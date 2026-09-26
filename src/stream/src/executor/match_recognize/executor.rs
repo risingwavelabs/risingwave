@@ -45,13 +45,15 @@
 //! the MV or replaying the topic may interleave equal-ORDER-BY rows differently and legitimately
 //! produce different matches (the standard leaves tie order implementation-defined).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt, once};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{
+    DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl, ToOwnedDatum,
+};
 use risingwave_expr::ExprError;
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
@@ -553,9 +555,9 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     /// Compiled `DEFINE` predicates keyed by their pattern variable.
     defines: HashMap<String, CompiledDefine>,
     within: Option<NonStrictExpression>,
-    /// `WITHIN` deadline expr (see [`MatchRecognizeExecutorArgs`]); consulted on every watermark
-    /// pass — which visits every partition, so an idle partition's timed-out partial is emitted or
-    /// evicted without new input in that partition.
+    /// `WITHIN` deadline expr (see [`MatchRecognizeExecutorArgs`]); the per-row deadline it
+    /// yields is what [`WakeupIndex`] files partitions under, so a watermark pass visits exactly
+    /// the idle partitions whose timed-out partial it can emit or evict — without new input there.
     within_deadline: Option<NonStrictExpression>,
     nfa: Nfa,
     skip: SkipMode,
@@ -1066,6 +1068,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     async fn rebuild_partitions(
         parts: &mut hashbrown::HashMap<OwnedRow, PartitionRun>,
+        wakeups: &mut WakeupIndex,
         state_table: &StateTable<S>,
         partition_key_indices: &[usize],
         time_col: usize,
@@ -1079,6 +1082,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         metrics: &MatchRecognizeMetrics,
     ) -> StreamExecutorResult<i64> {
         parts.clear();
+        *wakeups = WakeupIndex::default();
         let mut max_seq: i64 = -1;
         let vnodes: Vec<_> = state_table.vnodes().iter_vnodes().collect();
         for vnode in vnodes {
@@ -1119,17 +1123,21 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 // Not counted here: the ingest path counted this row once already, and a rebuild
                 // re-evaluates every retained row on each recovery.
                 let deadline = eval_deadline(within_deadline, &order_key).await;
-                let run = parts.entry(pk).or_insert_with(|| PartitionRun {
-                    rows: Vec::new(),
-                    matcher: IncrementalMatcher::new(nfa.clone(), skip.clone()),
-                    held: None,
-                });
+                let run = parts
+                    .entry(pk)
+                    .or_insert_with(|| PartitionRun::new(nfa.clone(), skip.clone()));
                 // The emit path and the dead-prefix prune binary-search `rows` by `seq`; pin the
                 // invariant where it is produced: state-table key order must feed each partition's
                 // seqs in strictly increasing order (the ordered-input contract).
                 debug_assert!(
                     run.rows.last().is_none_or(|last| last.seq < seq),
                     "state-table iteration fed a non-increasing seq into a partition buffer"
+                );
+                debug_assert!(
+                    run.rows
+                        .last()
+                        .is_none_or(|last| last.order_key.default_cmp(&order_key).is_le()),
+                    "state-table iteration fed a decreasing order key into a partition buffer"
                 );
                 run.rows.push(BufferedRow {
                     seq,
@@ -1145,7 +1153,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // safe on the data path — no emission happens during rebuild, the freeze loop holds on
         // exhaustion, and the next visit rescans the suffix with a fresh budget.
         let mut reported_budget = false;
-        for run in parts.values_mut() {
+        for (pk, run) in parts.iter_mut() {
             let mut budget = ScanBudget::new(SCAN_BUDGET_EVALUATIONS);
             let fed: Vec<Seq> = run.rows.iter().map(|r| Seq(r.seq)).collect();
             let matcher = DefineMatcher {
@@ -1156,6 +1164,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             run.matcher
                 .advance(&fed, &matcher, &mut budget, memoizable)
                 .await?;
+            // Every rebuilt partition is owed a first visit: rows that arrived after the last
+            // watermark before the restart were never structurally pruned.
+            wakeups.sync(pk, run, true);
             if budget.hit {
                 metrics.match_recognize_scan_budget_exhausted_count.inc();
                 report_scan_budget_once(eval_error_report, &mut reported_budget);
@@ -1212,10 +1223,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // `hashbrown` rather than std for `entry_ref` (see the ingest path below); std's raw
         // entry API never stabilized.
         let mut parts: hashbrown::HashMap<OwnedRow, PartitionRun> = hashbrown::HashMap::new();
+        let mut wakeups = WakeupIndex::default();
 
         // Recovery / rescale rebuild: see `rebuild_partitions`.
         let max_seq = Self::rebuild_partitions(
             &mut parts,
+            &mut wakeups,
             &state_table,
             &partition_key_indices,
             time_col,
@@ -1256,10 +1269,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // exhaustion (a pattern whose closer never arrives keeps its rows forever) is invisible
         // until the OOM. The chunk arm maintains it incrementally (an increment beside the push,
         // a decrement beside its eviction counter) because it never iterates the whole partition
-        // map; the watermark arm and the rebuild sites recount exactly, which self-heals any
-        // accounting slip within one watermark.
+        // map, and so does the watermark arm now that it visits only the partitions the
+        // watermark can change; the rebuild site recounts exactly, and a debug assertion in the
+        // watermark arm checks the incremental count against a recount.
         let mut retained_rows: i64 = parts.values().map(|r| r.rows.len() as i64).sum();
         metrics.match_recognize_retained_rows.set(retained_rows);
+        metrics
+            .match_recognize_retained_partitions
+            .set(parts.len() as i64);
 
         #[for_await]
         for msg in input {
@@ -1322,11 +1339,19 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // `entry_ref` hashes and probes once, materializing the key only on a
                         // vacant insert — one probe fewer than the contains_key/get_mut pair it
                         // replaced. (The `pk` allocation above is per-row either way.)
-                        let run = parts.entry_ref(&pk).or_insert_with(|| PartitionRun {
-                            rows: Vec::new(),
-                            matcher: IncrementalMatcher::new(nfa.clone(), skip.clone()),
-                            held: None,
-                        });
+                        let run = parts
+                            .entry_ref(&pk)
+                            .or_insert_with(|| PartitionRun::new(nfa.clone(), skip.clone()));
+                        // The wakeup index files a partition under its FIRST row's deadline and
+                        // relies on deadlines being non-decreasing along the buffer: rows arrive
+                        // order-key sorted (the ordered-input contract) and the deadline is
+                        // monotone in the order key. Pin the half the index depends on.
+                        debug_assert!(
+                            run.rows
+                                .last()
+                                .is_none_or(|last| last.order_key.default_cmp(&order_key).is_le()),
+                            "the ordered input fed a decreasing order key into a partition buffer"
+                        );
                         run.rows.push(BufferedRow {
                             seq,
                             order_key,
@@ -1372,6 +1397,19 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // borrow released.
                         let partition_emptied = run.rows.is_empty();
                         let emptied_capacity = run.rows.capacity();
+                        const DROP_EMPTY_PARTITION_CAPACITY: usize = 1024;
+                        let drop_now =
+                            partition_emptied && emptied_capacity >= DROP_EMPTY_PARTITION_CAPACITY;
+                        if !drop_now {
+                            // An arrival changed this partition's buffer: it is owed one watermark
+                            // visit (the structural prune runs only there), and its filed deadline
+                            // may have moved if the emission above consumed its first rows. An
+                            // emptied entry kept below is synced too — unfiled and pending — so the
+                            // next watermark sweeps it, as the full pass used to; without that it
+                            // would be reachable by nothing and live forever. The key is cloned
+                            // only on the first touch since the last visit.
+                            wakeups.sync(&pk, run, true);
+                        }
                         for c in filled {
                             yield Message::Chunk(c);
                         }
@@ -1385,13 +1423,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // exists to avoid. Above the threshold the retained capacity is worth more
                         // than the reconstruction: a partition that peaked at tens of thousands of
                         // rows holds a large allocation for an entry with nothing in it. Below it,
-                        // the next watermark pass sweeps the entry anyway.
-                        const DROP_EMPTY_PARTITION_CAPACITY: usize = 1024;
-                        if partition_emptied && emptied_capacity >= DROP_EMPTY_PARTITION_CAPACITY {
+                        // the entry was marked pending above and the next watermark pass sweeps it.
+                        if drop_now {
                             // Safe for the same reason as the watermark arm: `consume_prefix` resets
                             // the matcher when it consumes the whole buffer, so an empty-rows
                             // partition carries no state a later row would need.
-                            parts.remove(&pk);
+                            if let Some(mut run) = parts.remove(&pk) {
+                                wakeups.remove(&pk, &mut run);
+                            }
                         }
                     }
                     // Once per chunk, not once per row: the budget is now shared across the chunk, so
@@ -1402,6 +1441,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         report_scan_budget_once(&eval_error_report, &mut reported_budget);
                     }
                     metrics.match_recognize_retained_rows.set(retained_rows);
+                    metrics
+                        .match_recognize_retained_partitions
+                        .set(parts.len() as i64);
                     if let Some(c) = builder.take() {
                         yield Message::Chunk(c);
                     }
@@ -1415,11 +1457,35 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     if w.col_idx != time_col {
                         continue;
                     }
+                    // Only the partitions this watermark can change: those whose earliest
+                    // deadline has passed, and those touched since their last visit. See
+                    // `WakeupIndex` for why skipping the rest is exact, not approximate.
+                    let (due, pending) = wakeups.take_due(&w.val);
+                    if due.is_empty() && pending.is_empty() {
+                        // The idle watermark: nothing to visit, so no builder, no budget, no
+                        // pass — the common case for a watermark tick over many quiet partitions.
+                        debug_check_accounting(&parts, &wakeups, retained_rows);
+                        continue;
+                    }
+                    let due_len = due.len();
                     let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
                     let mut reported_budget = false;
                     let mut reported_degradations: Vec<SkipDegradation> = Vec::new();
                     let mut emptied: Vec<OwnedRow> = Vec::new();
-                    for (pk, run) in &mut parts {
+                    for (i, pk) in due.into_iter().chain(pending).enumerate() {
+                        let Some(run) = parts.get_mut(&pk) else {
+                            // Both removal sites unfile before dropping, and this arm defers its
+                            // removals to after the loop, so a filed key is always in the map.
+                            debug_assert!(false, "wakeup index holds a key that is not in `parts`");
+                            continue;
+                        };
+                        if i < due_len {
+                            // Popped from `due`: no longer filed until `sync` re-files it below.
+                            run.indexed_deadline = None;
+                        }
+                        // Drained from the pending set by `take_due` (deduplicated against `due`),
+                        // so a visit that ends owing another one re-files it from scratch.
+                        run.pending = false;
                         // One budget per partition VISIT: a shared pass-wide budget would let a
                         // single pathological partition starve emission and eviction for every
                         // partition iterated after it, pass after pass (map order is stable).
@@ -1444,7 +1510,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         let rows_before = run.rows.len();
                         let filled = Self::emit_ready(
                             run,
-                            pk,
+                            &pk,
                             &nfa,
                             &skip,
                             &defines,
@@ -1475,27 +1541,34 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             memoizable,
                         )
                         .await?;
-                        metrics
-                            .match_recognize_evicted_rows_count
-                            .inc_by((rows_before - run.rows.len()) as u64);
-                        if run.rows.is_empty() {
-                            emptied.push(pk.clone());
-                        }
+                        let evicted = (rows_before - run.rows.len()) as u64;
+                        metrics.match_recognize_evicted_rows_count.inc_by(evicted);
+                        retained_rows -= evicted as i64;
                         if budget.hit {
                             metrics.match_recognize_scan_budget_exhausted_count.inc();
                             report_scan_budget_once(&eval_error_report, &mut reported_budget);
+                        }
+                        if run.rows.is_empty() {
+                            wakeups.remove(&pk, run);
+                            emptied.push(pk);
+                        } else {
+                            // Re-file under the (possibly new) first deadline. A visit that ended on
+                            // a spent budget or with a refresh outstanding decided nothing final and
+                            // is owed the next visit too.
+                            let revisit = budget.hit || run.matcher.needs_refresh();
+                            wakeups.sync(&pk, run, revisit);
                         }
                     }
                     for pk in emptied {
                         parts.remove(&pk);
                     }
-                    // Exact recount, not the incremental counter: this arm just iterated every
-                    // partition, so the recount costs what the pass already paid — and it bounds
-                    // the lifetime of any future accounting slip to one watermark instead of
-                    // forever. (The chunk arm keeps the incremental counter: a recount there
-                    // would add a whole-map walk per chunk.)
-                    retained_rows = parts.values().map(|r| r.rows.len() as i64).sum();
+                    // The pass no longer iterates every partition, so the gauge is maintained
+                    // incrementally here as on the chunk arm; the exact recount is a debug check.
+                    debug_check_accounting(&parts, &wakeups, retained_rows);
                     metrics.match_recognize_retained_rows.set(retained_rows);
+                    metrics
+                        .match_recognize_retained_partitions
+                        .set(parts.len() as i64);
                     if let Some(c) = builder.take() {
                         yield Message::Chunk(c);
                     }
@@ -1538,6 +1611,223 @@ struct PartitionRun {
     /// this on every rebase: after a prune, the same `(resume_pos, len)` can recur over a different
     /// set of rows and a stale hit would withhold a now-decidable match.
     held: Option<(Seq, usize, usize)>,
+    /// The deadline this partition is filed under in [`WakeupIndex::due`] (`None` = not filed:
+    /// empty buffer, `Deadline::Never`, or popped for the current visit). Owned by the index; the
+    /// executor only reads it through [`WakeupIndex::sync`].
+    indexed_deadline: Option<ScalarImpl>,
+    /// Whether the partition is in [`WakeupIndex::pending`]: touched since its last watermark visit
+    /// (an arrival, a spent budget, a truncated scan) and therefore owed one visit regardless of
+    /// its deadline. Kept here so the hot path sets it with a byte store and clones the key only
+    /// on the `false → true` transition.
+    pending: bool,
+}
+
+impl PartitionRun {
+    fn new(nfa: std::sync::Arc<Nfa>, skip: SkipMode) -> Self {
+        Self {
+            rows: Vec::new(),
+            matcher: IncrementalMatcher::new(nfa, skip),
+            held: None,
+            indexed_deadline: None,
+            pending: false,
+        }
+    }
+}
+
+/// Debug-build checks the watermark arm runs on every watermark: the incremental `retained_rows`
+/// against an exact recount, and the wakeup index against the partition map (every filed key is a
+/// live partition filed under its first row's deadline, so the index cannot outgrow the map).
+/// Compiled out in release, where both are `O(partitions)`.
+#[inline]
+fn debug_check_accounting(
+    parts: &hashbrown::HashMap<OwnedRow, PartitionRun>,
+    wakeups: &WakeupIndex,
+    retained_rows: i64,
+) {
+    debug_assert_eq!(
+        retained_rows,
+        parts.values().map(|r| r.rows.len() as i64).sum::<i64>(),
+        "retained_rows accounting drifted"
+    );
+    debug_assert!(
+        wakeups.check_consistent(parts).is_ok(),
+        "wakeup index inconsistent: {:?}",
+        wakeups.check_consistent(parts)
+    );
+    // Release builds: the parameters are unused.
+    let _ = (parts, wakeups, retained_rows);
+}
+
+/// Which partitions a watermark visit can change — so the watermark arm visits only those.
+///
+/// A watermark `w` changes a partition's state in exactly three ways, each with a known lower
+/// bound on `w`: the deadline prune skips rows with `deadline < w`; `WITHIN` finality decides the
+/// first provisional match once its start row's `deadline < w`; and a budget-truncated scan or
+/// freeze resumes. Rows are sorted by order key within a partition and `deadline = order_key +
+/// bound` is monotone in it (an overflow is `Deadline::Never`, which sorts last), so the first two
+/// happen no earlier than `rows[0].deadline`, and the third is not watermark-dependent at all.
+/// Everything else a visit does — the emission gate's gap and extension verdicts, the structural
+/// liveness prune — is a pure function of the buffer and cannot change without an arrival.
+///
+/// Hence a partition needs the visit at `w` iff `rows[0].deadline < w` **or** it is *pending*:
+/// touched since its last watermark visit. Pending covers the structural prune of rows that
+/// arrived since (that prune runs only on watermark visits), a gate that held on a spent budget
+/// rather than a verdict, and a matcher asking for a refresh. A partition that is neither has
+/// nothing a watermark could change, and skipping it yields exactly the output the full pass did.
+///
+/// `due` buckets partitions by deadline so a whole expired bucket pops at once and a re-key is
+/// two `O(log n)` map operations; `Deadline::Never` partitions are never filed and wake only via
+/// `pending` or an arrival — the only ways their state can change. An emptied partition the chunk
+/// arm keeps for its capacity is synced like any other (unfiled, pending), so the watermark sweep
+/// of empty entries the full pass performed is preserved.
+///
+/// Size: a key is filed only while its partition is in the map with a non-empty buffer and a
+/// finite first deadline, under exactly that deadline; both removal sites unfile before dropping,
+/// every buffer mutation re-syncs, and an emptied bucket is dropped with its last key. So the index
+/// holds at most one entry per retained partition and is bounded by whatever bounds the partition
+/// map itself (`match_recognize_retained_partitions`); [`WakeupIndex::check_consistent`] pins this
+/// in debug builds.
+#[derive(Default)]
+struct WakeupIndex {
+    due: BTreeMap<DefaultOrdered<ScalarImpl>, hashbrown::HashSet<OwnedRow>>,
+    pending: hashbrown::HashSet<OwnedRow>,
+}
+
+impl WakeupIndex {
+    /// Bring the index in line with the partition's current buffer, and file it as pending if
+    /// asked. Call after anything that may have changed `rows[0]` or the matcher's refresh state.
+    fn sync(&mut self, pk: &OwnedRow, run: &mut PartitionRun, pending: bool) {
+        // Compared by reference: on the per-row common path (first row unchanged) this is a tag
+        // and value comparison with no clone.
+        let desired = run.rows.first().and_then(|r| match &r.deadline {
+            Deadline::At(d) => Some(d),
+            Deadline::Never => None,
+        });
+        if run.indexed_deadline.as_ref() != desired {
+            if let Some(old) = run.indexed_deadline.take() {
+                self.unfile(&old, pk);
+            }
+            if let Some(d) = desired {
+                self.due
+                    .entry(DefaultOrdered(d.clone()))
+                    .or_default()
+                    .insert(pk.clone());
+            }
+            run.indexed_deadline = desired.cloned();
+        }
+        if pending && !run.pending {
+            run.pending = true;
+            self.pending.insert(pk.clone());
+        }
+    }
+
+    /// Forget a partition that is being dropped from the map.
+    fn remove(&mut self, pk: &OwnedRow, run: &mut PartitionRun) {
+        if let Some(old) = run.indexed_deadline.take() {
+            self.unfile(&old, pk);
+        }
+        if run.pending {
+            run.pending = false;
+            self.pending.remove(pk);
+        }
+    }
+
+    fn unfile(&mut self, deadline: &ScalarImpl, pk: &OwnedRow) {
+        let key = DefaultOrdered(deadline.clone());
+        if let Some(bucket) = self.due.get_mut(&key) {
+            bucket.remove(pk);
+            if bucket.is_empty() {
+                self.due.remove(&key);
+            }
+        }
+    }
+
+    /// Partitions to visit at watermark `w`: every bucket with `deadline < w` (the strict
+    /// `Deadline::closed_at` boundary) plus every pending partition. Popped partitions are no
+    /// longer filed and the pending set is drained; the caller clears `run.pending` on every
+    /// visit and re-files through [`WakeupIndex::sync`] afterwards. Returns `(due, pending)` with
+    /// no partition in both: a due partition is visited once, so a visit that ends owing another
+    /// (spent budget, refresh) gets exactly one more, not a second one in the same pass.
+    fn take_due(&mut self, w: &ScalarImpl) -> (Vec<OwnedRow>, Vec<OwnedRow>) {
+        // `split_off` keeps `< w` in `self.due` and returns `>= w`; swap so the retained map is
+        // the unexpired part and the split-off one is what expired.
+        let mut expired = self.due.split_off(&DefaultOrdered(w.clone()));
+        std::mem::swap(&mut self.due, &mut expired);
+        let due: Vec<OwnedRow> = expired.into_values().flatten().collect();
+        if self.pending.is_empty() {
+            // Nothing to dedupe against and nothing to drain. The `is_empty` test matters:
+            // draining an empty `hashbrown` set still resets its whole control array, which keeps
+            // the capacity of the largest burst it ever held — an `O(capacity)` memset on every
+            // idle watermark, not `O(1)`.
+            return (due, Vec::new());
+        }
+        for pk in &due {
+            self.pending.remove(pk);
+        }
+        let pending: Vec<OwnedRow> = self.pending.drain().collect();
+        (due, pending)
+    }
+
+    /// The index invariant, checked in debug builds and tests: every filed key names a partition
+    /// in `parts` whose `indexed_deadline` is the bucket key and whose first row carries that
+    /// deadline (so a filed partition is non-empty), no bucket is empty, every pending key names a
+    /// partition with `pending` set, and no partition is filed or pending without the index knowing.
+    /// Together these bound the index by the partition map.
+    fn check_consistent(
+        &self,
+        parts: &hashbrown::HashMap<OwnedRow, PartitionRun>,
+    ) -> Result<(), String> {
+        let mut filed = 0usize;
+        for (deadline, bucket) in &self.due {
+            if bucket.is_empty() {
+                return Err(format!("empty bucket at {deadline:?}"));
+            }
+            for pk in bucket {
+                let run = parts
+                    .get(pk)
+                    .ok_or_else(|| format!("filed key {pk:?} not in the partition map"))?;
+                if run.indexed_deadline.as_ref() != Some(&deadline.0) {
+                    return Err(format!(
+                        "{pk:?} filed at {deadline:?} but records {:?}",
+                        run.indexed_deadline
+                    ));
+                }
+                match run.rows.first().map(|r| &r.deadline) {
+                    Some(Deadline::At(d)) if d == &deadline.0 => {}
+                    first => {
+                        return Err(format!(
+                            "{pk:?} filed at {deadline:?} but its first row has {first:?}"
+                        ));
+                    }
+                }
+                filed += 1;
+            }
+        }
+        for pk in &self.pending {
+            match parts.get(pk) {
+                Some(run) if run.pending => {}
+                Some(_) => return Err(format!("pending key {pk:?} not marked on its partition")),
+                None => return Err(format!("pending key {pk:?} not in the partition map")),
+            }
+        }
+        let recorded = parts
+            .values()
+            .filter(|r| r.indexed_deadline.is_some())
+            .count();
+        if recorded != filed {
+            return Err(format!(
+                "{recorded} partitions record a filing, {filed} are filed"
+            ));
+        }
+        let marked = parts.values().filter(|r| r.pending).count();
+        if marked != self.pending.len() {
+            return Err(format!(
+                "{marked} partitions marked pending, {} in the pending set",
+                self.pending.len()
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl<S: StateStore> Execute for MatchRecognizeExecutor<S> {
@@ -2218,6 +2508,385 @@ mod tests {
         async fn within_finality_overrides_alive_gap() {
             let pattern = Pattern::Alt(vec![concat("xnn"), var("n")]);
             assert!(gate(&pattern, "xn", 0, 1, true).await);
+        }
+    }
+
+    mod wakeup_index {
+        use super::*;
+
+        fn pk(i: i64) -> OwnedRow {
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(i))])
+        }
+
+        fn row(seq: i64, deadline: Deadline) -> BufferedRow {
+            BufferedRow {
+                seq,
+                order_key: Some(ScalarImpl::Int64(0)),
+                deadline,
+                row: OwnedRow::new(vec![]),
+            }
+        }
+
+        fn at(d: i64) -> Deadline {
+            Deadline::At(ScalarImpl::Int64(d))
+        }
+
+        fn run_with(deadlines: &[Deadline]) -> PartitionRun {
+            let nfa = Nfa::compile(&Pattern::Var("a".to_owned()));
+            let mut run = PartitionRun::new(std::sync::Arc::new(nfa), SkipMode::PastLastRow);
+            for (i, d) in deadlines.iter().enumerate() {
+                run.rows.push(row(i as i64, d.clone()));
+            }
+            run
+        }
+
+        fn sorted(mut v: Vec<OwnedRow>) -> Vec<OwnedRow> {
+            v.sort_by(|a, b| a.datum_at(0).default_cmp(&b.datum_at(0)));
+            v
+        }
+
+        /// A partition is due once the watermark passes its FIRST row's deadline — the strict
+        /// `closed_at` boundary — and never before; `Deadline::Never` is never filed.
+        #[test]
+        fn files_by_first_deadline_and_pops_strictly_before_the_watermark() {
+            let mut idx = WakeupIndex::default();
+            let mut early = run_with(&[at(5), at(9)]);
+            let mut late = run_with(&[at(10)]);
+            let mut never = run_with(&[Deadline::Never]);
+            idx.sync(&pk(1), &mut early, false);
+            idx.sync(&pk(2), &mut late, false);
+            idx.sync(&pk(3), &mut never, false);
+            assert_eq!(early.indexed_deadline, Some(ScalarImpl::Int64(5)));
+            assert_eq!(never.indexed_deadline, None, "Never is not filed");
+
+            // w == 5: the boundary is strict (`deadline < w`), nothing is due yet.
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(5));
+            assert!(due.is_empty() && pending.is_empty());
+            // w == 6: only the partition whose first deadline is 5.
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(6));
+            assert_eq!(due, vec![pk(1)]);
+            assert!(pending.is_empty());
+            // Popped means unfiled until the caller re-syncs; `late` is still filed.
+            let (due, _) = idx.take_due(&ScalarImpl::Int64(6));
+            assert!(due.is_empty());
+            let (due, _) = idx.take_due(&ScalarImpl::Int64(11));
+            assert_eq!(due, vec![pk(2)]);
+        }
+
+        /// Consuming the first rows re-files the partition under the new first deadline; an
+        /// unchanged first row is a no-op; an emptied buffer unfiles it.
+        #[test]
+        fn resync_follows_the_first_row() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[at(5), at(9)]);
+            idx.sync(&pk(1), &mut run, false);
+            // Appending later rows does not move the key.
+            run.rows.push(row(2, at(12)));
+            idx.sync(&pk(1), &mut run, false);
+            assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(5)));
+            // Consuming the head re-keys to 9: not due at 7, due at 10.
+            run.rows.remove(0);
+            idx.sync(&pk(1), &mut run, false);
+            assert_eq!(run.indexed_deadline, Some(ScalarImpl::Int64(9)));
+            assert!(idx.take_due(&ScalarImpl::Int64(7)).0.is_empty());
+            assert_eq!(idx.take_due(&ScalarImpl::Int64(10)).0, vec![pk(1)]);
+            // Empty buffer: unfiled, and `remove` is a clean no-op afterwards.
+            run.indexed_deadline = None;
+            idx.sync(&pk(1), &mut run, false);
+            run.rows.clear();
+            idx.sync(&pk(1), &mut run, false);
+            assert_eq!(run.indexed_deadline, None);
+            assert!(idx.due.is_empty());
+            idx.remove(&pk(1), &mut run);
+            assert!(idx.due.is_empty() && idx.pending.is_empty());
+        }
+
+        /// Pending is filed once per touch-window regardless of how many rows arrive, drained by
+        /// the next `take_due` independent of the watermark, and can coexist with being due.
+        #[test]
+        fn pending_is_filed_once_and_drained_by_the_next_visit() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[Deadline::Never]);
+            idx.sync(&pk(1), &mut run, true);
+            idx.sync(&pk(1), &mut run, true);
+            idx.sync(&pk(1), &mut run, true);
+            assert_eq!(idx.pending.len(), 1);
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(0));
+            assert!(due.is_empty());
+            assert_eq!(pending, vec![pk(1)]);
+            assert!(idx.pending.is_empty(), "drained");
+            // The caller clears `run.pending` on visit; until then a re-sync must not re-file it.
+            idx.sync(&pk(1), &mut run, true);
+            assert!(idx.pending.is_empty());
+            run.pending = false;
+            idx.sync(&pk(1), &mut run, true);
+            assert_eq!(idx.pending.len(), 1);
+
+            // Due and pending at once: reported once, as due.
+            let mut both = run_with(&[at(1)]);
+            idx.sync(&pk(2), &mut both, true);
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(2));
+            assert_eq!(due, vec![pk(2)]);
+            assert_eq!(pending, vec![pk(1)]);
+            assert!(idx.pending.is_empty());
+        }
+
+        /// A due-and-pending partition whose visit ends owing another one (the arm re-syncs with
+        /// `pending = true`) is filed for exactly one more visit, not visited twice in the same
+        /// pass: the pending copy was removed when the due copy popped.
+        #[test]
+        fn due_and_pending_visit_owed_again_is_filed_once() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[at(1)]);
+            idx.sync(&pk(1), &mut run, true);
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(2));
+            assert_eq!((due.len(), pending.len()), (1, 0));
+            // The arm's visit: popped, cleared, then re-synced as owed.
+            run.indexed_deadline = None;
+            run.pending = false;
+            idx.sync(&pk(1), &mut run, true);
+            assert_eq!(idx.pending.len(), 1);
+            assert_eq!(idx.due.len(), 1, "still expired, still filed");
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(2));
+            assert_eq!((due, pending), (vec![pk(1)], vec![]));
+        }
+
+        /// Removing a partition that is both filed and pending clears both structures.
+        #[test]
+        fn remove_clears_filed_and_pending() {
+            let mut idx = WakeupIndex::default();
+            let mut run = run_with(&[at(1)]);
+            idx.sync(&pk(1), &mut run, true);
+            assert_eq!((idx.due.len(), idx.pending.len()), (1, 1));
+            idx.remove(&pk(1), &mut run);
+            assert!(idx.due.is_empty() && idx.pending.is_empty());
+            assert!(run.indexed_deadline.is_none() && !run.pending);
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(2));
+            assert!(due.is_empty() && pending.is_empty());
+        }
+
+        /// The size bound: through arrivals, re-keys, emptying and removal the index never holds
+        /// more filed keys than there are non-empty partitions, and `check_consistent` accepts
+        /// every intermediate state a caller can reach through the public sequence.
+        #[test]
+        fn index_is_bounded_by_the_partition_map() {
+            let mut idx = WakeupIndex::default();
+            let mut parts: hashbrown::HashMap<OwnedRow, PartitionRun> = hashbrown::HashMap::new();
+            for i in 0..64 {
+                let deadlines = [at(i % 7), at(i % 7 + 10)];
+                let mut run = run_with(&deadlines);
+                idx.sync(&pk(i), &mut run, true);
+                parts.insert(pk(i), run);
+            }
+            idx.check_consistent(&parts).unwrap();
+            assert!(idx.due.len() <= parts.len());
+            // A visit at 4 pops deadlines 0..=3; emulate the arm: pop, clear, mutate, re-sync.
+            let (due, pending) = idx.take_due(&ScalarImpl::Int64(4));
+            let mut emptied = Vec::new();
+            for (i, key) in due.iter().chain(&pending).enumerate() {
+                let run = parts.get_mut(key).unwrap();
+                if i < due.len() {
+                    run.indexed_deadline = None;
+                }
+                run.pending = false;
+                // Consume the head; empty every third partition entirely.
+                run.rows.remove(0);
+                if i % 3 == 0 {
+                    run.rows.clear();
+                }
+                if run.rows.is_empty() {
+                    idx.remove(key, run);
+                    emptied.push(key.clone());
+                } else {
+                    idx.sync(key, run, i % 5 == 0);
+                }
+            }
+            for key in emptied {
+                parts.remove(&key);
+            }
+            idx.check_consistent(&parts).unwrap();
+            let filed: usize = idx.due.values().map(|b| b.len()).sum();
+            assert_eq!(
+                filed,
+                parts.values().filter(|r| !r.rows.is_empty()).count(),
+                "every non-empty partition is filed exactly once"
+            );
+            // An emptied partition kept in the map (the chunk arm's capacity branch) is unfiled
+            // and pending, never orphaned.
+            let key = parts.keys().next().unwrap().clone();
+            let run = parts.get_mut(&key).unwrap();
+            run.rows.clear();
+            idx.sync(&key, run, true);
+            assert!(run.indexed_deadline.is_none() && run.pending);
+            idx.check_consistent(&parts).unwrap();
+            assert!(idx.pending.contains(&key));
+        }
+
+        /// Many partitions sharing one deadline pop as a bucket; re-keying one of them does not
+        /// disturb the others.
+        #[test]
+        fn shared_deadline_bucket() {
+            let mut idx = WakeupIndex::default();
+            let mut runs: Vec<PartitionRun> = (0..5).map(|_| run_with(&[at(3), at(8)])).collect();
+            for (i, run) in runs.iter_mut().enumerate() {
+                idx.sync(&pk(i as i64), run, false);
+            }
+            assert_eq!(idx.due.len(), 1, "one bucket");
+            runs[2].rows.remove(0);
+            idx.sync(&pk(2), &mut runs[2], false);
+            assert_eq!(idx.due.len(), 2);
+            let (due, _) = idx.take_due(&ScalarImpl::Int64(4));
+            assert_eq!(sorted(due), vec![pk(0), pk(1), pk(3), pk(4)]);
+            let (due, _) = idx.take_due(&ScalarImpl::Int64(9));
+            assert_eq!(due, vec![pk(2)]);
+        }
+    }
+
+    /// Executor-level: the watermark arm no longer walks every partition, so the sweep of emptied
+    /// entries the full pass performed must be reproduced through the index.
+    mod executor_sweep {
+        use futures::StreamExt;
+        use risingwave_common::array::{Op, StreamChunk};
+        use risingwave_common::bitmap::Bitmap;
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+        use risingwave_common::hash::VirtualNode;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_common::util::sort_util::OrderType;
+        use risingwave_storage::memory::MemoryStateStore;
+
+        use super::*;
+        use crate::common::table::state_table::StateTable;
+        use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+        use crate::executor::test_utils::{MessageSender, MockSource};
+        use crate::executor::{ActorContext, BoxedMessageStream, Execute, Message};
+        use crate::task::ActorEvalErrorReport;
+
+        /// Distinct from every other test's table id: the metrics registry is process-global.
+        const TABLE_ID: u32 = 27205;
+
+        fn input_types() -> Vec<DataType> {
+            vec![DataType::Int64, DataType::Int64, DataType::Int64]
+        }
+
+        /// `PARTITION BY $0 ORDER BY $1`, `PATTERN (a b)`, no `DEFINE`, no `WITHIN`: every row
+        /// satisfies every variable, so two rows in a partition complete a match at once and
+        /// leave the partition empty — the shape that exercises the empty-entry sweep.
+        async fn build() -> (MessageSender, BoxedMessageStream, MatchRecognizeMetrics) {
+            let input_schema = Schema::new(input_types().into_iter().map(Field::unnamed).collect());
+            let output_schema = Schema::new(vec![
+                Field::with_name(DataType::Int64, "partition_0"),
+                Field::with_name(DataType::Int64, "_match_id"),
+            ]);
+            let table_columns = (0..4)
+                .map(|i| ColumnDesc::unnamed(ColumnId::new(i), DataType::Int64))
+                .collect();
+            let state_table = StateTable::from_table_catalog(
+                &gen_pbtable_with_dist_key(
+                    TableId::new(TABLE_ID),
+                    table_columns,
+                    vec![OrderType::ascending(); 3],
+                    vec![1, 2, 0],
+                    0,
+                    vec![1],
+                ),
+                MemoryStateStore::new(),
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+            )
+            .await;
+            let ctx = ActorContext::for_test(1);
+            let metrics = ctx.streaming_metrics.new_match_recognize_metrics(
+                TableId::new(TABLE_ID),
+                ctx.id,
+                ctx.fragment_id,
+            );
+            let report = ActorEvalErrorReport {
+                actor_context: ctx.clone(),
+                identity: Arc::from("test MatchRecognize"),
+            };
+            let nfa = Nfa::compile(&Pattern::Concat(vec![
+                Pattern::Var("a".to_owned()),
+                Pattern::Var("b".to_owned()),
+            ]));
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(input_schema, vec![0, 1]);
+            let executor = MatchRecognizeExecutor::new(MatchRecognizeExecutorArgs {
+                ctx,
+                input: source,
+                schema: output_schema,
+                chunk_size: 1024,
+                partition_key_indices: vec![0],
+                order_key_indices: vec![1],
+                measures: vec![],
+                defines: vec![],
+                within: None,
+                within_deadline: None,
+                nfa,
+                skip: SkipMode::PastLastRow,
+                eval_error_report: report,
+                state_table,
+            });
+            let mut stream = executor.boxed().execute();
+            tx.push_barrier(test_epoch(1), false);
+            drain_until_barrier(&mut stream, test_epoch(1)).await;
+            (tx, stream, metrics)
+        }
+
+        async fn drain_until_barrier(stream: &mut BoxedMessageStream, epoch: u64) -> usize {
+            let mut emitted = 0;
+            while let Some(msg) = stream.next().await {
+                match msg.unwrap() {
+                    Message::Barrier(b) if b.epoch.curr == epoch => return emitted,
+                    Message::Chunk(c) => emitted += c.cardinality(),
+                    _ => {}
+                }
+            }
+            panic!("stream ended before barrier {epoch}");
+        }
+
+        fn two_rows_per_partition(n: i64) -> StreamChunk {
+            let rows: Vec<(Op, OwnedRow)> = (0..n)
+                .flat_map(|p| {
+                    [0i64, 1].map(|ts| {
+                        (
+                            Op::Insert,
+                            OwnedRow::new(vec![
+                                Some(ScalarImpl::Int64(p)),
+                                Some(ScalarImpl::Int64(ts)),
+                                Some(ScalarImpl::Int64(1)),
+                            ]),
+                        )
+                    })
+                })
+                .collect();
+            StreamChunk::from_rows(&rows, &input_types())
+        }
+
+        /// A partition emptied by an arrival (match completed, buffer consumed, capacity below the
+        /// drop threshold) stays in the map until a watermark sweeps it. Without `WITHIN` it is
+        /// never due, so only the pending mark can bring the sweep to it: this pins that it does.
+        #[tokio::test]
+        async fn emptied_partitions_are_swept_by_the_next_watermark() {
+            let (mut tx, mut stream, metrics) = build().await;
+            tx.push_chunk(two_rows_per_partition(3));
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(2)).await;
+            assert_eq!(emitted, 3, "one match per partition");
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 0);
+            assert_eq!(
+                metrics.match_recognize_retained_partitions.get(),
+                3,
+                "emptied entries below the capacity threshold are kept until a watermark"
+            );
+
+            // No row arrives for any of them; the watermark alone must free the entries.
+            tx.push_int64_watermark(1, 5);
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+            drain_until_barrier(&mut stream, test_epoch(3)).await;
+            assert_eq!(
+                metrics.match_recognize_retained_partitions.get(),
+                0,
+                "an emptied partition nothing files must still be reachable by the sweep"
+            );
         }
     }
 }
