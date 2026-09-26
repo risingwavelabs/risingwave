@@ -399,7 +399,6 @@ impl CdcSplitTrait for OracleCdcSplit {
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        self.inner.snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
         self.inner.start_offset = Some(last_seen_offset);
         Ok(())
     }

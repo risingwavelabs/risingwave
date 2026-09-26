@@ -387,6 +387,20 @@ public class DbzConnectorConfig {
             }
         } else if (source == SourceTypeE.ORACLE) {
             var oracleProps = initiateDbConfig(ORACLE_CONFIG_FILE, substitutor);
+            // RisingWave backfills each table on demand, so the shared Debezium connector only
+            // captures schemas and streams changes. On recovery, rebuild the in-memory schema
+            // history and resume from the opaque offset persisted in the CDC split.
+            // Once Oracle is wired into shared CDC backfill, `isCdcBackfill` must always be true
+            // for Oracle sources; remove the implicit Debezium `initial` snapshot fallback then.
+            if (isCdcBackfill) {
+                if (null != startOffset && !startOffset.isBlank()) {
+                    oracleProps.setProperty("snapshot.mode", "recovery");
+                    oracleProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                } else {
+                    oracleProps.setProperty("snapshot.mode", "no_data");
+                }
+            }
             var heartbeatTable =
                     OracleHeartbeatTable.parse(userProps.get(ORACLE_HEARTBEAT_TABLE_NAME));
             oracleProps.setProperty(
