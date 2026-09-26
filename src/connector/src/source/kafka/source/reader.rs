@@ -107,6 +107,10 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
+        // Skip the final offset commit on drop. The consumer is closed in the background, so that
+        // commit could land after meta has deleted the group and recreate it. Committed offsets
+        // only expose progress to external tools.
+        consumer.set_no_consumer_close_on_drop();
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 

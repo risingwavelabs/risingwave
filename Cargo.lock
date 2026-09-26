@@ -9692,7 +9692,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.34"
-source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=d44dab0e03e49c9940786d7238098087a4129864#d44dab0e03e49c9940786d7238098087a4129864"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.5.0",
@@ -9723,7 +9723,7 @@ dependencies = [
 [[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.5.0+1"
-source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=d44dab0e03e49c9940786d7238098087a4129864#d44dab0e03e49c9940786d7238098087a4129864"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http 0.60.12",
@@ -9740,7 +9740,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=d44dab0e03e49c9940786d7238098087a4129864#d44dab0e03e49c9940786d7238098087a4129864"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -9751,7 +9751,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=d44dab0e03e49c9940786d7238098087a4129864#d44dab0e03e49c9940786d7238098087a4129864"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -9774,7 +9774,7 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=d44dab0e03e49c9940786d7238098087a4129864#d44dab0e03e49c9940786d7238098087a4129864"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -9784,7 +9784,7 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.6.0+0.14"
-source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=d44dab0e03e49c9940786d7238098087a4129864#d44dab0e03e49c9940786d7238098087a4129864"
 dependencies = [
  "async-stream",
  "chrono",
@@ -9799,7 +9799,7 @@ dependencies = [
 [[package]]
 name = "madsim-tonic-build"
 version = "0.6.0+0.14"
-source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=d44dab0e03e49c9940786d7238098087a4129864#d44dab0e03e49c9940786d7238098087a4129864"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -13149,7 +13149,7 @@ dependencies = [
 [[package]]
 name = "rdkafka-sys"
 version = "4.9.0+2.10.0"
-source = "git+https://github.com/risingwavelabs/rust-rdkafka?branch=downgrade-zstd#4b4ebb15290e067b53f76fb278cd1e358061e0f8"
+source = "git+https://github.com/risingwavelabs/rust-rdkafka?branch=downgrade-zstd#8e17e2ed9eb65973337f3c7d76281f9e6145d3fc"
 dependencies = [
  "cmake",
  "curl-sys",
