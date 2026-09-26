@@ -10,7 +10,7 @@ repository = { workspace = true }
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
 clap = { workspace = true }
-path-absolutize = "3.1"
+path-absolutize = "4.0"
 similar = "3"
 tokio = { workspace = true, features = ["process", "io-util"] }
 tracing = "0.1"
