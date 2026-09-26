@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use fail::fail_point;
-use futures::{StreamExt, stream};
+use futures::StreamExt;
 use opendal::layers::{RetryLayer, TimeoutLayer};
 use opendal::raw::BoxedStaticFuture;
 use opendal::services::Memory;
@@ -260,38 +260,9 @@ impl ObjectStore for OpendalObjectStore {
         let object_lister = object_lister.await?;
 
         let op = self.op.clone();
-        let stream = stream::unfold(object_lister, move |mut object_lister| {
+        let stream = object_lister.then(move |object| {
             let op = op.clone();
-
-            async move {
-                match object_lister.next().await {
-                    Some(Ok(object)) => {
-                        let key = object.path().to_owned();
-
-                        // OpenDAL 0.55 removed list metadata capability flags and reports
-                        // unknown content length as 0. Use listed metadata first, and call
-                        // stat() if timestamp is missing or size is 0 to avoid treating
-                        // unknown sizes as real zero-byte objects.
-                        let meta = object.metadata();
-                        let mut last_modified = meta.last_modified().map(timestamp_to_secs);
-                        let mut total_size = meta.content_length() as usize;
-                        if last_modified.is_none() || total_size == 0 {
-                            let stat_meta = op.stat(&key).await.ok()?;
-                            last_modified = stat_meta.last_modified().map(timestamp_to_secs);
-                            total_size = stat_meta.content_length() as usize;
-                        }
-
-                        let metadata = ObjectMetadata {
-                            key,
-                            last_modified: last_modified.unwrap_or(0_f64),
-                            total_size,
-                        };
-                        Some((Ok(metadata), object_lister))
-                    }
-                    Some(Err(err)) => Some((Err(err.into()), object_lister)),
-                    None => None,
-                }
-            }
+            async move { Self::listed_object_metadata(&op, object?).await }
         });
 
         Ok(stream.take(limit.unwrap_or(usize::MAX)).boxed())
@@ -303,6 +274,28 @@ impl ObjectStore for OpendalObjectStore {
 }
 
 impl OpendalObjectStore {
+    async fn listed_object_metadata(
+        op: &Operator,
+        object: opendal::Entry,
+    ) -> ObjectResult<ObjectMetadata> {
+        let key = object.path().to_owned();
+        // OpenDAL 0.55 removed list metadata capability flags and reports unknown sizes as 0.
+        let meta = object.metadata();
+        let mut last_modified = meta.last_modified().map(timestamp_to_secs);
+        let mut total_size = meta.content_length() as usize;
+        if last_modified.is_none() || total_size == 0 {
+            // Propagate stat failures; treating one as EOF can make recovery trust a partial scan.
+            let stat_meta = op.stat(&key).await?;
+            last_modified = stat_meta.last_modified().map(timestamp_to_secs);
+            total_size = stat_meta.content_length() as usize;
+        }
+        Ok(ObjectMetadata {
+            key,
+            last_modified: last_modified.unwrap_or(0_f64),
+            total_size,
+        })
+    }
+
     pub async fn copy(&self, from_path: &str, to_path: &str) -> ObjectResult<()> {
         self.op.copy(from_path, to_path).await?;
         Ok(())
@@ -520,7 +513,7 @@ impl StreamingUploader for OpendalStreamingUploader {
 
 #[cfg(test)]
 mod tests {
-    use stream::TryStreamExt;
+    use futures::TryStreamExt;
 
     use super::*;
 
@@ -607,6 +600,24 @@ mod tests {
         );
 
         uploader.finish().await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_listed_object_metadata_propagates_stat_failure() {
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
+        store
+            .upload("sst", Bytes::from_static(b"data"))
+            .await
+            .unwrap();
+        // Capture the listed entry before deletion so the subsequent metadata lookup fails.
+        // Memory entries have no last_modified, so our adapter must stat even a listed file.
+        let mut objects = store.op.lister_with("").recursive(true).await.unwrap();
+        let object = objects.next().await.unwrap().unwrap();
+        store.delete("sst").await.unwrap();
+        let error = OpendalObjectStore::listed_object_metadata(&store.op, object)
+            .await
+            .unwrap_err();
+        assert!(error.is_object_not_found_error());
     }
 
     #[tokio::test]
