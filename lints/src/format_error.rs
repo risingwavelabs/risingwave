@@ -19,14 +19,14 @@ use clippy_utils::macros::{
     FormatArgsStorage, find_format_arg_expr, is_format_macro, macro_backtrace,
 };
 use clippy_utils::paths::{PathLookup, PathNS};
-use clippy_utils::ty::implements_trait;
 use clippy_utils::sym::{Error, ToString};
+use clippy_utils::ty::implements_trait;
 use clippy_utils::{is_in_cfg_test, is_in_test_function};
 use rustc_ast::FormatArgsPiece;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
-use rustc_span::{Span, sym};
+use rustc_span::Span;
 
 use crate::utils::path::def_path_lookup;
 
@@ -155,10 +155,13 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
 
         // `err.to_string()`
         if let ExprKind::MethodCall(_, receiver, [], to_string_span) = expr.kind
-            && cx.typeck_results()
+            && cx
+                .typeck_results()
                 .type_dependent_def_id(expr.hir_id)
                 .is_some_and(|did| {
-                    let Some(trait_id) = cx.tcx.trait_of_assoc(did) else { return false };
+                    let Some(trait_id) = cx.tcx.trait_of_assoc(did) else {
+                        return false;
+                    };
                     cx.tcx.is_diagnostic_item(ToString, trait_id)
                 })
         {
