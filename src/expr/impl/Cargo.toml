@@ -71,7 +71,7 @@ tonic = { workspace = true, optional = true, features = ["tls-native-roots"] }
 tracing = "0.1"
 url = { version = "2", optional = true }
 uuid = { version = "1", features = ["v4"] }
-zstd = { version = "0.13", default-features = false, optional = true }
+zstd = { version = "0.14", default-features = false, optional = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
