@@ -61,7 +61,7 @@ use risingwave_common::row::OwnedRow;
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::match_recognize::nfa::{
-    CandidateMatcher, LabeledMatch, MatchScan, Nfa, ScanBudget, SkipMode,
+    CandidateMatcher, LabeledMatch, MatchScan, Nfa, ScanBudget, SkipMode, WalkScratch,
 };
 
 /// A row's stable sequence number: the buffer-table PK tiebreaker minted at ingest, unique for the
@@ -530,6 +530,7 @@ impl IncrementalMatcher {
             "dead_upto {} < next_pos {cursor}",
             self.dead_upto
         );
+        let mut scratch = WalkScratch::default();
         'freeze: for m in &tail_abs {
             // The skip-degradation diagnostic is dropped here for the same reason
             // `Nfa::find_matches_dynamic` drops it: this is freeze-cursor bookkeeping, not an
@@ -543,7 +544,7 @@ impl IncrementalMatcher {
             for p in self.dead_upto..resume {
                 let alive = self
                     .nfa
-                    .reaches_boundary_alive(p, n_rows, matcher, budget, memoize)
+                    .reaches_boundary_alive_with(p, n_rows, matcher, budget, memoize, &mut scratch)
                     .await?;
                 // A spent budget is NOT a deadness verdict: the liveness walk returns `false`
                 // when it stops early, and freezing on that fabricated answer advances the cursor
@@ -629,6 +630,7 @@ impl IncrementalMatcher {
 
         let mut kept = 0usize;
         let mut cursor = 0usize;
+        let mut scratch = WalkScratch::default();
         'keep: for m in &self.matched[..self.frozen_count] {
             // Frozen matches are stored in scan order, so each start is at or after the cursor; search
             // forward from there to recover its buffer position (seqs are not positions).
@@ -650,7 +652,14 @@ impl IncrementalMatcher {
             for p in cursor..resume {
                 let alive = self
                     .nfa
-                    .reaches_boundary_alive(p, trunc_pos, matcher, budget, memoize)
+                    .reaches_boundary_alive_with(
+                        p,
+                        trunc_pos,
+                        matcher,
+                        budget,
+                        memoize,
+                        &mut scratch,
+                    )
                     .await?;
                 // As in `rescan`'s freeze loop: a spent budget is not a deadness verdict — keep
                 // fewer matches frozen rather than freeze on a fabricated "dead".

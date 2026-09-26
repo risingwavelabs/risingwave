@@ -62,7 +62,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_storage::StateStore;
 
 use super::incremental::{Finalized, IncrementalMatcher, Seq};
-use super::nfa::{CandidateMatcher, Nfa, ScanBudget, SkipDegradation, SkipMode};
+use super::nfa::{CandidateMatcher, Nfa, ScanBudget, SkipDegradation, SkipMode, WalkScratch};
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::MatchRecognizeMetrics;
 use crate::executor::prelude::*;
@@ -757,6 +757,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // Only the `Copy` identity fields before the gate: cloning the whole match (its label vector
         // in particular) on every ATTEMPT would copy it once per visit for a held match; the clone
         // happens below, after the gate passes.
+        // One set of walk buffers for every gate check of this visit (see `WalkScratch`).
+        let mut scratch = WalkScratch::default();
         while let Some((start_seq, labels_len)) = run
             .matcher
             .provisional()
@@ -830,6 +832,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     statically_terminal,
                     budget,
                     memoizable,
+                    &mut scratch,
                 )
                 .await?
             };
@@ -932,6 +935,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // and fed positions coincide (`consume_prefix` keeps them aligned).
         let proven_dead = run.matcher.dead_prefix_end().min(n);
         let mut retain_from = n;
+        // One set of walk buffers for the whole pass (see `WalkScratch`).
+        let mut scratch = WalkScratch::default();
         for p in 0..n {
             // Window closed (deadline < w): `p` is dead, skip it. A window that never closes (no
             // WITHIN, or a deadline past the type's range) fails this test, so `p` is retained.
@@ -947,7 +952,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 within,
             };
             let alive = nfa
-                .reaches_boundary_alive(p, n, &matcher, budget, memoizable)
+                .reaches_boundary_alive_with(p, n, &matcher, budget, memoizable, &mut scratch)
                 .await?;
             if budget.hit || alive {
                 // Spent budget: `p` is undecided — retain it all rather than fabricate "dead".
@@ -1581,6 +1586,7 @@ async fn match_is_final(
     statically_terminal: bool,
     budget: &mut ScanBudget,
     memoize: bool,
+    scratch: &mut WalkScratch,
 ) -> StreamExecutorResult<bool> {
     // All three positions are in the same coordinate system: indices into the partition's
     // retained-row buffer (= the matcher's fed positions; `consume_prefix` keeps them aligned).
@@ -1597,7 +1603,7 @@ async fn match_is_final(
     }
     for p in resume_pos..start {
         let alive = nfa
-            .reaches_boundary_alive(p, n_rows, matcher, budget, memoize)
+            .reaches_boundary_alive_with(p, n_rows, matcher, budget, memoize, scratch)
             .await?;
         if budget.hit || alive {
             return Ok(false);
@@ -1609,7 +1615,7 @@ async fn match_is_final(
         return Ok(true);
     }
     let extend = nfa
-        .may_extend(start, n_rows, matcher, budget, memoize)
+        .may_extend_with(start, n_rows, matcher, budget, memoize, scratch)
         .await?;
     Ok(!extend)
 }
@@ -2170,6 +2176,7 @@ mod tests {
                 false,
                 &mut budget,
                 true,
+                &mut WalkScratch::default(),
             )
             .await
             .unwrap()
