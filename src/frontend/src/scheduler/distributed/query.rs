@@ -107,6 +107,11 @@ impl QueryExecution {
         }
     }
 
+    /// Returns the query associated with this execution.
+    pub fn query(&self) -> &Query {
+        &self.query
+    }
+
     /// Start execution of this query.
     /// Note the two shutdown channel sender and receivers are not dual.
     /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
@@ -206,7 +211,7 @@ impl QueryExecution {
         {
             warn!("Send cancel query request failed: the query has ended");
         } else {
-            info!("Send cancel request to query-{:?}", self.query.query_id);
+            info!("Send cancel request to query-{:?}", self.query().query_id);
         };
     }
 
