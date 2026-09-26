@@ -80,3 +80,49 @@
     - logical_plan
     - batch_plan
     - stream_plan
+# https://github.com/risingwavelabs/risingwave/issues/27259
+- id: create_udf_and_tables
+  sql: |
+    create function first_elem(arr jsonb, ts double precision) returns jsonb language javascript as $$
+    export function first_elem(arr, ts) {
+        return (Array.isArray(arr) && arr.length) ? arr[0] : null;
+    }
+    $$;
+    create table t (id int primary key, k varchar, ts double precision) append only;
+    create table d (k varchar primary key, arr jsonb, ts double precision);
+  expected_outputs: []
+- name: a UDF result read more than once is evaluated once per row
+  before:
+    - create_udf_and_tables
+  sql: |
+    with picked as (
+      select t.*, first_elem(d.arr, t.ts) as p
+      from t left join d for system_time as of proctime() on d.k = t.k),
+    resolved as (
+      select *, p ->> 'a' as a, p ->> 'b' as b, p ->> 'c' as c from picked)
+    select id, a, b, c from resolved;
+  expected_outputs:
+    - stream_plan
+- name: a UDF result read more than once on a retract stream is materialized once
+  before:
+    - create_udf_and_tables
+  sql: |
+    select p ->> 'a' as a, p ->> 'b' as b from (select first_elem(arr, ts) as p from d) s;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a UDF result read once is still merged into the outer project
+  before:
+    - create_udf_and_tables
+  sql: |
+    select p ->> 'a' as a from (select first_elem(arr, ts) as p from d) s;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a lambda result read more than once is evaluated once per row
+  sql: |
+    create table t (id int primary key, a int[]);
+    select x[1] as x1, x[2] as x2 from (select array_transform(a, |v| v * 2) as x from t) s;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
