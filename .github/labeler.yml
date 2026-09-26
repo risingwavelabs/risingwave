@@ -227,6 +227,10 @@ labels:
 
 - label: "ci/run-e2e-cassandra-sink-tests"
   files:
+  - "ci\\/scripts\\/e2e-cassandra-sink-test\\.sh"
+  - "e2e_test\\/commands\\/cassandra-cqlsh"
+  - "e2e_test\\/sink\\/cassandra_sink\\.slt"
+  - "java\\/connector-node\\/risingwave-sink-cassandra\\/.*"
   - "src\\/connector\\/src\\/sink\\/remote\\.rs"
 
 - label: "ci/run-e2e-mongodb-sink-tests"
