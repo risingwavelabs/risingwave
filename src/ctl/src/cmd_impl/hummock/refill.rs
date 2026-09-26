@@ -17,6 +17,7 @@ use std::time::Duration;
 use anyhow::Context;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::monitor::EndpointExt;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::GetTableCacheRefillStatsRequest;
@@ -67,5 +68,20 @@ pub async fn refill_stats(context: &CtlContext) -> anyhow::Result<()> {
 
     let results = try_join_all(futures).await?;
     println!("{}", serde_json::to_string_pretty(&results)?);
+    Ok(())
+}
+
+pub async fn warm_up_table_cache(
+    context: &CtlContext,
+    table_id: TableId,
+    concurrency: u32,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    let (key_count, worker_count) = meta_client
+        .warm_up_table_cache(table_id, concurrency)
+        .await?;
+    println!(
+        "Warmed up cache for table {table_id} on {worker_count} compute nodes ({key_count} keys scanned)"
+    );
     Ok(())
 }

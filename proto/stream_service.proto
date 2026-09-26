@@ -212,9 +212,22 @@ message GetMinUncommittedObjectIdResponse {
   uint64 min_uncommitted_object_id = 1;
 }
 
+message WarmUpTableCacheRequest {
+  uint32 table_id = 1;
+  common.Buffer vnode_bitmap = 2;
+  uint64 committed_epoch = 3;
+  // Maximum number of vnodes scanned concurrently on this compute node.
+  uint32 concurrency = 4;
+}
+
+message WarmUpTableCacheResponse {
+  uint64 key_count = 1;
+}
+
 service StreamService {
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
   rpc GetMinUncommittedObjectId(GetMinUncommittedObjectIdRequest) returns (GetMinUncommittedObjectIdResponse);
+  rpc WarmUpTableCache(WarmUpTableCacheRequest) returns (WarmUpTableCacheResponse);
 }
 
 // TODO: Lifecycle management for actors.
