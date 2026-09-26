@@ -192,24 +192,6 @@ impl FragmentActorBuilder {
                 })
             }
 
-            NodeBody::IcebergWithPkIndexWriter(_) => {
-                let mut new_stream_node = stream_node.clone();
-                // Compaction alternates between the normal and resolver inputs, so either merge
-                // must be able to remain alive while temporarily disconnected.
-                for (input, new_input) in stream_node
-                    .input
-                    .iter()
-                    .zip_eq_fast(&mut new_stream_node.input)
-                {
-                    *new_input = self.rewrite_inner(input, depth + 1)?;
-                    let Some(NodeBody::Merge(merge)) = new_input.node_body.as_mut() else {
-                        bail!("iceberg pk-index writer input must be a merge after actor rewrite");
-                    };
-                    merge.allow_empty_upstream = true;
-                }
-                Ok(new_stream_node)
-            }
-
             // For other nodes, visit the children recursively.
             _ => {
                 let mut new_stream_node = stream_node.clone();
