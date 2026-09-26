@@ -192,7 +192,7 @@ indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
-jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 # Keep LanceDB on the Lance 6 stack for now. Lance 7 pulls in dependencies
 # that require serde_json >= 1.0.149, while RisingWave pins serde_json below
 # 1.0.147 to preserve SQL JSONB float formatting compatibility. See #25739.
