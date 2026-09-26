@@ -83,6 +83,20 @@ pub struct SeqMatch {
     pub labels: Vec<String>,
 }
 
+/// A snapshot of the matcher's resumable state, compared across one visit to tell progress from
+/// none. See [`IncrementalMatcher::progress_marker`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgressMarker {
+    next_pos: usize,
+    matchless_upto: usize,
+    dead_upto: usize,
+    scan_cursor: usize,
+    frozen_count: usize,
+    matched: usize,
+    incomplete: bool,
+    freeze_truncated: bool,
+}
+
 /// Outcome of [`IncrementalMatcher::finalize_evicted_prefix`]: whether the matcher could finalize the
 /// evicted prefix in place (staying reusable) or the eviction shape forces the caller to drop and
 /// rebuild it.
@@ -361,6 +375,23 @@ impl IncrementalMatcher {
     /// emission.
     pub fn resume_pos(&self) -> usize {
         self.next_pos
+    }
+
+    /// Everything a visit can move: the frozen boundary, the verdict cursors, the match list and
+    /// the truncation flags. Two equal markers around a visit mean the visit decided nothing the
+    /// next one will not have to decide again — which, under a spent budget, is a stuck partition
+    /// rather than a starved one (see the executor's stuck-visit counter).
+    pub fn progress_marker(&self) -> ProgressMarker {
+        ProgressMarker {
+            next_pos: self.next_pos,
+            matchless_upto: self.matchless_upto,
+            dead_upto: self.dead_upto,
+            scan_cursor: self.scan_cursor,
+            frozen_count: self.frozen_count,
+            matched: self.matched.len(),
+            incomplete: self.incomplete,
+            freeze_truncated: self.freeze_truncated,
+        }
     }
 
     /// End of the prefix of fed positions proven dead at the boundary — every position below it
