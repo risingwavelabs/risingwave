@@ -304,6 +304,49 @@ Caused by these errors (recent errors listed first):
   2: expects an integer or expression that can be evaluated to an integer after LIMIT, but found non-const expression
 
 
+# expression in the FETCH clause
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v FETCH FIRST 1+2 ROWS ONLY;
+----
+0
+1
+2
+
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v OFFSET 2 FETCH FIRST 1.5*2 ROWS ONLY;
+----
+2
+3
+4
+
+# quantity omitted (bare ROW/ROWS): must not be misparsed as a `ROW(...)` expression, see
+# https://github.com/risingwavelabs/risingwave/issues/19952
+query I
+SELECT * FROM generate_series(0,3,1) as t(v) order by v FETCH FIRST ROW ONLY;
+----
+0
+
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v FETCH FIRST '2.2' ROWS ONLY;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: expects an integer or expression that can be evaluated to an integer after LIMIT,
+but the evaluation of the expression returns error:Expr error: error while evaluating expression `str_parse('2.2')`: Parse error: bigint invalid digit found in string
+
+
+statement error
+select 1 fetch first generate_series(1, 2) rows only;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Expr error
+  2: expects an integer or expression that can be evaluated to an integer after LIMIT, but found non-const expression
+
+
 # Subqueries that return negative values
 statement error
 SELECT * FROM integers as int LIMIT (SELECT -1);
