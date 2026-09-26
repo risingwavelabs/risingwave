@@ -29,7 +29,7 @@ chrono = { workspace = true, features = [
 ] }
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 clap = { workspace = true }
-comfy-table = "7"
+comfy-table = "8"
 crc32fast = "1"
 easy-ext = "1"
 educe = "0.6"
