@@ -236,7 +236,7 @@ quote = "1"
 rand = { workspace = true }
 serde = { workspace = true }
 serde_yaml = "0.9"
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
