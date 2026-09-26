@@ -20,7 +20,7 @@ use tonic::async_trait;
 use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
 use super::super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchSinkWriter;
-use super::elasticsearch_opensearch_config::{ElasticSearchConfig, ElasticSearchOpenSearchConfig};
+use super::elasticsearch_opensearch_config::ElasticSearchConfig;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
 
@@ -28,7 +28,7 @@ pub const ES_SINK: &str = "elasticsearch";
 
 #[derive(Debug)]
 pub struct ElasticSearchSink {
-    config: ElasticSearchOpenSearchConfig,
+    config: ElasticSearchConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
@@ -39,7 +39,7 @@ impl EnforceSecret for ElasticSearchSink {
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
-            ElasticSearchOpenSearchConfig::enforce_one(prop)?;
+            ElasticSearchConfig::enforce_one(prop)?;
         }
         Ok(())
     }
@@ -52,7 +52,7 @@ impl TryFrom<SinkParam> for ElasticSearchSink {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let pk_indices = param.downstream_pk_or_empty();
-        let config = ElasticSearchConfig::from_btreemap(param.properties)?.inner;
+        let config = ElasticSearchConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -76,8 +76,8 @@ impl Sink for ElasticSearchSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        self.config.validate_config(&self.schema)?;
-        let client = self.config.build_client(Self::SINK_NAME)?;
+        self.config.inner.validate_config(&self.schema)?;
+        let client = self.config.build_client()?;
         client.ping().await?;
         Ok(())
     }
@@ -89,12 +89,12 @@ impl Sink for ElasticSearchSink {
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(ElasticSearchOpenSearchSinkWriter::new(
-            self.config.clone(),
+            self.config.inner.clone(),
+            self.config.build_client()?,
             self.schema.clone(),
             self.pk_indices.clone(),
-            Self::SINK_NAME,
             self.is_append_only,
         )?
-        .into_log_sinker(self.config.concurrent_requests))
+        .into_log_sinker(self.config.inner.concurrent_requests))
     }
 }
