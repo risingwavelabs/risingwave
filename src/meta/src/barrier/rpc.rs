@@ -627,7 +627,7 @@ impl PartialGraphRecoverer<'_> {
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         creating_jobs: &mut HashSet<JobId>,
-        mv_depended_subscriptions: &mut HashMap<TableId, HashMap<SubscriptionId, u64>>,
+        mv_depended_subscriptions: &mut HashMap<TableId, HashSet<SubscriptionId>>,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
@@ -719,10 +719,10 @@ impl PartialGraphRecoverer<'_> {
                             job_id.as_mv_table_id(),
                             subscriptions
                                 .into_iter()
-                                .map(|(subscription_id, retention)| {
+                                .map(|subscription_id| {
                                     (
                                         subscription_id.as_subscriber_id(),
-                                        SubscriberType::Subscription(retention),
+                                        SubscriberType::Subscription,
                                     )
                                 })
                                 .collect(),

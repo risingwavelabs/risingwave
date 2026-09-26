@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::id::TableId;
+use risingwave_common::id::{JobId, TableId};
 use risingwave_pb::catalog::PbSubscription;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
@@ -26,10 +26,11 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub subscription_id: SubscriptionId,
     pub name: String,
-    pub retention_seconds: i64,
+    pub retention_seconds: Option<i64>,
     pub definition: String,
     pub subscription_state: i32,
     pub dependent_table_id: TableId,
+    pub cross_db_downstream_job_id: Option<JobId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -65,10 +66,11 @@ impl From<PbSubscription> for ActiveModel {
         Self {
             subscription_id: Set(pb_subscription.id),
             name: Set(pb_subscription.name),
-            retention_seconds: Set(pb_subscription.retention_seconds as _),
+            retention_seconds: Set(pb_subscription.retention_seconds.map(|v| v as _)),
             definition: Set(pb_subscription.definition),
             subscription_state: Set(pb_subscription.subscription_state),
             dependent_table_id: Set(pb_subscription.dependent_table_id),
+            cross_db_downstream_job_id: Set(pb_subscription.cross_db_downstream_job_id),
         }
     }
 }

@@ -1387,12 +1387,11 @@ impl DatabaseCheckpointControl {
             Some(Command::CreateSubscription {
                 subscription_id,
                 upstream_mv_table_id,
-                retention_second,
             }) => {
                 self.database_info.register_subscriber(
                     upstream_mv_table_id.as_job_id(),
                     subscription_id.as_subscriber_id(),
-                    SubscriberType::Subscription(retention_second),
+                    SubscriberType::Subscription,
                 );
                 let mutation = Some(Command::create_subscription_to_mutation(
                     upstream_mv_table_id,
@@ -1434,19 +1433,6 @@ impl DatabaseCheckpointControl {
                     node_actors,
                     PostCollectCommand::Command("DropSubscription".to_owned()),
                 )
-            }
-
-            Some(Command::AlterSubscriptionRetention {
-                subscription_id,
-                upstream_mv_table_id,
-                retention_second,
-            }) => {
-                self.database_info.update_subscription_retention(
-                    upstream_mv_table_id.as_job_id(),
-                    subscription_id.as_subscriber_id(),
-                    retention_second,
-                );
-                self.apply_simple_command(None, "AlterSubscriptionRetention")
             }
 
             Some(Command::ConnectorPropsChange(config)) => {

@@ -141,6 +141,49 @@ impl CatalogController {
         let mut objects_to_remove = root_objects.clone();
         objects_to_remove.extend(belonging_objects.iter().cloned());
         let removed_catalog_models = load_object_models(&txn, &objects_to_remove).await?;
+        let cross_db_subscription_models = removed_catalog_models
+            .iter()
+            .filter_map(|object_info| match object_info {
+                PbObjectInfo::Subscription(subscription)
+                    if subscription.cross_db_downstream_job_id.is_some() =>
+                {
+                    Some(subscription.clone())
+                }
+                _ => None,
+            })
+            .collect_vec();
+        let upstream_objects = Object::find()
+            .filter(
+                object::Column::Oid.is_in(
+                    cross_db_subscription_models
+                        .iter()
+                        .map(|subscription| subscription.dependent_table_id.as_object_id()),
+                ),
+            )
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|object| (object.oid, object))
+            .collect::<HashMap<_, _>>();
+        let removed_cross_db_subscriptions = cross_db_subscription_models
+            .into_iter()
+            .map(|subscription| {
+                let upstream_database_id = upstream_objects
+                    .get(&subscription.dependent_table_id.as_object_id())
+                    .and_then(|object| object.database_id)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "cannot resolve upstream database for cross-database subscription {}",
+                            subscription.id
+                        )
+                    })?;
+                Ok(CrossDbSubscriptionInfo {
+                    subscription_id: subscription.id,
+                    upstream_table_id: subscription.dependent_table_id,
+                    upstream_database_id,
+                })
+            })
+            .collect::<MetaResult<Vec<_>>>()?;
         removed_objects.extend(belonging_objects.into_iter().map(|obj| PartialObject {
             oid: obj.oid,
             obj_type: obj.obj_type,
@@ -345,6 +388,7 @@ impl CatalogController {
                 removed_iceberg_table_sinks,
                 removed_iceberg_sink_ids,
                 removed_iceberg_pk_index_sink_ids,
+                removed_cross_db_subscriptions,
             },
             version,
         ))

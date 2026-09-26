@@ -903,18 +903,26 @@ impl CatalogController {
         subscription_id: SubscriptionId,
         retention_seconds: u64,
         definition: String,
-    ) -> MetaResult<(NotificationVersion, PbSubscription)> {
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let obj = Object::find_by_id(subscription_id)
+        let (current_subscription, obj) = Subscription::find_by_id(subscription_id)
+            .find_also_related(Object)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
+        let obj =
+            obj.ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
+        if current_subscription.cross_db_downstream_job_id.is_some() {
+            return Err(MetaError::permission_denied(
+                "internal cross-database subscriptions cannot be altered".to_owned(),
+            ));
+        }
 
         let active_model = subscription::ActiveModel {
             subscription_id: Set(subscription_id),
-            retention_seconds: Set(retention_seconds as i64),
+            retention_seconds: Set(Some(retention_seconds as i64)),
             definition: Set(definition),
             ..Default::default()
         };
@@ -923,7 +931,7 @@ impl CatalogController {
         txn.commit().await?;
 
         let pb_subscription: PbSubscription = ObjectModel(subscription, obj, None).into();
-        let subscription_info = PbObjectInfo::Subscription(pb_subscription.clone());
+        let subscription_info = PbObjectInfo::Subscription(pb_subscription);
 
         let version = self
             .notify_frontend(
@@ -937,7 +945,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok((version, pb_subscription))
+        Ok(version)
     }
 
     pub async fn alter_streaming_job_config(
