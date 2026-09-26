@@ -33,6 +33,21 @@ echo "--- Run inline CDC source tests"
 risedev slt './e2e_test/source_inline/cdc/**/*.slt' --skip 'cron_only' -j1 --label "can-use-recover"
 risedev slt './e2e_test/source_inline/cdc/**/*.slt.serial' --skip 'cron_only' --label "can-use-recover"
 
+echo "--- Run SQL Server encrypted abort regression test"
+sqlserver_abort_test_classes=$(mktemp -d)
+source_cdc_jars=(./connector-node/libs/risingwave-source-cdc-*.jar)
+if [[ ${#source_cdc_jars[@]} -ne 1 || ! -f "${source_cdc_jars[0]}" ]]; then
+  echo "Expected exactly one risingwave-source-cdc jar in connector-node/libs" >&2
+  exit 1
+fi
+source_cdc_classpath="${source_cdc_jars[0]}:./connector-node/libs/*"
+javac -cp "${source_cdc_classpath}" \
+  -d "${sqlserver_abort_test_classes}" \
+  e2e_test/source_inline/cdc/sql_server/SqlServerEncryptedAbortTest.java
+java -cp "${sqlserver_abort_test_classes}:${source_cdc_classpath}" \
+  io.debezium.connector.sqlserver.SqlServerEncryptedAbortTest
+rm -rf "${sqlserver_abort_test_classes}"
+
 echo "--- Run TVF source tests"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 risedev slt './e2e_test/source_inline/tvf/*.slt'
