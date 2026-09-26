@@ -411,9 +411,15 @@ where
                                             chunk,
                                         );
                                         yield Message::Chunk(chunk);
+                                        // Only break once a full chunk has been produced, so a
+                                        // barrier period advances a whole chunk instead of a
+                                        // single row. Otherwise, when the upstream keeps the
+                                        // `PollNext::Left` branch permanently ready, this fallback
+                                        // block is entered every barrier and reads exactly one row,
+                                        // degrading the backfill to one-row-per-barrier.
+                                        break;
                                     }
-
-                                    break;
+                                    // Not a full chunk yet: keep reading to fill it.
                                 }
                             }
                         }
