@@ -3290,7 +3290,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
 dependencies = [
  "digest 0.10.7",
- "spin 0.10.0",
+ "spin 0.10.1",
 ]
 
 [[package]]
@@ -12229,7 +12229,7 @@ dependencies = [
  "nix 0.26.4",
  "once_cell",
  "smallvec",
- "spin 0.10.0",
+ "spin 0.10.1",
  "symbolic-demangle",
  "tempfile",
  "thiserror 2.0.17",
@@ -15167,7 +15167,7 @@ dependencies = [
  "prometheus",
  "reqwest 0.13.4",
  "risingwave_common",
- "spin 0.10.0",
+ "spin 0.12.3",
  "thiserror 2.0.17",
  "thiserror-ext",
  "tokio-retry",
@@ -15487,7 +15487,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "sled",
- "spin 0.10.0",
+ "spin 0.12.3",
  "sync-point",
  "tempfile",
  "thiserror 2.0.17",
@@ -17140,9 +17140,18 @@ dependencies = [
 
 [[package]]
 name = "spin"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
+checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
+dependencies = [
+ "lock_api",
+]
+
+[[package]]
+name = "spin"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
 dependencies = [
  "lock_api",
 ]
@@ -17719,7 +17728,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "madsim-tokio",
- "spin 0.10.0",
+ "spin 0.12.3",
  "thiserror 2.0.17",
 ]
 
