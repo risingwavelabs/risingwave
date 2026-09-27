@@ -1,0 +1,105 @@
+# Run once per authentication mode; both runs reuse fixed JetStream names.
+control substitution on
+
+statement ok
+set streaming_use_shared_source to false;
+
+statement ok
+set streaming_parallelism to 1;
+
+statement ok
+set sink_decouple to false;
+
+# Reset external state left behind by a previous failed run.
+system ok retry 10 backoff 1s
+python3 e2e_test/source_inline/nats/operation.py auth_setup
+
+# A valid but unauthorized seed must fail at authentication, not at key parsing.
+# In JWT mode the same seed also fails to prove ownership of the JWT's user key.
+statement error [Aa]uthorization [Vv]iolation
+create table bad_source (i int) with (
+  connector = 'nats',
+  server_url = '${NATS_AUTH_URL}',
+  subject = 'rw_auth_source',
+  stream = 'rw_auth_source',
+  consumer.durable_name = 'rw_auth_bad',
+  connect_mode = 'credential',
+  nkey = '${NATS_AUTH_WRONG_NKEY}'
+  ${NATS_AUTH_JWT_OPTION}
+) format plain encode json;
+
+statement ok
+create table source (i int) with (
+  connector = 'nats',
+  server_url = '${NATS_AUTH_URL}',
+  subject = 'rw_auth_source',
+  stream = 'rw_auth_source',
+  consumer.durable_name = 'rw_auth_reader',
+  connect_mode = 'credential',
+  nkey = '${NATS_AUTH_NKEY}'
+  ${NATS_AUTH_JWT_OPTION}
+) format plain encode json;
+
+query I rowsort retry 30 backoff 1s
+select distinct i from source;
+----
+1
+2
+3
+
+statement ok
+create table input (i int);
+
+statement error [Aa]uthorization [Vv]iolation
+create sink bad_sink from input with (
+  connector = 'nats',
+  server_url = '${NATS_AUTH_URL}',
+  subject = 'rw_auth_sink',
+  type = 'append-only',
+  force_append_only = 'true',
+  connect_mode = 'credential',
+  nkey = '${NATS_AUTH_WRONG_NKEY}'
+  ${NATS_AUTH_JWT_OPTION}
+);
+
+statement ok
+create sink sink from input with (
+  connector = 'nats',
+  server_url = '${NATS_AUTH_URL}',
+  subject = 'rw_auth_sink',
+  type = 'append-only',
+  force_append_only = 'true',
+  connect_mode = 'credential',
+  nkey = '${NATS_AUTH_NKEY}'
+  ${NATS_AUTH_JWT_OPTION}
+);
+
+statement ok
+insert into input values (4), (5), (6);
+
+statement ok
+flush;
+
+system ok retry 30 backoff 1s
+python3 e2e_test/source_inline/nats/operation.py auth_check_sink
+
+statement ok
+drop sink sink;
+
+statement ok
+drop table input;
+
+statement ok
+drop table source;
+
+system ok
+python3 e2e_test/source_inline/nats/operation.py auth_cleanup
+
+statement ok
+set sink_decouple to default;
+
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_use_shared_source to default;
