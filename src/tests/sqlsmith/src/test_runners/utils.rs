@@ -14,10 +14,10 @@
 
 use anyhow::{anyhow, bail};
 use itertools::Itertools;
-#[cfg(madsim)]
-use rand::rngs::ChaCha20Rng;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+#[cfg(madsim)]
+use rand_chacha::ChaChaRng;
 use risingwave_sqlparser::ast::Statement;
 use tokio::time::{Duration, sleep, timeout};
 use tokio_postgres::error::Error as PgError;
@@ -425,7 +425,7 @@ pub(super) async fn run_query_inner(
 pub(super) fn generate_rng(seed: Option<u64>) -> impl Rng {
     #[cfg(madsim)]
     if let Some(seed) = seed {
-        ChaCha20Rng::seed_from_u64(seed)
+        ChaChaRng::seed_from_u64(seed)
     } else {
         rand::make_rng()
     }

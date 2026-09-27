@@ -101,7 +101,7 @@ const KILL_IGNORE_FILES: &[&str] = &[
 mod background_ddl_mode {
     use anyhow::bail;
     use rand::RngExt as _;
-    use rand::rngs::ChaCha20Rng;
+    use rand_chacha::ChaChaRng;
     use sqllogictest::{Condition, Record, StatementExpect};
 
     use crate::client::RisingWave;
@@ -141,7 +141,7 @@ mod background_ddl_mode {
         record: &Record<T>,
         cmd: &SqlCmd,
         manual_background_ddl_enabled: bool,
-        rng: &mut ChaCha20Rng,
+        rng: &mut ChaChaRng,
         background_ddl_enabled: &mut bool,
     ) where
         D: sqllogictest::AsyncDB<ColumnType = T>,
@@ -259,7 +259,7 @@ mod vnode_mode {
 
 pub mod slt_env {
     use rand::SeedableRng;
-    use rand::rngs::ChaCha20Rng;
+    use rand_chacha::ChaChaRng;
 
     use crate::cluster::KillOpts;
 
@@ -280,12 +280,12 @@ pub mod slt_env {
             Self { opts }
         }
 
-        pub fn get_rng() -> ChaCha20Rng {
+        pub fn get_rng() -> ChaChaRng {
             let seed = std::env::var("MADSIM_TEST_SEED")
                 .unwrap_or("0".to_owned())
                 .parse::<u64>()
                 .unwrap();
-            ChaCha20Rng::seed_from_u64(seed)
+            ChaChaRng::seed_from_u64(seed)
         }
 
         pub fn background_ddl_rate(&self) -> f64 {

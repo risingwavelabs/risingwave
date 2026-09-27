@@ -16,7 +16,8 @@ chrono = { workspace = true }
 clap = { workspace = true }
 console = "0.16"
 itertools = { workspace = true }
-rand = { version = "0.10", features = ["chacha"] }
+rand = { version = "0.10" }
+rand_chacha = { version = "0.10" }
 regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_expr = { workspace = true }
