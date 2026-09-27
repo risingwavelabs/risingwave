@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Helm Charts Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: 'risingwavelabs/helm-charts'
           token: ${{ secrets.PR_TOKEN }}
@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Risingwave Operator Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: 'risingwavelabs/risingwave-operator'
           token: ${{ secrets.PR_TOKEN }}

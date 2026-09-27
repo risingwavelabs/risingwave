@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     name: license-header-check
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
         # For pull_request, `GITHUB_SHA` contains a implicit merge commit we want to avoid
