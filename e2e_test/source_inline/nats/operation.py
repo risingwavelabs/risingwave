@@ -1,9 +1,11 @@
 import asyncio
+import base64
 import time
 import json
 import os
 from nats.aio.client import Client as NATS
 from nats.js.api import StreamConfig
+from nats.js.errors import NotFoundError
 import psycopg2
 
 NATS_SERVER = os.environ.get("NATS_SERVER_URL", os.environ.get("RISEDEV_NATS_SERVER_URL", "nats://nats-server:4222"))
@@ -110,10 +112,53 @@ async def ensure_all_ack(stream_name: str, consumer_name: str):
         raise Exception(f"Consumer {consumer_name} on stream {stream_name} has {consumer.num_pending} pending messages")
     await nc.close()
 
+async def auth_operation(command: str):
+    """Prepare and inspect JetStream data for authentication.slt.serial."""
+    import nkeys
+
+    key = nkeys.from_seed(os.environ["NATS_AUTH_NKEY"].encode())
+    options = {
+        "signature_cb": lambda nonce: base64.b64encode(key.sign(nonce.encode())),
+    }
+    if os.environ["NATS_AUTH_MODE"] == "jwt":
+        options["user_jwt_cb"] = lambda: os.environ["NATS_AUTH_JWT"].encode()
+    else:
+        options["nkeys_seed_str"] = os.environ["NATS_AUTH_NKEY"]
+    nc = NATS()
+    await nc.connect(
+        os.environ["NATS_AUTH_URL"], allow_reconnect=False, connect_timeout=5,
+        max_reconnect_attempts=1,
+        **options,
+    )
+    try:
+        js = nc.jetstream()
+        if command in ("auth_setup", "auth_cleanup"):
+            for stream in ("rw_auth_source", "rw_auth_sink"):
+                try:
+                    await js.delete_stream(stream)
+                except NotFoundError:
+                    pass
+        if command == "auth_setup":
+            for stream in ("rw_auth_source", "rw_auth_sink"):
+                await js.add_stream(name=stream, subjects=[stream], storage="memory")
+            for i in range(1, 4):
+                await js.publish("rw_auth_source", json.dumps({"i": i}).encode())
+        elif command == "auth_check_sink":
+            info = await js.stream_info("rw_auth_sink")
+            rows = set()
+            for sequence in range(info.state.first_seq, info.state.last_seq + 1):
+                message = await js.get_msg("rw_auth_sink", seq=sequence)
+                rows.add(json.loads(message.data)["i"])
+            # The sink is at-least-once; allow duplicate deliveries, not missing values.
+            assert rows == {4, 5, 6}, f"Unexpected sink values: {rows}"
+    finally:
+        await nc.close()
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python operation.py <command> <stream_name> <subject> [table_name] [expect_count]")
+        print("Usage: python operation.py <command> [arguments...]")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -128,6 +173,11 @@ if __name__ == "__main__":
             asyncio.run(create_stream(stream_name, subject))
         elif command == "produce_stream":
             asyncio.run(produce_message(stream_name, subject))
+    elif command in ("auth_setup", "auth_check_sink", "auth_cleanup"):
+        if len(sys.argv) != 2:
+            print(f"Error: {command} does not accept additional arguments")
+            sys.exit(1)
+        asyncio.run(auth_operation(command))
     elif command == "validate_state":
         if len(sys.argv) != 4:
             print("Error: Both table name and expected count are required")
@@ -144,5 +194,5 @@ if __name__ == "__main__":
         asyncio.run(ensure_all_ack(stream_name, consumer_name))
     else:
         print(f"Unknown command: {command}")
-        print("Supported commands: create_stream, produce_stream, validate_state, ensure_all_ack")
+        print("Supported commands: create_stream, produce_stream, validate_state, ensure_all_ack, auth_setup, auth_check_sink, auth_cleanup")
         sys.exit(1)
