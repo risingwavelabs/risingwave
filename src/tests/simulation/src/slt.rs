@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use rand::{Rng, rng as thread_rng};
+use rand::{RngExt as _, rng as thread_rng};
 use sqllogictest::substitution::well_known;
 use sqllogictest::{
     Condition, ParallelTestError, Partitioner, QueryExpect, Record, StatementExpect,
@@ -100,7 +100,7 @@ const KILL_IGNORE_FILES: &[&str] = &[
 /// Randomly set DDL statements to use `background_ddl`
 mod background_ddl_mode {
     use anyhow::bail;
-    use rand::Rng;
+    use rand::RngExt as _;
     use rand_chacha::ChaChaRng;
     use sqllogictest::{Condition, Record, StatementExpect};
 
