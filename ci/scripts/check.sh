@@ -30,7 +30,7 @@ buf lint
 cd ..
 
 echo "--- Rust cargo-sort check"
-cargo sort --check --workspace --grouped
+cargo sort --check --check-format --workspace --grouped
 
 # Disable hakari until we make sure it's useful
 # echo "--- Rust cargo-hakari check"
