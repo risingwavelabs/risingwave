@@ -88,6 +88,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "tpch_upstream.slt",
     // Drop is not retryable in search path test.
     "search_path.slt",
+    // background CREATE SINK held at rate limit 0 can't be retried after a kill
+    "alter_mv/alter_mv_concurrency_check.slt",
     // Transaction statements are not retryable.
     "transaction/now.slt",
     "transaction/read_only_multi_conn.slt",
