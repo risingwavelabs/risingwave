@@ -89,7 +89,6 @@ impl CreatingStreamingJobControl {
         notifiers: Vec<Notifier>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
-        barrier_interval_ms: u32,
         version_stat: &HummockVersionStats,
         control_stream_manager: &mut ControlStreamManager,
         edges: &mut FragmentEdgeBuildResult,
@@ -146,7 +145,6 @@ impl CreatingStreamingJobControl {
             &mut prev_epoch_fake_physical_time,
             &mut pending_non_checkpoint_barriers,
             PbBarrierKind::Checkpoint,
-            barrier_interval_ms,
         );
 
         let added_actors = info.stream_job_fragments.actor_ids().collect();
@@ -231,7 +229,6 @@ impl CreatingStreamingJobControl {
                 create_mview_tracker,
                 snapshot_backfill_actors,
                 snapshot_epoch,
-                barrier_interval_ms,
                 info: job_info,
                 pending_non_checkpoint_barriers,
             },
@@ -311,7 +308,6 @@ impl CreatingStreamingJobControl {
                     } else {
                         BarrierKind::Barrier
                     },
-                    barrier_interval_ms: upstream_barrier_info.barrier_interval_ms,
                 });
                 prev_epoch = *epoch;
             }
@@ -320,7 +316,6 @@ impl CreatingStreamingJobControl {
             prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
             curr_epoch: TracedEpoch::new(Epoch(upstream_barrier_info.curr_epoch())),
             kind: BarrierKind::Checkpoint(pending_non_checkpoint_barriers),
-            barrier_interval_ms: upstream_barrier_info.barrier_interval_ms,
         });
         Ok(ret)
     }
@@ -347,7 +342,6 @@ impl CreatingStreamingJobControl {
             &mut prev_epoch_fake_physical_time,
             &mut pending_non_checkpoint_barriers,
             PbBarrierKind::Initial,
-            upstream_barrier_info.barrier_interval_ms,
         );
         Ok((
             CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -366,7 +360,6 @@ impl CreatingStreamingJobControl {
                 .collect(),
                 info,
                 snapshot_epoch,
-                barrier_interval_ms: upstream_barrier_info.barrier_interval_ms,
                 pending_non_checkpoint_barriers,
             },
             barrier_info,
