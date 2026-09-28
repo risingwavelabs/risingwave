@@ -23,6 +23,7 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::{AccessError, AccessResult};
+use risingwave_pb::connector_service::SourceType;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use smallvec::SmallVec;
 use thiserror_ext::AsReport;
@@ -335,14 +336,14 @@ impl SourceStreamChunkRowWriter<'_> {
                     &Some(ref col @ AdditionalColumnType::DatabaseName(_))
                     | &Some(ref col @ AdditionalColumnType::TableName(_)),
                 ) => {
-                    // For MongoDB CDC, both database_name and collection_name should be parsed from payload
-                    // Check if this is MongoDB CDC by looking for CollectionName column in schema
-                    let is_mongodb_cdc = self.builder.column_descs.iter().any(|d| {
-                        matches!(
-                            d.additional_column.column_type,
-                            Some(AdditionalColumnType::CollectionName(_))
-                        )
-                    });
+                    // MongoDB's source envelope carries the database name on every
+                    // change, including deletes. Do not infer connector type from
+                    // which INCLUDE columns the user selected.
+                    let is_mongodb_cdc = matches!(
+                        self.row_meta.as_ref().map(|meta| meta.source_meta),
+                        Some(SourceMeta::DebeziumCdc(cdc_meta))
+                            if cdc_meta.source_type == SourceType::Mongodb
+                    );
 
                     if matches!(col, AdditionalColumnType::DatabaseName(_)) && is_mongodb_cdc {
                         // MongoDB CDC database_name should be parsed from payload.source.db
