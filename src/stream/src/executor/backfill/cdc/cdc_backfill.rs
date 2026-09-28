@@ -474,17 +474,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                 if last_binlog_offset.is_some() {
                                     state_impl
-                                        .mutate_and_commit_state(
+                                        .mutate_state(
                                             current_pk_pos.clone(),
                                             last_binlog_offset.clone(),
                                             total_snapshot_row_count,
                                             false,
-                                            barrier.epoch,
                                         )
                                         .await?;
-                                } else {
-                                    state_impl.commit_state(barrier.epoch).await?;
                                 }
+
+                                state_impl.commit_state(barrier.epoch).await?;
 
                                 yield Message::Barrier(barrier);
                             }
@@ -613,6 +612,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             }
                         }
                         // Commit after all preceding recovery chunks have been emitted.
+                        if current_pk_pos.is_some() {
+                            state_impl
+                                .mutate_state(
+                                    current_pk_pos.clone(),
+                                    last_binlog_offset.clone(),
+                                    total_snapshot_row_count,
+                                    false,
+                                )
+                                .await?;
+                        }
+
                         state_impl.commit_state(barrier.epoch).await?;
                         yield Message::Barrier(barrier);
                         break;
@@ -2087,7 +2097,7 @@ mod tests {
             executor.next().await.unwrap().unwrap(),
             Message::Barrier(_)
         ));
-        assert_recovery_offset(memory_state_store, 2, test_epoch(4)).await;
+        assert_recovery_offset(memory_state_store, 4, test_epoch(4)).await;
     }
 
     #[tokio::test]
