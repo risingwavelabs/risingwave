@@ -459,10 +459,27 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 self.rate_limit_rps = entry.rate_limit;
                                             }
                                         }
+                                        mutation if mutation.is_stop(self.actor_ctx.id) => {
+                                            tracing::info!(
+                                                %table_id,
+                                                upstream_table_name,
+                                                "CdcBackfill has been dropped due to config change"
+                                            );
+                                            yield Message::Barrier(barrier);
+                                            return Ok(());
+                                        }
                                         _ => (),
                                     }
                                 }
-                                state_impl.commit_state(barrier.epoch).await?;
+                                state_impl
+                                    .mutate_and_commit_state(
+                                        current_pk_pos.clone(),
+                                        last_binlog_offset.clone(),
+                                        total_snapshot_row_count,
+                                        false,
+                                        barrier.epoch,
+                                    )
+                                    .await?;
                                 yield Message::Barrier(barrier);
                             }
                             Message::Chunk(chunk) => {
