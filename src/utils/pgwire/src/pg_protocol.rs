@@ -813,11 +813,6 @@ where
         let authenticator = session.user_authenticator();
         authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(BeMessage::AuthenticationOk)?;
-
-        // Cancel request need this for identify and verification. According to postgres
-        // doc, it should be written to buffer after receive AuthenticationOk. Without it
-        // the client has no session id to cancel with, so cancellation silently never
-        // matches a session.
         self.stream
             .write_no_flush(BeMessage::BackendKeyData(session.id()))?;
 

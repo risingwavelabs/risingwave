@@ -151,9 +151,6 @@ pub struct FeCancelMessage {
 
 impl FeCancelMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
-        // A CancelRequest carries a fixed-length body: the process id and the secret key.
-        // A client that never received `BackendKeyData` has no secret key to send and ends
-        // the message early; reject it instead of panicking in `Buf::get_i32`.
         if buf.remaining() < 8 {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
