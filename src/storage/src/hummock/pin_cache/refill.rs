@@ -180,7 +180,9 @@ mod tests {
     #[tokio::test]
     async fn test_revoked_download_cannot_publish_and_replacement_can_retry() {
         for revoke_by_unregister in [false, true] {
-            let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
+            let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
+                .await
+                .unwrap();
             let object_id = HummockSstableObjectId::from(1001);
             pin_cache.register_objects([(object_id, 11)]);
             let token = pin_cache.prepare_refill(object_id).unwrap();
@@ -224,7 +226,7 @@ mod tests {
     async fn test_interrupted_fs_upload_cannot_publish() {
         for cancel in [false, true] {
             let (_dir, local_store) = local_object_store().await;
-            let pin_cache = PinCache::new(local_store.clone(), 1, []);
+            let pin_cache = PinCache::new(local_store.clone(), 1, []).await.unwrap();
             let object_id = HummockSstableObjectId::from(1001);
             pin_cache.register_objects([(object_id, 8)]);
 
