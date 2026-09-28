@@ -471,15 +471,21 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         _ => (),
                                     }
                                 }
-                                state_impl
-                                    .mutate_and_commit_state(
-                                        current_pk_pos.clone(),
-                                        last_binlog_offset.clone(),
-                                        total_snapshot_row_count,
-                                        false,
-                                        barrier.epoch,
-                                    )
-                                    .await?;
+
+                                if last_binlog_offset.is_some() {
+                                    state_impl
+                                        .mutate_and_commit_state(
+                                            current_pk_pos.clone(),
+                                            last_binlog_offset.clone(),
+                                            total_snapshot_row_count,
+                                            false,
+                                            barrier.epoch,
+                                        )
+                                        .await?;
+                                } else {
+                                    state_impl.commit_state(barrier.epoch).await?;
+                                }
+
                                 yield Message::Barrier(barrier);
                             }
                             Message::Chunk(chunk) => {
