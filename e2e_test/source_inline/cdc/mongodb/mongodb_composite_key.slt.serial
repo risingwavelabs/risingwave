@@ -1,9 +1,11 @@
 # MongoDB namespaces are part of row identity when one table watches several collections.
+control substitution on
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 const a = db.getSiblingDB('rw_mongo_key_a');
 const b = db.getSiblingDB('rw_mongo_key_b');
 a.dropDatabase();
@@ -23,7 +25,7 @@ CREATE TABLE mongo_key_by_database (
 INCLUDE DATABASE_NAME AS company_name
 WITH (
   connector = 'mongodb-cdc',
-  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  mongodb.url = '${MONGODB_URL}',
   collection.name = 'rw_mongo_key_[ab][.]documents'
 );
 
@@ -37,7 +39,7 @@ INCLUDE DATABASE_NAME AS company_name
 INCLUDE COLLECTION_NAME AS collection_name
 WITH (
   connector = 'mongodb-cdc',
-  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  mongodb.url = '${MONGODB_URL}',
   collection.name = 'rw_mongo_key_a[.](documents|other_documents)'
 );
 
@@ -59,7 +61,7 @@ rw_mongo_key_a documents a0
 rw_mongo_key_a other_documents other0
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 const a = db.getSiblingDB('rw_mongo_key_a');
 const id = ObjectId('6911a33502454e0f774f8810');
 a.documents.updateOne({ _id: id }, { $set: { version: 'a1' } });
@@ -72,7 +74,7 @@ rw_mongo_key_a a1
 rw_mongo_key_b b0
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 const a = db.getSiblingDB('rw_mongo_key_a');
 a.documents.deleteOne({ _id: ObjectId('6911a33502454e0f774f8810') });
 EOF
@@ -88,7 +90,7 @@ SELECT collection_name, payload ->> 'version' FROM mongo_key_by_namespace;
 other_documents other0
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 const a = db.getSiblingDB('rw_mongo_key_a');
 a.documents.insertOne({ _id: ObjectId('6911a33502454e0f774f8810'), version: 'a2' });
 EOF
@@ -108,7 +110,7 @@ CREATE TABLE mongo_key_no_snapshot (
 INCLUDE DATABASE_NAME AS company_name
 WITH (
   connector = 'mongodb-cdc',
-  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  mongodb.url = '${MONGODB_URL}',
   collection.name = 'rw_mongo_key_[ab][.]documents',
   debezium.snapshot.mode = 'no_data'
 );
@@ -123,10 +125,31 @@ SELECT count(*) FROM mongo_key_no_snapshot;
 ----
 0
 
-sleep 1s
+# MongoDB's no_data stream may start after CREATE TABLE returns. Produce a fresh
+# event on each attempt until it is observed, then remove the readiness probe.
+system ok retry 30 backoff 1s
+set -e
+mongosh "$MONGODB_URL" <<'EOF'
+db.getSiblingDB('rw_mongo_key_a').documents.updateOne(
+  { _id: ObjectId('6911a33502454e0f774f8812') },
+  { $inc: { probe: 1 } },
+  { upsert: true }
+);
+EOF
+test "$(psql -XAt -v ON_ERROR_STOP=1 -h "$SLT_HOST" -p "$SLT_PORT" -U root -d "$SLT_DB" -c "SELECT count(*) FROM mongo_key_no_snapshot WHERE payload ->> 'probe' IS NOT NULL")" = 1
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
+db.getSiblingDB('rw_mongo_key_a').documents.deleteOne({ _id: ObjectId('6911a33502454e0f774f8812') });
+EOF
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM mongo_key_no_snapshot_derived;
+----
+0
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
 const a = db.getSiblingDB('rw_mongo_key_a');
 const id = ObjectId('6911a33502454e0f774f8811');
 a.documents.insertOne({ _id: id, version: 'live_a0' });
@@ -144,7 +167,7 @@ SELECT company_name, version FROM mongo_key_no_snapshot_derived;
 rw_mongo_key_a live_a0
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 const b = db.getSiblingDB('rw_mongo_key_b');
 const id = ObjectId('6911a33502454e0f774f8811');
 b.documents.insertOne({ _id: id, version: 'live_b0' });
@@ -169,7 +192,7 @@ SELECT count(*), count(DISTINCT _id) FROM mongo_key_no_snapshot;
 2 1
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 const a = db.getSiblingDB('rw_mongo_key_a');
 const id = ObjectId('6911a33502454e0f774f8811');
 a.documents.updateOne({ _id: id }, { $set: { version: 'live_a1' } });
@@ -188,7 +211,7 @@ rw_mongo_key_a live_a1
 rw_mongo_key_b live_b0
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 db.getSiblingDB('rw_mongo_key_a').documents.deleteOne({
   _id: ObjectId('6911a33502454e0f774f8811')
 });
@@ -220,7 +243,7 @@ sleep 10s
 
 onlyif can-use-recover
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 const a = db.getSiblingDB('rw_mongo_key_a');
 const b = db.getSiblingDB('rw_mongo_key_b');
 a.documents.updateOne(
@@ -279,7 +302,7 @@ statement ok
 DROP TABLE mongo_key_no_snapshot;
 
 system ok
-mongosh 'mongodb://mongodb:27017' <<'EOF'
+mongosh "$MONGODB_URL" <<'EOF'
 db.getSiblingDB('rw_mongo_key_a').dropDatabase();
 db.getSiblingDB('rw_mongo_key_b').dropDatabase();
 EOF

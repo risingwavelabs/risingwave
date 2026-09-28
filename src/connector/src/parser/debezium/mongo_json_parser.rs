@@ -315,6 +315,7 @@ mod tests {
             for (company, operation, expected_op) in [
                 ("company1", "r", Op::Insert),
                 ("company2", "r", Op::Insert),
+                ("company1", "c", Op::Insert),
                 ("company1", "u", Op::Insert),
                 ("company1", "d", Op::Delete),
             ] {
@@ -333,6 +334,7 @@ mod tests {
                 .unwrap();
                 let mut builder =
                     SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
+                // MongoDB namespace columns must come from the event envelope.
                 let source_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
                     "wrong.documents".to_owned(),
                     0,
@@ -353,6 +355,7 @@ mod tests {
                     .unwrap();
                 builder.finish_current_chunk();
                 let chunk = builder.consume_ready_chunks().next().unwrap();
+                assert_eq!(chunk.cardinality(), 1);
                 let (op, row) = chunk.rows().next().unwrap();
                 assert_eq!(op, expected_op);
                 assert_eq!(
