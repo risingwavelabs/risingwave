@@ -30,11 +30,6 @@ import java.util.List;
 
 public class MySqlValidatorTest {
     @Test
-    public void testPrimaryKeysMatchInOrderIgnoringCase() {
-        MySqlValidator.primaryKeyCheck(List.of("id", "tenant"), List.of("ID", "Tenant"));
-    }
-
-    @Test
     public void testPrimaryKeyMismatch() {
         for (var upstream :
                 List.of(

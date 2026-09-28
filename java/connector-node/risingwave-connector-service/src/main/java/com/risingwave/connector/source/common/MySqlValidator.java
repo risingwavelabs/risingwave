@@ -298,16 +298,17 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             }
         }
 
-        // Match the primary-index order used by the snapshot reader, not table column order.
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.pk"))) {
             stmt.setString(1, dbName);
             stmt.setString(2, tableName);
             var pkFields = new ArrayList<String>();
+
             try (var res = stmt.executeQuery()) {
                 while (res.next()) {
                     pkFields.add(res.getString(1));
                 }
             }
+
             primaryKeyCheck(tableSchema.getPrimaryKeys(), pkFields);
         }
     }
@@ -326,6 +327,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                     "Upstream MySQL primary key metadata is empty; expected columns "
                             + expectedPkFields);
         }
+
         if (expectedPkFields.size() != pkFields.size()) {
             throw ValidatorUtils.invalidArgument(
                     "Primary key mismatch: the SQL schema defines "
@@ -334,6 +336,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                             + pkFields.size()
                             + " columns.");
         }
+
         for (int i = 0; i < expectedPkFields.size(); i++) {
             if (!pkFields.get(i).equalsIgnoreCase(expectedPkFields.get(i))) {
                 throw ValidatorUtils.invalidArgument(
