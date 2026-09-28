@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import time
 import json
 import os
@@ -129,16 +128,14 @@ async def ensure_all_ack(stream_name: str, consumer_name: str):
 
 async def auth_operation(command: str):
     """Prepare and inspect JetStream data for authentication.slt.serial."""
-    import nkeys
 
-    key = nkeys.from_seed(os.environ["NATS_AUTH_NKEY"].encode())
     options = {
-        "signature_cb": lambda nonce: base64.b64encode(key.sign(nonce.encode())),
+        "nkeys_seed_str": os.environ["NATS_AUTH_NKEY"],
     }
+
     if os.environ["NATS_AUTH_MODE"] == "jwt":
         options["user_jwt_cb"] = lambda: os.environ["NATS_AUTH_JWT"].encode()
-    else:
-        options["nkeys_seed_str"] = os.environ["NATS_AUTH_NKEY"]
+
     nc = NATS()
     await nc.connect(
         os.environ["NATS_AUTH_URL"],
@@ -190,7 +187,7 @@ if __name__ == "__main__":
         if command == "create_stream":
             asyncio.run(create_stream(stream_name, subject))
         elif command == "produce_stream":
-            asyncio.run(produce_message(stream_name, subject))
+            asyncio.run(produce_message(subject))
         elif command == "produce_stream_with_headers":
             asyncio.run(produce_message(subject, with_headers=True))
     elif command in ("auth_setup", "auth_check_sink", "auth_cleanup"):
@@ -215,6 +212,6 @@ if __name__ == "__main__":
     else:
         print(f"Unknown command: {command}")
         print(
-            "Supported commands: create_stream, produce_stream, produce_stream_with_headers,validate_state, ensure_all_ack, auth_setup, auth_check_sink, auth_cleanup"
+            "Supported commands: create_stream, produce_stream, produce_stream_with_headers, validate_state, ensure_all_ack, auth_setup, auth_check_sink, auth_cleanup"
         )
         sys.exit(1)
