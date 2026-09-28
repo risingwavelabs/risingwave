@@ -439,7 +439,7 @@ pub async fn handle_connection<S, SM>(
 }
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     use bytes::Bytes;
@@ -464,8 +464,26 @@ mod tests {
     use crate::types;
     use crate::types::Row;
 
-    struct MockSessionManager {}
-    struct MockSession {}
+    struct MockSessionManager {
+        authenticator: UserAuthenticator,
+        session_id: SessionId,
+        cancelled: Arc<Mutex<Vec<SessionId>>>,
+    }
+
+    impl Default for MockSessionManager {
+        fn default() -> Self {
+            Self {
+                authenticator: UserAuthenticator::None,
+                session_id: (0, 0),
+                cancelled: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    struct MockSession {
+        authenticator: UserAuthenticator,
+        id: SessionId,
+    }
 
     const STREAMING_TEST_QUERY: &str = "SELECT 'pgwire_streaming_test'";
 
@@ -486,16 +504,17 @@ mod tests {
             _user_name: &str,
             _peer_addr: crate::net::AddressRef,
         ) -> Result<Arc<Self::Session>, Self::Error> {
-            Ok(Arc::new(MockSession {}))
+            Ok(Arc::new(MockSession {
+                authenticator: self.authenticator.clone(),
+                id: self.session_id,
+            }))
         }
 
-        fn cancel_queries_in_session(&self, _session_id: SessionId) {
-            todo!()
+        fn cancel_queries_in_session(&self, session_id: SessionId) {
+            self.cancelled.lock().unwrap().push(session_id);
         }
 
-        fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {
-            todo!()
-        }
+        fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {}
 
         fn end_session(&self, _session: &Self::Session) {}
     }
@@ -595,11 +614,11 @@ mod tests {
         }
 
         fn user_authenticator(&self) -> &UserAuthenticator {
-            &UserAuthenticator::None
+            &self.authenticator
         }
 
         fn id(&self) -> SessionId {
-            (0, 0)
+            self.id
         }
 
         fn get_config(&self, key: &str) -> Result<String, Self::Error> {
@@ -643,7 +662,7 @@ mod tests {
         let bind_addr = bind_addr.into();
         let pg_config = pg_config.into();
 
-        let session_mgr = MockSessionManager {};
+        let session_mgr = MockSessionManager::default();
         tokio::spawn(async move {
             pg_serve(
                 &bind_addr,
@@ -689,6 +708,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_cancel_request_after_password_auth() {
+        let session_id = (42, 7);
+        let cancelled = Arc::new(Mutex::new(Vec::new()));
+        let session_mgr = MockSessionManager {
+            authenticator: UserAuthenticator::ClearText(b"pw".to_vec()),
+            session_id,
+            cancelled: cancelled.clone(),
+        };
+
+        tokio::spawn(async move {
+            pg_serve(
+                "127.0.0.1:10002",
+                socket2::TcpKeepalive::new(),
+                Arc::new(session_mgr),
+                ConnectionContext {
+                    tls_config: None,
+                    redact_sql_option_keywords: None,
+                    message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
+                        .into(),
+                    stream_flush_threshold_bytes: 64 * 1024,
+                },
+                CancellationToken::new(), // dummy
+            )
+            .await
+        });
+        // wait for server to start
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let (client, connection) =
+            tokio_postgres::connect("host=localhost port=10002 user=mock password=pw", NoTls)
+                .await
+                .unwrap();
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+
+        // The cancel token is built from the `BackendKeyData` the server sent after
+        // `AuthenticationOk`. Without it the client cancels with (0, 0) instead.
+        client.cancel_token().cancel_query(NoTls).await.unwrap();
+
+        for _ in 0..100 {
+            if !cancelled.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(cancelled.lock().unwrap().as_slice(), &[session_id]);
+    }
+
+    #[tokio::test]
     async fn test_query_tcp() {
         do_test_query("127.0.0.1:10000", "host=localhost port=10000").await;
     }
@@ -722,7 +791,7 @@ mod tests {
             pg_serve(
                 &bind_addr,
                 socket2::TcpKeepalive::new(),
-                Arc::new(MockSessionManager {}),
+                Arc::new(MockSessionManager::default()),
                 ConnectionContext {
                     tls_config: None,
                     redact_sql_option_keywords: None,
