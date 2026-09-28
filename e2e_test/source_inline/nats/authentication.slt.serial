@@ -1,4 +1,3 @@
-# Run once per authentication mode; both runs reuse fixed JetStream names.
 control substitution on
 
 statement ok
