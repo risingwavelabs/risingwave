@@ -203,6 +203,7 @@ pub type RelabeledGuardedIntGaugeVec = RelabeledMetricVec<LabelGuardedIntGaugeVe
 pub enum GaugeAggregation {
     Sum,
     Min,
+    Max,
 }
 
 /// Extension methods for relabeling guarded integer gauges with explicit aggregation semantics.
@@ -361,6 +362,17 @@ impl AggregatedGaugeGroup {
                     state.aggregate.map_or(value, |current| current.min(value))
                 }
             }
+            GaugeAggregation::Max => {
+                if previous == state.aggregate && previous.is_some_and(|old| value < old) {
+                    *state
+                        .values
+                        .values()
+                        .max()
+                        .expect("the updated value exists")
+                } else {
+                    state.aggregate.map_or(value, |current| current.max(value))
+                }
+            }
         };
         state.aggregate = Some(aggregate);
         self.gauge.set(aggregate);
@@ -384,6 +396,7 @@ impl AggregatedGaugeGroup {
         let aggregate = match self.aggregation {
             GaugeAggregation::Sum => state.aggregate.unwrap_or(0).wrapping_sub(previous),
             GaugeAggregation::Min => state.values.values().copied().min().unwrap_or(0),
+            GaugeAggregation::Max => state.values.values().copied().max().unwrap_or(0),
         };
         state.aggregate = (!state.values.is_empty()).then_some(aggregate);
         self.gauge.set(aggregate);
@@ -600,6 +613,65 @@ mod tests {
 
             empty_actor.set_optional(None);
             assert_eq!(values(&registry), [0]);
+        }
+    }
+
+    #[test]
+    fn test_max_aggregation_update_clone_and_drop() {
+        for level in [
+            MetricLevel::Disabled,
+            MetricLevel::Critical,
+            MetricLevel::Info,
+        ] {
+            let registry = Registry::new();
+            let vec = test_vec(&registry, level, GaugeAggregation::Max);
+            let actor_1 = vec.with_guarded_label_values(&["1", "shared"]);
+            let actor_2 = vec.with_guarded_label_values(&["2", "shared"]);
+
+            actor_1.set(100);
+            assert_eq!(values(&registry), [100]);
+            actor_2.set(200);
+            assert_eq!(values(&registry), [200]);
+            actor_1.set(300);
+            assert_eq!(values(&registry), [300]);
+            actor_2.set(300);
+            actor_1.set(100);
+            assert_eq!(values(&registry), [300]);
+            actor_2.set(50);
+            assert_eq!(values(&registry), [100]);
+
+            let actor_1_clone = actor_1.clone();
+            drop(actor_1);
+            assert_eq!(values(&registry), [100]);
+            drop(actor_1_clone);
+            assert_eq!(values(&registry), [50]);
+            drop(actor_2);
+            assert_eq!(values(&registry), [0]);
+            assert!(values(&registry).is_empty());
+        }
+    }
+
+    #[test]
+    fn test_max_aggregation_ignores_absent_contributions() {
+        for level in [MetricLevel::Critical, MetricLevel::Info] {
+            let registry = Registry::new();
+            let vec = test_vec(&registry, level, GaugeAggregation::Max);
+            let actor_1 = vec.with_guarded_label_values(&["1", "shared"]);
+            let actor_2 = vec.with_guarded_label_values(&["2", "shared"]);
+
+            // Uninitialized and absent handles must not contribute a zero maximum.
+            actor_1.set(-100);
+            assert_eq!(values(&registry), [-100]);
+            actor_2.set_optional(None);
+            assert_eq!(values(&registry), [-100]);
+            actor_2.set_optional(Some(-50));
+            assert_eq!(values(&registry), [-50]);
+            actor_2.set_optional(None);
+            assert_eq!(values(&registry), [-100]);
+            actor_1.set_optional(None);
+            assert_eq!(values(&registry), [0]);
+            actor_2.set(-200);
+            assert_eq!(values(&registry), [-200]);
         }
     }
 

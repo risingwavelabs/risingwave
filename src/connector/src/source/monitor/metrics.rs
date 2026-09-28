@@ -258,6 +258,8 @@ impl SourceMetrics {
         )
         .unwrap()
         .relabel_debug_1(metric_level);
+        // Preserve the frontend's max-by-source/partition query semantics when live and
+        // backfill readers share a worker and their actor labels are relabeled.
         let latest_message_id = register_guarded_int_gauge_vec_with_registry!(
             "source_latest_message_id",
             "Latest message id for a exec per partition",
@@ -265,7 +267,7 @@ impl SourceMetrics {
             registry,
         )
         .unwrap()
-        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Min);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Max);
         let partition_eof_count = register_guarded_int_counter_vec_with_registry!(
             "source_partition_eof_count",
             "Total number of EOF events received from specific partition",
@@ -440,7 +442,7 @@ mod tests {
                 &metrics.latest_message_id,
                 &["1", "source", "partition"],
                 &["2", "source", "partition"],
-                5,
+                7,
             );
             assert_aggregation(
                 &metrics.file_source_dirty_split_count,
@@ -448,6 +450,53 @@ mod tests {
                 &["2", "source", "name", "fragment"],
                 12,
             );
+        }
+    }
+
+    #[test]
+    fn latest_message_id_max_is_independent_of_reader_placement() {
+        for level in [MetricLevel::Critical, MetricLevel::Info, MetricLevel::Debug] {
+            for same_worker in [true, false] {
+                let live_registry = Registry::new();
+                let backfill_registry = Registry::new();
+                let live_metrics = SourceMetrics::new(&live_registry, level);
+                let backfill_metrics = if same_worker {
+                    live_metrics.clone()
+                } else {
+                    SourceMetrics::new(&backfill_registry, level)
+                };
+                let live = live_metrics.latest_message_id.with_guarded_label_values(&[
+                    "1",
+                    "source",
+                    "partition",
+                ]);
+                let backfill = backfill_metrics
+                    .latest_message_id
+                    .with_guarded_label_values(&["2", "source", "partition"]);
+                live.set(1_000);
+                backfill.set(100);
+
+                // Match the frontend's max(source_latest_message_id) across workers.
+                let mut offsets: Vec<_> = [&live_registry, &backfill_registry]
+                    .into_iter()
+                    .flat_map(Registry::gather)
+                    .filter(|family| family.name() == "source_latest_message_id")
+                    .flat_map(|family| {
+                        family
+                            .get_metric()
+                            .iter()
+                            .map(|metric| metric.get_gauge().value() as i64)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                assert_eq!(offsets.iter().copied().max(), Some(1_000));
+                offsets.sort_unstable();
+                if same_worker && level != MetricLevel::Debug {
+                    assert_eq!(offsets, [1_000]);
+                } else {
+                    assert_eq!(offsets, [100, 1_000]);
+                }
+            }
         }
     }
 }
