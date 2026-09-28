@@ -327,6 +327,10 @@ pub struct CacheConfig {
     #[config_doc(omitted)]
     pub meta_cache_eviction: CacheEvictionConfig,
 
+    /// Number of lifecycle lock shards in the Pin Cache. Must be greater than zero.
+    #[serde(default = "default::storage::pin_cache_shard_num")]
+    pub pin_cache_shard_num: usize,
+
     #[serde(default = "default::storage::vector_block_cache_capacity_mb")]
     pub vector_block_cache_capacity_mb: usize,
     #[serde(default = "default::storage::vector_block_cache_shard_num")]
@@ -1136,6 +1140,10 @@ pub mod default {
 
         pub fn vector_file_block_size_kb() -> usize {
             1024
+        }
+
+        pub fn pin_cache_shard_num() -> usize {
+            64
         }
 
         pub fn vector_block_cache_capacity_mb() -> usize {
