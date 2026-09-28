@@ -151,6 +151,18 @@ pub struct FeCancelMessage {
 
 impl FeCancelMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        // A CancelRequest carries a fixed-length body: the process id and the secret key.
+        // A client that never received `BackendKeyData` has no secret key to send and ends
+        // the message early; reject it instead of panicking in `Buf::get_i32`.
+        if buf.remaining() < 8 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "Invalid cancel request: expected 8 bytes of payload, got {}",
+                    buf.remaining()
+                ),
+            ));
+        }
         let target_process_id = buf.get_i32();
         let target_secret_key = buf.get_i32();
         Ok(FeMessage::CancelQuery(Self {
@@ -897,9 +909,13 @@ fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) -> Re
 
 #[cfg(test)]
 mod tests {
+    use std::io::ErrorKind;
+
     use bytes::Bytes;
 
-    use crate::pg_message::{FeParseMessage, FeQueryMessage, FeStartupMessage};
+    use crate::pg_message::{
+        FeCancelMessage, FeMessage, FeParseMessage, FeQueryMessage, FeStartupMessage,
+    };
 
     #[test]
     fn test_get_sql() {
@@ -918,6 +934,23 @@ mod tests {
             type_ids: vec![],
         };
         assert_eq!(fe.get_sql().unwrap(), "select 1");
+    }
+
+    #[test]
+    fn test_cancel_request_rejects_short_payload() {
+        // A client without a secret key stops after the process id.
+        let err = FeCancelMessage::parse(Bytes::from_static(&[0, 0, 0, 1])).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+
+        let err = FeCancelMessage::parse(Bytes::new()).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+
+        let msg = FeCancelMessage::parse(Bytes::from_static(&[0, 0, 0, 1, 0, 0, 0, 2])).unwrap();
+        let FeMessage::CancelQuery(msg) = msg else {
+            panic!("expected a cancel query message");
+        };
+        assert_eq!(msg.target_process_id, 1);
+        assert_eq!(msg.target_secret_key, 2);
     }
 
     #[test]
