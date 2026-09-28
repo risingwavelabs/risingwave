@@ -275,6 +275,8 @@ mod tests {
         assert_eq!(row.datum_at(1).to_owned_datum(), None);
     }
 
+    /// Checks that snapshot and live events derive namespace keys from the envelope,
+    /// including deletes without pre-images and tables without a collection column.
     #[tokio::test]
     async fn test_namespace_key_on_upsert_and_delete() {
         let oid = "65bc9fb6c485f419a7a877fe";

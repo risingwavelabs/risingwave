@@ -270,6 +270,10 @@ impl<'a> SourceStreamChunkRowWriter<'a> {
 }
 
 impl SourceStreamChunkRowWriter<'_> {
+    /// Resolves payload and metadata columns, then applies a row action atomically.
+    ///
+    /// Primary-key access errors reject the action; other field access errors produce
+    /// `NULL`. Any error returned during construction rolls back columns already written.
     fn do_action<'a, A: RowWriterAction>(
         &'a mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output<'a>>,

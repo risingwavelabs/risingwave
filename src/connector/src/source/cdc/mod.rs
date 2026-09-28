@@ -393,6 +393,7 @@ mod tests {
 
     use super::*;
 
+    /// Checks that removing namespace columns remaps key indices without reordering them.
     #[test]
     fn projection_remaps_keys_around_include_columns() {
         let mut company =
@@ -426,6 +427,7 @@ mod tests {
         assert_eq!(projected.pk_indices, vec![1, 0]);
     }
 
+    /// Checks that ordinary CDC keys survive projection with or without trailing metadata.
     #[test]
     fn projection_preserves_ordinary_cdc_keys() {
         // Both protobuf representations of a regular column must survive projection.
