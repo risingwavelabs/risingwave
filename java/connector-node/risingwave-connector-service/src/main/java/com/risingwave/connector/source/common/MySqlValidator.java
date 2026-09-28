@@ -20,7 +20,6 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.Catalog;
 import com.risingwave.proto.Data;
-
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -113,9 +112,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             while (res.next()) {
                 if (!res.getString(2).equalsIgnoreCase("ON")) {
                     throw ValidatorUtils.internalError(
-                            "MySQL doesn't enable binlog.\n"
-                                + "Please set the value of log_bin to 'ON' and restart your MySQL"
-                                + " server.");
+                            "MySQL doesn't enable binlog.\nPlease set the value of log_bin to 'ON' and restart your MySQL server.");
                 }
             }
         }
@@ -126,8 +123,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             while (res.next()) {
                 if (!res.getString(2).equalsIgnoreCase("ROW")) {
                     throw ValidatorUtils.internalError(
-                            "MySQL binlog_format should be 'ROW'.\n"
-                                + "Please modify the config and restart your MySQL server.");
+                            "MySQL binlog_format should be 'ROW'.\nPlease modify the config and restart your MySQL server.");
                 }
             }
         }
@@ -138,8 +134,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             while (res.next()) {
                 if (!res.getString(2).equalsIgnoreCase("FULL")) {
                     throw ValidatorUtils.internalError(
-                            "MySQL binlog_row_image should be 'FULL'.\\n"
-                                + "Please modify the config and restart your MySQL server.");
+                            "MySQL binlog_row_image should be 'FULL'.\\nPlease modify the config and restart your MySQL server.");
                 }
             }
         }

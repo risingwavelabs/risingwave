@@ -23,10 +23,8 @@ import static org.junit.Assert.assertTrue;
 
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
-
-import org.junit.Test;
-
 import java.util.List;
+import org.junit.Test;
 
 public class MySqlValidatorTest {
     @Test
