@@ -2041,7 +2041,10 @@ fn normalize_cdc_auto_schema_change_column_names(
     cdc_table_type: PbCdcTableType,
     original_columns_by_name: &HashMap<String, ColumnCatalog>,
 ) -> TableSchemaChange {
-    if cdc_table_type != PbCdcTableType::Mysql {
+    if !matches!(
+        cdc_table_type,
+        PbCdcTableType::Mysql | PbCdcTableType::Mariadb
+    ) {
         return table_change;
     }
 

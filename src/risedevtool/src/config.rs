@@ -213,6 +213,7 @@ impl ConfigExpander {
                     "redis" => ServiceConfig::Redis(serde_yaml::from_str(&out_str)?),
                     "clickhouse" => ServiceConfig::ClickHouse(serde_yaml::from_str(&out_str)?),
                     "mysql" => ServiceConfig::MySql(serde_yaml::from_str(&out_str)?),
+                    "mariadb" => ServiceConfig::MariaDb(serde_yaml::from_str(&out_str)?),
                     "postgres" => ServiceConfig::Postgres(serde_yaml::from_str(&out_str)?),
                     "sqlserver" => ServiceConfig::SqlServer(serde_yaml::from_str(&out_str)?),
                     "mongodb" => ServiceConfig::MongoDb(serde_yaml::from_str(&out_str)?),

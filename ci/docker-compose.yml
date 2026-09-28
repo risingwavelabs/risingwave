@@ -37,6 +37,27 @@ services:
       timeout: 5s
       retries: 5
 
+  mariadb:
+    image: mariadb:11.4
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --log-bin=mariadb-bin
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+      - --server-id=4101
+      - --binlog-legacy-event-pos=ON
+    ports:
+      - 3306
+    environment:
+      - MARIADB_ROOT_PASSWORD=123456
+      - MARIADB_DATABASE=risedev
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   moto:
     image: motoserver/moto:5.0.3
     ports:
@@ -237,6 +258,8 @@ services:
     depends_on:
       mysql:
         condition: service_started
+      mariadb:
+        condition: service_healthy
       sqlserver-server:
         condition: service_started
       db:

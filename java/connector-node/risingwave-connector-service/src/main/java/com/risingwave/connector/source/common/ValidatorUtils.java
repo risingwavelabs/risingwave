@@ -65,6 +65,8 @@ public final class ValidatorUtils {
         switch (sourceType) {
             case MYSQL:
                 return String.format("jdbc:mysql://%s:%s/%s", host, port, database);
+            case MARIADB:
+                return String.format("jdbc:mariadb://%s:%s/%s", host, port, database);
             case POSTGRES:
             case CITUS:
                 return String.format("jdbc:postgresql://%s:%s/%s", host, port, database);

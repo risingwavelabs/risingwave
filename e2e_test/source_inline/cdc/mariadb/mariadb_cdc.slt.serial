@@ -1,0 +1,102 @@
+control substitution on
+
+statement ok
+DROP SOURCE IF EXISTS s_mariadb_cdc CASCADE;
+
+system ok
+mariadb -e "
+    CREATE DATABASE IF NOT EXISTS rw_mariadb_cdc;
+    DROP USER IF EXISTS 'rw_mariadb_cdc'@'%';
+    CREATE USER 'rw_mariadb_cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, BINLOG MONITOR
+        ON *.* TO 'rw_mariadb_cdc'@'%';
+    USE rw_mariadb_cdc;
+    DROP TABLE IF EXISTS orders;
+    CREATE TABLE orders (
+        id INT NOT NULL PRIMARY KEY,
+        customer VARCHAR(50) NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL
+    ) ENGINE=InnoDB;
+    INSERT INTO orders VALUES (1, 'alice', 10.50), (2, 'bob', 20.00);
+"
+
+statement ok
+CREATE SOURCE s_mariadb_cdc WITH (
+    ${RISEDEV_MARIADB_WITH_OPTIONS_COMMON},
+    username = 'rw_mariadb_cdc',
+    password = 'abcdef',
+    database.name = 'rw_mariadb_cdc',
+    auto.schema.change = 'true',
+    server.id = '4102'
+);
+
+statement ok
+CREATE TABLE mariadb_orders (*)
+WITH (snapshot = 'true', snapshot.batch_size = 1)
+FROM s_mariadb_cdc TABLE 'rw_mariadb_cdc.orders';
+
+statement ok
+CREATE MATERIALIZED VIEW mariadb_orders_upper AS
+SELECT id, upper(customer) AS customer, amount FROM mariadb_orders;
+
+query ITT retry 20 backoff 1s
+SELECT id, customer, amount FROM mariadb_orders ORDER BY id;
+----
+1 alice 10.50
+2 bob 20.00
+
+query ITT retry 20 backoff 1s
+SELECT id, customer, amount FROM mariadb_orders_upper ORDER BY id;
+----
+1 ALICE 10.50
+2 BOB 20.00
+
+system ok
+mariadb -e "
+    USE rw_mariadb_cdc;
+    START TRANSACTION;
+    UPDATE orders SET amount = 11.25 WHERE id = 1;
+    DELETE FROM orders WHERE id = 2;
+    INSERT INTO orders VALUES (3, 'carol', 30.75);
+    COMMIT;
+"
+
+query ITT retry 20 backoff 1s
+SELECT id, customer, amount FROM mariadb_orders ORDER BY id;
+----
+1 alice 11.25
+3 carol 30.75
+
+onlyif can-use-recover
+statement ok
+RECOVER;
+
+system ok
+mariadb -e "
+    USE rw_mariadb_cdc;
+    ALTER TABLE orders ADD COLUMN region VARCHAR(20) NOT NULL DEFAULT 'unknown';
+    INSERT INTO orders (id, customer, amount, region)
+        VALUES (4, 'dave', 40.00, 'apac');
+"
+
+query ITTT retry 30 backoff 1s
+SELECT id, customer, amount, region FROM mariadb_orders ORDER BY id;
+----
+1 alice 11.25 unknown
+3 carol 30.75 unknown
+4 dave 40.00 apac
+
+statement ok
+DROP MATERIALIZED VIEW mariadb_orders_upper;
+
+statement ok
+DROP TABLE mariadb_orders;
+
+statement ok
+DROP SOURCE s_mariadb_cdc CASCADE;
+
+system ok
+mariadb -e "
+    DROP DATABASE IF EXISTS rw_mariadb_cdc;
+    DROP USER IF EXISTS 'rw_mariadb_cdc'@'%';
+"

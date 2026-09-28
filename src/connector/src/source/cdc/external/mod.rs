@@ -51,6 +51,7 @@ pub enum ExternalCdcTableType {
     Undefined,
     Mock,
     MySql,
+    MariaDb,
     Postgres,
     SqlServer,
     Citus,
@@ -62,6 +63,7 @@ impl ExternalCdcTableType {
         let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
             "mysql-cdc" => Self::MySql,
+            "mariadb-cdc" => Self::MariaDb,
             "postgres-cdc" => Self::Postgres,
             "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
@@ -71,19 +73,22 @@ impl ExternalCdcTableType {
     }
 
     pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::MySql | Self::Postgres | Self::SqlServer)
+        matches!(
+            self,
+            Self::MySql | Self::MariaDb | Self::Postgres | Self::SqlServer
+        )
     }
 
     pub fn enable_transaction_metadata(&self) -> bool {
         // In Debezium, transactional metadata cause delay of the newest events, as the `END` message is never sent unless a new transaction starts.
-        // So we only allow transactional metadata for MySQL and Postgres.
+        // So we only allow transactional metadata for MySQL-compatible sources and Postgres.
         // See more in https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
-        matches!(self, Self::MySql | Self::Postgres)
+        matches!(self, Self::MySql | Self::MariaDb | Self::Postgres)
     }
 
     pub fn get_cdc_offset_parser(&self) -> ConnectorResult<CdcOffsetParseFunc> {
         match self {
-            Self::MySql => Ok(MySqlExternalTableReader::get_cdc_offset_parser()),
+            Self::MySql | Self::MariaDb => Ok(MySqlExternalTableReader::get_cdc_offset_parser()),
             Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
             Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
             Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
@@ -100,7 +105,7 @@ impl ExternalCdcTableType {
         table_id: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
-            Self::MySql => Ok(ExternalTableReaderImpl::MySql(
+            Self::MySql | Self::MariaDb => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(config, schema, pk_indices).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
@@ -128,6 +133,7 @@ impl From<ExternalCdcTableType> for PbCdcTableType {
         match cdc_table_type {
             ExternalCdcTableType::Postgres => Self::Postgres,
             ExternalCdcTableType::MySql => Self::Mysql,
+            ExternalCdcTableType::MariaDb => Self::Mariadb,
             ExternalCdcTableType::SqlServer => Self::Sqlserver,
 
             ExternalCdcTableType::Citus => Self::Citus,
@@ -142,6 +148,7 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
         match cdc_table_type {
             PbCdcTableType::Postgres => Self::Postgres,
             PbCdcTableType::Mysql => Self::MySql,
+            PbCdcTableType::Mariadb => Self::MariaDb,
             PbCdcTableType::Sqlserver => Self::SqlServer,
             PbCdcTableType::Mongo => Self::Mongo,
             PbCdcTableType::Citus => Self::Citus,
@@ -167,7 +174,7 @@ impl SchemaTableName {
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
         let schema_name = match table_type {
-            ExternalCdcTableType::MySql => properties
+            ExternalCdcTableType::MySql | ExternalCdcTableType::MariaDb => properties
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
@@ -512,7 +519,7 @@ impl ExternalTableImpl {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         let cdc_source_type = CdcSourceType::from(config.connector.as_str());
         match cdc_source_type {
-            CdcSourceType::Mysql => Ok(ExternalTableImpl::MySql(
+            CdcSourceType::Mysql | CdcSourceType::Mariadb => Ok(ExternalTableImpl::MySql(
                 MySqlExternalTable::connect(config).await?,
             )),
             CdcSourceType::Postgres => {
@@ -583,7 +590,7 @@ impl ExternalTableImpl {
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match CdcSourceType::from(config.connector.as_str()) {
-            CdcSourceType::Mysql => {
+            CdcSourceType::Mysql | CdcSourceType::Mariadb => {
                 MySqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
             }
             _ => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),

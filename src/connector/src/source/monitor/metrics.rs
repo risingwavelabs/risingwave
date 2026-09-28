@@ -73,6 +73,10 @@ pub struct EnumeratorMetrics {
     pub mysql_cdc_binlog_file_seq_min: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (max)
     pub mysql_cdc_binlog_file_seq_max: LabelGuardedIntGaugeVec,
+    /// `MariaDB` CDC binlog file sequence number (min)
+    pub mariadb_cdc_binlog_file_seq_min: LabelGuardedIntGaugeVec,
+    /// `MariaDB` CDC binlog file sequence number (max)
+    pub mariadb_cdc_binlog_file_seq_max: LabelGuardedIntGaugeVec,
     /// SQL Server CDC upstream minimum LSN
     pub sqlserver_cdc_upstream_min_lsn: LabelGuardedIntGaugeVec,
     /// SQL Server CDC upstream maximum LSN
@@ -132,6 +136,22 @@ impl EnumeratorMetrics {
         )
         .unwrap();
 
+        let mariadb_cdc_binlog_file_seq_min = register_guarded_int_gauge_vec_with_registry!(
+            "mariadb_cdc_binlog_file_seq_min",
+            "MariaDB CDC upstream binlog file sequence number (minimum/oldest)",
+            &["source_id", "hostname", "port"],
+            registry,
+        )
+        .unwrap();
+
+        let mariadb_cdc_binlog_file_seq_max = register_guarded_int_gauge_vec_with_registry!(
+            "mariadb_cdc_binlog_file_seq_max",
+            "MariaDB CDC upstream binlog file sequence number (maximum/newest)",
+            &["source_id", "hostname", "port"],
+            registry,
+        )
+        .unwrap();
+
         let sqlserver_cdc_upstream_min_lsn = register_guarded_int_gauge_vec_with_registry!(
             "sqlserver_cdc_upstream_min_lsn",
             "SQL Server CDC upstream minimum LSN",
@@ -155,6 +175,8 @@ impl EnumeratorMetrics {
             pg_cdc_upstream_max_lsn,
             mysql_cdc_binlog_file_seq_min,
             mysql_cdc_binlog_file_seq_max,
+            mariadb_cdc_binlog_file_seq_min,
+            mariadb_cdc_binlog_file_seq_max,
             sqlserver_cdc_upstream_min_lsn,
             sqlserver_cdc_upstream_max_lsn,
         }

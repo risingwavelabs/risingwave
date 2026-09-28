@@ -40,6 +40,7 @@ pub mod prelude {
     pub type MongodbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mongodb>;
     pub type PostgresCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Postgres>;
     pub type MysqlCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mysql>;
+    pub type MariadbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mariadb>;
     pub type SqlServerCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::SqlServer>;
     pub type OracleCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Oracle>;
 }

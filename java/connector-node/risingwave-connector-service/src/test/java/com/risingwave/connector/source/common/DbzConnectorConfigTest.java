@@ -19,6 +19,7 @@ package com.risingwave.connector.source.common;
 import static org.junit.Assert.assertEquals;
 
 import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
 import java.util.HashMap;
 import org.junit.Test;
 
@@ -33,5 +34,28 @@ public class DbzConnectorConfigTest {
         var config = new DbzConnectorConfig(SourceTypeE.MONGODB, 42, null, userProps, false, false);
 
         assertEquals("RW_CDC_42", config.getResolvedDebeziumProps().getProperty("topic.prefix"));
+    }
+
+    @Test
+    public void configuresDedicatedMariaDbConnectorAndSslMode() {
+        var userProps = new HashMap<String, String>();
+        userProps.put("hostname", "localhost");
+        userProps.put("port", "3306");
+        userProps.put("username", "root");
+        userProps.put("password", "secret");
+        userProps.put("database.name", "test");
+        userProps.put("table.name", "orders");
+        userProps.put("server.id", "4102");
+        userProps.put("ssl.mode", "required");
+
+        var config = new DbzConnectorConfig(SourceTypeE.MARIADB, 43, null, userProps, false, false);
+
+        assertEquals(
+                "io.debezium.connector.mariadb.MariaDbConnector",
+                config.getResolvedDebeziumProps().getProperty("connector.class"));
+        assertEquals("trust", config.getResolvedDebeziumProps().getProperty("database.ssl.mode"));
+        assertEquals(
+                OpendalSchemaHistory.class.getName(),
+                config.getResolvedDebeziumProps().getProperty("schema.history.internal"));
     }
 }

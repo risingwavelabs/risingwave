@@ -127,6 +127,8 @@ public class DbzChangeEventConsumer
         switch (connector) {
             case MYSQL:
                 return SourceType.MYSQL;
+            case MARIADB:
+                return SourceType.MARIADB;
             case POSTGRES:
                 return SourceType.POSTGRES;
             case CITUS:

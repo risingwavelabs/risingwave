@@ -19,6 +19,7 @@ macro_rules! for_all_classified_sources {
             // cdc sources
             {
                 { Mysql },
+                { Mariadb },
                 { Postgres },
                 { Citus },
                 { Mongodb },
