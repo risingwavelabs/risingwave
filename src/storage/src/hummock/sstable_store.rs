@@ -525,10 +525,7 @@ impl SstableStore {
                     return Err(HummockError::from(e));
                 }
             };
-            // Copy the block out of the object store's read buffer. Some backends (e.g. the
-            // opendal fs reader) return a slice of a much larger pooled buffer, so a zero-copy
-            // block would keep that whole buffer alive while the cache only accounts for the
-            // block itself. The prefetch path copies for the same reason.
+            // copy to avoid holding the (possibly much larger) read buffer in memory.
             let block = Box::new(Block::decode_with_copy(
                 block_data,
                 uncompressed_capacity,
