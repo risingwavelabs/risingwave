@@ -15,7 +15,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::mem::replace;
 
-use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::id::{FragmentId, PartialGraphId};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -76,11 +75,8 @@ impl CreatingStreamingJobStatus {
                         .chain(pending_upstream_barriers.drain(..))
                         .collect();
 
-                    let CreatingStreamingJobStatus::ConsumingSnapshot {
-                        snapshot,
-                        info,
-                        ..
-                    } = replace(self, CreatingStreamingJobStatus::PlaceHolder)
+                    let CreatingStreamingJobStatus::ConsumingSnapshot { snapshot, info, .. } =
+                        replace(self, CreatingStreamingJobStatus::PlaceHolder)
                     else {
                         unreachable!()
                     };
@@ -272,6 +268,7 @@ fn drain_pending_barriers(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::util::epoch::Epoch;
     use risingwave_pb::stream_plan::PbStreamNode;
 
     use super::*;
