@@ -1,0 +1,54 @@
+control substitution on
+
+statement ok
+DROP TABLE IF EXISTS oracle_quiet_customers;
+
+statement ok
+DROP SOURCE IF EXISTS oracle_quiet_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare missing_oracle_hb
+
+# The fixture seeds CUSTOMERS before source creation. No subsequent user-table DML
+# is issued: only the connector's periodic heartbeat action generates captured activity.
+statement ok
+CREATE SOURCE oracle_quiet_source WITH (
+    ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = 'APP',
+    heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
+    heartbeat.table.auto.initialize = 'true',
+    debezium.heartbeat.interval.ms = '1000',
+    debezium.table.exclude.list = 'C##RW_VALIDATOR[.]RW_HEARTBEAT'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE oracle_quiet_customers (
+    "ID" INT,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM oracle_quiet_source TABLE 'APP.CUSTOMERS';
+
+query T retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_quiet_customers;
+----
+1 RisingWave
+
+# Read checkpoint-visible split state repeatedly. A startup initialization signal
+# or a single snapshot-completion heartbeat is insufficient: require three advances.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py assert_heartbeat_progress --source oracle_quiet_source
+
+# Heartbeat activity advances recovery state without changing the user table.
+query T
+SELECT "ID", "NAME" FROM oracle_quiet_customers;
+----
+1 RisingWave
+
+statement ok
+DROP TABLE oracle_quiet_customers;
+
+statement ok
+DROP SOURCE oracle_quiet_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

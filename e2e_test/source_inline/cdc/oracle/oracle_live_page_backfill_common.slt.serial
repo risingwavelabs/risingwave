@@ -1,0 +1,81 @@
+control substitution on
+
+statement ok
+DROP TABLE IF EXISTS oracle_live_page;
+
+statement ok
+DROP SOURCE IF EXISTS oracle_live_page_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare live_page
+
+statement ok
+CREATE SOURCE oracle_live_page_source WITH (
+    ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = 'APP',
+    heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
+    heartbeat.table.auto.initialize = 'true',
+    -- Keep periodic heartbeat-table writes outside this test's duration, so they
+    -- cannot satisfy the source-offset check after the deliberate row changes.
+    -- The forced startup heartbeat still runs before we sample the mutation boundary.
+    debezium.heartbeat.interval.ms = '3600000'
+) FORMAT PLAIN ENCODE JSON;
+
+# Throttle a multi-page live scan so concurrent CDC changes overlap the frontier.
+statement ok
+SET backfill_rate_limit = 2;
+
+statement ok
+CREATE TABLE oracle_live_page (
+    "ID" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("ID")
+) WITH (snapshot.batch_size = 5)
+FROM oracle_live_page_source TABLE 'APP.RW_LIVE_PAGE';
+
+# Pause at a checkpointed prefix: IDs 1-3 have been scanned, but even a prefetched
+# five-row page cannot include ID 45. Change rows on both sides of that prefix.
+# Wait for the source to checkpoint the changes while backfill remains paused, then resume.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py mutate_at_frontier --source oracle_live_page_source --table oracle_live_page
+
+query I retry 60 backoff 1s
+SELECT count(*) FROM oracle_live_page;
+----
+50
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_live_page WHERE "ID" IN (0, 1, 2, 3, 45, 46, 100, 103);
+----
+0 inserted-behind
+1 updated-prefix
+100 inserted-ahead
+103 initial-3
+45 updated-suffix
+
+# Compare every row, not just the mutated keys or the total count.
+query I retry 30 backoff 1s
+WITH expected AS (
+    SELECT id, CASE id WHEN 1 THEN 'updated-prefix' WHEN 45 THEN 'updated-suffix'
+                      ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 50) AS rows(id) WHERE id NOT IN (2, 3, 46)
+    UNION ALL SELECT 0, 'inserted-behind'
+    UNION ALL SELECT 100, 'inserted-ahead'
+    UNION ALL SELECT 103, 'initial-3'
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_live_page t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py assert_backfill_finished --table oracle_live_page
+
+statement ok
+DROP TABLE oracle_live_page;
+
+statement ok
+DROP SOURCE oracle_live_page_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
