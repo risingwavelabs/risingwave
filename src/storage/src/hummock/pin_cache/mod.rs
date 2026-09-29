@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use bytes::Bytes;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectStoreRef};
 
@@ -144,16 +144,13 @@ impl PinCacheState {
 }
 
 /// A local whole-SST cache. The remote object store remains authoritative.
+/// Each object's state is protected by its shard lock. Reads, refills, and membership updates
+/// may run concurrently; batch membership updates are not atomic across shards.
 pub(crate) struct PinCache {
     store: ObjectStoreRef,
+    // Hold only one shard lock at a time. Never perform I/O or call back into the controller
+    // or refill executor while locked. Construction finishes before this cache is shared.
     shards: Box<[RwLock<PinCacheState>]>,
-    // Serializes batch membership updates, never acquired by foreground lookups.
-    // A batch becomes visible shard by shard; each object's transition remains atomic.
-    // Nested state locks follow membership_update -> one shard. Never hold
-    // two shard locks together. Construction finishes before this cache is shared.
-    // Shard code must not call back into membership or the refill executor, or perform I/O
-    // while locked. The executor may hold its own state lock while calling shard operations.
-    membership_update: Mutex<()>,
     next_path_id: AtomicU64,
 }
 
@@ -240,7 +237,6 @@ impl PinCache {
             shards: (0..shard_num)
                 .map(|_| RwLock::new(PinCacheState::default()))
                 .collect(),
-            membership_update: Mutex::new(()),
             next_path_id: AtomicU64::new(rand::random()),
         };
         for (id, size) in objects {

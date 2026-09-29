@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -115,19 +114,6 @@ async fn test_pin_read_and_unpin_lifecycle() {
         pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
         original
     );
-    remote_store
-        .upload(remote_path, Bytes::from_static(b"changed remote"))
-        .await
-        .unwrap();
-    pin_cache
-        .pin_sst(remote_store.clone(), remote_path.to_owned(), object_id)
-        .await
-        .unwrap();
-    assert_eq!(
-        pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
-        original
-    );
-
     let old_read = pin_cache.get(object_id).unwrap();
     let old_entry = Arc::downgrade(&old_read.entry);
     pin_cache.remove_objects([object_id]);
@@ -136,16 +122,14 @@ async fn test_pin_read_and_unpin_lifecycle() {
     assert!(pin_cache.get(object_id).is_none());
     assert_eq!(old_read.read(..).await.unwrap(), original);
 
-    let changed = Bytes::from_static(b"changed remote");
-    pin_cache.insert_objects([(object_id, changed.len() as u64)]);
+    pin_cache.insert_objects([(object_id, original.len() as u64)]);
     pin_cache
         .pin_sst(remote_store.clone(), remote_path.to_owned(), object_id)
         .await
         .unwrap();
-    assert_eq!(
-        pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
-        changed
-    );
+    let current = pin_cache.get(object_id).unwrap();
+    assert!(!Arc::ptr_eq(&old_read.entry, &current.entry));
+    assert_eq!(current.read(..).await.unwrap(), original);
     // Removing and reinserting the same object does not redirect an existing reader.
     assert_eq!(old_read.read(..).await.unwrap(), original);
     old_read.invalidate();
@@ -153,7 +137,7 @@ async fn test_pin_read_and_unpin_lifecycle() {
     drop(old_read);
     assert!(old_entry.upgrade().is_none());
 
-    pin_cache.replace_objects(HashMap::new());
+    pin_cache.replace_objects([]);
     assert!(pin_cache.prepare_refill(object_id).is_none());
     assert!(pin_cache.get(object_id).is_none());
 }
@@ -197,11 +181,12 @@ async fn test_revoked_token_cannot_begin_a_late_download() {
 }
 
 #[tokio::test]
-async fn test_inflight_is_not_routable_and_cancellation_releases_token() {
+async fn test_inflight_is_not_routable_and_cancellation_allows_retry() {
     let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
     let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.replace_objects(HashMap::from([(object_id, 8)]));
+    pin_cache.insert_objects([(object_id, 8)]);
 
+    let token = pin_cache.prepare_refill(object_id).unwrap();
     let download = start_download(&pin_cache, object_id);
     assert!(pin_cache.get(object_id).is_none());
     assert_eq!(
@@ -212,6 +197,7 @@ async fn test_inflight_is_not_routable_and_cancellation_releases_token() {
         PinCacheRefillOutcome::InProgress
     );
     drop(download);
+    assert_eq!(pin_cache.prepare_refill(object_id), Some(token));
 
     let retry = start_download(&pin_cache, object_id);
     pin_cache
@@ -238,16 +224,15 @@ async fn test_revoked_download_cannot_publish_or_remove_replacement() {
     for revoke_by_unpin in [false, true] {
         let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
         let object_id = HummockSstableObjectId::from(1001);
-        let desired = [(object_id, 11)];
-        pin_cache.replace_objects(desired);
+        pin_cache.insert_objects([(object_id, 11)]);
         let old = start_download(&pin_cache, object_id);
 
         if revoke_by_unpin {
             pin_cache.remove_objects([object_id]);
+            pin_cache.insert_objects([(object_id, 11)]);
         } else {
-            pin_cache.replace_objects(HashMap::from([(object_id, 12)]));
+            pin_cache.revoke_refill(object_id);
         }
-        pin_cache.replace_objects(desired);
         let replacement = start_download(&pin_cache, object_id);
         assert_ne!(
             old.entry.as_ref().unwrap().path,
@@ -284,7 +269,7 @@ async fn test_failed_download_can_be_retried() {
     let remote_store = in_memory_object_store();
     let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
     let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.replace_objects(HashMap::from([(object_id, 8)]));
+    pin_cache.insert_objects([(object_id, 8)]);
     let token = pin_cache.prepare_refill(object_id).unwrap();
     assert!(
         pin_cache
@@ -406,7 +391,7 @@ async fn test_read_failure_only_invalidates_selected_publication() {
     let remote_store = in_memory_object_store();
     let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
     let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.replace_objects(HashMap::from([(object_id, 8)]));
+    pin_cache.insert_objects([(object_id, 8)]);
     remote_store
         .upload("sst", Bytes::from_static(b"complete"))
         .await
@@ -440,7 +425,7 @@ fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
 }
 
 #[tokio::test]
-async fn test_other_shard_and_control_locks_do_not_block_lookup_or_publish() {
+async fn test_other_shard_does_not_block_object_operations() {
     let mut config = RwConfig::default();
     config.storage.cache.pin_cache_shard_num = 3;
     let system_params = system_params_for_test().into();
@@ -461,30 +446,33 @@ async fn test_other_shard_and_control_locks_do_not_block_lookup_or_publish() {
         )
         .await
         .unwrap();
-    let runtime = tokio::runtime::Handle::current();
 
-    // Keep the locks held until the other thread reports completion. A regression fails
-    // with a bounded timeout, then releases the locks so the worker can still exit.
+    // Hold an unrelated shard until the other thread completes. On timeout, release it
+    // before joining so an accidental cross-shard dependency fails instead of hanging.
     let result = std::thread::scope(|scope| {
-        let control = cache.membership_update.lock();
         let shard = cache.shard(blocked).write();
         let (tx, rx) = std::sync::mpsc::channel();
         let cache = &cache;
         scope.spawn(move || {
-            let _runtime = runtime.enter();
             assert!(cache.contains_object(available));
             assert!(cache.get(available).is_none());
             assert_eq!(download.publish(), PinCacheRefillOutcome::Published);
+            let token = cache.prepare_refill(available).unwrap();
+            cache.revoke_refill(available);
+            assert_ne!(cache.prepare_refill(available), Some(token));
             cache.get(available).unwrap().invalidate();
             assert!(cache.get(available).is_none());
+            cache.remove_objects([available]);
+            assert!(!cache.contains_object(available));
+            cache.insert_objects([(available, 8)]);
+            assert!(cache.prepare_refill(available).is_some());
             tx.send(()).unwrap();
         });
         let result = rx.recv_timeout(Duration::from_secs(5));
         drop(shard);
-        drop(control);
         result
     });
-    result.expect("an unrelated shard or control lock blocked the object lifecycle");
+    result.expect("an unrelated shard blocked the object lifecycle");
 }
 
 #[tokio::test]

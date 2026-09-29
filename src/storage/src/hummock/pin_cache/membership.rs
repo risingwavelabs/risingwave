@@ -42,7 +42,6 @@ impl PinCache {
         objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) {
         let objects = self.partition_objects(objects);
-        let _update = self.membership_update.lock();
         for (shard, objects) in self.shards.iter().zip_eq_fast(objects) {
             if objects.is_empty() {
                 continue;
@@ -62,7 +61,6 @@ impl PinCache {
         for id in objects {
             objects_by_shard[Self::shard_index(id, self.shards.len())].push(id);
         }
-        let _update = self.membership_update.lock();
         for (shard, objects) in self.shards.iter().zip_eq_fast(objects_by_shard) {
             if objects.is_empty() {
                 continue;
@@ -84,7 +82,6 @@ impl PinCache {
         objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) {
         let objects = self.partition_objects(objects);
-        let _update = self.membership_update.lock();
         for (shard, objects) in self.shards.iter().zip_eq_fast(objects) {
             let mut state = shard.write();
             for (_, mut object) in state
