@@ -39,39 +39,61 @@ CREATE TABLE s (v1 int, v2 varchar) WITH (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
+CREATE DATABASE pubsub_input_db WITH CHECKPOINT_FREQUENCY = 114514;
+
+statement ok
+CREATE DATABASE pubsub_observer_db WITH CHECKPOINT_FREQUENCY = 1;
+
+statement ok
+SET DATABASE TO pubsub_observer_db;
+
+statement ok
+CREATE TABLE observed (v1 int, v2 varchar) WITH (
+    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
+    pubsub.subscription = 'test-observation-subscription',
+    pubsub.ack_deadline_seconds = 10
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+SET DATABASE TO pubsub_input_db;
+
+statement ok
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
     pubsub.subscription = 'test-subscription-1',
     pubsub.ack_deadline_seconds = 10
 ) FORMAT PLAIN ENCODE JSON;
 
-# Disable checkpointing to test ack-on-checkpoint behavior.
-# Note that DDL & flush will trigger checkpoint.
 statement ok
-ALTER SYSTEM SET checkpoint_frequency TO 114514;
+CREATE SINK observation_sink FROM s1 WITH (
+    connector = 'google_pubsub',
+    pubsub.endpoint = '${PUBSUB_EMULATOR_HOST}',
+    pubsub.emulator_host = '${PUBSUB_EMULATOR_HOST}',
+    pubsub.topic = 'test-observation-topic'
+) FORMAT PLAIN ENCODE JSON (force_append_only = 'true');
 
 # Publish data after table creation, because DDL triggers checkpoint.
 system ok
 e2e_test/source_inline/pubsub/prepare-data.rs publish
 
 # No checkpoint has happened, so checkpoint visibility shows 0.
-statement ok
-set visibility_mode = 'checkpoint';
-
 query I
 select count(*) from s1;
 ----
 0
 
 statement ok
-set visibility_mode = 'all';
+SET DATABASE TO pubsub_observer_db;
 
 # Wait for all 10 messages to be consumed. The emulator may or may not redeliver
 # while the stream is active, so only assert the distinct payloads we care about.
 query I retry 60 backoff 1s
-select count(distinct v1) from s1;
+select count(distinct v1) from observed;
 ----
 10
+
+statement ok
+SET DATABASE TO pubsub_input_db;
 
 # Recovery: uncheckpointed data is lost, stream disconnects.
 statement ok
@@ -79,21 +101,14 @@ RECOVER;
 
 sleep 1s
 
-statement ok
-flush;
-
-# After recovery, uncheckpointed data is lost. Check under checkpoint visibility
-# to avoid racing with an early redelivery that would appear under 'all'.
-statement ok
-set visibility_mode = 'checkpoint';
-
+# After recovery, uncheckpointed data is lost.
 query I
 select count(*) from s1;
 ----
 0
 
 statement ok
-set visibility_mode = 'all';
+ALTER DATABASE pubsub_input_db SET CHECKPOINT_FREQUENCY = 1;
 
 # Wait for redelivery. Poll instead of a fixed sleep, because the emulator's
 # streaming-pull redelivery timing is non-deterministic.
@@ -106,8 +121,7 @@ select count(distinct v1) from s1;
 statement ok
 flush;
 
-# Wait a full ack-deadline window for any post-checkpoint redeliveries to surface,
-# then checkpoint again so the drop/recreate check only observes subscription state.
+# Wait a full ack-deadline window for any post-checkpoint redeliveries to surface.
 # Use retry instead of fixed sleep -- emulator timing is non-deterministic on slow CI.
 query I retry 20 backoff 1s
 select count(distinct v1) from s1;
@@ -115,11 +129,22 @@ select count(distinct v1) from s1;
 10
 
 statement ok
+DROP SINK observation_sink;
+
+statement ok
 DROP TABLE s1;
 
-# Attempted to verify no redelivery after ack: drop and recreate on the same subscription.
-# But ack can happen in any time, we can not guarantee the messages are ack-ed in time.
-
-# Restore to the value in src/config/ci-recovery.toml
 statement ok
-ALTER SYSTEM SET checkpoint_frequency TO 5;
+SET DATABASE TO pubsub_observer_db;
+
+statement ok
+DROP TABLE observed;
+
+statement ok
+SET DATABASE TO dev;
+
+statement ok
+DROP DATABASE pubsub_input_db;
+
+statement ok
+DROP DATABASE pubsub_observer_db;

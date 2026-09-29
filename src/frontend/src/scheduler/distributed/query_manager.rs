@@ -215,10 +215,7 @@ impl QueryManager {
             .query_manager()
             .add_query(query_id.clone(), query_execution.clone());
 
-        let worker_node_manager_reader = WorkerNodeSelector::new(
-            self.worker_node_manager.clone(),
-            pinned_snapshot.support_barrier_read(),
-        );
+        let worker_node_manager_reader = WorkerNodeSelector::new(self.worker_node_manager.clone());
 
         // Starts the execution of the query.
         let query_result_fetcher = query_execution

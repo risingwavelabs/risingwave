@@ -56,7 +56,7 @@ use risingwave_common::config::{
 use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
+use risingwave_common::session_config::{ConfigReporter, SessionConfig};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
@@ -1438,14 +1438,6 @@ impl SessionImpl {
         self.notice_tx
             .send(notice)
             .expect("notice channel should not be closed");
-    }
-
-    pub fn is_barrier_read(&self) -> bool {
-        match self.config().visibility_mode() {
-            VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
-            VisibilityMode::All => true,
-            VisibilityMode::Checkpoint => false,
-        }
     }
 
     pub fn statement_timeout(&self) -> Duration {

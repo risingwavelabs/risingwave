@@ -62,8 +62,7 @@ fn choose_worker(
     frontend_env: &FrontendEnv,
     request_id: u32,
 ) -> SchedulerResult<WorkerNode> {
-    let worker_node_manager =
-        WorkerNodeSelector::new(frontend_env.worker_node_manager_ref(), false);
+    let worker_node_manager = WorkerNodeSelector::new(frontend_env.worker_node_manager_ref());
 
     // dml should use streaming vnode mapping
     let vnode_mapping = get_table_dml_vnode_mapping(table_id, frontend_env, &worker_node_manager)?;
