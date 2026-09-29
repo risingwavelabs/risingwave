@@ -736,10 +736,18 @@ mod tests {
         // wait for server to start
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        let (client, connection) =
-            tokio_postgres::connect("host=localhost port=10002 user=mock password=pw", NoTls)
-                .await
-                .unwrap();
+        let (client, connection) = tokio_postgres::connect(
+            "host=localhost port=10002 user=mock password=pw application_name=cancel_test",
+            NoTls,
+        )
+        .await
+        .unwrap();
+        // Reported in the same `ParameterStatus` burst as `BackendKeyData`, so the
+        // password path must not skip it either.
+        assert_eq!(
+            connection.parameter("application_name"),
+            Some("cancel_test")
+        );
         tokio::spawn(async move {
             let _ = connection.await;
         });
