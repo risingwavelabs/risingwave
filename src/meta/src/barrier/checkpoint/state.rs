@@ -1851,11 +1851,7 @@ impl DatabaseCheckpointControl {
                         .remove(job_id)
                         .map(|mutation| (mutation, notifier.as_mut()))
                 };
-                job.on_new_upstream_barrier(
-                    partial_graph_manager,
-                    &barrier_info,
-                    job_mutation,
-                )?;
+                job.on_new_upstream_barrier(partial_graph_manager, &barrier_info, job_mutation)?;
             }
         }
         debug_assert!(independent_job_throttle_mutations.is_empty());

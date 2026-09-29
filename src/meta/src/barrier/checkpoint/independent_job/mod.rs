@@ -375,16 +375,6 @@ pub(crate) enum IndependentCheckpointJobControl {
 }
 
 impl IndependentCheckpointJob {
-    pub(crate) fn pre_apply_throttle(
-        &mut self,
-        config: &mut ThrottleConfigMap,
-    ) -> Option<Mutation> {
-        match self {
-            Self::CreatingStreamingJob(job) => job.pre_apply_throttle(config),
-            Self::BatchRefresh(job) => job.pre_apply_throttle(config),
-        }
-    }
-
     fn can_drop_independently(&self) -> bool {
         match self {
             Self::CreatingStreamingJob(j) => j.can_drop_independently(),
