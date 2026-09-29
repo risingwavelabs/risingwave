@@ -66,9 +66,9 @@ postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.14", features = ["process"] }
-prometheus-http-query = "0.8.3"
+prometheus-http-query = "0.9.0"
 prost = { workspace = true }
-quick-xml = { version = "0.40", features = ["serialize"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
@@ -103,7 +103,7 @@ tokio-stream = { workspace = true }
 toml = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
-tower-http = { version = "0.6", features = [
+tower-http = { version = "0.7", features = [
     "add-extension",
     "cors",
     "compression-gzip",

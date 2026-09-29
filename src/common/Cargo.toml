@@ -19,7 +19,7 @@ arrow-58-schema = { package = "arrow-schema", version = "58" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
-bitfield-struct = "0.12"
+bitfield-struct = "0.13"
 bitflags = "2"
 byteorder = "1"
 bytes = "1"
@@ -49,7 +49,7 @@ humantime = "2.3"
 ipnet = "2.12"
 itertools = { workspace = true }
 itoa = "1.0"
-jiff = "0.1.15"
+jiff = "0.2.35"
 jni = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
