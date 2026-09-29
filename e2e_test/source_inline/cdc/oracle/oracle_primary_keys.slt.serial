@@ -1,0 +1,171 @@
+control substitution on
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare pk_equivalence
+
+statement ok
+CREATE SOURCE oracle_pk_equivalence WITH (
+    ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = 'APP',
+    heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
+    heartbeat.table.auto.initialize = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+# invalid primary key (missing TENANT_ID)
+statement error (?s).*Primary key mismatch.*
+CREATE TABLE oracle_pk_count_mismatch (
+    "TENANT_ID" INT,
+    "ORDER_ID" INT,
+    "OTHER_COLUMN" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("ORDER_ID")
+) WITH (snapshot = 'false')
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_EQUIV';
+
+# invalid primary key (OTHER_COLUMN is not an upstream key column)
+statement error (?s).*Primary key mismatch.*
+CREATE TABLE oracle_pk_name_mismatch (
+    "TENANT_ID" INT,
+    "ORDER_ID" INT,
+    "OTHER_COLUMN" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("TENANT_ID", "OTHER_COLUMN")
+) WITH (snapshot = 'false')
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_EQUIV';
+
+# invalid primary key column names (Oracle stores these names in uppercase)
+statement error (?s).*preserve the upstream column name.*
+CREATE TABLE oracle_pk_case_mismatch (
+    tenant_id INT,
+    order_id INT,
+    other_column INT,
+    value VARCHAR,
+    PRIMARY KEY (tenant_id, order_id)
+) WITH (snapshot = 'false')
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_EQUIV';
+
+# Matching the upstream key allows two rows with the same ORDER_ID but different TENANT_ID.
+statement ok
+CREATE TABLE oracle_pk_equivalent (
+    "TENANT_ID" INT,
+    "ORDER_ID" INT,
+    "OTHER_COLUMN" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("TENANT_ID", "ORDER_ID")
+) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_EQUIV';
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM oracle_pk_equivalent;
+----
+3
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_equivalent;
+----
+1 42 first
+1 43 sibling
+2 42 second
+
+# Discover the same key automatically. One-row pages must keep rows that share TENANT_ID.
+statement ok
+CREATE TABLE oracle_pk_discovered (*) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_EQUIV';
+
+# The declared key may use a different order without changing row identity.
+statement ok
+CREATE TABLE oracle_pk_reversed (
+    "TENANT_ID" INT,
+    "ORDER_ID" INT,
+    "OTHER_COLUMN" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("ORDER_ID", "TENANT_ID")
+) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_EQUIV';
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_discovered;
+----
+1 42 first
+1 43 sibling
+2 42 second
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_reversed;
+----
+1 42 first
+1 43 sibling
+2 42 second
+
+# Updates and deletes must preserve composite-key identity when ORDER_ID is shared.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py mutate_pk_equivalence
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_equivalent;
+----
+1 42 updated
+1 43 sibling
+3 42 inserted
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_discovered;
+----
+1 42 updated
+1 43 sibling
+3 42 inserted
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_reversed;
+----
+1 42 updated
+1 43 sibling
+3 42 inserted
+
+# invalid upstream primary key (no declared primary key)
+statement error (?s).*primary key.*
+CREATE TABLE oracle_pk_missing (*)
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_NONE';
+
+# invalid upstream primary key (NUMBER has no declared precision)
+statement error (?s).*requires a declared NUMBER precision.*
+CREATE TABLE oracle_pk_unbounded (*)
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_UNBOUNDED';
+
+# invalid upstream primary key (NUMBER precision exceeds 28 digits)
+statement error (?s).*requires a declared NUMBER precision.*
+CREATE TABLE oracle_pk_wide (*)
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_WIDE';
+
+# invalid upstream primary key (timestamp precision exceeds microseconds)
+statement error (?s).*unsupported type TIMESTAMP.*
+CREATE TABLE oracle_pk_timestamp (*)
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_TIMESTAMP';
+
+# invalid upstream primary key (national character ordering is unsupported)
+statement error (?s).*unsupported type NVARCHAR2.*
+CREATE TABLE oracle_pk_national (*)
+FROM oracle_pk_equivalence TABLE 'APP.RW_PK_NATIONAL';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations
+WHERE name IN ('oracle_pk_count_mismatch', 'oracle_pk_name_mismatch',
+               'oracle_pk_case_mismatch', 'oracle_pk_missing', 'oracle_pk_unbounded',
+               'oracle_pk_wide', 'oracle_pk_timestamp', 'oracle_pk_national');
+----
+0
+
+statement ok
+DROP TABLE oracle_pk_reversed;
+
+statement ok
+DROP TABLE oracle_pk_discovered;
+
+statement ok
+DROP TABLE oracle_pk_equivalent;
+
+statement ok
+DROP SOURCE oracle_pk_equivalence CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

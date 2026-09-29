@@ -536,3 +536,38 @@ fn invoke_jni_snapshot_read(
         .map_err(Into::into)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{OracleExternalTable, OracleOldestOpenTransactionStartScn};
+
+    #[test]
+    fn test_open_transaction_mining_boundary() {
+        let transaction = |instance_id, start_scn| OracleOldestOpenTransactionStartScn {
+            instance_id,
+            start_scn,
+        };
+        let boundary = 100;
+
+        let error = OracleExternalTable::check_open_transactions(boundary, &[transaction(0, 99)])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Cannot create Oracle CDC table"));
+        assert!(error.contains("starting at SCN 99"));
+        assert!(error.contains("initial mining SCN 100"));
+
+        for transactions in [vec![], vec![transaction(0, 100)], vec![transaction(0, 101)]] {
+            OracleExternalTable::check_open_transactions(boundary, &transactions).unwrap();
+        }
+
+        // Every instance must pass; an acceptable first instance cannot hide a violation.
+        let error = OracleExternalTable::check_open_transactions(
+            boundary,
+            &[transaction(1, 120), transaction(2, 90)],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("instance 2"));
+        assert!(error.contains("starting at SCN 90"));
+    }
+}

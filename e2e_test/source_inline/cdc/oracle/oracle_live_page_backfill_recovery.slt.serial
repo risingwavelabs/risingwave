@@ -1,0 +1,68 @@
+control substitution on
+
+onlyif can-use-recover
+statement ok
+DROP SOURCE IF EXISTS oracle_recovery_source CASCADE;
+
+onlyif can-use-recover
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare live_transactions
+
+# Begin the Oracle update before source creation and keep it uncommitted.
+onlyif can-use-recover
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_transaction_fixture.py begin --name oracle_recovery_source
+
+onlyif can-use-recover
+statement ok
+CREATE SOURCE oracle_recovery_source WITH (
+    ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = 'APP',
+    heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
+    heartbeat.table.auto.initialize = 'true',
+    -- Keep periodic heartbeat writes outside the recovery scenario.
+    debezium.heartbeat.interval.ms = '3600000'
+) FORMAT PLAIN ENCODE JSON;
+
+# Checkpoint another transaction, recover during paused backfill, then commit
+# the old transaction. Recover again after backfill and create a new dependent table.
+onlyif can-use-recover
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py run_recovery_case --source oracle_recovery_source --table oracle_recovery_table
+
+onlyif can-use-recover
+query I retry 60 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id = 1 THEN 'recovered-long'
+                    WHEN id = 50 THEN 'after-recovery'
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1000) AS rows(id) WHERE id <> 2
+    UNION ALL SELECT 1001, 'after-recovery-insert'
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_recovery_table t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+# The new table must discover and backfill the current upstream rows after recovery.
+onlyif can-use-recover
+query I retry 60 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id = 1 THEN 'recovered-long'
+                    WHEN id = 50 THEN 'after-recovery'
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1000) AS rows(id) WHERE id <> 2
+    UNION ALL SELECT 1001, 'after-recovery-insert'
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_recovery_table_new t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+onlyif can-use-recover
+statement ok
+DROP SOURCE oracle_recovery_source CASCADE;
+
+onlyif can-use-recover
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
