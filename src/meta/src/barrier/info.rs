@@ -371,20 +371,9 @@ pub(super) struct BarrierInfo {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
     pub kind: BarrierKind,
-    pub barrier_interval_ms: u32,
 }
 
 impl BarrierInfo {
-    pub(super) fn new_initial(prev_epoch: TracedEpoch, barrier_interval_ms: u32) -> Self {
-        let curr_epoch = prev_epoch.next();
-        Self {
-            prev_epoch,
-            curr_epoch,
-            kind: BarrierKind::Initial,
-            barrier_interval_ms,
-        }
-    }
-
     pub(super) fn prev_epoch(&self) -> u64 {
         self.prev_epoch.value().0
     }
@@ -485,6 +474,17 @@ impl InflightDatabaseInfo {
 
     pub fn contains_job(&self, job_id: JobId) -> bool {
         self.jobs.contains_key(&job_id)
+    }
+
+    /// Empty if the job is not in this database.
+    pub fn job_fragment_infos(
+        &self,
+        job_id: JobId,
+    ) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
+        self.jobs
+            .get(&job_id)
+            .into_iter()
+            .flat_map(|job| job.fragment_infos())
     }
 
     pub(super) fn job_id_by_fragment(&self, fragment_id: FragmentId) -> Option<JobId> {

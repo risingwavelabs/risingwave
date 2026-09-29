@@ -114,7 +114,6 @@ pub(super) enum CreatingStreamingJobStatus {
         create_mview_tracker: CreateMviewProgressTracker,
         snapshot_backfill_actors: HashSet<ActorId>,
         snapshot_epoch: u64,
-        barrier_interval_ms: u32,
         info: CreatingJobInfo,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
@@ -148,7 +147,6 @@ impl CreatingStreamingJobStatus {
                 ref mut pending_upstream_barriers,
                 ref mut pending_non_checkpoint_barriers,
                 ref snapshot_epoch,
-                barrier_interval_ms,
                 ..
             } => {
                 for progress in create_mview_progress {
@@ -162,7 +160,6 @@ impl CreatingStreamingJobStatus {
                         curr_epoch: TracedEpoch::new(Epoch(*snapshot_epoch)),
                         prev_epoch: TracedEpoch::new(prev_epoch),
                         kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
-                        barrier_interval_ms,
                     }]
                     .into_iter()
                     .chain(pending_upstream_barriers.drain(..))
@@ -258,7 +255,6 @@ impl CreatingStreamingJobStatus {
                 prev_epoch_fake_physical_time,
                 pending_non_checkpoint_barriers,
                 create_mview_tracker,
-                barrier_interval_ms,
                 ..
             } => {
                 let mutation = mutation.or_else(|| {
@@ -277,7 +273,6 @@ impl CreatingStreamingJobStatus {
                 });
                 let barrier_num_to_inject = resolve_initial_barrier_num_to_inject();
                 pending_upstream_barriers.push(barrier_info.clone());
-                *barrier_interval_ms = barrier_info.barrier_interval_ms;
                 // Mutation barriers must be forwarded even when the partial graph has reached the
                 // configured pending-barrier limit.
                 if barrier_num_to_inject == 0 && mutation.is_none() {
@@ -294,7 +289,6 @@ impl CreatingStreamingJobStatus {
                                 unreachable!("upstream new epoch should not be initial")
                             }
                         },
-                        barrier_info.barrier_interval_ms,
                     ),
                     mutation,
                 )]
@@ -325,13 +319,11 @@ impl CreatingStreamingJobStatus {
         prev_epoch_fake_physical_time: &mut u64,
         pending_non_checkpoint_barriers: &mut Vec<u64>,
         kind: PbBarrierKind,
-        barrier_interval_ms: u32,
     ) -> BarrierInfo {
         super::super::new_fake_barrier(
             prev_epoch_fake_physical_time,
             pending_non_checkpoint_barriers,
             kind,
-            barrier_interval_ms,
         )
     }
 
@@ -395,7 +387,6 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
             curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
             kind: BarrierKind::Barrier,
-            barrier_interval_ms: 1000,
         }
     }
 
@@ -503,7 +494,6 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(1)),
             curr_epoch: TracedEpoch::new(Epoch(2)),
             kind: BarrierKind::Checkpoint(vec![1]),
-            barrier_interval_ms: 1000,
         });
         assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
     }

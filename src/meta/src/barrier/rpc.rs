@@ -60,7 +60,7 @@ use tokio::time::{Instant, sleep};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::TracedEpoch;
+use super::{BarrierKind, TracedEpoch};
 use crate::barrier::BackfillOrderState;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
@@ -619,7 +619,6 @@ impl PartialGraphRecoverer<'_> {
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
-        barrier_interval_ms: u32,
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
@@ -793,7 +792,12 @@ impl PartialGraphRecoverer<'_> {
         );
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
-        let barrier_info = BarrierInfo::new_initial(prev_epoch, barrier_interval_ms);
+        let curr_epoch = prev_epoch.next();
+        let barrier_info = BarrierInfo {
+            prev_epoch,
+            curr_epoch,
+            kind: BarrierKind::Initial,
+        };
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<JobId, _> = HashMap::new();
         for (job_id, fragment_infos) in snapshot_backfill_jobs {
@@ -1158,7 +1162,6 @@ impl PartialGraphRecoverer<'_> {
                 upstream_table_ids,
                 snapshot_epoch,
                 committed_epoch,
-                barrier_info.barrier_interval_ms,
                 job_backfill_orders,
                 hummock_version_stats,
                 mutation,
@@ -1278,7 +1281,16 @@ impl ControlStreamManager {
 
                 {
                     let mutation = mutation.clone();
-                    let barrier = barrier_to_protobuf(barrier_info, mutation);
+                    let barrier = Barrier {
+                        epoch: Some(risingwave_pb::data::Epoch {
+                            curr: barrier_info.curr_epoch(),
+                            prev: barrier_info.prev_epoch(),
+                        }),
+                        mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
+                        tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span())
+                            .to_protobuf(),
+                        kind: barrier_info.kind.to_protobuf() as i32,
+                    };
 
                     node.handle
                         .request_sender
@@ -1430,24 +1442,6 @@ impl ControlStreamManager {
                 }
             })
             .collect()
-    }
-}
-
-pub(super) fn barrier_to_protobuf(
-    barrier_info: &BarrierInfo,
-    mutation: Option<Mutation>,
-) -> Barrier {
-    Barrier {
-        epoch: Some(risingwave_pb::data::Epoch {
-            curr: barrier_info.curr_epoch(),
-            prev: barrier_info.prev_epoch(),
-        }),
-        mutation: mutation.map(|mutation| BarrierMutation {
-            mutation: Some(mutation),
-        }),
-        tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span()).to_protobuf(),
-        kind: barrier_info.kind.to_protobuf() as i32,
-        barrier_interval_ms: barrier_info.barrier_interval_ms,
     }
 }
 

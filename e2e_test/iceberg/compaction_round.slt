@@ -88,6 +88,14 @@ WHERE sink_name = '__iceberg_sink_iceberg_round';
 ----
 idle 0 t
 
+# The drained round covers the latest sink commit, so compaction has caught up.
+query TII
+SELECT last_success_at IS NOT NULL, consecutive_failures, compaction_lag_sec
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_iceberg_round';
+----
+t 0 0
+
 # Two appends plus exactly three rewrites. Full compaction must not select an
 # earlier batch's output again, even though each new attempt loads the latest head.
 query III
