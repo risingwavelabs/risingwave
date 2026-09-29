@@ -57,16 +57,6 @@ statement ok
 SET batch_read_latest_committed TO DEFAULT;
 
 statement ok
-SET visibility_mode = all;
-
-query IT
-SELECT * FROM t_realtime;
-----
-
-statement ok
-SET visibility_mode TO DEFAULT;
-
-statement ok
 SET query_mode TO DEFAULT;
 
 # Frontend-pinned reads still include the pending row.

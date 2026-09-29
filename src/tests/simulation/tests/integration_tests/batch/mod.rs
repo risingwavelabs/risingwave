@@ -112,10 +112,6 @@ async fn test_serving_cluster_availability() {
             .unwrap();
     }
     session.run("flush;").await.unwrap();
-    session
-        .run("set visibility_mode to checkpoint;")
-        .await
-        .unwrap();
     session.run("set query_mode to distributed;").await.unwrap();
 
     let select = "select * from t1 order by c;";
@@ -153,13 +149,6 @@ async fn test_serving_cluster_availability() {
         .kill(format!("compute-{}", num_streaming + num_serving));
     // no serving nodes
     session.run(select).await.unwrap_err();
-    session.run(select).await.unwrap_err();
-    session.run("set visibility_mode to all;").await.unwrap();
-    query_and_assert(session.clone()).await;
-    session
-        .run("set visibility_mode to checkpoint;")
-        .await
-        .unwrap();
     session.run(select).await.unwrap_err();
 
     create_compute_node(&cluster, num_streaming + num_serving + 1, "serving");

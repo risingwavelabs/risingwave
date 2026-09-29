@@ -11,10 +11,6 @@ flush;
 
 connection txn
 statement ok
-SET VISIBILITY_MODE TO checkpoint;
-
-connection txn
-statement ok
 start transaction read only;
 
 connection txn
