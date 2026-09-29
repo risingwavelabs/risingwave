@@ -1,0 +1,132 @@
+control substitution on
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS oracle_shared_changelog;
+
+statement ok
+DROP SOURCE IF EXISTS oracle_shared_orders_events;
+
+statement ok
+DROP TABLE IF EXISTS oracle_shared_customers;
+
+statement ok
+DROP TABLE IF EXISTS oracle_shared_orders;
+
+statement ok
+DROP TABLE IF EXISTS oracle_shared_empty;
+
+statement ok
+DROP SOURCE IF EXISTS oracle_shared_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare shared_source
+
+# A source with no new user-table writes must start and allow table creation immediately.
+statement ok
+CREATE SOURCE oracle_shared_source WITH (
+    ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = 'APP',
+    heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
+    heartbeat.table.auto.initialize = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE oracle_shared_customers (
+    "ID" INT,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM oracle_shared_source TABLE 'APP.CUSTOMERS';
+
+# Discover columns automatically and accept lower/mixed-case upstream table names.
+statement ok
+CREATE TABLE oracle_shared_orders (*)
+FROM oracle_shared_source TABLE 'app.rw_e2_orders';
+
+statement ok
+CREATE TABLE oracle_shared_empty (*)
+FROM oracle_shared_source TABLE 'App.Rw_E2_Empty';
+
+query T retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_shared_customers;
+----
+1 RisingWave
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_shared_orders;
+----
+10 order-initial
+11 order-delete
+
+query I
+SELECT count(*) FROM oracle_shared_empty;
+----
+0
+
+# Only changes to RW_E2_ORDERS after this CREATE SOURCE should appear in the view.
+# The two existing rows should not appear.
+statement ok
+CREATE SOURCE oracle_shared_orders_events (*)
+WITH (snapshot = 'false')
+FROM oracle_shared_source TABLE 'aPp.Rw_E2_Orders';
+
+statement ok
+CREATE MATERIALIZED VIEW oracle_shared_changelog AS
+WITH changes AS CHANGELOG FROM oracle_shared_orders_events
+SELECT "ID", "NAME", changelog_op FROM changes;
+
+query I
+SELECT count(*) FROM oracle_shared_changelog;
+----
+0
+
+# Change all three upstream tables, including inserting into the empty table.
+# Each RisingWave table should receive only changes from its own upstream table.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py mutate_shared_source
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_shared_customers;
+----
+1 customer-updated
+2 customer-inserted
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_shared_orders;
+----
+10 order-updated
+12 order-inserted
+
+query T retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_shared_empty;
+----
+20 empty-inserted
+
+# Only the three new RW_E2_ORDERS changes should appear, not changes to the other tables.
+# changelog_op is 1 for insert/update and 2 for delete.
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "NAME", changelog_op FROM oracle_shared_changelog;
+----
+10 order-updated 1
+11 order-delete 2
+12 order-inserted 1
+
+statement ok
+DROP MATERIALIZED VIEW oracle_shared_changelog;
+
+statement ok
+DROP SOURCE oracle_shared_orders_events;
+
+statement ok
+DROP TABLE oracle_shared_customers;
+
+statement ok
+DROP TABLE oracle_shared_orders;
+
+statement ok
+DROP TABLE oracle_shared_empty;
+
+statement ok
+DROP SOURCE oracle_shared_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

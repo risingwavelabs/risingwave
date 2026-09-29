@@ -102,7 +102,7 @@ pub struct SqlServerCdcSplit {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct OracleCdcSplit {
     pub inner: CdcSplitBase,
-    /// Fixed source boundary chosen when the shared source first starts mining.
+    /// Initial mining boundary reported by the latest LogMiner streaming-source instance.
     pub initial_mining_scn: Option<u64>,
 }
 
@@ -417,7 +417,7 @@ impl CdcSplitTrait for OracleCdcSplit {
             if scn == 0 {
                 bail!("initial Oracle mining SCN must be positive");
             }
-            self.initial_mining_scn.get_or_insert(scn);
+            self.initial_mining_scn = Some(scn);
             self.inner.start_offset = Some(offset.to_string());
         } else {
             self.inner.start_offset = Some(last_seen_offset);

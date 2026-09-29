@@ -1,0 +1,85 @@
+control substitution on
+
+statement ok
+DROP TABLE IF EXISTS oracle_live_long;
+
+statement ok
+DROP TABLE IF EXISTS oracle_live_large;
+
+statement ok
+DROP SOURCE IF EXISTS oracle_live_transactions_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare live_transactions
+
+statement ok
+CREATE SOURCE oracle_live_transactions_source WITH (
+    ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = 'APP',
+    heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
+    heartbeat.table.auto.initialize = 'true',
+    -- Keep periodic heartbeat writes outside the transaction scenarios.
+    debezium.heartbeat.interval.ms = '3600000'
+) FORMAT PLAIN ENCODE JSON;
+
+# Update ID 1 before creating the table. Commit only after its original value has
+# been scanned, with an internal-state check that the table's lower SCN follows the update.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py run_transaction_case --source oracle_live_transactions_source --table oracle_live_long --scenario long
+
+query I retry 60 backoff 1s
+SELECT count(*) FROM oracle_live_long;
+----
+1000
+
+query T retry 30 backoff 1s
+SELECT "VALUE" FROM oracle_live_long WHERE "ID" = 1;
+----
+long-committed
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM oracle_live_long
+WHERE "VALUE" IS DISTINCT FROM CASE WHEN "ID" = 1 THEN 'long-committed'
+                                   ELSE 'initial-' || "ID"::VARCHAR END;
+----
+0
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py assert_backfill_finished --table oracle_live_long
+
+statement ok
+DROP TABLE oracle_live_long;
+
+# Scan at least 300 rows, then pause. Update 600 rows and insert 600 more in one
+# transaction. Its scanned-prefix changes alone exceed the default 256-row chunk capacity.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py run_transaction_case --source oracle_live_transactions_source --table oracle_live_large --scenario large
+
+query I retry 60 backoff 1s
+SELECT count(*) FROM oracle_live_large;
+----
+1600
+
+# Every key must survive the same-commit-SCN chunk boundaries with its expected value.
+query I retry 30 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id <= 600 OR id > 1000 THEN 'large-' || id::VARCHAR
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1600) AS rows(id)
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_live_large t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py assert_backfill_finished --table oracle_live_large
+
+statement ok
+DROP TABLE oracle_live_large;
+
+statement ok
+DROP SOURCE oracle_live_transactions_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
