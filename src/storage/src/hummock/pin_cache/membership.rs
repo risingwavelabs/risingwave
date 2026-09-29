@@ -35,9 +35,10 @@ impl PinCache {
         shards
     }
 
-    /// Admits objects for refill without downloading them or removing existing objects.
-    /// Reinserting an admitted object preserves its file and refill tokens.
-    pub(crate) fn insert_objects(
+    /// Registers objects for explicit refill without downloading them.
+    /// Registering an existing object preserves its state and refill tokens; it does not repair
+    /// an invalidated file. A registered object is readable only after publication.
+    pub(crate) fn register_objects(
         &self,
         objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) {
@@ -48,15 +49,18 @@ impl PinCache {
             }
             let mut state = shard.write();
             for (id, size) in objects {
-                state.insert_object(id, size);
+                state.register_object(id, size);
             }
         }
     }
 
-    /// Removes objects from the index and revokes their refill tokens immediately.
-    /// Existing read handles retain their entries. The refiller decides when to apply delta
+    /// Unregisters objects, withdrawing their publications and revoking all refill tokens.
+    /// Existing read handles retain their files. The refiller decides when to apply delta
     /// deletions relative to version publication; this method does not wait for a version.
-    pub(crate) fn remove_objects(&self, objects: impl IntoIterator<Item = HummockSstableObjectId>) {
+    pub(crate) fn unregister_objects(
+        &self,
+        objects: impl IntoIterator<Item = HummockSstableObjectId>,
+    ) {
         let mut objects_by_shard = vec![Vec::new(); self.shards.len()];
         for id in objects {
             objects_by_shard[Self::shard_index(id, self.shards.len())].push(id);
@@ -74,30 +78,8 @@ impl PinCache {
         }
     }
 
-    /// Replaces all admitted objects for a policy change or a full membership rebuild.
-    /// Matching objects keep their file and refill tokens; removed or resized objects lose both.
-    /// Normal version deltas use `insert_objects` and `remove_objects` instead.
-    pub(crate) fn replace_objects(
-        &self,
-        objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
-    ) {
-        let objects = self.partition_objects(objects);
-        for (shard, objects) in self.shards.iter().zip_eq_fast(objects) {
-            let mut state = shard.write();
-            for (_, mut object) in state
-                .objects
-                .extract_if(|id, object| objects.get(id) != Some(&object.size()))
-            {
-                object.take_published();
-            }
-            for (id, size) in objects {
-                state.insert_object(id, size);
-            }
-        }
-    }
-
-    /// Whether an object is admitted, including files not yet downloaded or published.
-    pub(crate) fn contains_object(&self, object_id: HummockSstableObjectId) -> bool {
+    /// Whether an object is registered, regardless of whether it has a readable local file.
+    pub(crate) fn is_registered(&self, object_id: HummockSstableObjectId) -> bool {
         self.shard(object_id)
             .read()
             .objects
