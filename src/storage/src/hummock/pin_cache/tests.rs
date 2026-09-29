@@ -25,7 +25,7 @@ use risingwave_object_store::object::{
     ObjectStoreImpl, ObjectStoreRef, build_remote_object_store,
 };
 
-use super::refill::{PinCacheDownloadGuard, PinCacheDownloadStart};
+use super::refill::PinCacheDownloadGuard;
 use super::{PinCache, PinCacheRefillOutcome};
 use crate::monitor::ObjectStoreMetrics;
 use crate::opts::StorageOpts;
@@ -72,17 +72,15 @@ pub(super) async fn local_object_store() -> (tempfile::TempDir, ObjectStoreRef) 
     (dir, store)
 }
 
-fn start_download(
+// Construct an unpublished file only for tests of upload/publication boundaries.
+// Admission and already-published checks are exercised through refill below.
+fn new_download(
     pin_cache: &Arc<PinCache>,
     object_id: HummockSstableObjectId,
+    size: u64,
 ) -> PinCacheDownloadGuard {
     let token = pin_cache.prepare_refill(object_id).unwrap();
-    match pin_cache.start_download(token) {
-        PinCacheDownloadStart::Download(download) => download,
-        PinCacheDownloadStart::Complete(outcome) => {
-            panic!("expected download, got {outcome:?}")
-        }
-    }
+    PinCacheDownloadGuard::new(Arc::clone(pin_cache), token, size)
 }
 
 #[test]
@@ -109,7 +107,13 @@ async fn test_read_and_unregister_lifecycle() {
         .pin_sst(remote_store.clone(), remote_path.to_owned(), object_id)
         .await
         .unwrap();
-    assert!(pin_cache.get(object_id).is_some());
+    assert_eq!(
+        pin_cache
+            .pin_sst(in_memory_object_store(), "unused".into(), object_id)
+            .await
+            .unwrap(),
+        PinCacheRefillOutcome::AlreadyPublished
+    );
     assert_eq!(
         pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
         original
@@ -177,51 +181,17 @@ async fn test_revoked_token_cannot_begin_a_late_download() {
 }
 
 #[tokio::test]
-async fn test_inflight_is_not_routable_and_cancellation_allows_retry() {
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
-    let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.register_objects([(object_id, 8)]);
-
-    let token = pin_cache.prepare_refill(object_id).unwrap();
-    let download = start_download(&pin_cache, object_id);
-    assert!(pin_cache.get(object_id).is_none());
-    assert_eq!(
-        pin_cache
-            .pin_sst(in_memory_object_store(), "unused".into(), object_id)
-            .await
-            .unwrap(),
-        PinCacheRefillOutcome::InProgress
-    );
-    drop(download);
-    assert_eq!(pin_cache.prepare_refill(object_id), Some(token));
-
-    let retry = start_download(&pin_cache, object_id);
-    pin_cache
-        .store
-        .upload(
-            &retry.file.as_ref().unwrap().path,
-            Bytes::from_static(b"complete"),
-        )
-        .await
-        .unwrap();
-    assert_eq!(retry.publish(), PinCacheRefillOutcome::Published);
-    assert!(pin_cache.get(object_id).is_some());
-    assert_eq!(
-        pin_cache
-            .pin_sst(in_memory_object_store(), "unused".into(), object_id)
-            .await
-            .unwrap(),
-        PinCacheRefillOutcome::AlreadyPublished
-    );
-}
-
-#[tokio::test]
-async fn test_revoked_download_cannot_publish_or_remove_replacement() {
+async fn test_revoked_download_cannot_publish_and_replacement_can_retry() {
     for revoke_by_unregister in [false, true] {
         let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
         let object_id = HummockSstableObjectId::from(1001);
         pin_cache.register_objects([(object_id, 11)]);
-        let old = start_download(&pin_cache, object_id);
+        let old = new_download(&pin_cache, object_id, 11);
+        pin_cache
+            .store
+            .upload(&old.file.path, Bytes::from_static(b"replacement"))
+            .await
+            .unwrap();
 
         if revoke_by_unregister {
             pin_cache.unregister_objects([object_id]);
@@ -229,30 +199,24 @@ async fn test_revoked_download_cannot_publish_or_remove_replacement() {
         } else {
             pin_cache.revoke_refill(object_id);
         }
-        let replacement = start_download(&pin_cache, object_id);
-        assert_ne!(
-            old.file.as_ref().unwrap().path,
-            replacement.file.as_ref().unwrap().path
-        );
-
+        let old_path = old.file.path.clone();
+        // The executor waits for the revoked attempt to finish before starting its replacement.
         assert_eq!(old.publish(), PinCacheRefillOutcome::Obsolete);
         assert!(pin_cache.get(object_id).is_none());
-        assert_eq!(
-            pin_cache
-                .pin_sst(in_memory_object_store(), "unused".into(), object_id)
-                .await
-                .unwrap(),
-            PinCacheRefillOutcome::InProgress,
-        );
-        pin_cache
-            .store
-            .upload(
-                &replacement.file.as_ref().unwrap().path,
-                Bytes::from_static(b"replacement"),
-            )
+
+        let remote = in_memory_object_store();
+        remote
+            .upload("sst", Bytes::from_static(b"replacement"))
             .await
             .unwrap();
-        assert_eq!(replacement.publish(), PinCacheRefillOutcome::Published);
+        assert_eq!(
+            pin_cache
+                .pin_sst(remote, "sst".into(), object_id)
+                .await
+                .unwrap(),
+            PinCacheRefillOutcome::Published
+        );
+        assert_ne!(old_path, pin_cache.get(object_id).unwrap().file.path);
         assert_eq!(
             pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
             Bytes::from_static(b"replacement")
@@ -297,8 +261,8 @@ async fn test_interrupted_fs_upload_cannot_publish() {
         let object_id = HummockSstableObjectId::from(1001);
         pin_cache.register_objects([(object_id, 8)]);
 
-        let download = start_download(&pin_cache, object_id);
-        let final_path = download.file.as_ref().unwrap().path.clone();
+        let download = new_download(&pin_cache, object_id, 8);
+        let final_path = download.file.path.clone();
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (fail_tx, fail_rx) = tokio::sync::oneshot::channel();
         let reader = MonitoredStreamingReader::new(
@@ -341,6 +305,7 @@ async fn test_interrupted_fs_upload_cannot_publish() {
         })
         .await
         .unwrap();
+        assert!(pin_cache.get(object_id).is_none());
         if cancel {
             task.abort();
             assert!(task.await.unwrap_err().is_cancelled());
@@ -350,14 +315,24 @@ async fn test_interrupted_fs_upload_cannot_publish() {
         }
 
         assert!(pin_cache.get(object_id).is_none());
-        // Cancellation/failure returns the object to NotCached, so a retry can start.
-        drop(start_download(&pin_cache, object_id));
         assert!(
             local_store
                 .metadata(&final_path)
                 .await
                 .unwrap_err()
                 .is_object_not_found_error()
+        );
+        let remote = in_memory_object_store();
+        remote
+            .upload("sst", Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+        assert_eq!(
+            pin_cache
+                .pin_sst(remote, "sst".into(), object_id)
+                .await
+                .unwrap(),
+            PinCacheRefillOutcome::Published
         );
     }
 }
@@ -433,13 +408,10 @@ async fn test_other_shard_does_not_block_object_operations() {
     let blocked = object_in_shard(0, 3);
     let available = object_in_shard(2, 3);
     cache.register_objects([(blocked, 8), (available, 8)]);
-    let download = start_download(&cache, available);
+    let download = new_download(&cache, available, 8);
     cache
         .store
-        .upload(
-            &download.file.as_ref().unwrap().path,
-            Bytes::from_static(b"complete"),
-        )
+        .upload(&download.file.path, Bytes::from_static(b"complete"))
         .await
         .unwrap();
 
@@ -477,17 +449,19 @@ async fn test_object_membership_across_shards() {
     let objects = [object_in_shard(0, 3), object_in_shard(2, 3)];
     cache.register_objects(objects.into_iter().map(|id| (id, 8)));
     let tokens = objects.map(|id| cache.prepare_refill(id).unwrap());
+    let remote = in_memory_object_store();
+    remote
+        .upload("sst", Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
     for id in objects {
-        let download = start_download(&cache, id);
-        cache
-            .store
-            .upload(
-                &download.file.as_ref().unwrap().path,
-                Bytes::from_static(b"complete"),
-            )
-            .await
-            .unwrap();
-        assert_eq!(download.publish(), PinCacheRefillOutcome::Published);
+        assert_eq!(
+            cache
+                .pin_sst(remote.clone(), "sst".into(), id)
+                .await
+                .unwrap(),
+            PinCacheRefillOutcome::Published
+        );
     }
 
     // Repeated registration preserves the publication and refill identity.

@@ -26,21 +26,26 @@ use super::{
 };
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
-pub(super) enum PinCacheDownloadStart {
-    Download(PinCacheDownloadGuard),
-    Complete(PinCacheRefillOutcome),
-}
-
-/// Owns an in-flight download until publication transfers its file to the read index.
-/// It must also handle cancellation before or during an upload, when no result is returned.
+/// Owns an unpublished file. The index stays unchanged until successful publication.
 pub(super) struct PinCacheDownloadGuard {
     pin_cache: Arc<PinCache>,
     token: PinCacheRefillToken,
-    // Publication moves the file into the read index. Drop releases an unpublished attempt.
-    pub(super) file: Option<Arc<PinCacheFile>>,
+    // Publication moves this reference into the read index.
+    pub(super) file: Arc<PinCacheFile>,
 }
 
 impl PinCacheDownloadGuard {
+    /// Allocates one unpublished file. The caller has checked admission and serializes attempts.
+    pub(super) fn new(pin_cache: Arc<PinCache>, token: PinCacheRefillToken, size: u64) -> Self {
+        let path_id = pin_cache.next_path_id.fetch_add(1, Ordering::Relaxed);
+        let path = format!("{}-{path_id}.sst", token.object_id.as_raw_id());
+        Self {
+            pin_cache,
+            token,
+            file: Arc::new(PinCacheFile { path, size }),
+        }
+    }
+
     fn record_io_failure(&self, phase: &'static str) {
         GLOBAL_PIN_CACHE_METRICS
             .io_failures
@@ -51,17 +56,13 @@ impl PinCacheDownloadGuard {
     /// Copies an existing SST stream into a unique local path using the object-store uploader.
     /// After finishing the upload, checks both the copied byte count and local file size before
     /// attempting publication. Publication still requires the current download token and membership.
-    /// On error or cancellation, `Drop` resets a still-current download to `NotCached`,
-    /// preserving its token for retry. A revoked guard cannot change the newer object state.
+    /// Errors and cancellation leave the index unchanged. A revoked download cannot publish.
     /// Physical file reclamation is added separately.
     pub(super) async fn write(
         self,
         mut reader: MonitoredStreamingReader,
     ) -> ObjectResult<PinCacheRefillOutcome> {
-        let file = self
-            .file
-            .as_ref()
-            .expect("download owns an unpublished file");
+        let file = &self.file;
         let mut writer = self
             .pin_cache
             .store
@@ -103,36 +104,15 @@ impl PinCacheDownloadGuard {
         Ok(self.publish())
     }
 
-    /// Downloading -> Published only while this admission is current. Removing the object or
-    /// revoking its generation rejects publication. Success transfers the file to the index;
-    /// rejection leaves it with the guard, whose Drop runs after the shard lock is released.
-    pub(super) fn publish(mut self) -> PinCacheRefillOutcome {
+    /// Publishes only while this admission is current. Removing the object or revoking its
+    /// generation rejects publication. Success transfers the file to the index.
+    pub(super) fn publish(self) -> PinCacheRefillOutcome {
         let mut state = self.pin_cache.shard(self.token.object_id).write();
         let Some(object) = state.object_for_refill(self.token) else {
             return PinCacheRefillOutcome::Obsolete;
         };
-        debug_assert!(matches!(
-            object.state,
-            PinCacheObjectState::Downloading { .. }
-        ));
-        object.publish(self.file.take().expect("download owns an unpublished file"));
+        object.publish(self.file);
         PinCacheRefillOutcome::Published
-    }
-}
-
-impl Drop for PinCacheDownloadGuard {
-    fn drop(&mut self) {
-        if self.file.is_none() {
-            return; // Publication transferred ownership to the index.
-        }
-        if let Some(object) = self
-            .pin_cache
-            .shard(self.token.object_id)
-            .write()
-            .object_for_refill(self.token)
-        {
-            object.cancel_download();
-        }
     }
 }
 
@@ -165,63 +145,40 @@ impl PinCache {
         } = &mut *state;
         if let Some(object) = objects.get_mut(&object_id) {
             object.generation = allocate_generation(next_generation);
-            object.cancel_download();
         }
     }
 
     /// Executes a queued refill using admission previously captured by this cache.
+    /// The caller must serialize attempts per object, including across token revocation.
     /// Rechecks admission before starting a download.
-    /// A stale token skips the download. Failures or cancellation leave cleanup to the download guard.
+    /// A stale token skips the download. The index changes only after a successful publication.
     pub(crate) async fn refill(
         self: &Arc<Self>,
         token: PinCacheRefillToken,
         remote_store: ObjectStoreRef,
         remote_path: String,
     ) -> ObjectResult<PinCacheRefillOutcome> {
-        let download = match self.start_download(token) {
-            PinCacheDownloadStart::Download(download) => download,
-            PinCacheDownloadStart::Complete(outcome) => return Ok(outcome),
+        let size = {
+            let state = self.shard(token.object_id).read();
+            let Some(object) = state
+                .objects
+                .get(&token.object_id)
+                .filter(|object| object.generation == token.generation)
+            else {
+                return Ok(PinCacheRefillOutcome::Obsolete);
+            };
+            match object.state {
+                PinCacheObjectState::NotCached { size } => size,
+                PinCacheObjectState::Published(_) => {
+                    return Ok(PinCacheRefillOutcome::AlreadyPublished);
+                }
+            }
         };
+        let download = PinCacheDownloadGuard::new(Arc::clone(self), token, size);
         let reader = remote_store
             .streaming_read(&remote_path, ..)
             .await
             .inspect_err(|_| download.record_io_failure("remote_read_init"))?;
         download.write(reader).await
-    }
-
-    pub(super) fn start_download(
-        self: &Arc<Self>,
-        token: PinCacheRefillToken,
-    ) -> PinCacheDownloadStart {
-        let object_id = token.object_id;
-        let mut state = self.shard(object_id).write();
-        let Some(object) = state.object_for_refill(token) else {
-            return PinCacheDownloadStart::Complete(PinCacheRefillOutcome::Obsolete);
-        };
-        let size = match object.state {
-            PinCacheObjectState::NotCached { size } => size,
-            PinCacheObjectState::Downloading { .. } => {
-                return PinCacheDownloadStart::Complete(PinCacheRefillOutcome::InProgress);
-            }
-            PinCacheObjectState::Published(_) => {
-                return PinCacheDownloadStart::Complete(PinCacheRefillOutcome::AlreadyPublished);
-            }
-        };
-        let file = PinCacheFile {
-            path: self.new_object_path(object_id),
-            size,
-        };
-        let file = Arc::new(file);
-        object.state = PinCacheObjectState::Downloading { size };
-        PinCacheDownloadStart::Download(PinCacheDownloadGuard {
-            pin_cache: Arc::clone(self),
-            token,
-            file: Some(file),
-        })
-    }
-
-    fn new_object_path(&self, object_id: HummockSstableObjectId) -> String {
-        let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
-        format!("{}-{path_id}.sst", object_id.as_raw_id())
     }
 }

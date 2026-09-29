@@ -19,8 +19,9 @@
 //! this index does not track versions.
 //! A refill captures a `PinCacheRefillToken` with `prepare_refill` before it is queued;
 //! `refill` checks the token before I/O and again at publication. Each object has one file
-//! stage: `NotCached` -> `Downloading` -> `Published`. Failure/cancellation returns it to `NotCached`;
-//! revocation also changes its admission identity. Unregistering invalidates all object tokens.
+//! state: `NotCached` or `Published`. The executor owns running attempts; downloads leave the
+//! index unchanged until publication. Revocation changes the admission identity; unregistering
+//! invalidates all object tokens.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
 //! Reads use `get` and never create refill work. Startup recovery, capacity accounting,
 //! and physical file reclamation are added separately before production activation.
@@ -56,7 +57,6 @@ struct PinCacheFile {
 /// `NotCached` means no readable copy; obsolete files may still await reclamation.
 enum PinCacheObjectState {
     NotCached { size: u64 },
-    Downloading { size: u64 },
     Published(Arc<PinCacheFile>),
 }
 
@@ -71,9 +71,7 @@ struct PinCacheObject {
 impl PinCacheObject {
     fn size(&self) -> u64 {
         match &self.state {
-            PinCacheObjectState::NotCached { size } | PinCacheObjectState::Downloading { size } => {
-                *size
-            }
+            PinCacheObjectState::NotCached { size } => *size,
             PinCacheObjectState::Published(file) => file.size,
         }
     }
@@ -108,12 +106,6 @@ impl PinCacheObject {
             .published_bytes
             .add(metric_bytes(file.size));
         self.state = PinCacheObjectState::Published(file);
-    }
-
-    fn cancel_download(&mut self) {
-        if let PinCacheObjectState::Downloading { size } = self.state {
-            self.state = PinCacheObjectState::NotCached { size };
-        }
     }
 }
 
@@ -185,8 +177,6 @@ pub(crate) enum PinCacheRefillOutcome {
     Published,
     /// A local read route already existed, so this attempt skipped the download.
     AlreadyPublished,
-    /// Another download for this object is still in flight; this attempt skipped the download.
-    InProgress,
     /// This attempt is no longer eligible to publish, for example after its generation is revoked.
     Obsolete,
 }
