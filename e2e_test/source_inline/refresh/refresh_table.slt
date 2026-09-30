@@ -361,9 +361,37 @@ SELECT * FROM refresh_fs_t_mv;
 
 
 # ----
-# Test 8: DROP CONNECTOR is not supported on a refreshable table yet
-statement error DROP CONNECTOR on a refreshable table
+# Test 8: DROP CONNECTOR drops the refresh job too, and the table is no longer refreshable
+let refresh_t_id
+select id from rw_tables where name = 'refresh_fs_t_on_conflict_ignore';
+
+query T retry 30 backoff 1s
+select current_status from rw_refresh_table_state where table_id = ${refresh_t_id};
+----
+IDLE
+
+statement ok
 ALTER TABLE refresh_fs_t_on_conflict_ignore DROP CONNECTOR;
+
+query I
+select count(*) from rw_internal_table_info where job_name = 'refresh_fs_t_on_conflict_ignore';
+----
+0
+
+query I
+select count(*) from rw_refresh_table_state where table_id = ${refresh_t_id};
+----
+0
+
+statement error not refreshable
+REFRESH TABLE refresh_fs_t_on_conflict_ignore;
+
+query II rowsort
+SELECT * FROM refresh_fs_t_on_conflict_ignore;
+----
+1 alice
+5 eve
+6 frank
 
 
 # ----
