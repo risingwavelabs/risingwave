@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
+use risingwave_common::bail_not_implemented;
 use risingwave_connector::parser::additional_columns::gen_default_addition_col_name;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_pb::ddl_service::TableJobType;
@@ -157,6 +158,9 @@ pub async fn handle_alter_table_drop_connector(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let (table_def, source_def) = fetch_schema_info(&session, table_name.clone())?;
+    if table_def.refreshable {
+        bail_not_implemented!("DROP CONNECTOR on a refreshable table");
+    }
     let original_definition = table_def.create_sql_ast_purified()?;
 
     let new_statement = rewrite_table_definition(&table_def, &source_def, original_definition)?;

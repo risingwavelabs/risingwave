@@ -777,7 +777,8 @@ impl CatalogController {
         let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
             .select_only()
             .filter(
-                object::Column::Oid.is_in(vec![drop_table_connector_ctx.to_remove_state_table_id]),
+                object::Column::Oid
+                    .is_in(drop_table_connector_ctx.to_remove_state_table_ids.clone()),
             )
             .into_partial_model()
             .all(txn)
