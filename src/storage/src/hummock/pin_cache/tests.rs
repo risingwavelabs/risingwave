@@ -31,7 +31,15 @@ use crate::opts::StorageOpts;
 #[tokio::test]
 #[should_panic(expected = "pin cache shard count must be greater than zero")]
 async fn test_zero_shards_rejected() {
-    PinCache::new(in_memory_object_store(), 0, [])
+    PinCache::new(in_memory_object_store(), 0, 2, [])
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[should_panic(expected = "pin cache recovery concurrency must be greater than zero")]
+async fn test_zero_recover_concurrency_rejected() {
+    PinCache::new(in_memory_object_store(), 1, 0, [])
         .await
         .unwrap();
 }
@@ -40,7 +48,7 @@ async fn test_zero_shards_rejected() {
 async fn test_read_and_unregister_lifecycle() {
     let remote_store = in_memory_object_store();
     let (_dir, local_store) = local_object_store().await;
-    let pin_cache = PinCache::new(local_store, 1, []).await.unwrap();
+    let pin_cache = PinCache::new(local_store, 1, 2, []).await.unwrap();
     let object_id = HummockSstableObjectId::from(1001);
     let remote_path = "remote.sst";
     let original = Bytes::from_static(b"complete sst");
@@ -93,7 +101,7 @@ async fn test_read_and_unregister_lifecycle() {
 #[tokio::test]
 async fn test_failed_download_can_be_retried() {
     let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
+    let pin_cache = PinCache::new(in_memory_object_store(), 1, 2, [])
         .await
         .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
@@ -126,7 +134,7 @@ async fn test_failed_download_can_be_retried() {
 #[tokio::test]
 async fn test_completed_invalid_fs_upload_cannot_publish() {
     let (_dir, local_store) = local_object_store().await;
-    let pin_cache = PinCache::new(local_store.clone(), 1, []).await.unwrap();
+    let pin_cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
     let remote_store = in_memory_object_store();
     remote_store
         .upload("sst", Bytes::from_static(b"half"))
@@ -145,7 +153,7 @@ async fn test_completed_invalid_fs_upload_cannot_publish() {
 #[tokio::test]
 async fn test_read_failure_only_invalidates_selected_publication() {
     let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
+    let pin_cache = PinCache::new(in_memory_object_store(), 1, 2, [])
         .await
         .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
@@ -184,12 +192,18 @@ fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
 async fn test_other_shard_does_not_block_object_operations() {
     let mut config = RwConfig::default();
     config.storage.cache.pin_cache_shard_num = 3;
+    config.storage.cache.pin_cache_recover_concurrency = 2;
     let system_params = system_params_for_test().into();
     let memory = extract_storage_memory_config(&config);
     let opts = StorageOpts::from((&config, &system_params, &memory));
-    let cache = PinCache::new(in_memory_object_store(), opts.pin_cache_shard_num, [])
-        .await
-        .unwrap();
+    let cache = PinCache::new(
+        in_memory_object_store(),
+        opts.pin_cache_shard_num,
+        opts.pin_cache_recover_concurrency,
+        [],
+    )
+    .await
+    .unwrap();
     assert_eq!(cache.shards.len(), 3);
 
     let blocked = object_in_shard(0, 3);
@@ -236,7 +250,7 @@ async fn test_other_shard_does_not_block_object_operations() {
 
 #[tokio::test]
 async fn test_object_membership_across_shards() {
-    let cache = PinCache::new(in_memory_object_store(), 3, [])
+    let cache = PinCache::new(in_memory_object_store(), 3, 2, [])
         .await
         .unwrap();
     let objects = [object_in_shard(0, 3), object_in_shard(2, 3)];
@@ -298,7 +312,7 @@ fn test_parse_finalized_object_path() {
 async fn test_recovery_rejects_incomplete_inventory() {
     for partial_inventory in [false, true] {
         let local_store = in_memory_object_store();
-        let mut cache = PinCache::new(local_store.clone(), 1, []).await.unwrap();
+        let mut cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
         local_store
             .upload("1001-42.sst", Bytes::from_static(b"complete"))
             .await
@@ -313,7 +327,7 @@ async fn test_recovery_rejects_incomplete_inventory() {
         // Exercise both list and mid-stream failures before sharing the cache.
         let result = Arc::get_mut(&mut cache)
             .unwrap()
-            .recover_local_files(objects)
+            .recover_local_files(objects, 2)
             .await;
         assert!(
             result
@@ -348,7 +362,7 @@ async fn test_recovery_returns_ready_routes_across_shards() {
             .await
             .unwrap();
     }
-    let cache = PinCache::new(local.clone(), 3, objects.into_iter().map(|id| (id, 8)))
+    let cache = PinCache::new(local.clone(), 3, 2, objects.into_iter().map(|id| (id, 8)))
         .await
         .unwrap();
 

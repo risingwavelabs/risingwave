@@ -346,6 +346,7 @@ block_cache_shard_num = ""
 meta_cache_capacity_mb = ""
 meta_cache_shard_num = ""
 pin_cache_shard_num = 64
+pin_cache_recover_concurrency = 8
 vector_block_cache_capacity_mb = 16
 vector_block_cache_shard_num = 16
 vector_meta_cache_capacity_mb = 16

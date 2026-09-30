@@ -219,11 +219,16 @@ impl PinCache {
     pub(crate) async fn new(
         store: ObjectStoreRef,
         shard_num: usize,
+        recover_concurrency: usize,
         objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) -> ObjectResult<Arc<Self>> {
         assert!(
             shard_num > 0,
             "pin cache shard count must be greater than zero"
+        );
+        assert!(
+            recover_concurrency > 0,
+            "pin cache recovery concurrency must be greater than zero"
         );
         let mut pin_cache = Self {
             store,
@@ -240,12 +245,18 @@ impl PinCache {
         GLOBAL_PIN_CACHE_METRICS.published_bytes.set(0);
         GLOBAL_PIN_CACHE_METRICS.recovery_ready.set(0);
         let objects = pin_cache.store.list("", None, None).await;
-        pin_cache
-            .recover_local_files(objects)
+        let recovered = pin_cache
+            .recover_local_files(objects, recover_concurrency)
             .await
             .inspect_err(|_| {
                 GLOBAL_PIN_CACHE_METRICS.recovery_failures.inc();
             })?;
+        GLOBAL_PIN_CACHE_METRICS
+            .published_objects
+            .set(metric_bytes(recovered.objects));
+        GLOBAL_PIN_CACHE_METRICS
+            .published_bytes
+            .set(metric_bytes(recovered.bytes));
         GLOBAL_PIN_CACHE_METRICS.recovery_ready.set(1);
         Ok(Arc::new(pin_cache))
     }
