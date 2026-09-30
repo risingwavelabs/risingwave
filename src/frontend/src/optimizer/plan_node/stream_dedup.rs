@@ -50,6 +50,23 @@ impl StreamDedup {
         StreamDedup { base, core }
     }
 
+    /// The dedup columns in the pk order of the state table, and the clean watermark column. The
+    /// first dedup column with a watermark is moved to the front, so that the state is cleaned by a
+    /// pk-prefix watermark.
+    fn state_pk_dedup_cols(&self) -> (Vec<usize>, Option<usize>) {
+        let mut cols = self.core.dedup_cols.clone();
+        let input_watermark_columns = self.core.input.watermark_columns();
+        let pos = cols
+            .iter()
+            .position(|&idx| input_watermark_columns.contains(idx));
+        let clean_col = pos.map(|pos| {
+            let col = cols.remove(pos);
+            cols.insert(0, col);
+            col
+        });
+        (cols, clean_col)
+    }
+
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
         let schema = self.core.schema();
         let mut builder = TableCatalogBuilder::default();
@@ -58,20 +75,12 @@ impl StreamDedup {
             builder.add_column(field);
         });
 
-        self.core.dedup_cols.iter().for_each(|idx| {
+        let (dedup_cols, clean_col) = self.state_pk_dedup_cols();
+        dedup_cols.iter().for_each(|idx| {
             builder.add_order_column(*idx, OrderType::ascending());
         });
-
-        // Only one clean watermark column is supported. If it's not the first pk column, the state
-        // is cleaned by compaction rather than filtered on read.
-        let input_watermark_columns = self.core.input.watermark_columns();
-        if let Some(&idx) = self
-            .core
-            .dedup_cols
-            .iter()
-            .find(|&&idx| input_watermark_columns.contains(idx))
-        {
-            builder.set_clean_watermark_indices(vec![idx]);
+        if let Some(clean_col) = clean_col {
+            builder.set_clean_watermark_indices(vec![clean_col]);
         }
 
         let read_prefix_len_hint = builder.get_current_pk_len();
@@ -108,8 +117,8 @@ impl StreamNode for StreamDedup {
         PbNodeBody::AppendOnlyDedup(Box::new(DedupNode {
             state_table: Some(table_catalog.to_internal_table_prost()),
             dedup_column_indices: self
-                .core
-                .dedup_cols
+                .state_pk_dedup_cols()
+                .0
                 .iter()
                 .map(|idx| *idx as _)
                 .collect_vec(),

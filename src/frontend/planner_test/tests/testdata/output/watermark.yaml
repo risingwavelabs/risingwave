@@ -493,7 +493,7 @@
 
     Table 0
     ├── columns: [ t_ts, t_v1, t_v2, t__row_id, _rw_timestamp ]
-    ├── primary key: [ $1 ASC, $0 ASC ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 1, 0 ]
     ├── read pk prefix len hint: 2

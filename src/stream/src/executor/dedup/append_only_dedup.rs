@@ -33,6 +33,7 @@ pub struct AppendOnlyDedupExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     input: Option<Executor>,
+    /// Input column indices of the dedup key, in the pk order of the state table.
     dedup_cols: Vec<usize>,
     /// The input column whose watermark cleans the state.
     clean_watermark_col: Option<usize>,
