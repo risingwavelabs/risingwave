@@ -14,11 +14,18 @@
 
 use std::sync::Arc;
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt, stream};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::{ObjectMetadataIter, ObjectResult};
+use risingwave_object_store::object::{ObjectError, ObjectMetadataIter, ObjectResult};
 
-use super::{PinCache, PinCacheFile, PinCacheObject, PinCacheShard};
+use super::{PinCache, PinCacheFile, PinCacheObjectState, PinCacheShard};
+
+#[derive(Debug, Default)]
+pub(super) struct RecoveryStats {
+    pub objects: u64,
+    pub bytes: u64,
+}
 
 impl PinCache {
     pub(super) fn parse_object_id(path: &str) -> Option<HummockSstableObjectId> {
@@ -31,70 +38,110 @@ impl PinCache {
     }
 
     /// Recovers only existing local files matching the initial membership and expected size.
-    /// This runs before sharing the cache, so no shard locks or runtime recovery state are needed.
-    /// On any inventory error, construction fails without reclaiming a partial inventory.
+    /// This runs before sharing the cache. Each task exclusively owns one shard, without locks.
+    /// Lists and partitions all file metadata first, then recovers shards with bounded concurrency.
+    /// Rejected files are reclaimed only after the complete inventory and all shard tasks succeed.
     /// No remote SST metadata is read for vnode pruning; unpin/version removal withdraws stale routes.
     /// There is no persisted refill watermark: objects missed during downtime are not backfilled.
     /// Reads of missing objects use the normal fallback; subsequent version deltas drive refill.
     pub(super) async fn recover_local_files(
         &mut self,
         objects: ObjectResult<ObjectMetadataIter>,
-    ) -> ObjectResult<()> {
+        concurrency: usize,
+    ) -> ObjectResult<RecoveryStats> {
+        let mut files: Vec<Vec<_>> = (0..self.shards.len()).map(|_| Vec::new()).collect();
         let mut objects = objects?;
         let mut stale_objects = Vec::new();
-        while let Some(metadata) = objects.next().await {
-            let metadata = metadata?;
+        while let Some(metadata) = objects.try_next().await? {
             if metadata.key.is_empty() || metadata.key.ends_with('/') {
                 continue;
             }
-            let entry = Arc::new(PinCacheFile::new(
+            let entry = PinCacheFile::new(
                 metadata.key,
                 metadata.total_size as u64,
                 Arc::clone(&self.gc),
-            ));
+            );
             self.gc.account_existing(&entry);
             if let Some(object_id) = Self::parse_object_id(&entry.path) {
                 let shard_index = Self::shard_index(object_id, self.shards.len());
-                let state = self.shards[shard_index].get_mut();
-                if let Some(object) = state.recovery_target(object_id, &entry) {
-                    object.publish(entry);
-                    continue;
-                }
+                files[shard_index].push((object_id, entry));
             } else {
                 tracing::warn!(path = %entry.path, "skipping pin cache file with invalid name during recovery");
+                stale_objects.push(Arc::new(entry));
             }
-            stale_objects.push(entry);
         }
-        // Do not reclaim anything from an incomplete inventory.
+        let shards = self
+            .shards
+            .iter_mut()
+            .zip_eq_fast(files)
+            .enumerate()
+            .filter(|(_, (_, files))| !files.is_empty());
+        let results = stream::iter(shards)
+            .map(|(index, (shard, files))| {
+                let mut state = std::mem::take(shard.get_mut());
+                tokio::task::spawn_blocking(move || {
+                    let (stats, stale) = state.recover(files);
+                    (index, state, stats, stale)
+                })
+            })
+            .buffer_unordered(concurrency)
+            // Join all tasks before propagating a panic. On cancellation, running tasks own
+            // only unretired files and private shard state; they never reclaim files or update metrics.
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| {
+                ObjectError::internal(format!("pin cache recovery task failed: {err}"))
+            })?;
+        let mut stats = RecoveryStats::default();
+        for (index, state, recovered, stale) in results {
+            stale_objects.extend(stale);
+            *self.shards[index].get_mut() = state;
+            stats.objects += recovered.objects;
+            stats.bytes += recovered.bytes;
+        }
         self.gc.reclaim(stale_objects);
-        Ok(())
+        Ok(stats)
     }
 }
 
 impl PinCacheShard {
-    fn recovery_target(
+    fn recover(
         &mut self,
-        object_id: HummockSstableObjectId,
-        entry: &PinCacheFile,
-    ) -> Option<&mut PinCacheObject> {
-        let Some(object) = self.objects.get_mut(&object_id) else {
-            tracing::debug!(path = %entry.path, "skipping pin cache file outside current membership during recovery");
-            return None;
-        };
-        let expected_size = object.size();
-        if entry.size != expected_size {
-            tracing::warn!(
-                path = %entry.path,
-                actual_size = entry.size,
-                expected_size,
-                "skipping pin cache file with unexpected size during recovery"
-            );
-            return None;
+        files: Vec<(HummockSstableObjectId, PinCacheFile)>,
+    ) -> (RecoveryStats, Vec<Arc<PinCacheFile>>) {
+        let mut stats = RecoveryStats::default();
+        let mut stale_objects = Vec::new();
+        for (object_id, entry) in files {
+            let Some(object) = self.objects.get_mut(&object_id) else {
+                tracing::debug!(path = %entry.path, "skipping pin cache file outside current membership during recovery");
+                stale_objects.push(Arc::new(entry));
+                continue;
+            };
+            let expected_size = object.size();
+            if entry.size != expected_size {
+                tracing::warn!(
+                    path = %entry.path,
+                    actual_size = entry.size,
+                    expected_size,
+                    "skipping pin cache file with unexpected size during recovery"
+                );
+                stale_objects.push(Arc::new(entry));
+                continue;
+            }
+            if object.published().is_some() {
+                tracing::debug!(path = %entry.path, "skipping duplicate pin cache file during recovery");
+                stale_objects.push(Arc::new(entry));
+                continue;
+            }
+            stats.objects += 1;
+            stats.bytes += entry.size;
+            object.state = PinCacheObjectState::Published(Arc::new(entry));
         }
-        if object.published().is_some() {
-            tracing::debug!(path = %entry.path, "skipping duplicate pin cache file during recovery");
-            return None;
-        }
-        Some(object)
+        (stats, stale_objects)
     }
 }
+
+#[cfg(test)]
+mod tests;
