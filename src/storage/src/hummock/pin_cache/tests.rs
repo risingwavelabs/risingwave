@@ -16,16 +16,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt, stream};
 use risingwave_common::config::{ObjectStoreConfig, RwConfig, extract_storage_memory_config};
 use risingwave_common::system_param::system_params_for_test;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
-    InMemObjectStore, MonitoredStreamingReader, ObjectError, ObjectResult, ObjectStore,
-    ObjectStoreImpl, ObjectStoreRef, build_remote_object_store,
+    InMemObjectStore, ObjectResult, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
+    build_remote_object_store,
 };
 
-use super::refill::PinCacheDownloadGuard;
 use super::{PinCache, PinCacheRefillOutcome};
 use crate::monitor::ObjectStoreMetrics;
 use crate::opts::StorageOpts;
@@ -70,17 +68,6 @@ pub(super) async fn local_object_store() -> (tempfile::TempDir, ObjectStoreRef) 
         .await,
     );
     (dir, store)
-}
-
-// Construct an unpublished file only for tests of upload/publication boundaries.
-// Admission and already-published checks are exercised through refill below.
-fn new_download(
-    pin_cache: &Arc<PinCache>,
-    object_id: HummockSstableObjectId,
-    size: u64,
-) -> PinCacheDownloadGuard {
-    let token = pin_cache.prepare_refill(object_id).unwrap();
-    PinCacheDownloadGuard::new(Arc::clone(pin_cache), token, size)
 }
 
 #[test]
@@ -181,50 +168,6 @@ async fn test_revoked_token_cannot_begin_a_late_download() {
 }
 
 #[tokio::test]
-async fn test_revoked_download_cannot_publish_and_replacement_can_retry() {
-    for revoke_by_unregister in [false, true] {
-        let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
-        let object_id = HummockSstableObjectId::from(1001);
-        pin_cache.register_objects([(object_id, 11)]);
-        let old = new_download(&pin_cache, object_id, 11);
-        pin_cache
-            .store
-            .upload(&old.file.path, Bytes::from_static(b"replacement"))
-            .await
-            .unwrap();
-
-        if revoke_by_unregister {
-            pin_cache.unregister_objects([object_id]);
-            pin_cache.register_objects([(object_id, 11)]);
-        } else {
-            pin_cache.revoke_refill(object_id);
-        }
-        let old_path = old.file.path.clone();
-        // The executor waits for the revoked attempt to finish before starting its replacement.
-        assert_eq!(old.publish(), PinCacheRefillOutcome::Obsolete);
-        assert!(pin_cache.get(object_id).is_none());
-
-        let remote = in_memory_object_store();
-        remote
-            .upload("sst", Bytes::from_static(b"replacement"))
-            .await
-            .unwrap();
-        assert_eq!(
-            pin_cache
-                .pin_sst(remote, "sst".into(), object_id)
-                .await
-                .unwrap(),
-            PinCacheRefillOutcome::Published
-        );
-        assert_ne!(old_path, pin_cache.get(object_id).unwrap().file.path);
-        assert_eq!(
-            pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
-            Bytes::from_static(b"replacement")
-        );
-    }
-}
-
-#[tokio::test]
 async fn test_failed_download_can_be_retried() {
     let remote_store = in_memory_object_store();
     let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
@@ -251,90 +194,6 @@ async fn test_failed_download_can_be_retried() {
         PinCacheRefillOutcome::Published
     );
     assert!(pin_cache.get(object_id).is_some());
-}
-
-#[tokio::test]
-async fn test_interrupted_fs_upload_cannot_publish() {
-    for cancel in [false, true] {
-        let (_dir, local_store) = local_object_store().await;
-        let pin_cache = PinCache::new(local_store.clone(), 1, []);
-        let object_id = HummockSstableObjectId::from(1001);
-        pin_cache.register_objects([(object_id, 8)]);
-
-        let download = new_download(&pin_cache, object_id, 8);
-        let final_path = download.file.path.clone();
-        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-        let (fail_tx, fail_rx) = tokio::sync::oneshot::channel();
-        let reader = MonitoredStreamingReader::new(
-            "test",
-            Box::pin(
-                stream::iter([
-                    Ok(Bytes::from_static(b"half")),
-                    Ok(Bytes::from_static(b"x")),
-                ])
-                .chain(stream::once(async move {
-                    // Two writes flush the FS position writer's one-chunk buffer.
-                    started_tx.send(()).unwrap();
-                    let _ = fail_rx.await;
-                    Err(ObjectError::internal("injected remote read failure"))
-                })),
-            ),
-            Arc::new(ObjectStoreMetrics::unused()),
-            None,
-        );
-        let task = tokio::spawn(download.write(reader));
-        tokio::time::timeout(Duration::from_secs(5), started_rx)
-            .await
-            .unwrap()
-            .unwrap();
-        // Wait for Tokio's buffered file write to reach the filesystem before cancellation.
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let files: Vec<_> = local_store
-                    .list("", None, None)
-                    .await
-                    .unwrap()
-                    .try_collect()
-                    .await
-                    .unwrap();
-                if files.iter().any(|file| file.total_size == 4) {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        assert!(pin_cache.get(object_id).is_none());
-        if cancel {
-            task.abort();
-            assert!(task.await.unwrap_err().is_cancelled());
-        } else {
-            fail_tx.send(()).unwrap();
-            assert!(task.await.unwrap().is_err());
-        }
-
-        assert!(pin_cache.get(object_id).is_none());
-        assert!(
-            local_store
-                .metadata(&final_path)
-                .await
-                .unwrap_err()
-                .is_object_not_found_error()
-        );
-        let remote = in_memory_object_store();
-        remote
-            .upload("sst", Bytes::from_static(b"complete"))
-            .await
-            .unwrap();
-        assert_eq!(
-            pin_cache
-                .pin_sst(remote, "sst".into(), object_id)
-                .await
-                .unwrap(),
-            PinCacheRefillOutcome::Published
-        );
-    }
 }
 
 #[tokio::test]
@@ -408,12 +267,12 @@ async fn test_other_shard_does_not_block_object_operations() {
     let blocked = object_in_shard(0, 3);
     let available = object_in_shard(2, 3);
     cache.register_objects([(blocked, 8), (available, 8)]);
-    let download = new_download(&cache, available, 8);
-    cache
-        .store
-        .upload(&download.file.path, Bytes::from_static(b"complete"))
+    let remote = in_memory_object_store();
+    remote
+        .upload("sst", Bytes::from_static(b"complete"))
         .await
         .unwrap();
+    let runtime = tokio::runtime::Handle::current();
 
     // Hold an unrelated shard until the other thread completes. On timeout, release it
     // before joining so an accidental cross-shard dependency fails instead of hanging.
@@ -424,7 +283,13 @@ async fn test_other_shard_does_not_block_object_operations() {
         scope.spawn(move || {
             assert!(cache.is_registered(available));
             assert!(cache.get(available).is_none());
-            assert_eq!(download.publish(), PinCacheRefillOutcome::Published);
+            let token = cache.prepare_refill(available).unwrap();
+            assert_eq!(
+                runtime
+                    .block_on(cache.refill(token, remote, "sst".into()))
+                    .unwrap(),
+                PinCacheRefillOutcome::Published
+            );
             let token = cache.prepare_refill(available).unwrap();
             cache.revoke_refill(available);
             assert_ne!(cache.prepare_refill(available), Some(token));
