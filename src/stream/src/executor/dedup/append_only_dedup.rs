@@ -26,11 +26,16 @@ type Cache = ManagedLruCache<OwnedRow, ()>;
 
 /// [`AppendOnlyDedupExecutor`] drops any message that has duplicate pk columns with previous
 /// messages. It only accepts append-only input, and its output will be append-only as well.
+///
+/// Keys below the watermark on the state table's clean watermark column are removed from the
+/// state, as the watermark guarantees that they never arrive again.
 pub struct AppendOnlyDedupExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     input: Option<Executor>,
     dedup_cols: Vec<usize>,
+    /// The input column whose watermark cleans the state.
+    clean_watermark_col: Option<usize>,
     state_table: StateTable<S>,
     cache: Cache,
 }
@@ -46,10 +51,21 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
     ) -> Self {
         let metrics_info =
             MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "AppendOnly Dedup");
+        // The pk of the state table is the dedup columns, so the clean watermark column maps to
+        // the input by its position in the pk.
+        let clean_watermark_col = state_table.clean_watermark_index.map(|idx| {
+            let pk_pos = state_table
+                .pk_indices()
+                .iter()
+                .position(|&i| i == idx)
+                .expect("clean watermark column should be a dedup column");
+            dedup_cols[pk_pos]
+        });
         Self {
             ctx,
             input: Some(input),
             dedup_cols,
+            clean_watermark_col,
             state_table,
             cache: Cache::unbounded(watermark_epoch, metrics_info),
         }
@@ -138,8 +154,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                 }
 
                 Message::Watermark(watermark) => {
-                    // No key below the watermark can arrive again, so its state can be cleaned.
-                    if self.state_table.clean_watermark_index == Some(watermark.col_idx) {
+                    if self.clean_watermark_col == Some(watermark.col_idx) {
                         self.state_table.update_watermark(watermark.val.clone());
                     }
                     yield Message::Watermark(watermark);
