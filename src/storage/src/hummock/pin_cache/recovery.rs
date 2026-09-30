@@ -19,7 +19,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectError, ObjectMetadataIter, ObjectResult};
 
-use super::{PinCache, PinCacheFile, PinCacheObject, PinCacheObjectState, PinCacheShard};
+use super::{PinCache, PinCacheFile, PinCacheObjectState, PinCacheShard};
 
 #[derive(Debug, Default)]
 pub(super) struct RecoveryStats {
@@ -104,39 +104,29 @@ impl PinCacheShard {
     fn recover(&mut self, files: Vec<(HummockSstableObjectId, PinCacheFile)>) -> RecoveryStats {
         let mut stats = RecoveryStats::default();
         for (object_id, entry) in files {
-            if let Some(object) = self.recovery_target(object_id, &entry) {
-                stats.objects += 1;
-                stats.bytes += entry.size;
-                object.state = PinCacheObjectState::Published(Arc::new(entry));
+            let Some(object) = self.objects.get_mut(&object_id) else {
+                tracing::debug!(path = %entry.path, "skipping pin cache file outside current membership during recovery");
+                continue;
+            };
+            let expected_size = object.size();
+            if entry.size != expected_size {
+                tracing::warn!(
+                    path = %entry.path,
+                    actual_size = entry.size,
+                    expected_size,
+                    "skipping pin cache file with unexpected size during recovery"
+                );
+                continue;
             }
+            if object.published().is_some() {
+                tracing::debug!(path = %entry.path, "skipping duplicate pin cache file during recovery");
+                continue;
+            }
+            stats.objects += 1;
+            stats.bytes += entry.size;
+            object.state = PinCacheObjectState::Published(Arc::new(entry));
         }
         stats
-    }
-
-    fn recovery_target(
-        &mut self,
-        object_id: HummockSstableObjectId,
-        entry: &PinCacheFile,
-    ) -> Option<&mut PinCacheObject> {
-        let Some(object) = self.objects.get_mut(&object_id) else {
-            tracing::debug!(path = %entry.path, "skipping pin cache file outside current membership during recovery");
-            return None;
-        };
-        let expected_size = object.size();
-        if entry.size != expected_size {
-            tracing::warn!(
-                path = %entry.path,
-                actual_size = entry.size,
-                expected_size,
-                "skipping pin cache file with unexpected size during recovery"
-            );
-            return None;
-        }
-        if object.published().is_some() {
-            tracing::debug!(path = %entry.path, "skipping duplicate pin cache file during recovery");
-            return None;
-        }
-        Some(object)
     }
 }
 
