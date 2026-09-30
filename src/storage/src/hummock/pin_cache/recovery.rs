@@ -61,13 +61,13 @@ impl PinCache {
                 metadata.total_size as u64,
                 Arc::clone(&self.gc),
             );
-            self.gc.account_existing(&entry);
+            self.gc.account_existing(entry.size);
             if let Some(object_id) = Self::parse_object_id(&entry.path) {
                 let shard_index = Self::shard_index(object_id, self.shards.len());
                 files[shard_index].push((object_id, entry));
             } else {
                 tracing::warn!(path = %entry.path, "skipping pin cache file with invalid name during recovery");
-                stale_objects.push(Arc::new(entry));
+                stale_objects.push(entry);
             }
         }
         let shards = self
@@ -101,7 +101,9 @@ impl PinCache {
             stats.objects += recovered.objects;
             stats.bytes += recovered.bytes;
         }
-        self.gc.reclaim(stale_objects);
+        for file in stale_objects {
+            file.retire();
+        }
         Ok(stats)
     }
 }
@@ -110,13 +112,13 @@ impl PinCacheShard {
     fn recover(
         &mut self,
         files: Vec<(HummockSstableObjectId, PinCacheFile)>,
-    ) -> (RecoveryStats, Vec<Arc<PinCacheFile>>) {
+    ) -> (RecoveryStats, Vec<PinCacheFile>) {
         let mut stats = RecoveryStats::default();
         let mut stale_objects = Vec::new();
         for (object_id, entry) in files {
             let Some(object) = self.objects.get_mut(&object_id) else {
                 tracing::debug!(path = %entry.path, "skipping pin cache file outside current membership during recovery");
-                stale_objects.push(Arc::new(entry));
+                stale_objects.push(entry);
                 continue;
             };
             let expected_size = object.size();
@@ -127,12 +129,12 @@ impl PinCacheShard {
                     expected_size,
                     "skipping pin cache file with unexpected size during recovery"
                 );
-                stale_objects.push(Arc::new(entry));
+                stale_objects.push(entry);
                 continue;
             }
             if object.published().is_some() {
                 tracing::debug!(path = %entry.path, "skipping duplicate pin cache file during recovery");
-                stale_objects.push(Arc::new(entry));
+                stale_objects.push(entry);
                 continue;
             }
             stats.objects += 1;

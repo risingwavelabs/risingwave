@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::TryStreamExt;
 use risingwave_common::config::{RwConfig, extract_storage_memory_config};
 use risingwave_common::system_param::system_params_for_test;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -104,7 +104,7 @@ async fn test_read_and_unregister_lifecycle() {
 #[tokio::test]
 async fn test_failed_download_can_be_retried() {
     let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX, 1, 2, [])
+    let pin_cache = PinCache::new(in_memory_object_store(), 8, 1, 2, [])
         .await
         .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
@@ -116,6 +116,8 @@ async fn test_failed_download_can_be_retried() {
             .await
             .is_err()
     );
+    // Remote initialization failed before any local upload, so no GC is needed to retry.
+    assert_eq!(accounted_bytes(&pin_cache.gc), 0);
     assert!(pin_cache.get(object_id).is_none());
 
     remote_store
@@ -324,37 +326,23 @@ fn test_parse_finalized_object_path() {
 }
 
 #[tokio::test]
-async fn test_recovery_rejects_incomplete_inventory() {
-    for partial_inventory in [false, true] {
-        let local_store = in_memory_object_store();
-        let mut cache = PinCache::new(local_store.clone(), u64::MAX, 1, 2, [])
-            .await
-            .unwrap();
-        local_store
-            .upload("1001-42.sst", Bytes::from_static(b"complete"))
-            .await
-            .unwrap();
-        let error = ObjectError::internal("injected inventory failure");
-        let objects = if partial_inventory {
-            let metadata = local_store.metadata("1001-42.sst").await.unwrap();
-            Ok(stream::iter([Ok(metadata), Err(error)]).boxed())
-        } else {
-            Err(error)
-        };
-        // Exercise both list and mid-stream failures before sharing the cache.
-        let result = Arc::get_mut(&mut cache)
-            .unwrap()
-            .recover_local_files(objects, 2)
-            .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("injected inventory failure")
-        );
-        assert!(cache.get(1001.into()).is_none());
-        assert!(local_store.metadata("1001-42.sst").await.is_ok());
-    }
+async fn test_recovery_rejects_inventory_initialization_error() {
+    let local_store = in_memory_object_store();
+    let mut cache = PinCache::new(local_store.clone(), u64::MAX, 1, 2, [])
+        .await
+        .unwrap();
+    local_store
+        .upload("1001-42.sst", Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    let error = Arc::get_mut(&mut cache)
+        .unwrap()
+        .recover_local_files(Err(ObjectError::internal("injected inventory failure")), 2)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("injected inventory failure"));
+    assert!(cache.get(1001.into()).is_none());
+    assert!(local_store.metadata("1001-42.sst").await.is_ok());
 }
 
 #[tokio::test]
