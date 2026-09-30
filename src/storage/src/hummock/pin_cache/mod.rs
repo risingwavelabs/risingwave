@@ -38,6 +38,8 @@ use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectSto
 mod membership;
 mod refill;
 #[cfg(test)]
+pub(super) mod test_utils;
+#[cfg(test)]
 mod tests;
 
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
@@ -135,8 +137,10 @@ impl PinCacheShard {
         );
     }
 
-    /// Returns the registered object only if the refill token is still current.
-    fn object_for_refill(&mut self, token: PinCacheRefillToken) -> Option<&mut PinCacheObject> {
+    /// Finds the registered object whose ID and generation both match the token.
+    /// Returns None after unregistration or token revocation, including removal followed by
+    /// re-registration of the same ID. This does not check whether a file is already published.
+    fn object_matching_token(&mut self, token: PinCacheRefillToken) -> Option<&mut PinCacheObject> {
         self.objects
             .get_mut(&token.object_id)
             .filter(|object| object.generation == token.generation)

@@ -16,64 +16,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use risingwave_common::config::{ObjectStoreConfig, RwConfig, extract_storage_memory_config};
+use risingwave_common::config::{RwConfig, extract_storage_memory_config};
 use risingwave_common::system_param::system_params_for_test;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::{
-    InMemObjectStore, ObjectResult, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
-    build_remote_object_store,
-};
 
 use super::PinCache;
-use crate::monitor::ObjectStoreMetrics;
+use super::test_utils::{
+    download_and_publish_for_test, in_memory_object_store, local_object_store,
+};
 use crate::opts::StorageOpts;
-
-impl PinCache {
-    pub(crate) async fn pin_sst(
-        self: &Arc<Self>,
-        remote_store: ObjectStoreRef,
-        remote_path: String,
-        object_id: HummockSstableObjectId,
-    ) -> ObjectResult<()> {
-        let token = self
-            .prepare_refill(object_id)
-            .expect("test object must be needed");
-        let size = self.shard(object_id).read().objects[&object_id].size();
-        let download = self
-            .download(object_id, size, remote_store, remote_path)
-            .await?;
-        assert!(self.publish(token, download));
-        Ok(())
-    }
-}
-
-pub(super) fn in_memory_object_store() -> ObjectStoreRef {
-    Arc::new(ObjectStoreImpl::InMem(
-        InMemObjectStore::for_test().monitored(
-            Arc::new(ObjectStoreMetrics::unused()),
-            Arc::new(ObjectStoreConfig::default()),
-        ),
-    ))
-}
-
-pub(super) async fn local_object_store() -> (tempfile::TempDir, ObjectStoreRef) {
-    let dir = tempfile::tempdir().unwrap();
-    let mut config = ObjectStoreConfig {
-        upload_part_size: 1,
-        ..Default::default()
-    };
-    config.set_atomic_write_dir();
-    let store = Arc::new(
-        build_remote_object_store(
-            &format!("fs://{}", dir.path().display()),
-            Arc::new(ObjectStoreMetrics::unused()),
-            "test pin cache",
-            Arc::new(config),
-        )
-        .await,
-    );
-    (dir, store)
-}
 
 #[test]
 #[should_panic(expected = "pin cache shard count must be greater than zero")]
@@ -95,10 +46,14 @@ async fn test_read_and_unregister_lifecycle() {
         .unwrap();
 
     pin_cache.register_objects([(object_id, original.len() as u64)]);
-    pin_cache
-        .pin_sst(remote_store.clone(), remote_path.to_owned(), object_id)
-        .await
-        .unwrap();
+    download_and_publish_for_test(
+        &pin_cache,
+        remote_store.clone(),
+        remote_path.to_owned(),
+        object_id,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
         original
@@ -112,10 +67,14 @@ async fn test_read_and_unregister_lifecycle() {
     assert_eq!(old_read.read(..).await.unwrap(), original);
 
     pin_cache.register_objects([(object_id, original.len() as u64)]);
-    pin_cache
-        .pin_sst(remote_store.clone(), remote_path.to_owned(), object_id)
-        .await
-        .unwrap();
+    download_and_publish_for_test(
+        &pin_cache,
+        remote_store.clone(),
+        remote_path.to_owned(),
+        object_id,
+    )
+    .await
+    .unwrap();
     let current = pin_cache.get(object_id).unwrap();
     assert!(!Arc::ptr_eq(&old_read.file, &current.file));
     assert_eq!(current.read(..).await.unwrap(), original);
@@ -170,8 +129,7 @@ async fn test_completed_invalid_fs_upload_cannot_publish() {
     let object_id = HummockSstableObjectId::from(1001);
     pin_cache.register_objects([(object_id, 8)]);
     assert!(
-        pin_cache
-            .pin_sst(remote_store, "sst".into(), object_id)
+        download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id)
             .await
             .is_err()
     );
@@ -188,8 +146,7 @@ async fn test_read_failure_only_invalidates_selected_publication() {
         .upload("sst", Bytes::from_static(b"complete"))
         .await
         .unwrap();
-    pin_cache
-        .pin_sst(remote_store.clone(), "sst".into(), object_id)
+    download_and_publish_for_test(&pin_cache, remote_store.clone(), "sst".into(), object_id)
         .await
         .unwrap();
     let old = pin_cache.get(object_id).unwrap();
@@ -197,8 +154,7 @@ async fn test_read_failure_only_invalidates_selected_publication() {
     assert!(old.read(..).await.is_err());
     assert!(pin_cache.get(object_id).is_none());
 
-    pin_cache
-        .pin_sst(remote_store, "sst".into(), object_id)
+    download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id)
         .await
         .unwrap();
     // This handle stays on the old path and must not remove the new route.
@@ -280,8 +236,7 @@ async fn test_object_membership_across_shards() {
         .await
         .unwrap();
     for id in objects {
-        cache
-            .pin_sst(remote.clone(), "sst".into(), id)
+        download_and_publish_for_test(&cache, remote.clone(), "sst".into(), id)
             .await
             .unwrap();
     }

@@ -145,7 +145,8 @@ impl PinCache {
     /// A rejected download is dropped after the lock, so cleanup never runs while it is held.
     pub(crate) fn publish(&self, token: PinCacheRefillToken, download: PinCacheDownload) -> bool {
         let mut state = self.shard(token.object_id).write();
-        let Some(object) = state.object_for_refill(token) else {
+        let Some(object) = state.object_matching_token(token) else {
+            // This download lost permission to publish when its object was unregistered or revoked.
             return false;
         };
         object.publish(download.into_file());
@@ -171,7 +172,9 @@ mod tests {
     use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
     use super::{PinCache, PinCacheDownload, PinCacheFile};
-    use crate::hummock::pin_cache::tests::{in_memory_object_store, local_object_store};
+    use crate::hummock::pin_cache::test_utils::{
+        download_and_publish_for_test, in_memory_object_store, local_object_store,
+    };
     use crate::monitor::ObjectStoreMetrics;
 
     #[tokio::test]
@@ -206,8 +209,7 @@ mod tests {
             assert!(!pin_cache.publish(token, old));
             assert!(pin_cache.get(object_id).is_none());
 
-            pin_cache
-                .pin_sst(remote, "sst".into(), object_id)
+            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id)
                 .await
                 .unwrap();
             assert_ne!(old_path, pin_cache.get(object_id).unwrap().file.path);
@@ -297,8 +299,7 @@ mod tests {
                 .upload("sst", Bytes::from_static(b"complete"))
                 .await
                 .unwrap();
-            pin_cache
-                .pin_sst(remote, "sst".into(), object_id)
+            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id)
                 .await
                 .unwrap();
         }
