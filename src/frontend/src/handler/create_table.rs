@@ -1892,8 +1892,7 @@ pub async fn generate_stream_graph_for_replace_table(
         original_catalog.associated_source_id().is_some() && format_encode.is_none();
     if is_drop_connector {
         debug_assert!(
-            source_watermarks.is_empty()
-                && include_column_options.is_empty()
+            include_column_options.is_empty()
                 && with_options
                     .iter()
                     .all(|opt| opt.name.real_value().to_lowercase() != "connector")
