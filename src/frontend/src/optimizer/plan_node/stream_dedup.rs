@@ -62,7 +62,8 @@ impl StreamDedup {
             builder.add_order_column(*idx, OrderType::ascending());
         });
 
-        // Clean the state by the watermark on the first dedup column that has one.
+        // Only one clean watermark column is supported. If it's not the first pk column, the state
+        // is cleaned by compaction rather than filtered on read.
         let input_watermark_columns = self.core.input.watermark_columns();
         if let Some(&idx) = self
             .core
