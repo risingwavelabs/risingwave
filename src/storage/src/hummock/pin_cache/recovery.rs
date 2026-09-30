@@ -32,7 +32,7 @@ impl PinCache {
 
     /// Recovers only existing local files matching the initial membership and expected size.
     /// This runs before sharing the cache, so no shard locks or runtime recovery state are needed.
-    /// Any inventory error fails construction. Unselected files remain on disk until GC is added.
+    /// On any inventory error, construction fails without reclaiming a partial inventory.
     /// No remote SST metadata is read for vnode pruning; unpin/version removal withdraws stale routes.
     /// There is no persisted refill watermark: objects missed during downtime are not backfilled.
     /// Reads of missing objects use the normal fallback; subsequent version deltas drive refill.
@@ -41,25 +41,32 @@ impl PinCache {
         objects: ObjectResult<ObjectMetadataIter>,
     ) -> ObjectResult<()> {
         let mut objects = objects?;
+        let mut stale_objects = Vec::new();
         while let Some(metadata) = objects.next().await {
             let metadata = metadata?;
             if metadata.key.is_empty() || metadata.key.ends_with('/') {
                 continue;
             }
-            let entry = Arc::new(PinCacheFile {
-                path: metadata.key,
-                size: metadata.total_size as u64,
-            });
+            let entry = Arc::new(PinCacheFile::new(
+                metadata.key,
+                metadata.total_size as u64,
+                Arc::clone(&self.gc),
+            ));
+            self.gc.account_existing(&entry);
             if let Some(object_id) = Self::parse_object_id(&entry.path) {
                 let shard_index = Self::shard_index(object_id, self.shards.len());
                 let state = self.shards[shard_index].get_mut();
                 if let Some(object) = state.recovery_target(object_id, &entry) {
                     object.publish(entry);
+                    continue;
                 }
             } else {
                 tracing::warn!(path = %entry.path, "skipping pin cache file with invalid name during recovery");
             }
+            stale_objects.push(entry);
         }
+        // Do not reclaim anything from an incomplete inventory.
+        self.gc.reclaim(stale_objects);
         Ok(())
     }
 }

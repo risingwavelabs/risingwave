@@ -24,17 +24,18 @@
 //! invalidates all object tokens.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
 //! Reads use `get` and never create refill work. Recovery completes before sharing the cache.
-//! Capacity accounting and physical reclamation are added before production activation.
+//! GC reclaims withdrawn files after their last reader releases them.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectStoreRef};
 
+mod gc;
 mod membership;
 mod recovery;
 mod refill;
@@ -43,6 +44,7 @@ pub(super) mod test_utils;
 #[cfg(test)]
 mod tests;
 
+use self::gc::PinCacheGc;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
 fn metric_bytes(bytes: u64) -> i64 {
@@ -53,6 +55,28 @@ fn metric_bytes(bytes: u64) -> i64 {
 struct PinCacheFile {
     path: String,
     size: u64,
+    gc: Arc<PinCacheGc>,
+    // Normal shutdown preserves published files; only explicitly retired files are deleted.
+    retired: AtomicBool,
+}
+
+impl PinCacheFile {
+    fn new(path: String, size: u64, gc: Arc<PinCacheGc>) -> Self {
+        Self {
+            path,
+            size,
+            gc,
+            retired: AtomicBool::new(false),
+        }
+    }
+}
+
+impl Drop for PinCacheFile {
+    fn drop(&mut self) {
+        if *self.retired.get_mut() {
+            self.gc.enqueue(std::mem::take(&mut self.path));
+        }
+    }
 }
 
 /// One object's file lifecycle. Only `Published` can be read. A revoked download may
@@ -154,8 +178,9 @@ impl PinCacheShard {
 pub(crate) struct PinCache {
     store: ObjectStoreRef,
     // Hold only one shard lock at a time. Never perform I/O or call back into the controller
-    // or refill executor while locked. Construction finishes before this cache is shared.
+    // or refill executor while locked. GC accounting is a leaf lock below the shard. Construction finishes before this cache is shared.
     shards: Box<[RwLock<PinCacheShard>]>,
+    gc: Arc<PinCacheGc>,
     next_path_id: AtomicU64,
 }
 
@@ -176,7 +201,7 @@ impl PinCacheRefillToken {
 }
 
 /// A reference to one published file, retained even after its object leaves the index.
-/// Reads never look up the object a second time.
+/// The file stays on disk until the last handle releases it. Reads never look up the object again.
 /// Callers must support fallback if the selected local file becomes unavailable.
 #[derive(Clone)]
 pub(crate) struct PinCacheReadHandle {
@@ -198,7 +223,9 @@ impl PinCacheReadHandle {
                 .published()
                 .is_some_and(|file| Arc::ptr_eq(file, &self.file))
         {
-            object.take_published();
+            let file = object.take_published();
+            drop(state);
+            self.pin_cache.gc.reclaim(file);
         }
     }
 
@@ -218,6 +245,7 @@ impl PinCache {
     /// An incomplete inventory fails initialization; no partially recovered cache is returned.
     pub(crate) async fn new(
         store: ObjectStoreRef,
+        capacity: u64,
         shard_num: usize,
         objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) -> ObjectResult<Arc<Self>> {
@@ -225,8 +253,10 @@ impl PinCache {
             shard_num > 0,
             "pin cache shard count must be greater than zero"
         );
+        let gc = Arc::new(PinCacheGc::new(Arc::clone(&store), capacity));
         let mut pin_cache = Self {
             store,
+            gc,
             shards: (0..shard_num)
                 .map(|_| RwLock::new(PinCacheShard::default()))
                 .collect(),

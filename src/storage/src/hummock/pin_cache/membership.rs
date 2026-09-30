@@ -65,6 +65,7 @@ impl PinCache {
         for id in objects {
             objects_by_shard[Self::shard_index(id, self.shards.len())].push(id);
         }
+        let mut stale = Vec::new();
         for (shard, objects) in self.shards.iter().zip_eq_fast(objects_by_shard) {
             if objects.is_empty() {
                 continue;
@@ -72,10 +73,11 @@ impl PinCache {
             let mut state = shard.write();
             for id in objects {
                 if let Some(mut object) = state.objects.remove(&id) {
-                    object.take_published();
+                    stale.extend(object.take_published());
                 }
             }
         }
+        self.gc.reclaim(stale);
     }
 
     /// Whether an object is registered, regardless of whether it has a readable local file.
