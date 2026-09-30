@@ -18,8 +18,8 @@
 //! deltas. The refiller owns the ordering of these operations relative to version publication;
 //! this index does not track versions.
 //! A refill captures a `PinCacheRefillToken` with `prepare_refill` before it is queued;
-//! `refill` checks the token before I/O and again at publication. Each object has one file
-//! state: `NotCached` or `Published`. The executor owns running attempts; downloads leave the
+//! the caller checks it before I/O, and `publish` checks it atomically with the index update.
+//! Each object has one file state: `NotCached` or `Published`. The executor owns running attempts; downloads leave the
 //! index unchanged until publication. Revocation changes the admission identity; unregistering
 //! invalidates all object tokens.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
@@ -168,17 +168,6 @@ impl PinCacheRefillToken {
     pub(crate) fn object_id(&self) -> HummockSstableObjectId {
         self.object_id
     }
-}
-
-/// Describes the work performed or skipped by one refill attempt.
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) enum PinCacheRefillOutcome {
-    /// This attempt copied and validated the SST, then published its local read route.
-    Published,
-    /// A local read route already existed, so this attempt skipped the download.
-    AlreadyPublished,
-    /// This attempt is no longer eligible to publish, for example after its generation is revoked.
-    Obsolete,
 }
 
 /// A reference to one published file, retained even after its object leaves the index.

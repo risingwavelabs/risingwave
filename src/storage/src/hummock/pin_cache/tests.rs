@@ -24,7 +24,7 @@ use risingwave_object_store::object::{
     build_remote_object_store,
 };
 
-use super::{PinCache, PinCacheRefillOutcome};
+use super::PinCache;
 use crate::monitor::ObjectStoreMetrics;
 use crate::opts::StorageOpts;
 
@@ -34,11 +34,16 @@ impl PinCache {
         remote_store: ObjectStoreRef,
         remote_path: String,
         object_id: HummockSstableObjectId,
-    ) -> ObjectResult<PinCacheRefillOutcome> {
+    ) -> ObjectResult<()> {
         let token = self
             .prepare_refill(object_id)
             .expect("test object must be needed");
-        self.refill(token, remote_store, remote_path).await
+        let size = self.shard(object_id).read().objects[&object_id].size();
+        let download = self
+            .download(object_id, size, remote_store, remote_path)
+            .await?;
+        assert!(self.publish(token, download));
+        Ok(())
     }
 }
 
@@ -95,13 +100,6 @@ async fn test_read_and_unregister_lifecycle() {
         .await
         .unwrap();
     assert_eq!(
-        pin_cache
-            .pin_sst(in_memory_object_store(), "unused".into(), object_id)
-            .await
-            .unwrap(),
-        PinCacheRefillOutcome::AlreadyPublished
-    );
-    assert_eq!(
         pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
         original
     );
@@ -130,44 +128,6 @@ async fn test_read_and_unregister_lifecycle() {
 }
 
 #[tokio::test]
-async fn test_revoked_token_cannot_begin_a_late_download() {
-    let remote = in_memory_object_store();
-    remote
-        .upload("sst", Bytes::from_static(b"complete"))
-        .await
-        .unwrap();
-    let object = HummockSstableObjectId::from(911);
-    for revoke_by_unregister in [false, true] {
-        let cache = PinCache::new(in_memory_object_store(), 1, []);
-        cache.register_objects([(object, 8)]);
-        let token = cache.prepare_refill(object).unwrap();
-        assert_eq!(token.object_id(), object);
-
-        if revoke_by_unregister {
-            cache.unregister_objects([object]);
-            cache.register_objects([(object, 8)]);
-        } else {
-            cache.revoke_refill(object);
-        }
-        let replacement = cache.prepare_refill(object).unwrap();
-        assert_eq!(
-            cache
-                .refill(token, remote.clone(), "sst".into())
-                .await
-                .unwrap(),
-            PinCacheRefillOutcome::Obsolete
-        );
-        assert_eq!(
-            cache
-                .refill(replacement, remote.clone(), "sst".into())
-                .await
-                .unwrap(),
-            PinCacheRefillOutcome::Published
-        );
-    }
-}
-
-#[tokio::test]
 async fn test_failed_download_can_be_retried() {
     let remote_store = in_memory_object_store();
     let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
@@ -176,7 +136,7 @@ async fn test_failed_download_can_be_retried() {
     let token = pin_cache.prepare_refill(object_id).unwrap();
     assert!(
         pin_cache
-            .refill(token, remote_store.clone(), "sst".into())
+            .download(object_id, 8, remote_store.clone(), "sst".into())
             .await
             .is_err()
     );
@@ -186,13 +146,15 @@ async fn test_failed_download_can_be_retried() {
         .upload("sst", Bytes::from_static(b"complete"))
         .await
         .unwrap();
-    assert_eq!(
-        pin_cache
-            .refill(token, remote_store, "sst".into())
-            .await
-            .unwrap(),
-        PinCacheRefillOutcome::Published
+    let download = pin_cache
+        .download(object_id, 8, remote_store, "sst".into())
+        .await
+        .unwrap();
+    assert!(
+        pin_cache.get(object_id).is_none(),
+        "download alone must not publish"
     );
+    assert!(pin_cache.publish(token, download));
     assert!(pin_cache.get(object_id).is_some());
 }
 
@@ -284,12 +246,10 @@ async fn test_other_shard_does_not_block_object_operations() {
             assert!(cache.is_registered(available));
             assert!(cache.get(available).is_none());
             let token = cache.prepare_refill(available).unwrap();
-            assert_eq!(
-                runtime
-                    .block_on(cache.refill(token, remote, "sst".into()))
-                    .unwrap(),
-                PinCacheRefillOutcome::Published
-            );
+            let download = runtime
+                .block_on(cache.download(available, 8, remote, "sst".into()))
+                .unwrap();
+            assert!(cache.publish(token, download));
             let token = cache.prepare_refill(available).unwrap();
             cache.revoke_refill(available);
             assert_ne!(cache.prepare_refill(available), Some(token));
@@ -320,13 +280,10 @@ async fn test_object_membership_across_shards() {
         .await
         .unwrap();
     for id in objects {
-        assert_eq!(
-            cache
-                .pin_sst(remote.clone(), "sst".into(), id)
-                .await
-                .unwrap(),
-            PinCacheRefillOutcome::Published
-        );
+        cache
+            .pin_sst(remote.clone(), "sst".into(), id)
+            .await
+            .unwrap();
     }
 
     // Repeated registration preserves the publication and refill identity.

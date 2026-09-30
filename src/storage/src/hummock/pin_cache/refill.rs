@@ -20,18 +20,16 @@ use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectResult, ObjectStoreRef,
 };
 
-use super::{
-    PinCache, PinCacheFile, PinCacheObjectState, PinCacheRefillOutcome, PinCacheRefillToken,
-    PinCacheShard, allocate_generation,
-};
+use super::{PinCache, PinCacheFile, PinCacheRefillToken, PinCacheShard, allocate_generation};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
-/// Owns one unpublished file; it has no access to the cache index or refill admission.
-struct PinCacheDownloadGuard {
+/// Owns a complete, unpublished file returned by `PinCache::download`.
+/// Dropping it never changes the index. Construction and writing stay private to this module.
+pub(crate) struct PinCacheDownload {
     file: Arc<PinCacheFile>,
 }
 
-impl PinCacheDownloadGuard {
+impl PinCacheDownload {
     fn new(file: PinCacheFile) -> Self {
         Self {
             file: Arc::new(file),
@@ -121,56 +119,37 @@ impl PinCache {
         }
     }
 
-    /// Executes a queued refill using admission previously captured by this cache.
-    /// The caller must serialize attempts per object, including across token revocation.
-    /// Rechecks admission before starting a download.
-    /// A stale token skips the download. The index changes only after a successful publication.
-    pub(crate) async fn refill(
+    /// Copies and validates a whole SST without reading or changing the cache index.
+    /// The caller checks membership, ownership and cache hits before downloading, and serializes
+    /// attempts per object. Only a successful return can be submitted to `publish`.
+    pub(crate) async fn download(
         &self,
-        token: PinCacheRefillToken,
+        object_id: HummockSstableObjectId,
+        size: u64,
         remote_store: ObjectStoreRef,
         remote_path: String,
-    ) -> ObjectResult<PinCacheRefillOutcome> {
-        let size = {
-            let state = self.shard(token.object_id).read();
-            let Some(object) = state
-                .objects
-                .get(&token.object_id)
-                .filter(|object| object.generation == token.generation)
-            else {
-                return Ok(PinCacheRefillOutcome::Obsolete);
-            };
-            match object.state {
-                PinCacheObjectState::NotCached { size } => size,
-                PinCacheObjectState::Published(_) => {
-                    return Ok(PinCacheRefillOutcome::AlreadyPublished);
-                }
-            }
-        };
+    ) -> ObjectResult<PinCacheDownload> {
         let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
-        let path = format!("{}-{path_id}.sst", token.object_id.as_raw_id());
-        let download = PinCacheDownloadGuard::new(PinCacheFile { path, size });
+        let path = format!("{}-{path_id}.sst", object_id.as_raw_id());
+        let download = PinCacheDownload::new(PinCacheFile { path, size });
         let reader = remote_store
             .streaming_read(&remote_path, ..)
             .await
             .inspect_err(|_| record_io_failure("remote_read_init"))?;
-        let download = download.write(&self.store, reader).await?;
-        Ok(self.publish(token, download))
+        download.write(&self.store, reader).await
     }
 
-    /// Checks admission and installs the complete file under the same shard lock.
+    /// Installs a downloaded file only if its original admission is still current.
+    /// Returns false if the task was revoked while downloading. The caller must use the token
+    /// for this file and serialize downloads per object; an existing publication is a bug.
     /// A rejected download is dropped after the lock, so cleanup never runs while it is held.
-    fn publish(
-        &self,
-        token: PinCacheRefillToken,
-        download: PinCacheDownloadGuard,
-    ) -> PinCacheRefillOutcome {
+    pub(crate) fn publish(&self, token: PinCacheRefillToken, download: PinCacheDownload) -> bool {
         let mut state = self.shard(token.object_id).write();
         let Some(object) = state.object_for_refill(token) else {
-            return PinCacheRefillOutcome::Obsolete;
+            return false;
         };
         object.publish(download.into_file());
-        PinCacheRefillOutcome::Published
+        true
     }
 }
 
@@ -191,7 +170,7 @@ mod tests {
     use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
-    use super::{PinCache, PinCacheDownloadGuard, PinCacheFile, PinCacheRefillOutcome};
+    use super::{PinCache, PinCacheDownload, PinCacheFile};
     use crate::hummock::pin_cache::tests::{in_memory_object_store, local_object_store};
     use crate::monitor::ObjectStoreMetrics;
 
@@ -208,7 +187,7 @@ mod tests {
                 .await
                 .unwrap();
             let reader = remote.streaming_read("sst", ..).await.unwrap();
-            let old = PinCacheDownloadGuard::new(PinCacheFile {
+            let old = PinCacheDownload::new(PinCacheFile {
                 path: "1001-0.sst".into(),
                 size: 11,
             })
@@ -224,19 +203,13 @@ mod tests {
             }
             let old_path = old.file.path.clone();
             // The executor waits for the revoked attempt to finish before starting its replacement.
-            assert_eq!(
-                pin_cache.publish(token, old),
-                PinCacheRefillOutcome::Obsolete
-            );
+            assert!(!pin_cache.publish(token, old));
             assert!(pin_cache.get(object_id).is_none());
 
-            assert_eq!(
-                pin_cache
-                    .pin_sst(remote, "sst".into(), object_id)
-                    .await
-                    .unwrap(),
-                PinCacheRefillOutcome::Published
-            );
+            pin_cache
+                .pin_sst(remote, "sst".into(), object_id)
+                .await
+                .unwrap();
             assert_ne!(old_path, pin_cache.get(object_id).unwrap().file.path);
             assert_eq!(
                 pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
@@ -253,7 +226,7 @@ mod tests {
             let object_id = HummockSstableObjectId::from(1001);
             pin_cache.register_objects([(object_id, 8)]);
 
-            let download = PinCacheDownloadGuard::new(PinCacheFile {
+            let download = PinCacheDownload::new(PinCacheFile {
                 path: "1001-0.sst".into(),
                 size: 8,
             });
@@ -324,13 +297,10 @@ mod tests {
                 .upload("sst", Bytes::from_static(b"complete"))
                 .await
                 .unwrap();
-            assert_eq!(
-                pin_cache
-                    .pin_sst(remote, "sst".into(), object_id)
-                    .await
-                    .unwrap(),
-                PinCacheRefillOutcome::Published
-            );
+            pin_cache
+                .pin_sst(remote, "sst".into(), object_id)
+                .await
+                .unwrap();
         }
     }
 }
