@@ -13,11 +13,11 @@ SET streaming_parallelism = 1;
 statement ok
 CREATE TABLE t (k INT, ts INT, WATERMARK FOR ts AS ts - 10) APPEND ONLY;
 
-# The watermark column is the first dedup column, so cleaned rows are filtered out on read.
+# The watermark column is the first dedup column.
 statement ok
 CREATE MATERIALIZED VIEW mv_first AS SELECT DISTINCT ON (ts, k) ts, k FROM t;
 
-# The watermark column is not the first dedup column, so cleaned rows are removed by compaction.
+# The watermark column is the second dedup column, and the state table puts it first in the pk.
 statement ok
 CREATE MATERIALIZED VIEW mv_second AS SELECT DISTINCT ON (k, ts) k, ts FROM t;
 
@@ -25,13 +25,9 @@ let first_tname
 SELECT name FROM rw_catalog.rw_internal_table_info
 WHERE job_name = 'mv_first' AND name LIKE '%appendonlydedup%';
 
-let second_tid, second_tname
-SELECT id, name FROM rw_catalog.rw_internal_table_info
+let second_tname
+SELECT name FROM rw_catalog.rw_internal_table_info
 WHERE job_name = 'mv_second' AND name LIKE '%appendonlydedup%';
-
-let second_cgid
-SELECT id FROM rw_catalog.rw_hummock_compaction_group_configs
-WHERE member_tables @> ('[' || $second_tid || ']')::jsonb;
 
 statement ok
 INSERT INTO t VALUES (1, 1), (2, 2), (1, 1);
@@ -48,7 +44,7 @@ SELECT t_k, t_ts FROM ${second_tname};
 1 1
 2 2
 
-# Advance the watermark to 20.
+# Advance the watermark to 20. Rows below it are cleaned and no longer visible in the state.
 statement ok
 INSERT INTO t VALUES (3, 30);
 
@@ -56,9 +52,6 @@ query II rowsort retry 30 backoff 1s
 SELECT t_ts, t_k FROM ${first_tname};
 ----
 30 3
-
-system ok
-./risedev ctl hummock trigger-manual-compaction --exclusive -c "$second_cgid" -t "$second_tid" -l 0,6
 
 query II rowsort retry 30 backoff 1s
 SELECT t_k, t_ts FROM ${second_tname};

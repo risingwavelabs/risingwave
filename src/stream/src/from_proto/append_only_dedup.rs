@@ -42,10 +42,16 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
             .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
+        // Unlike the stream key, the dedup columns are in the pk order of the state table.
+        let dedup_cols = node
+            .dedup_column_indices
+            .iter()
+            .map(|&idx| idx as usize)
+            .collect();
         let exec = AppendOnlyDedupExecutor::new(
             params.actor_context,
             input,
-            params.info.stream_key.clone(), /* TODO(rc): should change to use `dedup_column_indices`, but need to check backward compatibility */
+            dedup_cols,
             state_table,
             params.watermark_epoch,
             params.executor_stats.clone(),
