@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -21,7 +19,7 @@ use risingwave_object_store::object::ObjectStoreRef;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
-use super::{Ordering, PinCacheFile, metric_bytes};
+use super::metric_bytes;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
 // Match the maximum delete batch size used by Hummock GC.
@@ -29,12 +27,19 @@ const DELETE_BATCH_SIZE: usize = 1000;
 
 #[derive(Default)]
 struct PinCacheGcState {
-    // Reservations that can be released by deleting their final paths.
-    accounted_paths: HashMap<String, u64>,
     // Total of path reservations and uncertain bytes.
     accounted_bytes: u64,
     // A subset of accounted_bytes, retained until a new cache inventories the actual files.
     uncertain_bytes: u64,
+}
+
+impl PinCacheGcState {
+    fn release(&mut self, bytes: u64) {
+        self.accounted_bytes = self.accounted_bytes.saturating_sub(bytes);
+        GLOBAL_PIN_CACHE_METRICS
+            .accounted_bytes
+            .set(metric_bytes(self.accounted_bytes));
+    }
 }
 
 /// Owns physical-path accounting and reclamation. Callers must withdraw routes first.
@@ -42,8 +47,9 @@ pub(super) struct PinCacheGc {
     capacity: u64,
     // Leaf lock: accounting must not call back into PinCache or the executor, or perform I/O.
     state: Arc<Mutex<PinCacheGcState>>,
-    // Pending paths, not tasks. Their reservations remain charged until deletion succeeds.
-    reclaim_tx: mpsc::UnboundedSender<String>,
+    // Each retired file's final owner submits its path and reservation exactly once.
+    // Pending reservations remain charged until deletion succeeds.
+    reclaim_tx: mpsc::UnboundedSender<(String, u64)>,
 }
 
 impl PinCacheGc {
@@ -69,27 +75,23 @@ impl PinCacheGc {
         }
     }
 
-    pub(super) fn account_existing(&self, entry: &PinCacheFile) {
+    /// Accounts one file from the startup inventory, which lists each physical path once.
+    pub(super) fn account_existing(&self, size: u64) {
         let mut state = self.state.lock();
-        if let Entry::Vacant(slot) = state.accounted_paths.entry(entry.path.clone()) {
-            slot.insert(entry.size);
-            state.accounted_bytes = state.accounted_bytes.saturating_add(entry.size);
-            GLOBAL_PIN_CACHE_METRICS
-                .accounted_bytes
-                .set(metric_bytes(state.accounted_bytes));
-        }
+        state.accounted_bytes = state.accounted_bytes.saturating_add(size);
+        GLOBAL_PIN_CACHE_METRICS
+            .accounted_bytes
+            .set(metric_bytes(state.accounted_bytes));
     }
 
-    pub(super) fn try_reserve(&self, entry: &PinCacheFile) -> Result<(), u64> {
+    pub(super) fn try_reserve(&self, size: u64) -> Result<(), u64> {
         let mut state = self.state.lock();
-        let Some(accounted_bytes) = state.accounted_bytes.checked_add(entry.size) else {
+        let Some(accounted_bytes) = state.accounted_bytes.checked_add(size) else {
             return Err(state.accounted_bytes);
         };
         if accounted_bytes > self.capacity {
             return Err(state.accounted_bytes);
         }
-        let old = state.accounted_paths.insert(entry.path.clone(), entry.size);
-        debug_assert!(old.is_none(), "pin-cache paths must be unique");
         state.accounted_bytes = accounted_bytes;
         GLOBAL_PIN_CACHE_METRICS
             .accounted_bytes
@@ -97,27 +99,24 @@ impl PinCacheGc {
         Ok(())
     }
 
-    pub(super) fn mark_uncertain(&self, entry: &PinCacheFile) {
+    /// Returns a reservation only when no local upload has started.
+    pub(super) fn release_unused(&self, size: u64) {
+        self.state.lock().release(size);
+    }
+
+    /// Called once by an unfinished download; its reservation must not also be enqueued.
+    pub(super) fn mark_uncertain(&self, size: u64) {
         let mut state = self.state.lock();
-        // Detach the reservation from its final path without releasing capacity. Deleting that
-        // path cannot reclaim backend-owned temporary files; only startup can inventory them.
-        if let Some(size) = state.accounted_paths.remove(&entry.path) {
-            state.uncertain_bytes = state.uncertain_bytes.saturating_add(size);
-            GLOBAL_PIN_CACHE_METRICS
-                .uncertain_bytes
-                .set(metric_bytes(state.uncertain_bytes));
-        }
+        // The unfinished download relinquishes its reservation without releasing capacity.
+        // Its final path cannot reclaim backend-owned temporary files; startup inventories them.
+        state.uncertain_bytes = state.uncertain_bytes.saturating_add(size);
+        GLOBAL_PIN_CACHE_METRICS
+            .uncertain_bytes
+            .set(metric_bytes(state.uncertain_bytes));
     }
 
-    pub(super) fn reclaim(&self, files: impl IntoIterator<Item = Arc<PinCacheFile>>) {
-        for file in files {
-            // The final file reference submits deletion; outstanding readers keep it on disk.
-            file.retired.store(true, Ordering::Relaxed);
-        }
-    }
-
-    pub(super) fn enqueue(&self, path: String) {
-        if self.reclaim_tx.send(path).is_err() {
+    pub(super) fn enqueue(&self, path: String, size: u64) {
+        if self.reclaim_tx.send((path, size)).is_err() {
             GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
             tracing::warn!("pin cache GC worker stopped; keeping files accounted until recovery");
         }
@@ -126,11 +125,17 @@ impl PinCacheGc {
     async fn run(
         store: ObjectStoreRef,
         state: Arc<Mutex<PinCacheGcState>>,
-        mut receiver: mpsc::UnboundedReceiver<String>,
+        mut receiver: mpsc::UnboundedReceiver<(String, u64)>,
     ) {
+        let mut files = Vec::with_capacity(DELETE_BATCH_SIZE);
         let mut paths = Vec::with_capacity(DELETE_BATCH_SIZE);
-        while receiver.recv_many(&mut paths, DELETE_BATCH_SIZE).await != 0 {
-            Self::reclaim_batch(&store, &state, &paths).await;
+        while receiver.recv_many(&mut files, DELETE_BATCH_SIZE).await != 0 {
+            let mut bytes = 0_u64;
+            for (path, size) in files.drain(..) {
+                paths.push(path);
+                bytes = bytes.saturating_add(size);
+            }
+            Self::reclaim_batch(&store, &state, &paths, bytes).await;
             paths.clear();
         }
     }
@@ -139,9 +144,12 @@ impl PinCacheGc {
         store: &ObjectStoreRef,
         state: &Mutex<PinCacheGcState>,
         paths: &[String],
+        bytes: u64,
     ) {
         match store.delete_objects(paths).await {
-            Ok(()) => Self::finish_delete(state, paths),
+            Ok(()) => {
+                state.lock().release(bytes);
+            }
             Err(error) => {
                 GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
                 tracing::warn!(
@@ -151,21 +159,6 @@ impl PinCacheGc {
                 );
             }
         }
-    }
-
-    fn finish_delete(state: &Mutex<PinCacheGcState>, paths: &[String]) {
-        for path in paths {
-            // Release accounting between paths so capacity reservations can proceed during
-            // a large deletion batch. Refills reserve capacity without holding a shard lock.
-            let mut state = state.lock();
-            if let Some(size) = state.accounted_paths.remove(path) {
-                state.accounted_bytes = state.accounted_bytes.saturating_sub(size);
-            }
-        }
-        let state = state.lock();
-        GLOBAL_PIN_CACHE_METRICS
-            .accounted_bytes
-            .set(metric_bytes(state.accounted_bytes));
     }
 }
 
@@ -177,9 +170,9 @@ pub(super) mod tests {
     use parking_lot::Mutex;
     use tokio::sync::mpsc;
 
-    use super::super::PinCache;
     use super::super::test_utils::{in_memory_object_store, local_object_store};
-    use super::{DELETE_BATCH_SIZE, PinCacheFile, PinCacheGc, PinCacheGcState};
+    use super::super::{PinCache, PinCacheFile};
+    use super::{DELETE_BATCH_SIZE, PinCacheGc, PinCacheGcState};
 
     pub(in crate::hummock::pin_cache) fn accounted_bytes(gc: &PinCacheGc) -> u64 {
         gc.state.lock().accounted_bytes
@@ -198,91 +191,70 @@ pub(super) mod tests {
     #[tokio::test]
     async fn test_failed_deletion_keeps_capacity_reserved() {
         let (dir, local_store) = local_object_store().await;
-        let gc = Arc::new(PinCacheGc::new(local_store.clone(), 8));
+        let gc = Arc::new(PinCacheGc::new(local_store.clone(), 16));
         let entry = Arc::new(PinCacheFile::new("1001-42.sst".into(), 8, Arc::clone(&gc)));
         // A nonempty directory at the exact object path makes FS deletion fail,
         // including when the test runs as root (unlike permission-based failures).
         let path = dir.path().join(&entry.path);
         std::fs::create_dir(&path).unwrap();
         std::fs::write(path.join("child"), b"complete").unwrap();
-        gc.try_reserve(&entry).unwrap();
-        PinCacheGc::reclaim_batch(&local_store, &gc.state, std::slice::from_ref(&entry.path)).await;
+        gc.try_reserve(entry.size).unwrap();
+        PinCacheGc::reclaim_batch(
+            &local_store,
+            &gc.state,
+            std::slice::from_ref(&entry.path),
+            entry.size,
+        )
+        .await;
 
         assert!(path.join("child").exists());
         {
             let state = gc.state.lock();
             assert_eq!(state.accounted_bytes, 8);
-            assert_eq!(state.accounted_paths[&entry.path], 8);
             assert_eq!(state.uncertain_bytes, 0);
         }
-        let replacement = PinCacheFile::new("1002-43.sst".into(), 8, Arc::clone(&gc));
-        assert_eq!(gc.try_reserve(&replacement), Err(8));
-
-        // A later successful deletion is the only event that may release this reservation.
-        std::fs::remove_file(path.join("child")).unwrap();
-        std::fs::remove_dir(&path).unwrap();
-        PinCacheGc::reclaim_batch(&local_store, &gc.state, std::slice::from_ref(&entry.path)).await;
-        assert_eq!(gc.state.lock().accounted_bytes, 0);
+        // A successful later batch releases only its own reservation, not the failed batch's.
+        let complete = PinCacheFile::new("1002-43.sst".into(), 8, Arc::clone(&gc));
+        gc.try_reserve(complete.size).unwrap();
+        local_store
+            .upload(&complete.path, Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+        PinCacheGc::reclaim_batch(
+            &local_store,
+            &gc.state,
+            std::slice::from_ref(&complete.path),
+            complete.size,
+        )
+        .await;
+        assert!(path.join("child").exists());
+        assert_eq!(gc.state.lock().accounted_bytes, 8);
         assert_eq!(gc.state.lock().uncertain_bytes, 0);
-        gc.try_reserve(&replacement).unwrap();
+        assert_eq!(gc.try_reserve(9), Err(8));
     }
 
     #[tokio::test]
-    async fn test_final_path_deletion_keeps_uncertain_capacity_reserved() {
-        for final_path_exists in [false, true] {
-            let (dir, local_store) = local_object_store().await;
-            let gc = Arc::new(PinCacheGc::new(local_store.clone(), 16));
-            let entry = Arc::new(PinCacheFile::new("1001-42.sst".into(), 8, Arc::clone(&gc)));
-            if final_path_exists {
-                local_store
-                    .upload(&entry.path, Bytes::from_static(b"complete"))
-                    .await
-                    .unwrap();
-            }
-            // Model an orphan whose path is not known to the download guard.
-            let temporary_path = dir.path().join("orphan.tmp");
-            std::fs::write(&temporary_path, b"half").unwrap();
-            gc.try_reserve(&entry).unwrap();
-            gc.mark_uncertain(&entry);
-            gc.mark_uncertain(&entry);
+    async fn test_reclamation_keeps_uncertain_capacity_reserved() {
+        let local_store = in_memory_object_store();
+        let gc = PinCacheGc::new(local_store.clone(), 16);
+        gc.try_reserve(8).unwrap();
+        gc.mark_uncertain(8);
 
-            // Normal reclamation must release only its own reservation, leaving uncertain debt.
-            let complete = Arc::new(PinCacheFile::new("1002-43.sst".into(), 8, Arc::clone(&gc)));
-            gc.try_reserve(&complete).unwrap();
-            local_store
-                .upload(&complete.path, Bytes::from_static(b"complete"))
-                .await
-                .unwrap();
-            PinCacheGc::reclaim_batch(
-                &local_store,
-                &gc.state,
-                std::slice::from_ref(&complete.path),
-            )
-            .await;
+        // Normal reclamation releases only its own reservation, leaving uncertain debt.
+        gc.try_reserve(8).unwrap();
+        let path = "1002-43.sst".to_owned();
+        local_store
+            .upload(&path, Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+        PinCacheGc::reclaim_batch(&local_store, &gc.state, &[path], 8).await;
 
-            for _ in 0..2 {
-                PinCacheGc::reclaim_batch(
-                    &local_store,
-                    &gc.state,
-                    std::slice::from_ref(&entry.path),
-                )
-                .await;
-                assert!(
-                    local_store
-                        .metadata(&entry.path)
-                        .await
-                        .unwrap_err()
-                        .is_object_not_found_error()
-                );
-                assert!(temporary_path.exists());
-                let state = gc.state.lock();
-                assert_eq!(state.accounted_bytes, 8);
-                assert_eq!(state.uncertain_bytes, 8);
-                assert!(state.accounted_paths.is_empty());
-            }
-            let replacement = PinCacheFile::new("1003-44.sst".into(), 9, Arc::clone(&gc));
-            assert_eq!(gc.try_reserve(&replacement), Err(8));
+        {
+            let state = gc.state.lock();
+            assert_eq!(state.accounted_bytes, 8);
+            assert_eq!(state.uncertain_bytes, 8);
         }
+        assert_eq!(gc.try_reserve(9), Err(8));
     }
 
     #[tokio::test]
@@ -291,24 +263,30 @@ pub(super) mod tests {
         let state = Arc::new(Mutex::new(PinCacheGcState::default()));
         let (reclaim_tx, reclaim_rx) = mpsc::unbounded_channel();
         let gc = Arc::new(PinCacheGc {
-            capacity: (DELETE_BATCH_SIZE + 1) as u64,
+            capacity: (0..=DELETE_BATCH_SIZE)
+                .map(|id| (id % 7 + 1) as u64)
+                .sum::<u64>()
+                + 7,
             state: state.clone(),
             reclaim_tx,
         });
+        // Keep a reservation outside the queue to detect an over-release across batches.
+        gc.try_reserve(7).unwrap();
         // Queue more than one batch before starting the worker. Pending files must still
         // consume capacity, and closing the queue must not discard the final partial batch.
         for id in 0..=DELETE_BATCH_SIZE {
-            let entry = Arc::new(PinCacheFile::new(format!("{id}-1.sst"), 1, Arc::clone(&gc)));
+            let size = id % 7 + 1;
+            let entry = PinCacheFile::new(format!("{id}-1.sst"), size as u64, Arc::clone(&gc));
             local_store
-                .upload(&entry.path, Bytes::from_static(b"x"))
+                .upload(&entry.path, Bytes::from(vec![b'x'; size]))
                 .await
                 .unwrap();
-            gc.try_reserve(&entry).unwrap();
-            gc.reclaim([entry]);
+            gc.try_reserve(entry.size).unwrap();
+            entry.retire();
+            // Repeated retirement still submits exactly one deletion when the owner drops.
+            entry.retire();
         }
-        let replacement = PinCacheFile::new("replacement".into(), 1, Arc::clone(&gc));
-        assert_eq!(gc.try_reserve(&replacement), Err(gc.capacity));
-        drop(replacement);
+        assert_eq!(gc.try_reserve(1), Err(gc.capacity));
         drop(gc);
         tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -316,8 +294,7 @@ pub(super) mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(state.lock().accounted_bytes, 0);
-        assert!(state.lock().accounted_paths.is_empty());
+        assert_eq!(state.lock().accounted_bytes, 7);
         for id in 0..=DELETE_BATCH_SIZE {
             assert!(
                 local_store
