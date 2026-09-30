@@ -235,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn test_revoked_download_cannot_publish_and_replacement_can_retry() {
         for revoke_by_unregister in [false, true] {
-            let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX, 1, [])
+            let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX, 1, 2, [])
                 .await
                 .unwrap();
             let object_id = HummockSstableObjectId::from(1001);
@@ -292,7 +292,9 @@ mod tests {
     async fn test_interrupted_fs_upload_keeps_capacity_until_recovery() {
         for cancel in [false, true] {
             let (_dir, local_store) = local_object_store().await;
-            let pin_cache = PinCache::new(local_store.clone(), 8, 1, []).await.unwrap();
+            let pin_cache = PinCache::new(local_store.clone(), 8, 1, 2, [])
+                .await
+                .unwrap();
             let object_id = HummockSstableObjectId::from(1001);
             pin_cache.register_objects([(object_id, 8)]);
 
@@ -381,7 +383,7 @@ mod tests {
             assert_eq!(accounted_bytes(&pin_cache.gc), 8);
             drop(pin_cache);
 
-            let recovered = PinCache::new(local_store.clone(), 8, 1, [(object_id, 8)])
+            let recovered = PinCache::new(local_store.clone(), 8, 1, 2, [(object_id, 8)])
                 .await
                 .unwrap();
 
