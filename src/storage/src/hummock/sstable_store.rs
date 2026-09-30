@@ -1537,7 +1537,9 @@ mod tests {
         let sst = sstable_store.sstable(&info, &mut stats).await.unwrap();
 
         let local_store = mock_sstable_store().await.store();
-        let pin_cache = PinCache::new(local_store, u64::MAX, 1, []).await.unwrap();
+        let pin_cache = PinCache::new(local_store, u64::MAX, 1, 2, [])
+            .await
+            .unwrap();
         sstable_store.set_pin_cache(pin_cache.clone());
         let remote_path = sstable_store.get_sst_data_path(info.object_id);
         let remote_size = sstable_store
@@ -1634,7 +1636,7 @@ mod tests {
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
         sstable_store.clear_block_cache().await.unwrap();
-        let pin_cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, [])
+        let pin_cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, 2, [])
             .await
             .unwrap();
         sstable_store.set_pin_cache(pin_cache.clone());
@@ -1687,7 +1689,7 @@ mod tests {
     #[tokio::test]
     async fn test_compactor_stream_ignores_published_pin() {
         let sstable_store = mock_sstable_store().await;
-        let pin_cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, [])
+        let pin_cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, 2, [])
             .await
             .unwrap();
         sstable_store.set_pin_cache(pin_cache.clone());
@@ -1731,7 +1733,7 @@ mod tests {
     async fn test_pin_meta_route_is_fixed_and_decode_failure_falls_back() {
         let sstable_store = mock_sstable_store().await;
         let local_store = mock_sstable_store().await.store();
-        let pin_cache = PinCache::new(local_store.clone(), u64::MAX, 1, [])
+        let pin_cache = PinCache::new(local_store.clone(), u64::MAX, 1, 2, [])
             .await
             .unwrap();
         sstable_store.set_pin_cache(pin_cache.clone());
@@ -1817,7 +1819,7 @@ mod tests {
     async fn test_truncated_pinned_meta_falls_back_to_remote() {
         let sstable_store = mock_sstable_store().await;
         let local_store = mock_sstable_store().await.store();
-        let pin_cache = PinCache::new(local_store.clone(), u64::MAX, 1, [])
+        let pin_cache = PinCache::new(local_store.clone(), u64::MAX, 1, 2, [])
             .await
             .unwrap();
         sstable_store.set_pin_cache(pin_cache.clone());
@@ -1904,7 +1906,7 @@ mod tests {
         let sst = sstable_store.sstable(&info, &mut stats).await.unwrap();
 
         let local_store = mock_sstable_store().await.store();
-        let pin_cache = PinCache::new(local_store.clone(), u64::MAX, 1, [])
+        let pin_cache = PinCache::new(local_store.clone(), u64::MAX, 1, 2, [])
             .await
             .unwrap();
         sstable_store.set_pin_cache(pin_cache.clone());
