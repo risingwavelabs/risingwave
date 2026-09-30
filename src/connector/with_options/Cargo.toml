@@ -12,7 +12,7 @@ proc-macro = true
 
 [dependencies]
 quote = "1"
-syn = "2"
+syn = "3"
 
 [dev-dependencies]
 
