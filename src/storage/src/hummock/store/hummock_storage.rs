@@ -235,6 +235,7 @@ impl HummockStorage {
                 store,
                 (options.pin_cache_capacity_mb as u64).saturating_mul(1 << 20),
                 options.pin_cache_shard_num,
+                options.pin_cache_recover_concurrency,
                 PinCacheRefillController::pinned_ssts(&pinned_version, &pinned_tables)
                     .map(|sst| (sst.object_id, sst.file_size)),
             )

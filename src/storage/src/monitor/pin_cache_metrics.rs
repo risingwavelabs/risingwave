@@ -84,18 +84,6 @@ impl PinCacheMetrics {
         )
         .unwrap();
 
-        for phase in [
-            "remote_read_init",
-            "remote_read",
-            "local_upload_init",
-            "local_upload_write",
-            "local_upload_finish",
-            "local_metadata",
-            "size_validation",
-        ] {
-            let _ = io_failures.with_label_values(&[phase]);
-        }
-
         Self {
             io_failures,
             accounted_bytes: capacity_bytes.with_label_values(&["accounted"]),

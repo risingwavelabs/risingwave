@@ -1567,7 +1567,7 @@ mod tests {
     }
 
     async fn pin_cache_for_test() -> Arc<PinCache> {
-        PinCache::new(in_memory_object_store(), u64::MAX, 1, [])
+        PinCache::new(in_memory_object_store(), u64::MAX, 1, 2, [])
             .await
             .unwrap()
     }
@@ -3457,6 +3457,7 @@ mod tests {
             local_store,
             u64::MAX,
             1,
+            2,
             [
                 (recovered.object_id, recovered.file_size),
                 (missing.object_id, missing.file_size),
@@ -3575,6 +3576,7 @@ mod tests {
             in_memory_object_store(),
             blocker.file_size.max(target.file_size),
             1,
+            2,
             [],
         )
         .await

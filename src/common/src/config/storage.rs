@@ -340,6 +340,11 @@ pub struct CacheConfig {
     #[serde(default = "default::storage::pin_cache_shard_num")]
     pub pin_cache_shard_num: usize,
 
+    /// Maximum number of concurrent Pin Cache index recovery tasks. Must be greater than zero.
+    /// This does not control file listing or metadata I/O concurrency.
+    #[serde(default = "default::storage::pin_cache_recover_concurrency")]
+    pub pin_cache_recover_concurrency: usize,
+
     #[serde(default = "default::storage::vector_block_cache_capacity_mb")]
     pub vector_block_cache_capacity_mb: usize,
     #[serde(default = "default::storage::vector_block_cache_shard_num")]
@@ -1161,6 +1166,10 @@ pub mod default {
 
         pub fn pin_cache_shard_num() -> usize {
             64
+        }
+
+        pub fn pin_cache_recover_concurrency() -> usize {
+            8
         }
 
         pub fn vector_block_cache_capacity_mb() -> usize {

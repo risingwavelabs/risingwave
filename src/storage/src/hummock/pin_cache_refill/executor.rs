@@ -682,6 +682,7 @@ mod tests {
             mock_sstable_store().await.store(),
             info.file_size,
             1,
+            2,
             [(object, info.file_size)],
         )
         .await
@@ -711,7 +712,7 @@ mod tests {
     #[tokio::test]
     async fn test_failed_admission_is_sticky_for_identical_tickets_and_reset_clears_debt() {
         let store = mock_sstable_store().await;
-        let cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, [])
+        let cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, 2, [])
             .await
             .unwrap();
         let object = HummockSstableObjectId::from(870);
@@ -768,7 +769,7 @@ mod tests {
     async fn test_revoked_work_is_not_reused_after_membership_replacement() {
         for resubmit in [false, true] {
             let store = mock_sstable_store().await;
-            let cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, [])
+            let cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, 2, [])
                 .await
                 .unwrap();
             let (_, info) = gen_test_sstable(
@@ -867,7 +868,7 @@ mod tests {
     #[tokio::test]
     async fn test_pin_executor_uses_bounded_parallelism() {
         let store = mock_sstable_store().await;
-        let cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, [])
+        let cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, 2, [])
             .await
             .unwrap();
         let mut objects = HashMap::new();
