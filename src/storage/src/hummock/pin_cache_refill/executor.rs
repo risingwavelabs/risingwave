@@ -253,7 +253,8 @@ impl State {
 }
 
 /// A bounded object executor, not a version queue. Version deadlines only drop tickets;
-/// this worker continues owning open uploads and retries live-owned failed admissions.
+/// this worker continues owning open uploads and retries live-owned I/O failures.
+/// Capacity rejection completes the attempt without retrying or waiting for GC.
 #[derive(Clone)]
 pub(super) struct PinCacheRefillExecutor {
     // Lock order: executor state -> PinCache shard. PinCache never calls back into this lock.
@@ -594,7 +595,13 @@ impl PinCacheRefillExecutor {
                                 let _ = work.completion.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
                                 false
                             },
-                            Ok(Ok(CapacityRejected)) => true,
+                            Ok(Ok(CapacityRejected)) => {
+                                // Cache pressure must not keep a refill admission alive. Report
+                                // fallback to the version gate and let version application retire
+                                // old files; a later explicit submission may attempt this object again.
+                                work.completion.store(2, Ordering::Release);
+                                false
+                            },
                             Ok(Err(PinCacheRefillError { phase, error })) => {
                                 REFILL_FAILURES.with_label_values(&[phase]).inc();
                                 tracing::warn!(
@@ -707,6 +714,57 @@ mod tests {
             refill_pin_cache_object(&store, &projections, &HashMap::new(), token).await,
             Ok(NotOwned(Some(_)))
         ));
+    }
+
+    #[tokio::test]
+    async fn test_capacity_rejection_finishes_without_retry_debt() {
+        let store = mock_sstable_store().await;
+        let (_, info) = gen_test_sstable(
+            default_builder_opt_for_test(),
+            874,
+            std::iter::once((
+                FullKey::new(
+                    TableId::default(),
+                    TableKey(iterator_test_table_key_of(0)),
+                    test_epoch(1),
+                ),
+                HummockValue::put(vec![1]),
+            )),
+            store.clone(),
+        )
+        .await;
+        let object = info.object_id;
+        let cache = PinCache::new(
+            mock_sstable_store().await.store(),
+            info.file_size - 1,
+            1,
+            2,
+            [(object, info.file_size)],
+        )
+        .await
+        .unwrap();
+        store.set_pin_cache(cache.clone());
+        let executor = PinCacheRefillExecutor::new(store, Arc::new(Semaphore::new(1)));
+        let ticket = executor.submit(PinCacheRefillPlan {
+            objects: [(object, vec![info])].into(),
+            ownership: Arc::new(
+                [(
+                    TableId::default(),
+                    Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+                )]
+                .into(),
+            ),
+        });
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), ticket.wait())
+                .await
+                .unwrap()
+        );
+        assert!(cache.get(object).is_none());
+        assert!(cache.is_registered(object));
+        let state = executor.state.lock();
+        assert!(state.objects.is_empty() && state.schedule.is_empty());
+        assert_eq!(state.backlog, [[0; 2]; 3]);
     }
 
     #[tokio::test]

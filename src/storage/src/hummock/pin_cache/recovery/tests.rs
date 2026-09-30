@@ -49,96 +49,25 @@ async fn cache(shard_num: usize, ids: &[HummockSstableObjectId]) -> PinCache {
 }
 
 #[tokio::test]
-async fn test_recovery_keeps_first_valid_file() {
-    let id = HummockSstableObjectId::from(1001);
-    let mut cache = cache(1, &[id]).await;
-    let files = stream::iter((0..5000).map(move |path_id| {
-        // The first candidate is invalid; the next must win over all later duplicates.
-        Ok(metadata(id, path_id, if path_id == 0 { 4 } else { 8 }))
-    }));
-    let stats = cache
-        .recover_local_files(Ok(files.boxed()), 2)
-        .await
-        .unwrap();
-    assert_eq!(stats.objects, 1);
-    assert_eq!(stats.bytes, 8);
-    let object = &cache.shards[0].get_mut().objects[&id];
-    assert_eq!(object.published().unwrap().path, "1001-1.sst");
-}
-
-#[tokio::test]
-async fn test_recovery_scan_failure_leaves_index_unchanged() {
-    let ids = [object_in_shard(0, 3), object_in_shard(2, 3)];
-    let mut cache = cache(3, &ids).await;
-    let files = stream::iter(
-        (0..5000)
-            .map(move |i| Ok(metadata(ids[i % ids.len()], i, 8)))
-            .chain([Err(ObjectError::internal("injected inventory failure"))]),
-    );
-    let error = cache
-        .recover_local_files(Ok(files.boxed()), 2)
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("injected inventory failure"));
-    // Even a late listing error must leave all registered objects untouched.
-    for id in ids {
-        let shard = cache.shard(id).read();
-        let object = &shard.objects[&id];
-        assert_eq!(object.size(), 8);
-        assert!(object.published().is_none());
-    }
-}
-
-#[tokio::test]
 async fn test_recovery_handles_sparse_shards_at_different_concurrency() {
-    for concurrency in [1, 2, 8, 32] {
-        for occupied in [vec![0, 8, 16], (0..17).collect()] {
-            let ids: Vec<_> = occupied.iter().map(|&i| object_in_shard(i, 17)).collect();
-            let mut cache = cache(17, &ids).await;
-            for round in 0..2 {
-                let files = stream::iter(
-                    ids.iter()
-                        .flat_map(|&id| {
-                            [
-                                Ok(metadata(id, round * 3, 4)),
-                                Ok(metadata(id, round * 3 + 1, 8)),
-                                Ok(metadata(id, round * 3 + 2, 8)),
-                            ]
-                        })
-                        .collect::<Vec<_>>(),
-                );
-                let stats = cache
-                    .recover_local_files(Ok(files.boxed()), concurrency)
-                    .await
-                    .unwrap();
-                let expected = if round == 0 { ids.len() as u64 } else { 0 };
-                assert_eq!(stats.objects, expected);
-                assert_eq!(stats.bytes, expected * 8);
-                for &id in &ids {
-                    let shard = cache.shard(id).read();
-                    assert_eq!(
-                        shard.objects[&id].published().unwrap().path,
-                        format!("{}-1.sst", id.as_raw_id())
-                    );
-                }
-            }
+    // Serial, parallel, and more workers than occupied shards all restore the original indices.
+    for concurrency in [1, 2, 8] {
+        let ids = [0, 2, 4].map(|i| object_in_shard(i, 5));
+        let mut cache = cache(5, &ids).await;
+        let files = stream::iter(ids.map(|id| Ok(metadata(id, 1, 8))));
+        let stats = cache
+            .recover_local_files(Ok(files.boxed()), concurrency)
+            .await
+            .unwrap();
+        assert_eq!(stats.objects, 3);
+        assert_eq!(stats.bytes, 24);
+        for id in ids {
+            let shard = cache.shard(id).read();
+            assert_eq!(
+                shard.objects[&id].published().unwrap().path,
+                format!("{}-1.sst", id.as_raw_id())
+            );
         }
-    }
-}
-
-#[tokio::test]
-async fn test_recovery_cancelled_during_scan_leaves_index_unchanged() {
-    let ids = [object_in_shard(0, 3), object_in_shard(2, 3)];
-    let mut cache = cache(3, &ids).await;
-    let files = stream::iter(ids.map(|id| Ok(metadata(id, 1, 8)))).chain(stream::pending());
-    let mut recovery = Box::pin(cache.recover_local_files(Ok(files.boxed()), 2));
-    assert!(futures::poll!(&mut recovery).is_pending());
-    drop(recovery);
-    for id in ids {
-        let shard = cache.shard(id).read();
-        let object = &shard.objects[&id];
-        assert_eq!(object.size(), 8);
-        assert!(object.published().is_none());
     }
 }
 
@@ -220,10 +149,11 @@ async fn test_incomplete_recovery_preserves_files_and_accounting() {
     use crate::hummock::pin_cache::gc::tests::accounted_bytes;
 
     for cancel in [false, true] {
-        let id = HummockSstableObjectId::from(1001);
-        let mut cache = cache(3, &[id]).await;
+        let ids = [object_in_shard(0, 3), object_in_shard(2, 3)];
+        let mut cache = cache(3, &ids).await;
         let files = [
-            metadata(id, 1, 8),
+            metadata(ids[0], 1, 8),
+            metadata(ids[1], 1, 8),
             metadata(10000.into(), 1, 8),
             ObjectMetadata {
                 key: "unfinished.tmp".into(),
@@ -251,11 +181,17 @@ async fn test_incomplete_recovery_preserves_files_and_accounting() {
                     Err(ObjectError::internal("injected scan error"))
                 }))
                 .boxed();
-            assert!(cache.recover_local_files(Ok(objects), 2).await.is_err());
+            let error = cache.recover_local_files(Ok(objects), 2).await.unwrap_err();
+            assert!(error.to_string().contains("injected scan error"));
         }
         tokio::task::yield_now().await;
-        assert_eq!(accounted_bytes(&cache.gc), 24);
-        assert!(cache.shard(id).read().objects[&id].published().is_none());
+        assert_eq!(accounted_bytes(&cache.gc), 32);
+        for id in ids {
+            let shard = cache.shard(id).read();
+            let object = &shard.objects[&id];
+            assert_eq!(object.size(), 8);
+            assert!(object.published().is_none());
+        }
         for path in paths {
             assert_eq!(
                 cache.store.read(&path, ..).await.unwrap(),

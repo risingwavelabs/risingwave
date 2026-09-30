@@ -70,12 +70,17 @@ impl PinCacheFile {
             retired: AtomicBool::new(false),
         }
     }
+
+    /// Marks this file for deletion after its final owner releases it.
+    fn retire(&self) {
+        self.retired.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Drop for PinCacheFile {
     fn drop(&mut self) {
         if *self.retired.get_mut() {
-            self.gc.enqueue(std::mem::take(&mut self.path));
+            self.gc.enqueue(std::mem::take(&mut self.path), self.size);
         }
     }
 }
@@ -224,9 +229,9 @@ impl PinCacheReadHandle {
                 .published()
                 .is_some_and(|file| Arc::ptr_eq(file, &self.file))
         {
-            let file = object.take_published();
+            let file = object.take_published().unwrap();
             drop(state);
-            self.pin_cache.gc.reclaim(file);
+            file.retire();
         }
     }
 
