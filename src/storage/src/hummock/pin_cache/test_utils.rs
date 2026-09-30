@@ -44,7 +44,7 @@ pub(in crate::hummock) async fn download_and_publish_for_test(
     Ok(())
 }
 
-pub(super) fn in_memory_object_store() -> ObjectStoreRef {
+pub(in crate::hummock) fn in_memory_object_store() -> ObjectStoreRef {
     Arc::new(ObjectStoreImpl::InMem(
         InMemObjectStore::for_test().monitored(
             Arc::new(ObjectStoreMetrics::unused()),
