@@ -700,6 +700,8 @@ impl CacheRefiller {
             .await
             {
                 Ok(true) => RefillBatchOutcome::Ready,
+                // A failed refill (including capacity rejection) must still release the
+                // version batch so obsolete files can retire after version application.
                 Ok(false) => RefillBatchOutcome::DegradedError,
                 Err(_) => RefillBatchOutcome::DegradedTimeout,
             }
@@ -3575,7 +3577,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pin_capacity_debt_recovers_without_another_version_delta() {
+    async fn test_pin_capacity_failure_does_not_block_version_application() {
         let table = TableId::from(233);
         let store = mock_sstable_store().await;
         let (_, blocker) = gen_test_sst_with_object_id(table, store.clone(), 830).await;
@@ -3598,11 +3600,16 @@ mod tests {
         )
         .await
         .unwrap();
+        // Keep the old physical file alive even after version application. Refill must
+        // report failure while capacity is still unavailable, rather than wait for GC.
+        let old_reader = cache.get(blocker.object_id).unwrap();
         store.set_pin_cache(cache.clone());
         let version = pinned_version_with_sst(table, &blocker);
+        let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+        config.timeout = Duration::from_secs(60);
         let mut refiller = CacheRefiller::new(
             Role::Streaming,
-            test_refill_config(CacheRefillPolicy::Disabled),
+            config,
             store,
             CacheRefiller::default_spawn_refill_task(),
             version.clone(),
@@ -3614,31 +3621,28 @@ mod tests {
         refiller.start_cache_refill(
             vec![SstDeltaInfo {
                 insert_sst_infos: vec![target.clone()],
+                delete_sst_infos: vec![blocker.clone()],
                 ..Default::default()
             }],
             version,
-            pinned_version_with_ssts(&[table], &[blocker.clone(), target.clone()]),
+            pinned_version_with_sst(table, &target),
             PinCacheMembershipUpdate::Delta,
         );
-        assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
+        let events = tokio::time::timeout(Duration::from_secs(1), refiller.next_events())
+            .await
+            .expect("capacity failure must release the version before the refill deadline");
+        assert_eq!(events.len(), 1);
         assert_eq!(
             refiller.last_outcome,
             Some(super::RefillBatchOutcome::DegradedError)
         );
         assert!(cache.get(target.object_id).is_none());
-        // Reclaim capacity, but create no new version/ownership trigger for the failed target.
-        cache.get(blocker.object_id).unwrap().invalidate();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while cache.get(target.object_id).is_none() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        assert!(
-            cache.get(blocker.object_id).is_none(),
-            "an ordinary local failure is not read-through repair"
-        );
+        assert!(cache.is_registered(blocker.object_id));
+        refiller.on_versions_applied(&events);
+        assert!(!cache.is_registered(blocker.object_id));
+        assert!(cache.is_registered(target.object_id));
+        assert!(cache.get(target.object_id).is_none());
+        assert!(old_reader.read(..).await.is_ok());
     }
 
     #[tokio::test]
