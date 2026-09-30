@@ -77,7 +77,9 @@ impl PinCache {
                 }
             }
         }
-        self.gc.reclaim(stale);
+        for file in stale {
+            file.retire();
+        }
     }
 
     /// Whether an object is registered, regardless of whether it has a readable local file.

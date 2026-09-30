@@ -38,17 +38,23 @@ pub(crate) enum PinCacheDownloadError {
 pub(crate) struct PinCacheDownload {
     // Taking the file transfers cleanup responsibility to the index.
     file: Option<Arc<PinCacheFile>>,
+    upload_state: UploadState,
+}
+
+enum UploadState {
+    NotStarted,
     // An unfinished uploader may leave backend-owned temporary files with unknown paths.
-    upload_in_progress: bool,
+    InProgress,
+    Complete,
 }
 
 impl PinCacheDownload {
     /// Reserves capacity before any I/O. Rejection returns the current accounted bytes.
     fn new(file: PinCacheFile) -> Result<Self, u64> {
-        file.gc.try_reserve(&file)?;
+        file.gc.try_reserve(file.size)?;
         Ok(Self {
             file: Some(Arc::new(file)),
-            upload_in_progress: false,
+            upload_state: UploadState::NotStarted,
         })
     }
 
@@ -67,7 +73,7 @@ impl PinCacheDownload {
             .file
             .as_ref()
             .expect("download owns an unpublished file");
-        self.upload_in_progress = true;
+        self.upload_state = UploadState::InProgress;
         let mut writer = store
             .streaming_upload(&file.path)
             .await
@@ -91,7 +97,7 @@ impl PinCacheDownload {
             .finish()
             .await
             .inspect_err(|_| record_io_failure("local_upload_finish"))?;
-        self.upload_in_progress = false;
+        self.upload_state = UploadState::Complete;
         let local_size = store
             .metadata(&file.path)
             .await
@@ -112,14 +118,15 @@ impl Drop for PinCacheDownload {
         let Some(file) = self.file.take() else {
             return; // Publication transferred ownership to the index.
         };
-        if self.upload_in_progress {
-            file.gc.mark_uncertain(&file);
-            tracing::warn!(path = %file.path, reserved_bytes = file.size,
-                "unfinished pin cache upload; retaining capacity until recovery");
-            return;
+        match self.upload_state {
+            UploadState::NotStarted => file.gc.release_unused(file.size),
+            UploadState::InProgress => {
+                file.gc.mark_uncertain(file.size);
+                tracing::warn!(path = %file.path, reserved_bytes = file.size,
+                    "unfinished pin cache upload; retaining capacity until recovery");
+            }
+            UploadState::Complete => file.retire(),
         }
-        let gc = Arc::clone(&file.gc);
-        gc.reclaim([file]);
     }
 }
 
