@@ -436,3 +436,81 @@
         └─StreamGroupTopN [append_only] { order: [t.ts DESC], limit: 1, offset: 0, group_key: [t.v1] }
           └─StreamExchange { dist: HashShard(t.v1) }
             └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: append-only dedup with watermark on the first dedup column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select distinct on (ts, v1) * from t;
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [ts, v1, v2, t._row_id(hidden)], stream_key: [ts, v1], pk_columns: [ts, v1], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └── StreamAppendOnlyDedup { dedup_cols: [t.ts, t.v1] } { tables: [ AppendOnlyDedup: 0 ] }
+        └── StreamExchange Hash([0, 1]) from 1
+
+    Fragment 1
+    StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    ├── tables: [ StreamScan: 1 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ t_ts, t_v1, t_v2, t__row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0, 1 ]
+    ├── read pk prefix len hint: 2
+    └── clean watermark indices: [0]
+
+    Table 1
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ ts, v1, v2, t._row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0, 1 ]
+    └── read pk prefix len hint: 2
+
+- name: append-only dedup with watermark on a non-first dedup column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select distinct on (v1, ts) * from t;
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [ts, v1, v2, t._row_id(hidden)], stream_key: [v1, ts], pk_columns: [v1, ts], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └── StreamAppendOnlyDedup { dedup_cols: [t.v1, t.ts] } { tables: [ AppendOnlyDedup: 0 ] }
+        └── StreamExchange Hash([1, 0]) from 1
+
+    Fragment 1
+    StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    ├── tables: [ StreamScan: 1 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ t_ts, t_v1, t_v2, t__row_id, _rw_timestamp ]
+    ├── primary key: [ $1 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 1, 0 ]
+    ├── read pk prefix len hint: 2
+    └── clean watermark indices: [0]
+
+    Table 1
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ ts, v1, v2, t._row_id, _rw_timestamp ]
+    ├── primary key: [ $1 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 1, 0 ]
+    └── read pk prefix len hint: 2
+

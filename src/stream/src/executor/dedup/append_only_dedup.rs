@@ -138,6 +138,10 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                 }
 
                 Message::Watermark(watermark) => {
+                    // No key below the watermark can arrive again, so its state can be cleaned.
+                    if self.state_table.clean_watermark_index == Some(watermark.col_idx) {
+                        self.state_table.update_watermark(watermark.val.clone());
+                    }
                     yield Message::Watermark(watermark);
                 }
             }
@@ -188,7 +192,9 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::batch_table::BatchTable;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
@@ -271,5 +277,106 @@ mod tests {
                 + 1 20 D",
             )
         );
+    }
+
+    #[tokio::test]
+    async fn test_dedup_executor_clean_state_by_watermark() {
+        let table_id = TableId::new(1);
+        let column_descs = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+        ];
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Int64),
+        ]);
+        let dedup_col_indices = vec![0];
+        let pk_indices = dedup_col_indices.clone();
+        let order_types = vec![OrderType::ascending()];
+
+        let state_store = MemoryStateStore::new();
+        // No clean watermark column is set in the catalog, so the first dedup column is used.
+        let state_table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                table_id,
+                column_descs.clone(),
+                order_types.clone(),
+                pk_indices.clone(),
+                0,
+            ),
+            state_store.clone(),
+            None,
+        )
+        .await;
+        let table = BatchTable::for_test(
+            state_store,
+            table_id,
+            column_descs,
+            order_types,
+            pk_indices.clone(),
+            vec![0, 1],
+        );
+        let stored_keys = async || {
+            let mut keys = vec![];
+            for key in 1..=4_i64 {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(key.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                if row.is_some() {
+                    keys.push(key);
+                }
+            }
+            keys
+        };
+
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, pk_indices);
+        let mut dedup_executor = AppendOnlyDedupExecutor::new(
+            ActorContext::for_test(123),
+            source,
+            dedup_col_indices,
+            state_table,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(StreamingMetrics::unused()),
+        )
+        .boxed()
+        .execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        dedup_executor.next().await.unwrap().unwrap();
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I
+            + 1 1
+            + 2 2
+            + 3 3
+            + 4 4",
+        ));
+        dedup_executor.next().await.unwrap().unwrap();
+
+        // A watermark on a non-dedup column is forwarded without cleaning the state.
+        tx.push_int64_watermark(1, 10);
+        let msg = dedup_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_watermark().unwrap(),
+            Watermark::new(1, DataType::Int64, ScalarImpl::Int64(10))
+        );
+        tx.push_barrier(test_epoch(2), false);
+        dedup_executor.next().await.unwrap().unwrap();
+        assert_eq!(stored_keys().await, vec![1, 2, 3, 4]);
+
+        tx.push_int64_watermark(0, 3);
+        let msg = dedup_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_watermark().unwrap(),
+            Watermark::new(0, DataType::Int64, ScalarImpl::Int64(3))
+        );
+        tx.push_barrier(test_epoch(3), false);
+        dedup_executor.next().await.unwrap().unwrap();
+        assert_eq!(stored_keys().await, vec![3, 4]);
     }
 }

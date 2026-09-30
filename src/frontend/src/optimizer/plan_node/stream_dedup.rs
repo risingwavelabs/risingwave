@@ -62,6 +62,17 @@ impl StreamDedup {
             builder.add_order_column(*idx, OrderType::ascending());
         });
 
+        // Clean the state by the watermark on the first dedup column that has one.
+        let input_watermark_columns = self.core.input.watermark_columns();
+        if let Some(&idx) = self
+            .core
+            .dedup_cols
+            .iter()
+            .find(|&&idx| input_watermark_columns.contains(idx))
+        {
+            builder.set_clean_watermark_indices(vec![idx]);
+        }
+
         let read_prefix_len_hint = builder.get_current_pk_len();
 
         builder.build(
