@@ -445,19 +445,23 @@ mod tests {
 
     #[test]
     fn pulsar_schema_rejects_other_connectors_and_formats() {
-        let kafka = format_encode(
-            Format::Plain,
-            Encode::Avro,
-            &[(PULSAR_SCHEMA_URL_KEY, "http://localhost:8080")],
-        );
-        assert!(validate_compatibility(&kafka, &mut source_options(KAFKA_CONNECTOR)).is_err());
-
-        let upsert = format_encode(
-            Format::Upsert,
-            Encode::Avro,
-            &[(PULSAR_SCHEMA_URL_KEY, "http://localhost:8080")],
-        );
-        assert!(validate_compatibility(&upsert, &mut source_options(PULSAR_CONNECTOR)).is_err());
+        for (connector, format, encode) in [
+            (KAFKA_CONNECTOR, Format::Plain, Encode::Avro),
+            (PULSAR_CONNECTOR, Format::Upsert, Encode::Avro),
+            (PULSAR_CONNECTOR, Format::Plain, Encode::Protobuf),
+            (PULSAR_CONNECTOR, Format::Plain, Encode::Json),
+        ] {
+            let format_encode = format_encode(
+                format,
+                encode,
+                &[(PULSAR_SCHEMA_URL_KEY, "http://localhost:8080")],
+            );
+            let error =
+                validate_compatibility(&format_encode, &mut source_options(connector)).unwrap_err();
+            assert!(error.to_string().contains(
+                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
+            ));
+        }
     }
 
     #[test]

@@ -22,6 +22,7 @@ use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo};
 use super::unified::json::BigintUnsignedHandlingMode;
 use super::utils::{get_kafka_topic, get_pulsar_topic};
 use super::{DebeziumProps, TimeHandling, TimestampHandling, TimestamptzHandling};
+use crate::WithOptionsSecResolved;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
@@ -29,10 +30,7 @@ use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use crate::schema::pulsar_schema::PulsarSchemaConfig;
 use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
-use crate::source::{
-    PULSAR_CONNECTOR, SourceColumnDesc, SourceEncode, SourceFormat, extract_source_struct,
-};
-use crate::{WithOptionsSecResolved, WithPropertiesExt};
+use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, extract_source_struct};
 
 pub const PARQUET_CASE_INSENSITIVE_KEY: &str = "parquet.case_insensitive";
 
@@ -182,12 +180,6 @@ impl SpecificParserConfig {
                 config.schema_location = if let Some(client_config) =
                     PulsarSchemaConfig::from_options(&format_encode_options_with_secret)?
                 {
-                    if !options_with_secret.is_pulsar_connector() || format != SourceFormat::Plain {
-                        bail!(
-                            "Pulsar schema requires connector = '{}' with FORMAT PLAIN ENCODE AVRO",
-                            PULSAR_CONNECTOR
-                        );
-                    }
                     SchemaLocation::Pulsar {
                         client_config,
                         topic: get_pulsar_topic(&options_with_secret)?.clone(),
@@ -442,7 +434,7 @@ mod tests {
 
     use super::*;
     use crate::schema::pulsar_schema::{PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY};
-    use crate::source::{KAFKA_CONNECTOR, UPSTREAM_SOURCE_KEY};
+    use crate::source::{PULSAR_CONNECTOR, UPSTREAM_SOURCE_KEY};
 
     #[test]
     fn pulsar_schema_config_uses_pulsar_source_topic() {
@@ -483,32 +475,5 @@ mod tests {
             panic!("expected Pulsar Avro parser config");
         };
         assert_eq!(topic, "persistent://tenant/namespace/events");
-    }
-
-    #[test]
-    fn pulsar_schema_config_rejects_unsupported_sources() {
-        for (connector, format) in [
-            (PULSAR_CONNECTOR, FormatType::Upsert),
-            (KAFKA_CONNECTOR, FormatType::Plain),
-        ] {
-            let info = StreamSourceInfo {
-                format: format as i32,
-                row_encode: EncodeType::Avro as i32,
-                format_encode_options: BTreeMap::from([(
-                    PULSAR_SCHEMA_URL_KEY.to_owned(),
-                    "https://pulsar-admin:8443".to_owned(),
-                )]),
-                ..Default::default()
-            };
-            let source_options = WithOptionsSecResolved::without_secrets(BTreeMap::from([
-                (UPSTREAM_SOURCE_KEY.to_owned(), connector.to_owned()),
-                ("topic".to_owned(), "events".to_owned()),
-            ]));
-
-            let error = SpecificParserConfig::new(&info, &source_options).unwrap_err();
-            assert!(error.to_string().contains(
-                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
-            ));
-        }
     }
 }
