@@ -1,0 +1,15 @@
+# Leaves a refresh in flight for the cluster restart in the CI script; the checks are in
+# refresh_table_restart_after.slt.
+
+include ./refresh_table_paused.slt.part
+
+# Carries the trigger of the held cycle across the restart; the row has to be checkpointed to
+# survive it.
+statement ok
+CREATE TABLE refresh_paused_marker (trigger_before varchar);
+
+statement ok
+INSERT INTO refresh_paused_marker VALUES ('${trigger_before}');
+
+statement ok
+FLUSH;

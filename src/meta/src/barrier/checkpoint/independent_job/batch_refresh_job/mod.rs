@@ -15,7 +15,7 @@
 //! Batch refresh job checkpoint control for periodically-refreshed materialized views.
 //!
 //! It lives permanently in `DatabaseCheckpointControl.independent_checkpoint_job_controls`
-//! as an `IndependentCheckpointJobControl::BatchRefresh` variant for its entire lifetime.
+//! as a running batch-refresh independent job for its entire lifetime.
 //!
 //! Lifecycle:
 //!   DDL → `ConsumingSnapshot` → `FinishingSnapshot` → `Idle`
@@ -46,15 +46,14 @@ use tracing::{debug, info};
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::command::{PostCollectCommand, ThrottleConfigMap, extract_throttle_config};
-use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
-use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
+use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::{CollectionNotifier, NotifierStarter};
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphStat,
 };
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
-use crate::barrier::rpc::to_partial_graph_id;
+use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::{
     BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
 };
@@ -66,6 +65,7 @@ use crate::controller::scale::{
 use crate::model::{
     FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate, StreamingJobModelContextExt,
 };
+use crate::notification::NotifierStarter;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::ExtendedFragmentBackfillOrder;
 
@@ -99,6 +99,17 @@ pub(crate) struct BatchRefreshRenderResult {
     pub actors_to_create: StreamJobActorsToCreate,
 }
 
+/// Static actor metadata rendered for a closed independent-job graph.
+///
+/// This does not build edges or decide which fragments are active. In particular,
+/// Iceberg V3 can render all of its actor partitions once and activate only the
+/// input or compaction-resolver partition for a given phase.
+#[derive(Debug)]
+pub(crate) struct RenderedIndependentJobActors {
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+    pub stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
+}
+
 // ── Batch refresh job metadata ───────────────────────────────────────────────
 
 /// Lightweight metadata for re-rendering actors on each periodic refresh run.
@@ -120,9 +131,6 @@ pub(crate) struct BatchRefreshJobTriggerContext {
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
-
-/// The partial graph is being reset (always for drop).
-/// Once the reset is confirmed, the job is removed from the map.
 
 #[derive(Debug)]
 enum BatchRefreshJobStatus {
@@ -173,8 +181,6 @@ enum BatchRefreshJobStatus {
         /// `prev_epoch` of the stop barrier; becomes `last_committed_epoch` when transitioning to Idle.
         target_upstream_epoch: u64,
     },
-    /// The partial graph is being reset (for drop).
-    Resetting { notifiers: Vec<CollectionNotifier> },
 }
 
 // ── Complete type ─────────────────────────────────────────────────────────────
@@ -201,40 +207,31 @@ pub(crate) struct BatchRefreshJobCheckpointControl {
 
 // ── Unified actor rendering ───────────────────────────────────────────────────
 
-impl BatchRefreshJobCheckpointControl {
-    /// Render actors for a batch refresh job from logical metadata only.
-    ///
-    /// Performs the full pipeline:
-    /// 1. Derive no-shuffle ensembles from `downstreams`
-    /// 2. Render actor assignments (ID allocation, worker placement, vnode bitmap)
-    /// 3. Build `StreamActor` structs
-    /// 4. Build internal-only edges (no upstream dispatcher edges)
-    /// 5. Produce `fragment_infos`, `node_actors`, `state_table_ids`, `actors_to_create`
-    ///
-    /// Shared by both the DDL create path and the recovery path.
-    pub(crate) fn render_actors_and_build_job_info(
+/// Render actor IDs, placement, vnode bitmaps, and actor definitions for a closed
+/// independent-job graph.
+///
+/// Every fragment in a no-shuffle ensemble must belong to `fragments`. Independent
+/// jobs consume upstream data through the log store, so their actor placement does
+/// not need to align with an existing upstream fragment.
+impl RenderedIndependentJobActors {
+    pub(crate) fn render(
         fragments: &HashMap<FragmentId, LoadedFragment>,
         downstreams: &FragmentDownstreamRelation,
         definition: &str,
-        // Actor rendering context:
         actor_id_generator: &AtomicU32,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         database_resource_group: &str,
         streaming_job_model: &streaming_job::Model,
-        // Edge building context:
-        partial_graph_id: PartialGraphId,
-    ) -> MetaResult<BatchRefreshRenderResult> {
-        // Step 1: Derive no-shuffle ensembles from downstreams.
-        let ensembles = Self::resolve_ensembles(fragments, downstreams)?;
+    ) -> MetaResult<Self> {
+        let ensembles =
+            BatchRefreshJobCheckpointControl::resolve_ensembles(fragments, downstreams)?;
 
-        // Step 2: Render actor assignments for each ensemble.
         let mut actor_assignments: HashMap<
             FragmentId,
             HashMap<ActorId, (WorkerId, Option<risingwave_common::bitmap::Bitmap>)>,
         > = HashMap::new();
 
         for ensemble in &ensembles {
-            // All fragments are new (batch refresh has no existing upstream fragments).
             let first_component = ensemble
                 .component_fragments()
                 .next()
@@ -243,7 +240,6 @@ impl BatchRefreshJobCheckpointControl {
             let distribution_type = fragment.distribution_type;
             let vnode_count = fragment.vnode_count;
 
-            // Assert all component fragments share the same vnode count.
             for fid in ensemble.component_fragments() {
                 let f = &fragments[&fid];
                 assert_eq!(
@@ -260,9 +256,7 @@ impl BatchRefreshJobCheckpointControl {
                     .dedup(),
             )
             .map_err(|_| {
-                anyhow!(
-                    "entry fragments have inconsistent parallelism settings in batch refresh job"
-                )
+                anyhow!("entry fragments have inconsistent parallelism settings in independent job")
             })?;
 
             let actor_template = EnsembleActorTemplate::render_new(
@@ -283,7 +277,7 @@ impl BatchRefreshJobCheckpointControl {
             }
         }
 
-        // Step 3: Expand assignments into StreamActor + actor_location + InflightFragmentInfo.
+        let stream_context = streaming_job_model.stream_context();
         let mut stream_actors: HashMap<FragmentId, Vec<StreamActor>> = HashMap::new();
         let mut actor_location: HashMap<ActorId, WorkerId> = HashMap::new();
 
@@ -291,7 +285,6 @@ impl BatchRefreshJobCheckpointControl {
             let mut actors = Vec::with_capacity(assignments.len());
             for (&actor_id, (worker_id, vnode_bitmap)) in assignments {
                 actor_location.insert(actor_id, *worker_id);
-                let stream_context = streaming_job_model.stream_context();
                 actors.push(StreamActor {
                     actor_id,
                     fragment_id: *fragment_id,
@@ -304,8 +297,7 @@ impl BatchRefreshJobCheckpointControl {
             stream_actors.insert(*fragment_id, actors);
         }
 
-        // Build InflightFragmentInfo from logical fragments + rendered actors.
-        let fragment_infos: HashMap<FragmentId, InflightFragmentInfo> = fragments
+        let fragment_infos = fragments
             .iter()
             .map(|(fragment_id, loaded)| {
                 let actors = stream_actors
@@ -318,7 +310,7 @@ impl BatchRefreshJobCheckpointControl {
                             crate::controller::fragment::InflightActorInfo {
                                 worker_id: actor_location[&actor.actor_id],
                                 vnode_bitmap: actor.vnode_bitmap.clone(),
-                                splits: vec![], // batch refresh has no source splits
+                                splits: vec![],
                             },
                         )
                     })
@@ -338,19 +330,60 @@ impl BatchRefreshJobCheckpointControl {
             })
             .collect();
 
+        Ok(Self {
+            fragment_infos,
+            stream_actors,
+        })
+    }
+}
+
+impl BatchRefreshJobCheckpointControl {
+    /// Render actors for a batch refresh job from logical metadata only.
+    ///
+    /// Performs the full pipeline:
+    /// 1. Derive no-shuffle ensembles from `downstreams`
+    /// 2. Render actor assignments (ID allocation, worker placement, vnode bitmap)
+    /// 3. Build `StreamActor` structs
+    /// 4. Build internal-only edges (no upstream dispatcher edges)
+    /// 5. Produce `fragment_infos`, `node_actors`, `state_table_ids`, `actors_to_create`
+    ///
+    /// Shared by both the DDL create path and the recovery path.
+    pub(crate) fn render_actors_and_build_job_info(
+        fragments: &HashMap<FragmentId, LoadedFragment>,
+        downstreams: &FragmentDownstreamRelation,
+        definition: &str,
+        // Actor rendering context:
+        actor_id_generator: &AtomicU32,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        control_stream_manager: &ControlStreamManager,
+        database_resource_group: &str,
+        streaming_job_model: &streaming_job::Model,
+        // Edge building context:
+        partial_graph_id: PartialGraphId,
+    ) -> MetaResult<BatchRefreshRenderResult> {
+        let RenderedIndependentJobActors {
+            fragment_infos,
+            stream_actors,
+        } = RenderedIndependentJobActors::render(
+            fragments,
+            downstreams,
+            definition,
+            actor_id_generator,
+            worker_nodes,
+            database_resource_group,
+            streaming_job_model,
+        )?;
+
         // Step 4: Build edges (internal-only, no upstream).
-        let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|f| {
-            (
-                f.fragment_id,
-                EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
-                    f,
-                    partial_graph_id,
-                    worker_nodes,
-                ),
+        let (mut edges, _) = FragmentEdgeBuilder::new()
+            .add_new_fragments(
+                fragment_infos.values(),
+                partial_graph_id,
+                control_stream_manager,
             )
-        }));
-        builder.add_relations(downstreams);
-        let mut edges = builder.build();
+            .finish_fragments()
+            .add_relations(downstreams)?
+            .build();
 
         let actors_to_create = edges.collect_actors_to_create(fragment_infos.values().map(|f| {
             (
@@ -470,7 +503,7 @@ impl BatchRefreshJobCheckpointControl {
     pub(crate) fn new(
         database_id: DatabaseId,
         job_id: JobId,
-        create_info: CreateSnapshotBackfillJobCommandInfo,
+        create_info: CreateIndependentStreamingJobCommandInfo,
         notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
@@ -499,6 +532,7 @@ impl BatchRefreshJobCheckpointControl {
             &create_info.info.definition,
             actor_id_generator,
             worker_nodes,
+            partial_graph_manager.control_stream_manager(),
             &create_info.info.database_resource_group,
             &create_info.info.streaming_job_model,
             partial_graph_id,
@@ -693,7 +727,7 @@ impl BatchRefreshJobCheckpointControl {
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
         notifier: Option<&mut NotifierStarter>,
-        first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
+        first_create_info: Option<CreateIndependentStreamingJobCommandInfo>,
         is_stop: bool,
     ) -> MetaResult<()> {
         if is_stop {
@@ -705,7 +739,6 @@ impl BatchRefreshJobCheckpointControl {
         partial_graph_manager.inject_barrier(
             partial_graph_id,
             mutation,
-            None,
             node_actors,
             state_table_ids.iter().copied(),
             if is_stop {
@@ -718,7 +751,7 @@ impl BatchRefreshJobCheckpointControl {
             PartialGraphBarrierInfo::new(
                 first_create_info.map_or_else(
                     PostCollectCommand::barrier,
-                    CreateSnapshotBackfillJobCommandInfo::into_post_collect,
+                    CreateIndependentStreamingJobCommandInfo::into_post_collect,
                 ),
                 barrier_info,
                 notifier,
@@ -740,7 +773,7 @@ impl BatchRefreshJobCheckpointControl {
     ) -> MetaResult<()> {
         if !matches!(self.status, BatchRefreshJobStatus::ConsumingSnapshot { .. }) {
             // ConsumingLogStore has all barriers pre-injected; no forwarding needed.
-            // Idle and Resetting have no partial graph.
+            // Idle has no partial graph.
             return Ok(());
         }
         let (mutation, notifier) = match mutation {
@@ -921,25 +954,18 @@ impl BatchRefreshJobCheckpointControl {
     pub(crate) fn start_completing(
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
-        upstream_committed_epoch: u64,
     ) -> Option<(
         u64,
         HashMap<WorkerId, BarrierCompleteResponse>,
         PartialGraphBarrierInfo,
         Option<TrackingJob>,
     )> {
-        // Do not complete any barrier until upstream has committed the snapshot epoch,
-        // since completing the first barrier persists the snapshot epoch to catalog.
-        if upstream_committed_epoch < self.snapshot_epoch {
-            return None;
-        }
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
             | BatchRefreshJobStatus::FinishingSnapshot { .. }
             | BatchRefreshJobStatus::ConsumingLogStore { .. } => {}
             BatchRefreshJobStatus::Idle { .. }
-            | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-            | BatchRefreshJobStatus::Resetting { .. } => {
+            | BatchRefreshJobStatus::InitializingBatchRefresh { .. } => {
                 return None;
             }
         };
@@ -1024,30 +1050,9 @@ impl BatchRefreshJobCheckpointControl {
             BatchRefreshJobStatus::ConsumingLogStore { .. } => {
                 partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
             }
-            BatchRefreshJobStatus::Resetting { .. } => {
-                // The job was dropped while the completing task was running in the background.
-                // The partial graph has already been reset, so skip the ack.
-            }
             BatchRefreshJobStatus::Idle { .. }
             | BatchRefreshJobStatus::InitializingBatchRefresh { .. } => {
                 unreachable!("batch refresh job should not be completing in this state")
-            }
-        }
-    }
-
-    /// Called when the partial graph reset is confirmed (drop only).
-    pub(super) fn on_partial_graph_reset(mut self) {
-        match &mut self.status {
-            BatchRefreshJobStatus::Resetting { notifiers } => {
-                for notifier in notifiers.drain(..) {
-                    notifier.notify_collected();
-                }
-            }
-            _ => {
-                panic!(
-                    "batch refresh job {}: on_partial_graph_reset in unexpected state {:?}",
-                    self.job_id, self.status
-                );
             }
         }
     }
@@ -1082,7 +1087,7 @@ impl BatchRefreshJobCheckpointControl {
                 progress: "BatchRefresh LogStore".to_owned(),
                 backfill_type: PbBackfillType::SnapshotBackfill,
             }),
-            BatchRefreshJobStatus::Idle { .. } | BatchRefreshJobStatus::Resetting { .. } => None,
+            BatchRefreshJobStatus::Idle { .. } => None,
         }
     }
 
@@ -1100,14 +1105,13 @@ impl BatchRefreshJobCheckpointControl {
         }
     }
 
-    pub(super) fn pinned_upstream_tables(&self) -> HashSet<TableId> {
+    pub(super) fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
             | BatchRefreshJobStatus::FinishingSnapshot { .. }
             | BatchRefreshJobStatus::ConsumingLogStore { .. }
             | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-            | BatchRefreshJobStatus::Idle { .. } => self.snapshot_backfill_upstream_tables.clone(),
-            BatchRefreshJobStatus::Resetting { .. } => HashSet::new(),
+            | BatchRefreshJobStatus::Idle { .. } => &self.snapshot_backfill_upstream_tables,
         }
     }
 
@@ -1119,8 +1123,7 @@ impl BatchRefreshJobCheckpointControl {
             }
             BatchRefreshJobStatus::ConsumingLogStore { fragment_infos, .. } => Some(fragment_infos),
             BatchRefreshJobStatus::FinishingSnapshot { .. }
-            | BatchRefreshJobStatus::Idle { .. }
-            | BatchRefreshJobStatus::Resetting { .. } => None,
+            | BatchRefreshJobStatus::Idle { .. } => None,
         }
     }
 
@@ -1252,6 +1255,7 @@ impl BatchRefreshJobCheckpointControl {
             &context.definition,
             actor_id_counter,
             worker_nodes,
+            partial_graph_manager.control_stream_manager(),
             &context.database_resource_group,
             &context.streaming_job_model,
             self.partial_graph_id,
@@ -1465,72 +1469,6 @@ impl BatchRefreshLogicalFragments {
         Self {
             fragments: ctx.fragments.clone(),
             downstreams: ctx.downstreams.clone(),
-        }
-    }
-}
-
-// ── Drop handling ─────────────────────────────────────────────────────────────
-
-impl BatchRefreshJobCheckpointControl {
-    /// Drop this batch refresh job.
-    pub(super) fn drop(
-        &mut self,
-        notifier: Option<&mut NotifierStarter>,
-        partial_graph_manager: &mut PartialGraphManager,
-    ) -> bool {
-        match &mut self.status {
-            BatchRefreshJobStatus::Resetting {
-                notifiers: existing_notifiers,
-                ..
-            } => {
-                existing_notifiers.extend(notifier.map(NotifierStarter::add_notify));
-                true
-            }
-            BatchRefreshJobStatus::ConsumingSnapshot { .. }
-            | BatchRefreshJobStatus::FinishingSnapshot { .. }
-            | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-            | BatchRefreshJobStatus::ConsumingLogStore { .. } => {
-                partial_graph_manager.reset_partial_graphs([self.partial_graph_id]);
-                self.status = BatchRefreshJobStatus::Resetting {
-                    notifiers: notifier
-                        .map(NotifierStarter::add_notify)
-                        .into_iter()
-                        .collect(),
-                };
-                true
-            }
-            BatchRefreshJobStatus::Idle { .. } => {
-                // Idle has no running partial graph, but we still go through
-                // the reset flow so the cleanup path is uniform.
-                partial_graph_manager.reset_partial_graphs([self.partial_graph_id]);
-                self.status = BatchRefreshJobStatus::Resetting {
-                    notifiers: notifier
-                        .map(NotifierStarter::add_notify)
-                        .into_iter()
-                        .collect(),
-                };
-                true
-            }
-        }
-    }
-
-    /// Reset during database recovery.
-    ///
-    /// Returns `true` if the partial graph was already resetting (from a prior drop),
-    /// meaning we should not issue a new reset request.
-    pub(crate) fn reset(self) -> bool {
-        match self.status {
-            BatchRefreshJobStatus::ConsumingSnapshot { .. }
-            | BatchRefreshJobStatus::FinishingSnapshot { .. }
-            | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-            | BatchRefreshJobStatus::ConsumingLogStore { .. }
-            | BatchRefreshJobStatus::Idle { .. } => false,
-            BatchRefreshJobStatus::Resetting { notifiers, .. } => {
-                for notifier in notifiers {
-                    notifier.notify_collected();
-                }
-                true
-            }
         }
     }
 }

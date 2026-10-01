@@ -17,6 +17,9 @@
 mod mqtt_common;
 pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
+mod pubsub_common;
+pub(crate) use pubsub_common::resolve_pubsub_project_id;
+
 mod common;
 pub use common::{
     AwsAuthProps, AwsPrivateLinkItem, DISABLE_DEFAULT_CREDENTIAL, KafkaCommon,

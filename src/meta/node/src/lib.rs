@@ -188,9 +188,8 @@ pub struct MetaNodeOpts {
     pub license_key_path: Option<PathBuf>,
 
     /// 128-bit AES key for secret store in HEX format.
-    #[educe(Debug(ignore))] // TODO: use newtype to redact debug impl
     #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
-    pub secret_store_private_key_hex: Option<String>,
+    pub secret_store_private_key_hex: Option<Secret<String>>,
 
     /// The path of the temp secret file directory.
     #[clap(
@@ -317,7 +316,7 @@ pub fn start(
 
         let secret_store_private_key = opts
             .secret_store_private_key_hex
-            .map(|key| hex::decode(key).unwrap());
+            .map(|key| hex::decode(key.expose_secret()).unwrap());
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
@@ -540,18 +539,9 @@ pub fn start(
                     .streaming
                     .developer
                     .refresh_scheduler_interval_sec,
-                table_stat_high_write_throughput_ratio_for_split: config
+                table_write_throughput_retention_seconds: config
                     .meta
-                    .table_stat_high_write_throughput_ratio_for_split,
-                table_stat_low_write_throughput_ratio_for_merge: config
-                    .meta
-                    .table_stat_low_write_throughput_ratio_for_merge,
-                table_stat_throuput_window_seconds_for_split: config
-                    .meta
-                    .table_stat_throuput_window_seconds_for_split,
-                table_stat_throuput_window_seconds_for_merge: config
-                    .meta
-                    .table_stat_throuput_window_seconds_for_merge,
+                    .table_write_throughput_retention_seconds,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta

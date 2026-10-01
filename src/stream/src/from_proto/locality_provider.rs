@@ -79,6 +79,7 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             params.executor_stats.clone(),
             params.config.developer.chunk_size,
             params.actor_context.fragment_id,
+            node.rate_limit.into(),
         );
 
         Ok((params.info, exec).into())

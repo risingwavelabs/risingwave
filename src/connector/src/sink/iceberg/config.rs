@@ -334,6 +334,13 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
+    /// For REST catalogs such as AWS Glue, derive a missing table location from the
+    /// namespace's `location` property. Defaults to false. An existing location
+    /// derived from `warehouse.path` takes precedence; a missing or empty namespace
+    /// location leaves server-side location assignment unchanged.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub default_table_location_from_namespace: bool,
+
     /// Whether it is `exactly_once`, the default is true.
     #[serde(default = "default_some_true")]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -610,6 +617,12 @@ impl IcebergConfig {
         Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
         config.validate_enable_pk_index()?;
         config.validate_manifest_rewrite_format(config.format_version)?;
+
+        if config.default_table_location_from_namespace && !config.common.is_rest_catalog()? {
+            return Err(SinkError::Config(anyhow!(
+                "`default_table_location_from_namespace` is only supported for REST catalogs"
+            )));
+        }
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = iceberg_java_catalog_props_from_options(

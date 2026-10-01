@@ -424,7 +424,12 @@ impl FragmentTypeFlag {
 
     /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
     pub fn backfill_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
-        [FragmentTypeFlag::SourceScan, FragmentTypeFlag::StreamScan].into_iter()
+        [
+            FragmentTypeFlag::SourceScan,
+            FragmentTypeFlag::StreamScan,
+            FragmentTypeFlag::LocalityProvider,
+        ]
+        .into_iter()
     }
 
     /// Fragments that may be affected by `SOURCE_RATE_LIMIT`.
