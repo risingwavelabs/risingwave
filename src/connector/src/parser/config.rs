@@ -141,17 +141,6 @@ impl SpecificParserConfig {
             LocalSecretManager::global().fill_secrets(options, secret_refs)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
-        let pulsar_schema_config =
-            PulsarSchemaConfig::from_options(&format_encode_options_with_secret)?;
-        if pulsar_schema_config.is_some()
-            && (!options_with_secret.is_pulsar_connector()
-                || !matches!((format, encode), (SourceFormat::Plain, SourceEncode::Avro)))
-        {
-            bail!(
-                "Pulsar schema requires connector = '{}' with FORMAT PLAIN ENCODE AVRO",
-                PULSAR_CONNECTOR
-            );
-        }
         // this transformation is needed since there may be config for the protocol
         // in the future
         let protocol_config = match format {
@@ -190,11 +179,18 @@ impl SpecificParserConfig {
                     map_handling: MapHandling::from_options(&format_encode_options_with_secret)?,
                     ..Default::default()
                 };
-                config.schema_location = if let Some(client_config) = pulsar_schema_config {
-                    let topic = get_pulsar_topic(&options_with_secret)?.clone();
+                config.schema_location = if let Some(client_config) =
+                    PulsarSchemaConfig::from_options(&format_encode_options_with_secret)?
+                {
+                    if !options_with_secret.is_pulsar_connector() || format != SourceFormat::Plain {
+                        bail!(
+                            "Pulsar schema requires connector = '{}' with FORMAT PLAIN ENCODE AVRO",
+                            PULSAR_CONNECTOR
+                        );
+                    }
                     SchemaLocation::Pulsar {
                         client_config,
-                        topic,
+                        topic: get_pulsar_topic(&options_with_secret)?.clone(),
                     }
                 } else if let Some(schema_arn) =
                     format_encode_options_with_secret.get(AWS_GLUE_SCHEMA_ARN_KEY)
@@ -446,7 +442,7 @@ mod tests {
 
     use super::*;
     use crate::schema::pulsar_schema::{PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY};
-    use crate::source::UPSTREAM_SOURCE_KEY;
+    use crate::source::{KAFKA_CONNECTOR, UPSTREAM_SOURCE_KEY};
 
     #[test]
     fn pulsar_schema_config_uses_pulsar_source_topic() {
@@ -490,21 +486,29 @@ mod tests {
     }
 
     #[test]
-    fn pulsar_schema_config_rejects_upsert() {
-        let info = StreamSourceInfo {
-            format: FormatType::Upsert as i32,
-            row_encode: EncodeType::Avro as i32,
-            format_encode_options: BTreeMap::from([(
-                PULSAR_SCHEMA_URL_KEY.to_owned(),
-                "https://pulsar-admin:8443".to_owned(),
-            )]),
-            ..Default::default()
-        };
-        let source_options = WithOptionsSecResolved::without_secrets(BTreeMap::from([
-            (UPSTREAM_SOURCE_KEY.to_owned(), PULSAR_CONNECTOR.to_owned()),
-            ("topic".to_owned(), "events".to_owned()),
-        ]));
+    fn pulsar_schema_config_rejects_unsupported_sources() {
+        for (connector, format) in [
+            (PULSAR_CONNECTOR, FormatType::Upsert),
+            (KAFKA_CONNECTOR, FormatType::Plain),
+        ] {
+            let info = StreamSourceInfo {
+                format: format as i32,
+                row_encode: EncodeType::Avro as i32,
+                format_encode_options: BTreeMap::from([(
+                    PULSAR_SCHEMA_URL_KEY.to_owned(),
+                    "https://pulsar-admin:8443".to_owned(),
+                )]),
+                ..Default::default()
+            };
+            let source_options = WithOptionsSecResolved::without_secrets(BTreeMap::from([
+                (UPSTREAM_SOURCE_KEY.to_owned(), connector.to_owned()),
+                ("topic".to_owned(), "events".to_owned()),
+            ]));
 
-        assert!(SpecificParserConfig::new(&info, &source_options).is_err());
+            let error = SpecificParserConfig::new(&info, &source_options).unwrap_err();
+            assert!(error.to_string().contains(
+                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
+            ));
+        }
     }
 }
