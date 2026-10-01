@@ -191,24 +191,16 @@ impl Drop for RefillAttemptGuard {
 
 #[derive(Clone, Copy)]
 enum Status {
+    // Both initial attempts and retries wait here until their deadline.
     Queued(Instant),
     Running,
-    Failed(Instant),
 }
 
 impl Status {
     fn deadline(self) -> Option<Instant> {
         match self {
-            Self::Queued(at) | Self::Failed(at) => Some(at),
+            Self::Queued(at) => Some(at),
             Self::Running => None,
-        }
-    }
-
-    fn index(self) -> usize {
-        match self {
-            Self::Queued(_) => 0,
-            Self::Running => 1,
-            Self::Failed(_) => 2,
         }
     }
 }
@@ -221,6 +213,17 @@ struct Work {
     completion: Arc<AtomicU8>,
     attempts: u32,
     status: Status,
+}
+
+impl Work {
+    // Retry debt is an observation of queued work, not a separate scheduling state.
+    fn backlog_index(&self) -> usize {
+        match self.status {
+            Status::Queued(_) if self.attempts == 0 => 0,
+            Status::Running => 1,
+            Status::Queued(_) => 2,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -236,8 +239,8 @@ impl State {
         if let Some(at) = work.status.deadline() {
             self.schedule.remove(&(at, object));
         }
-        self.backlog[work.status.index()][0] -= 1;
-        self.backlog[work.status.index()][1] -= work.projections[0].file_size as i64;
+        self.backlog[work.backlog_index()][0] -= 1;
+        self.backlog[work.backlog_index()][1] -= work.projections[0].file_size as i64;
         Some(work)
     }
 
@@ -246,8 +249,8 @@ impl State {
         if let Some(at) = work.status.deadline() {
             self.schedule.insert((at, object));
         }
-        self.backlog[work.status.index()][0] += 1;
-        self.backlog[work.status.index()][1] += work.projections[0].file_size as i64;
+        self.backlog[work.backlog_index()][0] += 1;
+        self.backlog[work.backlog_index()][1] += work.projections[0].file_size as i64;
         self.objects.insert(object, work);
     }
 }
@@ -627,7 +630,7 @@ impl PinCacheRefillExecutor {
                         };
                         if retry {
                             work.attempts = work.attempts.saturating_add(1);
-                            work.status = Status::Failed(
+                            work.status = Status::Queued(
                                 Instant::now()
                                     + Duration::from_millis(
                                         100 * (1_u64 << work.attempts.min(8)),
@@ -805,6 +808,14 @@ mod tests {
                 .await
                 .unwrap()
         );
+        // I/O failure must run again after backoff while the original ticket stays failed.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while executor.state.lock().objects[&object].attempts < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
         let next = executor.submit(plan);
         assert!(Arc::ptr_eq(&completion, &next.completions[0]));
         assert!(

@@ -293,7 +293,7 @@ struct ActiveBatch {
     pin_bytes: u64,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default)]
 struct PinRefillPlanStats {
     objects: u64,
     bytes: u64,
@@ -3938,25 +3938,27 @@ mod tests {
                 PinCacheRefillPlan::owns_object(&sst, &projections, &ownership),
                 expected
             );
-            let plan = PinCacheRefillPlan::new(
-                &[SstDeltaInfo {
-                    insert_sst_infos: projections.clone(),
-                    ..Default::default()
-                }],
-                &[info.object_id].into(),
-                ownership,
-            );
-            assert_eq!(plan.objects.len(), 1, "physical downloads are deduplicated");
-            let mut stats = PinRefillPlanStats::default();
-            stats.add_plan(&plan);
-            assert_eq!(stats.objects, 1);
-            assert_eq!(stats.bytes, info.file_size);
         }
         assert!(!PinCacheRefillPlan::owns_object(
             &sst,
             &projections,
             &HashMap::new()
         ));
+
+        // Physical-object accounting is independent of the vnode selected above.
+        let plan = PinCacheRefillPlan::new(
+            &[SstDeltaInfo {
+                insert_sst_infos: projections,
+                ..Default::default()
+            }],
+            &[info.object_id].into(),
+            [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
+        );
+        assert_eq!(plan.objects.len(), 1, "physical downloads are deduplicated");
+        let mut stats = PinRefillPlanStats::default();
+        stats.add_plan(&plan);
+        assert_eq!(stats.objects, 1);
+        assert_eq!(stats.bytes, info.file_size);
     }
 
     #[test]
