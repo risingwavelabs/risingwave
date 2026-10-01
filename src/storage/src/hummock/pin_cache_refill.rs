@@ -223,7 +223,7 @@ impl PinCacheObjectChanges {
 /// Maintains logical pin-cache membership separately from Foyer block-refill policy.
 pub(crate) struct PinCacheRefillController {
     sstable_store: SstableStoreRef,
-    pinned_table_ids: Option<HashSet<TableId>>,
+    pinned_table_ids: HashSet<TableId>,
     object_ref_counts: HashMap<HummockSstableObjectId, u32>,
     pub(crate) version: PinnedVersion,
     ownership: Arc<HashMap<TableId, Bitmap>>,
@@ -239,7 +239,7 @@ impl PinCacheRefillController {
         let executor = PinCacheRefillExecutor::new(sstable_store.clone(), concurrency);
         Self {
             sstable_store,
-            pinned_table_ids: None,
+            pinned_table_ids: HashSet::new(),
             object_ref_counts: HashMap::new(),
             version,
             ownership: Arc::default(),
@@ -254,25 +254,19 @@ impl PinCacheRefillController {
         pinned_table_ids: HashSet<TableId>,
         resident_versions: &[PinnedVersion],
     ) {
-        if self.pinned_table_ids.as_ref() == Some(&pinned_table_ids) {
+        if self.pinned_table_ids == pinned_table_ids {
             return;
         }
-        let before = self
-            .pinned_table_ids
-            .as_ref()
-            .map(|tables| {
-                resident_versions
-                    .iter()
-                    .flat_map(|version| Self::pinned_objects(version, tables))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let before = resident_versions
+            .iter()
+            .flat_map(|version| Self::pinned_objects(version, &self.pinned_table_ids))
+            .collect();
         let after = resident_versions
             .iter()
             .flat_map(|version| Self::pinned_objects(version, &pinned_table_ids))
             .collect();
         let changes = PinCacheObjectChanges::between(before, after);
-        self.pinned_table_ids = Some(pinned_table_ids);
+        self.pinned_table_ids = pinned_table_ids;
         self.rebuild_object_ref_counts();
         if let Some(cache) = self.sstable_store.pin_cache() {
             cache.register_objects(changes.inserted);
@@ -358,12 +352,9 @@ impl PinCacheRefillController {
         before: &HummockVersion,
         after: &HummockVersion,
     ) -> PinCacheObjectChanges {
-        let Some(tables) = &self.pinned_table_ids else {
-            return PinCacheObjectChanges::default();
-        };
         PinCacheObjectChanges::between(
-            Self::pinned_objects(before, tables),
-            Self::pinned_objects(after, tables),
+            Self::pinned_objects(before, &self.pinned_table_ids),
+            Self::pinned_objects(after, &self.pinned_table_ids),
         )
     }
 
@@ -411,10 +402,8 @@ impl PinCacheRefillController {
 
     fn rebuild_object_ref_counts(&mut self) {
         self.object_ref_counts.clear();
-        if let Some(tables) = &self.pinned_table_ids {
-            for sst in Self::pinned_ssts(&self.version, tables) {
-                *self.object_ref_counts.entry(sst.object_id).or_insert(0) += 1;
-            }
+        for sst in Self::pinned_ssts(&self.version, &self.pinned_table_ids) {
+            *self.object_ref_counts.entry(sst.object_id).or_insert(0) += 1;
         }
     }
 
@@ -422,9 +411,10 @@ impl PinCacheRefillController {
         &mut self,
         deltas: &[SstDeltaInfo],
     ) -> Option<PinCacheObjectChanges> {
-        let Some(pinned_table_ids) = &self.pinned_table_ids else {
+        let pinned_table_ids = &self.pinned_table_ids;
+        if pinned_table_ids.is_empty() {
             return Some(PinCacheObjectChanges::default());
-        };
+        }
 
         let mut initial_counts = HashMap::new();
         let mut inserted_sizes = HashMap::new();
