@@ -3,7 +3,7 @@
 """Oracle fixtures and composable SQL, transaction, and backfill operations.
 
 SLTs own fixture SQL and teardown, and attach hooks at named operation boundaries.
-The CLI exposes preparation, table cleanup, and the transaction worker.
+The CLI exposes preparation, fixture cleanup, and the transaction worker.
 Functions are ordered as public APIs, shared helpers (_), then private helpers (__).
 Single-caller private helpers are defined inside their caller.
 """
@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -127,7 +128,7 @@ def prepare(
     outcome = SqlOutcome()
     try:
         __prepare_base()
-        drop_tables()
+        __drop_tables()
     except Exception as error:
         outcome.exception = error
     context = HookContext([outcome])
@@ -143,21 +144,21 @@ def prepare(
     )
 
 
-def drop_tables() -> None:
-    """Discover and drop existing tables in the two dedicated test schemas."""
-    with _connect_as_sys(TEST_ORACLE_PDB) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT OWNER, TABLE_NAME FROM ALL_TABLES "
-                "WHERE OWNER IN (:1, :2) AND DROPPED = 'NO' "
-                "ORDER BY OWNER, TABLE_NAME",
-                [TEST_ORACLE_USER, TEST_ORACLE_SOURCE_SCHEMA],
+def cleanup() -> None:
+    temporary = Path(tempfile.gettempdir())
+    transactions = list(temporary.glob("rw-oracle-transaction-*"))
+    for directory in transactions:
+        if directory.is_symlink() or not directory.is_dir():
+            raise RuntimeError(f"unexpected transaction fixture path: {directory}")
+        if not (directory / "done.json").is_file():
+            raise RuntimeError(
+                f"unfinished transaction fixture: {directory}; end it before cleanup"
             )
-            for owner, table in cursor.fetchall():
-                table = table.replace('"', '""')
-                cursor.execute(
-                    f'DROP TABLE "{owner}"."{table}" CASCADE CONSTRAINTS PURGE'
-                )
+    __drop_tables()
+    for directory in transactions:
+        shutil.rmtree(directory)
+    for checkpoint in temporary.glob("rw-oracle-checkpoint-*"):
+        checkpoint.unlink()
 
 
 def execute_oracle_sqls(
@@ -390,6 +391,22 @@ def _transaction_state(name: str) -> dict:
 
 
 # Module-private helpers.
+def __drop_tables() -> None:
+    with _connect_as_sys(TEST_ORACLE_PDB) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT OWNER, TABLE_NAME FROM ALL_TABLES "
+                "WHERE OWNER IN (:1, :2) AND DROPPED = 'NO' "
+                "ORDER BY OWNER, TABLE_NAME",
+                [TEST_ORACLE_USER, TEST_ORACLE_SOURCE_SCHEMA],
+            )
+            for owner, table in cursor.fetchall():
+                table = table.replace('"', '""')
+                cursor.execute(
+                    f'DROP TABLE "{owner}"."{table}" CASCADE CONSTRAINTS PURGE'
+                )
+
+
 def __invoke_hook(hook, context: HookContext, kwargs: dict | None) -> None:
     # Import lazily: hooks use the connection and checkpoint readers above.
     if hook is None:
@@ -548,16 +565,18 @@ def __main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("prepare")
-    subparsers.add_parser("drop-tables")
+    subparsers.add_parser("cleanup")
     worker_parser = subparsers.add_parser("__hold_tx")
     worker_parser.add_argument("name")
     args = parser.parse_args()
     if args.command == "prepare":
         prepare()
-    elif args.command == "drop-tables":
-        drop_tables()
-    else:
+    elif args.command == "cleanup":
+        cleanup()
+    elif args.command == "__hold_tx":
         __hold_tx(args.name)
+    else:
+        raise ValueError(f"unknown fixture command: {args.command}")
 
 
 if __name__ == "__main__":

@@ -282,9 +282,8 @@ def check_paused_backfill(
     checkpoint = {"state": state}
     if source is not None:
         split = _read_source_split(_source_state_table(source))
-        if not split or not split.get("initial_mining_scn"):
-            raise RuntimeError(f"missing checkpointed source mining boundary: {split}")
-        checkpoint["initial_mining_scn"] = split["initial_mining_scn"]
+        if not split or not split["inner"].get("start_offset"):
+            raise RuntimeError(f"missing checkpointed source offset: {split}")
     _save_checkpoint(context.table, checkpoint)
     print(f"paused backfill: {state}")
 
@@ -328,17 +327,10 @@ def check_source_offset(
     check_success(context)
     before_scn = context.transaction["before_scn"]
     source_table = _source_state_table(source)
-    checkpoint = _load_checkpoint(paused_table) if paused_table is not None else None
     deadline = time.monotonic() + timeout
     split = None
     while time.monotonic() < deadline:
         split = _read_source_split(source_table)
-        if (
-            checkpoint
-            and split
-            and split["initial_mining_scn"] != checkpoint["initial_mining_scn"]
-        ):
-            raise RuntimeError(f"mining boundary changed without recovery: {split}")
         raw = split["inner"].get("start_offset") if split else None
         offset = json.loads(raw) if raw else {}
         decoded = offset.get("sourceOffset", {}).get("decoded_commit_scn")
@@ -367,24 +359,14 @@ def check_heartbeat_progress(
     saved_offset = json.loads(saved["inner"]["start_offset"]) if saved else None
     deadline = time.monotonic() + timeout
     previous_scn = int(saved_offset["sourceOffset"]["scn"]) if saved else None
-    initial_mining_scn = saved["initial_mining_scn"] if saved else None
     advances = 0
     last_split = None
     while time.monotonic() < deadline:
         last_split = _read_source_split(table)
         if last_split is not None:
-            mining_scn = last_split.get("initial_mining_scn")
             raw_offset = last_split["inner"].get("start_offset")
-            if mining_scn is not None and raw_offset:
+            if raw_offset:
                 offset = json.loads(raw_offset)
-                if int(mining_scn) <= 0:
-                    raise RuntimeError(f"invalid mining boundary: {last_split}")
-                if initial_mining_scn is None:
-                    initial_mining_scn = mining_scn
-                elif mining_scn != initial_mining_scn:
-                    raise RuntimeError(
-                        f"checkpointed mining boundary changed: {last_split}"
-                    )
                 if saved_offset is not None:
                     # A fresh initialization can advance SCN too; recovery must
                     # retain the original native snapshot boundary instead.

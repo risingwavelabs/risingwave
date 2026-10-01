@@ -23,7 +23,6 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.management.JMException;
@@ -141,34 +140,6 @@ public class DbzSourceUtils {
         return "\"" + identifier + "\"";
     }
 
-    /**
-     * Waits for the first Oracle mining position to be enqueued, not for a CDC row or checkpoint.
-     */
-    public static boolean waitForOracleStreamingRunning(
-            CountDownLatch initialMiningReady,
-            String dbServerName,
-            int waitStreamingStartTimeout,
-            BooleanSupplier shouldContinue)
-            throws InterruptedException {
-        LOG.info("Waiting for Oracle source {} to start its first mining session", dbServerName);
-        int waitedSeconds = 0;
-        while (shouldContinue.getAsBoolean()) {
-            if (initialMiningReady.await(1, TimeUnit.SECONDS)) {
-                LOG.info("Oracle source {} reported its initial mining position", dbServerName);
-                return true;
-            }
-            if (++waitedSeconds >= waitStreamingStartTimeout) {
-                LOG.error(
-                        "Oracle source {} did not report its initial mining position within {} seconds",
-                        dbServerName,
-                        waitStreamingStartTimeout);
-                return false;
-            }
-        }
-        LOG.info("Cancelled waiting for Oracle source {} to start", dbServerName);
-        return false;
-    }
-
     public static boolean waitForStreamingRunning(
             SourceTypeE sourceType,
             String dbServerName,
@@ -186,6 +157,9 @@ public class DbzSourceUtils {
         } else if (sourceType == SourceTypeE.SQL_SERVER) {
             return waitForStreamingRunningInner(
                     "sql_server", dbServerName, waitStreamingStartTimeout, shouldContinue);
+        } else if (sourceType == SourceTypeE.ORACLE) {
+            return waitForStreamingRunningInner(
+                    "oracle", dbServerName, waitStreamingStartTimeout, shouldContinue);
         } else {
             LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
             return true;

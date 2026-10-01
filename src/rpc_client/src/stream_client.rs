@@ -71,7 +71,6 @@ macro_rules! for_all_stream_rpc {
         $macro! {
             { 0, get_min_uncommitted_object_id, GetMinUncommittedObjectIdRequest, GetMinUncommittedObjectIdResponse }
             ,{ 0, warm_up_table_cache, WarmUpTableCacheRequest, WarmUpTableCacheResponse }
-            ,{ 0, get_oracle_initial_mining_scn, GetOracleInitialMiningScnRequest, GetOracleInitialMiningScnResponse }
         }
     };
 }

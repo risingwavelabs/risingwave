@@ -121,8 +121,8 @@ SELECT "ID", "NAME" FROM oracle_quiet_customers;
 ----
 1 RisingWave
 
-# Read checkpoint-visible split state repeatedly. A startup initialization signal
-# or a single snapshot-completion heartbeat is insufficient: require three advances.
+# Read checkpoint-visible split state repeatedly. A single startup heartbeat is
+# insufficient: require three advances.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_oracle_sqls
@@ -167,9 +167,8 @@ SELECT "ID", "NAME" FROM oracle_quiet_customers;
 1 RisingWave
 
 # Recover from durable heartbeat state, not a user-table DATA event. The hook
-# requires three further native SCN advances without resetting the saved mining
-# or snapshot boundary; merely initializing a fresh source must not pass.
-onlyif can-use-recover
+# requires three further native SCN advances without resetting the native snapshot
+# boundary; merely initializing a fresh source must not pass.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
@@ -181,7 +180,6 @@ execute_sqls(
 )
 PY
 
-onlyif can-use-recover
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_oracle_sqls
@@ -217,7 +215,7 @@ statement ok
 DROP SOURCE oracle_quiet_source CASCADE;
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py drop-tables
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
 
 # Closing the PDB stops the writer; dropping it also removes its job and files.
 # The job is bounded (~10 minutes) so an aborted SLT cannot write indefinitely.
