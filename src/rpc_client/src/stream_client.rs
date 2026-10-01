@@ -69,8 +69,7 @@ pub type StreamClientPoolRef = Arc<StreamClientPool>;
 macro_rules! for_all_stream_rpc {
     ($macro:ident) => {
         $macro! {
-            { 0, get_min_uncommitted_object_id, GetMinUncommittedObjectIdRequest, GetMinUncommittedObjectIdResponse },
-            { 0, get_oracle_initial_mining_scn, GetOracleInitialMiningScnRequest, GetOracleInitialMiningScnResponse }
+            { 0, get_min_uncommitted_object_id, GetMinUncommittedObjectIdRequest, GetMinUncommittedObjectIdResponse }
         }
     };
 }

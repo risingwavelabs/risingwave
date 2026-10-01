@@ -40,7 +40,7 @@ use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_connector::source::cdc::{
-    ORACLE_CDC_CONNECTOR, build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
+    build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
 };
 use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -75,9 +75,8 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    check_oracle_source_open_transactions, derive_with_options_for_cdc_table,
-    not_null_check_for_cdc_table, reject_pk_filtered_by_debezium_column_filter,
-    sanity_check_for_table_on_cdc_source,
+    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
@@ -1111,9 +1110,6 @@ pub(super) async fn handle_create_table_plan(
                     &source.with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
-            if source.with_properties.get_connector().as_deref() == Some(ORACLE_CDC_CONNECTOR) {
-                check_oracle_source_open_transactions(session, &source, &cdc_with_options).await?;
-            }
             let (columns, pk_names, pk_comparisons) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
                 None => {

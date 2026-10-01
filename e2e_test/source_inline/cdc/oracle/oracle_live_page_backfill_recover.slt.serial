@@ -1,14 +1,11 @@
 include oracle_test_env.slt.part
 
-onlyif can-use-recover
 statement ok
 DROP SOURCE IF EXISTS oracle_recovery_source CASCADE;
 
-onlyif can-use-recover
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
 
-onlyif can-use-recover
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_oracle_sqls
@@ -21,7 +18,6 @@ execute_oracle_sqls([
 PY
 
 # Begin the Oracle update before source creation and keep it uncommitted.
-onlyif can-use-recover
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import begin_tx
@@ -30,7 +26,6 @@ begin_tx("oracle_recovery_source", [
 ])
 PY
 
-onlyif can-use-recover
 statement ok
 CREATE SOURCE oracle_recovery_source WITH (
     ${TEST_ORACLE_WITH_OPTIONS_COMMON},
@@ -42,22 +37,18 @@ CREATE SOURCE oracle_recovery_source WITH (
 ) FORMAT PLAIN ENCODE JSON;
 
 # Checkpoint a prefix and pause backfill before committing another transaction.
-onlyif can-use-recover
 statement ok
 SET backfill_rate_limit = 2;
 
-onlyif can-use-recover
 statement ok
 CREATE TABLE oracle_recovery_table (
     "ID" INT PRIMARY KEY, "VALUE" VARCHAR
 ) WITH (snapshot.batch_size = 5)
 FROM oracle_recovery_source TABLE 'APP.RW_LIVE_PAGE';
 
-onlyif can-use-recover
 statement ok
 SET backfill_rate_limit = DEFAULT;
 
-onlyif can-use-recover
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import begin_backfills
@@ -71,7 +62,6 @@ begin_backfills(
 )
 PY
 
-onlyif can-use-recover
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import begin_tx, end_tx
@@ -88,7 +78,6 @@ PY
 
 # Recover while the original transaction is still open. Its checkpointed prefix
 # must be restored, and its uncommitted update must remain invisible.
-onlyif can-use-recover
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
@@ -100,13 +89,11 @@ execute_sqls(
 )
 PY
 
-onlyif can-use-recover
 query T
 SELECT "VALUE" FROM oracle_recovery_table WHERE "ID" = 1;
 ----
 initial-1
 
-onlyif can-use-recover
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import end_tx, end_backfills
@@ -118,22 +105,37 @@ end_backfills(
 )
 PY
 
-onlyif can-use-recover
 query T retry 90 backoff 1s
 SELECT "VALUE" FROM oracle_recovery_table WHERE "ID" = 1;
 ----
 recovered-long
 
+# Validate the resumed backfill before another recovery or further CDC mutations.
+query I retry 60 backoff 1s
+SELECT count(*) FROM oracle_recovery_table;
+----
+1000
+
+# Count missing, unexpected, or incorrect rows: zero means the entire table matches.
+query I retry 60 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id = 1 THEN 'recovered-long'
+                    WHEN id = 50 THEN 'other-committed'
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1000) AS rows(id)
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_recovery_table t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
 # Recover again after completion, then verify that ordinary CDC resumes.
-onlyif can-use-recover
 statement ok
 FLUSH;
 
-onlyif can-use-recover
 statement ok
 RECOVER;
 
-onlyif can-use-recover
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import begin_tx, end_tx
@@ -145,22 +147,19 @@ begin_tx("oracle_after_recovery", [
 end_tx("oracle_after_recovery")
 PY
 
-onlyif can-use-recover
 query T retry 90 backoff 1s
 SELECT "VALUE" FROM oracle_recovery_table WHERE "ID" = 50;
 ----
 after-recovery
 
-onlyif can-use-recover
 statement ok
 SET backfill_rate_limit = 1000;
 
-onlyif can-use-recover
 statement ok
 CREATE TABLE oracle_recovery_table_new (*)
 FROM oracle_recovery_source TABLE 'APP.RW_LIVE_PAGE';
 
-onlyif can-use-recover
+# Zero mismatches means the existing table survived both recoveries and all CDC changes.
 query I retry 60 backoff 1s
 WITH expected AS (
     SELECT id, CASE WHEN id = 1 THEN 'recovered-long'
@@ -174,8 +173,7 @@ WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
 ----
 0
 
-# The new table must discover and backfill the current upstream rows after recovery.
-onlyif can-use-recover
+# The new table must independently backfill the current rows with zero mismatches.
 query I retry 60 backoff 1s
 WITH expected AS (
     SELECT id, CASE WHEN id = 1 THEN 'recovered-long'
@@ -189,10 +187,8 @@ WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
 ----
 0
 
-onlyif can-use-recover
 statement ok
 DROP SOURCE oracle_recovery_source CASCADE;
 
-onlyif can-use-recover
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py drop-tables
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
