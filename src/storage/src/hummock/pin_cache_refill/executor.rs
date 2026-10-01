@@ -808,6 +808,14 @@ mod tests {
                 .await
                 .unwrap()
         );
+        // I/O failure must run again after backoff while the original ticket stays failed.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while executor.state.lock().objects[&object].attempts < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
         let next = executor.submit(plan);
         assert!(Arc::ptr_eq(&completion, &next.completions[0]));
         assert!(
