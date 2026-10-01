@@ -64,7 +64,6 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId>;
 
     async fn backup_meta(&self, remarks: Option<String>) -> Result<u64>;
-    async fn get_oracle_initial_mining_scn(&self, source_id: SourceId) -> Result<u64>;
     async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)>;
     async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()>;
 
@@ -309,10 +308,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
         self.0.list_actor_splits().await
-    }
-
-    async fn get_oracle_initial_mining_scn(&self, source_id: SourceId) -> Result<u64> {
-        self.0.get_oracle_initial_mining_scn(source_id).await
     }
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {

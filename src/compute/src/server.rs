@@ -421,7 +421,7 @@ pub async fn compute_node_serve(
     let batch_exchange_srv = BatchExchangeServiceImpl::new(batch_mgr.clone());
     let stream_exchange_srv =
         StreamExchangeServiceImpl::new(stream_mgr.clone(), stream_exchange_srv_metrics);
-    let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
+    let stream_srv = StreamServiceImpl::new(stream_mgr.clone());
     let (meta_cache, block_cache, hummock_storage) = if let Some(hummock) = state_store.as_hummock()
     {
         (

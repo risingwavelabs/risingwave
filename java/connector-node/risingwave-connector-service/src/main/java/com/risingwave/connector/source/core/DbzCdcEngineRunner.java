@@ -47,7 +47,6 @@ public class DbzCdcEngineRunner {
                             config.getSourceType(),
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
-                            config.requiresInitialOracleMining(),
                             (success, message, error) -> {
                                 if (!success) {
                                     LOG.error(
@@ -82,7 +81,6 @@ public class DbzCdcEngineRunner {
                             config.getSourceType(),
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
-                            config.requiresInitialOracleMining(),
                             (success, message, error) -> {
                                 if (!success) {
                                     LOG.error(
@@ -142,23 +140,15 @@ public class DbzCdcEngineRunner {
 
         boolean startOk = true;
         // Wait for connector-specific streaming startup before sending the handshake.
-        if (config.requiresInitialOracleMining() || config.isBackfillSource()) {
+        if (config.isBackfillSource()) {
             var databaseServerName =
                     config.getResolvedDebeziumProps()
                             .getProperty(CommonConnectorConfig.TOPIC_PREFIX.name());
-            if (config.requiresInitialOracleMining()) {
-                startOk =
-                        DbzSourceUtils.waitForOracleStreamingRunning(
-                                engine.initialOracleMiningReady(),
-                                databaseServerName,
-                                config.getWaitStreamingStartTimeout());
-            } else {
-                startOk =
-                        DbzSourceUtils.waitForStreamingRunning(
-                                config.getSourceType(),
-                                databaseServerName,
-                                config.getWaitStreamingStartTimeout());
-            }
+            startOk =
+                    DbzSourceUtils.waitForStreamingRunning(
+                            config.getSourceType(),
+                            databaseServerName,
+                            config.getWaitStreamingStartTimeout());
         }
 
         running.set(true);

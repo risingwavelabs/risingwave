@@ -94,46 +94,6 @@ final class OracleExternalTable {
         }
     }
 
-    static ConnectorServiceProto.OracleExternalTableResponse oldestOpenTransactionScns(
-            ConnectorServiceProto.OracleExternalTableRequest request) throws SQLException {
-        var racNodes =
-                request.getPropertiesOrDefault(DbzConnectorConfig.ORACLE_DEBEZIUM_RAC_NODES, "");
-        var isRac = !racNodes.isBlank();
-        var sql =
-                isRac
-                        ? "SELECT START_SCN, INST_ID FROM GV$TRANSACTION"
-                        : "SELECT START_SCN FROM V$TRANSACTION";
-        // Check every row before aggregating: MIN alone would conceal an unknown START_SCN.
-        var oldestStartScnByInstance = new HashMap<Integer, Long>();
-        try (var connection = connect(request.getPropertiesMap());
-                var statement = connection.createStatement();
-                var result = statement.executeQuery(sql)) {
-            while (result.next()) {
-                var startScn = result.getLong("START_SCN");
-                if (result.wasNull() || startScn <= 0) {
-                    throw new SQLException("Oracle open transaction has no valid START_SCN");
-                }
-                var instanceId = 0;
-                if (isRac) {
-                    instanceId = result.getInt("INST_ID");
-                    if (result.wasNull() || instanceId <= 0) {
-                        throw new SQLException("Oracle open transaction has no valid INST_ID");
-                    }
-                }
-                oldestStartScnByInstance.merge(instanceId, startScn, Long::min);
-            }
-        }
-        var response = ConnectorServiceProto.OracleExternalTableResponse.newBuilder();
-        oldestStartScnByInstance.forEach(
-                (instanceId, startScn) ->
-                        response.addOldestOpenTransactionScns(
-                                ConnectorServiceProto.OracleOldestOpenTransactionStartScn
-                                        .newBuilder()
-                                        .setStartScn(startScn)
-                                        .setInstanceId(instanceId)));
-        return response.build();
-    }
-
     static ConnectorServiceProto.OracleExternalTableResponse currentScn(
             ConnectorServiceProto.OracleExternalTableRequest request) throws SQLException {
         try (var connection = connect(request.getPropertiesMap());

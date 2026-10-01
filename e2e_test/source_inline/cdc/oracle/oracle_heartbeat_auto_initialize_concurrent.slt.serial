@@ -306,4 +306,4 @@ execute_sqls(
 PY
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py drop-tables
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

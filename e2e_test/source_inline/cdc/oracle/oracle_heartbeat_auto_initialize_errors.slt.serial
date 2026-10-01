@@ -213,7 +213,7 @@ CREATE SOURCE incompatible_oracle_hb WITH (
 PY
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py drop-tables
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
 
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'

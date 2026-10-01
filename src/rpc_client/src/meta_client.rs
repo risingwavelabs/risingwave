@@ -107,7 +107,7 @@ use risingwave_pb::meta::session_param_service_client::SessionParamServiceClient
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
-use risingwave_pb::meta::{FragmentDistribution, GetOracleInitialMiningScnRequest, *};
+use risingwave_pb::meta::{FragmentDistribution, *};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
@@ -1308,16 +1308,6 @@ impl MetaClient {
             .await?;
 
         Ok(resp.actor_splits)
-    }
-
-    pub async fn get_oracle_initial_mining_scn(&self, source_id: SourceId) -> Result<u64> {
-        let resp = self
-            .inner
-            .get_oracle_initial_mining_scn(GetOracleInitialMiningScnRequest {
-                source_id: source_id.as_raw_id(),
-            })
-            .await?;
-        Ok(resp.initial_mining_scn)
     }
 
     pub async fn pause(&self) -> Result<PauseResponse> {
@@ -2727,7 +2717,6 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_sink_log_store_tables, ListSinkLogStoreTablesRequest, ListSinkLogStoreTablesResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
-            ,{ stream_client, get_oracle_initial_mining_scn, GetOracleInitialMiningScnRequest, GetOracleInitialMiningScnResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
