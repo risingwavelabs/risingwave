@@ -58,15 +58,6 @@ public final class JniOracleExternalTable {
         return invoke(() -> session(sessionId).currentScn());
     }
 
-    public static byte[] oldestOpenTransactionScns(byte[] propertiesBytes) {
-        return invoke(
-                () ->
-                        OracleExternalTable.oldestOpenTransactionScns(
-                                        ConnectorServiceProto.OracleConnectionProperties.parseFrom(
-                                                propertiesBytes))
-                                .toByteArray());
-    }
-
     public static void snapshotRead(
             long sessionId, byte[] requestBytes, long startPkPointer, long channelPtr) {
         invoke(

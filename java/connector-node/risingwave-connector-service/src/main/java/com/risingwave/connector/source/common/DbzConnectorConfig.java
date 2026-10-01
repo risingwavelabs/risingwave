@@ -132,7 +132,6 @@ public class DbzConnectorConfig {
     private final SourceTypeE sourceType;
     private final Properties resolvedDbzProps;
     private final boolean isBackfillSource;
-    private final boolean requiresInitialOracleMining;
     private final int waitStreamingStartTimeout;
 
     public long getSourceId() {
@@ -149,10 +148,6 @@ public class DbzConnectorConfig {
 
     public boolean isBackfillSource() {
         return isBackfillSource;
-    }
-
-    public boolean requiresInitialOracleMining() {
-        return requiresInitialOracleMining;
     }
 
     public int getWaitStreamingStartTimeout() {
@@ -174,10 +169,6 @@ public class DbzConnectorConfig {
         var isCdcBackfill =
                 null != userProps.get(SNAPSHOT_MODE_KEY)
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
-        this.requiresInitialOracleMining =
-                source == SourceTypeE.ORACLE
-                        && isCdcSourceJob
-                        && (startOffset == null || startOffset.isBlank());
         var waitStreamingStartTimeout =
                 Integer.parseInt(
                         userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "60"));

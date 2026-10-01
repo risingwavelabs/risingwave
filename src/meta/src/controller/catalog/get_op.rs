@@ -21,8 +21,8 @@ use sea_orm::ConnectionTrait;
 use super::*;
 use crate::controller::utils::{
     StreamingJobExtraInfo, get_database_resource_group, get_existing_job_resource_group,
-    get_internal_tables_by_id, get_streaming_job_extra_info as fetch_streaming_job_extra_info,
-    get_table_columns, load_streaming_jobs_by_ids,
+    get_streaming_job_extra_info as fetch_streaming_job_extra_info, get_table_columns,
+    load_streaming_jobs_by_ids,
 };
 
 impl CatalogController {
@@ -151,37 +151,6 @@ impl CatalogController {
             .one(&inner.db)
             .await?;
         Ok(ObjectModel(table, obj.unwrap(), streaming_job).into())
-    }
-
-    /// Finds the shared Oracle source's internal split-state table so meta can read its
-    /// checkpointed initial mining SCN. `CREATE TABLE` needs this SCN to decide whether
-    /// the requested table can be safely backfilled *before* starting its backfill job;
-    /// meta exposes the committed value to frontend DDL, which cannot read the source
-    /// executor's split directly.
-    pub async fn get_oracle_source_state_table(&self, source_id: SourceId) -> MetaResult<PbTable> {
-        let inner = self.inner.read().await;
-        let source = Source::find_by_id(source_id)
-            .one(&inner.db)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
-        if !source.is_shared()
-            || !source
-                .with_properties
-                .0
-                .get("connector")
-                .is_some_and(|connector| connector.eq_ignore_ascii_case("oracle-cdc"))
-        {
-            return Err(anyhow!("source {source_id} is not a shared Oracle CDC source").into());
-        }
-        let tables =
-            get_internal_tables_by_id(JobId::new(source_id.as_raw_id()), &inner.db).await?;
-        if tables.len() != 1 {
-            return Err(
-                anyhow!("expected one state table for Oracle CDC source {source_id}").into(),
-            );
-        }
-        drop(inner);
-        self.get_table_by_id(tables[0]).await
     }
 
     pub async fn get_table_by_id(&self, table_id: TableId) -> MetaResult<PbTable> {
