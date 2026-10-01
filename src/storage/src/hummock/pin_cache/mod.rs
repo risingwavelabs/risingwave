@@ -115,14 +115,16 @@ impl PinCacheObject {
         }
     }
 
-    /// Detaches a read route. Membership and refill admission remain valid.
-    fn take_published(&mut self) -> Option<Arc<PinCacheFile>> {
+    /// Withdraws the read route and retires its file. Membership and refill admission remain valid.
+    /// The caller must release the returned reference outside the shard lock.
+    fn unpublish(&mut self) -> Option<Arc<PinCacheFile>> {
         let size = self.published()?.size;
         let PinCacheObjectState::Published(file) =
             std::mem::replace(&mut self.state, PinCacheObjectState::NotCached { size })
         else {
             unreachable!()
         };
+        file.retire();
         GLOBAL_PIN_CACHE_METRICS.published_objects.dec();
         GLOBAL_PIN_CACHE_METRICS
             .published_bytes
@@ -228,9 +230,9 @@ impl PinCacheReadHandle {
                 .published()
                 .is_some_and(|file| Arc::ptr_eq(file, &self.file))
         {
-            let file = object.take_published().unwrap();
+            let file = object.unpublish().unwrap();
             drop(state);
-            file.retire();
+            drop(file);
         }
     }
 
