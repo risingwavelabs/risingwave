@@ -25,7 +25,7 @@ use risingwave_object_store::object::ObjectError;
 use super::PinCache;
 use super::gc::tests::{accounted_bytes, wait_for_reclaim};
 use super::test_utils::{
-    download_and_publish_for_test, in_memory_object_store, local_object_store,
+    download_and_publish_for_test, in_memory_object_store, local_object_store, object_in_shard,
 };
 use crate::opts::StorageOpts;
 
@@ -197,13 +197,6 @@ async fn test_read_failure_only_invalidates_selected_publication() {
     );
 }
 
-fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
-    (1..)
-        .map(HummockSstableObjectId::from)
-        .find(|&id| PinCache::shard_index(id, shard_num) == shard)
-        .unwrap()
-}
-
 #[tokio::test]
 async fn test_other_shard_does_not_block_object_operations() {
     let mut config = RwConfig::default();
@@ -350,19 +343,10 @@ async fn test_recovery_returns_ready_routes_across_shards() {
     let (_dir, local) = local_object_store().await;
     let objects = [object_in_shard(0, 3), object_in_shard(2, 3)];
     for id in objects {
-        for path_id in [1, 2] {
-            local
-                .upload(
-                    &format!("{}-{path_id}.sst", id.as_raw_id()),
-                    Bytes::from_static(b"complete"),
-                )
-                .await
-                .unwrap();
-        }
         local
             .upload(
-                &format!("{}-3.sst", id.as_raw_id()),
-                Bytes::from_static(b"short"),
+                &format!("{}-1.sst", id.as_raw_id()),
+                Bytes::from_static(b"complete"),
             )
             .await
             .unwrap();
