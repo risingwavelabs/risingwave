@@ -191,21 +191,15 @@ pub(super) mod tests {
     #[tokio::test]
     async fn test_failed_deletion_keeps_capacity_reserved() {
         let (dir, local_store) = local_object_store().await;
-        let gc = Arc::new(PinCacheGc::new(local_store.clone(), 16));
-        let entry = Arc::new(PinCacheFile::new("1001-42.sst".into(), 8, Arc::clone(&gc)));
+        let gc = PinCacheGc::new(local_store.clone(), 16);
+        let failed_path = "1001-42.sst".to_owned();
         // A nonempty directory at the exact object path makes FS deletion fail,
         // including when the test runs as root (unlike permission-based failures).
-        let path = dir.path().join(&entry.path);
+        let path = dir.path().join(&failed_path);
         std::fs::create_dir(&path).unwrap();
         std::fs::write(path.join("child"), b"complete").unwrap();
-        gc.try_reserve(entry.size).unwrap();
-        PinCacheGc::reclaim_batch(
-            &local_store,
-            &gc.state,
-            std::slice::from_ref(&entry.path),
-            entry.size,
-        )
-        .await;
+        gc.try_reserve(8).unwrap();
+        PinCacheGc::reclaim_batch(&local_store, &gc.state, &[failed_path], 8).await;
 
         assert!(path.join("child").exists());
         {
@@ -214,19 +208,13 @@ pub(super) mod tests {
             assert_eq!(state.uncertain_bytes, 0);
         }
         // A successful later batch releases only its own reservation, not the failed batch's.
-        let complete = PinCacheFile::new("1002-43.sst".into(), 8, Arc::clone(&gc));
-        gc.try_reserve(complete.size).unwrap();
+        let complete_path = "1002-43.sst".to_owned();
+        gc.try_reserve(8).unwrap();
         local_store
-            .upload(&complete.path, Bytes::from_static(b"complete"))
+            .upload(&complete_path, Bytes::from_static(b"complete"))
             .await
             .unwrap();
-        PinCacheGc::reclaim_batch(
-            &local_store,
-            &gc.state,
-            std::slice::from_ref(&complete.path),
-            complete.size,
-        )
-        .await;
+        PinCacheGc::reclaim_batch(&local_store, &gc.state, &[complete_path], 8).await;
         assert!(path.join("child").exists());
         assert_eq!(gc.state.lock().accounted_bytes, 8);
         assert_eq!(gc.state.lock().uncertain_bytes, 0);
