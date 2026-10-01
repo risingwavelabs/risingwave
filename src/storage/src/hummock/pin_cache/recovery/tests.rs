@@ -15,7 +15,7 @@
 use risingwave_object_store::object::ObjectMetadata;
 
 use super::*;
-use crate::hummock::pin_cache::test_utils::in_memory_object_store;
+use crate::hummock::pin_cache::test_utils::{in_memory_object_store, object_in_shard};
 
 fn metadata(id: HummockSstableObjectId, path_id: usize, size: usize) -> ObjectMetadata {
     ObjectMetadata {
@@ -23,13 +23,6 @@ fn metadata(id: HummockSstableObjectId, path_id: usize, size: usize) -> ObjectMe
         last_modified: 0.0,
         total_size: size,
     }
-}
-
-fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
-    (1..)
-        .map(HummockSstableObjectId::from)
-        .find(|&id| PinCache::shard_index(id, shard_num) == shard)
-        .unwrap()
 }
 
 async fn cache(shard_num: usize, ids: &[HummockSstableObjectId]) -> PinCache {

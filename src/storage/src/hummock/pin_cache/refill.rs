@@ -37,7 +37,7 @@ pub(crate) enum PinCacheDownloadError {
 /// Dropping it never changes the index. Construction and writing stay private to this module.
 pub(crate) struct PinCacheDownload {
     // Taking the file transfers cleanup responsibility to the index.
-    file: Option<Arc<PinCacheFile>>,
+    file: Option<PinCacheFile>,
     upload_state: UploadState,
 }
 
@@ -53,13 +53,13 @@ impl PinCacheDownload {
     fn new(file: PinCacheFile) -> Result<Self, u64> {
         file.gc.try_reserve(file.size)?;
         Ok(Self {
-            file: Some(Arc::new(file)),
+            file: Some(file),
             upload_state: UploadState::NotStarted,
         })
     }
 
     fn into_file(mut self) -> Arc<PinCacheFile> {
-        self.file.take().expect("download owns an unpublished file")
+        Arc::new(self.file.take().expect("download owns an unpublished file"))
     }
 
     /// Copies and validates the complete file without publishing it. Success returns the owner
