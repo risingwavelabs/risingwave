@@ -446,11 +446,7 @@ impl PinCacheRefillExecutor {
                     .map(|(&table, bitmap)| (table, bitmap.clone()))
                     .collect::<HashMap<_, _>>(),
             );
-            if !work.projections.iter().any(|sst| {
-                sst.table_ids
-                    .iter()
-                    .any(|table| ownership.contains_key(table))
-            }) {
+            if ownership.is_empty() {
                 cache.revoke_refill(*object);
                 work.completion.store(2, Ordering::Release);
                 if let Some(route) = cache.get(*object) {
