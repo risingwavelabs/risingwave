@@ -13,8 +13,13 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::net::IpAddr;
+use std::time::{Duration, SystemTime};
 
 use anyhow::anyhow;
+use aws_credential_types::Credentials as AwsCredentials;
+use aws_credential_types::provider::future::ProvideCredentials as ProvideCredentialsFuture;
+use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
 use maplit::hashset;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
@@ -52,6 +57,7 @@ pub struct OpenSearchConfig {
     pub inner: ElasticSearchOpenSearchConfig,
 
     /// Authentication method for `OpenSearch`. Supported values: `basic`, `aws_sigv4`.
+    /// `OpenSearch` `SigV4` options must be set in sink `WITH` options; `CREATE CONNECTION` does not support them.
     #[serde(rename = "auth.method")]
     pub auth_method: Option<String>,
 
@@ -162,6 +168,53 @@ fn default_concurrent_requests() -> usize {
     1024
 }
 
+#[derive(Debug)]
+struct CachedAwsCredentialsProvider {
+    inner: SharedCredentialsProvider,
+    cached: tokio::sync::Mutex<Option<AwsCredentials>>,
+    refresh_before: Duration,
+}
+
+impl CachedAwsCredentialsProvider {
+    fn new(inner: SharedCredentialsProvider) -> Self {
+        Self {
+            inner,
+            cached: tokio::sync::Mutex::new(None),
+            refresh_before: Duration::from_secs(60),
+        }
+    }
+
+    fn needs_refresh(credentials: &AwsCredentials, refresh_before: Duration) -> bool {
+        match credentials.expiry() {
+            Some(expiry) => match SystemTime::now().checked_add(refresh_before) {
+                Some(refresh_deadline) => refresh_deadline >= expiry,
+                None => true,
+            },
+            None => false,
+        }
+    }
+}
+
+impl ProvideCredentials for CachedAwsCredentialsProvider {
+    fn provide_credentials<'a>(&'a self) -> ProvideCredentialsFuture<'a>
+    where
+        Self: 'a,
+    {
+        ProvideCredentialsFuture::new(async move {
+            let mut cached = self.cached.lock().await;
+            if let Some(credentials) = cached.as_ref()
+                && !Self::needs_refresh(credentials, self.refresh_before)
+            {
+                return Ok(credentials.clone());
+            }
+
+            let credentials = self.inner.provide_credentials().await?;
+            *cached = Some(credentials.clone());
+            Ok(credentials)
+        })
+    }
+}
+
 impl TryFrom<&ElasticsearchConnection> for ElasticSearchOpenSearchConfig {
     type Error = ConnectorError;
 
@@ -209,8 +262,9 @@ impl OpenSearchConfig {
     }
 
     pub async fn build_client(&self) -> Result<ElasticSearchOpenSearchClient> {
+        let url = self.inner.url()?;
         let mut transport_builder = opensearch::http::transport::TransportBuilder::new(
-            opensearch::http::transport::SingleNodeConnectionPool::new(self.inner.url()?),
+            opensearch::http::transport::SingleNodeConnectionPool::new(url.clone()),
         );
 
         match self.validate_auth_config()? {
@@ -233,8 +287,25 @@ impl OpenSearchConfig {
             }
             OpenSearchAuthMethod::AwsSigV4 => {
                 let aws_config = self.aws_auth_props.build_config().await?;
-                let credentials = opensearch::auth::Credentials::try_from(&aws_config)
-                    .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
+                let credentials_provider = aws_config.credentials_provider().ok_or_else(|| {
+                    SinkError::ElasticSearchOpenSearch(anyhow!(
+                        "AWS SDK config does not have a credentials provider"
+                    ))
+                })?;
+                let region = aws_config
+                    .region()
+                    .ok_or_else(|| {
+                        SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "AWS SDK config does not have a region"
+                        ))
+                    })?
+                    .clone();
+                let credentials = opensearch::auth::Credentials::AwsSigV4(
+                    SharedCredentialsProvider::new(CachedAwsCredentialsProvider::new(
+                        credentials_provider,
+                    )),
+                    region,
+                );
                 transport_builder = transport_builder
                     .service_name(self.aws_sigv4_service_name.as_deref().unwrap_or("es"))
                     .auth(credentials);
@@ -278,6 +349,11 @@ impl OpenSearchConfig {
                 }
             }
             OpenSearchAuthMethod::AwsSigV4 => {
+                if !is_https_or_loopback(&self.inner.url()?) {
+                    return Err(SinkError::Config(anyhow!(
+                        "`url` must use HTTPS for non-loopback endpoints when `auth.method` is `aws_sigv4`."
+                    )));
+                }
                 if self.inner.username.is_some() || self.inner.password.is_some() {
                     return Err(SinkError::Config(anyhow!(
                         "`username` and `password` cannot be used when `auth.method` is `aws_sigv4`."
@@ -308,8 +384,18 @@ impl OpenSearchConfig {
             || self.aws_auth_props.arn.is_some()
             || self.aws_auth_props.external_id.is_some()
             || self.aws_auth_props.profile.is_some()
-            || self.aws_auth_props.msk_signer_timeout_sec.is_some()
             || self.aws_sigv4_service_name.is_some()
+    }
+}
+
+fn is_https_or_loopback(url: &Url) -> bool {
+    if url.scheme() == "https" {
+        return true;
+    }
+    match url.host_str() {
+        Some(host) if host.eq_ignore_ascii_case("localhost") => true,
+        Some(host) => host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback()),
+        None => false,
     }
 }
 
@@ -388,6 +474,46 @@ mod tests {
         let config = OpenSearchConfig::from_btreemap(props).unwrap();
         let err = config.auth_method().unwrap_err();
         assert!(err.to_string().contains("unsupported `auth.method`"));
+    }
+
+    #[test]
+    fn test_reject_sigv4_http_url_for_remote_host() {
+        let mut props = BTreeMap::from([
+            ("url".to_owned(), "http://example.com".to_owned()),
+            ("index".to_owned(), "rw_test".to_owned()),
+        ]);
+        props.insert("auth.method".to_owned(), "aws_sigv4".to_owned());
+        props.insert("aws.region".to_owned(), "us-east-1".to_owned());
+
+        let config = OpenSearchConfig::from_btreemap(props).unwrap();
+        let err = config.validate_auth_config().unwrap_err();
+        assert!(err.to_string().contains("must use HTTPS"));
+    }
+
+    #[test]
+    fn test_allow_sigv4_http_url_for_loopback() {
+        let mut props = BTreeMap::from([
+            ("url".to_owned(), "http://127.0.0.1:19200".to_owned()),
+            ("index".to_owned(), "rw_test".to_owned()),
+        ]);
+        props.insert("auth.method".to_owned(), "aws_sigv4".to_owned());
+        props.insert("aws.region".to_owned(), "us-east-1".to_owned());
+
+        let config = OpenSearchConfig::from_btreemap(props).unwrap();
+        assert!(matches!(
+            config.validate_auth_config().unwrap(),
+            OpenSearchAuthMethod::AwsSigV4
+        ));
+    }
+
+    #[test]
+    fn test_msk_signer_timeout_is_not_opensearch_aws_auth_config() {
+        let mut config = OpenSearchConfig::from_btreemap(base_opensearch_props()).unwrap();
+        config.aws_auth_props.msk_signer_timeout_sec = Some(10);
+        assert!(matches!(
+            config.validate_auth_config().unwrap(),
+            OpenSearchAuthMethod::None
+        ));
     }
 }
 

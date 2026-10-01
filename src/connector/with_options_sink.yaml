@@ -1543,7 +1543,9 @@ OpenSearchConfig:
     default: '"upsert" . to_owned ()'
   - name: auth.method
     field_type: String
-    comments: 'Authentication method for `OpenSearch`. Supported values: `basic`, `aws_sigv4`.'
+    comments: |-
+      Authentication method for `OpenSearch`. Supported values: `basic`, `aws_sigv4`.
+      `OpenSearch` `SigV4` options must be set in sink `WITH` options; `CREATE CONNECTION` does not support them.
     required: false
   - name: aws.sigv4.service_name
     field_type: String
