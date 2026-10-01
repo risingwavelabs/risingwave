@@ -277,9 +277,10 @@ async fn test_object_membership_across_shards() {
             .unwrap();
     }
 
-    // Repeated registration preserves the publication and refill identity.
+    // Repeated registration, including duplicates in one batch, preserves the publication
+    // and refill identity.
     let first = cache.get(objects[0]).unwrap();
-    cache.register_objects([(objects[0], 8)]);
+    cache.register_objects([(objects[0], 8), (objects[0], 8)]);
     assert_eq!(cache.prepare_refill(objects[0]), Some(tokens[0]));
     assert!(Arc::ptr_eq(
         &first.file,
