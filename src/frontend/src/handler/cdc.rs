@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{CdcKeyComparison, ColumnCatalog};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
-use risingwave_connector::source::cdc::external::oracle::OracleExternalTable;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalTableConfig, ExternalTableImpl, SCHEMA_NAME_KEY, SchemaTableName,
     TABLE_NAME_KEY,
@@ -29,32 +28,9 @@ use risingwave_connector::source::cdc::{
 use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
 use thiserror_ext::AsReport;
 
-use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::create_source::reject_variant_columns;
 use crate::handler::create_table::{bind_sql_columns, bind_sql_pk_names, bind_table_constraints};
-use crate::session::SessionImpl;
-
-/// Reject a new Oracle CDC table when an open transaction began before the source's
-/// checkpointed initial mining boundary. This does not validate redo retention.
-pub(crate) async fn check_oracle_source_open_transactions(
-    session: &SessionImpl,
-    source: &SourceCatalog,
-    table_options: &WithOptionsSecResolved,
-) -> Result<()> {
-    let initial_mining_scn = session
-        .env()
-        .meta_client()
-        .get_oracle_initial_mining_scn(source.id)
-        .await
-        .context("failed to read the Oracle CDC source's checkpointed initial mining SCN")?;
-    let (properties, secret_refs) = table_options.clone().into_parts();
-    let config = ExternalTableConfig::try_from_btreemap(properties, secret_refs)
-        .context("failed to extract Oracle external table config")?;
-    let oldest_start_scns = OracleExternalTable::oldest_open_transaction_scns(&config).await?;
-    OracleExternalTable::check_open_transactions(initial_mining_scn, &oldest_start_scns)?;
-    Ok(())
-}
 
 /// Derive connector properties and normalize `external_table_name` for CDC tables.
 ///

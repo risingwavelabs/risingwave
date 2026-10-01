@@ -32,9 +32,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_jni_core::{JavaBindingIterator, JniSenderType, call_static_method};
 use risingwave_pb::connector_service::{
-    OracleConnectionProperties, OracleOldestOpenTransactionScnsResponse,
-    OracleOldestOpenTransactionStartScn, OracleSnapshotReadRequest, OracleSnapshotReadResponse,
-    TableSchema,
+    OracleConnectionProperties, OracleSnapshotReadRequest, OracleSnapshotReadResponse, TableSchema,
 };
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -80,40 +78,6 @@ pub struct OracleExternalTable {
 }
 
 impl OracleExternalTable {
-    /// Find the earliest open transaction per instance for the new-table preflight.
-    /// The table-time gate compares these starts with the source split's fixed initial mining SCN.
-    /// This query does not establish redo availability.
-    pub async fn oldest_open_transaction_scns(
-        config: &ExternalTableConfig,
-    ) -> ConnectorResult<Vec<OracleOldestOpenTransactionStartScn>> {
-        let properties = config.oracle_connection_properties()?;
-        let response = tokio::task::spawn_blocking(move || {
-            invoke_jni_oldest_open_transaction_scns(&properties)
-        })
-        .await
-        .context("failed to join Oracle oldest-open-transaction query task")??;
-        Ok(response.scns)
-    }
-
-    /// Reject creating a table if any open transaction predates the source's initial mining SCN.
-    /// Passing this check does not prove redo availability for any mining thread.
-    pub fn check_open_transactions(
-        initial_mining_scn: u64,
-        oldest_start_scns: &[OracleOldestOpenTransactionStartScn],
-    ) -> ConnectorResult<()> {
-        for transaction in oldest_start_scns {
-            if transaction.start_scn < initial_mining_scn {
-                bail!(
-                    "Cannot create Oracle CDC table: instance {} has an open transaction starting at SCN {} before the source's initial mining SCN {}. This transaction may be unrelated to the requested table, but its affected tables are unknown. Recreate the Oracle CDC source before retrying table creation",
-                    transaction.instance_id,
-                    transaction.start_scn,
-                    initial_mining_scn
-                );
-            }
-        }
-        Ok(())
-    }
-
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         let properties = config.oracle_connection_properties()?;
         let table_schema = tokio::task::spawn_blocking(move || invoke_jni_discover(&properties))
@@ -483,25 +447,6 @@ fn invoke_jni_current_scn(session_id: i64) -> anyhow::Result<i64> {
     })
 }
 
-fn invoke_jni_oldest_open_transaction_scns(
-    properties: &OracleConnectionProperties,
-) -> anyhow::Result<OracleOldestOpenTransactionScnsResponse> {
-    let jvm = Jvm::get_or_init()?;
-    execute_with_jni_env(jvm, |env| {
-        let properties_bytes = env.byte_array_from_slice(&properties.encode_to_vec())?;
-        let response_bytes = call_static_method!(
-            env,
-            {com.risingwave.connector.source.common.JniOracleExternalTable},
-            {byte[] oldestOpenTransactionScns(byte[] propertiesBytes)},
-            &properties_bytes
-        )?;
-        OracleOldestOpenTransactionScnsResponse::decode(
-            risingwave_jni_core::to_guarded_slice(&response_bytes, env)?.deref(),
-        )
-        .map_err(Into::into)
-    })
-}
-
 fn invoke_jni_snapshot_read(
     session_id: i64,
     request: &OracleSnapshotReadRequest,
@@ -527,39 +472,4 @@ fn invoke_jni_snapshot_read(
         )?;
         Ok(())
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{OracleExternalTable, OracleOldestOpenTransactionStartScn};
-
-    #[test]
-    fn test_open_transaction_mining_boundary() {
-        let transaction = |instance_id, start_scn| OracleOldestOpenTransactionStartScn {
-            instance_id,
-            start_scn,
-        };
-        let boundary = 100;
-
-        let error = OracleExternalTable::check_open_transactions(boundary, &[transaction(0, 99)])
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("Cannot create Oracle CDC table"));
-        assert!(error.contains("starting at SCN 99"));
-        assert!(error.contains("initial mining SCN 100"));
-
-        for transactions in [vec![], vec![transaction(0, 100)], vec![transaction(0, 101)]] {
-            OracleExternalTable::check_open_transactions(boundary, &transactions).unwrap();
-        }
-
-        // Every instance must pass; an acceptable first instance cannot hide a violation.
-        let error = OracleExternalTable::check_open_transactions(
-            boundary,
-            &[transaction(1, 120), transaction(2, 90)],
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("instance 2"));
-        assert!(error.contains("starting at SCN 90"));
-    }
 }

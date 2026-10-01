@@ -16,8 +16,6 @@
 
 package com.risingwave.connector.source.core;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
@@ -35,7 +33,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CountDownLatch;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.json.JsonConverter;
@@ -67,11 +64,6 @@ public class DbzChangeEventConsumer
     private final String transactionTopic;
     private final String schemaChangeTopic;
 
-    // Oracle-specific
-    private final boolean requiresInitialOracleMining;
-    private final CountDownLatch initialOracleMiningReady = new CountDownLatch(1);
-    private volatile boolean initialOracleMiningReported;
-
     private volatile DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>>
             currentRecordCommitter;
 
@@ -82,25 +74,6 @@ public class DbzChangeEventConsumer
             String transactionTopic,
             String schemaChangeTopic,
             BlockingQueue<GetEventStreamResponse> queue) {
-        this(
-                connector,
-                sourceId,
-                heartbeatTopicPrefix,
-                transactionTopic,
-                schemaChangeTopic,
-                queue,
-                false);
-    }
-
-    DbzChangeEventConsumer(
-            SourceTypeE connector,
-            long sourceId,
-            String heartbeatTopicPrefix,
-            String transactionTopic,
-            String schemaChangeTopic,
-            BlockingQueue<GetEventStreamResponse> queue,
-            boolean requiresInitialOracleMining) {
-        this.requiresInitialOracleMining = requiresInitialOracleMining;
         this.connector = connector;
         this.sourceId = sourceId;
         this.outputChannel = queue;
@@ -127,37 +100,6 @@ public class DbzChangeEventConsumer
         this.keyConverter = keyConverter;
     }
 
-    /** Sends the selected mining position before any records from the first mining session. */
-    void reportInitialOracleMining(
-            String scn, Map<String, ?> partition, Map<String, ?> sourceOffset)
-            throws InterruptedException {
-        try {
-            var offset = new DebeziumOffset(partition, sourceOffset, true);
-            ObjectNode encoded = new ObjectMapper().valueToTree(offset);
-            encoded.put("initialMiningScn", scn);
-            var event =
-                    CdcMessage.newBuilder()
-                            .setOffset(encoded.toString())
-                            .setPartition(String.valueOf(sourceId))
-                            .setSourceType(SourceType.ORACLE)
-                            .setMsgType(CdcMessage.CdcMessageType.HEARTBEAT)
-                            .build();
-            outputChannel.put(
-                    GetEventStreamResponse.newBuilder()
-                            .setSourceId(sourceId)
-                            .addEvents(event)
-                            .build());
-            initialOracleMiningReported = true;
-            initialOracleMiningReady.countDown();
-        } catch (IllegalArgumentException e) {
-            throw new CdcConnectorException("Failed to encode Oracle mining offset", e);
-        }
-    }
-
-    CountDownLatch initialOracleMiningReady() {
-        return initialOracleMiningReady;
-    }
-
     /**
      * Whether records can be acknowledged before the corresponding RisingWave checkpoint.
      *
@@ -165,13 +107,12 @@ public class DbzChangeEventConsumer
      * the replication slot's low watermark, allowing PostgreSQL to recycle older WAL. Acknowledging
      * it before the output is durable could recycle WAL that RisingWave still needs for recovery.
      *
-     * <p>Oracle needs checkpoint-delayed acknowledgement because Debezium's opaque offset contains
-     * the LogMiner restart low watermark required to rebuild buffered transactions. Acknowledging
-     * it before the output is durable could make recovery skip changes that RisingWave has not
-     * checkpointed.
+     * <p>Oracle LogMiner does not use acknowledgements to control redo retention. It acknowledges
+     * batches directly to maintain Debezium's restart offsets, while RisingWave independently
+     * checkpoints the full native offset for its own recovery.
      */
     private boolean noNeedCommitOffset() {
-        return connector != SourceTypeE.POSTGRES && connector != SourceTypeE.ORACLE;
+        return connector != SourceTypeE.POSTGRES;
     }
 
     private EventType getEventType(SourceRecord record) {
@@ -235,17 +176,6 @@ public class DbzChangeEventConsumer
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
             EventType eventType = getEventType(record);
-            if (requiresInitialOracleMining && !initialOracleMiningReported) {
-                if (eventType == EventType.HEARTBEAT) {
-                    // A no_data snapshot can emit a heartbeat before LogMiner selects its start
-                    // SCN. The coordinator's pre-streaming heartbeat is also too early.
-                    continue;
-                }
-                // TODO: If Oracle schema-change emission is supported, handle pre-mining snapshot
-                // schema records without checkpointing their offsets.
-                throw new CdcConnectorException(
-                        "Oracle emitted a CDC record before its initial mining position was known");
-            }
             Map<String, ?> sourceOffset = record.sourceOffset();
             if (connector == SourceTypeE.ORACLE
                     && eventType == EventType.DATA

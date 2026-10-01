@@ -1,0 +1,85 @@
+# Each scenario owns a fresh source/table and the same deterministic upstream data.
+statement ok
+DROP SOURCE IF EXISTS oracle_restart_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE (ID NUMBER PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE (ID, VALUE) "
+    "SELECT LEVEL, 'initial-' || TO_CHAR(LEVEL) FROM DUAL CONNECT BY LEVEL <= 1000",
+])
+PY
+
+# Only RW's connections use the proxy. Python fixture SQL goes directly to Oracle.
+statement ok
+CREATE SOURCE oracle_restart_source WITH (
+    connector = 'oracle-cdc',
+    hostname = '127.0.0.1',
+    port = '${TEST_ORACLE_PROXY_PORT}',
+    username = '${TEST_ORACLE_USER}',
+    password = '${TEST_ORACLE_PASSWORD}',
+    database.name = '${TEST_ORACLE_DATABASE}',
+    database.pdb.name = '${TEST_ORACLE_PDB}',
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    heartbeat.table.auto.initialize = 'true',
+    debezium.heartbeat.interval.ms = '1000'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+SET backfill_rate_limit = 2;
+
+statement ok
+CREATE TABLE oracle_restart_table (
+    "ID" INT PRIMARY KEY, "VALUE" VARCHAR
+) WITH (snapshot.batch_size = 5)
+FROM oracle_restart_source TABLE 'APP.RW_LIVE_PAGE';
+
+statement ok
+SET backfill_rate_limit = DEFAULT;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_backfills
+from oracle_test_hooks import check_backfill_prefix, check_paused_backfill
+begin_backfills(
+    ["oracle_restart_table"],
+    before_backfill_pause_hook=check_backfill_prefix,
+    before_backfill_pause_hook_kwargs={"min_pk": 5},
+    after_backfill_pause_hook=check_paused_backfill,
+    after_backfill_pause_hook_kwargs={
+        "min_pk": 5, "max_pk": 35, "check_row_count": True,
+        "check_snapshot_offset": True, "source": "oracle_restart_source",
+    },
+)
+PY
+
+# Commit changes on both sides of the frontier after the snapshot has started.
+# No transaction is left open across a crash or connection outage.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'before-prefix' WHERE ID = 1",
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'before-suffix' WHERE ID = 900",
+    "DELETE FROM APP.RW_LIVE_PAGE WHERE ID IN (2, 901)",
+    "INSERT INTO APP.RW_LIVE_PAGE VALUES (0, 'before-insert-prefix')",
+    "INSERT INTO APP.RW_LIVE_PAGE VALUES (1001, 'before-insert-suffix')",
+])
+PY
+
+query IT rowsort retry 90 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_restart_table WHERE "ID" IN (0, 1, 2);
+----
+0 before-insert-prefix
+1 before-prefix
+
+# Persist the consumed CDC changes as well as the paused backfill frontier.
+statement ok
+FLUSH;
