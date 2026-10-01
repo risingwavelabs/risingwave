@@ -1,4 +1,4 @@
-control substitution on
+include oracle_test_env.slt.part
 
 statement ok
 DROP TABLE IF EXISTS oracle_live_page;
@@ -7,13 +7,24 @@ statement ok
 DROP SOURCE IF EXISTS oracle_live_page_source CASCADE;
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare live_page
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE (ID NUMBER PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE (ID, VALUE) "
+    "SELECT LEVEL, 'initial-' || TO_CHAR(LEVEL) FROM DUAL CONNECT BY LEVEL <= 50",
+])
+PY
 
 statement ok
 CREATE SOURCE oracle_live_page_source WITH (
-    ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
-    schema.name = 'APP',
-    heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
     heartbeat.table.auto.initialize = 'true',
     -- Keep periodic heartbeat-table writes outside this test's duration, so they
     -- cannot satisfy the source-offset check after the deliberate row changes.
@@ -33,11 +44,72 @@ CREATE TABLE oracle_live_page (
 ) WITH (snapshot.batch_size = 5)
 FROM oracle_live_page_source TABLE 'APP.RW_LIVE_PAGE';
 
-# Pause at a checkpointed prefix: IDs 1-3 have been scanned, but even a prefetched
-# five-row page cannot include ID 45. Change rows on both sides of that prefix.
-# Wait for the source to checkpoint the changes while backfill remains paused, then resume.
+# Pause at a checkpointed prefix. Even a prefetched five-row page cannot include ID 45.
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py mutate_at_frontier --source oracle_live_page_source --table oracle_live_page
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_backfills
+from oracle_test_hooks import check_backfill_prefix, check_paused_backfill
+begin_backfills(
+    ["oracle_live_page"],
+    before_backfill_pause_hook=check_backfill_prefix,
+    before_backfill_pause_hook_kwargs={"min_pk": 5},
+    after_backfill_pause_hook=check_paused_backfill,
+    after_backfill_pause_hook_kwargs={
+        "min_pk": 5, "max_pk": 15, "check_row_count": True,
+        "check_snapshot_offset": True, "source": "oracle_live_page_source",
+    },
+)
+PY
+
+# Hold changes open while checking the scanned prefix, then roll them back.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx
+begin_tx("oracle_live_rollback", [
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'uncommitted' WHERE ID = 1",
+    "INSERT INTO APP.RW_LIVE_PAGE VALUES (200, 'rolled-back')",
+])
+PY
+
+query T
+SELECT "VALUE" FROM oracle_live_page WHERE "ID" = 1;
+----
+initial-1
+
+query I
+SELECT count(*) FROM oracle_live_page WHERE "ID" = 200;
+----
+0
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import end_tx
+end_tx("oracle_live_rollback", commit=False)
+PY
+
+# Change both sides of the frontier. Checkpoint the data offset while still paused.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx, end_tx, end_backfills
+from oracle_test_hooks import check_source_offset, check_backfill_finished
+begin_tx("oracle_live_mutation", [
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'updated-prefix' WHERE ID = 1",
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'updated-suffix' WHERE ID = 45",
+    "DELETE FROM APP.RW_LIVE_PAGE WHERE ID IN (2, 46)",
+    "INSERT INTO APP.RW_LIVE_PAGE (ID, VALUE) VALUES (0, 'inserted-behind')",
+    "UPDATE APP.RW_LIVE_PAGE SET ID = 103 WHERE ID = 3",
+    "INSERT INTO APP.RW_LIVE_PAGE (ID, VALUE) VALUES (100, 'inserted-ahead')",
+])
+end_tx(
+    "oracle_live_mutation",
+    after_tx_end_hook=check_source_offset,
+    after_tx_end_hook_kwargs={"source": "oracle_live_page_source", "paused_table": "oracle_live_page"},
+)
+end_backfills(
+    ["oracle_live_page"],
+    after_backfill_resume_hook=check_backfill_finished,
+)
+PY
 
 query I retry 60 backoff 1s
 SELECT count(*) FROM oracle_live_page;
@@ -68,9 +140,6 @@ WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
 ----
 0
 
-system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_cdc_state.py assert_backfill_finished --table oracle_live_page
-
 statement ok
 DROP TABLE oracle_live_page;
 
@@ -78,4 +147,4 @@ statement ok
 DROP SOURCE oracle_live_page_source CASCADE;
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py drop-tables

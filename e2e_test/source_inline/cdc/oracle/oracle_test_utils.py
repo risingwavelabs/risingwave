@@ -1,320 +1,341 @@
 #!/usr/bin/env python3
 
+"""Oracle fixtures and composable SQL, transaction, and backfill operations.
+
+SLTs own fixture SQL and teardown, and attach hooks at named operation boundaries.
+The CLI exposes preparation, table cleanup, and the transaction worker.
+Functions are ordered as public APIs, shared helpers (_), then private helpers (__).
+Single-caller private helpers are defined inside their caller.
+"""
+
 import argparse
+import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 
 import oracledb
 
-HEARTBEAT_TABLE = "RW_HEARTBEAT"
-MISSING_SCHEMA = "RW_MISSING_SCHEMA"
-PRESERVED_HEARTBEAT_VALUE = 7
-SOURCE_TABLE = "CUSTOMERS"
-SOURCE_SCHEMA = "APP"
-PK_RESTRICTION_TABLES = {
-    "RW_PK_NONE": "ID NUMBER(9)",
-    "RW_PK_UNBOUNDED": "ID NUMBER PRIMARY KEY",
-    "RW_PK_WIDE": "ID NUMBER(29) PRIMARY KEY",
-    "RW_PK_TIMESTAMP": "ID TIMESTAMP(9) PRIMARY KEY",
-    "RW_PK_NATIONAL": "ID NVARCHAR2(20) PRIMARY KEY",
-}
-IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
+# Contract: keep these TEST_ mappings and fixture constants synchronized with
+# oracle_test_env.slt.part. Fixture names must not be added to service profiles.
+TEST_ORACLE_HOST = os.environ["ORACLE_HOST"]
+TEST_ORACLE_PORT = int(os.environ["ORACLE_PORT"])
+TEST_ORACLE_USER = os.environ["ORACLE_USER"].upper()
+TEST_ORACLE_PASSWORD = os.environ["ORACLE_PASSWORD"]
+TEST_ORACLE_DATABASE = os.environ["ORACLE_DATABASE"].upper()
+TEST_ORACLE_PDB = os.environ["ORACLE_PDB"].upper()
+TEST_ORACLE_SOURCE_SCHEMA = "APP"
+ORACLE_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
 TABLE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 DDL_STATEMENT_TIMEOUT_SECONDS = 120
 PSQL_PROCESS_TIMEOUT_SECONDS = 150
-HEARTBEAT_ASSERT_TIMEOUT_SECONDS = 30
-
-ERROR_SCENARIOS = {
-    "missing_oracle_schema": (
-        MISSING_SCHEMA,
-        "table_and_seed_row",
-        f"schema '{MISSING_SCHEMA}' does not exist",
-    ),
-    "missing_app_oracle_hb": (
-        SOURCE_SCHEMA,
-        "table_and_seed_row",
-        f"Failed to create Oracle heartbeat table '{SOURCE_SCHEMA}.{HEARTBEAT_TABLE}'",
-    ),
-    "empty_app_oracle_hb": (
-        SOURCE_SCHEMA,
-        "seed_row",
-        f"Failed to insert the seed row into Oracle heartbeat table '{SOURCE_SCHEMA}.{HEARTBEAT_TABLE}'",
-    ),
-    "seeded_app_oracle_hb": (
-        SOURCE_SCHEMA,
-        "access_grants",
-        f"needs UPDATE permission on heartbeat table '{SOURCE_SCHEMA}.{HEARTBEAT_TABLE}'",
-    ),
-    "incompatible_oracle_hb": (
-        None,
-        "table_and_seed_row",
-        "must contain NUMBER columns named 'ID' and 'HEARTBEAT'",
-    ),
-}
+CHECKPOINT_QUERY_TIMEOUT_SECONDS = 30
+TRANSACTION_TIMEOUT_SECONDS = 300
+BACKFILL_RESUME_RATE = 1000
 
 
-def env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"{name} is not set")
-    return value
+@dataclass
+class SqlOutcome:
+    sql: str = ""
+    result: subprocess.CompletedProcess[str] | None = None
+    exception: Exception | None = None
 
 
-def normalize_identifier(value: str, description: str) -> str:
+@dataclass
+class HookContext:
+    outcomes: list[SqlOutcome] = field(default_factory=list)
+    table: str | None = None
+    transaction: dict | None = None
+
+
+# Public APIs.
+def prepare(
+    *,
+    create_schema_hook=None,
+    create_schema_hook_kwargs=None,
+    create_heartbeat_tables_hook=None,
+    create_heartbeat_tables_hook_kwargs=None,
+) -> None:
+    """Set up Oracle infrastructure; omitted creation hooks use their defaults."""
+    from oracle_test_hooks import (
+        create_default_schema,
+        create_default_heartbeat_tables,
+    )
+
+    def __prepare_base() -> None:
+        """Provision logging and the connector user/schema, not source tables."""
+
+        def __wait_for_database(service: str):
+            deadline = time.monotonic() + 600
+            while True:
+                try:
+                    return _connect_as_sys(service)
+                except oracledb.DatabaseError as error:
+                    if time.monotonic() >= deadline:
+                        raise
+                    print(
+                        f"Waiting for Oracle service {service}: {error}",
+                        file=sys.stderr,
+                    )
+                    time.sleep(5)
+
+        def __execute_ignoring(cursor, sql: str, ignored_codes: set[int]) -> None:
+            try:
+                cursor.execute(sql)
+            except oracledb.DatabaseError as error:
+                if _error_code(error) not in ignored_codes:
+                    raise
+
+        user = TEST_ORACLE_USER
+        password = TEST_ORACLE_PASSWORD.replace('"', '""')
+        with __wait_for_database(TEST_ORACLE_DATABASE) as connection:
+            with connection.cursor() as cursor:
+                __execute_ignoring(cursor, "ALTER DATABASE FORCE LOGGING", {12920})
+                __execute_ignoring(
+                    cursor, "ALTER DATABASE ADD SUPPLEMENTAL LOG DATA", {32588}
+                )
+                try:
+                    cursor.execute(
+                        f'CREATE USER {user} IDENTIFIED BY "{password}" CONTAINER=ALL'
+                    )
+                except oracledb.DatabaseError as error:
+                    if _error_code(error) != 1920:
+                        raise
+                    cursor.execute(
+                        f'ALTER USER {user} IDENTIFIED BY "{password}" CONTAINER=ALL'
+                    )
+                cursor.execute(
+                    "GRANT CREATE SESSION, SET CONTAINER, FLASHBACK ANY TABLE, "
+                    "SELECT ANY TABLE, SELECT ANY TRANSACTION, LOGMINING, LOCK ANY TABLE, "
+                    f"CREATE TABLE, CREATE SEQUENCE TO {user} CONTAINER=ALL"
+                )
+                cursor.execute(
+                    "GRANT SELECT_CATALOG_ROLE, EXECUTE_CATALOG_ROLE "
+                    f"TO {user} CONTAINER=ALL"
+                )
+        with __wait_for_database(TEST_ORACLE_PDB) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(f"ALTER USER {user} QUOTA UNLIMITED ON USERS")
+
+    outcome = SqlOutcome()
+    try:
+        __prepare_base()
+        drop_tables()
+    except Exception as error:
+        outcome.exception = error
+    context = HookContext([outcome])
+    __invoke_hook(
+        create_schema_hook or create_default_schema,
+        context,
+        create_schema_hook_kwargs,
+    )
+    __invoke_hook(
+        create_heartbeat_tables_hook or create_default_heartbeat_tables,
+        context,
+        create_heartbeat_tables_hook_kwargs,
+    )
+
+
+def drop_tables() -> None:
+    """Discover and drop existing tables in the two dedicated test schemas."""
+    with _connect_as_sys(TEST_ORACLE_PDB) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT OWNER, TABLE_NAME FROM ALL_TABLES "
+                "WHERE OWNER IN (:1, :2) AND DROPPED = 'NO' "
+                "ORDER BY OWNER, TABLE_NAME",
+                [TEST_ORACLE_USER, TEST_ORACLE_SOURCE_SCHEMA],
+            )
+            for owner, table in cursor.fetchall():
+                table = table.replace('"', '""')
+                cursor.execute(
+                    f'DROP TABLE "{owner}"."{table}" CASCADE CONSTRAINTS PURGE'
+                )
+
+
+def execute_oracle_sqls(
+    sqls: list[str],
+    *,
+    after_oracle_sqls_hook=None,
+    after_oracle_sqls_hook_kwargs=None,
+) -> None:
+    """Execute and commit in order, then invoke the optional success hook."""
+    with _connect_as_sys(TEST_ORACLE_PDB) as connection:
+        with connection.cursor() as cursor:
+            for sql in sqls:
+                cursor.execute(sql)
+        connection.commit()
+    __invoke_hook(
+        after_oracle_sqls_hook,
+        HookContext([SqlOutcome(sql=sql) for sql in sqls]),
+        after_oracle_sqls_hook_kwargs,
+    )
+
+
+def execute_sqls(
+    sqls: list[str],
+    is_concurrent=False,
+    *,
+    after_sqls_hook=None,
+    after_sqls_hook_kwargs=None,
+) -> None:
+    outcomes = __run_each(sqls, __sql_outcome, is_concurrent)
+    __invoke_hook(after_sqls_hook, HookContext(outcomes), after_sqls_hook_kwargs)
+
+
+def begin_tx(
+    name: str,
+    dmls: list,
+    *,
+    after_tx_begin_hook=None,
+    after_tx_begin_hook_kwargs=None,
+) -> None:
+    """Hold explicit DML; (sql, bind_rows) entries preserve executemany operations."""
+    context = HookContext()
+    try:
+        directory = __state_path("transaction", name)
+        if directory.exists():
+            if not (directory / "done.json").exists():
+                raise RuntimeError(f"unfinished transaction fixture: {directory}")
+            # Clear every previous result/request before starting a new worker.
+            # A stale request.json could immediately end the new transaction.
+            for path in directory.iterdir():
+                path.unlink()
+        else:
+            directory.mkdir()
+        with (directory / "worker.log").open("w") as log:
+            worker = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "__hold_tx", name],
+                stdin=subprocess.PIPE,
+                stdout=log,
+                stderr=log,
+                text=True,
+                start_new_session=True,
+            )
+            # Closing stdin lets json.load finish without waiting for transaction end.
+            with worker.stdin as stdin:
+                json.dump(dmls, stdin)
+        context.transaction = __wait_file(directory / "ready.json")
+    except Exception as error:
+        context.outcomes.append(SqlOutcome(exception=error))
+    __invoke_hook(after_tx_begin_hook, context, after_tx_begin_hook_kwargs)
+
+
+def end_tx(
+    name: str,
+    commit=True,
+    *,
+    after_tx_end_hook=None,
+    after_tx_end_hook_kwargs=None,
+) -> None:
+    context = HookContext()
+    try:
+        directory = __state_path("transaction", name)
+        context.transaction = _transaction_state(name)
+        __publish(directory / "request.json", {"commit": commit})
+        result = __wait_file(directory / "done.json")
+        if not result.get("ok"):
+            raise RuntimeError(result)
+    except Exception as error:
+        context.outcomes.append(SqlOutcome(exception=error))
+    __invoke_hook(after_tx_end_hook, context, after_tx_end_hook_kwargs)
+
+
+def begin_backfills(
+    tables: list[str],
+    is_concurrent=False,
+    *,
+    before_backfill_pause_hook=None,
+    before_backfill_pause_hook_kwargs=None,
+    after_backfill_pause_hook=None,
+    after_backfill_pause_hook_kwargs=None,
+) -> None:
+    """Wait/check through the pre-pause hook, then pause and checkpoint each table."""
+
+    def __pause(table):
+        if not TABLE_IDENTIFIER.fullmatch(table):
+            raise RuntimeError(f"invalid table name: {table}")
+        context = HookContext(table=table)
+        __invoke_hook(
+            before_backfill_pause_hook, context, before_backfill_pause_hook_kwargs
+        )
+        context.outcomes = [
+            __sql_outcome(f"ALTER TABLE {table} SET backfill_rate_limit = 0;"),
+            __sql_outcome("FLUSH;"),
+        ]
+        __invoke_hook(
+            after_backfill_pause_hook,
+            context,
+            after_backfill_pause_hook_kwargs,
+        )
+
+    __run_each(tables, __pause, is_concurrent)
+
+
+def end_backfills(
+    tables: list[str],
+    is_concurrent=False,
+    *,
+    after_backfill_resume_hook=None,
+    after_backfill_resume_hook_kwargs=None,
+) -> None:
+    """Remove throttling; waiting for completion is an optional post-resume check."""
+
+    def __resume(table):
+        if not TABLE_IDENTIFIER.fullmatch(table):
+            raise RuntimeError(f"invalid table name: {table}")
+        context = HookContext(
+            [
+                __sql_outcome(
+                    f"ALTER TABLE {table} SET backfill_rate_limit = {BACKFILL_RESUME_RATE};"
+                )
+            ],
+            table=table,
+        )
+        __invoke_hook(
+            after_backfill_resume_hook,
+            context,
+            after_backfill_resume_hook_kwargs,
+        )
+
+    __run_each(tables, __resume, is_concurrent)
+
+
+# Helpers shared with oracle_test_hooks.py.
+def _normalize_identifier(value: str, description: str) -> str:
     value = value.upper()
-    if not IDENTIFIER.fullmatch(value):
+    if not ORACLE_IDENTIFIER.fullmatch(value):
         raise RuntimeError(f"{description} is not a valid unquoted Oracle identifier")
     return value
 
 
-def identifier(name: str) -> str:
-    return normalize_identifier(env(name), name)
+def _connect_as_sys(service: str):
+    def __dsn(service: str) -> str:
+        return oracledb.makedsn(
+            TEST_ORACLE_HOST, TEST_ORACLE_PORT, service_name=service
+        )
 
-
-def dsn(service: str) -> str:
-    return oracledb.makedsn(
-        env("ORACLE_HOST"), int(env("ORACLE_PORT")), service_name=service
-    )
-
-
-def connect_as_sys(service: str):
     return oracledb.connect(
         user="SYS",
-        password=env("ORACLE_PASSWORD"),
-        dsn=dsn(service),
+        password=TEST_ORACLE_PASSWORD,
+        dsn=__dsn(service),
         mode=oracledb.AUTH_MODE_SYSDBA,
     )
 
 
-def wait_for_database(service: str):
-    deadline = time.monotonic() + 600
-    while True:
-        try:
-            return connect_as_sys(service)
-        except oracledb.DatabaseError as error:
-            if time.monotonic() >= deadline:
-                raise
-            print(f"Waiting for Oracle service {service}: {error}", file=sys.stderr)
-            time.sleep(5)
-
-
-def error_code(error: oracledb.DatabaseError) -> int:
+def _error_code(error: oracledb.DatabaseError) -> int:
     return error.args[0].code
 
 
-def execute_ignoring(cursor, sql: str, ignored_codes: set[int]) -> None:
-    try:
-        cursor.execute(sql)
-    except oracledb.DatabaseError as error:
-        if error_code(error) not in ignored_codes:
-            raise
-
-
-def quoted_password() -> str:
-    return '"' + env("ORACLE_PASSWORD").replace('"', '""') + '"'
-
-
-def prepare_base() -> None:
-    user = identifier("ORACLE_USER")
-    database = identifier("ORACLE_DATABASE")
-    pdb = identifier("ORACLE_PDB")
-    password = quoted_password()
-
-    with wait_for_database(database) as connection:
-        with connection.cursor() as cursor:
-            execute_ignoring(cursor, "ALTER DATABASE FORCE LOGGING", {12920})
-            execute_ignoring(
-                cursor, "ALTER DATABASE ADD SUPPLEMENTAL LOG DATA", {32588}
-            )
-            try:
-                cursor.execute(
-                    f"CREATE USER {user} IDENTIFIED BY {password} CONTAINER=ALL"
-                )
-            except oracledb.DatabaseError as error:
-                if error_code(error) != 1920:
-                    raise
-                cursor.execute(
-                    f"ALTER USER {user} IDENTIFIED BY {password} CONTAINER=ALL"
-                )
-            cursor.execute(
-                "GRANT CREATE SESSION, SET CONTAINER, FLASHBACK ANY TABLE, "
-                "SELECT ANY TABLE, SELECT ANY TRANSACTION, LOGMINING, LOCK ANY TABLE, "
-                f"CREATE TABLE, CREATE SEQUENCE TO {user} CONTAINER=ALL"
-            )
-            cursor.execute(
-                "GRANT SELECT_CATALOG_ROLE, EXECUTE_CATALOG_ROLE "
-                f"TO {user} CONTAINER=ALL"
-            )
-
-    with wait_for_database(pdb) as connection:
-        with connection.cursor() as cursor:
-            try:
-                cursor.execute(
-                    f"CREATE USER {SOURCE_SCHEMA} IDENTIFIED BY {password} "
-                    "QUOTA UNLIMITED ON USERS"
-                )
-            except oracledb.DatabaseError as error:
-                if error_code(error) != 1920:
-                    raise
-                cursor.execute(
-                    f"ALTER USER {SOURCE_SCHEMA} IDENTIFIED BY {password}"
-                )
-            cursor.execute(f"GRANT CREATE SESSION TO {SOURCE_SCHEMA}")
-            cursor.execute(f"ALTER USER {user} QUOTA UNLIMITED ON USERS")
-            execute_ignoring(
-                cursor, f"DROP TABLE {user}.{HEARTBEAT_TABLE} PURGE", {942}
-            )
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.{HEARTBEAT_TABLE} PURGE", {942}
-            )
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.{SOURCE_TABLE} PURGE", {942}
-            )
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.RW_PK_EQUIV PURGE", {942}
-            )
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.RW_PK_OTHER PURGE", {942}
-            )
-            execute_ignoring(cursor, f"DROP USER {MISSING_SCHEMA} CASCADE", {1918})
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.RW_LIVE_PAGE PURGE", {942}
-            )
-            for table in ["RW_E2_ORDERS", "RW_E2_EMPTY"]:
-                execute_ignoring(cursor, f"DROP TABLE {SOURCE_SCHEMA}.{table} PURGE", {942})
-            for table in PK_RESTRICTION_TABLES:
-                execute_ignoring(cursor, f"DROP TABLE {SOURCE_SCHEMA}.{table} PURGE", {942})
-            cursor.execute(
-                f"CREATE TABLE {SOURCE_SCHEMA}.{SOURCE_TABLE} "
-                "(ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))"
-            )
-            cursor.execute(
-                f"ALTER TABLE {SOURCE_SCHEMA}.{SOURCE_TABLE} "
-                "ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS"
-            )
-            cursor.execute(
-                f"INSERT INTO {SOURCE_SCHEMA}.{SOURCE_TABLE} (ID, NAME) "
-                "VALUES (1, 'RisingWave')"
-            )
-        connection.commit()
-
-
-def prepare(state: str) -> None:
-    prepare_base()
-    user = identifier("ORACLE_USER")
-    pdb = identifier("ORACLE_PDB")
-
-    with connect_as_sys(pdb) as connection:
-        with connection.cursor() as cursor:
-            if state in {
-                "missing_oracle_hb",
-                "missing_app_oracle_hb",
-                "missing_oracle_schema",
-            }:
-                return
-
-            connector_owned_states = {
-                "empty_oracle_hb",
-                "seeded_oracle_hb",
-                "incompatible_oracle_hb",
-            }
-            owner = user if state in connector_owned_states else SOURCE_SCHEMA
-            if state == "incompatible_oracle_hb":
-                cursor.execute(
-                    f"CREATE TABLE {user}.{HEARTBEAT_TABLE} "
-                    "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT VARCHAR2(20) NOT NULL)"
-                )
-                cursor.execute(
-                    f"INSERT INTO {user}.{HEARTBEAT_TABLE} (ID, HEARTBEAT) "
-                    "VALUES (1, 'unchanged')"
-                )
-            else:
-                cursor.execute(
-                    f"CREATE TABLE {owner}.{HEARTBEAT_TABLE} "
-                    "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL)"
-                )
-                if state in {"seeded_oracle_hb", "seeded_app_oracle_hb"}:
-                    cursor.execute(
-                        f"INSERT INTO {owner}.{HEARTBEAT_TABLE} (ID, HEARTBEAT) "
-                        f"VALUES (1, {PRESERVED_HEARTBEAT_VALUE})"
-                    )
-            if state == "shared_source":
-                for table in ["RW_E2_ORDERS", "RW_E2_EMPTY"]:
-                    cursor.execute(
-                        f"CREATE TABLE {SOURCE_SCHEMA}.{table} "
-                        "(ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))"
-                    )
-                    cursor.execute(
-                        f"ALTER TABLE {SOURCE_SCHEMA}.{table} "
-                        "ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS"
-                    )
-                cursor.executemany(
-                    f"INSERT INTO {SOURCE_SCHEMA}.RW_E2_ORDERS (ID, NAME) VALUES (:1, :2)",
-                    [(10, "order-initial"), (11, "order-delete")],
-                )
-            if state in {"live_page", "live_transactions"}:
-                cursor.execute(
-                    f"CREATE TABLE {SOURCE_SCHEMA}.RW_LIVE_PAGE "
-                    "(ID NUMBER PRIMARY KEY, VALUE VARCHAR2(100))"
-                )
-                cursor.execute(
-                    f"ALTER TABLE {SOURCE_SCHEMA}.RW_LIVE_PAGE "
-                    "ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS"
-                )
-                cursor.executemany(
-                    f"INSERT INTO {SOURCE_SCHEMA}.RW_LIVE_PAGE (ID, VALUE) "
-                    "VALUES (:1, :2)",
-                    [(i, f"initial-{i}") for i in range(
-                        1, 1001 if state == "live_transactions" else 51
-                    )],
-                )
-            if state == "pk_equivalence":
-                for table, key_definition in PK_RESTRICTION_TABLES.items():
-                    cursor.execute(
-                        f"CREATE TABLE {SOURCE_SCHEMA}.{table} "
-                        f"({key_definition}, VALUE VARCHAR2(100))"
-                    )
-                    cursor.execute(
-                        f"ALTER TABLE {SOURCE_SCHEMA}.{table} "
-                        "ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS"
-                    )
-                cursor.execute(
-                    f"CREATE TABLE {SOURCE_SCHEMA}.RW_PK_EQUIV "
-                    "(TENANT_ID NUMBER(9) NOT NULL, ORDER_ID NUMBER(9) NOT NULL, "
-                    "OTHER_COLUMN NUMBER, VALUE VARCHAR2(100), "
-                    "PRIMARY KEY (TENANT_ID, ORDER_ID))"
-                )
-                cursor.execute(
-                    f"ALTER TABLE {SOURCE_SCHEMA}.RW_PK_EQUIV "
-                    "ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS"
-                )
-                cursor.execute(
-                    f"INSERT INTO {SOURCE_SCHEMA}.RW_PK_EQUIV "
-                    "(TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) "
-                    "VALUES (1, 42, 7, 'first')"
-                )
-                cursor.execute(
-                    f"INSERT INTO {SOURCE_SCHEMA}.RW_PK_EQUIV "
-                    "(TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) "
-                    "VALUES (2, 42, 8, 'second')"
-                )
-                cursor.execute(
-                    f"INSERT INTO {SOURCE_SCHEMA}.RW_PK_EQUIV "
-                    "(TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) "
-                    "VALUES (1, 43, 10, 'sibling')"
-                )
-
-        connection.commit()
-
-
-def query_one(sql: str):
-    pdb = identifier("ORACLE_PDB")
-    with connect_as_sys(pdb) as connection:
+def _query_one(sql: str):
+    with _connect_as_sys(TEST_ORACLE_PDB) as connection:
         with connection.cursor() as cursor:
             cursor.execute(sql)
             row = cursor.fetchone()
@@ -323,392 +344,221 @@ def query_one(sql: str):
             return row[0]
 
 
-def assert_table_missing(owner: str) -> None:
-    count = query_one(
-        "SELECT COUNT(*) FROM ALL_TABLES "
-        f"WHERE OWNER = '{owner}' AND TABLE_NAME = '{HEARTBEAT_TABLE}'"
+# Checkpoint readers use checkpoint visibility, never actor-local/non-durable state.
+def _source_state_table(source: str) -> str:
+    return __state_table(source, "source")
+
+
+def _backfill_state_table(table: str) -> str:
+    return __state_table(table, "table", "AND name LIKE '%_streamcdcscan_%'")
+
+
+def _read_source_split(table: str) -> dict | None:
+    rows = __query(
+        "SELECT offset_info->'split_info'->'oracle_split' "
+        f"FROM {table} WHERE offset_info->'split_info'->'oracle_split' IS NOT NULL;"
     )
-    if count != 0:
-        raise RuntimeError(f"expected {owner}.{HEARTBEAT_TABLE} to be absent")
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise RuntimeError(f"expected one Oracle source split, got {rows}")
+    return json.loads(rows[0])
 
 
-def assert_schema_missing() -> None:
-    count = query_one(
-        f"SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME = '{MISSING_SCHEMA}'"
+def _read_backfill_state(table: str) -> dict | None:
+    rows = __query(
+        "SELECT jsonb_build_object('pk', \"ID\", 'finished', backfill_finished, "
+        f"'rows', row_count, 'offset', cdc_offset) FROM {table};"
     )
-    if count != 0:
-        raise RuntimeError(f"expected schema {MISSING_SCHEMA} to be absent")
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise RuntimeError(f"expected one backfill state row, got {rows}")
+    return json.loads(rows[0])
 
 
-def assert_empty(owner: str) -> None:
-    count = query_one(f"SELECT COUNT(*) FROM {owner}.{HEARTBEAT_TABLE}")
-    if count != 0:
-        raise RuntimeError(
-            f"expected {owner}.{HEARTBEAT_TABLE} to be empty, got {count} rows"
-        )
+def _save_checkpoint(table: str, value: dict) -> None:
+    __publish(__state_path("checkpoint", table), value)
 
 
-def assert_seed(owner: str, expected_value: int | None) -> None:
-    pdb = identifier("ORACLE_PDB")
-    with connect_as_sys(pdb) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"SELECT HEARTBEAT FROM {owner}.{HEARTBEAT_TABLE} WHERE ID = 1"
-            )
-            rows = cursor.fetchall()
-            if len(rows) != 1:
-                raise RuntimeError(
-                    f"expected one seed row in {owner}.{HEARTBEAT_TABLE}, got {len(rows)}"
-                )
-            if expected_value is not None and rows[0][0] != expected_value:
-                raise RuntimeError(
-                    f"expected heartbeat value {expected_value}, got {rows[0][0]}"
-                )
+def _load_checkpoint(table: str) -> dict:
+    return json.loads(__state_path("checkpoint", table).read_text())
 
 
-def assert_heartbeat_active(owner: str) -> None:
-    pdb = identifier("ORACLE_PDB")
-    deadline = time.monotonic() + HEARTBEAT_ASSERT_TIMEOUT_SECONDS
-    while True:
-        with connect_as_sys(pdb) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    f"SELECT HEARTBEAT FROM {owner}.{HEARTBEAT_TABLE} WHERE ID = 1"
-                )
-                rows = cursor.fetchall()
-        if len(rows) == 1 and rows[0][0] in {0, 1}:
-            return
-        if time.monotonic() >= deadline:
-            raise RuntimeError(
-                f"expected an active heartbeat value of 0 or 1 in "
-                f"{owner}.{HEARTBEAT_TABLE}, got {rows}"
-            )
-        time.sleep(0.5)
+def _transaction_state(name: str) -> dict:
+    return json.loads((__state_path("transaction", name) / "ready.json").read_text())
 
 
-def assert_incompatible_unchanged() -> None:
-    user = identifier("ORACLE_USER")
-    data_type = query_one(
-        "SELECT DATA_TYPE FROM ALL_TAB_COLUMNS "
-        f"WHERE OWNER = '{user}' AND TABLE_NAME = '{HEARTBEAT_TABLE}' "
-        "AND COLUMN_NAME = 'HEARTBEAT'"
-    )
-    value = query_one(
-        f"SELECT HEARTBEAT FROM {user}.{HEARTBEAT_TABLE} WHERE ID = 1"
-    )
-    if data_type != "VARCHAR2" or value != "unchanged":
-        raise RuntimeError(
-            f"incompatible table was modified: data type={data_type}, value={value}"
-        )
+# Module-private helpers.
+def __invoke_hook(hook, context: HookContext, kwargs: dict | None) -> None:
+    # Import lazily: hooks use the connection and checkpoint readers above.
+    if hook is None:
+        from oracle_test_hooks import check_success
+
+        hook = check_success
+    hook(context, **(kwargs or {}))
 
 
-def create_source_sql(name: str, heartbeat_table: str | None = None) -> str:
-    common_options = env("RISEDEV_ORACLE_WITH_OPTIONS_COMMON")
-    user = identifier("ORACLE_USER")
-    heartbeat_table = heartbeat_table or f"{user}.{HEARTBEAT_TABLE}"
-    return f"""
-CREATE SOURCE {name} WITH (
-    {common_options},
-    schema.name = '{SOURCE_SCHEMA}',
-    heartbeat.table.name = '{heartbeat_table}',
-    heartbeat.table.auto.initialize = 'true'
-) FORMAT PLAIN ENCODE JSON;
-"""
+def __run_psql(sql: str, *, checkpoint=False, timeout=PSQL_PROCESS_TIMEOUT_SECONDS):
+    def __env(name: str) -> str:
+        value = os.environ.get(name)
+        if not value:
+            raise RuntimeError(f"{name} is not set")
+        return value
 
-
-def manual_setup_sql(owner: str, setup: str) -> str:
-    pdb = identifier("ORACLE_PDB")
-    user = identifier("ORACLE_USER")
-    qualified_name = f"{owner}.{HEARTBEAT_TABLE}"
-    lines = [f"ALTER SESSION SET CONTAINER = {pdb};"]
-    if setup == "table_and_seed_row":
-        lines.append(
-            f"CREATE TABLE {qualified_name} "
-            "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL);"
-        )
-    if setup != "access_grants":
-        lines.extend(
-            [
-                f"INSERT INTO {qualified_name} (ID, HEARTBEAT) VALUES (1, 0);",
-                "COMMIT;",
-            ]
-        )
-    if owner != user:
-        lines.append(
-            f'GRANT UPDATE (HEARTBEAT) ON {qualified_name} TO "{user}";'
-        )
-    return "\n".join(lines)
-
-
-def run_psql(sql: str, table_name: str) -> subprocess.CompletedProcess[str]:
     process_env = os.environ.copy()
-    existing_options = process_env.get("PGOPTIONS", "")
-    timeout_option = f"-c statement_timeout={DDL_STATEMENT_TIMEOUT_SECONDS}s"
-    process_env["PGOPTIONS"] = f"{existing_options} {timeout_option}".strip()
+    options = f"-c statement_timeout={DDL_STATEMENT_TIMEOUT_SECONDS}s"
+    if checkpoint:
+        options += " -c visibility_mode=checkpoint"
+    process_env["PGOPTIONS"] = (
+        process_env.get("PGOPTIONS", "") + " " + options
+    ).strip()
+    return subprocess.run(
+        [
+            "psql",
+            "-X",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-t",
+            "-A",
+            "-q",
+            "-h",
+            __env("SLT_HOST"),
+            "-p",
+            __env("SLT_PORT"),
+            "-d",
+            __env("SLT_DB"),
+            "-U",
+            "root",
+        ],
+        input=sql,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=process_env,
+        timeout=timeout,
+    )
+
+
+def __query(sql: str) -> list[str]:
+    result = __run_psql(sql, checkpoint=True, timeout=CHECKPOINT_QUERY_TIMEOUT_SECONDS)
+    result.check_returncode()
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def __sql_outcome(sql: str) -> SqlOutcome:
     try:
-        return subprocess.run(
-            [
-                "psql",
-                "-X",
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-h",
-                env("SLT_HOST"),
-                "-p",
-                env("SLT_PORT"),
-                "-d",
-                env("SLT_DB"),
-                "-U",
-                "root",
-            ],
-            input=sql,
-            text=True,
-            capture_output=True,
-            check=False,
-            env=process_env,
-            timeout=PSQL_PROCESS_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as error:
+        return SqlOutcome(sql, result=__run_psql(sql))
+    except Exception as error:
+        return SqlOutcome(sql, exception=error)
+
+
+def __run_each(items, operation, is_concurrent: bool):
+    if is_concurrent and items:
+        barrier = threading.Barrier(len(items))
+
+        def __run(item):
+            barrier.wait()
+            return operation(item)
+
+        with ThreadPoolExecutor(max_workers=len(items)) as executor:
+            return list(executor.map(__run, items))
+    return [operation(item) for item in items]
+
+
+def __state_table(name: str, job_type: str, extra_filter="") -> str:
+    if not TABLE_IDENTIFIER.fullmatch(name):
+        raise RuntimeError(f"invalid {job_type} name: {name}")
+    rows = __query(
+        "SELECT name FROM rw_catalog.rw_internal_table_info "
+        f"WHERE job_name = '{name}' AND job_type = '{job_type}' "
+        f"AND schema_name = 'public' {extra_filter};"
+    )
+    if len(rows) != 1:
         raise RuntimeError(
-            f"CREATE TABLE {table_name} timed out after "
-            f"{PSQL_PROCESS_TIMEOUT_SECONDS} seconds"
-        ) from error
-
-
-def assert_create_source_error(state: str) -> None:
-    owner, setup, expected_message = ERROR_SCENARIOS[state]
-    owner = owner or identifier("ORACLE_USER")
-    heartbeat_table = f"{owner}.{HEARTBEAT_TABLE}"
-    result = run_psql(create_source_sql(state, heartbeat_table), state)
-    if result.returncode == 0:
-        raise RuntimeError(f"CREATE SOURCE {state} unexpectedly succeeded")
-    if expected_message not in result.stderr:
-        raise RuntimeError(
-            f"CREATE SOURCE {state} did not report the expected error:\n{result.stderr}"
+            f"expected one {job_type} state table for {name}, got {rows}"
         )
-
-    expected_setup_sql = manual_setup_sql(owner, setup)
-    setup_start = result.stderr.find(expected_setup_sql.splitlines()[0])
-    if setup_start == -1:
-        raise RuntimeError(
-            f"CREATE SOURCE {state} did not include DBA setup SQL:\n{result.stderr}"
-        )
-    actual_setup_sql = result.stderr[setup_start:].strip()
-    if actual_setup_sql != expected_setup_sql:
-        raise RuntimeError(
-            f"CREATE SOURCE {state} returned unexpected DBA setup SQL\n"
-            f"expected:\n{expected_setup_sql}\nactual:\n{actual_setup_sql}"
-        )
+    return '"' + rows[0].replace('"', '""') + '"'
 
 
-def create_sources_concurrently(prefix: str, count: int) -> None:
-    if not TABLE_IDENTIFIER.fullmatch(prefix):
-        raise RuntimeError(f"invalid table prefix: {prefix}")
-    if count < 2:
-        raise RuntimeError("concurrent table count must be at least 2")
-
-    barrier = threading.Barrier(count)
-
-    def create(index: int) -> tuple[str, subprocess.CompletedProcess[str]]:
-        name = f"{prefix}_{index}"
-        barrier.wait()
-        return name, run_psql(create_source_sql(name), name)
-
-    with ThreadPoolExecutor(max_workers=count) as executor:
-        results = list(executor.map(create, range(1, count + 1)))
-
-    failures = [(name, result) for name, result in results if result.returncode != 0]
-    if failures:
-        details = "\n".join(
-            f"{name}:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-            for name, result in failures
-        )
-        raise RuntimeError(f"concurrent CREATE TABLE failed:\n{details}")
+def __state_path(kind: str, name: str) -> Path:
+    if not TABLE_IDENTIFIER.fullmatch(name):
+        raise RuntimeError(f"invalid fixture name: {name}")
+    return Path(tempfile.gettempdir()) / f"rw-oracle-{kind}-{name}"
 
 
-def mutate_shared_source() -> None:
-    pdb = identifier("ORACLE_PDB")
-    with connect_as_sys(pdb) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"UPDATE {SOURCE_SCHEMA}.{SOURCE_TABLE} SET NAME = 'customer-updated' "
-                "WHERE ID = 1"
-            )
-            cursor.execute(
-                f"INSERT INTO {SOURCE_SCHEMA}.{SOURCE_TABLE} (ID, NAME) "
-                "VALUES (2, 'customer-inserted')"
-            )
-            cursor.execute(
-                f"UPDATE {SOURCE_SCHEMA}.RW_E2_ORDERS SET NAME = 'order-updated' WHERE ID = 10"
-            )
-            cursor.execute(f"DELETE FROM {SOURCE_SCHEMA}.RW_E2_ORDERS WHERE ID = 11")
-            cursor.execute(
-                f"INSERT INTO {SOURCE_SCHEMA}.RW_E2_ORDERS (ID, NAME) "
-                "VALUES (12, 'order-inserted')"
-            )
-            cursor.execute(
-                f"INSERT INTO {SOURCE_SCHEMA}.RW_E2_EMPTY (ID, NAME) "
-                "VALUES (20, 'empty-inserted')"
-            )
-        connection.commit()
+def __publish(path: Path, value: dict) -> None:
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value))
+    temporary.replace(path)
 
 
-def mutate_live_page() -> None:
-    pdb = identifier("ORACLE_PDB")
-    with connect_as_sys(pdb) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"UPDATE {SOURCE_SCHEMA}.RW_LIVE_PAGE SET VALUE = 'updated-prefix' "
-                "WHERE ID = 1"
-            )
-            cursor.execute(
-                f"UPDATE {SOURCE_SCHEMA}.RW_LIVE_PAGE SET VALUE = 'updated-suffix' "
-                "WHERE ID = 45"
-            )
-            cursor.execute(f"DELETE FROM {SOURCE_SCHEMA}.RW_LIVE_PAGE WHERE ID IN (2, 46)")
-            cursor.execute(
-                f"INSERT INTO {SOURCE_SCHEMA}.RW_LIVE_PAGE (ID, VALUE) "
-                "VALUES (0, 'inserted-behind')"
-            )
-            cursor.execute(
-                f"UPDATE {SOURCE_SCHEMA}.RW_LIVE_PAGE SET ID = 103 "
-                "WHERE ID = 3"
-            )
-            cursor.execute(
-                f"INSERT INTO {SOURCE_SCHEMA}.RW_LIVE_PAGE (ID, VALUE) "
-                "VALUES (100, 'inserted-ahead')"
-            )
-        connection.commit()
+def __wait_file(path: Path, timeout=30) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return json.loads(path.read_text())
+        done = path.parent / "done.json"
+        if done.exists():
+            result = json.loads(done.read_text())
+            if not result.get("ok"):
+                raise RuntimeError(result)
+        time.sleep(0.1)
+    raise RuntimeError(f"transaction fixture timed out waiting for {path}")
 
 
-def mutate_pk_equivalence() -> None:
-    pdb = identifier("ORACLE_PDB")
-    with connect_as_sys(pdb) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f"UPDATE {SOURCE_SCHEMA}.RW_PK_EQUIV SET VALUE = 'updated' "
-                "WHERE TENANT_ID = 1 AND ORDER_ID = 42"
-            )
-            cursor.execute(
-                f"INSERT INTO {SOURCE_SCHEMA}.RW_PK_EQUIV "
-                "(TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) "
-                "VALUES (3, 42, 9, 'inserted')"
-            )
-            cursor.execute(
-                f"DELETE FROM {SOURCE_SCHEMA}.RW_PK_EQUIV "
-                "WHERE TENANT_ID = 2 AND ORDER_ID = 42"
-            )
-
-        connection.commit()
-
-
-def cleanup() -> None:
-    user = identifier("ORACLE_USER")
-    pdb = identifier("ORACLE_PDB")
-    with connect_as_sys(pdb) as connection:
-        with connection.cursor() as cursor:
-            for table in ["RW_E2_ORDERS", "RW_E2_EMPTY"]:
-                execute_ignoring(cursor, f"DROP TABLE {SOURCE_SCHEMA}.{table} PURGE", {942})
-            for table in PK_RESTRICTION_TABLES:
-                execute_ignoring(cursor, f"DROP TABLE {SOURCE_SCHEMA}.{table} PURGE", {942})
-            for owner in [user, SOURCE_SCHEMA]:
-                execute_ignoring(
-                    cursor, f"DROP TABLE {owner}.{HEARTBEAT_TABLE} PURGE", {942}
+def __main() -> None:
+    def __hold_tx(name: str) -> None:
+        directory = __state_path("transaction", name)
+        try:
+            dmls = json.load(sys.stdin)
+            with _connect_as_sys(TEST_ORACLE_PDB) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT CURRENT_SCN FROM V$DATABASE")
+                    before_scn = int(cursor.fetchone()[0])
+                    for dml in dmls:
+                        if isinstance(dml, str):
+                            cursor.execute(dml)
+                        else:
+                            sql, rows = dml
+                            cursor.executemany(sql, rows)
+                    cursor.execute("SELECT CURRENT_SCN FROM V$DATABASE")
+                    operation_scn = int(cursor.fetchone()[0])
+                __publish(
+                    directory / "ready.json",
+                    {
+                        "name": name,
+                        "before_scn": before_scn,
+                        "operation_scn": operation_scn,
+                    },
                 )
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.{SOURCE_TABLE} PURGE", {942}
-            )
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.RW_PK_EQUIV PURGE", {942}
-            )
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.RW_PK_OTHER PURGE", {942}
-            )
-            execute_ignoring(
-                cursor, f"DROP TABLE {SOURCE_SCHEMA}.RW_LIVE_PAGE PURGE", {942}
-            )
-            execute_ignoring(cursor, f"DROP USER {MISSING_SCHEMA} CASCADE", {1918})
+                # Preserve the existing fixture's automatic rollback on an abandoned SLT.
+                request = __wait_file(
+                    directory / "request.json", TRANSACTION_TIMEOUT_SECONDS
+                )
+                if request["commit"]:
+                    connection.commit()
+                else:
+                    connection.rollback()
+            __publish(directory / "done.json", {"ok": True})
+        except Exception as error:
+            __publish(directory / "done.json", {"error": str(error)})
+            raise
 
-
-def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
-
-    prepare_parser = subparsers.add_parser("prepare")
-    prepare_parser.add_argument(
-        "state",
-        choices=[
-            "missing_oracle_hb",
-            "empty_oracle_hb",
-            "seeded_oracle_hb",
-            "missing_app_oracle_hb",
-            "empty_app_oracle_hb",
-            "seeded_app_oracle_hb",
-            "incompatible_oracle_hb",
-            "missing_oracle_schema",
-            "pk_equivalence",
-            "live_page",
-            "live_transactions",
-            "shared_source",
-        ],
-    )
-
-    missing_parser = subparsers.add_parser("assert_table_missing")
-    missing_parser.add_argument("owner", choices=[SOURCE_SCHEMA])
-    subparsers.add_parser("assert_schema_missing")
-
-    empty_parser = subparsers.add_parser("assert_empty")
-    empty_parser.add_argument("owner", choices=[SOURCE_SCHEMA])
-
-    seed_parser = subparsers.add_parser("assert_seed")
-    seed_parser.add_argument("owner")
-    seed_parser.add_argument("--expected_value", type=int)
-
-    active_parser = subparsers.add_parser("assert_heartbeat_active")
-    active_parser.add_argument("owner")
-
-    subparsers.add_parser("assert_incompatible_unchanged")
-
-    error_parser = subparsers.add_parser("assert_create_source_error")
-    error_parser.add_argument("state", choices=ERROR_SCENARIOS)
-
-    concurrent_parser = subparsers.add_parser("create_sources_concurrently")
-    concurrent_parser.add_argument("prefix")
-    concurrent_parser.add_argument("--count", type=int, default=2)
-
-    subparsers.add_parser("mutate_shared_source")
-    subparsers.add_parser("mutate_live_page")
-    subparsers.add_parser("mutate_pk_equivalence")
-    subparsers.add_parser("cleanup")
+    subparsers.add_parser("prepare")
+    subparsers.add_parser("drop-tables")
+    worker_parser = subparsers.add_parser("__hold_tx")
+    worker_parser.add_argument("name")
     args = parser.parse_args()
-
     if args.command == "prepare":
-        prepare(args.state)
-    elif args.command == "assert_table_missing":
-        assert_table_missing(args.owner)
-    elif args.command == "assert_schema_missing":
-        assert_schema_missing()
-    elif args.command == "assert_empty":
-        assert_empty(args.owner)
-    elif args.command == "assert_seed":
-        assert_seed(normalize_identifier(args.owner, "owner"), args.expected_value)
-    elif args.command == "assert_heartbeat_active":
-        assert_heartbeat_active(normalize_identifier(args.owner, "owner"))
-    elif args.command == "assert_incompatible_unchanged":
-        assert_incompatible_unchanged()
-    elif args.command == "assert_create_source_error":
-        assert_create_source_error(args.state)
-    elif args.command == "create_sources_concurrently":
-        create_sources_concurrently(args.prefix, args.count)
-    elif args.command == "mutate_shared_source":
-        mutate_shared_source()
-    elif args.command == "mutate_live_page":
-        mutate_live_page()
-    elif args.command == "mutate_pk_equivalence":
-        mutate_pk_equivalence()
+        prepare()
+    elif args.command == "drop-tables":
+        drop_tables()
     else:
-        cleanup()
+        __hold_tx(args.name)
 
 
 if __name__ == "__main__":
-    main()
+    __main()

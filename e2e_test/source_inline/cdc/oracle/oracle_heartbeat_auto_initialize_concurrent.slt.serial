@@ -1,4 +1,4 @@
-control substitution on
+include oracle_test_env.slt.part
 
 statement ok
 DROP TABLE IF EXISTS missing_oracle_hb_1;
@@ -38,10 +38,45 @@ DROP SOURCE IF EXISTS seeded_oracle_hb_source_2 CASCADE;
 
 # Concurrent shared-source creation must converge when both initially observe a missing table.
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare missing_oracle_hb
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import prepare
+from oracle_test_hooks import no_op
+prepare(create_heartbeat_tables_hook=no_op)
+PY
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py create_sources_concurrently missing_oracle_hb_source
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
+])
+PY
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_seed
+execute_sqls([
+    """CREATE SOURCE missing_oracle_hb_source_1 WITH (
+        $TEST_ORACLE_WITH_OPTIONS_COMMON,
+        schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+        heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
+        heartbeat.table.auto.initialize = 'true'
+    ) FORMAT PLAIN ENCODE JSON;""",
+    """CREATE SOURCE missing_oracle_hb_source_2 WITH (
+        $TEST_ORACLE_WITH_OPTIONS_COMMON,
+        schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+        heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
+        heartbeat.table.auto.initialize = 'true'
+    ) FORMAT PLAIN ENCODE JSON;""",
+],
+    is_concurrent=True,
+    after_sqls_hook=check_heartbeat_seed,
+    after_sqls_hook_kwargs={"owner": "$TEST_ORACLE_USER"},
+)
+PY
 
 statement ok
 CREATE TABLE missing_oracle_hb_1 (
@@ -67,9 +102,6 @@ SELECT count(*) FROM missing_oracle_hb_2;
 ----
 1
 
-system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR
-
 statement ok
 DROP TABLE missing_oracle_hb_1;
 
@@ -79,18 +111,60 @@ DROP TABLE missing_oracle_hb_2;
 statement ok
 DROP SOURCE missing_oracle_hb_source_1 CASCADE;
 
-statement ok
-DROP SOURCE missing_oracle_hb_source_2 CASCADE;
-
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_seed
+execute_sqls(
+    ["DROP SOURCE missing_oracle_hb_source_2 CASCADE;"],
+    after_sqls_hook=check_heartbeat_seed,
+    after_sqls_hook_kwargs={"owner": "$TEST_ORACLE_USER"},
+)
+PY
 
 # Compatible existing empty heartbeat tables must be seeded by concurrent shared sources.
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare empty_oracle_hb
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import prepare
+from oracle_test_hooks import no_op
+prepare(create_heartbeat_tables_hook=no_op)
+PY
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py create_sources_concurrently empty_oracle_hb_source
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
+    "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
+    "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL)",
+])
+PY
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_seed
+execute_sqls([
+    """CREATE SOURCE empty_oracle_hb_source_1 WITH (
+        $TEST_ORACLE_WITH_OPTIONS_COMMON,
+        schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+        heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
+        heartbeat.table.auto.initialize = 'true'
+    ) FORMAT PLAIN ENCODE JSON;""",
+    """CREATE SOURCE empty_oracle_hb_source_2 WITH (
+        $TEST_ORACLE_WITH_OPTIONS_COMMON,
+        schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+        heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
+        heartbeat.table.auto.initialize = 'true'
+    ) FORMAT PLAIN ENCODE JSON;""",
+],
+    is_concurrent=True,
+    after_sqls_hook=check_heartbeat_seed,
+    after_sqls_hook_kwargs={"owner": "$TEST_ORACLE_USER"},
+)
+PY
 
 statement ok
 CREATE TABLE empty_oracle_hb_1 (
@@ -116,9 +190,6 @@ SELECT count(*) FROM empty_oracle_hb_2;
 ----
 1
 
-system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR
-
 statement ok
 DROP TABLE empty_oracle_hb_1;
 
@@ -128,21 +199,64 @@ DROP TABLE empty_oracle_hb_2;
 statement ok
 DROP SOURCE empty_oracle_hb_source_1 CASCADE;
 
-statement ok
-DROP SOURCE empty_oracle_hb_source_2 CASCADE;
-
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_seed
+execute_sqls(
+    ["DROP SOURCE empty_oracle_hb_source_2 CASCADE;"],
+    after_sqls_hook=check_heartbeat_seed,
+    after_sqls_hook_kwargs={"owner": "$TEST_ORACLE_USER"},
+)
+PY
 
 # A snapshot-completion heartbeat must change the sentinel even with concurrent shared sources.
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare seeded_oracle_hb
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import prepare
+from oracle_test_hooks import no_op
+prepare(create_heartbeat_tables_hook=no_op)
+PY
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR --expected_value 7
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
+    "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
+    "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL)",
+    "INSERT INTO $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE (ID, HEARTBEAT) VALUES (1, 7)",
+])
+PY
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py create_sources_concurrently seeded_oracle_hb_source
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_seed, HEARTBEAT_STATE_TIMEOUT_SECONDS
+execute_sqls([
+    """CREATE SOURCE seeded_oracle_hb_source_1 WITH (
+        $TEST_ORACLE_WITH_OPTIONS_COMMON,
+        schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+        heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
+        heartbeat.table.auto.initialize = 'true'
+    ) FORMAT PLAIN ENCODE JSON;""",
+    """CREATE SOURCE seeded_oracle_hb_source_2 WITH (
+        $TEST_ORACLE_WITH_OPTIONS_COMMON,
+        schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+        heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
+        heartbeat.table.auto.initialize = 'true'
+    ) FORMAT PLAIN ENCODE JSON;""",
+],
+    is_concurrent=True,
+    after_sqls_hook=check_heartbeat_seed,
+    after_sqls_hook_kwargs={
+        "owner": "$TEST_ORACLE_USER", "allowed_values": {0, 1},
+        "timeout": HEARTBEAT_STATE_TIMEOUT_SECONDS,
+    },
+)
+PY
 
 statement ok
 CREATE TABLE seeded_oracle_hb_1 (
@@ -168,9 +282,6 @@ SELECT count(*) FROM seeded_oracle_hb_2;
 ----
 1
 
-system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_heartbeat_active C##RW_VALIDATOR
-
 statement ok
 DROP TABLE seeded_oracle_hb_1;
 
@@ -180,11 +291,19 @@ DROP TABLE seeded_oracle_hb_2;
 statement ok
 DROP SOURCE seeded_oracle_hb_source_1 CASCADE;
 
-statement ok
-DROP SOURCE seeded_oracle_hb_source_2 CASCADE;
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_seed, HEARTBEAT_STATE_TIMEOUT_SECONDS
+execute_sqls(
+    ["DROP SOURCE seeded_oracle_hb_source_2 CASCADE;"],
+    after_sqls_hook=check_heartbeat_seed,
+    after_sqls_hook_kwargs={
+        "owner": "$TEST_ORACLE_USER", "allowed_values": {0, 1},
+        "timeout": HEARTBEAT_STATE_TIMEOUT_SECONDS,
+    },
+)
+PY
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_heartbeat_active C##RW_VALIDATOR
-
-system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py drop-tables
