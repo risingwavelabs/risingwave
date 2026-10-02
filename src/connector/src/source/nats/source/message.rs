@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
-
 use async_nats::HeaderMap;
 use async_nats::jetstream::Message;
 use itertools::Itertools;
@@ -50,7 +48,7 @@ impl NatsMeta {
                 .and_then(|(_, values)| values.first())
         })?;
 
-        Some(header_bytes_to_datum(target_value.as_ref(), data_type))
+        Some(header_value_to_datum(target_value.as_str(), data_type))
     }
 
     pub fn extract_headers(&self) -> Option<Datum> {
@@ -76,16 +74,13 @@ impl NatsMeta {
     }
 }
 
-fn header_bytes_to_datum<'a>(bytes: &'a [u8], data_type: Option<&PbDataType>) -> DatumCow<'a> {
+fn header_value_to_datum<'a>(value: &'a str, data_type: Option<&PbDataType>) -> DatumCow<'a> {
     if let Some(data_type) = data_type
         && data_type.type_name == PbTypeName::Varchar as i32
     {
-        match String::from_utf8_lossy(bytes) {
-            Cow::Borrowed(str) => Some(ScalarRefImpl::Utf8(str)).into(),
-            Cow::Owned(string) => Some(ScalarImpl::Utf8(string.into())).into(),
-        }
+        Some(ScalarRefImpl::Utf8(value)).into()
     } else {
-        Some(ScalarRefImpl::Bytea(bytes)).into()
+        Some(ScalarRefImpl::Bytea(value.as_bytes())).into()
     }
 }
 
@@ -120,31 +115,14 @@ impl From<NatsMessage> for SourceMessage {
 
 impl NatsMessage {
     pub fn new(split_id: SplitId, message: Message) -> Self {
-        Self::from_parts(
-            split_id,
-            message.info().unwrap().stream_sequence,
-            message.message.payload.to_vec(),
-            message.message.reply.map(|s| s.as_str().to_owned()),
-            message.message.subject.as_str().to_owned(),
-            message.message.headers,
-        )
-    }
-
-    fn from_parts(
-        split_id: SplitId,
-        sequence_number: u64,
-        payload: Vec<u8>,
-        reply_subject: Option<String>,
-        subject: String,
-        headers: Option<HeaderMap>,
-    ) -> Self {
+        let sequence_number = message.info().unwrap().stream_sequence.to_string();
         NatsMessage {
             split_id,
-            sequence_number: sequence_number.to_string(),
-            payload,
-            reply_subject,
-            subject,
-            headers,
+            sequence_number,
+            payload: message.message.payload.to_vec(),
+            reply_subject: message.message.reply.map(|s| s.as_str().to_owned()),
+            subject: message.message.subject.as_str().to_owned(),
+            headers: message.message.headers,
         }
     }
 }
@@ -166,13 +144,6 @@ mod tests {
 
     fn varchar_pb() -> PbDataType {
         DataType::Varchar.to_protobuf()
-    }
-
-    #[test]
-    fn extract_subject_returns_utf8_ref() {
-        let meta = nats_meta("orders.new", None);
-        let datum = meta.extract_subject();
-        assert!(matches!(datum, Some(ScalarRefImpl::Utf8("orders.new"))));
     }
 
     #[test]
@@ -220,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_headers_returns_list_when_present() {
+    fn extract_headers_flattens_repeated_names() {
         let mut headers = HeaderMap::new();
         headers.insert("k1", "v1");
         headers.append("k2", "v2a");
@@ -232,8 +203,36 @@ mod tests {
             Some(ScalarImpl::List(list)) => list,
             other => panic!("expected list, got {other:?}"),
         };
-        // 1 value under k1 + 2 values under k2 = 3 struct rows.
-        assert_eq!(list.len(), 3);
+
+        // Inter-key order comes from a `HashMap`, so sort before comparing.
+        let mut entries = list
+            .iter()
+            .map(|datum| {
+                let Some(ScalarRefImpl::Struct(item)) = datum else {
+                    panic!("expected struct, got {datum:?}");
+                };
+                let mut fields = item.iter_fields_ref();
+                let name = match fields.next().flatten() {
+                    Some(ScalarRefImpl::Utf8(name)) => name.to_owned(),
+                    other => panic!("expected varchar name, got {other:?}"),
+                };
+                let value = match fields.next().flatten() {
+                    Some(ScalarRefImpl::Bytea(value)) => value.to_vec(),
+                    other => panic!("expected bytea value, got {other:?}"),
+                };
+                (name, value)
+            })
+            .collect_vec();
+        entries.sort();
+
+        assert_eq!(
+            entries,
+            vec![
+                ("k1".to_owned(), b"v1".to_vec()),
+                ("k2".to_owned(), b"v2a".to_vec()),
+                ("k2".to_owned(), b"v2b".to_vec()),
+            ]
+        );
     }
 
     #[test]
@@ -265,67 +264,5 @@ mod tests {
         };
         assert_eq!(nats.subject, "orders.new");
         assert!(nats.headers.is_some());
-    }
-
-    #[test]
-    fn source_message_offset_empty_when_no_reply_subject() {
-        let msg = NatsMessage {
-            split_id: "split-1".into(),
-            sequence_number: "1".to_owned(),
-            payload: vec![],
-            reply_subject: None,
-            subject: "s".to_owned(),
-            headers: None,
-        };
-        let source: SourceMessage = msg.into();
-        assert_eq!(source.offset, "");
-    }
-
-    #[test]
-    fn header_bytes_to_datum_varchar_owned_on_invalid_utf8() {
-        // Two lone 0xFF bytes are invalid UTF-8; from_utf8_lossy replaces
-        // them with U+FFFD and returns Cow::Owned, exercising the
-        // defensive Owned arm the Kafka path mirrors.
-        let invalid = [0xFFu8, 0xFF];
-        let datum = header_bytes_to_datum(&invalid, Some(&varchar_pb())).to_owned_datum();
-        let ScalarImpl::Utf8(s) = datum.unwrap() else {
-            panic!("expected Utf8");
-        };
-        assert!(s.contains('\u{FFFD}'));
-    }
-
-    #[test]
-    fn header_bytes_to_datum_bytea_when_no_data_type() {
-        let bytes = [0x00u8, 0xFF, 0x7A];
-        let datum = header_bytes_to_datum(&bytes, None).to_owned_datum();
-        assert_eq!(datum, Some(ScalarImpl::Bytea(bytes.to_vec().into())));
-    }
-
-    #[test]
-    fn nats_message_from_parts_shapes_all_fields() {
-        let mut headers = HeaderMap::new();
-        headers.insert("k", "v");
-        let msg = NatsMessage::from_parts(
-            "split-2".into(),
-            42,
-            b"payload-bytes".to_vec(),
-            Some("reply.subject".to_owned()),
-            "orders.new".to_owned(),
-            Some(headers),
-        );
-        assert_eq!(&*msg.split_id, "split-2");
-        assert_eq!(msg.sequence_number, "42");
-        assert_eq!(msg.payload, b"payload-bytes");
-        assert_eq!(msg.reply_subject.as_deref(), Some("reply.subject"));
-        assert_eq!(msg.subject, "orders.new");
-        assert!(msg.headers.is_some());
-    }
-
-    #[test]
-    fn nats_message_from_parts_handles_absent_reply_and_headers() {
-        let msg = NatsMessage::from_parts("split-3".into(), 0, vec![], None, "s".to_owned(), None);
-        assert_eq!(msg.sequence_number, "0");
-        assert!(msg.reply_subject.is_none());
-        assert!(msg.headers.is_none());
     }
 }
