@@ -290,10 +290,6 @@ impl ExternalTableConfig {
             ("database.pdb.name".to_owned(), self.pdb_name.clone()),
             ("schema.name".to_owned(), self.schema.clone()),
             ("table.name".to_owned(), self.table.clone()),
-            (
-                "debezium.rac.nodes".to_owned(),
-                self.rac_nodes.clone().unwrap_or_default(),
-            ),
         ])
     }
 

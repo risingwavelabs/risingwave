@@ -15,7 +15,7 @@
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::task::LocalStreamManager;
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
@@ -23,11 +23,12 @@ use tonic::{Request, Response, Status, Streaming};
 #[derive(Clone)]
 pub struct StreamServiceImpl {
     pub mgr: LocalStreamManager,
+    pub env: StreamEnvironment,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: LocalStreamManager) -> Self {
-        StreamServiceImpl { mgr }
+    pub fn new(mgr: LocalStreamManager, env: StreamEnvironment) -> Self {
+        StreamServiceImpl { mgr, env }
     }
 }
 
