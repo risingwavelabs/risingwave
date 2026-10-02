@@ -29,7 +29,6 @@ pub(crate) struct PinCacheMetrics {
     pub io_failures: IntCounterVec,
     pub capacity_bytes: IntGauge,
     pub accounted_bytes: IntGauge,
-    pub uncertain_bytes: IntGauge,
     pub published_objects: IntGauge,
     pub published_bytes: IntGauge,
     pub recovery_ready: IntGauge,
@@ -87,7 +86,6 @@ impl PinCacheMetrics {
         Self {
             io_failures,
             accounted_bytes: capacity_bytes.with_label_values(&["accounted"]),
-            uncertain_bytes: capacity_bytes.with_label_values(&["uncertain"]),
             capacity_bytes: capacity_bytes.with_label_values(&["capacity"]),
             published_objects,
             published_bytes,

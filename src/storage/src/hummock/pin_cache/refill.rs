@@ -36,30 +36,24 @@ pub(crate) enum PinCacheDownloadError {
 /// Owns a complete, unpublished file returned by `PinCache::download`.
 /// Dropping it never changes the index. Construction and writing stay private to this module.
 pub(crate) struct PinCacheDownload {
-    // Taking the file transfers cleanup responsibility to the index.
-    file: Option<PinCacheFile>,
-    upload_state: UploadState,
-}
-
-enum UploadState {
-    NotStarted,
-    // An unfinished uploader may leave backend-owned temporary files with unknown paths.
-    InProgress,
-    Complete,
+    file: Option<Arc<PinCacheFile>>,
+    gc: Arc<super::gc::PinCacheGc>,
+    upload_started: bool,
 }
 
 impl PinCacheDownload {
     /// Reserves capacity before any I/O. Rejection returns the current accounted bytes.
-    fn new(file: PinCacheFile) -> Result<Self, u64> {
-        file.gc.try_reserve(file.size)?;
+    fn new(gc: Arc<super::gc::PinCacheGc>, path: String, size: u64) -> Result<Self, u64> {
+        let file = gc.try_reserve(path, size)?;
         Ok(Self {
             file: Some(file),
-            upload_state: UploadState::NotStarted,
+            gc,
+            upload_started: false,
         })
     }
 
     fn into_file(mut self) -> Arc<PinCacheFile> {
-        Arc::new(self.file.take().expect("download owns an unpublished file"))
+        self.file.take().expect("download owns a file lease")
     }
 
     /// Copies and validates the complete file without publishing it. Success returns the owner
@@ -69,11 +63,8 @@ impl PinCacheDownload {
         store: &ObjectStoreRef,
         mut reader: MonitoredStreamingReader,
     ) -> ObjectResult<Self> {
-        let file = self
-            .file
-            .as_ref()
-            .expect("download owns an unpublished file");
-        self.upload_state = UploadState::InProgress;
+        let file = self.file.as_ref().expect("download owns a file lease");
+        self.upload_started = true;
         // TODO: Preallocate file.size bytes in the FS writer's temporary file once
         // OpenDAL supports physical space reservation. Cache capacity currently only
         // limits logical usage.
@@ -100,7 +91,7 @@ impl PinCacheDownload {
             .finish()
             .await
             .inspect_err(|_| record_io_failure("local_upload_finish"))?;
-        self.upload_state = UploadState::Complete;
+        self.gc.complete_upload(file);
         let local_size = store
             .metadata(&file.path)
             .await
@@ -119,16 +110,12 @@ impl PinCacheDownload {
 impl Drop for PinCacheDownload {
     fn drop(&mut self) {
         let Some(file) = self.file.take() else {
-            return; // Publication transferred ownership to the index.
+            return; // Publication transferred the lease to the index.
         };
-        match self.upload_state {
-            UploadState::NotStarted => file.gc.release_unused(file.size),
-            UploadState::InProgress => {
-                file.gc.mark_uncertain(file.size);
-                tracing::warn!(path = %file.path, reserved_bytes = file.size,
-                    "unfinished pin cache upload; retaining capacity until recovery");
-            }
-            UploadState::Complete => file.retire(),
+        if self.upload_started {
+            self.gc.finish_attempt(&file);
+        } else {
+            self.gc.release_unused(&file);
         }
     }
 }
@@ -177,8 +164,7 @@ impl PinCache {
     ) -> Result<PinCacheDownload, PinCacheDownloadError> {
         let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
         let path = format!("{}-{path_id}.sst", object_id.as_raw_id());
-        let file = PinCacheFile::new(path, size, Arc::clone(&self.gc));
-        let download = match PinCacheDownload::new(file) {
+        let download = match PinCacheDownload::new(Arc::clone(&self.gc), path, size) {
             Ok(download) => download,
             Err(accounted_bytes) => {
                 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
@@ -235,8 +221,8 @@ mod tests {
     use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
-    use super::{PinCache, PinCacheDownload, PinCacheFile};
-    use crate::hummock::pin_cache::gc::tests::{accounted_bytes, wait_for_reclaim};
+    use super::{PinCache, PinCacheDownload};
+    use crate::hummock::pin_cache::gc::tests::accounted_bytes;
     use crate::hummock::pin_cache::test_utils::{
         download_and_publish_for_test, in_memory_object_store, local_object_store,
     };
@@ -257,15 +243,11 @@ mod tests {
                 .await
                 .unwrap();
             let reader = remote.streaming_read("sst", ..).await.unwrap();
-            let old = PinCacheDownload::new(PinCacheFile::new(
-                "1001-0.sst".into(),
-                11,
-                Arc::clone(&pin_cache.gc),
-            ))
-            .unwrap()
-            .write(&pin_cache.store, reader)
-            .await
-            .unwrap();
+            let old = PinCacheDownload::new(Arc::clone(&pin_cache.gc), "1001-0.sst".into(), 11)
+                .unwrap()
+                .write(&pin_cache.store, reader)
+                .await
+                .unwrap();
 
             if revoke_by_unregister {
                 pin_cache.unregister_objects([object_id]);
@@ -277,7 +259,7 @@ mod tests {
             // The executor waits for the revoked attempt to finish before starting its replacement.
             assert!(!pin_cache.publish(token, old));
             assert!(pin_cache.get(object_id).is_none());
-            wait_for_reclaim(&pin_cache).await;
+            pin_cache.gc.select_minor().delete().await.unwrap();
             assert!(
                 pin_cache
                     .store
@@ -299,7 +281,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_interrupted_fs_upload_keeps_capacity_until_recovery() {
+    async fn test_full_gc_reclaims_interrupted_fs_upload() {
         for cancel in [false, true] {
             let (_dir, local_store) = local_object_store().await;
             let pin_cache = PinCache::new(local_store.clone(), 8, 1, 2, [])
@@ -308,12 +290,8 @@ mod tests {
             let object_id = HummockSstableObjectId::from(1001);
             pin_cache.register_objects([(object_id, 8)]);
 
-            let download = PinCacheDownload::new(PinCacheFile::new(
-                "1001-0.sst".into(),
-                8,
-                Arc::clone(&pin_cache.gc),
-            ))
-            .unwrap();
+            let download =
+                PinCacheDownload::new(Arc::clone(&pin_cache.gc), "1001-0.sst".into(), 8).unwrap();
             let final_path = download.file.as_ref().unwrap().path.clone();
             let (started_tx, started_rx) = tokio::sync::oneshot::channel();
             let (fail_tx, fail_rx) = tokio::sync::oneshot::channel();
@@ -360,6 +338,26 @@ mod tests {
             .await
             .unwrap();
             assert!(pin_cache.get(object_id).is_none());
+            // Full GC must associate the real backend's temporary file with this live upload,
+            // even though there is no published route and the age cutoff would allow deletion.
+            pin_cache.gc.select_minor().delete().await.unwrap();
+            pin_cache
+                .gc
+                .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+                .await
+                .unwrap()
+                .delete()
+                .await
+                .unwrap();
+            let files: Vec<_> = local_store
+                .list("", None, None)
+                .await
+                .unwrap()
+                .try_collect()
+                .await
+                .unwrap();
+            assert!(files.iter().any(|file| file.total_size == 4));
+            let before_stop = std::time::SystemTime::now();
             if cancel {
                 task.abort();
                 assert!(task.await.unwrap_err().is_cancelled());
@@ -391,14 +389,26 @@ mod tests {
             // Unpin must not release the reservation for the backend-owned temporary file either.
             pin_cache.unregister_objects([object_id]);
             assert_eq!(accounted_bytes(&pin_cache.gc), 8);
-            drop(pin_cache);
-
-            let recovered = PinCache::new(local_store.clone(), 8, 1, 2, [(object_id, 8)])
+            // A scan started before the attempt stopped must not release its reservation.
+            pin_cache
+                .gc
+                .select_full(before_stop)
+                .await
+                .unwrap()
+                .delete()
                 .await
                 .unwrap();
-
-            wait_for_reclaim(&recovered).await;
-            assert!(recovered.get(object_id).is_none());
+            assert_eq!(accounted_bytes(&pin_cache.gc), 8);
+            pin_cache
+                .gc
+                .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+                .await
+                .unwrap()
+                .delete()
+                .await
+                .unwrap();
+            assert_eq!(accounted_bytes(&pin_cache.gc), 0);
+            assert!(pin_cache.get(object_id).is_none());
             let files: Vec<_> = local_store
                 .list("", None, None)
                 .await
@@ -407,15 +417,16 @@ mod tests {
                 .await
                 .unwrap();
             assert!(files.iter().all(|file| file.key.ends_with('/')));
+            pin_cache.register_objects([(object_id, 8)]);
             let remote_store = in_memory_object_store();
             remote_store
                 .upload("sst", Bytes::from_static(b"complete"))
                 .await
                 .unwrap();
-            download_and_publish_for_test(&recovered, remote_store, "sst".into(), object_id)
+            download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id)
                 .await
                 .unwrap();
-            assert!(recovered.get(object_id).is_some());
+            assert!(pin_cache.get(object_id).is_some());
         }
     }
 }

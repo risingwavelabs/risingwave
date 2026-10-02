@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::ObjectError;
 
 use super::PinCache;
-use super::gc::tests::{accounted_bytes, wait_for_reclaim};
+use super::gc::tests::accounted_bytes;
 use super::test_utils::{
     download_and_publish_for_test, in_memory_object_store, local_object_store, object_in_shard,
 };
@@ -98,6 +98,7 @@ async fn test_read_and_unregister_lifecycle() {
     old_read.invalidate();
     assert!(pin_cache.get(object_id).is_some());
     drop(old_read);
+    pin_cache.gc.select_minor().delete().await.unwrap();
     assert!(old_file.upgrade().is_none());
 }
 
@@ -155,7 +156,7 @@ async fn test_completed_invalid_fs_upload_reclaims_capacity() {
             .is_err()
     );
     assert!(pin_cache.get(object_id).is_none());
-    wait_for_reclaim(&pin_cache).await;
+    pin_cache.gc.select_minor().delete().await.unwrap();
     let files: Vec<_> = local_store
         .list("", None, None)
         .await
@@ -383,7 +384,7 @@ async fn test_recovery_reclaims_files_outside_initial_membership() {
     let pin_cache = PinCache::new(local_store.clone(), 1024, 1, 2, [])
         .await
         .unwrap();
-    wait_for_reclaim(&pin_cache).await;
+    pin_cache.gc.select_minor().delete().await.unwrap();
     for path in ["1001-42.sst", "unfinished.tmp"] {
         assert!(
             local_store
@@ -418,14 +419,22 @@ async fn test_gc_waits_for_readers_and_preserves_shutdown_files() {
             cache.unregister_objects([1001.into()]);
         }
         assert!(cache.get(1001.into()).is_none());
-        tokio::task::yield_now().await;
+        cache.gc.select_minor().delete().await.unwrap();
+        cache
+            .gc
+            .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+            .await
+            .unwrap()
+            .delete()
+            .await
+            .unwrap();
         assert_eq!(
             reader.read(..).await.unwrap(),
             Bytes::from_static(b"complete")
         );
         assert_eq!(accounted_bytes(&cache.gc), 8);
         drop(reader);
-        wait_for_reclaim(&cache).await;
+        cache.gc.select_minor().delete().await.unwrap();
         assert!(
             local
                 .metadata(&path)

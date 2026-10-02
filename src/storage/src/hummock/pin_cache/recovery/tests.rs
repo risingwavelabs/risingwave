@@ -100,13 +100,8 @@ async fn test_recovery_reclaims_rejected_files_across_shards() {
         .unwrap();
     assert_eq!(stats.objects, 2);
     assert_eq!(stats.bytes, 16);
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while accounted_bytes(&cache.gc) != 16 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    cache.gc.select_minor().delete().await.unwrap();
+    assert_eq!(accounted_bytes(&cache.gc), 16);
     for path in paths {
         if retained.contains(&path) {
             assert_eq!(

@@ -40,7 +40,7 @@ impl PinCache {
     /// Recovers only existing local files matching the initial membership and expected size.
     /// This runs before sharing the cache. Each task exclusively owns one shard, without locks.
     /// Lists and partitions all file metadata first, then recovers shards with bounded concurrency.
-    /// Rejected files are reclaimed only after the complete inventory and all shard tasks succeed.
+    /// After successful recovery, rejected files have no external lease and are eligible for GC.
     /// No remote SST metadata is read for vnode pruning; unpin/version removal withdraws stale routes.
     /// There is no persisted refill watermark: objects missed during downtime are not backfilled.
     /// Reads of missing objects use the normal fallback; subsequent version deltas drive refill.
@@ -51,23 +51,18 @@ impl PinCache {
     ) -> ObjectResult<RecoveryStats> {
         let mut files: Vec<Vec<_>> = (0..self.shards.len()).map(|_| Vec::new()).collect();
         let mut objects = objects?;
-        let mut stale_objects = Vec::new();
         while let Some(metadata) = objects.try_next().await? {
             if metadata.key.is_empty() || metadata.key.ends_with('/') {
                 continue;
             }
-            let entry = PinCacheFile::new(
-                metadata.key,
-                metadata.total_size as u64,
-                Arc::clone(&self.gc),
-            );
-            self.gc.account_existing(entry.size);
+            let entry = self
+                .gc
+                .account_existing(metadata.key, metadata.total_size as u64);
             if let Some(object_id) = Self::parse_object_id(&entry.path) {
                 let shard_index = Self::shard_index(object_id, self.shards.len());
                 files[shard_index].push((object_id, entry));
             } else {
                 tracing::warn!(path = %entry.path, "skipping pin cache file with invalid name during recovery");
-                stale_objects.push(entry);
             }
         }
         let shards = self
@@ -80,13 +75,13 @@ impl PinCache {
             .map(|(index, (shard, files))| {
                 let mut state = std::mem::take(shard.get_mut());
                 tokio::task::spawn_blocking(move || {
-                    let (stats, stale) = state.recover(files);
-                    (index, state, stats, stale)
+                    let stats = state.recover(files);
+                    (index, state, stats)
                 })
             })
             .buffer_unordered(concurrency)
             // Join all tasks before propagating a panic. On cancellation, running tasks own
-            // only unretired files and private shard state; they never reclaim files or update metrics.
+            // only file leases and private shard state; they never reclaim files or update metrics.
             .collect::<Vec<_>>()
             .await
             .into_iter()
@@ -95,14 +90,10 @@ impl PinCache {
                 ObjectError::internal(format!("pin cache recovery task failed: {err}"))
             })?;
         let mut stats = RecoveryStats::default();
-        for (index, state, recovered, stale) in results {
-            stale_objects.extend(stale);
+        for (index, state, recovered) in results {
             *self.shards[index].get_mut() = state;
             stats.objects += recovered.objects;
             stats.bytes += recovered.bytes;
-        }
-        for file in stale_objects {
-            file.retire();
         }
         Ok(stats)
     }
@@ -111,14 +102,12 @@ impl PinCache {
 impl PinCacheShard {
     fn recover(
         &mut self,
-        files: Vec<(HummockSstableObjectId, PinCacheFile)>,
-    ) -> (RecoveryStats, Vec<PinCacheFile>) {
+        files: Vec<(HummockSstableObjectId, Arc<PinCacheFile>)>,
+    ) -> RecoveryStats {
         let mut stats = RecoveryStats::default();
-        let mut stale_objects = Vec::new();
         for (object_id, entry) in files {
             let Some(object) = self.objects.get_mut(&object_id) else {
                 tracing::debug!(path = %entry.path, "skipping pin cache file outside current membership during recovery");
-                stale_objects.push(entry);
                 continue;
             };
             let expected_size = object.size();
@@ -129,19 +118,17 @@ impl PinCacheShard {
                     expected_size,
                     "skipping pin cache file with unexpected size during recovery"
                 );
-                stale_objects.push(entry);
                 continue;
             }
             if object.published().is_some() {
                 tracing::debug!(path = %entry.path, "skipping duplicate pin cache file during recovery");
-                stale_objects.push(entry);
                 continue;
             }
             stats.objects += 1;
             stats.bytes += entry.size;
-            object.state = PinCacheObjectState::Published(Arc::new(entry));
+            object.state = PinCacheObjectState::Published(entry);
         }
-        (stats, stale_objects)
+        stats
     }
 }
 

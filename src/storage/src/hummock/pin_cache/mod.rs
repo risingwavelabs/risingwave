@@ -28,7 +28,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 use bytes::Bytes;
 use parking_lot::RwLock;
@@ -55,33 +55,6 @@ fn metric_bytes(bytes: u64) -> i64 {
 struct PinCacheFile {
     path: String,
     size: u64,
-    gc: Arc<PinCacheGc>,
-    // Normal shutdown preserves published files; only explicitly retired files are deleted.
-    retired: AtomicBool,
-}
-
-impl PinCacheFile {
-    fn new(path: String, size: u64, gc: Arc<PinCacheGc>) -> Self {
-        Self {
-            path,
-            size,
-            gc,
-            retired: AtomicBool::new(false),
-        }
-    }
-
-    /// Marks this file for deletion after its final owner releases it.
-    fn retire(&self) {
-        self.retired.store(true, Ordering::Relaxed);
-    }
-}
-
-impl Drop for PinCacheFile {
-    fn drop(&mut self) {
-        if *self.retired.get_mut() {
-            self.gc.enqueue(std::mem::take(&mut self.path), self.size);
-        }
-    }
 }
 
 /// One object's file lifecycle. Only `Published` can be read. A revoked download may
@@ -115,7 +88,8 @@ impl PinCacheObject {
         }
     }
 
-    /// Withdraws the read route and retires its file. Membership and refill admission remain valid.
+    /// Withdraws the read route; GC may select the file after its last owner releases it.
+    /// Membership and refill admission remain valid.
     /// The caller must release the returned reference outside the shard lock.
     fn unpublish(&mut self) -> Option<Arc<PinCacheFile>> {
         let size = self.published()?.size;
@@ -124,7 +98,6 @@ impl PinCacheObject {
         else {
             unreachable!()
         };
-        file.retire();
         GLOBAL_PIN_CACHE_METRICS.published_objects.dec();
         GLOBAL_PIN_CACHE_METRICS
             .published_bytes
