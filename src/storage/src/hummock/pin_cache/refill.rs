@@ -23,7 +23,8 @@ use risingwave_object_store::object::{
 use super::{PinCache, PinCacheFile, PinCacheRefillToken, PinCacheShard, allocate_generation};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
-/// Owns a complete, unpublished file returned by `PinCache::download`.
+/// Owns an unpublished local file throughout writing and validation.
+/// Only a successful `PinCache::download` exposes this owner to the caller.
 /// Dropping it never changes the index. Construction and writing stay private to this module.
 pub(crate) struct PinCacheDownload {
     file: Arc<PinCacheFile>,
@@ -49,6 +50,8 @@ impl PinCacheDownload {
         mut reader: MonitoredStreamingReader,
     ) -> ObjectResult<Self> {
         let file = &self.file;
+        // TODO: Preallocate file.size bytes in the FS writer's temporary file once
+        // OpenDAL supports physical space reservation.
         let mut writer = store
             .streaming_upload(&file.path)
             .await

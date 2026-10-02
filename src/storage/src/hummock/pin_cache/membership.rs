@@ -41,7 +41,7 @@ impl PinCache {
             // Release the shard before dropping the removed publication.
             let object = self.shard(id).write().objects.remove(&id);
             if let Some(mut object) = object {
-                object.take_published();
+                object.unpublish();
             }
         }
     }
