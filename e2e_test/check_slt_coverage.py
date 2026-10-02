@@ -64,10 +64,11 @@ def should_ignore_file(file_path, ignore_patterns):
 
 
 def find_all_slt_files(include_ignored=False):
-    """Find all .slt and .slt.part files in the e2e_test directory"""
+    """Find all .slt, .slt.serial, and .slt.part files in the e2e_test directory"""
     slt_files = set(
         path_for_storage(f)
-        for f in glob.glob(f"{E2E_TEST_DIR}/**/*.slt", recursive=True)
+        for suffix in (".slt", ".slt.serial")
+        for f in glob.glob(f"{E2E_TEST_DIR}/**/*{suffix}", recursive=True)
     )
     slt_part_files = set(
         path_for_storage(f)
@@ -93,37 +94,23 @@ def extract_slt_patterns_from_script(script_path):
     with open(script_path, "r") as f:
         content = f.read()
 
-        # Enhanced pattern to catch both with and without './' prefix
-        # Find all risedev slt or sqllogictest commands
+        # Match quoted regular/serial paths and globs, with or without './'.
         slt_commands = re.finditer(
-            r'(risedev\s+slt|sqllogictest)\s+.*?([\'\"](?:\.\/)?e2e_test\/[^\'\"]*\.slt[\'\"]|[\'\"](?:\.\/)?e2e_test\/[^\'\"]*\/\*\*\/\*\.slt[\'\"]|[\'\"](?:\.\/)?e2e_test\/[^\'"]*\/\*\.slt[\'\"])',
+            r'''(?:risedev\s+slt|sqllogictest)\s+.*?['"]((?:\./)?e2e_test/[^'"]*\.slt(?:\.serial)?)['"]''',
             content,
             re.DOTALL,
         )
 
         for command in slt_commands:
-            cmd_str = command.group(0)
-
-            # Extract quoted paths/globs (handling both single and double quotes, with or without './' prefix)
-            path_matches = re.finditer(
-                r"[\'\"]((\.\/)?e2e_test\/[^\'\"]*\.slt)[\'\"]|[\'\"]((\.\/)?e2e_test\/[^\'\"]*\/\*\*\/\*\.slt)[\'\"]|[\'\"]((\.\/)?e2e_test\/[^\'\"]*\/\*\.slt)[\'\"]",
-                cmd_str,
-            )
-            for path_match in path_matches:
-                pattern = (
-                    path_match.group(1) or path_match.group(3) or path_match.group(5)
-                )
-                # Remove ./ prefix if present
-                if pattern.startswith("./"):
-                    pattern = pattern[2:]
-
-                # Handle unescaped patterns
-                pattern = handle_unescaped_pattern(pattern)
-                patterns.append(pattern)
+            pattern = command.group(1)
+            if pattern.startswith("./"):
+                pattern = pattern[2:]
+            patterns.append(handle_unescaped_pattern(pattern))
 
         # Find find commands that look for SLT files
         find_commands = re.finditer(
-            r"find\s+(?:\.\/)?e2e_test[^\n]*-name\s+[\'\"].*?\.slt[\'\"]", content
+            r'''find\s+(?:\./)?e2e_test[^\n]*-name\s+['"]([^'"]*\.slt(?:\.serial)?)['"]''',
+            content,
         )
         for cmd in find_commands:
             find_cmd = cmd.group(0)
@@ -134,6 +121,7 @@ def extract_slt_patterns_from_script(script_path):
                 # Remove ./ prefix if present
                 if dir_path.startswith("./"):
                     dir_path = dir_path[2:]
+                pattern = f"{dir_path}/**/{cmd.group(1)}"
                 # Check if there's a grep exclusion in this command
                 if "grep -L" in find_cmd or "grep -v" in find_cmd:
                     grep_pattern_match = re.search(
@@ -141,11 +129,9 @@ def extract_slt_patterns_from_script(script_path):
                     )
                     if grep_pattern_match:
                         excluded_pattern = grep_pattern_match.group(1)
-                        excluded_patterns.append(
-                            (f"{dir_path}/**/*.slt", excluded_pattern)
-                        )
+                        excluded_patterns.append((pattern, excluded_pattern))
                 else:
-                    patterns.append(f"{dir_path}/**/*.slt")
+                    patterns.append(pattern)
 
     return patterns, excluded_patterns
 
@@ -169,11 +155,10 @@ def expand_glob_pattern(pattern):
 
 
 def find_included_files(slt_files):
-    """Find all included files referenced in .slt files"""
+    """Find all included files referenced in regular, serial, and partial SLTs"""
     include_map = {}  # Map of file to files it includes
-    included_by_map = defaultdict(list)  # Map of file to files that include it
 
-    include_regex = re.compile(r"include\s+(.*\.slt(?:\.part)?)")
+    include_regex = re.compile(r"include\s+(.*\.slt(?:\.part|\.serial)?)")
 
     for slt_file in slt_files:
         include_map[slt_file] = []
@@ -198,7 +183,6 @@ def find_included_files(slt_files):
                                 real_matching_file = path_for_storage(matching_file)
                                 if real_matching_file in slt_files:
                                     include_map[slt_file].append(real_matching_file)
-                                    included_by_map[real_matching_file].append(slt_file)
                         else:
                             # Regular path
                             full_path = os.path.normpath(
@@ -207,13 +191,12 @@ def find_included_files(slt_files):
                             real_path = path_for_storage(full_path)
                             if os.path.exists(real_path) and real_path in slt_files:
                                 include_map[slt_file].append(real_path)
-                                included_by_map[real_path].append(slt_file)
         except Exception as e:
             # Skip files that can't be read
             print(f"Error reading {slt_file}, skipping: {e}")
             pass
 
-    return include_map, included_by_map
+    return include_map
 
 
 def group_by_directory(file_list):
@@ -269,14 +252,14 @@ def analyze_uncovered_directories(all_files, covered_files):
 
 
 def propagate_coverage_through_includes(
-    covered_slt_files, include_map, included_by_map, all_slt_part_files
+    covered_slt_files, include_map, all_slt_part_files
 ):
     """Propagate coverage through include relationships recursively
 
-    If a .slt file is covered, all .slt and .slt.part files it includes are also considered covered.
+    If a file is covered, all .slt, .slt.serial, and .slt.part files it includes are covered.
     This function handles recursive include relationships to any depth.
     """
-    # Start with directly covered .slt files
+    # Start with directly covered regular and serial SLT files
     covered_directly = set(covered_slt_files)
     covered_through_includes = set()
 
@@ -305,59 +288,11 @@ def propagate_coverage_through_includes(
     for slt_file in covered_directly:
         process_includes(slt_file)
 
-    # Now handle part files transitively through multiple levels of inclusion
-    # Keep processing until no new files are added
-    previous_size = 0
-    covered_part_files = set()
-
-    # First add directly covered part files
-    for part_file in all_slt_part_files:
-        if part_file in covered_directly or part_file in covered_through_includes:
-            covered_part_files.add(part_file)
-
-    # Recursively add part files included by covered files through any number of steps
-    while True:
-        # Process files that include covered part files
-        for part_file in all_slt_part_files:
-            if part_file in covered_part_files:
-                continue
-
-            # Check if any file including this .slt.part is covered
-            if part_file in included_by_map:
-                for including_file in included_by_map[part_file]:
-                    if (
-                        including_file in covered_directly
-                        or including_file in covered_through_includes
-                        or including_file in covered_part_files
-                    ):
-                        covered_part_files.add(part_file)
-                        break
-
-        # Check if we've added any new files
-        current_size = len(covered_through_includes) + len(covered_part_files)
-        if current_size == previous_size:
-            # No new files were added, we're done
-            break
-
-        # Update size and continue
-        previous_size = current_size
-
-        # Also propagate in the other direction - if a part file is covered,
-        # any file that includes it should also be considered covered
-        for covered_file in list(covered_part_files) + list(covered_through_includes):
-            if covered_file in included_by_map:
-                for including_file in included_by_map[covered_file]:
-                    if (
-                        including_file not in covered_directly
-                        and including_file not in covered_through_includes
-                    ):
-                        if including_file.endswith(".slt"):
-                            covered_through_includes.add(including_file)
-                        elif (
-                            including_file.endswith(".slt.part")
-                            and including_file not in covered_part_files
-                        ):
-                            covered_part_files.add(including_file)
+    # Coverage flows from a caller to its includes, never back to other callers.
+    # Sharing a covered include does not prove that an unselected test runs.
+    covered_part_files = all_slt_part_files & (
+        covered_directly | covered_through_includes
+    )
 
     return covered_directly, covered_through_includes, covered_part_files
 
@@ -399,7 +334,7 @@ def main():
                 print(f"  - {pattern}")
 
     # Find include relationships
-    include_map, included_by_map = find_included_files(all_files)
+    include_map = find_included_files(all_files)
 
     scripts = [f for f in os.listdir(CI_SCRIPTS_DIR) if f.endswith(".sh")]
 
@@ -455,6 +390,8 @@ def main():
                 print(f"    Matches: {len(matched_files)}")
 
             for file in matched_files:
+                if file not in all_files:
+                    continue
                 covered_files[file].append(script)
                 files_covered_by_script.add(file)
                 all_covered_files.add(file)
@@ -473,8 +410,8 @@ def main():
             # Filter files that don't match the exclude regex
             included_files = []
             for file in matched_files:
-                # Skip already covered files
-                if file in files_covered_by_script:
+                # Skip ignored and already covered files.
+                if file not in all_files or file in files_covered_by_script:
                     continue
 
                 with open(file, "r", errors="ignore") as f:
@@ -501,7 +438,7 @@ def main():
     # Find covered files through includes
     directly_covered, covered_through_includes, covered_part_files = (
         propagate_coverage_through_includes(
-            all_covered_files, include_map, included_by_map, all_slt_part_files
+            all_covered_files, include_map, all_slt_part_files
         )
     )
 
@@ -511,7 +448,9 @@ def main():
     )
 
     # Categorize covered files
-    covered_slt_files = set(f for f in all_covered_files if f.endswith(".slt"))
+    covered_slt_files = set(
+        f for f in all_covered_files if f.endswith((".slt", ".slt.serial"))
+    )
     covered_slt_part_files = set(
         f for f in all_covered_files if f.endswith(".slt.part")
     )
