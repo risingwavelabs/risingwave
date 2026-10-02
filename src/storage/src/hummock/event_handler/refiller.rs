@@ -786,14 +786,6 @@ impl CacheRefiller {
             })
     }
 
-    /// Replaces the complete policy snapshot applicable to this worker.
-    pub(crate) fn replace_table_cache_refill_policies(
-        &mut self,
-        policies: HashMap<TableId, CacheRefillPolicy>,
-    ) {
-        self.replace_table_cache_refill_runtime_snapshot(policies, HashSet::new());
-    }
-
     /// Replaces Foyer policy and Pin intent from the same complete snapshot.
     pub(crate) fn replace_table_cache_refill_runtime_snapshot(
         &mut self,

@@ -329,7 +329,6 @@ impl SstableStore {
         Ok(())
     }
 
-    #[allow(dead_code)] // Wired to production storage in the final stack layer.
     pub(crate) fn set_pin_cache(&self, pin_cache: Arc<PinCache>) {
         assert!(
             self.pin_cache.set(pin_cache).is_ok(),
