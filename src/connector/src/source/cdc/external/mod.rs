@@ -259,6 +259,12 @@ pub struct DebeziumSourceOffset {
     // sql server offset
     pub commit_lsn: Option<String>,
     pub change_lsn: Option<String>,
+    // oracle offset
+    // Oracle's sourceOffset can emit a string txId, which conflicts with the
+    // PostgreSQL txid field above using the same serde name. Oracle offsets are
+    // parsed directly with serde_json::Value instead of declaring this field here;
+    // the comparison SCN is read as a string and converted to u64.
+    // pub decoded_commit_scn: Option<u64>
 }
 
 pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
@@ -324,10 +330,6 @@ pub struct ExternalTableConfig {
     /// The Oracle pluggable database name. This field is only used by the Oracle CDC connector.
     #[serde(rename = "database.pdb.name", default = "Default::default")]
     pub pdb_name: String,
-    /// Effective RAC instance list forwarded to Debezium for shared Oracle sources. This field is
-    /// only used by the Oracle CDC connector.
-    #[serde(rename = "debezium.rac.nodes", default)]
-    pub rac_nodes: Option<String>,
     #[serde(rename = "table.name")]
     pub table: String,
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
