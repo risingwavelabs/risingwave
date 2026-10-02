@@ -225,10 +225,9 @@ message ValidateSourceResponse {
 message OracleExternalTableRequest {
   map<string, string> properties = 1;
   TableSchema table_schema = 2;
-  uint64 snapshot_scn = 3;
-  repeated OracleDatum start_pk = 4;
-  repeated string primary_keys = 5;
-  uint32 limit = 6;
+  repeated OracleDatum start_pk = 3;
+  repeated string primary_keys = 4;
+  uint32 limit = 5;
 }
 
 message OracleDatum {

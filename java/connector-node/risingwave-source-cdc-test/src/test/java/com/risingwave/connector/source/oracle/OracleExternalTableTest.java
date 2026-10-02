@@ -23,7 +23,6 @@ import com.risingwave.connector.source.common.JniOracleExternalTable;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data.DataType.TypeName;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,10 +32,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class OracleExternalTableTest extends OracleSourceTestBase {
-    // Oracle can briefly reject flashback reads after creating the test table.
-    private static final Duration FLASHBACK_READ_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration FLASHBACK_RETRY_INTERVAL = Duration.ofMillis(250);
-
     private static OracleTestFixture oracle;
 
     @BeforeClass
@@ -131,7 +126,7 @@ public class OracleExternalTableTest extends OracleSourceTestBase {
     }
 
     @Test
-    public void readsFirstAndSubsequentCompositePrimaryKeyPagesAtFixedScn() throws Exception {
+    public void readsLiveCompositePrimaryKeyPages() throws Exception {
         var qualifiedTable = "APP.EXT_SNAPSHOT";
         createTable(
                 qualifiedTable,
@@ -169,15 +164,13 @@ public class OracleExternalTableTest extends OracleSourceTestBase {
                         .putAllProperties(catalogRequest.getPropertiesMap())
                         .setTableSchema(tableSchema)
                         .addAllPrimaryKeys(List.of("REGION", "ID"))
-                        .setLimit(2);
-        var firstPage = readFirstAvailableSnapshot(catalogRequest, snapshotRequest);
-        var snapshotScn = snapshotRequest.getSnapshotScn();
-        assertTrue(snapshotScn > 0);
-        var fixedSnapshotRequest = snapshotRequest.build();
+                        .setLimit(2)
+                        .build();
+        var firstPage = snapshotRead(snapshotRequest);
 
-        execute("INSERT INTO " + qualifiedTable + " VALUES ('west', 3, 'after-snapshot', TRUE)");
+        // Live pages must include rows inserted ahead of the already-read PK frontier.
+        execute("INSERT INTO " + qualifiedTable + " VALUES ('west', 3, 'after-first-page', TRUE)");
         assertEquals(6, queryInt("SELECT COUNT(*) FROM " + qualifiedTable));
-        assertEquals(snapshotScn, fixedSnapshotRequest.getSnapshotScn());
 
         var rows = new ArrayList<String>();
         var pageSizes = new ArrayList<Integer>();
@@ -199,37 +192,33 @@ public class OracleExternalTableTest extends OracleSourceTestBase {
             }
             var lastRow = page.getRows(page.getRowsCount() - 1);
             var pageRequest =
-                    fixedSnapshotRequest.toBuilder()
+                    snapshotRequest.toBuilder()
                             .clearStartPk()
                             .addStartPk(lastRow.getValues(0))
                             .addStartPk(lastRow.getValues(1))
                             .build();
             page = snapshotRead(pageRequest);
-            assertEquals(snapshotScn, pageRequest.getSnapshotScn());
         }
 
-        assertEquals(List.of(2, 2, 1, 0), pageSizes);
+        assertEquals(List.of(2, 2, 2, 0), pageSizes);
         assertEquals(
                 List.of(
                         "east:1=east-one:true",
                         "east:2=east-two:false",
                         "east:3=east-three:true",
                         "west:1=west-one:false",
-                        "west:2=west-two:true"),
+                        "west:2=west-two:true",
+                        "west:3=after-first-page:true"),
                 rows);
     }
 
     @Test
-    public void rejectsNegativeSnapshotScnAndLimit() throws Exception {
-        var validRequest =
-                ConnectorServiceProto.OracleExternalTableRequest.newBuilder()
-                        .setTableSchema(ConnectorServiceProto.TableSchema.getDefaultInstance())
-                        .setSnapshotScn(1)
-                        .setLimit(1);
-
-        assertSnapshotError(
-                validRequest.clone().setSnapshotScn(-1).build(), "invalid snapshot SCN");
-        assertSnapshotError(validRequest.clone().setLimit(-1).build(), "invalid limit");
+    public void rejectsMissingSchemaAndInvalidLimit() throws Exception {
+        var request = ConnectorServiceProto.OracleExternalTableRequest.newBuilder().setLimit(1);
+        assertSnapshotError(request.build(), "missing its RisingWave table schema");
+        request.setTableSchema(ConnectorServiceProto.TableSchema.getDefaultInstance());
+        assertSnapshotError(request.clone().setLimit(0).build(), "invalid limit");
+        assertSnapshotError(request.clone().setLimit(-1).build(), "invalid limit");
     }
 
     private void assertDiscoveredTypes(String tableName, Map<String, TypeName> expectedTypes)
@@ -280,41 +269,6 @@ public class OracleExternalTableTest extends OracleSourceTestBase {
     private ConnectorServiceProto.OracleExternalTableResponse snapshotReadResponse(
             ConnectorServiceProto.OracleExternalTableRequest request) throws Exception {
         return parseResponse(JniOracleExternalTable.snapshotRead(request.toByteArray()));
-    }
-
-    private ConnectorServiceProto.OracleExternalTableResponse readFirstAvailableSnapshot(
-            ConnectorServiceProto.OracleExternalTableRequest catalogRequest,
-            ConnectorServiceProto.OracleExternalTableRequest.Builder snapshotRequest)
-            throws Exception {
-        var deadline = System.nanoTime() + FLASHBACK_READ_TIMEOUT.toNanos();
-        var attempts = 0;
-        while (true) {
-            attempts++;
-            var currentScn =
-                    successfulResponse(
-                                    JniOracleExternalTable.currentScn(catalogRequest.toByteArray()))
-                            .getSnapshotScn();
-            snapshotRequest.setSnapshotScn(currentScn);
-            var response = snapshotReadResponse(snapshotRequest.build());
-            var error = response.getError().getErrorMessage();
-            if (error.isEmpty()) {
-                return response;
-            }
-            assertTrue(error, error.contains("ORA-01466"));
-            if (System.nanoTime() >= deadline) {
-                throw new AssertionError(
-                        String.format(
-                                "Oracle table '%s.%s' did not become available for flashback reads "
-                                        + "within %d seconds after %d attempts; last SCN %d: %s",
-                                catalogRequest.getPropertiesOrDefault("schema.name", "<unknown>"),
-                                catalogRequest.getPropertiesOrDefault("table.name", "<unknown>"),
-                                FLASHBACK_READ_TIMEOUT.toSeconds(),
-                                attempts,
-                                currentScn,
-                                error));
-            }
-            Thread.sleep(FLASHBACK_RETRY_INTERVAL.toMillis());
-        }
     }
 
     private static ConnectorServiceProto.OracleExternalTableResponse successfulResponse(
