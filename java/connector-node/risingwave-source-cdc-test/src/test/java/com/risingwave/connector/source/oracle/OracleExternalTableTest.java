@@ -126,6 +126,47 @@ public class OracleExternalTableTest extends OracleSourceTestBase {
     }
 
     @Test
+    public void rejectsPrimaryKeysWithInexactOrdering() throws Exception {
+        var unsupportedTypes = new LinkedHashMap<String, String>();
+        unsupportedTypes.put("NUMBER", "requires a declared NUMBER precision");
+        unsupportedTypes.put("NUMBER(29)", "requires a declared NUMBER precision");
+        unsupportedTypes.put("NUMBER(28,29)", "requires a declared NUMBER precision");
+        unsupportedTypes.put("NUMBER(28,-1)", "requires a declared NUMBER precision");
+        unsupportedTypes.put("TIMESTAMP(9)", "unsupported type TIMESTAMP");
+        unsupportedTypes.put("NVARCHAR2(20)", "unsupported type NVARCHAR2");
+        unsupportedTypes.put("NCHAR(20)", "unsupported type NCHAR");
+        var index = 0;
+        for (var entry : unsupportedTypes.entrySet()) {
+            var table = "EXT_PK_UNSUPPORTED_" + index++;
+            createTable(
+                    "APP." + table,
+                    "CREATE TABLE APP." + table + " (ID " + entry.getKey() + " PRIMARY KEY)");
+            assertDiscoveryError(table, entry.getValue());
+        }
+    }
+
+    @Test
+    public void acceptsLosslessPrimaryKeyTypes() throws Exception {
+        var supportedTypes = new LinkedHashMap<String, TypeName>();
+        supportedTypes.put("NUMBER(28,0)", TypeName.DECIMAL);
+        supportedTypes.put("NUMBER(28,28)", TypeName.DECIMAL);
+        supportedTypes.put("NUMBER(27,-1)", TypeName.DECIMAL);
+        supportedTypes.put("RAW(16)", TypeName.BYTEA);
+        supportedTypes.put("DATE", TypeName.TIMESTAMP);
+        supportedTypes.put("TIMESTAMP(6)", TypeName.TIMESTAMP);
+        supportedTypes.put("VARCHAR2(20)", TypeName.VARCHAR);
+        supportedTypes.put("CHAR(20)", TypeName.VARCHAR);
+        var index = 0;
+        for (var entry : supportedTypes.entrySet()) {
+            var table = "EXT_PK_SUPPORTED_" + index++;
+            createTable(
+                    "APP." + table,
+                    "CREATE TABLE APP." + table + " (ID " + entry.getKey() + " PRIMARY KEY)");
+            assertDiscoveredTypes(table, Map.of("ID", entry.getValue()));
+        }
+    }
+
+    @Test
     public void readsLiveCompositePrimaryKeyPages() throws Exception {
         var qualifiedTable = "APP.EXT_SNAPSHOT";
         createTable(
