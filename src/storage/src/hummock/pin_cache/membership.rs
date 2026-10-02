@@ -12,29 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use super::PinCache;
 
 impl PinCache {
-    fn partition_objects(
-        &self,
-        objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
-    ) -> Vec<HashMap<HummockSstableObjectId, u64>> {
-        let mut shards = vec![HashMap::new(); self.shards.len()];
-        for (id, size) in objects {
-            if let Some(previous) =
-                shards[Self::shard_index(id, self.shards.len())].insert(id, size)
-            {
-                assert_eq!(previous, size, "one object must have one physical size");
-            }
-        }
-        shards
-    }
-
     /// Registers objects for explicit refill without downloading them.
     /// Registering an existing object preserves its state and refill tokens; it does not repair
     /// an invalidated file. A registered object is readable only after publication.
@@ -42,15 +24,9 @@ impl PinCache {
         &self,
         objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) {
-        let objects = self.partition_objects(objects);
-        for (shard, objects) in self.shards.iter().zip_eq_fast(objects) {
-            if objects.is_empty() {
-                continue;
-            }
-            let mut state = shard.write();
-            for (id, size) in objects {
-                state.register_object(id, size);
-            }
+        // Release the shard between objects so a large update does not hold up lookups.
+        for (id, size) in objects {
+            self.shard(id).write().register_object(id, size);
         }
     }
 
@@ -61,19 +37,11 @@ impl PinCache {
         &self,
         objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) {
-        let mut objects_by_shard = vec![Vec::new(); self.shards.len()];
         for id in objects {
-            objects_by_shard[Self::shard_index(id, self.shards.len())].push(id);
-        }
-        for (shard, objects) in self.shards.iter().zip_eq_fast(objects_by_shard) {
-            if objects.is_empty() {
-                continue;
-            }
-            let mut state = shard.write();
-            for id in objects {
-                if let Some(mut object) = state.objects.remove(&id) {
-                    object.take_published();
-                }
+            // Release the shard before dropping the removed publication.
+            let object = self.shard(id).write().objects.remove(&id);
+            if let Some(mut object) = object {
+                object.take_published();
             }
         }
     }
