@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::ops::Deref;
-use std::sync::Mutex;
 
 use anyhow::{Context, anyhow};
 use futures::StreamExt;
@@ -113,7 +112,6 @@ pub struct OracleExternalTableReader {
     rw_schema: Schema,
     pk_indices: Vec<usize>,
     table_schema: TableSchema,
-    snapshot_scn: Mutex<Option<u64>>,
 }
 
 impl ExternalTableReader for OracleExternalTableReader {
@@ -129,7 +127,6 @@ impl ExternalTableReader for OracleExternalTableReader {
         if response.snapshot_scn == 0 {
             bail!("Oracle returned an invalid current SCN");
         }
-        *self.snapshot_scn.lock().unwrap() = Some(response.snapshot_scn);
         Ok(CdcOffset::Oracle(OracleOffset {
             scn: response.snapshot_scn,
         }))
@@ -207,7 +204,6 @@ impl OracleExternalTableReader {
             rw_schema,
             pk_indices,
             table_schema,
-            snapshot_scn: Mutex::new(None),
         })
     }
 
@@ -230,11 +226,6 @@ impl OracleExternalTableReader {
             ))?;
         }
 
-        let snapshot_scn = self
-            .snapshot_scn
-            .lock()
-            .unwrap()
-            .context("Oracle snapshot read started before obtaining the current SCN")?;
         let start_pk = start_pk
             .map(|row| encode_start_pk(row, &self.rw_schema, &self.pk_indices))
             .transpose()?;
@@ -245,7 +236,6 @@ impl OracleExternalTableReader {
         let request = OracleExternalTableRequest {
             properties,
             table_schema: Some(self.table_schema.clone()),
-            snapshot_scn,
             start_pk: start_pk.unwrap_or_default(),
             primary_keys,
             limit,

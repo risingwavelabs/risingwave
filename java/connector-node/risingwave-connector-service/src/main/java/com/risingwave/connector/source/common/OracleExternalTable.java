@@ -38,7 +38,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-/** Pull-based Oracle catalog and flashback snapshot operations used by the Rust CDC backfill. */
+/** Pull-based Oracle catalog and live table scan operations used by the Rust CDC backfill. */
 final class OracleExternalTable {
     private static final Pattern ORACLE_UNQUOTED_IDENTIFIER =
             Pattern.compile("[A-Za-z][A-Za-z0-9_$#]*");
@@ -119,9 +119,6 @@ final class OracleExternalTable {
             throw new SQLException(
                     "Oracle snapshot request is missing its RisingWave table schema");
         }
-        if (request.getSnapshotScn() <= 0) {
-            throw new SQLException("Oracle snapshot request has an invalid snapshot SCN");
-        }
         if (request.getLimit() <= 0) {
             throw new SQLException("Oracle snapshot request has an invalid limit");
         }
@@ -137,7 +134,6 @@ final class OracleExternalTable {
                         columnNames,
                         schemaName,
                         tableName,
-                        request.getSnapshotScn(),
                         request.getPrimaryKeysList(),
                         request.getStartPkCount() > 0,
                         request.getLimit());
@@ -295,16 +291,12 @@ final class OracleExternalTable {
             List<String> columns,
             String schemaName,
             String tableName,
-            long scn,
             List<String> primaryKeys,
             boolean hasStartPrimaryKey,
             int limit)
             throws SQLException {
         if (columns.isEmpty() || primaryKeys.isEmpty()) {
             throw new SQLException("Oracle snapshot query requires columns and primary keys");
-        }
-        if (scn <= 0) {
-            throw new SQLException("Oracle snapshot query has an invalid SCN");
         }
         if (limit <= 0) {
             throw new SQLException("Oracle snapshot query has an invalid limit");
@@ -317,9 +309,7 @@ final class OracleExternalTable {
                         .append(" FROM ")
                         .append(quoteIdentifier(schemaName))
                         .append(".")
-                        .append(quoteIdentifier(tableName))
-                        .append(" AS OF SCN ")
-                        .append(scn);
+                        .append(quoteIdentifier(tableName));
         if (hasStartPrimaryKey) {
             sql.append(" WHERE ").append(buildPrimaryKeyFilter(keys));
         }
