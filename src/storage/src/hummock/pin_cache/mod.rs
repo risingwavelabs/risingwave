@@ -39,6 +39,7 @@ mod gc;
 mod membership;
 mod recovery;
 mod refill;
+pub(crate) use refill::PinCacheDownloadError;
 #[cfg(test)]
 pub(super) mod test_utils;
 #[cfg(test)]

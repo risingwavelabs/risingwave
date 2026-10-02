@@ -39,7 +39,7 @@ pub(in crate::hummock) async fn download_and_publish_for_test(
     remote_store: ObjectStoreRef,
     remote_path: String,
     object_id: HummockSstableObjectId,
-) -> Result<(), super::refill::PinCacheDownloadError> {
+) -> Result<(), super::PinCacheDownloadError> {
     let token = pin_cache
         .prepare_refill(object_id)
         .expect("test object must be registered");
