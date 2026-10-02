@@ -1870,12 +1870,12 @@ where
     }
 
     /// Scans flushed local state without reading uncommitted mem-table data.
-    pub async fn iter_with_vnode(
+    pub async fn iter_keyed_row_with_vnode(
         &self,
         vnode: VirtualNode,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<impl RowStream<'static>> {
+    ) -> StreamExecutorResult<impl KeyedRowStream<'static>> {
         if let Some(m) = &self.metrics {
             m.iter_count.inc();
         }
@@ -1894,7 +1894,12 @@ where
             .await?;
         let row_serde = self.row_serde.clone();
         Ok(iter
-            .into_stream(move |(_key, value)| Ok(OwnedRow::new(row_serde.deserialize(value)?)))
+            .into_stream(move |(key, value)| {
+                Ok(KeyedRow::new(
+                    TableKey(Bytes::copy_from_slice(key.user_key.table_key.as_ref())),
+                    OwnedRow::new(row_serde.deserialize(value)?),
+                ))
+            })
             .map_err(Into::into))
     }
 }

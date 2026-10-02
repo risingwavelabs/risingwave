@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::{Either as FutureEither, pending, select};
-use futures::{StreamExt, TryStreamExt, pin_mut};
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
@@ -30,6 +30,7 @@ use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter}
 use risingwave_pb::common::ThrottleType;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::merge_sort::merge_sort;
 
 use crate::common::table::state_table::{FlushedStateTableReader, StateTable};
 use crate::executor::backfill::utils::create_builder;
@@ -249,14 +250,16 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         })
     }
 
-    /// Creates a snapshot stream that reads from state table in locality order
+    /// Creates a snapshot stream that reads from state table in locality order. The vnodes of the
+    /// actor are merged, so that the order holds across them, e.g. for an operator that shards the
+    /// rows by another key.
     #[try_stream(ok = (VirtualNode, OwnedRow), error = StreamExecutorError)]
     async fn make_snapshot_stream<'a>(
         reader: FlushedStateTableReader<S>,
         backfill_state: LocalityBackfillState,
         rate_limiter: &'a MonitoredRateLimiter,
     ) {
-        // Read from state table per vnode in locality order
+        let mut vnode_streams = vec![];
         for vnode in reader.vnodes().iter_vnodes() {
             let progress = backfill_state.get_progress(&vnode);
 
@@ -282,20 +285,21 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 )
             };
 
-            // Iterate over rows for this vnode
-            let iter = reader
-                .iter_with_vnode(
+            let vnode_stream = reader
+                .iter_keyed_row_with_vnode(
                     vnode,
                     &range_bounds,
                     PrefetchOptions::prefetch_for_small_range_scan(),
                 )
                 .await?;
-            pin_mut!(iter);
+            vnode_streams.push(Box::pin(vnode_stream));
+        }
 
-            while let Some(row) = iter.try_next().await? {
-                rate_limiter.wait(1).await;
-                yield (vnode, row);
-            }
+        #[for_await]
+        for row in merge_sort(vnode_streams) {
+            let row = row?;
+            rate_limiter.wait(1).await;
+            yield (row.vnode(), row.into_owned_row());
         }
     }
 
@@ -887,5 +891,107 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::TryStreamExt;
+    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+
+    use super::*;
+    use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+
+    async fn read_snapshot(
+        state_table: &StateTable<MemoryStateStore>,
+        backfill_state: LocalityBackfillState,
+    ) -> Vec<(i64, i64)> {
+        let rate_limiter = RateLimiter::new(RateLimit::Disabled).monitored(state_table.table_id());
+        let rows: Vec<(VirtualNode, OwnedRow)> =
+            LocalityProviderExecutor::<MemoryStateStore>::make_snapshot_stream(
+                state_table.flushed_snapshot_reader(),
+                backfill_state,
+                &rate_limiter,
+            )
+            .try_collect()
+            .await
+            .unwrap();
+        rows.into_iter()
+            .map(|(vnode, row)| {
+                assert_eq!(vnode, state_table.compute_vnode_by_pk(&row));
+                (
+                    row.datum_at(0).unwrap().into_int64(),
+                    row.datum_at(1).unwrap().into_int64(),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_merges_vnodes() {
+        // Ordered by `(a, b)` but sharded by `b`, so that every vnode holds rows of every `a`.
+        let table = gen_pbtable_with_dist_key(
+            TableId::new(1),
+            vec![
+                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+            ],
+            vec![OrderType::ascending(), OrderType::ascending()],
+            vec![0, 1],
+            0,
+            vec![1],
+        );
+        let mut state_table = StateTable::from_table_catalog(
+            &table,
+            MemoryStateStore::new(),
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+        )
+        .await;
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+        state_table.init_epoch(epoch).await.unwrap();
+        let rows = (0..20i64).cartesian_product(0..10i64).collect_vec();
+        for &(a, b) in &rows {
+            state_table.insert(OwnedRow::new(vec![Some(a.into()), Some(b.into())]));
+        }
+        epoch.inc_for_test();
+        state_table.commit_for_test(epoch).await.unwrap();
+
+        let vnode_of = |b: i64| {
+            state_table.compute_vnode_by_pk(OwnedRow::new(vec![Some(0i64.into()), Some(b.into())]))
+        };
+        let new_backfill_state = || LocalityBackfillState::new(state_table.vnodes().iter_vnodes());
+
+        // The rows of all vnodes come out in locality order, rather than vnode by vnode.
+        assert_eq!(
+            read_snapshot(&state_table, new_backfill_state()).await,
+            rows
+        );
+
+        // On resume, a finished vnode is skipped and an unfinished one continues after its
+        // position.
+        let finished = vnode_of(0);
+        let b = (1..10).find(|&b| vnode_of(b) != finished).unwrap();
+        let in_progress = vnode_of(b);
+        let pos = (9, b);
+        let mut backfill_state = new_backfill_state();
+        backfill_state.finish_vnode(finished, 2);
+        backfill_state.update_progress(
+            in_progress,
+            OwnedRow::new(vec![Some(pos.0.into()), Some(pos.1.into())]),
+            10,
+        );
+        let expected = (rows.iter().copied())
+            .filter(|&(a, b)| match vnode_of(b) {
+                vnode if vnode == finished => false,
+                vnode if vnode == in_progress => (a, b) > pos,
+                _ => true,
+            })
+            .collect_vec();
+        assert_eq!(read_snapshot(&state_table, backfill_state).await, expected);
     }
 }
