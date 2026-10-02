@@ -101,10 +101,10 @@ drop user new_user;
 # below returned "source not found".
 
 statement ok
-create schema pg_tvf_schema;
+create schema tvf_schema;
 
 statement ok
-create source pg_tvf_schema.postgres_cdc_source_ns with (
+create source tvf_schema.postgres_cdc_source_ns with (
   ${RISEDEV_POSTGRES_WITH_OPTIONS_COMMON},
   username = '$PGUSER',
   password = '$PGPASSWORD',
@@ -112,17 +112,17 @@ create source pg_tvf_schema.postgres_cdc_source_ns with (
 );
 
 query II
-select id from postgres_query('pg_tvf_schema.postgres_cdc_source_ns', 'select id from test where id = 1;');
+select id from postgres_query('tvf_schema.postgres_cdc_source_ns', 'select id from test where id = 1;');
 ----
 1
 
 query II
-select id from postgres_query('"pg_tvf_schema"."postgres_cdc_source_ns"', 'select id from test where id = 1;');
+select id from postgres_query('"tvf_schema"."postgres_cdc_source_ns"', 'select id from test where id = 1;');
 ----
 1
 
 statement ok
-set search_path to pg_tvf_schema, public;
+set search_path to tvf_schema, public;
 
 query II
 select id from postgres_query('postgres_cdc_source_ns', 'select id from test where id = 1;');
@@ -140,16 +140,16 @@ statement error source not found: postgres_cdc_source_ns
 select id from postgres_query('postgres_cdc_source_ns', 'select id from test where id = 1;');
 
 statement error source not found: not_a_source
-select id from postgres_query('pg_tvf_schema.not_a_source', 'select id from test where id = 1;');
+select id from postgres_query('tvf_schema.not_a_source', 'select id from test where id = 1;');
 
 statement error postgres_query
 select id from postgres_query('some.deep.name.that.is.too.long', 'select id from test where id = 1;');
 
 statement ok
-drop source pg_tvf_schema.postgres_cdc_source_ns;
+drop source tvf_schema.postgres_cdc_source_ns;
 
 statement ok
-drop schema pg_tvf_schema;
+drop schema tvf_schema;
 
 statement ok
 drop source postgres_cdc_source;
