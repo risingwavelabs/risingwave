@@ -224,13 +224,14 @@ impl PinCacheGc {
         state.pending_deletes.insert(file.path.clone());
     }
 
-    // Only copy leases under the global lock; candidate allocation and inventory processing
-    // happen outside it. The snapshot also prevents another pass from selecting these files.
+    // Only snapshot files owned solely by the keeper. The cloned leases prevent another pass
+    // from selecting them; candidate allocation and inventory processing happen outside the lock.
     fn snapshot_files(&self) -> Vec<Arc<PinCacheFile>> {
         self.state
             .lock()
             .files
             .values()
+            .filter(|entry| Arc::strong_count(&entry.file) == 1)
             .map(|entry| entry.file.clone())
             .collect()
     }
@@ -271,6 +272,8 @@ impl PinCacheGc {
 
     /// Inventory first, then consult live leases. The caller chooses the retention watermark;
     /// age alone never overrides an uploader, publication, reader or outstanding selection.
+    /// The watermark must precede the scan so uploads stopped during it remain protected
+    /// by their attempt timestamp, even if their temporary files were not listed.
     pub(super) async fn select_full(
         self: &Arc<Self>,
         modified_before: SystemTime,

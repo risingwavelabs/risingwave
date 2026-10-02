@@ -158,7 +158,8 @@ impl PinCacheShard {
 pub(crate) struct PinCache {
     store: ObjectStoreRef,
     // Hold only one shard lock at a time. Never perform I/O or call back into the controller
-    // or refill executor while locked. GC accounting is a leaf lock below the shard. Construction finishes before this cache is shared.
+    // or refill executor while locked. Release the shard lock before handing files to GC.
+    // Construction finishes before this cache is shared.
     shards: Box<[RwLock<PinCacheShard>]>,
     gc: Arc<PinCacheGc>,
     next_path_id: AtomicU64,

@@ -33,7 +33,8 @@ pub(crate) enum PinCacheDownloadError {
     Io(#[from] ObjectError),
 }
 
-/// Owns a complete, unpublished file returned by `PinCache::download`.
+/// Owns a capacity reservation through the upload, then the complete, unpublished file.
+/// Only a successful `PinCache::download` exposes this owner to the caller.
 /// Dropping it never changes the index. Construction and writing stay private to this module.
 pub(crate) struct PinCacheDownload {
     file: Option<Arc<PinCacheFile>>,
