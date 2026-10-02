@@ -40,7 +40,7 @@ impl PinCache {
     /// Recovers only existing local files matching the initial membership and expected size.
     /// This runs before sharing the cache. Each task exclusively owns one shard, without locks.
     /// Lists and partitions all file metadata first, then recovers shards with bounded concurrency.
-    /// Any inventory error fails construction. Unselected files remain on disk until GC is added.
+    /// After successful recovery, rejected files have no external lease and are eligible for GC.
     /// No remote SST metadata is read for vnode pruning; unpin/version removal withdraws stale routes.
     /// There is no persisted refill watermark: objects missed during downtime are not backfilled.
     /// Reads of missing objects use the normal fallback; subsequent version deltas drive refill.
@@ -55,10 +55,9 @@ impl PinCache {
             if metadata.key.is_empty() || metadata.key.ends_with('/') {
                 continue;
             }
-            let entry = PinCacheFile {
-                path: metadata.key,
-                size: metadata.total_size as u64,
-            };
+            let entry = self
+                .gc
+                .account_existing(metadata.key, metadata.total_size as u64);
             if let Some(object_id) = Self::parse_object_id(&entry.path) {
                 let shard_index = Self::shard_index(object_id, self.shards.len());
                 files[shard_index].push((object_id, entry));
@@ -82,7 +81,7 @@ impl PinCache {
             })
             .buffer_unordered(concurrency)
             // Join all tasks before propagating a panic. On cancellation, running tasks own
-            // only private shard state and never access the store or global metrics.
+            // only file leases and private shard state; they never reclaim files or update metrics.
             .collect::<Vec<_>>()
             .await
             .into_iter()
@@ -101,7 +100,10 @@ impl PinCache {
 }
 
 impl PinCacheShard {
-    fn recover(&mut self, files: Vec<(HummockSstableObjectId, PinCacheFile)>) -> RecoveryStats {
+    fn recover(
+        &mut self,
+        files: Vec<(HummockSstableObjectId, Arc<PinCacheFile>)>,
+    ) -> RecoveryStats {
         let mut stats = RecoveryStats::default();
         for (object_id, entry) in files {
             let Some(object) = self.objects.get_mut(&object_id) else {
@@ -124,7 +126,7 @@ impl PinCacheShard {
             }
             stats.objects += 1;
             stats.bytes += entry.size;
-            object.state = PinCacheObjectState::Published(Arc::new(entry));
+            object.state = PinCacheObjectState::Published(entry);
         }
         stats
     }
