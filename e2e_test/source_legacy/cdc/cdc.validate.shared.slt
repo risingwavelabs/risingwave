@@ -130,7 +130,16 @@ statement ok
 drop source if exists oracle_validate_src cascade;
 
 system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare missing_oracle_hb
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import prepare, execute_oracle_sqls, TEST_ORACLE_SOURCE_SCHEMA
+from oracle_test_hooks import no_op
+prepare(create_heartbeat_tables_hook=no_op)
+execute_oracle_sqls([
+    f"CREATE TABLE {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
+    f"ALTER TABLE {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    f"INSERT INTO {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
+])
+PY
 
 statement ok
 create source oracle_validate_src with (
