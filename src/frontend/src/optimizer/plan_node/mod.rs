@@ -701,6 +701,10 @@ impl StreamPlanNodeMetadata for StreamPlanRef {
     fn columns_monotonicity(&self) -> &MonotonicityMap {
         self.plan_base().columns_monotonicity()
     }
+
+    fn replay_order(&self) -> &[usize] {
+        self.plan_base().replay_order()
+    }
 }
 
 /// Allow access to all fields defined in [`BatchPlanNodeMetadata`] for the type-erased plan node.
@@ -1188,7 +1192,7 @@ pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
-pub use logical_locality_provider::LogicalLocalityProvider;
+pub use logical_locality_provider::{LocalityInput, LogicalLocalityProvider};
 pub use logical_match_recognize::LogicalMatchRecognize;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};

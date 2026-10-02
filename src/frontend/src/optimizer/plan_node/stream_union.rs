@@ -94,6 +94,17 @@ impl StreamUnion {
             }
         };
 
+        // The inputs are interleaved, so only the order they share is kept.
+        let replay_order = (inputs.iter().map(|input| input.replay_order()))
+            .reduce(|order, input_order| {
+                let len = (order.iter().enumerate())
+                    .take_while(|&(i, col)| input_order.get(i) == Some(col))
+                    .count();
+                &order[..len]
+            })
+            .unwrap_or_default()
+            .to_vec();
+
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
@@ -101,7 +112,8 @@ impl StreamUnion {
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
             MonotonicityMap::new(),
-        );
+        )
+        .with_replay_order(replay_order);
 
         StreamUnion { base, core }
     }

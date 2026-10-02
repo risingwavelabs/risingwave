@@ -61,6 +61,17 @@ pub struct StreamExtra {
     watermark_columns: WatermarkColumns,
     /// The monotonicity of columns in the output.
     columns_monotonicity: MonotonicityMap,
+    /// The order in which each actor of the `PlanNode` outputs its rows during backfill, as output
+    /// columns. An operator that needs its input replayed with locality on a prefix of it gets it
+    /// without a locality provider.
+    ///
+    /// - A table scan reads its vnodes side by side in primary key order, and a locality provider
+    ///   replays them merged in its own.
+    /// - A stateful operator outputs the rows of each epoch clustered by its state key in the order
+    ///   they arrive, so it keeps the part of the order of its input within the key.
+    /// - An exchange interleaves the rows of the actors of its input, which keeps the order of each.
+    ///   Other operators that keep the order of their input pass it on. Others have none.
+    replay_order: Vec<usize>,
 }
 
 impl GetPhysicalCommon for StreamExtra {
@@ -185,6 +196,10 @@ impl stream::StreamPlanNodeMetadata for PlanBase<Stream> {
     fn columns_monotonicity(&self) -> &MonotonicityMap {
         &self.extra.columns_monotonicity
     }
+
+    fn replay_order(&self) -> &[usize] {
+        &self.extra.replay_order
+    }
 }
 
 impl batch::BatchPlanNodeMetadata for PlanBase<Batch> {
@@ -307,6 +322,7 @@ impl PlanBase<Stream> {
                 emit_on_window_close,
                 watermark_columns,
                 columns_monotonicity,
+                replay_order: vec![],
             },
         }
     }
@@ -330,6 +346,11 @@ impl PlanBase<Stream> {
             watermark_columns,
             columns_monotonicity,
         )
+    }
+
+    pub fn with_replay_order(mut self, replay_order: Vec<usize>) -> Self {
+        self.extra.replay_order = replay_order;
+        self
     }
 
     pub fn new_stream_share(

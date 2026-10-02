@@ -55,6 +55,11 @@ impl StreamDynamicFilter {
             StreamKind::Upsert => unreachable!(),
         };
 
+        let replay_order = if Self::keeps_left_order(&core) {
+            core.left().replay_order().to_vec()
+        } else {
+            vec![]
+        };
         let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
@@ -62,7 +67,8 @@ impl StreamDynamicFilter {
             false, // TODO(rc): decide EOWC property
             Self::derive_watermark_columns(&core),
             MonotonicityMap::new(), // TODO: derive monotonicity
-        );
+        )
+        .with_replay_order(replay_order);
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
 
         Ok(Self {
@@ -70,6 +76,17 @@ impl StreamDynamicFilter {
             core,
             cleaned_by_watermark,
         })
+    }
+
+    /// Whether the rows of the left input are output in the order they arrive. It holds when the
+    /// threshold only rises and the rows can only fall below it, e.g. `ts > now() - interval`:
+    /// a row is output when it arrives or never.
+    fn keeps_left_order(core: &DynamicFilter<PlanRef>) -> bool {
+        core.right().columns_monotonicity()[0].is_non_decreasing()
+            && matches!(
+                core.comparator(),
+                ExprType::GreaterThan | ExprType::GreaterThanOrEqual
+            )
     }
 
     fn derive_watermark_columns(core: &DynamicFilter<PlanRef>) -> WatermarkColumns {

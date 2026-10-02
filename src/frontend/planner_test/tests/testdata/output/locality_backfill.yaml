@@ -8,7 +8,7 @@
     StreamMaterialize { columns: [count, t.b(hidden)], stream_key: [t.b], pk_columns: [t.b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, t.b] }
       └─StreamHashAgg { group_key: [t.b], aggs: [count] }
-        └─StreamLocalityProvider { locality_columns: [t.b] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.b] }
           └─StreamExchange { dist: HashShard(t.b) }
             └─StreamTableScan { table: t, columns: [t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -21,15 +21,15 @@
     StreamMaterialize { columns: [count, t1.b(hidden)], stream_key: [t1.b], pk_columns: [t1.b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, t1.b] }
       └─StreamHashAgg { group_key: [t1.b], aggs: [count] }
-        └─StreamLocalityProvider { locality_columns: [t1.b] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t1.b] }
           └─StreamExchange { dist: HashShard(t1.b) }
             └─StreamHashJoin { type: Inner, predicate: t1.a = t2.a, output: [t1.b, t1.a, t1._row_id, t2.a, t2._row_id] }
               ├─StreamExchange { dist: HashShard(t1.a) }
-              │ └─StreamLocalityProvider { locality_columns: [t1.a] }
+              │ └─StreamLocalityProvider { locality_columns_ordered: [t1.a] }
               │   └─StreamExchange { dist: HashShard(t1.a) }
               │     └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
               └─StreamExchange { dist: HashShard(t2.a) }
-                └─StreamLocalityProvider { locality_columns: [t2.a] }
+                └─StreamLocalityProvider { locality_columns_ordered: [t2.a] }
                   └─StreamExchange { dist: HashShard(t2.a) }
                     └─StreamTableScan { table: t2, columns: [t2.a, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - sql: |
@@ -41,7 +41,7 @@
     StreamMaterialize { columns: [count, t.a(hidden), t.b(hidden)], stream_key: [t.a, t.b], pk_columns: [t.a, t.b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, t.a, t.b] }
       └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count] }
-        └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
           └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.b, t.a) }
             └─StreamTableScan { table: t, columns: [t.a, t.b], stream_scan_type: SnapshotBackfill, stream_key: [t.b, t.a], pk: [b, a], dist: UpstreamHashShard(t.b, t.a) }
 - sql: |
@@ -53,7 +53,7 @@
     StreamMaterialize { columns: [count, t.a(hidden), t.b(hidden)], stream_key: [t.a, t.b], pk_columns: [t.a, t.b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, t.a, t.b] }
       └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count] }
-        └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
           └─StreamExchange { dist: HashShard(t.a, t.b) }
             └─StreamProject { exprs: [t.a, t.b, t._row_id] }
               └─StreamFilter { predicate: (t.c > 1:Int32) }
@@ -68,17 +68,17 @@
     StreamMaterialize { columns: [count, t1.b(hidden)], stream_key: [t1.b], pk_columns: [t1.b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, t1.b] }
       └─StreamHashAgg { group_key: [t1.b], aggs: [count] }
-        └─StreamLocalityProvider { locality_columns: [t1.b] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t1.b] }
           └─StreamExchange { dist: HashShard(t1.b) }
             └─StreamProject { exprs: [t1.b, t1.a, t1._row_id, t2.a, t2._row_id] }
               └─StreamFilter { predicate: (t1.c > t2.c) }
                 └─StreamHashJoin { type: Inner, predicate: t1.a = t2.a, output: all }
                   ├─StreamExchange { dist: HashShard(t1.a) }
-                  │ └─StreamLocalityProvider { locality_columns: [t1.a] }
+                  │ └─StreamLocalityProvider { locality_columns_ordered: [t1.a] }
                   │   └─StreamExchange { dist: HashShard(t1.a) }
                   │     └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
                   └─StreamExchange { dist: HashShard(t2.a) }
-                    └─StreamLocalityProvider { locality_columns: [t2.a] }
+                    └─StreamLocalityProvider { locality_columns_ordered: [t2.a] }
                       └─StreamExchange { dist: HashShard(t2.a) }
                         └─StreamTableScan { table: t2, columns: [t2.a, t2.c, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - sql: |
@@ -90,7 +90,7 @@
     StreamMaterialize { columns: [rank, t.a(hidden), t._row_id(hidden)], stream_key: [t.a, t._row_id], pk_columns: [t.a, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [rank, t.a, t._row_id] }
       └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─StreamLocalityProvider { locality_columns: [t.a] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.a] }
           └─StreamExchange { dist: HashShard(t.a) }
             └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: enforce locality for temporal join for both sides.
@@ -106,7 +106,7 @@
     └─StreamExchange { dist: HashShard(stream.a1, idx2.id2, stream.b1, stream._row_id) }
       └─StreamTemporalJoin { type: LeftOuter, append_only: false, predicate: stream.a1 = idx2.a2 AND stream.b1 = idx2.b2, nested_loop: false, output: [stream.id1, stream.a1, idx2.id2, idx2.a2, stream.b1, stream._row_id] }
         ├─StreamExchange { dist: HashShard(stream.a1) }
-        │ └─StreamLocalityProvider { locality_columns: [stream.a1, stream.b1] }
+        │ └─StreamLocalityProvider { locality_columns_ordered: [stream.a1, stream.b1] }
         │   └─StreamExchange { dist: HashShard(stream.a1, stream.b1) }
         │     └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2) }
@@ -120,7 +120,7 @@
     StreamMaterialize { columns: [a, b, c, t._row_id(hidden)], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
     └─StreamAppendOnlyDedup { dedup_cols: [t.a] }
       └─StreamExchange { dist: HashShard(t.a) }
-        └─StreamLocalityProvider { locality_columns: [t.a] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.a] }
           └─StreamExchange { dist: HashShard(t.a) }
             └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: dedup provides locality on its dedup columns, so no extra locality provider is needed for the downstream agg.
@@ -136,7 +136,7 @@
         └─StreamExchange { dist: HashShard(t.a) }
           └─StreamAppendOnlyDedup { dedup_cols: [t.a, t.b] }
             └─StreamExchange { dist: HashShard(t.a, t.b) }
-              └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+              └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
                 └─StreamExchange { dist: HashShard(t.a, t.b) }
                   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -154,7 +154,7 @@
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamProject { exprs: [t.a, t.b, t.c] }
         └─StreamGroupTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
-          └─StreamLocalityProvider { locality_columns: [t.a] }
+          └─StreamLocalityProvider { locality_columns_ordered: [t.a] }
             └─StreamExchange { dist: HashShard(t.a) }
               └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -175,11 +175,11 @@
     StreamMaterialize { columns: [rank2, t.b(hidden), t.a(hidden)], stream_key: [t.b, t.a], pk_columns: [t.b, t.a], pk_conflict: NoCheck }
     └─StreamProject { exprs: [row_number, t.b, t.a] }
       └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.b ORDER BY t.a ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─StreamLocalityProvider { locality_columns: [t.b] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.b] }
           └─StreamExchange { dist: HashShard(t.b) }
             └─StreamProject { exprs: [t.a, t.b] }
               └─StreamGroupTopN { order: [t.c ASC], limit: 1, offset: 0, group_key: [t.a, t.b] }
-                └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+                └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
                   └─StreamExchange { dist: HashShard(t.a, t.b) }
                     └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -202,7 +202,7 @@
         └─StreamExchange { dist: HashShard(t.a) }
           └─StreamProject { exprs: [t.a, t.b, row_number, t._row_id] }
             └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a, t.b ORDER BY t.c ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+              └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
                 └─StreamExchange { dist: HashShard(t.a, t.b) }
                   └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -222,11 +222,11 @@
     StreamMaterialize { columns: [rank1, rank2, t.b(hidden), t.a(hidden), t._row_id(hidden)], stream_key: [t.b, t.a, t._row_id], pk_columns: [t.b, t.a, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [row_number, row_number, t.b, t.a, t._row_id] }
       └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.b ORDER BY t.a ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─StreamLocalityProvider { locality_columns: [t.b] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.b] }
           └─StreamExchange { dist: HashShard(t.b) }
             └─StreamProject { exprs: [t.a, t.b, row_number, t._row_id] }
               └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a, t.b ORDER BY t.c ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-                └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+                └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
                   └─StreamExchange { dist: HashShard(t.a, t.b) }
                     └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -253,10 +253,10 @@
     └─StreamOverWindow { window_functions: [first_value(t.v2) OVER(PARTITION BY t.p1, t.p2 ORDER BY t.v1 ASC, t.v2 ASC ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING)] }
       └─StreamOverWindow { window_functions: [first_value(t.v1) OVER(PARTITION BY t.p1, t.p2 ORDER BY t.time ASC, t.id ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING), first_value(t.v2) OVER(PARTITION BY t.p1, t.p2 ORDER BY t.time ASC, t.id ASC ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING)] }
         └─StreamOverWindow { window_functions: [first_value(t.v1) OVER(PARTITION BY t.p1, t.p2 ORDER BY t.id ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
-          └─StreamLocalityProvider { locality_columns: [t.p1, t.p2] }
+          └─StreamLocalityProvider { locality_columns_ordered: [t.p1, t.p2] }
             └─StreamExchange { dist: HashShard(t.p1, t.p2) }
               └─StreamOverWindow { window_functions: [first_value(t.v1) OVER(PARTITION BY t.p1 ORDER BY t.id ASC ROWS BETWEEN 0 PRECEDING AND 0 PRECEDING)] }
-                └─StreamLocalityProvider { locality_columns: [t.p1] }
+                └─StreamLocalityProvider { locality_columns_ordered: [t.p1] }
                   └─StreamExchange { dist: HashShard(t.p1) }
                     └─StreamTableScan { table: t, columns: [t.id, t.p1, t.p2, t.time, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -278,7 +278,7 @@
       └─StreamHashAgg { group_key: [t.a], aggs: [max(count), count] }
         └─StreamExchange { dist: HashShard(t.a) }
           └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count] }
-            └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+            └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
               └─StreamExchange { dist: HashShard(t.a, t.b) }
                 └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -298,9 +298,489 @@
     StreamMaterialize { columns: [max_num, t.b(hidden)], stream_key: [t.b], pk_columns: [t.b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [max(count), t.b] }
       └─StreamHashAgg { group_key: [t.b], aggs: [max(count), count] }
-        └─StreamLocalityProvider { locality_columns: [t.b] }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.b] }
           └─StreamExchange { dist: HashShard(t.b) }
             └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count] }
-              └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+              └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
                 └─StreamExchange { dist: HashShard(t.a, t.b) }
                   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: the provider replays rows in the order of the hash join state, which puts the eq keys with watermarks first.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t1 (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+    create table t2 (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+    select t1.k, t1.ts, t1.v, t2.v as v2 from t1 join t2 on t1.k = t2.k and t1.ts = t2.ts;
+  stream_plan: |-
+    StreamMaterialize { columns: [k, ts, v, v2, t1._row_id(hidden), t2.k(hidden), t2.ts(hidden), t2._row_id(hidden)], stream_key: [k, ts, t1._row_id, t2._row_id], pk_columns: [k, ts, t1._row_id, t2._row_id], pk_conflict: NoCheck, watermark_columns: [ts, t2.ts(hidden)] }
+    └─StreamExchange { dist: HashShard(t1.k, t1.ts, t1._row_id, t2._row_id) }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: t1.ts = t2.ts AND t1.k = t2.k, conditions_to_clean_state_in_join_key: [(t1.ts = t2.ts)], output_watermarks: [[t1.ts], [t2.ts]], output: [t1.k, t1.ts, t1.v, t2.v, t1._row_id, t2.k, t2.ts, t2._row_id] }
+        ├─StreamExchange { dist: HashShard(t1.k, t1.ts) }
+        │ └─StreamLocalityProvider { locality_columns_ordered: [t1.ts, t1.k] }
+        │   └─StreamExchange { dist: HashShard(t1.k, t1.ts) }
+        │     └─StreamTableScan { table: t1, columns: [t1.k, t1.ts, t1.v, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.k, t2.ts) }
+          └─StreamLocalityProvider { locality_columns_ordered: [t2.ts, t2.k] }
+            └─StreamExchange { dist: HashShard(t2.k, t2.ts) }
+              └─StreamTableScan { table: t2, columns: [t2.k, t2.ts, t2.v, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [k, ts, v, v2, t1._row_id(hidden), t2.k(hidden), t2.ts(hidden), t2._row_id(hidden)], stream_key: [k, ts, t1._row_id, t2._row_id], pk_columns: [k, ts, t1._row_id, t2._row_id], pk_conflict: NoCheck, watermark_columns: [ts, t2.ts(hidden)] }
+    └── StreamExchange Hash([0, 1, 4, 7]) from 1
+
+    Fragment 1
+    StreamHashJoin [window, append_only] { type: Inner, predicate: t1.ts = t2.ts AND t1.k = t2.k, conditions_to_clean_state_in_join_key: [(t1.ts = t2.ts)], output_watermarks: [[t1.ts], [t2.ts]], output: [t1.k, t1.ts, t1.v, t2.v, t1._row_id, t2.k, t2.ts, t2._row_id] }
+    ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
+    ├── StreamExchange Hash([0, 1]) from 2
+    └── StreamExchange Hash([0, 1]) from 4
+
+    Fragment 2
+    StreamLocalityProvider { locality_columns_ordered: [t1.ts, t1.k] } { tables: [ LocalityProviderState: 4, LocalityProviderProgress: 5 ] }
+    └── StreamExchange Hash([0, 1]) from 3
+
+    Fragment 3
+    StreamTableScan { table: t1, columns: [t1.k, t1.ts, t1.v, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 6 ] }
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 4
+    StreamLocalityProvider { locality_columns_ordered: [t2.ts, t2.k] } { tables: [ LocalityProviderState: 7, LocalityProviderProgress: 8 ] }
+    └── StreamExchange Hash([0, 1]) from 5
+
+    Fragment 5
+    StreamTableScan { table: t2, columns: [t2.k, t2.ts, t2.v, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) } { tables: [ StreamScan: 9 ] }
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0 { columns: [ t1_k, t1_ts, t1_v, t1__row_id, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [1] }
+
+    Table 1 { columns: [ t1_ts, t1_k, t1__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 1, 0 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+
+    Table 2 { columns: [ t2_k, t2_ts, t2_v, t2__row_id, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2, clean watermark indices: [1] }
+
+    Table 3 { columns: [ t2_ts, t2_k, t2__row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 1, 0 ], read pk prefix len hint: 2, clean watermark indices: [0] }
+
+    Table 4 { columns: [ t1_k, t1_ts, t1_v, t1__row_id, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 0 }
+
+    Table 5 { columns: [ vnode, t1_ts, t1_k, t1__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 6 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 7 { columns: [ t2_k, t2_ts, t2_v, t2__row_id, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 0 }
+
+    Table 8 { columns: [ vnode, t2_ts, t2_k, t2__row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 9 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4294967294 { columns: [ k, ts, v, v2, t1._row_id, t2.k, t2.ts, t2._row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $4 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 0, 1, 4, 7 ], read pk prefix len hint: 4 }
+
+- name: the provider replays rows in the order of the EOWC agg state, which puts the window column first.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+    select k, window_start, count(*) from tumble(t, ts, interval '1' minute) group by k, window_start;
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [k, window_start, count], stream_key: [k, window_start], pk_columns: [k, window_start], pk_conflict: NoCheck, watermark_columns: [window_start] }
+    └─StreamHashAgg [append_only, eowc] { group_key: [t.k, $expr1], aggs: [count], output_watermarks: [[$expr1]] }
+      └─StreamLocalityProvider { locality_columns_ordered: [$expr1, t.k] }
+        └─StreamExchange { dist: HashShard(t.k, $expr1) }
+          └─StreamProject { exprs: [t.k, TumbleStart(t.ts, '00:01:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
+            └─StreamTableScan { table: t, columns: [t.k, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+  eowc_stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [k, window_start, count], stream_key: [k, window_start], pk_columns: [k, window_start], pk_conflict: NoCheck, watermark_columns: [window_start] }
+    └── StreamHashAgg [append_only, eowc] { group_key: [t.k, $expr1], aggs: [count], output_watermarks: [[$expr1]] } { tables: [ HashAggState: 0 ] }
+        └── StreamLocalityProvider { locality_columns_ordered: [$expr1, t.k] } { tables: [ LocalityProviderState: 1, LocalityProviderProgress: 2 ] }
+            └── StreamExchange Hash([0, 1]) from 1
+
+    Fragment 1
+    StreamProject { exprs: [t.k, TumbleStart(t.ts, '00:01:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
+    └── StreamTableScan { table: t, columns: [t.k, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        ├── tables: [ StreamScan: 3 ]
+        ├── Upstream
+        └── BatchPlanNode
+
+    Table 0 { columns: [ t_k, $expr1, count, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+
+    Table 1
+    ├── columns: [ t_k, $expr1, t__row_id, _rw_timestamp ]
+    ├── primary key: [ $1 ASC, $0 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0, 1 ]
+    └── read pk prefix len hint: 0
+
+    Table 2
+    ├── columns: [ vnode, $expr1, t_k, t__row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 3
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ k, window_start, count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0, 1 ]
+    └── read pk prefix len hint: 2
+
+- name: the provider replays rows in the order the temporal join looks up the table.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table s (a int, b int, c int);
+    create table d (a int, b int, c int, primary key (a, b));
+    select s.a, s.b, s.c, d.c as dc from s join d for system_time as of proctime() on s.b = d.b and s.a = d.a;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c, dc, s._row_id(hidden), d.a(hidden), d.b(hidden)], stream_key: [b, a, s._row_id], pk_columns: [b, a, s._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(s.a, s.b, s._row_id) }
+      └─StreamTemporalJoin { type: Inner, append_only: false, predicate: s.a = d.a AND s.b = d.b, nested_loop: false, output: [s.a, s.b, s.c, d.c, s._row_id, d.a, d.b] }
+        ├─StreamExchange { dist: HashShard(s.a, s.b) }
+        │ └─StreamLocalityProvider { locality_columns_ordered: [s.a, s.b] }
+        │   └─StreamExchange { dist: HashShard(s.a, s.b) }
+        │     └─StreamTableScan { table: s, columns: [s.a, s.b, s.c, s._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s._row_id], pk: [_row_id], dist: UpstreamHashShard(s._row_id) }
+        └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(d.a, d.b) }
+          └─StreamTableScan { table: d, columns: [d.a, d.b, d.c], stream_scan_type: UpstreamOnly, stream_key: [d.a, d.b], pk: [a, b], dist: UpstreamHashShard(d.a, d.b) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [a, b, c, dc, s._row_id(hidden), d.a(hidden), d.b(hidden)], stream_key: [b, a, s._row_id], pk_columns: [b, a, s._row_id], pk_conflict: NoCheck }
+    └── StreamExchange Hash([0, 1, 4]) from 1
+
+    Fragment 1
+    StreamTemporalJoin { type: Inner, append_only: false, predicate: s.a = d.a AND s.b = d.b, nested_loop: false, output: [s.a, s.b, s.c, d.c, s._row_id, d.a, d.b] }
+    ├── tables: [ TemporalJoinMemo: 0 ]
+    ├── StreamExchange Hash([0, 1]) from 2
+    └── StreamExchange NoShuffle from 4
+
+    Fragment 2
+    StreamLocalityProvider { locality_columns_ordered: [s.a, s.b] } { tables: [ LocalityProviderState: 1, LocalityProviderProgress: 2 ] }
+    └── StreamExchange Hash([0, 1]) from 3
+
+    Fragment 3
+    StreamTableScan { table: s, columns: [s.a, s.b, s.c, s._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s._row_id], pk: [_row_id], dist: UpstreamHashShard(s._row_id) }
+    ├── tables: [ StreamScan: 3 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 4
+    StreamTableScan { table: d, columns: [d.a, d.b, d.c], stream_scan_type: UpstreamOnly, stream_key: [d.a, d.b], pk: [a, b], dist: UpstreamHashShard(d.a, d.b) }
+    ├── tables: [ StreamScan: 4 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ d_a, d_b, d_c, s_a, s_b, s_b_0, s_a_0, s__row_id, _rw_timestamp ]
+    ├── primary key: [ $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+    ├── distribution key: [ 3, 4 ]
+    └── read pk prefix len hint: 5
+
+    Table 1
+    ├── columns: [ s_a, s_b, s_c, s__row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0, 1 ]
+    └── read pk prefix len hint: 0
+
+    Table 2
+    ├── columns: [ vnode, s_a, s_b, s__row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 3
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4
+    ├── columns: [ vnode, a, b, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ a, b, c, dc, s._row_id, d.a, d.b, _rw_timestamp ]
+    ├── primary key: [ $1 ASC, $0 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
+    ├── distribution key: [ 0, 1, 4 ]
+    └── read pk prefix len hint: 3
+
+- name: no provider when the table is read in the lookup order of the temporal join.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table s (a int, b int, c int, primary key (a, b));
+    create table d (a int, b int, c int, primary key (a, b));
+    select s.a, s.b, s.c, d.c as dc from s join d for system_time as of proctime() on s.b = d.b and s.a = d.a;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c, dc, d.a(hidden), d.b(hidden)], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(s.a, s.b) }
+      └─StreamTemporalJoin { type: Inner, append_only: false, predicate: s.a = d.a AND s.b = d.b, nested_loop: false, output: [s.a, s.b, s.c, d.c, d.a, d.b] }
+        ├─StreamExchange { dist: HashShard(s.a, s.b) }
+        │ └─StreamTableScan { table: s, columns: [s.a, s.b, s.c], stream_scan_type: ArrangementBackfill, stream_key: [s.a, s.b], pk: [a, b], dist: UpstreamHashShard(s.a, s.b) }
+        └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(d.a, d.b) }
+          └─StreamTableScan { table: d, columns: [d.a, d.b, d.c], stream_scan_type: UpstreamOnly, stream_key: [d.a, d.b], pk: [a, b], dist: UpstreamHashShard(d.a, d.b) }
+- name: a provider when the table is read in the written order but the join puts the watermark column first.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t1 (k int, ts timestamp, v int, primary key (k, ts), watermark for ts as ts - interval '1' second with ttl);
+    create table t2 (k int, ts timestamp, v int, primary key (k, ts), watermark for ts as ts - interval '1' second with ttl);
+    select t1.k, t1.ts, t1.v, t2.v as v2 from t1 join t2 on t1.k = t2.k and t1.ts = t2.ts;
+  stream_plan: |-
+    StreamMaterialize { columns: [k, ts, v, v2, t2.k(hidden), t2.ts(hidden)], stream_key: [k, ts], pk_columns: [k, ts], pk_conflict: NoCheck, watermark_columns: [ts, t2.ts(hidden)] }
+    └─StreamExchange { dist: HashShard(t1.k, t1.ts) }
+      └─StreamHashJoin [window] { type: Inner, predicate: t1.ts = t2.ts AND t1.k = t2.k, conditions_to_clean_state_in_join_key: [(t1.ts = t2.ts)], output_watermarks: [[t1.ts], [t2.ts]], output: [t1.k, t1.ts, t1.v, t2.v, t2.k, t2.ts] }
+        ├─StreamExchange { dist: HashShard(t1.k, t1.ts) }
+        │ └─StreamLocalityProvider { locality_columns_ordered: [t1.ts, t1.k] }
+        │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t1.k, t1.ts) }
+        │     └─StreamTableScan { table: t1, columns: [t1.k, t1.ts, t1.v], stream_scan_type: SnapshotBackfill, stream_key: [t1.k, t1.ts], pk: [k, ts], dist: UpstreamHashShard(t1.k, t1.ts) }
+        └─StreamExchange { dist: HashShard(t2.k, t2.ts) }
+          └─StreamLocalityProvider { locality_columns_ordered: [t2.ts, t2.k] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t2.k, t2.ts) }
+              └─StreamTableScan { table: t2, columns: [t2.k, t2.ts, t2.v], stream_scan_type: SnapshotBackfill, stream_key: [t2.k, t2.ts], pk: [k, ts], dist: UpstreamHashShard(t2.k, t2.ts) }
+- name: a provider between windowed aggs and the window join, which puts the window column first.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t1 (k int, ts timestamp, watermark for ts as ts - interval '1' second) append only;
+    create table t2 (k int, ts timestamp, watermark for ts as ts - interval '1' second) append only;
+    select a.k, a.window_start, a.c, b.c as c2 from
+      (select k, window_start, count(*) c from tumble(t1, ts, interval '1' minute) group by k, window_start) a
+      join
+      (select k, window_start, count(*) c from tumble(t2, ts, interval '1' minute) group by k, window_start) b
+      on a.k = b.k and a.window_start = b.window_start;
+  stream_plan: |-
+    StreamMaterialize { columns: [k, window_start, c, c2, t2.k(hidden), $expr2(hidden)], stream_key: [k, window_start], pk_columns: [k, window_start], pk_conflict: NoCheck, watermark_columns: [window_start, $expr2(hidden)] }
+    └─StreamExchange { dist: HashShard(t1.k, $expr1) }
+      └─StreamHashJoin [window] { type: Inner, predicate: $expr1 = $expr2 AND t1.k = t2.k, conditions_to_clean_state_in_join_key: [($expr1 = $expr2)], output_watermarks: [[$expr1], [$expr2]], output: [t1.k, $expr1, count, count, t2.k, $expr2] }
+        ├─StreamExchange { dist: HashShard(t1.k, $expr1) }
+        │ └─StreamLocalityProvider { locality_columns_ordered: [$expr1, t1.k] }
+        │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t1.k, $expr1) }
+        │     └─StreamHashAgg [append_only] { group_key: [t1.k, $expr1], aggs: [count], output_watermarks: [[$expr1]] }
+        │       └─StreamLocalityProvider { locality_columns_ordered: [t1.k, $expr1] }
+        │         └─StreamExchange { dist: HashShard(t1.k, $expr1) }
+        │           └─StreamProject { exprs: [t1.k, TumbleStart(t1.ts, '00:01:00':Interval) as $expr1, t1._row_id], output_watermarks: [[$expr1]] }
+        │             └─StreamTableScan { table: t1, columns: [t1.k, t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.k, $expr2) }
+          └─StreamLocalityProvider { locality_columns_ordered: [$expr2, t2.k] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t2.k, $expr2) }
+              └─StreamHashAgg [append_only] { group_key: [t2.k, $expr2], aggs: [count], output_watermarks: [[$expr2]] }
+                └─StreamLocalityProvider { locality_columns_ordered: [t2.k, $expr2] }
+                  └─StreamExchange { dist: HashShard(t2.k, $expr2) }
+                    └─StreamProject { exprs: [t2.k, TumbleStart(t2.ts, '00:01:00':Interval) as $expr2, t2._row_id], output_watermarks: [[$expr2]] }
+                      └─StreamTableScan { table: t2, columns: [t2.k, t2.ts, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: no provider when joining on the group key of an agg, which outputs rows in that order.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int);
+    create table u (x int, y bigint);
+    select x.b, x.s, u.y from (select b, sum(a) as s from t group by b) x join u on x.b = u.x;
+  stream_plan: |-
+    StreamMaterialize { columns: [b, s, y, u.x(hidden), u._row_id(hidden)], stream_key: [b, u._row_id], pk_columns: [b, u._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t.b, u._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t.b = u.x, output: [t.b, sum(t.a), u.y, u.x, u._row_id] }
+        ├─StreamExchange { dist: HashShard(t.b) }
+        │ └─StreamProject { exprs: [t.b, sum(t.a)] }
+        │   └─StreamHashAgg { group_key: [t.b], aggs: [sum(t.a), count] }
+        │     └─StreamLocalityProvider { locality_columns_ordered: [t.b] }
+        │       └─StreamExchange { dist: HashShard(t.b) }
+        │         └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(u.x) }
+          └─StreamLocalityProvider { locality_columns_ordered: [u.x] }
+            └─StreamExchange { dist: HashShard(u.x) }
+              └─StreamTableScan { table: u, columns: [u.x, u.y, u._row_id], stream_scan_type: SnapshotBackfill, stream_key: [u._row_id], pk: [_row_id], dist: UpstreamHashShard(u._row_id) }
+- name: a provider when joining on an agg call, which the agg does not output in order.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int);
+    create table u (x int, y bigint);
+    select x.b, x.s, u.x from (select b, sum(a) as s from t group by b) x join u on x.s = u.y;
+  stream_plan: |-
+    StreamMaterialize { columns: [b, s, x, u.y(hidden), u._row_id(hidden)], stream_key: [s, b, u._row_id], pk_columns: [s, b, u._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t.b, sum(t.a), u._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: sum(t.a) = u.y, output: all }
+        ├─StreamExchange { dist: HashShard(sum(t.a)) }
+        │ └─StreamLocalityProvider { locality_columns_ordered: [sum(t.a)] }
+        │   └─StreamExchange { dist: HashShard(sum(t.a)) }
+        │     └─StreamProject { exprs: [t.b, sum(t.a)] }
+        │       └─StreamHashAgg { group_key: [t.b], aggs: [sum(t.a), count] }
+        │         └─StreamLocalityProvider { locality_columns_ordered: [t.b] }
+        │           └─StreamExchange { dist: HashShard(t.b) }
+        │             └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(u.y) }
+          └─StreamLocalityProvider { locality_columns_ordered: [u.y] }
+            └─StreamExchange { dist: HashShard(u.y) }
+              └─StreamTableScan { table: u, columns: [u.x, u.y, u._row_id], stream_scan_type: SnapshotBackfill, stream_key: [u._row_id], pk: [_row_id], dist: UpstreamHashShard(u._row_id) }
+- name: a temporal filter that only drops rows keeps the order of its input, so no provider.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (k int, ts timestamptz, v int, primary key (k, ts));
+    select k, count(*) from t where ts > now() - interval '1' hour group by k;
+  stream_plan: |-
+    StreamMaterialize { columns: [k, count], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └─StreamHashAgg { group_key: [t.k], aggs: [count] }
+      └─StreamExchange { dist: HashShard(t.k) }
+        └─StreamDynamicFilter { predicate: (t.ts > $expr1), output_watermarks: [[t.ts]], output: [t.k, t.ts], cleaned_by_watermark: true }
+          ├─StreamTableScan { table: t, columns: [t.k, t.ts], stream_scan_type: SnapshotBackfill, stream_key: [t.k, t.ts], pk: [k, ts], dist: UpstreamHashShard(t.k, t.ts) }
+          └─StreamExchange { dist: Broadcast }
+            └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
+              └─StreamNow { output: [now] }
+- name: a temporal filter that delays rows does not keep the order of its input, so a provider.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (k int, ts timestamptz, v int, primary key (k, ts));
+    select k, count(*) from t where ts < now() - interval '1' hour group by k;
+  stream_plan: |-
+    StreamMaterialize { columns: [k, count], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └─StreamHashAgg { group_key: [t.k], aggs: [count] }
+      └─StreamLocalityProvider { locality_columns_ordered: [t.k] }
+        └─StreamExchange { dist: HashShard(t.k) }
+          └─StreamDynamicFilter { predicate: (t.ts < $expr1), output: [t.k, t.ts], cleaned_by_watermark: true }
+            ├─StreamTableScan { table: t, columns: [t.k, t.ts], stream_scan_type: SnapshotBackfill, stream_key: [t.k, t.ts], pk: [k, ts], dist: UpstreamHashShard(t.k, t.ts) }
+            └─StreamExchange { dist: Broadcast }
+              └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
+                └─StreamNow { output: [now] }
+- name: an expression that may map several values to one keeps the order of its column only, so a provider.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (ts timestamp, b int, v int, primary key (ts, b));
+    select date_trunc('hour', ts) as h, b, count(*) from t group by date_trunc('hour', ts), b;
+  stream_plan: |-
+    StreamMaterialize { columns: [h, b, count], stream_key: [h, b], pk_columns: [h, b], pk_conflict: NoCheck }
+    └─StreamHashAgg { group_key: [$expr1, t.b], aggs: [count] }
+      └─StreamLocalityProvider { locality_columns_ordered: [$expr1, t.b] }
+        └─StreamExchange { dist: HashShard($expr1, t.b) }
+          └─StreamProject { exprs: [DateTrunc('hour':Varchar, t.ts) as $expr1, t.b, t.ts] }
+            └─StreamTableScan { table: t, columns: [t.ts, t.b], stream_scan_type: SnapshotBackfill, stream_key: [t.ts, t.b], pk: [ts, b], dist: UpstreamHashShard(t.ts, t.b) }
+- name: the hash join follows the distribution of an input that needs no provider.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t1 (ts timestamp, k int, c int, v int, primary key (ts, k, c), watermark for ts as ts - interval '1' second with ttl);
+    create table t2 (ts timestamp, k int, v int, watermark for ts as ts - interval '1' second) append only;
+    select a.ts, a.k, a.s, t2.v from (select ts, k, sum(v) as s from t1 group by ts, k) a join t2 on a.k = t2.k and a.ts = t2.ts;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, k, s, v, t2.k(hidden), t2.ts(hidden), t2._row_id(hidden)], stream_key: [ts, k, t2._row_id], pk_columns: [ts, k, t2._row_id], pk_conflict: NoCheck, watermark_columns: [ts, t2.ts(hidden)] }
+    └─StreamExchange { dist: HashShard(t1.ts, t1.k, t2._row_id) }
+      └─StreamHashJoin [window] { type: Inner, predicate: t1.ts = t2.ts AND t1.k = t2.k, conditions_to_clean_state_in_join_key: [(t1.ts = t2.ts)], output_watermarks: [[t1.ts], [t2.ts]], output: [t1.ts, t1.k, sum(t1.v), t2.v, t2.k, t2.ts, t2._row_id] }
+        ├─StreamProject { exprs: [t1.ts, t1.k, sum(t1.v)], output_watermarks: [[t1.ts]] }
+        │ └─StreamHashAgg { group_key: [t1.ts, t1.k], aggs: [sum(t1.v), count], output_watermarks: [[t1.ts]] }
+        │   └─StreamExchange { dist: HashShard(t1.ts, t1.k) }
+        │     └─StreamTableScan { table: t1, columns: [t1.ts, t1.k, t1.v, t1.c], stream_scan_type: SnapshotBackfill, stream_key: [t1.ts, t1.k, t1.c], pk: [ts, k, c], dist: UpstreamHashShard(t1.ts, t1.k, t1.c) }
+        └─StreamExchange { dist: HashShard(t2.ts, t2.k) }
+          └─StreamLocalityProvider { locality_columns_ordered: [t2.ts, t2.k] }
+            └─StreamExchange { dist: HashShard(t2.ts, t2.k) }
+              └─StreamTableScan { table: t2, columns: [t2.ts, t2.k, t2.v, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: the hash join shuffles an input that needs no provider but is not hash distributed.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int);
+    create materialized view mv as select a, b from t order by a limit 10;
+    create table u (x int, y int);
+    select mv.a, mv.b, u.y from mv join u on mv.a = u.x;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, y, mv.t._row_id(hidden), u.x(hidden), u._row_id(hidden)], stream_key: [mv.t._row_id, a, u._row_id], pk_columns: [mv.t._row_id, a, u._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(mv.a, mv.t._row_id, u._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: mv.a = u.x, output: [mv.a, mv.b, u.y, mv.t._row_id, u.x, u._row_id] }
+        ├─StreamExchange { dist: HashShard(mv.a) }
+        │ └─StreamTableScan { table: mv, columns: [mv.a, mv.b, mv.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [mv.t._row_id, mv.a], pk: [a, t._row_id], dist: Single }
+        └─StreamExchange { dist: HashShard(u.x) }
+          └─StreamLocalityProvider { locality_columns_ordered: [u.x] }
+            └─StreamExchange { dist: HashShard(u.x) }
+              └─StreamTableScan { table: u, columns: [u.x, u.y, u._row_id], stream_scan_type: SnapshotBackfill, stream_key: [u._row_id], pk: [_row_id], dist: UpstreamHashShard(u._row_id) }
+- name: an EOWC over window outputs rows in the order of the sort by time below it, so a provider above it.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+    select distinct on (k) k, ts, s from (select k, ts, sum(v) over (partition by k order by ts rows between 1 preceding and current row) as s from t);
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [k, ts, s, t._row_id(hidden)], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └─StreamAppendOnlyDedup { dedup_cols: [t.k] }
+      └─StreamExchange { dist: HashShard(t.k) }
+        └─StreamLocalityProvider { locality_columns_ordered: [t.k] }
+          └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.k) }
+            └─StreamProject { exprs: [t.k, t.ts, sum, t._row_id] }
+              └─StreamEowcOverWindow { window_functions: [sum(t.v) OVER(PARTITION BY t.k ORDER BY t.ts ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+                └─StreamEowcSort { sort_column: t.ts }
+                  └─StreamLocalityProvider { locality_columns_ordered: [t.k] }
+                    └─StreamExchange { dist: HashShard(t.k) }
+                      └─StreamTableScan { table: t, columns: [t.k, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: an exchange keeps the order of each actor, so no provider above an agg whose input is shuffled by another key.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int, c int) append only;
+    create table u (x int, y int);
+    select x.a, x.cnt, u.y from (select a, count(*) as cnt from (select distinct on (a, b) a, b from t) group by a) x join u on x.a = u.x;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, cnt, y, u.x(hidden), u._row_id(hidden)], stream_key: [a, u._row_id], pk_columns: [a, u._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t.a, u._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t.a = u.x, output: [t.a, count, u.y, u.x, u._row_id] }
+        ├─StreamHashAgg [append_only] { group_key: [t.a], aggs: [count] }
+        │ └─StreamExchange { dist: HashShard(t.a) }
+        │   └─StreamAppendOnlyDedup { dedup_cols: [t.a, t.b] }
+        │     └─StreamExchange { dist: HashShard(t.a, t.b) }
+        │       └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
+        │         └─StreamExchange { dist: HashShard(t.a, t.b) }
+        │           └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(u.x) }
+          └─StreamLocalityProvider { locality_columns_ordered: [u.x] }
+            └─StreamExchange { dist: HashShard(u.x) }
+              └─StreamTableScan { table: u, columns: [u.x, u.y, u._row_id], stream_scan_type: SnapshotBackfill, stream_key: [u._row_id], pk: [_row_id], dist: UpstreamHashShard(u._row_id) }
+- name: an exchange keeps the order in which a provider replays rows, so no provider above the dedup.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int, c int) append only;
+    select a, b, count(*) from (select distinct on (a, b) a, b, c from t) group by a, b;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, count], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamHashAgg [append_only] { group_key: [t.a, t.b], aggs: [count] }
+      └─StreamAppendOnlyDedup { dedup_cols: [t.a, t.b] }
+        └─StreamExchange { dist: HashShard(t.a, t.b) }
+          └─StreamLocalityProvider { locality_columns_ordered: [t.a, t.b] }
+            └─StreamExchange { dist: HashShard(t.a, t.b) }
+              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: the provider replays rows in the lookup order of an index sharded by its first column, while sharded by all the lookup columns.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table s (a int, b int, c int);
+    create table d (id int primary key, a int, b int, c int);
+    create index idx on d(a, b) include (c);
+    select s.a, s.b, s.c, d.c as dc from s join d for system_time as of proctime() on s.b = d.b and s.a = d.a;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c, dc, s._row_id(hidden), idx.d.id(hidden)], stream_key: [b, a, s._row_id, idx.d.id], pk_columns: [b, a, s._row_id, idx.d.id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(s.a, s.b, s._row_id, idx.d.id) }
+      └─StreamTemporalJoin { type: Inner, append_only: false, predicate: s.a = idx.a AND s.b = idx.b, nested_loop: false, output: [s.a, s.b, s.c, idx.c, s._row_id, idx.d.id] }
+        ├─StreamExchange { dist: HashShard(s.a) }
+        │ └─StreamLocalityProvider { locality_columns_ordered: [s.a, s.b] }
+        │   └─StreamExchange { dist: HashShard(s.a, s.b) }
+        │     └─StreamTableScan { table: s, columns: [s.a, s.b, s.c, s._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s._row_id], pk: [_row_id], dist: UpstreamHashShard(s._row_id) }
+        └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx.a) }
+          └─StreamTableScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d.id], stream_scan_type: UpstreamOnly, stream_key: [idx.a, idx.d.id], pk: [a, b, d.id], dist: UpstreamHashShard(idx.a) }

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pretty_xmlish::XmlNode;
-use risingwave_common::catalog::Field;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{Field, FieldDisplay};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -37,11 +37,32 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamLocalityProvider {
     pub base: PlanBase<Stream>,
     core: generic::LocalityProvider<PlanRef>,
+    /// The locality columns in the order the rows are replayed, which leads the primary key of the
+    /// state table. It follows the state of the operator the provider feeds.
+    locality_columns_ordered: Vec<usize>,
 }
 
 impl StreamLocalityProvider {
-    pub fn new(core: generic::LocalityProvider<PlanRef>) -> Self {
+    /// The locality columns missing from `locality_columns_ordered` are appended to it.
+    pub fn new(
+        core: generic::LocalityProvider<PlanRef>,
+        locality_columns_ordered: &[usize],
+    ) -> Self {
         let input = core.input.clone();
+        assert!(
+            locality_columns_ordered
+                .iter()
+                .all(|k| core.locality_columns.contains(k))
+        );
+        let locality_columns_ordered = locality_columns_ordered
+            .iter()
+            .chain(
+                core.locality_columns
+                    .iter()
+                    .filter(|k| !locality_columns_ordered.contains(k)),
+            )
+            .copied()
+            .collect_vec();
 
         let dist = match input.distribution() {
             Distribution::HashShard(keys) => {
@@ -59,6 +80,10 @@ impl StreamLocalityProvider {
             }
         };
 
+        let replay_order = (locality_columns_ordered.iter())
+            .chain(input.expect_stream_key())
+            .copied()
+            .collect();
         // LocalityProvider maintains the append-only behavior if input is append-only
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -67,12 +92,13 @@ impl StreamLocalityProvider {
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
-        );
-        StreamLocalityProvider { base, core }
-    }
-
-    pub fn locality_columns(&self) -> &[usize] {
-        &self.core.locality_columns
+        )
+        .with_replay_order(replay_order);
+        StreamLocalityProvider {
+            base,
+            core,
+            locality_columns_ordered,
+        }
     }
 }
 
@@ -84,7 +110,7 @@ impl PlanTreeNodeUnary<Stream> for StreamLocalityProvider {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core)
+        Self::new(core, &self.locality_columns_ordered)
     }
 }
 
@@ -92,7 +118,15 @@ impl_plan_tree_node_for_unary! { Stream, StreamLocalityProvider }
 
 impl Distill for StreamLocalityProvider {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let vec = self.core.fields_pretty();
+        let locality_columns_ordered = self
+            .locality_columns_ordered
+            .iter()
+            .map(|&i| Pretty::display(&FieldDisplay(&self.schema()[i])))
+            .collect();
+        let vec = vec![(
+            "locality_columns_ordered",
+            Pretty::Array(locality_columns_ordered),
+        )];
         childless_record("StreamLocalityProvider", vec)
     }
 }
@@ -103,7 +137,11 @@ impl StreamNode for StreamLocalityProvider {
         let progress_table = self.build_progress_catalog(state);
 
         let locality_provider_node = LocalityProviderNode {
-            locality_columns: self.locality_columns().iter().map(|&i| i as u32).collect(),
+            locality_columns: self
+                .locality_columns_ordered
+                .iter()
+                .map(|&i| i as u32)
+                .collect(),
             // State table for buffering input data
             state_table: Some(state_table.to_prost()),
             // Progress table for tracking backfill progress
@@ -134,7 +172,7 @@ impl ExprVisitable for StreamLocalityProvider {
 impl StreamLocalityProvider {
     /// Build the state table catalog for buffering input data
     /// Schema: same as input schema (locality handled by primary key ordering)
-    /// Key: `locality_columns` (vnode handled internally by `StateTable`)
+    /// Key: `locality_columns_ordered` (vnode handled internally by `StateTable`)
     fn build_state_catalog(&self, state: &mut BuildFragmentGraphState) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
         let input = self.input();
@@ -145,8 +183,8 @@ impl StreamLocalityProvider {
             catalog_builder.add_column(field);
         }
 
-        // Set locality columns as primary key.
-        for locality_col_idx in self.locality_columns() {
+        // Set locality columns as primary key, in the replay order.
+        for locality_col_idx in &self.locality_columns_ordered {
             catalog_builder.add_order_column(*locality_col_idx, OrderType::ascending());
         }
         // add streaming key of the input as the rest of the primary key
@@ -176,8 +214,8 @@ impl StreamLocalityProvider {
         catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        // Add locality columns as part of primary key
-        for &locality_col_idx in self.locality_columns() {
+        // Add locality columns as part of primary key, in the same order as the state table.
+        for &locality_col_idx in &self.locality_columns_ordered {
             let field = &input_schema.fields[locality_col_idx];
             catalog_builder.add_column(field);
         }

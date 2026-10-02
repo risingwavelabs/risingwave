@@ -57,25 +57,28 @@ pub trait ToStream {
         required_dist.streaming_enforce_if_not_satisfies(ret)
     }
 
+    /// Returns an equivalent plan that reads its data in a better order for `columns`, e.g.
+    /// through an index, or `None` if there is none.
     fn try_better_locality(&self, _columns: &[usize]) -> Option<LogicalPlanRef> {
         None
     }
 }
 
-/// Try to enforce the locality requirement on the given columns.
-/// If a better plan can be found, return the better plan.
-/// If no better plan can be found, and locality backfill is enabled, wrap the plan
-/// with `LogicalLocalityProvider`.
-/// Otherwise, return the plan as is.
+/// Requires locality on the given columns for the backfill of the plan's consumer.
+///
+/// The plan switches to a better access path for the columns if there is one. If locality
+/// backfill is enabled, the plan is then wrapped with a `LogicalLocalityProvider`, which reserves
+/// the columns in the stream key. Whether the provider is built is decided in `to_stream` through
+/// [`LocalityInput`], where the order in which the input replays rows and the order the consumer
+/// needs are both known.
 pub fn try_enforce_locality_requirement(
     plan: LogicalPlanRef,
     columns: &[usize],
     locality_backfill_enabled: bool,
 ) -> LogicalPlanRef {
     assert!(!columns.is_empty());
-    if let Some(better_plan) = plan.try_better_locality(columns) {
-        better_plan
-    } else if locality_backfill_enabled {
+    let plan = plan.try_better_locality(columns).unwrap_or(plan);
+    if locality_backfill_enabled {
         LogicalLocalityProvider::new(plan, columns.to_owned()).into()
     } else {
         plan

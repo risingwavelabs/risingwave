@@ -1,0 +1,148 @@
+# Whether a locality provider is built is decided on the stream plan, from the order in which its
+# input replays rows. Each view is compared with the same query in batch.
+
+statement ok
+set enable_locality_backfill = true;
+
+statement ok
+set locality_backfill_mode = always;
+
+# A join on the sum of an agg gets a provider above the agg, whose locality column changes with
+# every update of the sum.
+statement ok
+create table g (id int primary key, a int, b int);
+
+statement ok
+create table u (id int primary key, x int, y bigint);
+
+statement ok
+insert into g select i, i % 7, i % 50 from generate_series(1, 3000) i;
+
+statement ok
+insert into u select i, i % 50, i % 400 from generate_series(1, 3000) i;
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv_jsum as select x.b, x.s, u.id as uid from (select b, sum(a) as s from g group by b) x join u on x.s = u.y;
+
+statement ok
+update g set a = a + 1 where id % 13 = 0;
+
+statement ok
+delete from g where id % 31 = 0;
+
+statement ok
+flush;
+
+# The agg outputs rows in the order of the join state, so no provider above it, and the join follows
+# its hash distribution instead of shuffling it.
+statement ok
+create table f1 (ts timestamp, k int, c int, v int, primary key (ts, k, c), watermark for ts as ts - interval '1' second with ttl);
+
+statement ok
+create table f2 (ts timestamp, k int, v int, watermark for ts as ts - interval '1' second) append only;
+
+statement ok
+insert into f1 select '2026-01-01 00:00:00'::timestamp + (i % 60) * interval '10' millisecond, i % 7, i, i from generate_series(0, 2999) i;
+
+statement ok
+insert into f2 select '2026-01-01 00:00:00'::timestamp + (i % 60) * interval '10' millisecond, i % 7, -i from generate_series(0, 599) i;
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv_follow as select a.ts, a.k, a.s, f2.v from (select ts, k, sum(v) as s from f1 group by ts, k) a join f2 on a.k = f2.k and a.ts = f2.ts;
+
+statement ok
+update f1 set v = v + 1 where c % 13 = 0;
+
+statement ok
+delete from f1 where c % 31 = 0;
+
+statement ok
+flush;
+
+# The view is read in the join key order but is a singleton, so the join shuffles it.
+statement ok
+create table st (a int, b int);
+
+statement ok
+create table su (x int, y int);
+
+statement ok
+insert into st select i, i * 10 from generate_series(1, 100) i;
+
+statement ok
+insert into su select i % 20, i from generate_series(1, 400) i;
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv_top as select a, b from st order by a limit 10;
+
+statement ok
+create materialized view mv_single as select mv_top.a, mv_top.b, su.y from mv_top join su on mv_top.a = su.x;
+
+statement ok
+delete from st where a = 3;
+
+statement ok
+flush;
+
+query BB
+with mv as (select b, s, uid from mv_jsum), ref as (select x.b, x.s, u.id as uid from (select b, sum(a) as s from g group by b) x join u on x.s = u.y)
+select
+  (select count(*) from mv) = (select count(*) from ref),
+  (select count(*) from ((select * from mv except select * from ref) union all (select * from ref except select * from mv)) t) = 0;
+----
+t t
+
+query BB
+with mv as (select ts, k, s, v from mv_follow), ref as (select a.ts, a.k, a.s, f2.v from (select ts, k, sum(v) as s from f1 group by ts, k) a join f2 on a.k = f2.k and a.ts = f2.ts)
+select
+  (select count(*) from mv) = (select count(*) from ref),
+  (select count(*) from ((select * from mv except select * from ref) union all (select * from ref except select * from mv)) t) = 0;
+----
+t t
+
+query BB
+with mv as (select a, b, y from mv_single), ref as (select t.a, t.b, su.y from (select a, b from st order by a limit 10) t join su on t.a = su.x)
+select
+  (select count(*) from mv) = (select count(*) from ref),
+  (select count(*) from ((select * from mv except select * from ref) union all (select * from ref except select * from mv)) t) = 0;
+----
+t t
+
+statement ok
+drop materialized view mv_single;
+
+statement ok
+drop materialized view mv_top;
+
+statement ok
+drop materialized view mv_follow;
+
+statement ok
+drop materialized view mv_jsum;
+
+statement ok
+drop table su;
+
+statement ok
+drop table st;
+
+statement ok
+drop table f2;
+
+statement ok
+drop table f1;
+
+statement ok
+drop table u;
+
+statement ok
+drop table g;

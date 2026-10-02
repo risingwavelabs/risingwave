@@ -29,9 +29,9 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    BackfillType, BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
-    PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject,
-    ToBatch, ToStream, generic, try_enforce_locality_requirement,
+    BackfillType, BatchPlanRef, ColPrunable, ExprRewritable, LocalityInput, Logical,
+    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin,
+    StreamPlanRef, StreamProject, ToBatch, ToStream, generic, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -45,7 +45,7 @@ use crate::optimizer::plan_node::{
     StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
-use crate::optimizer::property::{Distribution, RequiredDist};
+use crate::optimizer::property::{Distribution, RequiredDist, WatermarkColumns};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -973,57 +973,97 @@ impl<'a> Deref for TemporalJoinScan<'a> {
 }
 
 impl LogicalJoin {
+    /// Converts both inputs of a hash join and enforces the distribution the join needs.
+    ///
+    /// `order_eq_keys` orders the eq keys, which lead the primary key of the join state, by the
+    /// watermark columns of the inputs. The inputs are laid out like the join state only after
+    /// that. Returns the inputs and the ordered predicate.
     fn get_stream_input_for_hash_join(
         &self,
-        predicate: &EqJoinPredicate,
+        predicate: EqJoinPredicate,
+        order_eq_keys: impl FnOnce(
+            EqJoinPredicate,
+            &WatermarkColumns,
+            &WatermarkColumns,
+        ) -> EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<(StreamPlanRef, StreamPlanRef)> {
+    ) -> Result<(StreamPlanRef, StreamPlanRef, EqJoinPredicate)> {
         use super::stream::prelude::*;
 
-        let mut right = self.right().to_stream_with_dist_required(
-            &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
+        // The distribution of an input that the other side can follow: a hash on the eq keys that
+        // an exchange can reproduce, i.e. not `UpstreamHashShard`. The input of a provider may be
+        // distributed in any way, as it is converted without the distribution the join requires.
+        fn followable_dist(plan: &StreamPlanRef, eq_keys: &[usize]) -> Option<RequiredDist> {
+            match plan.distribution() {
+                dist @ Distribution::HashShard(_)
+                    if dist
+                        .satisfies(&RequiredDist::shard_by_key(plan.schema().len(), eq_keys)) =>
+                {
+                    Some(RequiredDist::PhysicalDist(dist.clone()))
+                }
+                _ => None,
+            }
+        }
+
+        let left_len = self.left().schema().len();
+        let right_len = self.right().schema().len();
+        let r2l = predicate.r2l_eq_columns_mapping(left_len, right_len);
+        let l2r = predicate.l2r_eq_columns_mapping(left_len, right_len);
+
+        let right = LocalityInput::new(
+            &self.right(),
+            &RequiredDist::shard_by_key(right_len, &predicate.right_eq_indexes()),
             ctx,
         )?;
-        let r2l =
-            predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
-        let l2r =
-            predicate.l2r_eq_columns_mapping(self.left().schema().len(), right.schema().len());
-        let mut left;
-        let right_dist = right.distribution();
-        match right_dist {
-            Distribution::HashShard(_) => {
-                let left_dist = r2l
-                    .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = self.left().to_stream_with_dist_required(&left_dist, ctx)?;
-            }
-            Distribution::UpstreamHashShard(_, _) => {
-                left = self.left().to_stream_with_dist_required(
-                    &RequiredDist::shard_by_key(
-                        self.left().schema().len(),
-                        &predicate.left_eq_indexes(),
-                    ),
-                    ctx,
-                )?;
-                let left_dist = left.distribution();
-                match left_dist {
-                    Distribution::HashShard(_) => {
-                        let right_dist = l2r.rewrite_required_distribution(
-                            &RequiredDist::PhysicalDist(left_dist.clone()),
-                        );
-                        right = right_dist.streaming_enforce_if_not_satisfies(right)?
-                    }
-                    Distribution::UpstreamHashShard(_, _) => {
-                        left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
-                            .streaming_enforce_if_not_satisfies(left)?;
-                        right = RequiredDist::hash_shard(&predicate.right_eq_indexes())
-                            .streaming_enforce_if_not_satisfies(right)?;
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            _ => unreachable!(),
+        // Whether a provider is built, and so its distribution, is known only after the eq keys
+        // are ordered by the watermark columns of both inputs. So the left input follows the right
+        // one only if it is not a provider.
+        let left_required_dist = match &right {
+            LocalityInput::Stream(right) => followable_dist(right, &predicate.right_eq_indexes()),
+            LocalityInput::Provider(..) => None,
         }
-        Ok((left, right))
+        .map_or_else(
+            || RequiredDist::shard_by_key(left_len, &predicate.left_eq_indexes()),
+            |right_dist| r2l.rewrite_required_distribution(&right_dist),
+        );
+        let left = LocalityInput::new(&self.left(), &left_required_dist, ctx)?;
+
+        let ordered_predicate = order_eq_keys(
+            predicate.clone(),
+            left.stream().watermark_columns(),
+            right.stream().watermark_columns(),
+        );
+        let left_key = ordered_predicate.left_eq_indexes();
+        let right_key = ordered_predicate.right_eq_indexes();
+
+        // A provider is `UpstreamHashShard`, so an input that gets one cannot be followed.
+        let followable = |input: &LocalityInput, key: &[usize]| {
+            (!input.needs_provider(key))
+                .then(|| followable_dist(input.stream(), key))
+                .flatten()
+        };
+        let (left_dist, right_dist) =
+            match (followable(&left, &left_key), followable(&right, &right_key)) {
+                (_, Some(right_dist)) => {
+                    (r2l.rewrite_required_distribution(&right_dist), right_dist)
+                }
+                (Some(left_dist), None) => {
+                    let right_dist = l2r.rewrite_required_distribution(&left_dist);
+                    (left_dist, right_dist)
+                }
+                (None, None) => (
+                    RequiredDist::hash_shard(&predicate.left_eq_indexes()),
+                    RequiredDist::hash_shard(&predicate.right_eq_indexes()),
+                ),
+            };
+
+        let left = left.into_stream_with_layout(&left_key)?;
+        let right = right.into_stream_with_layout(&right_key)?;
+        Ok((
+            left_dist.streaming_enforce_if_not_satisfies(left)?,
+            right_dist.streaming_enforce_if_not_satisfies(right)?,
+            ordered_predicate,
+        ))
     }
 
     fn to_stream_hash_join(
@@ -1034,7 +1074,8 @@ impl LogicalJoin {
         use super::stream::prelude::*;
 
         assert!(predicate.has_eq());
-        let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
+        let (left, right, predicate) =
+            self.get_stream_input_for_hash_join(predicate, StreamHashJoin::order_eq_keys, ctx)?;
 
         let mut core = self.core.clone_with_inputs(left, right);
         core.on = generic::JoinOn::EqPredicate(predicate);
@@ -1322,7 +1363,9 @@ impl LogicalJoin {
             RequiredDist::hash_shard(&left_dist_key)
         };
 
-        let left = self.left().to_stream(ctx)?;
+        // Replay rows in the order the lookups read the table.
+        let left = LocalityInput::new(&self.left(), &RequiredDist::Any, ctx)?
+            .into_stream_with_layout(&predicate.left_eq_indexes()[..lookup_prefix_len])?;
         let left = if is_broadcast {
             // Always shuffle the LHS by its stream key. The point of a broadcast temporal join is
             // to make the join fragment independent: without an exchange here, the join would be
@@ -1520,7 +1563,9 @@ impl LogicalJoin {
             .into());
         }
 
-        let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
+        // The AsOf join keys its state by the eq keys in the written order.
+        let (left, right, predicate) =
+            self.get_stream_input_for_hash_join(predicate, |predicate, _, _| predicate, ctx)?;
         let left_len = left.schema().len();
         let mut core = self.core.clone_with_inputs(left, right);
         core.on = generic::JoinOn::EqPredicate(predicate);

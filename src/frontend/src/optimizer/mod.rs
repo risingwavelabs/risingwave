@@ -783,16 +783,18 @@ impl LogicalPlanRoot {
                         If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_owned(),
                     ).into());
                 }
-                let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
+                let optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
                 let locality_backfill_enabled =
                     resolve_locality_backfill(&ctx, optimized_plan.plan.clone(), backfill_type);
-                let (mut plan, mut out_col_change) = rewrite_logical_plan_for_stream(
-                    &optimized_plan.plan,
+                let plan = optimized_plan.clone().rewrite_and_convert_to_stream(
+                    emit_on_window_close,
                     backfill_type,
                     locality_backfill_enabled,
                 )?;
 
-                let locality_provider_count = LocalityProviderCounter::count(plan.clone());
+                // Count the providers in the stream plan, as `to_stream` builds only those whose
+                // input does not already replay rows in the needed order.
+                let locality_provider_count = LocalityProviderCounter::count(plan.plan.clone());
                 let locality_backfill_mode = ctx.session_ctx().config().locality_backfill_mode();
                 if locality_backfill_enabled
                     && locality_backfill_requires_license(
@@ -807,33 +809,14 @@ impl LogicalPlanRoot {
                         "The streaming job would use {locality_provider_count} locality providers, \
                          which are unavailable under the current license. Falling back to regular backfill."
                     ));
-                    (plan, out_col_change) = rewrite_logical_plan_for_stream(
-                        &optimized_plan.plan,
-                        backfill_type,
-                        false,
-                    )?;
-                }
-                if explain_trace {
-                    ctx.trace("Logical Rewrite For Stream:");
-                    ctx.trace(plan.explain_to_string());
-                }
-
-                optimized_plan.required_dist =
-                    out_col_change.rewrite_required_distribution(&optimized_plan.required_dist);
-                optimized_plan.required_order = out_col_change
-                    .rewrite_required_order(&optimized_plan.required_order)
-                    .unwrap();
-                optimized_plan.out_fields =
-                    out_col_change.rewrite_bitset(&optimized_plan.out_fields);
-                let mut plan = plan.to_stream_with_dist_required(
-                    &optimized_plan.required_dist,
-                    &mut ToStreamContext::new_with_backfill_type(
+                    optimized_plan.rewrite_and_convert_to_stream(
                         emit_on_window_close,
                         backfill_type,
-                    ),
-                )?;
-                plan = stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)?;
-                optimized_plan.into_phase(plan)
+                        false,
+                    )?
+                } else {
+                    plan
+                }
             }
         };
 
@@ -843,6 +826,34 @@ impl LogicalPlanRoot {
             ctx.trace(<PlanRef<Stream> as Explain>::explain_to_string(&plan.plan));
         }
         Ok(plan)
+    }
+
+    /// Rewrites the optimized logical plan for stream and converts it to a stream plan.
+    fn rewrite_and_convert_to_stream(
+        mut self,
+        emit_on_window_close: bool,
+        backfill_type: BackfillType,
+        locality_backfill_enabled: bool,
+    ) -> Result<StreamOptimizedLogicalPlanRoot> {
+        let ctx = self.plan.ctx();
+        let (plan, out_col_change) =
+            rewrite_logical_plan_for_stream(&self.plan, backfill_type, locality_backfill_enabled)?;
+        if ctx.is_explain_trace() {
+            ctx.trace("Logical Rewrite For Stream:");
+            ctx.trace(plan.explain_to_string());
+        }
+
+        self.required_dist = out_col_change.rewrite_required_distribution(&self.required_dist);
+        self.required_order = out_col_change
+            .rewrite_required_order(&self.required_order)
+            .unwrap();
+        self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
+        let mut plan = plan.to_stream_with_dist_required(
+            &self.required_dist,
+            &mut ToStreamContext::new_with_backfill_type(emit_on_window_close, backfill_type),
+        )?;
+        plan = stream_enforce_eowc_requirement(ctx, plan, emit_on_window_close)?;
+        Ok(self.into_phase(plan))
     }
 
     /// Visit the plan root and compute the cardinality.

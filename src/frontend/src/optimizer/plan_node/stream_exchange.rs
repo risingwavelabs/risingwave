@@ -98,7 +98,8 @@ impl StreamExchange {
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             columns_monotonicity,
-        );
+        )
+        .with_replay_order(input.replay_order().to_vec());
         StreamExchange {
             base,
             input,
@@ -118,7 +119,8 @@ impl StreamExchange {
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
-        );
+        )
+        .with_replay_order(input.replay_order().to_vec());
         StreamExchange {
             base,
             input,

@@ -38,8 +38,8 @@ use crate::optimizer::plan_node::stream_global_approx_percentile::StreamGlobalAp
 use crate::optimizer::plan_node::stream_local_approx_percentile::StreamLocalApproxPercentile;
 use crate::optimizer::plan_node::stream_row_merge::StreamRowMerge;
 use crate::optimizer::plan_node::{
-    BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject, PredicatePushdownContext,
-    RewriteStreamContext, ToStreamContext, gen_filter_and_pushdown,
+    BatchSortAgg, ColumnPruningContext, LocalityInput, LogicalDedup, LogicalProject,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext, gen_filter_and_pushdown,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{
@@ -1438,10 +1438,12 @@ impl ToStream for LogicalAgg {
         let eowc = ctx.emit_on_window_close();
         let input = self.input();
 
-        let stream_input = input.to_stream(ctx)?;
+        let stream_input = LocalityInput::new(&input, &RequiredDist::Any, ctx)?;
 
         // Use Dedup operator, if possible.
-        if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
+        if stream_input.stream().append_only()
+            && self.agg_calls().is_empty()
+            && !self.group_key().is_empty()
         {
             let group_key = self.group_key().to_vec();
             let input_schema_len = input.schema().len();
@@ -1459,7 +1461,7 @@ impl ToStream for LogicalAgg {
                 AggType::Builtin(PbAggKind::ApproxCountDistinct)
             )
         }) {
-            if stream_input.append_only() {
+            if stream_input.stream().append_only() {
                 self.core.ctx().session_ctx().notice_to_user(
                     "Streaming `APPROX_COUNT_DISTINCT` is still a preview feature and subject to change. Please do not use it in production environment.",
                 );
@@ -1470,6 +1472,17 @@ impl ToStream for LogicalAgg {
             }
         }
 
+        // An EOWC hash agg keys its state by the window column first.
+        let window_col = if eowc && !self.group_key().is_empty() {
+            Some(
+                self.core
+                    .eowc_window_column(stream_input.stream().watermark_columns())?,
+            )
+        } else {
+            None
+        };
+        let stream_input =
+            stream_input.into_stream_with_layout(&self.core.get_ordered_group_key(window_col))?;
         let plan = self.gen_dist_stream_agg_plan(stream_input)?;
 
         let (plan, n_final_agg_calls) = if let Some(final_agg) = plan.as_stream_simple_agg() {
@@ -1534,24 +1547,6 @@ impl ToStream for LogicalAgg {
             }
             Ok(project.into())
         }
-    }
-
-    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if columns.is_empty() {
-            return None;
-        }
-
-        // Check if the given columns are a prefix of group keys.
-        let group_key = self.group_key().to_vec();
-        if columns.len() > group_key.len() || columns != &group_key[..columns.len()] {
-            return None;
-        }
-
-        // Return the same plan directly without calling `try_better_locality` on input.
-        // Because in `logical_rewrite_for_stream`, we will enforce the locality requirement on the group keys anyway.
-        // If we call `try_better_locality` on input, it would miss the chance to utilize the locality of the current agg,
-        // since the agg's input doesn't have the locality yet at that moment.
-        Some(self.clone_with_input(self.input()).into())
     }
 
     fn logical_rewrite_for_stream(

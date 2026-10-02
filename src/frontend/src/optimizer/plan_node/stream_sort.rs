@@ -107,6 +107,11 @@ impl StreamEowcSort {
             true,
             watermark_columns,
             columns_monotonicity,
+        )
+        .with_replay_order(
+            std::iter::once(sort_column_index)
+                .chain(secondary_order_columns.iter().copied())
+                .collect(),
         );
         Self {
             base,

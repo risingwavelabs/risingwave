@@ -66,7 +66,8 @@ impl StreamOverWindow {
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
-        );
+        )
+        .with_replay_order(input.replay_order_within(&core.partition_key_indices()));
 
         Ok(StreamOverWindow { base, core })
     }

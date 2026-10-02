@@ -1,0 +1,108 @@
+# The locality provider replays rows laid out like the state of the operator it feeds,
+# which can differ from the order the keys are written in.
+
+statement ok
+set enable_locality_backfill = true;
+
+statement ok
+set locality_backfill_mode = always;
+
+# Hash join, whose state puts the eq keys with watermarks first.
+statement ok
+create table t1 (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+
+statement ok
+create table t2 (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+
+statement ok
+insert into t1 select i % 10, '2026-01-01 00:00:00'::timestamp + i * interval '1' second, i from generate_series(1, 1000) i;
+
+statement ok
+insert into t2 select i % 10, '2026-01-01 00:00:00'::timestamp + i * interval '1' second, i * 2 from generate_series(1, 1000) i;
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv_join as select t1.k, t1.ts, t1.v, t2.v as v2 from t1 join t2 on t1.k = t2.k and t1.ts = t2.ts;
+
+query III
+select count(*), sum(v), sum(v2) from mv_join;
+----
+1000 500500 1001000
+
+statement ok
+insert into t1 values (3, '2026-01-01 00:33:20', 5000);
+
+statement ok
+insert into t2 values (3, '2026-01-01 00:33:20', 7000);
+
+statement ok
+flush;
+
+query III
+select count(*), sum(v), sum(v2) from mv_join;
+----
+1001 505500 1008000
+
+# EOWC agg, whose state puts the window column first.
+statement ok
+create materialized view mv_eowc as select k, window_start, count(*) as cnt from tumble(t1, ts, interval '1' minute) group by k, window_start emit on window close;
+
+# Close all the windows above.
+statement ok
+insert into t1 values (0, '2026-01-02 00:00:00', 0);
+
+statement ok
+flush;
+
+# The window-closing watermark takes a few seconds to reach the agg.
+query II retry 30 backoff 1s
+select count(*), sum(cnt) from mv_eowc;
+----
+171 1001
+
+# Temporal join, which looks up the table in the order of its primary key.
+statement ok
+create table s (a int, b int, c int);
+
+statement ok
+create table d (a int, b int, c int, primary key (a, b));
+
+statement ok
+insert into s select i % 7, i % 11, i from generate_series(1, 1000) i;
+
+statement ok
+insert into d select a, b, a * 100 + b from generate_series(0, 6) a, generate_series(0, 10) b;
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv_temporal as select s.a, s.b, s.c, d.c as dc from s join d for system_time as of proctime() on s.b = d.b and s.a = d.a;
+
+query II
+select count(*), sum(dc) from mv_temporal;
+----
+1000 305305
+
+statement ok
+drop materialized view mv_temporal;
+
+statement ok
+drop materialized view mv_eowc;
+
+statement ok
+drop materialized view mv_join;
+
+statement ok
+drop table d;
+
+statement ok
+drop table s;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t1;

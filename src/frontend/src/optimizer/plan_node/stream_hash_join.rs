@@ -213,27 +213,35 @@ fn derive_watermark_for_hash_join(
 }
 
 impl StreamHashJoin {
-    pub fn new(mut core: generic::Join<PlanRef>) -> Result<Self> {
+    /// Orders the eq keys, which lead the primary key of the join state: the keys with a watermark
+    /// on both sides come first, so that the state can be cleaned by a prefix of its primary key.
+    pub fn order_eq_keys(
+        predicate: EqJoinPredicate,
+        left_watermark_columns: &WatermarkColumns,
+        right_watermark_columns: &WatermarkColumns,
+    ) -> EqJoinPredicate {
+        let reorder_idx = predicate
+            .eq_indexes()
+            .iter()
+            .positions(|(left_key, right_key)| {
+                left_watermark_columns.contains(*left_key)
+                    && right_watermark_columns.contains(*right_key)
+            })
+            .collect_vec();
+        predicate.reorder(&reorder_idx)
+    }
+
+    /// Keeps the order of the eq keys in `core`. The planner orders them with
+    /// [`Self::order_eq_keys`] before building the inputs, since a `LocalityProvider` input has to
+    /// follow that order.
+    pub fn new(core: generic::Join<PlanRef>) -> Result<Self> {
         let stream_kind = core.stream_kind()?;
 
-        // Reorder `eq_join_predicate` by placing the watermark column at the beginning.
-        let eq_join_predicate = {
-            let eq_join_predicate = core
-                .on
-                .as_eq_predicate_ref()
-                .expect("StreamHashJoin requires JoinOn::EqPredicate in core")
-                .clone();
-            let mut reorder_idx = vec![];
-            for (i, (left_key, right_key)) in eq_join_predicate.eq_indexes().iter().enumerate() {
-                if core.left.watermark_columns().contains(*left_key)
-                    && core.right.watermark_columns().contains(*right_key)
-                {
-                    reorder_idx.push(i);
-                }
-            }
-            eq_join_predicate.reorder(&reorder_idx)
-        };
-        core.on = generic::JoinOn::EqPredicate(eq_join_predicate.clone());
+        let eq_join_predicate = core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamHashJoin requires JoinOn::EqPredicate in core")
+            .clone();
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),

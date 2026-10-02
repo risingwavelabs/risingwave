@@ -36,7 +36,8 @@ use crate::expr::{
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::logical_agg::LogicalAggBuilder;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, Literal, LocalityInput, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition, IndexSet};
@@ -662,7 +663,9 @@ impl ToStream for LogicalOverWindow {
             empty_partition_by_not_implemented!();
         }
 
-        let stream_input = self.input().to_stream(ctx)?;
+        let stream_input = LocalityInput::new(&self.input(), &RequiredDist::Any, ctx)?;
+        let required_dist =
+            RequiredDist::shard_by_key(self.input().schema().len(), &partition_key_indices);
 
         if ctx.emit_on_window_close() {
             // Emit-On-Window-Close case
@@ -676,6 +679,7 @@ impl ToStream for LogicalOverWindow {
                 .into());
             }
             if !stream_input
+                .stream()
                 .watermark_columns()
                 .contains(order_by[0].column_index)
             {
@@ -690,9 +694,9 @@ impl ToStream for LogicalOverWindow {
             }
             let order_key_index = order_by[0].column_index;
 
-            let sort_input =
-                RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
-                    .streaming_enforce_if_not_satisfies(stream_input)?;
+            let sort_input = required_dist.streaming_enforce_if_not_satisfies(
+                stream_input.into_stream_with_layout(&partition_key_indices)?,
+            )?;
             // After sharding by partition key, `StreamEowcSort` gives rows in the same partition
             // and `ORDER BY` value a deterministic tie-break based on the preserved input stream
             // key. This matches `EowcOverWindow`'s persisted order
@@ -716,31 +720,13 @@ impl ToStream for LogicalOverWindow {
                 );
             }
 
-            let new_input =
-                RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
-                    .streaming_enforce_if_not_satisfies(stream_input)?;
+            let new_input = required_dist.streaming_enforce_if_not_satisfies(
+                stream_input.into_stream_with_layout(&partition_key_indices)?,
+            )?;
             let core = self.core.clone_with_input(new_input);
 
             Ok(StreamOverWindow::new(core)?.into())
         }
-    }
-
-    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if columns.is_empty() {
-            return None;
-        }
-
-        let partition_key_indices = self.partition_key_indices();
-        if columns.len() > partition_key_indices.len()
-            || columns != &partition_key_indices[..columns.len()]
-        {
-            return None;
-        }
-
-        // Similar to agg/topn, keep the current over-window node so the locality can be provided
-        // by its own state table after `to_stream`, instead of trying to enforce it on input
-        // during logical rewrite.
-        Some(self.clone_with_input(self.input()).into())
     }
 
     fn logical_rewrite_for_stream(

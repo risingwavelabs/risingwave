@@ -27,7 +27,7 @@ use super::{
 use crate::error::{ErrorCode, Result, RwError};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
-    BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
+    BatchTopN, ColumnPruningContext, LocalityInput, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -323,32 +323,16 @@ impl ToStream for LogicalTopN {
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let input = self.input().to_stream(ctx)?;
-            let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
-                .streaming_enforce_if_not_satisfies(input)?;
+            let required_dist =
+                RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
+            let input = LocalityInput::new(&self.input(), &RequiredDist::Any, ctx)?
+                .into_stream_with_layout(self.group_key())?;
+            let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
             let core = self.core.clone_with_input(input);
             StreamGroupTopN::new(core, None)?.into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })
-    }
-
-    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if columns.is_empty() || self.group_key().is_empty() {
-            return None;
-        }
-
-        // GroupTopN stores rows with group keys as the primary key prefix in its internal state
-        // table, so it can directly satisfy locality requests on a prefix of its group key.
-        let group_key = self.group_key().to_vec();
-        if columns.len() > group_key.len() || columns != &group_key[..columns.len()] {
-            return None;
-        }
-
-        // Similar to agg, return the current plan directly instead of asking input for better
-        // locality first. The locality can be provided by the current TopN itself after
-        // `to_stream`, while its input does not have it yet during logical rewrite.
-        Some(self.clone_with_input(self.input()).into())
     }
 
     fn logical_rewrite_for_stream(
