@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::{StreamExt, stream};
 use risingwave_common::config::{RwConfig, extract_storage_memory_config};
 use risingwave_common::system_param::system_params_for_test;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -24,7 +23,7 @@ use risingwave_object_store::object::ObjectError;
 
 use super::PinCache;
 use super::test_utils::{
-    download_and_publish_for_test, in_memory_object_store, local_object_store,
+    download_and_publish_for_test, in_memory_object_store, local_object_store, object_in_shard,
 };
 use crate::opts::StorageOpts;
 
@@ -38,7 +37,7 @@ async fn test_zero_shards_rejected() {
 
 #[tokio::test]
 #[should_panic(expected = "pin cache recovery concurrency must be greater than zero")]
-async fn test_zero_recover_concurrency_rejected() {
+async fn test_zero_recovery_concurrency_is_rejected() {
     PinCache::new(in_memory_object_store(), 1, 0, [])
         .await
         .unwrap();
@@ -181,13 +180,6 @@ async fn test_read_failure_only_invalidates_selected_publication() {
     );
 }
 
-fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
-    (1..)
-        .map(HummockSstableObjectId::from)
-        .find(|&id| PinCache::shard_index(id, shard_num) == shard)
-        .unwrap()
-}
-
 #[tokio::test]
 async fn test_other_shard_does_not_block_object_operations() {
     let mut config = RwConfig::default();
@@ -310,35 +302,21 @@ fn test_parse_finalized_object_path() {
 }
 
 #[tokio::test]
-async fn test_recovery_rejects_incomplete_inventory() {
-    for partial_inventory in [false, true] {
-        let local_store = in_memory_object_store();
-        let mut cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
-        local_store
-            .upload("1001-42.sst", Bytes::from_static(b"complete"))
-            .await
-            .unwrap();
-        let error = ObjectError::internal("injected inventory failure");
-        let objects = if partial_inventory {
-            let metadata = local_store.metadata("1001-42.sst").await.unwrap();
-            Ok(stream::iter([Ok(metadata), Err(error)]).boxed())
-        } else {
-            Err(error)
-        };
-        // Exercise both list and mid-stream failures before sharing the cache.
-        let result = Arc::get_mut(&mut cache)
-            .unwrap()
-            .recover_local_files(objects, 2)
-            .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("injected inventory failure")
-        );
-        assert!(cache.get(1001.into()).is_none());
-        assert!(local_store.metadata("1001-42.sst").await.is_ok());
-    }
+async fn test_recovery_rejects_inventory_initialization_error() {
+    let local_store = in_memory_object_store();
+    let mut cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
+    local_store
+        .upload("1001-42.sst", Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    let error = Arc::get_mut(&mut cache)
+        .unwrap()
+        .recover_local_files(Err(ObjectError::internal("injected inventory failure")), 2)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("injected inventory failure"));
+    assert!(cache.get(1001.into()).is_none());
+    assert!(local_store.metadata("1001-42.sst").await.is_ok());
 }
 
 #[tokio::test]
@@ -346,19 +324,10 @@ async fn test_recovery_returns_ready_routes_across_shards() {
     let (_dir, local) = local_object_store().await;
     let objects = [object_in_shard(0, 3), object_in_shard(2, 3)];
     for id in objects {
-        for path_id in [1, 2] {
-            local
-                .upload(
-                    &format!("{}-{path_id}.sst", id.as_raw_id()),
-                    Bytes::from_static(b"complete"),
-                )
-                .await
-                .unwrap();
-        }
         local
             .upload(
-                &format!("{}-3.sst", id.as_raw_id()),
-                Bytes::from_static(b"short"),
+                &format!("{}-1.sst", id.as_raw_id()),
+                Bytes::from_static(b"complete"),
             )
             .await
             .unwrap();

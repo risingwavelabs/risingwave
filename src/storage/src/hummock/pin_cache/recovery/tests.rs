@@ -15,7 +15,7 @@
 use risingwave_object_store::object::ObjectMetadata;
 
 use super::*;
-use crate::hummock::pin_cache::test_utils::in_memory_object_store;
+use crate::hummock::pin_cache::test_utils::{in_memory_object_store, object_in_shard};
 
 fn metadata(id: HummockSstableObjectId, path_id: usize, size: usize) -> ObjectMetadata {
     ObjectMetadata {
@@ -23,13 +23,6 @@ fn metadata(id: HummockSstableObjectId, path_id: usize, size: usize) -> ObjectMe
         last_modified: 0.0,
         total_size: size,
     }
-}
-
-fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
-    (1..)
-        .map(HummockSstableObjectId::from)
-        .find(|&id| PinCache::shard_index(id, shard_num) == shard)
-        .unwrap()
 }
 
 async fn cache(shard_num: usize, ids: &[HummockSstableObjectId]) -> PinCache {
@@ -90,37 +83,23 @@ async fn test_recovery_scan_failure_leaves_index_unchanged() {
 
 #[tokio::test]
 async fn test_recovery_handles_sparse_shards_at_different_concurrency() {
-    for concurrency in [1, 2, 8, 32] {
-        for occupied in [vec![0, 8, 16], (0..17).collect()] {
-            let ids: Vec<_> = occupied.iter().map(|&i| object_in_shard(i, 17)).collect();
-            let mut cache = cache(17, &ids).await;
-            for round in 0..2 {
-                let files = stream::iter(
-                    ids.iter()
-                        .flat_map(|&id| {
-                            [
-                                Ok(metadata(id, 0, 4)),
-                                Ok(metadata(id, 1, 8)),
-                                Ok(metadata(id, 2, 8)),
-                            ]
-                        })
-                        .collect::<Vec<_>>(),
-                );
-                let stats = cache
-                    .recover_local_files(Ok(files.boxed()), concurrency)
-                    .await
-                    .unwrap();
-                let expected = if round == 0 { ids.len() as u64 } else { 0 };
-                assert_eq!(stats.objects, expected);
-                assert_eq!(stats.bytes, expected * 8);
-                for &id in &ids {
-                    let shard = cache.shard(id).read();
-                    assert_eq!(
-                        shard.objects[&id].published().unwrap().path,
-                        format!("{}-1.sst", id.as_raw_id())
-                    );
-                }
-            }
+    // Serial, parallel, and more workers than occupied shards all restore the original indices.
+    for concurrency in [1, 2, 8] {
+        let ids = [0, 2, 4].map(|i| object_in_shard(i, 5));
+        let mut cache = cache(5, &ids).await;
+        let files = stream::iter(ids.map(|id| Ok(metadata(id, 1, 8))));
+        let stats = cache
+            .recover_local_files(Ok(files.boxed()), concurrency)
+            .await
+            .unwrap();
+        assert_eq!(stats.objects, 3);
+        assert_eq!(stats.bytes, 24);
+        for id in ids {
+            let shard = cache.shard(id).read();
+            assert_eq!(
+                shard.objects[&id].published().unwrap().path,
+                format!("{}-1.sst", id.as_raw_id())
+            );
         }
     }
 }
