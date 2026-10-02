@@ -1,0 +1,542 @@
+/*
+ * Copyright 2026 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Copyright Debezium Authors.
+ *
+ * Licensed under the Apache Software License version 2.0, available at http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+package io.debezium.connector.oracle;
+
+import io.debezium.connector.SnapshotRecord;
+import io.debezium.connector.SnapshotType;
+import io.debezium.pipeline.CommonOffsetContext;
+import io.debezium.pipeline.source.snapshot.incremental.IncrementalSnapshotContext;
+import io.debezium.pipeline.txmetadata.TransactionContext;
+import io.debezium.relational.TableId;
+import io.debezium.spi.schema.DataCollectionId;
+import io.debezium.util.Strings;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.apache.kafka.connect.data.Schema;
+
+/**
+ * Debezium 3.2.4.Final override preserving snapshot boundary transactions in streaming offsets.
+ * Restores the serialization behavior before the DBZ-9413 refactor.
+ */
+public class OracleOffsetContext extends CommonOffsetContext<SourceInfo> {
+
+    public static final String SNAPSHOT_PENDING_TRANSACTIONS_KEY = "snapshot_pending_tx";
+    public static final String SNAPSHOT_SCN_KEY = "snapshot_scn";
+
+    private final Schema sourceInfoSchema;
+
+    private final TransactionContext transactionContext;
+    private final IncrementalSnapshotContext<TableId> incrementalSnapshotContext;
+
+    /**
+     * SCN that was used for the initial consistent snapshot.
+     *
+     * <p>We keep track of this field because it's a cutoff for emitting DDL statements, in case we
+     * start mining _before_ the snapshot SCN to cover transactions that were ongoing at the time
+     * the snapshot was taken.
+     */
+    private final Scn snapshotScn;
+
+    /**
+     * Map of (txid, start SCN) for all transactions in progress at the time the snapshot was taken.
+     */
+    private Map<String, Scn> snapshotPendingTransactions;
+
+    private OracleOffsetContext(
+            OracleConnectorConfig connectorConfig,
+            Scn scn,
+            Long scnIndex,
+            CommitScn commitScn,
+            String lcrPosition,
+            Scn snapshotScn,
+            Map<String, Scn> snapshotPendingTransactions,
+            SnapshotType snapshot,
+            boolean snapshotCompleted,
+            TransactionContext transactionContext,
+            IncrementalSnapshotContext<TableId> incrementalSnapshotContext,
+            String transactionId,
+            Long transactionSequence) {
+        super(new SourceInfo(connectorConfig), snapshotCompleted);
+        sourceInfo.setScn(scn);
+        sourceInfo.setScnIndex(scnIndex);
+        sourceInfo.setTransactionId(transactionId);
+        sourceInfo.setTransactionSequence(transactionSequence);
+        // It is safe to set this value to the supplied SCN, specifically for snapshots.
+        // During streaming this value will be updated by the current event handler.
+        sourceInfo.setEventScn(scn);
+        sourceInfo.setLcrPosition(lcrPosition);
+        sourceInfo.setCommitScn(commitScn);
+        sourceInfoSchema = sourceInfo.schema();
+
+        // Snapshot SCN is a new field and may be null in cases where the offsets are being read
+        // from
+        // and older version of Debezium. In this case, we need to explicitly enforce Scn#NULL usage
+        // when the value is null.
+        this.snapshotScn = snapshotScn == null ? Scn.NULL : snapshotScn;
+        this.snapshotPendingTransactions = snapshotPendingTransactions;
+
+        this.transactionContext = transactionContext;
+        this.incrementalSnapshotContext = incrementalSnapshotContext;
+
+        if (this.snapshotCompleted) {
+            postSnapshotCompletion();
+        } else {
+            setSnapshot(snapshot);
+            sourceInfo.setSnapshot(snapshot != null ? SnapshotRecord.TRUE : SnapshotRecord.FALSE);
+        }
+    }
+
+    public static class Builder {
+
+        private OracleConnectorConfig connectorConfig;
+        private Scn scn;
+        private Long scnIndex;
+        private String lcrPosition;
+        private SnapshotType snapshot;
+        private boolean snapshotCompleted;
+        private TransactionContext transactionContext;
+        private IncrementalSnapshotContext<TableId> incrementalSnapshotContext;
+        private Map<String, Scn> snapshotPendingTransactions;
+        private Scn snapshotScn;
+        private String transactionId;
+        private Long transactionSequence;
+        private CommitScn commitScn = CommitScn.empty();
+
+        public Builder logicalName(OracleConnectorConfig connectorConfig) {
+            this.connectorConfig = connectorConfig;
+            return this;
+        }
+
+        public Builder scn(Scn scn) {
+            this.scn = scn;
+            return this;
+        }
+
+        public Builder scnIndex(Long scnIndex) {
+            this.scnIndex = scnIndex;
+            return this;
+        }
+
+        public Builder lcrPosition(String lcrPosition) {
+            this.lcrPosition = lcrPosition;
+            return this;
+        }
+
+        public Builder snapshot(SnapshotType snapshot) {
+            this.snapshot = snapshot;
+            return this;
+        }
+
+        public Builder snapshotCompleted(boolean snapshotCompleted) {
+            this.snapshotCompleted = snapshotCompleted;
+            return this;
+        }
+
+        public Builder transactionContext(TransactionContext transactionContext) {
+            this.transactionContext = transactionContext;
+            return this;
+        }
+
+        public Builder incrementalSnapshotContext(
+                IncrementalSnapshotContext<TableId> incrementalSnapshotContext) {
+            this.incrementalSnapshotContext = incrementalSnapshotContext;
+            return this;
+        }
+
+        public Builder snapshotPendingTransactions(Map<String, Scn> snapshotPendingTransactions) {
+            this.snapshotPendingTransactions = snapshotPendingTransactions;
+            return this;
+        }
+
+        public Builder snapshotScn(Scn scn) {
+            this.snapshotScn = scn;
+            return this;
+        }
+
+        public Builder transactionId(String transactionId) {
+            this.transactionId = transactionId;
+            return this;
+        }
+
+        public Builder transactionSequence(Long transactionSequence) {
+            this.transactionSequence = transactionSequence;
+            return this;
+        }
+
+        public Builder commitScn(CommitScn commitScn) {
+            this.commitScn = commitScn;
+            return this;
+        }
+
+        public OracleOffsetContext build() {
+            return new OracleOffsetContext(
+                    connectorConfig,
+                    scn,
+                    scnIndex,
+                    commitScn,
+                    lcrPosition,
+                    snapshotScn,
+                    snapshotPendingTransactions,
+                    snapshot,
+                    snapshotCompleted,
+                    transactionContext,
+                    incrementalSnapshotContext,
+                    transactionId,
+                    transactionSequence);
+        }
+    }
+
+    public static Builder create() {
+        return new Builder();
+    }
+
+    @Override
+    public Map<String, ?> getOffset() {
+        final Map<String, Object> result = new HashMap<>();
+
+        if (getSnapshot().isPresent()) {
+            result.put(SourceInfo.SNAPSHOT_KEY, getSnapshot().get().toString());
+            result.put(SNAPSHOT_COMPLETED_KEY, snapshotCompleted);
+        }
+
+        if (sourceInfo.getLcrPosition() != null) {
+            // XStream
+            result.put(SourceInfo.LCR_POSITION_KEY, sourceInfo.getLcrPosition());
+        } else {
+            // Non-XStream
+            if (sourceInfo.getScn() != null) {
+                result.put(SourceInfo.SCN_KEY, sourceInfo.getScn().toString());
+            }
+            if (sourceInfo.getScnIndex() != null) {
+                result.put(SourceInfo.SCN_INDEX_KEY, sourceInfo.getScnIndex());
+            }
+        }
+
+        if (snapshotScn != null && !snapshotScn.isNull()) {
+            result.put(SNAPSHOT_SCN_KEY, snapshotScn.toString());
+        }
+
+        // These transactions belong to the original snapshot boundary, not the snapshot phase.
+        // Keep them with snapshot_scn so recovery does not filter their pre-boundary changes.
+        final String encodedPendingTransactions = getEncodedSnapshotPendingTransactions();
+        if (!Strings.isNullOrEmpty(encodedPendingTransactions)) {
+            result.put(SNAPSHOT_PENDING_TRANSACTIONS_KEY, encodedPendingTransactions);
+        }
+
+        if (sourceInfo.getCommitScn() != null) {
+            sourceInfo.getCommitScn().store(result);
+        }
+
+        if (sourceInfo.getTransactionId() != null) {
+            result.put(SourceInfo.TXID_KEY, sourceInfo.getTransactionId());
+            if (sourceInfo.getTransactionSequence() != null) {
+                result.put(SourceInfo.TXSEQ_KEY, sourceInfo.getTransactionSequence());
+            }
+        }
+
+        return sourceInfo.isSnapshot()
+                ? result
+                : incrementalSnapshotContext.store(transactionContext.store(result));
+    }
+
+    @Override
+    public Schema getSourceInfoSchema() {
+        return sourceInfoSchema;
+    }
+
+    public void setScn(Scn scn) {
+        sourceInfo.setScn(scn);
+    }
+
+    public void setScnIndex(Long scnIndex) {
+        sourceInfo.setScnIndex(scnIndex);
+    }
+
+    public void setEventScn(Scn eventScn) {
+        sourceInfo.setEventScn(eventScn);
+    }
+
+    public void setEventCommitScn(Scn eventCommitScn) {
+        sourceInfo.setEventCommitScn(eventCommitScn);
+    }
+
+    public Scn getScn() {
+        return sourceInfo.getScn();
+    }
+
+    public Long getScnIndex() {
+        return sourceInfo.getScnIndex();
+    }
+
+    public CommitScn getCommitScn() {
+        return sourceInfo.getCommitScn();
+    }
+
+    public Instant getCommitTime() {
+        return sourceInfo.getCommitTime();
+    }
+
+    public Scn getEventScn() {
+        return sourceInfo.getEventScn();
+    }
+
+    public Scn getEventCommitScn() {
+        return sourceInfo.getEventCommitScn();
+    }
+
+    public void setLcrPosition(String lcrPosition) {
+        sourceInfo.setLcrPosition(lcrPosition);
+    }
+
+    public String getLcrPosition() {
+        return sourceInfo.getLcrPosition();
+    }
+
+    public Scn getSnapshotScn() {
+        return snapshotScn;
+    }
+
+    public Map<String, Scn> getSnapshotPendingTransactions() {
+        return snapshotPendingTransactions;
+    }
+
+    public String getTransactionId() {
+        return sourceInfo.getTransactionId();
+    }
+
+    public Long getTransactionSequence() {
+        return sourceInfo.getTransactionSequence();
+    }
+
+    public void setSnapshotPendingTransactions(Map<String, Scn> snapshotPendingTransactions) {
+        this.snapshotPendingTransactions = snapshotPendingTransactions;
+    }
+
+    public void setTransactionId(String transactionId) {
+        sourceInfo.setTransactionId(transactionId);
+    }
+
+    public void setTransactionSequence(Long transactionSequence) {
+        sourceInfo.setTransactionSequence(transactionSequence);
+    }
+
+    public void setUserName(String userName) {
+        sourceInfo.setUserName(userName);
+    }
+
+    public void setSourceTime(Instant instant) {
+        sourceInfo.setSourceTime(instant);
+    }
+
+    public void setTableId(TableId tableId) {
+        sourceInfo.tableEvent(tableId);
+    }
+
+    public Integer getRedoThread() {
+        return sourceInfo.getRedoThread();
+    }
+
+    public void setRedoThread(Integer redoThread) {
+        sourceInfo.setRedoThread(redoThread);
+    }
+
+    public void setRsId(String rsId) {
+        sourceInfo.setRsId(rsId);
+    }
+
+    public void setSsn(long ssn) {
+        sourceInfo.setSsn(ssn);
+    }
+
+    public void setStartScn(Scn startScn) {
+        sourceInfo.setStartScn(startScn);
+    }
+
+    public void setStartTime(Instant startTime) {
+        sourceInfo.setStartTime(startTime);
+    }
+
+    public void setCommitTime(Instant commitTime) {
+        sourceInfo.setCommitTime(commitTime);
+    }
+
+    public String getRedoSql() {
+        return sourceInfo.getRedoSql();
+    }
+
+    public void setRedoSql(String redoSql) {
+        sourceInfo.setRedoSql(redoSql);
+    }
+
+    public String getRowId() {
+        return sourceInfo.getRowId();
+    }
+
+    public void setRowId(String rowId) {
+        sourceInfo.setRowId(rowId);
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder("OracleOffsetContext [scn=").append(getScn());
+
+        if (getSnapshot().isPresent()) {
+            sb.append(", snapshot=").append(getSnapshot().get());
+            sb.append(", snapshot_completed=").append(snapshotCompleted);
+        } else if (getScnIndex() != null) {
+            sb.append(", scnIndex=").append(getScnIndex());
+        }
+
+        if (getTransactionId() != null) {
+            sb.append(", txId=").append(getTransactionId());
+            if (getTransactionSequence() != null) {
+                sb.append(", txSeq=").append(getTransactionSequence());
+            }
+        }
+
+        sb.append(", commit_scn=").append(sourceInfo.getCommitScn().toLoggableFormat());
+        sb.append(", lcr_position=").append(sourceInfo.getLcrPosition());
+
+        sb.append("]");
+
+        return sb.toString();
+    }
+
+    @Override
+    public void event(DataCollectionId tableId, Instant timestamp) {
+        sourceInfo.tableEvent((TableId) tableId);
+        sourceInfo.setSourceTime(timestamp);
+    }
+
+    public void tableEvent(TableId tableId, Instant timestamp) {
+        sourceInfo.setSourceTime(timestamp);
+        sourceInfo.tableEvent(tableId);
+    }
+
+    public void tableEvent(Set<TableId> tableIds, Instant timestamp) {
+        sourceInfo.setSourceTime(timestamp);
+        sourceInfo.tableEvent(tableIds);
+    }
+
+    @Override
+    public TransactionContext getTransactionContext() {
+        return transactionContext;
+    }
+
+    @Override
+    public IncrementalSnapshotContext<?> getIncrementalSnapshotContext() {
+        return incrementalSnapshotContext;
+    }
+
+    private String getEncodedSnapshotPendingTransactions() {
+        if (snapshotPendingTransactions == null || snapshotPendingTransactions.isEmpty()) {
+            return null;
+        }
+
+        return snapshotPendingTransactions.entrySet().stream()
+                .map(e -> e.getKey() + ":" + e.getValue().toString())
+                .collect(Collectors.joining(","));
+    }
+
+    /**
+     * Helper method to resolve a {@link Scn} by key from the offset map.
+     *
+     * @param offset the offset map
+     * @param key the entry key, either {@link SourceInfo#SCN_KEY} or {@link
+     *     SourceInfo#COMMIT_SCN_KEY}.
+     * @return the {@link Scn} or null if not found
+     */
+    public static Scn getScnFromOffsetMapByKey(Map<String, ?> offset, String key) {
+        Object scn = offset.get(key);
+        if (scn instanceof String) {
+            return Scn.valueOf((String) scn);
+        } else if (scn != null) {
+            return Scn.valueOf((Long) scn);
+        }
+        return null;
+    }
+
+    /**
+     * Helper method to read the in-progress transaction map from the offset map.
+     *
+     * @param offset the offset map
+     * @return the in-progress transaction map
+     */
+    public static Map<String, Scn> loadSnapshotPendingTransactions(Map<String, ?> offset) {
+        Map<String, Scn> snapshotPendingTransactions = new HashMap<>();
+        final String encoded =
+                readOffsetValue(offset, SNAPSHOT_PENDING_TRANSACTIONS_KEY, String.class);
+        if (encoded != null) {
+            Arrays.stream(encoded.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .forEach(
+                            e -> {
+                                String[] parts = e.split(":", 2);
+                                String txid = parts[0];
+                                Scn startScn = Scn.valueOf(parts[1]);
+                                snapshotPendingTransactions.put(txid, startScn);
+                            });
+        }
+        return snapshotPendingTransactions;
+    }
+
+    /**
+     * Helper method to read the snapshot SCN from the offset map.
+     *
+     * @param offset the offset map
+     * @return the snapshot SCN
+     */
+    public static Scn loadSnapshotScn(Map<String, ?> offset) {
+        return getScnFromOffsetMapByKey(offset, SNAPSHOT_SCN_KEY);
+    }
+
+    /**
+     * Helper method to read the transaction id from the offset map.
+     *
+     * @param offset the offset map
+     * @return the transaction identifier, may be {@code null}
+     */
+    public static String loadTransactionId(Map<String, ?> offset) {
+        return readOffsetValue(offset, SourceInfo.TXID_KEY, String.class);
+    }
+
+    /**
+     * Helper method to read the transaction sequence from the offset map.
+     *
+     * @param offset the offset map
+     * @return the transaction sequence, may be {@code null}
+     */
+    public static Long loadTransactionSequence(Map<String, ?> offset) {
+        return readOffsetValue(offset, SourceInfo.TXSEQ_KEY, Long.class);
+    }
+
+    private static <T> T readOffsetValue(Map<String, ?> offsets, String key, Class<T> valueType) {
+        final Object value = offsets.get(key);
+        return valueType.isInstance(value) ? valueType.cast(value) : null;
+    }
+}
