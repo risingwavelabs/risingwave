@@ -74,6 +74,9 @@ impl PinCacheDownload {
             .as_ref()
             .expect("download owns an unpublished file");
         self.upload_state = UploadState::InProgress;
+        // TODO: Preallocate file.size bytes in the FS writer's temporary file once
+        // OpenDAL supports physical space reservation. Cache capacity currently only
+        // limits logical usage.
         let mut writer = store
             .streaming_upload(&file.path)
             .await
