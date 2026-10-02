@@ -23,8 +23,8 @@
 //! index unchanged until publication. Revocation changes the admission identity; unregistering
 //! invalidates all object tokens.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
-//! Reads use `get` and never create refill work. Startup recovery, capacity accounting,
-//! and physical file reclamation are added separately before production activation.
+//! Reads use `get` and never create refill work. Recovery completes before sharing the cache.
+//! Capacity accounting and physical reclamation are added before production activation.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,6 +36,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectStoreRef};
 
 mod membership;
+mod recovery;
 mod refill;
 #[cfg(test)]
 pub(super) mod test_utils;
@@ -217,16 +218,21 @@ impl PinCacheReadHandle {
 }
 
 impl PinCache {
-    /// Registers the initial objects without downloading them.
-    /// The caller must supply an empty local store; existing-file recovery is added separately.
-    pub(crate) fn new(
+    /// Recovers local files selected by the initial pin-policy/version membership before sharing.
+    /// An incomplete inventory fails initialization; no partially recovered cache is returned.
+    pub(crate) async fn new(
         store: ObjectStoreRef,
         shard_num: usize,
+        recover_concurrency: usize,
         objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
-    ) -> Arc<Self> {
+    ) -> ObjectResult<Arc<Self>> {
         assert!(
             shard_num > 0,
             "pin cache shard count must be greater than zero"
+        );
+        assert!(
+            recover_concurrency > 0,
+            "pin cache recovery concurrency must be greater than zero"
         );
         let mut pin_cache = Self {
             store,
@@ -239,9 +245,20 @@ impl PinCache {
             let state = pin_cache.shards[Self::shard_index(id, shard_num)].get_mut();
             state.register_object(id, size);
         }
-        GLOBAL_PIN_CACHE_METRICS.published_objects.set(0);
-        GLOBAL_PIN_CACHE_METRICS.published_bytes.set(0);
-        Arc::new(pin_cache)
+        let metrics = &*GLOBAL_PIN_CACHE_METRICS;
+        let objects = pin_cache.store.list("", None, None).await;
+        let recovered = pin_cache
+            .recover_local_files(objects, recover_concurrency)
+            .await
+            .inspect_err(|_| {
+                metrics.recovery_failures.inc();
+            })?;
+        metrics
+            .published_objects
+            .set(metric_bytes(recovered.objects));
+        metrics.published_bytes.set(metric_bytes(recovered.bytes));
+        metrics.recovery_ready.set(1);
+        Ok(Arc::new(pin_cache))
     }
 
     pub(crate) fn get(
