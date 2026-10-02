@@ -88,9 +88,9 @@ impl PinCacheObject {
         }
     }
 
-    /// Withdraws the read route; GC may select the file after its last owner releases it.
+    /// Withdraws the read route and returns the exact file to enqueue for deletion.
     /// Membership and refill admission remain valid.
-    /// The caller must release the returned reference outside the shard lock.
+    /// The caller must hand the returned reference to GC outside the shard lock.
     fn unpublish(&mut self) -> Option<Arc<PinCacheFile>> {
         let size = self.published()?.size;
         let PinCacheObjectState::Published(file) =
@@ -205,7 +205,7 @@ impl PinCacheReadHandle {
         {
             let file = object.unpublish().unwrap();
             drop(state);
-            drop(file);
+            self.pin_cache.gc.enqueue_delete(file);
         }
     }
 

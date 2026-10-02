@@ -192,11 +192,13 @@ impl PinCache {
     /// Installs a downloaded file only if its original admission is still current.
     /// Returns false if the task was revoked while downloading. The caller must use the token
     /// for this file and serialize downloads per object; an existing publication is a bug.
-    /// A rejected download is dropped after the lock, so cleanup never runs while it is held.
+    /// A rejected download is handed to GC after releasing the lock.
     pub(crate) fn publish(&self, token: PinCacheRefillToken, download: PinCacheDownload) -> bool {
         let mut state = self.shard(token.object_id).write();
         let Some(object) = state.object_matching_token(token) else {
             // This download lost permission to publish when its object was unregistered or revoked.
+            drop(state);
+            self.gc.enqueue_delete(download.into_file());
             return false;
         };
         object.publish(download.into_file());

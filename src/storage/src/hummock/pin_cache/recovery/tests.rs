@@ -100,7 +100,14 @@ async fn test_recovery_reclaims_rejected_files_across_shards() {
         .unwrap();
     assert_eq!(stats.objects, 2);
     assert_eq!(stats.bytes, 16);
-    cache.gc.select_minor().delete().await.unwrap();
+    cache
+        .gc
+        .select_full(std::time::SystemTime::now() + std::time::Duration::from_secs(1))
+        .await
+        .unwrap()
+        .delete()
+        .await
+        .unwrap();
     assert_eq!(accounted_bytes(&cache.gc), 16);
     for path in paths {
         if retained.contains(&path) {

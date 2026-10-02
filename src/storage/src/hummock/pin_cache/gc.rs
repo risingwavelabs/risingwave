@@ -15,10 +15,11 @@
 //! File selection and reservation ownership, independent of GC scheduling.
 //!
 //! The keeper holds one reference to each accounted file. Downloads, publications and readers
-//! hold the others. A file with no external owner can be selected; a selection itself retains
-//! that reference until deletion finishes, preventing another pass from selecting it again.
+//! hold the others. Minor GC selects explicitly discarded files; full GC also discovers
+//! abandoned files. Both wait for external owners to release their references. A selection
+//! retains a reference until deletion finishes, preventing another pass from selecting it again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -44,6 +45,9 @@ struct FileEntry {
 #[derive(Default)]
 struct PinCacheGcState {
     files: HashMap<String, FileEntry>,
+    // A subset of `files`: exact paths of explicitly discarded, complete files.
+    // Keep entries until deletion succeeds, including while readers or selections hold them.
+    pending_deletes: HashSet<String>,
     accounted_bytes: u64,
 }
 
@@ -55,6 +59,7 @@ impl PinCacheGcState {
 
     fn remove(&mut self, file: &PinCacheFile) {
         if self.files.remove(&file.path).is_some() {
+            self.pending_deletes.remove(&file.path);
             self.accounted_bytes -= file.size;
             self.report();
         }
@@ -206,6 +211,19 @@ impl PinCacheGc {
         entry.changed_at = SystemTime::now();
     }
 
+    /// Hand off a complete, obsolete file after releasing its shard lock. This only records
+    /// deletion intent; readers may still hold the file, and no GC pass is started here.
+    pub(super) fn enqueue_delete(&self, file: Arc<PinCacheFile>) {
+        let mut state = self.state.lock();
+        debug_assert!(
+            state
+                .files
+                .get(&file.path)
+                .is_some_and(|entry| Arc::ptr_eq(&entry.file, &file) && !entry.scan_upload)
+        );
+        state.pending_deletes.insert(file.path.clone());
+    }
+
     // Only copy leases under the global lock; candidate allocation and inventory processing
     // happen outside it. The snapshot also prevents another pass from selecting these files.
     fn snapshot_files(&self) -> Vec<Arc<PinCacheFile>> {
@@ -226,15 +244,20 @@ impl PinCacheGc {
             .then_some((entry.scan_upload, entry.changed_at))
     }
 
-    /// Known complete files need neither a directory scan nor an age cutoff.
+    /// Only inspect explicitly discarded files, without scanning the keeper or storage.
+    /// Files still held by readers remain pending for a later pass.
     pub(super) fn select_minor(self: &Arc<Self>) -> PinCacheGcSelection {
-        let candidates = self
-            .snapshot_files()
+        let files: Vec<_> = {
+            let state = self.state.lock();
+            state
+                .pending_deletes
+                .iter()
+                .map(|path| state.files[path].file.clone())
+                .collect()
+        };
+        let candidates = files
             .into_iter()
-            .filter(|file| {
-                self.unreferenced_entry(file)
-                    .is_some_and(|(scan_upload, _)| !scan_upload)
-            })
+            .filter(|file| self.unreferenced_entry(file).is_some())
             .map(|file| Candidate {
                 paths: vec![file.path.clone()],
                 file,

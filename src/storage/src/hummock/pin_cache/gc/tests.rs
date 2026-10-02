@@ -28,30 +28,41 @@ pub(in crate::hummock::pin_cache) fn accounted_bytes(gc: &PinCacheGc) -> u64 {
 #[tokio::test]
 async fn test_selection_protects_files_and_can_be_abandoned() {
     let store = in_memory_object_store();
-    let gc = Arc::new(PinCacheGc::new(store.clone(), 8));
+    let gc = Arc::new(PinCacheGc::new(store.clone(), 16));
     let file = gc.try_reserve("1001-1.sst".into(), 8).unwrap();
     store
         .upload(&file.path, Bytes::from_static(b"complete"))
         .await
         .unwrap();
     gc.complete_upload(&file);
+    let abandoned = gc.try_reserve("1002-2.sst".into(), 8).unwrap();
+    store
+        .upload(&abandoned.path, Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    gc.complete_upload(&abandoned);
+    drop(abandoned);
+    // Even a complete, unreferenced file is not a minor candidate without deletion intent.
+    assert!(gc.select_minor().candidates.is_empty());
+    gc.enqueue_delete(file.clone());
+    // The explicit candidate still has a reader; enqueueing it must not bypass that lease.
     assert!(gc.select_minor().candidates.is_empty());
     drop(file);
     let selected = gc.select_minor();
     assert_eq!(selected.candidates.len(), 1);
     assert!(gc.select_minor().candidates.is_empty());
-    assert!(
-        gc.select_full(SystemTime::now() + Duration::from_secs(1))
-            .await
-            .unwrap()
-            .candidates
-            .is_empty()
-    );
-    assert!(gc.try_reserve("1002-2.sst".into(), 1).is_err());
+    let full = gc
+        .select_full(SystemTime::now() + Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert_eq!(full.candidates.len(), 1);
+    assert_eq!(full.candidates[0].file.path, "1002-2.sst");
+    drop(full);
+    assert!(gc.try_reserve("1003-3.sst".into(), 1).is_err());
     drop(selected);
-    assert_eq!(accounted_bytes(&gc), 8);
+    assert_eq!(accounted_bytes(&gc), 16);
     gc.select_minor().delete().await.unwrap();
-    assert_eq!(accounted_bytes(&gc), 0);
+    assert_eq!(accounted_bytes(&gc), 8);
     assert!(
         store
             .metadata("1001-1.sst")
@@ -59,6 +70,14 @@ async fn test_selection_protects_files_and_can_be_abandoned() {
             .unwrap_err()
             .is_object_not_found_error()
     );
+    assert!(store.metadata("1002-2.sst").await.is_ok());
+    gc.select_full(SystemTime::now() + Duration::from_secs(1))
+        .await
+        .unwrap()
+        .delete()
+        .await
+        .unwrap();
+    assert_eq!(accounted_bytes(&gc), 0);
 }
 
 #[tokio::test]
@@ -69,9 +88,10 @@ async fn test_failed_deletion_keeps_capacity_and_full_gc_retries() {
     // A nonempty directory makes deletion fail even when the test runs as root.
     std::fs::create_dir(dir.path().join(path)).unwrap();
     std::fs::write(dir.path().join(path).join("child"), b"complete").unwrap();
-    drop(gc.account_existing(path.into(), 8));
+    gc.enqueue_delete(gc.account_existing(path.into(), 8));
     assert!(gc.select_minor().delete().await.is_err());
     assert_eq!(accounted_bytes(&gc), 8);
+    assert_eq!(gc.select_minor().candidates.len(), 1);
     std::fs::remove_file(dir.path().join(path).join("child")).unwrap();
     std::fs::remove_dir(dir.path().join(path)).unwrap();
     // Missing files are idempotent deletes, and the reservation is released only once.

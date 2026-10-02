@@ -100,6 +100,7 @@ async fn test_read_and_unregister_lifecycle() {
     drop(old_read);
     pin_cache.gc.select_minor().delete().await.unwrap();
     assert!(old_file.upgrade().is_none());
+    assert_eq!(current.read(..).await.unwrap(), original);
 }
 
 #[tokio::test]
@@ -157,6 +158,16 @@ async fn test_completed_invalid_fs_upload_reclaims_capacity() {
     );
     assert!(pin_cache.get(object_id).is_none());
     pin_cache.gc.select_minor().delete().await.unwrap();
+    assert_eq!(accounted_bytes(&pin_cache.gc), 8);
+    pin_cache
+        .gc
+        .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+        .await
+        .unwrap()
+        .delete()
+        .await
+        .unwrap();
+    assert_eq!(accounted_bytes(&pin_cache.gc), 0);
     let files: Vec<_> = local_store
         .list("", None, None)
         .await
@@ -385,6 +396,15 @@ async fn test_recovery_reclaims_files_outside_initial_membership() {
         .await
         .unwrap();
     pin_cache.gc.select_minor().delete().await.unwrap();
+    assert_eq!(accounted_bytes(&pin_cache.gc), 10);
+    pin_cache
+        .gc
+        .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+        .await
+        .unwrap()
+        .delete()
+        .await
+        .unwrap();
     for path in ["1001-42.sst", "unfinished.tmp"] {
         assert!(
             local_store
