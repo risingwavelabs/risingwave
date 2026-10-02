@@ -171,6 +171,9 @@ final class OracleExternalTable {
         try (var statement = connection.createStatement()) {
             statement.execute("ALTER SESSION SET CONTAINER = " + pdbName);
             statement.execute("ALTER SESSION SET TIME_ZONE = 'UTC'");
+            // Match RisingWave's native string ordering for keyset pagination.
+            statement.execute("ALTER SESSION SET NLS_SORT = BINARY");
+            statement.execute("ALTER SESSION SET NLS_COMP = BINARY");
         } catch (SQLException error) {
             connection.close();
             throw error;
@@ -210,11 +213,13 @@ final class OracleExternalTable {
         var primaryKeys = new ArrayList<String>();
         try (var statement =
                 connection.prepareStatement(
-                        "SELECT cols.COLUMN_NAME "
+                        "SELECT cols.COLUMN_NAME, tc.DATA_TYPE, tc.DATA_PRECISION, tc.DATA_SCALE, tc.COLLATION "
                                 + "FROM ALL_CONSTRAINTS cons "
                                 + "JOIN ALL_CONS_COLUMNS cols "
                                 + "ON cons.OWNER = cols.OWNER "
                                 + "AND cons.CONSTRAINT_NAME = cols.CONSTRAINT_NAME "
+                                + "JOIN ALL_TAB_COLS tc ON tc.OWNER = cols.OWNER "
+                                + "AND tc.TABLE_NAME = cols.TABLE_NAME AND tc.COLUMN_NAME = cols.COLUMN_NAME "
                                 + "WHERE cons.OWNER = ? AND cons.TABLE_NAME = ? "
                                 + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED' "
                                 + "ORDER BY cols.POSITION")) {
@@ -222,11 +227,84 @@ final class OracleExternalTable {
             statement.setString(2, tableName);
             try (var result = statement.executeQuery()) {
                 while (result.next()) {
-                    primaryKeys.add(result.getString(1));
+                    validatePrimaryKeyOrdering(connection, result);
+                    primaryKeys.add(result.getString("COLUMN_NAME"));
                 }
             }
         }
         return primaryKeys;
+    }
+
+    /**
+     * Checks that an Oracle primary-key column can be decoded and compared without changing its
+     * ordering during PK-ordered snapshot pagination. Otherwise, the page frontier could skip or
+     * repeat rows.
+     *
+     * <p>Accepts NUMBER with declared precision, scale, and integer width each fitting within
+     * RisingWave's 28-digit decimal; RAW; DATE; TIMESTAMP with fractional precision at most 6; and
+     * CHAR/VARCHAR2 with BINARY or USING_NLS_COMP collation in an AL32UTF8 database. Snapshot
+     * sessions set NLS_COMP and NLS_SORT to BINARY for the session-controlled collation case.
+     */
+    private static void validatePrimaryKeyOrdering(Connection connection, ResultSet column)
+            throws SQLException {
+        var name = column.getString("COLUMN_NAME");
+        var type = column.getString("DATA_TYPE");
+        if (type.equals("NUMBER")) {
+            // Rust's decimal representation has 28 decimal digits and a maximum scale of 28.
+            // Rounding a key would collapse distinct rows and change the pagination frontier.
+            var precision = nullableInteger(column, "DATA_PRECISION");
+            var scale = nullableInteger(column, "DATA_SCALE");
+            if (precision != null
+                    && scale != null
+                    && precision <= 28
+                    && scale <= 28
+                    && precision - scale <= 28) {
+                return;
+            }
+            throw new SQLException(
+                    "Oracle CDC numeric primary key '"
+                            + name
+                            + "' requires a declared NUMBER precision, scale and integer width "
+                            + "representable within 28 decimal digits");
+        }
+        if (type.equals("RAW") || type.equals("DATE")) {
+            return;
+        }
+        if (type.startsWith("TIMESTAMP")) {
+            var scale = nullableInteger(column, "DATA_SCALE");
+            if (scale != null && scale <= 6) {
+                return;
+            }
+        }
+        if (type.equals("VARCHAR2") || type.equals("CHAR")) {
+            // A linguistic column collation overrides the binary session settings. National
+            // character types also need a different ordering from RisingWave's UTF-8 strings.
+            var collation = column.getString("COLLATION");
+            if (collation != null
+                    && !collation.equals("BINARY")
+                    && !collation.equals("USING_NLS_COMP")) {
+                throw new SQLException(
+                        "Oracle CDC primary key '" + name + "' requires binary collation");
+            }
+            try (var statement = connection.createStatement();
+                    var result =
+                            statement.executeQuery(
+                                    "SELECT VALUE FROM NLS_DATABASE_PARAMETERS "
+                                            + "WHERE PARAMETER = 'NLS_CHARACTERSET'")) {
+                if (result.next() && result.getString(1).equals("AL32UTF8")) {
+                    return;
+                }
+            }
+            throw new SQLException(
+                    "Oracle CDC character primary keys require the AL32UTF8 database character set");
+        }
+        throw new SQLException(
+                "Oracle CDC primary key '"
+                        + name
+                        + "' has unsupported type "
+                        + type
+                        + "; use NUMBER, RAW, DATE, TIMESTAMP with precision <= 6, "
+                        + "or binary CHAR/VARCHAR2 in an AL32UTF8 database");
     }
 
     private static Data.DataType oracleTypeToRisingWaveType(
