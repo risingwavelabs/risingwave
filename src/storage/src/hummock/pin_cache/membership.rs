@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use super::PinCache;
@@ -25,18 +24,9 @@ impl PinCache {
         &self,
         objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) {
-        let mut objects_by_shard = vec![Vec::new(); self.shards.len()];
+        // Release the shard between objects so a large update does not hold up lookups.
         for (id, size) in objects {
-            objects_by_shard[Self::shard_index(id, self.shards.len())].push((id, size));
-        }
-        for (shard, objects) in self.shards.iter().zip_eq_fast(objects_by_shard) {
-            if objects.is_empty() {
-                continue;
-            }
-            let mut state = shard.write();
-            for (id, size) in objects {
-                state.register_object(id, size);
-            }
+            self.shard(id).write().register_object(id, size);
         }
     }
 
@@ -47,23 +37,13 @@ impl PinCache {
         &self,
         objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) {
-        let mut objects_by_shard = vec![Vec::new(); self.shards.len()];
         for id in objects {
-            objects_by_shard[Self::shard_index(id, self.shards.len())].push(id);
-        }
-        let mut files = Vec::new();
-        for (shard, objects) in self.shards.iter().zip_eq_fast(objects_by_shard) {
-            if objects.is_empty() {
-                continue;
-            }
-            let mut state = shard.write();
-            for id in objects {
-                if let Some(mut object) = state.objects.remove(&id) {
-                    files.extend(object.unpublish());
-                }
+            // Release the shard before dropping the removed publication.
+            let object = self.shard(id).write().objects.remove(&id);
+            if let Some(mut object) = object {
+                object.unpublish();
             }
         }
-        drop(files);
     }
 
     /// Whether an object is registered, regardless of whether it has a readable local file.

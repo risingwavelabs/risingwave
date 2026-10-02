@@ -181,7 +181,7 @@ impl PinCacheShard {
 
 /// A local whole-SST cache. The remote object store remains authoritative.
 /// Each object's state is protected by its shard lock. Reads, refills, and membership updates
-/// may run concurrently; batch membership updates are not atomic across shards.
+/// may run concurrently; batch membership updates are not atomic across objects.
 pub(crate) struct PinCache {
     store: ObjectStoreRef,
     // Hold only one shard lock at a time. Never perform I/O or call back into the controller
