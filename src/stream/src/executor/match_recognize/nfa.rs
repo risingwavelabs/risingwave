@@ -203,9 +203,9 @@ pub trait CandidateMatcher {
     /// [the eviction walker]: Nfa::reaches_boundary_alive
     fn matches(
         &self,
-        var: &str,
+        var: VarId,
         pos: usize,
-        labels: &[String],
+        labels: &[VarId],
     ) -> impl std::future::Future<Output = StreamExecutorResult<bool>> + Send;
 }
 
@@ -239,12 +239,18 @@ pub enum Pattern {
 
 type StateId = usize;
 
+/// A pattern variable, interned per automaton: the index of its name in [`Nfa::var_names`]. The
+/// walk carries these instead of the names — a consumed row costs a two-byte push rather than a
+/// `String` allocation, and a predicate lookup is an index rather than a hash of the name. Names
+/// reappear only where a match leaves the automaton ([`LabeledMatch::labels`]).
+pub type VarId = u16;
+
 #[derive(Debug, Clone)]
 enum Transition {
     /// An ε-transition (consumes no row).
     Epsilon(StateId),
     /// Consume a row that satisfies pattern variable `var`, moving to `target`.
-    OnVar { var: String, target: StateId },
+    OnVar { var: VarId, target: StateId },
 }
 
 /// A Thompson-construction NFA with a single start and single accept state.
@@ -253,6 +259,8 @@ pub struct Nfa {
     states: Vec<Vec<Transition>>,
     start: StateId,
     accept: StateId,
+    /// The pattern variables by [`VarId`]: the distinct names of the pattern, sorted.
+    vars: Vec<String>,
     /// Per state: whether `accept` is reachable from it, with every predicate assumed satisfiable.
     /// This is the static half of [`Nfa::may_extend`]: a consuming transition at the row boundary
     /// whose target cannot reach `accept` can never contribute a longer match, no matter what rows
@@ -274,7 +282,25 @@ pub struct Nfa {
 impl Nfa {
     /// Compile a [`Pattern`] into an NFA.
     pub fn compile(pattern: &Pattern) -> Self {
-        let mut builder = NfaBuilder { states: Vec::new() };
+        // Ids are assigned by sorted name, not by first appearance, so two patterns over the same
+        // variables agree on them — which is what lets a test's reference matcher serve several
+        // automata, and costs nothing in production (the map is built once per query).
+        let mut vars = Vec::new();
+        collect_vars(pattern, &mut vars);
+        vars.sort();
+        vars.dedup();
+        // LOCKSTEP: `VarId` is `u16`. The binder's `MAX_PATTERN_NFA_STATES` (100k, two states per
+        // variable occurrence) bounds distinct variables to 50k, so this cannot fire from a plan
+        // the frontend produces; it pins the dependency where the cast lives.
+        assert!(
+            vars.len() <= usize::from(VarId::MAX) + 1,
+            "MATCH_RECOGNIZE pattern has {} distinct variables, more than a VarId can index",
+            vars.len()
+        );
+        let mut builder = NfaBuilder {
+            states: Vec::new(),
+            vars,
+        };
         let frag = builder.build(pattern);
         let reach_accept = Self::compute_reach_accept(&builder.states, frag.accept);
         let max_match_rows = Self::compute_max_match_rows(&builder.states, frag.start);
@@ -283,6 +309,7 @@ impl Nfa {
             states: builder.states,
             start: frag.start,
             accept: frag.accept,
+            vars: builder.vars,
             reach_accept,
             min_match_rows,
             max_match_rows,
@@ -292,6 +319,29 @@ impl Nfa {
     /// See the `max_match_rows` field.
     pub fn max_match_rows(&self) -> Option<usize> {
         self.max_match_rows
+    }
+
+    /// The pattern variables by [`VarId`].
+    pub fn var_names(&self) -> &[String] {
+        &self.vars
+    }
+
+    /// The id of a pattern variable, or `None` for a name the pattern does not use.
+    pub fn var_id(&self, name: &str) -> Option<VarId> {
+        self.vars.iter().position(|v| v == name).map(|i| i as VarId)
+    }
+
+    /// The name of a pattern variable.
+    pub fn var_name(&self, var: VarId) -> &str {
+        &self.vars[var as usize]
+    }
+
+    /// The names of a label path, for a match leaving the automaton.
+    fn label_names(&self, labels: &[VarId]) -> Vec<String> {
+        labels
+            .iter()
+            .map(|&v| self.vars[v as usize].clone())
+            .collect()
     }
 
     /// See the `max_match_rows` field: the longest path from `start` counting consuming edges,
@@ -449,7 +499,7 @@ impl Nfa {
             for &s in &current {
                 for t in &self.states[s] {
                     if let Transition::OnVar { var, target } = t
-                        && row.contains(var)
+                        && row.contains(self.var_name(*var))
                     {
                         next.insert(*target);
                     }
@@ -738,10 +788,10 @@ impl Nfa {
             let candidate = match t {
                 Transition::Epsilon(next) => self.longest_from(rows, *next, pos, visited),
                 Transition::OnVar { var, target } => {
-                    if pos < rows.len() && rows[pos].contains(var) {
+                    if pos < rows.len() && rows[pos].contains(self.var_name(*var)) {
                         self.longest_from(rows, *target, pos + 1, visited).map(
                             |(end, mut labels)| {
-                                labels.insert(0, var.clone());
+                                labels.insert(0, self.var_name(*var).to_owned());
                                 (end, labels)
                             },
                         )
@@ -858,6 +908,9 @@ impl Nfa {
                 .await?;
             let found_empty = match found {
                 Some((end, labels)) if end > i => {
+                    // The one place ids become names: a match leaving the automaton. The liveness
+                    // and extension probes share `walk` and discard the path.
+                    let labels = self.label_names(&labels);
                     // The diagnostic is dropped here on purpose: the executor recomputes the
                     // resume position for the matches it actually *emits* and reports from there,
                     // so a match that this scan finds but the emit path holds back or skips is not
@@ -1041,9 +1094,11 @@ impl Nfa {
         matcher: &(impl CandidateMatcher + Sync),
         budget: &mut ScanBudget,
         mut memo: Option<&mut Memo>,
-    ) -> StreamExecutorResult<Option<(usize, Vec<String>)>> {
+    ) -> StreamExecutorResult<Option<(usize, Vec<VarId>)>> {
         let n_states = self.states.len();
-        let mut path: Vec<String> = Vec::new();
+        // Interned labels: a consumed row is a two-byte push, and the names are materialized
+        // once, for a match that leaves the walk.
+        let mut path: Vec<VarId> = Vec::new();
         // One visited scope per consumption level; `scopes[depth]` is the live one. A walk opens a
         // scope per consumed row, so they are cleared and reused rather than reallocated.
         let mut scopes: Vec<Visited> = vec![Visited::new(n_states)];
@@ -1122,7 +1177,7 @@ impl Nfa {
                     if !budget.charge() {
                         return Ok(None);
                     }
-                    if !matcher.matches(var, pos, &path).await? {
+                    if !matcher.matches(*var, pos, &path).await? {
                         continue;
                     }
                     // Consumption boundary: the frame pushed below starts with a fresh visited
@@ -1138,7 +1193,7 @@ impl Nfa {
                     if !budget.step() {
                         return Ok(None);
                     }
-                    path.push(var.clone());
+                    path.push(*var);
                     depth += 1;
                     if depth == scopes.len() {
                         scopes.push(Visited::new(n_states));
@@ -1160,7 +1215,7 @@ impl Nfa {
         stack: &mut Vec<Frame>,
         scopes: &mut [Visited],
         depth: &mut usize,
-        path: &mut Vec<String>,
+        path: &mut Vec<VarId>,
         memo: Option<&mut Memo>,
         budget: &ScanBudget,
     ) {
@@ -1297,6 +1352,18 @@ struct Fragment {
 
 struct NfaBuilder {
     states: Vec<Vec<Transition>>,
+    /// The interner: a variable's id is its index here (see [`Nfa::compile`]).
+    vars: Vec<String>,
+}
+
+/// Every variable name the pattern mentions, with repeats.
+fn collect_vars(pattern: &Pattern, out: &mut Vec<String>) {
+    match pattern {
+        Pattern::Var(v) => out.push(v.clone()),
+        Pattern::Concat(ps) | Pattern::Alt(ps) => ps.iter().for_each(|p| collect_vars(p, out)),
+        Pattern::Quantified(inner, _, _) => collect_vars(inner, out),
+        Pattern::Permute(vs) => out.extend(vs.iter().cloned()),
+    }
 }
 
 impl NfaBuilder {
@@ -1309,8 +1376,16 @@ impl NfaBuilder {
         self.states[from].push(Transition::Epsilon(to));
     }
 
-    fn add_on_var(&mut self, from: StateId, var: String, to: StateId) {
+    fn add_on_var(&mut self, from: StateId, var: &str, to: StateId) {
+        let var = self.intern(var);
         self.states[from].push(Transition::OnVar { var, target: to });
+    }
+
+    /// `vars` is sorted and deduplicated by `Nfa::compile`, which collected every name first.
+    fn intern(&self, name: &str) -> VarId {
+        self.vars
+            .binary_search_by(|v| v.as_str().cmp(name))
+            .expect("every pattern variable was collected before building") as VarId
     }
 
     /// LOCKSTEP: the per-construct state counts below are mirrored by `estimate_nfa_states` in
@@ -1322,7 +1397,7 @@ impl NfaBuilder {
             Pattern::Var(v) => {
                 let start = self.new_state();
                 let accept = self.new_state();
-                self.add_on_var(start, v.clone(), accept);
+                self.add_on_var(start, v, accept);
                 Fragment { start, accept }
             }
             Pattern::Concat(parts) => {
@@ -1481,12 +1556,27 @@ fn permutations(items: &[String]) -> Vec<Vec<String>> {
 #[cfg(test)]
 pub(crate) struct SetMatcher {
     rows: Vec<BTreeSet<String>>,
+    /// The automaton's variable names, to read a row's satisfied-set by id.
+    names: Vec<String>,
 }
 
 #[cfg(test)]
 impl SetMatcher {
-    pub(crate) fn new(rows: Vec<BTreeSet<String>>) -> Self {
-        Self { rows }
+    pub(crate) fn new(nfa: &Nfa, rows: Vec<BTreeSet<String>>) -> Self {
+        Self {
+            rows,
+            names: nfa.var_names().to_vec(),
+        }
+    }
+
+    /// For a matcher shared by several automata: the names the ids stand for, sorted (see
+    /// [`Nfa::compile`]). Sound for an automaton exactly when its `var_names()` is a PREFIX of
+    /// the sorted `vars` — extra names must sort after every name the automaton uses.
+    pub(crate) fn over(rows: Vec<BTreeSet<String>>, vars: &[&str]) -> Self {
+        let mut names: Vec<String> = vars.iter().map(|v| (*v).to_owned()).collect();
+        names.sort();
+        names.dedup();
+        Self { rows, names }
     }
 }
 
@@ -1494,11 +1584,14 @@ impl SetMatcher {
 impl CandidateMatcher for SetMatcher {
     async fn matches(
         &self,
-        var: &str,
+        var: VarId,
         pos: usize,
-        _labels: &[String],
+        _labels: &[VarId],
     ) -> StreamExecutorResult<bool> {
-        Ok(self.rows[pos].contains(var))
+        Ok(self
+            .names
+            .get(var as usize)
+            .is_some_and(|name| self.rows[pos].contains(name)))
     }
 }
 
@@ -1895,17 +1988,21 @@ mod tests {
 
         struct CountingMatcher {
             rows: Vec<BTreeSet<String>>,
+            names: Vec<String>,
             calls: AtomicUsize,
         }
         impl CandidateMatcher for CountingMatcher {
             async fn matches(
                 &self,
-                var: &str,
+                var: VarId,
                 pos: usize,
-                _labels: &[String],
+                _labels: &[VarId],
             ) -> StreamExecutorResult<bool> {
                 self.calls.fetch_add(1, Ordering::Relaxed);
-                Ok(self.rows[pos].contains(var))
+                Ok(self
+                    .names
+                    .get(var as usize)
+                    .is_some_and(|name| self.rows[pos].contains(name)))
             }
         }
 
@@ -1915,6 +2012,7 @@ mod tests {
         // Pull ONE match, then compare predicate-evaluation counts against a full collect.
         let first_only = CountingMatcher {
             rows: r.clone(),
+            names: nfa.var_names().to_vec(),
             calls: AtomicUsize::new(0),
         };
         let mut scan = MatchScan::new();
@@ -1936,6 +2034,7 @@ mod tests {
 
         let full = CountingMatcher {
             rows: r.clone(),
+            names: nfa.var_names().to_vec(),
             calls: AtomicUsize::new(0),
         };
         let collected = nfa
@@ -1949,7 +2048,7 @@ mod tests {
         );
 
         // Pulling to exhaustion enumerates exactly the collected sequence.
-        let m = SetMatcher { rows: r.clone() };
+        let m = SetMatcher::new(&nfa, r.clone());
         let mut scan = MatchScan::new();
         let mut pulled = Vec::new();
         while let Some(mm) = nfa
@@ -1979,17 +2078,21 @@ mod tests {
 
         struct CountingMatcher {
             rows: Vec<BTreeSet<String>>,
+            names: Vec<String>,
             calls: AtomicUsize,
         }
         impl CandidateMatcher for CountingMatcher {
             async fn matches(
                 &self,
-                var: &str,
+                var: VarId,
                 pos: usize,
-                _labels: &[String],
+                _labels: &[VarId],
             ) -> StreamExecutorResult<bool> {
                 self.calls.fetch_add(1, Ordering::Relaxed);
-                Ok(self.rows[pos].contains(var))
+                Ok(self
+                    .names
+                    .get(var as usize)
+                    .is_some_and(|name| self.rows[pos].contains(name)))
             }
         }
 
@@ -2008,6 +2111,7 @@ mod tests {
             async move {
                 let m = CountingMatcher {
                     rows: r.clone(),
+                    names: nfa.var_names().to_vec(),
                     calls: AtomicUsize::new(0),
                 };
                 let mut budget = ScanBudget::unlimited();
@@ -2051,7 +2155,7 @@ mod tests {
     async fn spent_budget_stops_without_verdicts() {
         let nfa = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
         let r = rows("ab");
-        let m = SetMatcher { rows: r.clone() };
+        let m = SetMatcher::new(&nfa, r.clone());
 
         // Unlimited: the match is found.
         let mut budget = ScanBudget::unlimited();
@@ -2108,7 +2212,7 @@ mod tests {
         let p = Pattern::Concat(vec![vars("a"), vars("b")]);
         let nfa = Nfa::compile(&p);
         let r = rows("abab");
-        let m = SetMatcher { rows: r.clone() };
+        let m = SetMatcher::new(&nfa, r.clone());
         let dynamic = nfa
             .find_matches_dynamic(r.len(), &m, &SkipMode::PastLastRow)
             .await
@@ -2127,7 +2231,9 @@ mod tests {
     /// accepting result and must not hold it.
     #[tokio::test]
     async fn may_extend_follows_the_finder_preference_order() {
-        let m = |s: &str| SetMatcher { rows: rows(s) };
+        // One matcher for every automaton below: each is over `{a, b}` or `{a, b, c}`, both
+        // prefixes of the sorted names, so the ids agree.
+        let m = |s: &str| SetMatcher::over(rows(s), &["a", "b", "c"]);
 
         // Fixed (a b): after consuming both, nothing can extend — terminal.
         let fixed = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
@@ -2237,7 +2343,7 @@ mod tests {
 
         // `[a]` with the boundary right after it: the `a` is a live partial match — a future `b` may
         // complete it — so it must be retained.
-        let m = SetMatcher { rows: rows("a") };
+        let m = SetMatcher::new(&nfa, rows("a"));
         assert!(
             nfa.reaches_boundary_alive(0, 1, &m, &mut ScanBudget::unlimited(), false)
                 .await
@@ -2248,13 +2354,13 @@ mod tests {
         // pattern, but the following safe rows already block it from completing, so it is dead and
         // must be evictable. This is the case the previous `can_begin_at`-based predicate retained
         // forever.
-        let m = SetMatcher { rows: rows("ax") };
+        let m = SetMatcher::new(&nfa, rows("ax"));
         assert!(
             !nfa.reaches_boundary_alive(0, 2, &m, &mut ScanBudget::unlimited(), false)
                 .await
                 .unwrap()
         );
-        let m = SetMatcher { rows: rows("axx") };
+        let m = SetMatcher::new(&nfa, rows("axx"));
         assert!(
             !nfa.reaches_boundary_alive(0, 3, &m, &mut ScanBudget::unlimited(), false)
                 .await
@@ -2262,7 +2368,7 @@ mod tests {
         );
 
         // A later start can be the live one: in `[x, a]` row 0 is dead but row 1 (the `a`) is live.
-        let m = SetMatcher { rows: rows("xa") };
+        let m = SetMatcher::new(&nfa, rows("xa"));
         assert!(
             !nfa.reaches_boundary_alive(0, 2, &m, &mut ScanBudget::unlimited(), false)
                 .await
@@ -2276,7 +2382,7 @@ mod tests {
 
         // A complete match sitting exactly at the boundary is not yet finalized (it needs a following
         // safe row to confirm maximality), so its start is still retained.
-        let m = SetMatcher { rows: rows("ab") };
+        let m = SetMatcher::new(&nfa, rows("ab"));
         assert!(
             nfa.reaches_boundary_alive(0, 2, &m, &mut ScanBudget::unlimited(), false)
                 .await
@@ -2286,18 +2392,31 @@ mod tests {
 
     /// A path-dependent matcher: `b` only matches once an `a` has been bound earlier in the match.
     /// This exercises threading the running labels into the predicate.
-    struct NeedsPrecedingA;
+    struct NeedsPrecedingA {
+        a: VarId,
+        b: VarId,
+    }
+    impl NeedsPrecedingA {
+        fn for_nfa(nfa: &Nfa) -> Self {
+            Self {
+                a: nfa.var_id("a").unwrap(),
+                b: nfa.var_id("b").unwrap(),
+            }
+        }
+    }
     impl CandidateMatcher for NeedsPrecedingA {
         async fn matches(
             &self,
-            var: &str,
+            var: VarId,
             _pos: usize,
-            labels: &[String],
+            labels: &[VarId],
         ) -> StreamExecutorResult<bool> {
-            Ok(match var {
-                "a" => true,
-                "b" => labels.iter().any(|l| l == "a"),
-                _ => false,
+            Ok(if var == self.a {
+                true
+            } else if var == self.b {
+                labels.contains(&self.a)
+            } else {
+                false
             })
         }
     }
@@ -2306,7 +2425,7 @@ mod tests {
     async fn reluctant_quantifier_prefers_fewer() {
         // Three rows that each satisfy both `a` and `b`, so `a+ b` can stop early.
         let rows = vec![BTreeSet::from(["a".to_owned(), "b".to_owned()]); 3];
-        let m = SetMatcher { rows: rows.clone() };
+        let m = SetMatcher::over(rows.clone(), &["a", "b"]);
 
         // Greedy `a+ b`: consume as many `a` as possible -> [0, 3) (a a b).
         let greedy = Nfa::compile(&Pattern::Concat(vec![
@@ -2364,7 +2483,7 @@ mod tests {
         // guards against an empty-match or non-termination bug when two quantifiers over the same
         // variable sit adjacent with opposite preferences.
         let r = rows("aaa");
-        let m = SetMatcher { rows: r.clone() };
+        let m = SetMatcher::over(r.clone(), &["a"]);
         let nfa = Nfa::compile(&Pattern::Concat(vec![
             star(vars("a"), true),
             star(vars("a"), false),
@@ -2386,7 +2505,7 @@ mod tests {
         // Four rows that each satisfy both `a` and `b`, matched by `(<a-quant> b+)+`. The inner
         // first-variable quantifier's preference decides the split; the rest is greedy `b+`.
         let r = ab_rows(4);
-        let m = SetMatcher { rows: r.clone() };
+        let m = SetMatcher::over(r.clone(), &["a", "b"]);
 
         // Reluctant `a+?` takes the fewest `a` (one), then greedy `b+` takes the rest -> "abbb".
         let reluctant = Nfa::compile(&plus(
@@ -2428,9 +2547,8 @@ mod tests {
     async fn dynamic_threads_running_labels() {
         // (a b): `b` sees `a` in the running labels -> matches.
         let ab = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
-        let m = NeedsPrecedingA;
         assert_eq!(
-            ab.find_matches_dynamic(2, &m, &SkipMode::PastLastRow)
+            ab.find_matches_dynamic(2, &NeedsPrecedingA::for_nfa(&ab), &SkipMode::PastLastRow)
                 .await
                 .unwrap(),
             vec![LabeledMatch {
@@ -2443,7 +2561,7 @@ mod tests {
         // (b a): `b` is first, the running labels are empty, so it cannot match -> no match.
         let ba = Nfa::compile(&Pattern::Concat(vec![vars("b"), vars("a")]));
         assert_eq!(
-            ba.find_matches_dynamic(2, &m, &SkipMode::PastLastRow)
+            ba.find_matches_dynamic(2, &NeedsPrecedingA::for_nfa(&ba), &SkipMode::PastLastRow)
                 .await
                 .unwrap(),
             vec![]
@@ -2463,7 +2581,7 @@ mod tests {
             Pattern::Var("a".into()),
         ]);
         let nfa = Nfa::compile(&pat);
-        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); 2]);
+        let matcher = SetMatcher::new(&nfa, vec![BTreeSet::from(["a".to_owned()]); 2]);
         let mut scan = MatchScan::new();
         let mut budget = ScanBudget::new(1);
         let found = nfa
@@ -2544,7 +2662,7 @@ mod tests {
         );
         let nfa = Nfa::compile(&pat);
         let n_rows = 1300;
-        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+        let matcher = SetMatcher::new(&nfa, vec![BTreeSet::from(["a".to_owned()]); n_rows]);
         let mut budget = ScanBudget::new(1);
         assert!(
             !nfa.reaches_boundary_alive(0, n_rows, &matcher, &mut budget, true)
@@ -2573,7 +2691,7 @@ mod tests {
         ]));
         let scan_all = |seq: &str| {
             let nfa = &nfa;
-            let matcher = SetMatcher::new(rows(seq));
+            let matcher = SetMatcher::new(nfa, rows(seq));
             let n = seq.len();
             async move {
                 let mut scan = MatchScan::new();
@@ -2667,7 +2785,7 @@ mod tests {
         );
         let nfa = Nfa::compile(&pat);
         let n_rows = 10;
-        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+        let matcher = SetMatcher::new(&nfa, vec![BTreeSet::from(["a".to_owned()]); n_rows]);
         let mut scan = MatchScan::new();
         let mut budget = ScanBudget::new(1);
         let found = nfa
@@ -2699,7 +2817,7 @@ mod tests {
         let pat = Pattern::Quantified(Box::new(Pattern::Var("a".into())), Quantifier::Plus, false);
         let nfa = Nfa::compile(&pat);
         let n_rows = 2000;
-        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+        let matcher = SetMatcher::new(&nfa, vec![BTreeSet::from(["a".to_owned()]); n_rows]);
 
         let mut scan = MatchScan::new();
         let mut budget = ScanBudget::unlimited();
@@ -2754,7 +2872,7 @@ mod tests {
         let spans = |n_rows: usize| {
             let nfa = &nfa;
             async move {
-                let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+                let matcher = SetMatcher::new(nfa, vec![BTreeSet::from(["a".to_owned()]); n_rows]);
                 nfa.find_matches_dynamic(n_rows, &matcher, &SkipMode::PastLastRow)
                     .await
                     .unwrap()

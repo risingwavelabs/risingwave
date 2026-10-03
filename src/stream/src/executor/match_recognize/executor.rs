@@ -45,8 +45,6 @@
 //! the MV or replaying the topic may interleave equal-ORDER-BY rows differently and legitimately
 //! produce different matches (the standard leaves tie order implementation-defined).
 
-use std::collections::HashMap;
-
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VnodeBitmapExt;
@@ -64,6 +62,7 @@ use risingwave_storage::StateStore;
 use super::incremental::{Finalized, IncrementalMatcher, Seq};
 use super::nfa::{CandidateMatcher, Nfa, ScanBudget, SkipDegradation, SkipMode};
 use crate::common::table::state_table::StateTable;
+use crate::executor::match_recognize::nfa::VarId;
 use crate::executor::monitor::MatchRecognizeMetrics;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
@@ -335,6 +334,10 @@ use risingwave_pb::stream_plan::match_recognize_define_slot::Kind as DefineSlotK
 struct DefineSlot {
     kind: DefineSlotKind,
     vars: Vec<String>,
+    /// `vars` by [`VarId`], bound against the automaton in [`DefineTable::bind`]: whether a label
+    /// belongs to the set this slot navigates over, as one index instead of a name comparison per
+    /// label per question.
+    members: Vec<bool>,
     col_idx: usize,
     offset: usize,
 }
@@ -382,6 +385,7 @@ impl CompiledDefine {
                 Ok(DefineSlot {
                     kind,
                     vars: s.vars.clone(),
+                    members: Vec::new(),
                     col_idx: s.col_idx as usize,
                     offset: s.offset as usize,
                 })
@@ -395,12 +399,55 @@ impl CompiledDefine {
     }
 }
 
+/// The compiled `DEFINE`s by pattern variable, bound against the automaton's interned ids: the
+/// walker asks [`DefineMatcher::matches`] once per candidate row per path, and this makes the
+/// predicate lookup an index instead of a hash of the variable's name.
+pub struct DefineTable {
+    by_var: Vec<Option<CompiledDefine>>,
+}
+
+impl DefineTable {
+    /// Bind the compiled defines to the pattern's variables. A define whose symbol the pattern
+    /// does not use cannot come from the binder (it rejects the shape), so it means a corrupt or
+    /// skewed plan: fail the build, like every other decode check, rather than run a plan whose
+    /// meaning is in doubt.
+    pub fn bind(nfa: &Nfa, defines: Vec<CompiledDefine>) -> StreamExecutorResult<Self> {
+        let names = nfa.var_names();
+        let mut by_var: Vec<Option<CompiledDefine>> = (0..names.len()).map(|_| None).collect();
+        for mut def in defines {
+            let Some(var) = nfa.var_id(&def.symbol) else {
+                return Err(anyhow::anyhow!(
+                    "MATCH_RECOGNIZE DEFINE for `{}`, which the pattern does not use",
+                    def.symbol
+                )
+                .into());
+            };
+            for slot in &mut def.slots {
+                slot.members = names
+                    .iter()
+                    .map(|name| slot.vars.iter().any(|v| v == name))
+                    .collect();
+            }
+            by_var[var as usize] = Some(def);
+        }
+        Ok(Self { by_var })
+    }
+
+    fn get(&self, var: VarId) -> Option<&CompiledDefine> {
+        self.by_var.get(var as usize).and_then(|d| d.as_ref())
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &CompiledDefine> {
+        self.by_var.iter().flatten()
+    }
+}
+
 /// Evaluates `DEFINE` predicates against the in-progress match, driving the NFA. Holds the
 /// retained rows of one partition and the compiled `DEFINE`s; a variable with no `DEFINE` is
 /// universally true.
 struct DefineMatcher<'a> {
     rows: &'a [BufferedRow],
-    defines: &'a HashMap<String, CompiledDefine>,
+    defines: &'a DefineTable,
     /// `WITHIN` span predicate over `[last_order_key, first_order_key]`. Applied as a candidate is
     /// bound so the NFA prunes any extension that would push the match's span past the bound,
     /// yielding the longest match that fits the window rather than rejecting an overshooting greedy
@@ -423,13 +470,16 @@ impl DefineMatcher<'_> {
     fn slot_value(
         &self,
         slot: &DefineSlot,
-        var: &str,
+        var: VarId,
         pos: usize,
         match_start: usize,
-        labels: &[String],
+        labels: &[VarId],
     ) -> Datum {
         let col_at = |i: usize| self.rows[i].row.datum_at(slot.col_idx).to_owned_datum();
-        let in_var = |l: &str| slot.vars.iter().any(|v| v == l);
+        // A slot reaches a matcher only through a bound table (`DefineTable::bind` is the sole
+        // constructor), so `members` covers every id the automaton can ask about.
+        debug_assert_eq!(slot.members.len(), self.defines.by_var.len());
+        let in_var = |l: VarId| slot.members.get(l as usize).copied().unwrap_or(false);
         // Whether the candidate row itself belongs to the set this slot navigates over.
         let candidate_in_var = in_var(var);
         match slot.kind {
@@ -438,7 +488,7 @@ impl DefineMatcher<'_> {
             // The candidate is the running first only when no earlier row of the match is in the set.
             DefineSlotKind::RunningFirst => labels
                 .iter()
-                .position(|l| in_var(l))
+                .position(|&l| in_var(l))
                 .map(|k| match_start + k)
                 .or_else(|| candidate_in_var.then_some(pos))
                 .and_then(col_at),
@@ -448,7 +498,7 @@ impl DefineMatcher<'_> {
                 .or_else(|| {
                     labels
                         .iter()
-                        .rposition(|l| in_var(l))
+                        .rposition(|&l| in_var(l))
                         .map(|k| match_start + k)
                 })
                 .and_then(col_at),
@@ -462,9 +512,9 @@ impl DefineMatcher<'_> {
 impl CandidateMatcher for DefineMatcher<'_> {
     async fn matches(
         &self,
-        var: &str,
+        var: VarId,
         pos: usize,
-        labels: &[String],
+        labels: &[VarId],
     ) -> StreamExecutorResult<bool> {
         let match_start = pos - labels.len();
         // A pattern variable with no DEFINE matches every row; one with a DEFINE must satisfy it.
@@ -551,7 +601,7 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     time_col: usize,
     measures: Vec<CompiledMeasure>,
     /// Compiled `DEFINE` predicates keyed by their pattern variable.
-    defines: HashMap<String, CompiledDefine>,
+    defines: DefineTable,
     within: Option<NonStrictExpression>,
     /// `WITHIN` deadline expr (see [`MatchRecognizeExecutorArgs`]); consulted on every watermark
     /// pass — which visits every partition, so an idle partition's timed-out partial is emitted or
@@ -695,14 +745,10 @@ struct BufferedRow {
 }
 
 impl<S: StateStore> MatchRecognizeExecutor<S> {
-    pub fn new(args: MatchRecognizeExecutorArgs<S>) -> Self {
+    pub fn new(args: MatchRecognizeExecutorArgs<S>) -> StreamExecutorResult<Self> {
         let time_col = args.order_key_indices[0];
-        let defines = args
-            .defines
-            .into_iter()
-            .map(|d| (d.symbol.clone(), d))
-            .collect();
-        Self {
+        let defines = DefineTable::bind(&args.nfa, args.defines)?;
+        Ok(Self {
             ctx: args.ctx,
             input: args.input,
             schema: args.schema,
@@ -717,7 +763,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             skip: args.skip,
             eval_error_report: args.eval_error_report,
             state_table: args.state_table,
-        }
+        })
     }
 
     /// Emit every match the current state has decided, in scan order, mirroring the batch
@@ -733,7 +779,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         partition_key: &OwnedRow,
         nfa: &Nfa,
         skip: &SkipMode,
-        defines: &HashMap<String, CompiledDefine>,
+        defines: &DefineTable,
         within: Option<&NonStrictExpression>,
         measures: &[CompiledMeasure],
         watermark: Option<&ScalarImpl>,
@@ -911,7 +957,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
     async fn prune_dead_prefix(
         run: &mut PartitionRun,
         nfa: &Nfa,
-        defines: &HashMap<String, CompiledDefine>,
+        defines: &DefineTable,
         within: Option<&NonStrictExpression>,
         w: &ScalarImpl,
         state_table: &mut StateTable<S>,
@@ -998,7 +1044,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
     async fn consume_prefix(
         run: &mut PartitionRun,
         upto: usize,
-        defines: &HashMap<String, CompiledDefine>,
+        defines: &DefineTable,
         within: Option<&NonStrictExpression>,
         state_table: &mut StateTable<S>,
         budget: &mut ScanBudget,
@@ -1071,7 +1117,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         time_col: usize,
         nfa: &std::sync::Arc<Nfa>,
         skip: &SkipMode,
-        defines: &HashMap<String, CompiledDefine>,
+        defines: &DefineTable,
         within: Option<&NonStrictExpression>,
         within_deadline: &Option<NonStrictExpression>,
         memoizable: bool,
@@ -1185,7 +1231,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
 
         // Whether the per-start `(state, position)` failure memo is sound for this query: no
         // `DEFINE` slot may read the running label assignment. See `Memo` in the NFA module.
-        let memoizable = defines.values().all(|d| {
+        let memoizable = defines.iter().all(|d| {
             d.slots
                 .iter()
                 .all(|s| matches!(s.kind, DefineSlotKind::SelfCol | DefineSlotKind::Prev))
@@ -1677,16 +1723,13 @@ mod tests {
 
     /// `DEFINE <symbol> AS <nav> = <symbol>.v`, compiled through the real proto lowering so the slot
     /// kinds are the planner's.
-    fn nav_eq_self(symbol: &str, nav: PbDefineSlot) -> (String, CompiledDefine) {
+    fn nav_eq_self(symbol: &str, nav: PbDefineSlot) -> CompiledDefine {
         let pb = PbMatchRecognizeDefine {
             symbol: symbol.to_owned(),
             condition: Some(nav_eq_self_condition()),
             slots: vec![nav, nav_slot(KIND_SELF, &[], 0)],
         };
-        (
-            symbol.to_owned(),
-            CompiledDefine::from_protobuf(&pb, LogReport).unwrap(),
-        )
+        CompiledDefine::from_protobuf(&pb, LogReport).unwrap()
     }
 
     fn plus(var: &str) -> Pattern {
@@ -1702,11 +1745,7 @@ mod tests {
     }
 
     /// All matches over `vals`, with the whole buffer safe (no watermark boundary in play).
-    async fn find_all(
-        nfa: &Nfa,
-        defines: &HashMap<String, CompiledDefine>,
-        vals: &[i32],
-    ) -> Vec<LabeledMatch> {
+    async fn find_all(nfa: &Nfa, defines: &DefineTable, vals: &[i32]) -> Vec<LabeledMatch> {
         let rows = buffered(vals);
         let matcher = DefineMatcher {
             rows: &rows,
@@ -1724,9 +1763,14 @@ mod tests {
     /// candidate too — including on the match's first row, where no earlier `a` exists.
     #[tokio::test]
     async fn define_running_last_of_self_sees_candidate() {
-        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+        let nfa = Nfa::compile(&plus("a"));
+        let defines = DefineTable::bind(
+            &nfa,
+            vec![nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))],
+        )
+        .unwrap();
         assert_eq!(
-            find_all(&Nfa::compile(&plus("a")), &defines, &[1, 2, 3]).await,
+            find_all(&nfa, &defines, &[1, 2, 3]).await,
             vec![LabeledMatch {
                 start: 0,
                 end: 3,
@@ -1741,16 +1785,20 @@ mod tests {
     #[tokio::test]
     async fn define_running_last_of_self_keeps_start_alive() {
         let rows = buffered(&[1]);
-        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+        let nfa = Nfa::compile(&Pattern::Concat(vec![
+            Pattern::Var("a".to_owned()),
+            Pattern::Var("b".to_owned()),
+        ]));
+        let defines = DefineTable::bind(
+            &nfa,
+            vec![nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))],
+        )
+        .unwrap();
         let matcher = DefineMatcher {
             rows: &rows,
             defines: &defines,
             within: None,
         };
-        let nfa = Nfa::compile(&Pattern::Concat(vec![
-            Pattern::Var("a".to_owned()),
-            Pattern::Var("b".to_owned()),
-        ]));
         assert!(
             nfa.reaches_boundary_alive(
                 0,
@@ -1768,9 +1816,14 @@ mod tests {
     /// bound, so this holds for the match's first row and then pins later rows to that value.
     #[tokio::test]
     async fn define_running_first_of_self_sees_candidate() {
-        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0))]);
+        let nfa = Nfa::compile(&plus("a"));
+        let defines = DefineTable::bind(
+            &nfa,
+            vec![nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0))],
+        )
+        .unwrap();
         assert_eq!(
-            find_all(&Nfa::compile(&plus("a")), &defines, &[5, 5, 7]).await,
+            find_all(&nfa, &defines, &[5, 5, 7]).await,
             vec![
                 // 5, 5 share the first value; 7 breaks it and starts its own match.
                 LabeledMatch {
@@ -1793,14 +1846,18 @@ mod tests {
     /// `labels[1]` — pinning the `match_start + k` arithmetic where neither term is 0.
     #[tokio::test]
     async fn define_running_first_indexes_from_match_start() {
-        let defines = HashMap::from([
-            nav_eq_self("x", nav_slot(KIND_PREV, &[], 1)),
-            nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0)),
-        ]);
         let nfa = Nfa::compile(&Pattern::Concat(vec![
             Pattern::Var("x".to_owned()),
             plus("a"),
         ]));
+        let defines = DefineTable::bind(
+            &nfa,
+            vec![
+                nav_eq_self("x", nav_slot(KIND_PREV, &[], 1)),
+                nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0)),
+            ],
+        )
+        .unwrap();
         assert_eq!(
             // `x` = the second 9 (its physical predecessor is the first 9); the run of 7s is `a+`,
             // whose `FIRST` is `rows[2]`, so the trailing 5 ends the match.
@@ -1822,10 +1879,14 @@ mod tests {
         // The slot's `vars` is `members_of(u)`, which preserves the SUBSET's declaration order, so
         // both orders must behave identically: membership is a set test, not a look at `vars[0]`.
         for members in [["a", "b"], ["b", "a"]] {
-            let defines =
-                HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &members, 0))]);
+            let nfa = Nfa::compile(&plus("a"));
+            let defines = DefineTable::bind(
+                &nfa,
+                vec![nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &members, 0))],
+            )
+            .unwrap();
             assert_eq!(
-                find_all(&Nfa::compile(&plus("a")), &defines, &[1, 2, 3]).await,
+                find_all(&nfa, &defines, &[1, 2, 3]).await,
                 vec![LabeledMatch {
                     start: 0,
                     end: 3,
@@ -1843,11 +1904,15 @@ mod tests {
     /// against the candidate `b`. This is the shape every existing DEFINE test uses.
     #[tokio::test]
     async fn define_running_last_of_other_var_excludes_candidate() {
-        let defines = HashMap::from([nav_eq_self("b", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
         let nfa = Nfa::compile(&Pattern::Concat(vec![
             Pattern::Var("a".to_owned()),
             Pattern::Var("b".to_owned()),
         ]));
+        let defines = DefineTable::bind(
+            &nfa,
+            vec![nav_eq_self("b", nav_slot(KIND_RUNNING_LAST, &["a"], 0))],
+        )
+        .unwrap();
         // Equal values: the `b` row equals the running `a`, so `(a b)` matches.
         assert_eq!(
             find_all(&nfa, &defines, &[7, 7]).await,
@@ -2091,16 +2156,16 @@ mod tests {
                 DataType::Boolean,
                 Some(ScalarImpl::Bool(true)),
             ));
-            let defines = HashMap::new();
+            let nfa = Nfa::compile(&Pattern::Concat(vec![
+                Pattern::Var("a".to_owned()),
+                Pattern::Var("b".to_owned()),
+            ]));
+            let defines = DefineTable::bind(&nfa, vec![]).unwrap();
             let matcher = DefineMatcher {
                 rows: &rows,
                 defines: &defines,
                 within: Some(&within),
             };
-            let nfa = Nfa::compile(&Pattern::Concat(vec![
-                Pattern::Var("a".to_owned()),
-                Pattern::Var("b".to_owned()),
-            ]));
             nfa.find_matches_dynamic(rows.len(), &matcher, &SkipMode::PastLastRow)
                 .await
                 .unwrap()
@@ -2157,7 +2222,7 @@ mod tests {
             within_final: bool,
         ) -> bool {
             let nfa = Nfa::compile(pattern);
-            let matcher = SetMatcher::new(sets(rows));
+            let matcher = SetMatcher::new(&nfa, sets(rows));
             let mut budget = ScanBudget::unlimited();
             match_is_final(
                 &nfa,
