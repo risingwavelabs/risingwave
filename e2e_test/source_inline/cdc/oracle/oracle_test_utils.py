@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 
-"""Oracle fixtures and composable SQL operations.
+"""Oracle fixtures and composable SQL, transaction, and backfill operations.
 
 SLTs own fixture SQL and teardown, and attach hooks at named operation boundaries.
+The CLI exposes preparation, fixture cleanup, and the transaction worker.
 Functions are ordered as public APIs, shared helpers (_), then private helpers (__).
 Single-caller private helpers are defined inside their caller.
 """
 
 import argparse
+import json
 import os
+from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -29,8 +34,12 @@ TEST_ORACLE_DATABASE = os.environ["ORACLE_DATABASE"].upper()
 TEST_ORACLE_PDB = os.environ["ORACLE_PDB"].upper()
 TEST_ORACLE_SOURCE_SCHEMA = "APP"
 ORACLE_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
+TABLE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 DDL_STATEMENT_TIMEOUT_SECONDS = 120
 PSQL_PROCESS_TIMEOUT_SECONDS = 150
+CHECKPOINT_QUERY_TIMEOUT_SECONDS = 30
+TRANSACTION_TIMEOUT_SECONDS = 300
+BACKFILL_RESUME_RATE = 1000
 
 
 @dataclass
@@ -43,6 +52,8 @@ class SqlOutcome:
 @dataclass
 class HookContext:
     outcomes: list[SqlOutcome] = field(default_factory=list)
+    table: str | None = None
+    transaction: dict | None = None
 
 
 # Public APIs.
@@ -134,7 +145,20 @@ def prepare(
 
 
 def cleanup() -> None:
+    temporary = Path(tempfile.gettempdir())
+    transactions = list(temporary.glob("rw-oracle-transaction-*"))
+    for directory in transactions:
+        if directory.is_symlink() or not directory.is_dir():
+            raise RuntimeError(f"unexpected transaction fixture path: {directory}")
+        if not (directory / "done.json").is_file():
+            raise RuntimeError(
+                f"unfinished transaction fixture: {directory}; end it before cleanup"
+            )
     __drop_tables()
+    for directory in transactions:
+        shutil.rmtree(directory)
+    for checkpoint in temporary.glob("rw-oracle-checkpoint-*"):
+        checkpoint.unlink()
 
 
 def execute_oracle_sqls(
@@ -165,6 +189,124 @@ def execute_sqls(
 ) -> None:
     outcomes = __run_each(sqls, __sql_outcome, is_concurrent)
     __invoke_hook(after_sqls_hook, HookContext(outcomes), after_sqls_hook_kwargs)
+
+
+def begin_tx(
+    name: str,
+    dmls: list,
+    *,
+    after_tx_begin_hook=None,
+    after_tx_begin_hook_kwargs=None,
+) -> None:
+    """Hold explicit DML; (sql, bind_rows) entries preserve executemany operations."""
+    context = HookContext()
+    try:
+        directory = __state_path("transaction", name)
+        if directory.exists():
+            if not (directory / "done.json").exists():
+                raise RuntimeError(f"unfinished transaction fixture: {directory}")
+            # Clear every previous result/request before starting a new worker.
+            # A stale request.json could immediately end the new transaction.
+            for path in directory.iterdir():
+                path.unlink()
+        else:
+            directory.mkdir()
+        with (directory / "worker.log").open("w") as log:
+            worker = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "__hold_tx", name],
+                stdin=subprocess.PIPE,
+                stdout=log,
+                stderr=log,
+                text=True,
+                start_new_session=True,
+            )
+            # Closing stdin lets json.load finish without waiting for transaction end.
+            with worker.stdin as stdin:
+                json.dump(dmls, stdin)
+        context.transaction = __wait_file(directory / "ready.json")
+    except Exception as error:
+        context.outcomes.append(SqlOutcome(exception=error))
+    __invoke_hook(after_tx_begin_hook, context, after_tx_begin_hook_kwargs)
+
+
+def end_tx(
+    name: str,
+    commit=True,
+    *,
+    after_tx_end_hook=None,
+    after_tx_end_hook_kwargs=None,
+) -> None:
+    context = HookContext()
+    try:
+        directory = __state_path("transaction", name)
+        context.transaction = _transaction_state(name)
+        __publish(directory / "request.json", {"commit": commit})
+        result = __wait_file(directory / "done.json")
+        if not result.get("ok"):
+            raise RuntimeError(result)
+    except Exception as error:
+        context.outcomes.append(SqlOutcome(exception=error))
+    __invoke_hook(after_tx_end_hook, context, after_tx_end_hook_kwargs)
+
+
+def begin_backfills(
+    tables: list[str],
+    is_concurrent=False,
+    *,
+    before_backfill_pause_hook=None,
+    before_backfill_pause_hook_kwargs=None,
+    after_backfill_pause_hook=None,
+    after_backfill_pause_hook_kwargs=None,
+) -> None:
+    """Wait/check through the pre-pause hook, then pause and checkpoint each table."""
+
+    def __pause(table):
+        if not TABLE_IDENTIFIER.fullmatch(table):
+            raise RuntimeError(f"invalid table name: {table}")
+        context = HookContext(table=table)
+        __invoke_hook(
+            before_backfill_pause_hook, context, before_backfill_pause_hook_kwargs
+        )
+        context.outcomes = [
+            __sql_outcome(f"ALTER TABLE {table} SET backfill_rate_limit = 0;"),
+            __sql_outcome("FLUSH;"),
+        ]
+        __invoke_hook(
+            after_backfill_pause_hook,
+            context,
+            after_backfill_pause_hook_kwargs,
+        )
+
+    __run_each(tables, __pause, is_concurrent)
+
+
+def end_backfills(
+    tables: list[str],
+    is_concurrent=False,
+    *,
+    after_backfill_resume_hook=None,
+    after_backfill_resume_hook_kwargs=None,
+) -> None:
+    """Remove throttling; waiting for completion is an optional post-resume check."""
+
+    def __resume(table):
+        if not TABLE_IDENTIFIER.fullmatch(table):
+            raise RuntimeError(f"invalid table name: {table}")
+        context = HookContext(
+            [
+                __sql_outcome(
+                    f"ALTER TABLE {table} SET backfill_rate_limit = {BACKFILL_RESUME_RATE};"
+                )
+            ],
+            table=table,
+        )
+        __invoke_hook(
+            after_backfill_resume_hook,
+            context,
+            after_backfill_resume_hook_kwargs,
+        )
+
+    __run_each(tables, __resume, is_concurrent)
 
 
 # Helpers shared with oracle_test_hooks.py.
@@ -203,6 +345,51 @@ def _query_one(sql: str):
             return row[0]
 
 
+# Checkpoint readers use checkpoint visibility, never actor-local/non-durable state.
+def _source_state_table(source: str) -> str:
+    return __state_table(source, "source")
+
+
+def _backfill_state_table(table: str) -> str:
+    return __state_table(table, "table", "AND name LIKE '%_streamcdcscan_%'")
+
+
+def _read_source_split(table: str) -> dict | None:
+    rows = __query(
+        "SELECT offset_info->'split_info'->'oracle_split' "
+        f"FROM {table} WHERE offset_info->'split_info'->'oracle_split' IS NOT NULL;"
+    )
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise RuntimeError(f"expected one Oracle source split, got {rows}")
+    return json.loads(rows[0])
+
+
+def _read_backfill_state(table: str) -> dict | None:
+    rows = __query(
+        "SELECT jsonb_build_object('pk', \"ID\", 'finished', backfill_finished, "
+        f"'rows', row_count, 'offset', cdc_offset) FROM {table};"
+    )
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise RuntimeError(f"expected one backfill state row, got {rows}")
+    return json.loads(rows[0])
+
+
+def _save_checkpoint(table: str, value: dict) -> None:
+    __publish(__state_path("checkpoint", table), value)
+
+
+def _load_checkpoint(table: str) -> dict:
+    return json.loads(__state_path("checkpoint", table).read_text())
+
+
+def _transaction_state(name: str) -> dict:
+    return json.loads((__state_path("transaction", name) / "ready.json").read_text())
+
+
 # Module-private helpers.
 def __drop_tables() -> None:
     with _connect_as_sys(TEST_ORACLE_PDB) as connection:
@@ -221,7 +408,7 @@ def __drop_tables() -> None:
 
 
 def __invoke_hook(hook, context: HookContext, kwargs: dict | None) -> None:
-    # Import lazily: hooks use the connection helpers above.
+    # Import lazily: hooks use the connection and checkpoint readers above.
     if hook is None:
         from oracle_test_hooks import check_success
 
@@ -229,7 +416,7 @@ def __invoke_hook(hook, context: HookContext, kwargs: dict | None) -> None:
     hook(context, **(kwargs or {}))
 
 
-def __run_psql(sql: str):
+def __run_psql(sql: str, *, checkpoint=False, timeout=PSQL_PROCESS_TIMEOUT_SECONDS):
     def __env(name: str) -> str:
         value = os.environ.get(name)
         if not value:
@@ -238,6 +425,8 @@ def __run_psql(sql: str):
 
     process_env = os.environ.copy()
     options = f"-c statement_timeout={DDL_STATEMENT_TIMEOUT_SECONDS}s"
+    if checkpoint:
+        options += " -c visibility_mode=checkpoint"
     process_env["PGOPTIONS"] = (
         process_env.get("PGOPTIONS", "") + " " + options
     ).strip()
@@ -264,8 +453,14 @@ def __run_psql(sql: str):
         capture_output=True,
         check=False,
         env=process_env,
-        timeout=PSQL_PROCESS_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
+
+
+def __query(sql: str) -> list[str]:
+    result = __run_psql(sql, checkpoint=True, timeout=CHECKPOINT_QUERY_TIMEOUT_SECONDS)
+    result.check_returncode()
+    return [line for line in result.stdout.splitlines() if line.strip()]
 
 
 def __sql_outcome(sql: str) -> SqlOutcome:
@@ -288,16 +483,98 @@ def __run_each(items, operation, is_concurrent: bool):
     return [operation(item) for item in items]
 
 
+def __state_table(name: str, job_type: str, extra_filter="") -> str:
+    if not TABLE_IDENTIFIER.fullmatch(name):
+        raise RuntimeError(f"invalid {job_type} name: {name}")
+    rows = __query(
+        "SELECT name FROM rw_catalog.rw_internal_table_info "
+        f"WHERE job_name = '{name}' AND job_type = '{job_type}' "
+        f"AND schema_name = 'public' {extra_filter};"
+    )
+    if len(rows) != 1:
+        raise RuntimeError(
+            f"expected one {job_type} state table for {name}, got {rows}"
+        )
+    return '"' + rows[0].replace('"', '""') + '"'
+
+
+def __state_path(kind: str, name: str) -> Path:
+    if not TABLE_IDENTIFIER.fullmatch(name):
+        raise RuntimeError(f"invalid fixture name: {name}")
+    return Path(tempfile.gettempdir()) / f"rw-oracle-{kind}-{name}"
+
+
+def __publish(path: Path, value: dict) -> None:
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value))
+    temporary.replace(path)
+
+
+def __wait_file(path: Path, timeout=30) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return json.loads(path.read_text())
+        done = path.parent / "done.json"
+        if done.exists():
+            result = json.loads(done.read_text())
+            if not result.get("ok"):
+                raise RuntimeError(result)
+        time.sleep(0.1)
+    raise RuntimeError(f"transaction fixture timed out waiting for {path}")
+
+
 def __main() -> None:
+    def __hold_tx(name: str) -> None:
+        directory = __state_path("transaction", name)
+        try:
+            dmls = json.load(sys.stdin)
+            with _connect_as_sys(TEST_ORACLE_PDB) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT CURRENT_SCN FROM V$DATABASE")
+                    before_scn = int(cursor.fetchone()[0])
+                    for dml in dmls:
+                        if isinstance(dml, str):
+                            cursor.execute(dml)
+                        else:
+                            sql, rows = dml
+                            cursor.executemany(sql, rows)
+                    cursor.execute("SELECT CURRENT_SCN FROM V$DATABASE")
+                    operation_scn = int(cursor.fetchone()[0])
+                __publish(
+                    directory / "ready.json",
+                    {
+                        "name": name,
+                        "before_scn": before_scn,
+                        "operation_scn": operation_scn,
+                    },
+                )
+                # Preserve the existing fixture's automatic rollback on an abandoned SLT.
+                request = __wait_file(
+                    directory / "request.json", TRANSACTION_TIMEOUT_SECONDS
+                )
+                if request["commit"]:
+                    connection.commit()
+                else:
+                    connection.rollback()
+            __publish(directory / "done.json", {"ok": True})
+        except Exception as error:
+            __publish(directory / "done.json", {"error": str(error)})
+            raise
+
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("prepare")
     subparsers.add_parser("cleanup")
+    worker_parser = subparsers.add_parser("__hold_tx")
+    worker_parser.add_argument("name")
     args = parser.parse_args()
     if args.command == "prepare":
         prepare()
     elif args.command == "cleanup":
         cleanup()
+    elif args.command == "__hold_tx":
+        __hold_tx(args.name)
     else:
         raise ValueError(f"unknown fixture command: {args.command}")
 

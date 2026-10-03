@@ -1,19 +1,19 @@
 include oracle_test_env.slt.part
 
 statement ok
-DROP TABLE IF EXISTS missing_oracle_schema;
+DROP SOURCE IF EXISTS missing_oracle_schema CASCADE;
 
 statement ok
-DROP TABLE IF EXISTS missing_app_oracle_hb;
+DROP SOURCE IF EXISTS missing_app_oracle_hb CASCADE;
 
 statement ok
-DROP TABLE IF EXISTS empty_app_oracle_hb;
+DROP SOURCE IF EXISTS empty_app_oracle_hb CASCADE;
 
 statement ok
-DROP TABLE IF EXISTS seeded_app_oracle_hb;
+DROP SOURCE IF EXISTS seeded_app_oracle_hb CASCADE;
 
 statement ok
-DROP TABLE IF EXISTS incompatible_oracle_hb;
+DROP SOURCE IF EXISTS incompatible_oracle_hb CASCADE;
 
 # Initialization must not create the Oracle user that owns a missing schema.
 system ok
@@ -33,8 +33,6 @@ from oracle_test_utils import execute_oracle_sqls
 execute_oracle_sqls([
     # Not creating this owner does not remove leftovers from earlier runs.
     "DROP USER IF EXISTS RW_MISSING_SCHEMA CASCADE",
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
-    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
 ])
 PY
 
@@ -43,13 +41,12 @@ PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_creation_error, check_schema_missing
 execute_sqls(["""
-CREATE TABLE missing_oracle_schema ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+CREATE SOURCE missing_oracle_schema WITH (
     $TEST_ORACLE_WITH_OPTIONS_COMMON,
     schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-    table.name = 'CUSTOMERS',
     heartbeat.table.name = 'RW_MISSING_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE',
     heartbeat.table.auto.initialize = 'true'
-) FORMAT DEBEZIUM ENCODE JSON;
+) FORMAT PLAIN ENCODE JSON;
 """],
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={
@@ -61,7 +58,7 @@ CREATE TABLE missing_oracle_schema ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WI
 )
 PY
 
-# APP exists, but CREATE TABLE only permits heartbeat-table creation in the connector's schema.
+# APP exists, but CREATE SOURCE only permits heartbeat-table creation in the connector's schema.
 # Without CREATE ANY TABLE, it cannot create APP.RW_HEARTBEAT.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
@@ -72,25 +69,15 @@ PY
 
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
-from oracle_test_utils import execute_oracle_sqls
-execute_oracle_sqls([
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
-    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
-])
-PY
-
-system ok
-PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_creation_error, check_heartbeat_missing
 execute_sqls(["""
-CREATE TABLE missing_app_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+CREATE SOURCE missing_app_oracle_hb WITH (
     $TEST_ORACLE_WITH_OPTIONS_COMMON,
     schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-    table.name = 'CUSTOMERS',
     heartbeat.table.name = '$TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE',
     heartbeat.table.auto.initialize = 'true'
-) FORMAT DEBEZIUM ENCODE JSON;
+) FORMAT PLAIN ENCODE JSON;
 """],
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={
@@ -116,8 +103,6 @@ from oracle_test_utils import execute_oracle_sqls
 execute_oracle_sqls([
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE "
     "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL)",
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
-    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
 ])
 PY
 
@@ -126,13 +111,12 @@ PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_creation_error, check_heartbeat_empty
 execute_sqls(["""
-CREATE TABLE empty_app_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+CREATE SOURCE empty_app_oracle_hb WITH (
     $TEST_ORACLE_WITH_OPTIONS_COMMON,
     schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-    table.name = 'CUSTOMERS',
     heartbeat.table.name = '$TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE',
     heartbeat.table.auto.initialize = 'true'
-) FORMAT DEBEZIUM ENCODE JSON;
+) FORMAT PLAIN ENCODE JSON;
 """],
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={
@@ -160,8 +144,6 @@ execute_oracle_sqls([
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE "
     "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL)",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE (ID, HEARTBEAT) VALUES (1, 7)",
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
-    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
 ])
 PY
 
@@ -170,13 +152,12 @@ PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_creation_error, check_heartbeat_seed
 execute_sqls(["""
-CREATE TABLE seeded_app_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+CREATE SOURCE seeded_app_oracle_hb WITH (
     $TEST_ORACLE_WITH_OPTIONS_COMMON,
     schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-    table.name = 'CUSTOMERS',
     heartbeat.table.name = '$TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE',
     heartbeat.table.auto.initialize = 'true'
-) FORMAT DEBEZIUM ENCODE JSON;
+) FORMAT PLAIN ENCODE JSON;
 """],
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={
@@ -207,8 +188,6 @@ execute_oracle_sqls([
     "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
     "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT VARCHAR2(20) NOT NULL)",
     "INSERT INTO $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE (ID, HEARTBEAT) VALUES (1, 'unchanged')",
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
-    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
 ])
 PY
 
@@ -217,13 +196,12 @@ PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_creation_error, check_incompatible_heartbeat_unchanged
 execute_sqls(["""
-CREATE TABLE incompatible_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+CREATE SOURCE incompatible_oracle_hb WITH (
     $TEST_ORACLE_WITH_OPTIONS_COMMON,
     schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-    table.name = 'CUSTOMERS',
     heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
     heartbeat.table.auto.initialize = 'true'
-) FORMAT DEBEZIUM ENCODE JSON;
+) FORMAT PLAIN ENCODE JSON;
 """],
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={

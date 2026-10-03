@@ -7,10 +7,22 @@ statement ok
 DROP TABLE IF EXISTS missing_oracle_hb_2;
 
 statement ok
+DROP SOURCE IF EXISTS missing_oracle_hb_source_1 CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS missing_oracle_hb_source_2 CASCADE;
+
+statement ok
 DROP TABLE IF EXISTS empty_oracle_hb_1;
 
 statement ok
 DROP TABLE IF EXISTS empty_oracle_hb_2;
+
+statement ok
+DROP SOURCE IF EXISTS empty_oracle_hb_source_1 CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS empty_oracle_hb_source_2 CASCADE;
 
 statement ok
 DROP TABLE IF EXISTS seeded_oracle_hb_1;
@@ -18,8 +30,13 @@ DROP TABLE IF EXISTS seeded_oracle_hb_1;
 statement ok
 DROP TABLE IF EXISTS seeded_oracle_hb_2;
 
-# Concurrent direct CDC tables must converge when both observe a missing heartbeat table.
-# Shared-source creation is covered when Oracle shared-source support is wired.
+statement ok
+DROP SOURCE IF EXISTS seeded_oracle_hb_source_1 CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS seeded_oracle_hb_source_2 CASCADE;
+
+# Concurrent shared-source creation must converge when both initially observe a missing table.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import prepare
@@ -42,26 +59,38 @@ PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_seed
 execute_sqls([
-    """CREATE TABLE missing_oracle_hb_1 ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+    """CREATE SOURCE missing_oracle_hb_source_1 WITH (
         $TEST_ORACLE_WITH_OPTIONS_COMMON,
         schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-        table.name = 'CUSTOMERS',
         heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
         heartbeat.table.auto.initialize = 'true'
-    ) FORMAT DEBEZIUM ENCODE JSON;""",
-    """CREATE TABLE missing_oracle_hb_2 ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+    ) FORMAT PLAIN ENCODE JSON;""",
+    """CREATE SOURCE missing_oracle_hb_source_2 WITH (
         $TEST_ORACLE_WITH_OPTIONS_COMMON,
         schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-        table.name = 'CUSTOMERS',
         heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
         heartbeat.table.auto.initialize = 'true'
-    ) FORMAT DEBEZIUM ENCODE JSON;""",
+    ) FORMAT PLAIN ENCODE JSON;""",
 ],
     is_concurrent=True,
     after_sqls_hook=check_heartbeat_seed,
     after_sqls_hook_kwargs={"owner": "$TEST_ORACLE_USER"},
 )
 PY
+
+statement ok
+CREATE TABLE missing_oracle_hb_1 (
+    "ID" DECIMAL,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM missing_oracle_hb_source_1 TABLE 'APP.CUSTOMERS';
+
+statement ok
+CREATE TABLE missing_oracle_hb_2 (
+    "ID" DECIMAL,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM missing_oracle_hb_source_2 TABLE 'APP.CUSTOMERS';
 
 query I retry 30 backoff 1s
 SELECT count(*) FROM missing_oracle_hb_1;
@@ -76,19 +105,24 @@ SELECT count(*) FROM missing_oracle_hb_2;
 statement ok
 DROP TABLE missing_oracle_hb_1;
 
-# CDC table deletion must retain the shared upstream heartbeat table and seed row.
+statement ok
+DROP TABLE missing_oracle_hb_2;
+
+statement ok
+DROP SOURCE missing_oracle_hb_source_1 CASCADE;
+
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_seed
 execute_sqls(
-    ["DROP TABLE missing_oracle_hb_2;"],
+    ["DROP SOURCE missing_oracle_hb_source_2 CASCADE;"],
     after_sqls_hook=check_heartbeat_seed,
     after_sqls_hook_kwargs={"owner": "$TEST_ORACLE_USER"},
 )
 PY
 
-# Compatible existing empty heartbeat tables must be seeded by concurrent CDC tables.
+# Compatible existing empty heartbeat tables must be seeded by concurrent shared sources.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import prepare
@@ -113,26 +147,38 @@ PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_seed
 execute_sqls([
-    """CREATE TABLE empty_oracle_hb_1 ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+    """CREATE SOURCE empty_oracle_hb_source_1 WITH (
         $TEST_ORACLE_WITH_OPTIONS_COMMON,
         schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-        table.name = 'CUSTOMERS',
         heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
         heartbeat.table.auto.initialize = 'true'
-    ) FORMAT DEBEZIUM ENCODE JSON;""",
-    """CREATE TABLE empty_oracle_hb_2 ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+    ) FORMAT PLAIN ENCODE JSON;""",
+    """CREATE SOURCE empty_oracle_hb_source_2 WITH (
         $TEST_ORACLE_WITH_OPTIONS_COMMON,
         schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-        table.name = 'CUSTOMERS',
         heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
         heartbeat.table.auto.initialize = 'true'
-    ) FORMAT DEBEZIUM ENCODE JSON;""",
+    ) FORMAT PLAIN ENCODE JSON;""",
 ],
     is_concurrent=True,
     after_sqls_hook=check_heartbeat_seed,
     after_sqls_hook_kwargs={"owner": "$TEST_ORACLE_USER"},
 )
 PY
+
+statement ok
+CREATE TABLE empty_oracle_hb_1 (
+    "ID" DECIMAL,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM empty_oracle_hb_source_1 TABLE 'APP.CUSTOMERS';
+
+statement ok
+CREATE TABLE empty_oracle_hb_2 (
+    "ID" DECIMAL,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM empty_oracle_hb_source_2 TABLE 'APP.CUSTOMERS';
 
 query I retry 30 backoff 1s
 SELECT count(*) FROM empty_oracle_hb_1;
@@ -147,18 +193,24 @@ SELECT count(*) FROM empty_oracle_hb_2;
 statement ok
 DROP TABLE empty_oracle_hb_1;
 
+statement ok
+DROP TABLE empty_oracle_hb_2;
+
+statement ok
+DROP SOURCE empty_oracle_hb_source_1 CASCADE;
+
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_seed
 execute_sqls(
-    ["DROP TABLE empty_oracle_hb_2;"],
+    ["DROP SOURCE empty_oracle_hb_source_2 CASCADE;"],
     after_sqls_hook=check_heartbeat_seed,
     after_sqls_hook_kwargs={"owner": "$TEST_ORACLE_USER"},
 )
 PY
 
-# A snapshot-completion heartbeat must change the sentinel even with concurrent CDC tables.
+# A snapshot-completion heartbeat must change the sentinel even with concurrent shared sources.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import prepare
@@ -184,20 +236,18 @@ PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_seed, HEARTBEAT_STATE_TIMEOUT_SECONDS
 execute_sqls([
-    """CREATE TABLE seeded_oracle_hb_1 ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+    """CREATE SOURCE seeded_oracle_hb_source_1 WITH (
         $TEST_ORACLE_WITH_OPTIONS_COMMON,
         schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-        table.name = 'CUSTOMERS',
         heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
         heartbeat.table.auto.initialize = 'true'
-    ) FORMAT DEBEZIUM ENCODE JSON;""",
-    """CREATE TABLE seeded_oracle_hb_2 ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+    ) FORMAT PLAIN ENCODE JSON;""",
+    """CREATE SOURCE seeded_oracle_hb_source_2 WITH (
         $TEST_ORACLE_WITH_OPTIONS_COMMON,
         schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-        table.name = 'CUSTOMERS',
         heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
         heartbeat.table.auto.initialize = 'true'
-    ) FORMAT DEBEZIUM ENCODE JSON;""",
+    ) FORMAT PLAIN ENCODE JSON;""",
 ],
     is_concurrent=True,
     after_sqls_hook=check_heartbeat_seed,
@@ -207,6 +257,20 @@ execute_sqls([
     },
 )
 PY
+
+statement ok
+CREATE TABLE seeded_oracle_hb_1 (
+    "ID" DECIMAL,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM seeded_oracle_hb_source_1 TABLE 'APP.CUSTOMERS';
+
+statement ok
+CREATE TABLE seeded_oracle_hb_2 (
+    "ID" DECIMAL,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM seeded_oracle_hb_source_2 TABLE 'APP.CUSTOMERS';
 
 query I retry 30 backoff 1s
 SELECT count(*) FROM seeded_oracle_hb_1;
@@ -221,12 +285,18 @@ SELECT count(*) FROM seeded_oracle_hb_2;
 statement ok
 DROP TABLE seeded_oracle_hb_1;
 
+statement ok
+DROP TABLE seeded_oracle_hb_2;
+
+statement ok
+DROP SOURCE seeded_oracle_hb_source_1 CASCADE;
+
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_seed, HEARTBEAT_STATE_TIMEOUT_SECONDS
 execute_sqls(
-    ["DROP TABLE seeded_oracle_hb_2;"],
+    ["DROP SOURCE seeded_oracle_hb_source_2 CASCADE;"],
     after_sqls_hook=check_heartbeat_seed,
     after_sqls_hook_kwargs={
         "owner": "$TEST_ORACLE_USER", "allowed_values": {0, 1},

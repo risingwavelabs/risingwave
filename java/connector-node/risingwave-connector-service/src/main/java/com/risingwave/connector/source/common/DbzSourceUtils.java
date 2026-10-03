@@ -151,6 +151,8 @@ public class DbzSourceUtils {
         } else if (sourceType == SourceTypeE.SQL_SERVER) {
             return waitForStreamingRunningInner(
                     "sql_server", dbServerName, waitStreamingStartTimeout);
+        } else if (sourceType == SourceTypeE.ORACLE) {
+            return waitForStreamingRunningInner("oracle", dbServerName, waitStreamingStartTimeout);
         } else {
             LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
             return true;

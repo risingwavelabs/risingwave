@@ -16,7 +16,8 @@ use risingwave_common::bail;
 use thiserror_ext::AsReport;
 
 use super::unified::json::{
-    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+    BigintUnsignedHandlingMode, NumericHandling, TimeHandling, TimestampHandling,
+    TimestamptzHandling,
 };
 use super::unified::kv_event::KvEvent;
 use super::{
@@ -76,6 +77,12 @@ impl PlainParser {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                NumericHandling::Relax {
+                    string_parsing: matches!(
+                        &source_ctx.connector_props,
+                        crate::source::ConnectorProperties::OracleCdc(_)
+                    ),
+                },
                 BigintUnsignedHandlingMode::Long,
                 false,
             )?,

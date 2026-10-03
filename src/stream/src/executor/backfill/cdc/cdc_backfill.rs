@@ -31,11 +31,15 @@ use risingwave_connector::parser::{
     EncodingProperties, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
     SpecificParserConfig, TimeHandling, TimestampHandling, TimestamptzHandling,
 };
-use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
 };
-use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
+use risingwave_connector::source::cdc::{
+    CdcProperties, CdcScanOptions, Citus, Mongodb, Mysql, Oracle, Postgres, SqlServer,
+};
+use risingwave_connector::source::{
+    ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts,
+};
 use risingwave_pb::common::ThrottleType;
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
@@ -381,9 +385,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
             get_cdc_json_parse_handling_from_properties(&self.properties);
-        // Only postgres-cdc connector may trigger TOAST.
-        let handle_toast_columns: bool =
-            self.external_table.table_type() == &ExternalCdcTableType::Postgres;
         // Make sure to use mapping_message after transform_upstream.
         let mut upstream = transform_upstream(
             upstream,
@@ -392,7 +393,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             timestamptz_handling,
             time_handling,
             bigint_unsigned_handling,
-            handle_toast_columns,
+            self.external_table.table_type().clone(),
         )
         .boxed()
         .peekable();
@@ -1105,7 +1106,7 @@ pub async fn transform_upstream(
     timestamptz_handling: Option<TimestamptzHandling>,
     time_handling: Option<TimeHandling>,
     bigint_unsigned_handling: Option<BigintUnsignedHandlingMode>,
-    handle_toast_columns: bool,
+    table_type: ExternalCdcTableType,
 ) {
     let props = SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
@@ -1114,7 +1115,7 @@ pub async fn transform_upstream(
             timestamptz_handling,
             time_handling,
             bigint_unsigned_handling,
-            handle_toast_columns,
+            handle_toast_columns: table_type == ExternalCdcTableType::Postgres,
         }),
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
@@ -1125,13 +1126,24 @@ pub async fn transform_upstream(
         .iter()
         .map(SourceColumnDesc::from)
         .collect_vec();
-    let mut parser = DebeziumParser::new(
-        props,
-        columns_with_meta.clone(),
-        Arc::new(SourceContext::dummy()),
-    )
-    .await
-    .map_err(StreamExecutorError::connector_error)?;
+    let connector_props = match table_type {
+        ExternalCdcTableType::MySql => CdcProperties::<Mysql>::default().into(),
+        ExternalCdcTableType::Postgres => CdcProperties::<Postgres>::default().into(),
+        ExternalCdcTableType::SqlServer => CdcProperties::<SqlServer>::default().into(),
+        ExternalCdcTableType::Citus => CdcProperties::<Citus>::default().into(),
+        ExternalCdcTableType::Mongo => CdcProperties::<Mongodb>::default().into(),
+        ExternalCdcTableType::Oracle => CdcProperties::<Oracle>::default().into(),
+        ExternalCdcTableType::Mock | ExternalCdcTableType::Undefined => {
+            ConnectorProperties::default()
+        }
+    };
+    let source_ctx = SourceContext {
+        connector_props,
+        ..SourceContext::dummy()
+    };
+    let mut parser = DebeziumParser::new(props, columns_with_meta.clone(), Arc::new(source_ctx))
+        .await
+        .map_err(StreamExecutorError::connector_error)?;
 
     pin_mut!(upstream);
     #[for_await]
@@ -1293,7 +1305,15 @@ mod tests {
             ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
         ];
 
-        let parsed_stream = transform_upstream(upstream, columns, None, None, None, None, false);
+        let parsed_stream = transform_upstream(
+            upstream,
+            columns,
+            None,
+            None,
+            None,
+            None,
+            ExternalCdcTableType::MySql,
+        );
         pin_mut!(parsed_stream);
         let message = parsed_stream
             .next()

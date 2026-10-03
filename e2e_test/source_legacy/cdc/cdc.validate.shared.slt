@@ -1,8 +1,7 @@
 # CDC validation tests, primarily using shared sources.
 #
 # These tests verify that invalid CDC source and table definitions are rejected
-# during creation. Oracle temporarily uses direct CDC tables until shared-source
-# support is available.
+# during creation.
 
 control substitution on
 
@@ -81,18 +80,12 @@ create source mysql_invalid_heartbeat_non_integer with (
 
 
 ############################################################
-# Oracle: connector configuration errors fire at `CREATE TABLE`.
+# Oracle: connector configuration errors fire at `CREATE SOURCE`.
 ############################################################
 
-# TODO: Replace both direct Oracle CDC tables below with `CREATE SOURCE` once Oracle
-# shared-source support is ready in a later PR. Use implicit `FORMAT PLAIN ENCODE JSON`
-# like the MySQL cases, removing the explicit columns and table.name.
-# Both errors must be reported by Java validation before connecting to Oracle.
-
+# invalid user-provided heartbeat action query
 statement error 'debezium.heartbeat.action.query' is generated internally; configure 'heartbeat.table.name' instead
-create table oracle_user_provided_heartbeat_action (
- id INT PRIMARY KEY
-) with (
+create source oracle_user_provided_heartbeat_action with (
  connector = 'oracle-cdc',
  hostname = 'oracle',
  port = '1521',
@@ -101,15 +94,13 @@ create table oracle_user_provided_heartbeat_action (
  database.name = 'FREE',
  database.pdb.name = 'FREEPDB1',
  schema.name = 'APP',
- table.name = 'CUSTOMERS',
  heartbeat.table.name = 'APP.RW_HEARTBEAT',
  debezium.heartbeat.action.query = 'UPDATE APP.RW_HEARTBEAT SET HEARTBEAT = 1 WHERE ID = 1'
-) FORMAT DEBEZIUM ENCODE JSON;
+);
 
+# invalid PDB identifier
 statement error 'database.pdb.name' must be an unquoted Oracle identifier
-create table oracle_invalid_pdb_identifier (
- id INT PRIMARY KEY
-) with (
+create source oracle_invalid_pdb_identifier with (
  connector = 'oracle-cdc',
  hostname = 'oracle',
  port = '1521',
@@ -118,9 +109,83 @@ create table oracle_invalid_pdb_identifier (
  database.name = 'FREE',
  database.pdb.name = 'FREEPDB1; DROP TABLE APP.CUSTOMERS',
  schema.name = 'APP',
- table.name = 'CUSTOMERS',
  heartbeat.table.name = 'APP.RW_HEARTBEAT'
-) FORMAT DEBEZIUM ENCODE JSON;
+);
+
+
+# invalid auto schema change option
+statement error Oracle CDC auto schema change is not supported
+create source oracle_invalid_schema_change with (
+ ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+ schema.name = 'APP',
+ auto.schema.change = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+
+############################################################
+# Oracle: schema-level errors fire at `CREATE TABLE FROM SOURCE`.
+############################################################
+
+statement ok
+drop source if exists oracle_validate_src cascade;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import prepare, execute_oracle_sqls, TEST_ORACLE_SOURCE_SCHEMA
+from oracle_test_hooks import no_op
+prepare(create_heartbeat_tables_hook=no_op)
+execute_oracle_sqls([
+    f"CREATE TABLE {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
+    f"ALTER TABLE {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    f"INSERT INTO {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
+])
+PY
+
+statement ok
+create source oracle_validate_src with (
+ ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+ schema.name = 'APP',
+ heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
+ heartbeat.table.auto.initialize = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+# invalid upstream table name (missing schema)
+statement error (?s).*Invalid Oracle CDC table name.*expected schema.table.*
+create table oracle_invalid_table_name (*)
+from oracle_validate_src table 'CUSTOMERS';
+
+# invalid upstream table name (quoted identifier)
+statement error (?s).*Invalid Oracle CDC table name.*expected unquoted schema.table identifiers.*
+create table oracle_invalid_quoted_name (*)
+from oracle_validate_src table 'APP."CUSTOMERS"';
+
+# invalid upstream table name (table does not exist)
+statement error (?s).*Oracle table 'APP.RW_DOES_NOT_EXIST' has no visible columns.*
+create table oracle_missing_upstream (*)
+from oracle_validate_src table 'APP.RW_DOES_NOT_EXIST';
+
+query I
+select count(*) from rw_catalog.rw_relations
+where name in ('oracle_invalid_schema_change', 'oracle_invalid_table_name',
+               'oracle_invalid_quoted_name', 'oracle_missing_upstream');
+----
+0
+
+# valid upstream table
+statement ok
+create table oracle_validate_control ("ID" INT PRIMARY KEY, "NAME" VARCHAR)
+from oracle_validate_src table 'APP.CUSTOMERS';
+
+query T retry 30 backoff 1s
+select "ID", "NAME" from oracle_validate_control;
+----
+1 RisingWave
+
+statement ok
+drop source oracle_validate_src cascade;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
 
 
 ############################################################

@@ -781,6 +781,15 @@ pub fn bind_connector_props(
                 ))
             })?
         {
+            if with_properties.get_connector().as_deref() == Some(ORACLE_CDC_CONNECTOR) {
+                // TODO(oracle-cdc): Handle Oracle schema-change events and type compatibility
+                // before enabling CDC auto schema change.
+                return Err(ErrorCode::NotSupported(
+                    "Oracle CDC auto schema change is not supported".to_owned(),
+                    "Disable auto.schema.change".to_owned(),
+                )
+                .into());
+            }
             Feature::CdcAutoSchemaChange.check_available()?;
         }
 

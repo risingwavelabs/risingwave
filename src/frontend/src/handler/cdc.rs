@@ -23,7 +23,7 @@ use risingwave_connector::source::cdc::external::{
     TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::{
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
 use thiserror_ext::AsReport;
@@ -38,6 +38,8 @@ use crate::handler::create_table::{bind_sql_columns, bind_sql_pk_names, bind_tab
 /// - For SQL Server: Normalizes 'db.schema.table' (3 parts) to 'schema.table' (2 parts),
 ///   because users can optionally include database name for verification, but it needs to be
 ///   stripped to match the format returned by Debezium's `extract_table_name()`.
+/// - For Oracle: Folds unquoted `schema.table` identifiers to match Oracle catalog names and
+///   Debezium's `schema.table` topic suffix.
 /// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
 pub(crate) fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
@@ -83,6 +85,13 @@ pub(crate) fn derive_with_options_for_cdc_table(
                 with_options.insert(TABLE_NAME_KEY.into(), table_name);
                 // Return original external_table_name unchanged for Postgres
                 return Ok((with_options, external_table_name));
+            }
+            ORACLE_CDC_CONNECTOR => {
+                let (schema_name, table_name) =
+                    parse_oracle_cdc_external_table_name(&external_table_name)?;
+                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.clone());
+                with_options.insert(TABLE_NAME_KEY.into(), table_name.clone());
+                return Ok((with_options, format!("{schema_name}.{table_name}")));
             }
             SQL_SERVER_CDC_CONNECTOR => {
                 // SQL Server external table name must be in one of two formats:
@@ -157,6 +166,27 @@ pub(crate) fn derive_with_options_for_cdc_table(
         };
     }
     unreachable!("All valid CDC connectors should have returned by now")
+}
+
+/// Oracle's unquoted identifiers are case-insensitive, but its catalogs and Debezium
+/// topic suffix use upper case. Quoted names (including dots inside names) are not supported.
+fn parse_oracle_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
+    fn is_unquoted_identifier(name: &str) -> bool {
+        let mut chars = name.chars();
+        chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '$' | '#'))
+    }
+
+    let (schema, table) = external_table_name.split_once('.').ok_or_else(|| {
+        anyhow!("Invalid Oracle CDC table name '{external_table_name}': expected schema.table")
+    })?;
+    if !is_unquoted_identifier(schema) || !is_unquoted_identifier(table) {
+        return Err(anyhow!(
+            "Invalid Oracle CDC table name '{external_table_name}': expected unquoted schema.table identifiers"
+        )
+        .into());
+    }
+    Ok((schema.to_ascii_uppercase(), table.to_ascii_uppercase()))
 }
 
 /// Parse the schema/table name from the CDC `TABLE` clause.
