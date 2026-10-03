@@ -16,6 +16,7 @@
 
 package com.risingwave.connector.source.common;
 
+import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -51,6 +52,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private static final int INITIALIZATION_TIMEOUT_SECONDS = 30;
 
     private final Connection jdbcConnection;
+    private final TableSchema tableSchema;
     private final String pdbName;
     private final String schemaName;
     private final String tableName;
@@ -58,8 +60,10 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private final boolean autoInitializeHeartbeatTable;
     private final boolean isCdcSourceJob;
 
-    public OracleValidator(Map<String, String> userProps, boolean isCdcSourceJob)
+    public OracleValidator(
+            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
             throws SQLException {
+        this.tableSchema = tableSchema;
         this.pdbName = normalizePdbName(userProps.get(DbzConnectorConfig.ORACLE_PDB_NAME));
         this.heartbeatTable =
                 OracleHeartbeatTable.parse(
@@ -207,9 +211,49 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         try {
             switchToPdb();
             validateTableExists();
+            validateTablePrimaryKey();
             validateTableSupplementalLogging();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
+        }
+    }
+
+    private void validateTablePrimaryKey() throws SQLException {
+        var pkFields = new HashSet<String>();
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        "SELECT cols.COLUMN_NAME FROM ALL_CONSTRAINTS cons "
+                                + "JOIN ALL_CONS_COLUMNS cols ON cons.OWNER = cols.OWNER "
+                                + "AND cons.CONSTRAINT_NAME = cols.CONSTRAINT_NAME "
+                                + "WHERE cons.OWNER = ? AND cons.TABLE_NAME = ? "
+                                + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED'")) {
+            stmt.setString(1, schemaName);
+            stmt.setString(2, tableName);
+            try (var result = stmt.executeQuery()) {
+                while (result.next()) {
+                    pkFields.add(result.getString("COLUMN_NAME"));
+                }
+            }
+        }
+        primaryKeyCheck(tableSchema, pkFields);
+    }
+
+    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields) {
+        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+            throw ValidatorUtils.invalidArgument(
+                    "Primary key mismatch: the SQL schema defines "
+                            + sourceSchema.getPrimaryKeys().size()
+                            + " primary key columns, but the source table in Oracle has "
+                            + pkFields.size()
+                            + " columns.");
+        }
+        for (var colName : sourceSchema.getPrimaryKeys()) {
+            if (!pkFields.contains(colName)) {
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key mismatch: The primary key list of the source table in Oracle does not contain '"
+                                + colName
+                                + "'.\nHint: Oracle stores unquoted column names in uppercase. Use double quotes (\") in RisingWave to preserve the upstream column name.");
+            }
         }
     }
 

@@ -280,7 +280,8 @@ public class SourceValidateHandler {
                                     DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
                 }
                 validateQueueMemoryRatio(props);
-                try (var oracleValidator = new OracleValidator(props, isCdcSourceJob)) {
+                try (var oracleValidator =
+                        new OracleValidator(props, tableSchema, isCdcSourceJob)) {
                     oracleValidator.validateAll();
                 }
                 break;
