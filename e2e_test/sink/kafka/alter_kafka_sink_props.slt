@@ -1,3 +1,5 @@
+control substitution on
+
 statement ok
 set sink_decouple = true;
 
@@ -66,3 +68,82 @@ DROP SINK sink_kafka;
 
 statement ok
 DROP TABLE table_kafka;
+
+# Altering an unrelated property must not fail because a required property is a SECRET.
+statement ok
+CREATE SECRET kafka_broker WITH (backend = 'meta') AS '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}';
+
+statement ok
+CREATE TABLE table_kafka_secret (
+    id INT PRIMARY KEY,
+    v1 VARCHAR
+);
+
+statement ok
+CREATE SINK sink_kafka_secret FROM table_kafka_secret WITH (
+    connector = 'kafka',
+    properties.bootstrap.server = SECRET kafka_broker,
+    topic = 'test-rw-sink-alter-connector-props',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+statement ok
+ALTER SINK sink_kafka_secret CONNECTOR WITH (
+    properties.batch.size = '1000000'
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 'sink_kafka_secret'
+  and definition ilike '%properties.bootstrap.server = secret kafka_broker%'
+  and definition ilike '%properties.batch.size = ''1000000''%'
+  and connector_props->'properties.batch.size'->>'value' = '1000000'
+  and connector_props->'properties.bootstrap.server'->>'type' = 'secret';
+----
+1
+
+# Same for a sink whose secret comes from a CONNECTION and is altered through the connection.
+statement ok
+CREATE CONNECTION kafka_conn_secret WITH (
+    type = 'kafka',
+    properties.bootstrap.server = SECRET kafka_broker
+);
+
+statement ok
+CREATE SINK sink_kafka_conn_secret FROM table_kafka_secret WITH (
+    connector = 'kafka',
+    connection = kafka_conn_secret,
+    topic = 'test-rw-sink-alter-connector-props',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+statement ok
+ALTER CONNECTION kafka_conn_secret CONNECTOR WITH (
+    properties.security.protocol = 'PLAINTEXT'
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 'sink_kafka_conn_secret'
+  and connector_props->'properties.security.protocol'->>'value' = 'PLAINTEXT';
+----
+1
+
+statement ok
+DROP SINK sink_kafka_conn_secret;
+
+statement ok
+DROP CONNECTION kafka_conn_secret;
+
+statement ok
+DROP SINK sink_kafka_secret;
+
+statement ok
+DROP TABLE table_kafka_secret;
+
+statement ok
+DROP SECRET kafka_broker;
