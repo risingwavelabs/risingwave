@@ -25,8 +25,8 @@ use super::utils::impl_distill_by_unit;
 use super::{
     BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
-    StreamEowcSort, StreamOverWindow, ToBatch, ToStream, gen_filter_and_pushdown,
-    try_enforce_locality_requirement,
+    StreamEowcSort, StreamLocalityProvider, StreamOverWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -36,8 +36,7 @@ use crate::expr::{
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::logical_agg::LogicalAggBuilder;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, Literal, LocalityInput, PredicatePushdownContext, RewriteStreamContext,
-    ToStreamContext,
+    ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition, IndexSet};
@@ -663,9 +662,7 @@ impl ToStream for LogicalOverWindow {
             empty_partition_by_not_implemented!();
         }
 
-        let stream_input = LocalityInput::new(&self.input(), &RequiredDist::Any, ctx)?;
-        let required_dist =
-            RequiredDist::shard_by_key(self.input().schema().len(), &partition_key_indices);
+        let stream_input = self.input().to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
             // Emit-On-Window-Close case
@@ -679,7 +676,6 @@ impl ToStream for LogicalOverWindow {
                 .into());
             }
             if !stream_input
-                .stream()
                 .watermark_columns()
                 .contains(order_by[0].column_index)
             {
@@ -694,9 +690,11 @@ impl ToStream for LogicalOverWindow {
             }
             let order_key_index = order_by[0].column_index;
 
-            let sort_input = required_dist.streaming_enforce_if_not_satisfies(
-                stream_input.into_stream_with_layout(&partition_key_indices)?,
-            )?;
+            let sort_input =
+                RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
+                    .streaming_enforce_if_not_satisfies(stream_input)?;
+            let sort_input =
+                StreamLocalityProvider::enforce(sort_input, &partition_key_indices, ctx);
             // After sharding by partition key, `StreamEowcSort` gives rows in the same partition
             // and `ORDER BY` value a deterministic tie-break based on the preserved input stream
             // key. This matches `EowcOverWindow`'s persisted order
@@ -720,9 +718,10 @@ impl ToStream for LogicalOverWindow {
                 );
             }
 
-            let new_input = required_dist.streaming_enforce_if_not_satisfies(
-                stream_input.into_stream_with_layout(&partition_key_indices)?,
-            )?;
+            let new_input =
+                RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
+                    .streaming_enforce_if_not_satisfies(stream_input)?;
+            let new_input = StreamLocalityProvider::enforce(new_input, &partition_key_indices, ctx);
             let core = self.core.clone_with_input(new_input);
 
             Ok(StreamOverWindow::new(core)?.into())
@@ -741,11 +740,7 @@ impl ToStream for LogicalOverWindow {
         let logical_input = if partition_key_indices.is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(
-                self.input(),
-                &partition_key_indices,
-                ctx.locality_backfill_enabled(),
-            )
+            with_better_locality(self.input(), &partition_key_indices)
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (new_self, output_col_change) = self.rewrite_with_input(input, input_col_change);

@@ -21,13 +21,13 @@ use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchGroupTopN, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamPlanRef, StreamProject, ToBatch,
-    ToStream, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamLocalityProvider, StreamPlanRef,
+    StreamProject, ToBatch, ToStream, gen_filter_and_pushdown, generic, with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
-    BatchTopN, ColumnPruningContext, LocalityInput, LogicalProject, PredicatePushdownContext,
+    BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -323,11 +323,10 @@ impl ToStream for LogicalTopN {
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let required_dist =
-                RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-            let input = LocalityInput::new(&self.input(), &RequiredDist::Any, ctx)?
-                .into_stream_with_layout(self.group_key())?;
-            let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
+            let input = self.input().to_stream(ctx)?;
+            let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
+                .streaming_enforce_if_not_satisfies(input)?;
+            let input = StreamLocalityProvider::enforce(input, self.group_key(), ctx);
             let core = self.core.clone_with_input(input);
             StreamGroupTopN::new(core, None)?.into()
         } else {
@@ -342,11 +341,7 @@ impl ToStream for LogicalTopN {
         let logical_input = if self.group_key().is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(
-                self.input(),
-                self.group_key(),
-                ctx.locality_backfill_enabled(),
-            )
+            with_better_locality(self.input(), self.group_key())
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);

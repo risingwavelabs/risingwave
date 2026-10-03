@@ -80,9 +80,7 @@ impl StreamProjectSet {
         }
 
         let i2o = core.i2o_col_mapping();
-        let replay_order = (input.replay_order().iter())
-            .map_while(|&idx| i2o.try_map(idx))
-            .collect();
+        let replay_order = input.replay_order().map_while(|&idx| i2o.try_map(idx));
 
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.

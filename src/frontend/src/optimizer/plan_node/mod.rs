@@ -55,7 +55,7 @@ use super::property::{
     Distribution, FunctionalDependencySet, MonotonicityMap, Order, WatermarkColumns,
 };
 use crate::error::{ErrorCode, Result};
-use crate::optimizer::property::StreamKind;
+use crate::optimizer::property::{ReplayOrder, StreamKind};
 use crate::optimizer::{PlanVisitor, ShareId};
 use crate::session::current::notice_to_user;
 use crate::utils::{PrettySerde, build_graph_from_pretty};
@@ -702,7 +702,7 @@ impl StreamPlanNodeMetadata for StreamPlanRef {
         self.plan_base().columns_monotonicity()
     }
 
-    fn replay_order(&self) -> &[usize] {
+    fn replay_order(&self) -> &ReplayOrder {
         self.plan_base().replay_order()
     }
 }
@@ -1047,7 +1047,6 @@ mod logical_intersect;
 mod logical_join;
 mod logical_kafka_scan;
 mod logical_limit;
-mod logical_locality_provider;
 mod logical_match_recognize;
 mod logical_max_one_row;
 mod logical_multi_join;
@@ -1192,7 +1191,6 @@ pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
-pub use logical_locality_provider::{LocalityInput, LogicalLocalityProvider};
 pub use logical_match_recognize::LogicalMatchRecognize;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
@@ -1331,7 +1329,6 @@ macro_rules! for_all_plan_nodes {
             , { Logical, GapFill }
             , { Logical, VectorSearch }
             , { Logical, GetChannelDeltaStats }
-            , { Logical, LocalityProvider }
             , { Logical, VectorSearchLookupJoin }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }

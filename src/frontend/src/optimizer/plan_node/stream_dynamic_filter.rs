@@ -28,7 +28,7 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeBinary, StreamNode, StreamPlanRef as PlanRef,
 };
-use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
+use crate::optimizer::property::{MonotonicityMap, ReplayOrder, StreamKind, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -56,9 +56,9 @@ impl StreamDynamicFilter {
         };
 
         let replay_order = if Self::keeps_left_order(&core) {
-            core.left().replay_order().to_vec()
+            core.left().replay_order().clone()
         } else {
-            vec![]
+            ReplayOrder::default()
         };
         let base = PlanBase::new_stream_with_core(
             &core,

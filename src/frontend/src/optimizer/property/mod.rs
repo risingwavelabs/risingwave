@@ -36,3 +36,5 @@ mod watermark_columns;
 pub use watermark_columns::*;
 mod stream_kind;
 pub use stream_kind::*;
+mod replay_order;
+pub use replay_order::*;

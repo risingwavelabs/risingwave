@@ -29,9 +29,9 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    BackfillType, BatchPlanRef, ColPrunable, ExprRewritable, LocalityInput, Logical,
-    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin,
-    StreamPlanRef, StreamProject, ToBatch, ToStream, generic, try_enforce_locality_requirement,
+    BackfillType, BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamLocalityProvider,
+    StreamPlanRef, StreamProject, ToBatch, ToStream, generic, with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -973,11 +973,9 @@ impl<'a> Deref for TemporalJoinScan<'a> {
 }
 
 impl LogicalJoin {
-    /// Converts both inputs of a hash join and enforces the distribution the join needs.
-    ///
-    /// `order_eq_keys` orders the eq keys, which lead the primary key of the join state, by the
-    /// watermark columns of the inputs. The inputs are laid out like the join state only after
-    /// that. Returns the inputs and the ordered predicate.
+    /// Converts both inputs of a hash join with the distribution it needs, orders the eq keys,
+    /// which lead the primary key of the join state, with `order_eq_keys`, and lays out each input
+    /// like its join state. Returns the inputs and the ordered predicate.
     fn get_stream_input_for_hash_join(
         &self,
         predicate: EqJoinPredicate,
@@ -990,80 +988,57 @@ impl LogicalJoin {
     ) -> Result<(StreamPlanRef, StreamPlanRef, EqJoinPredicate)> {
         use super::stream::prelude::*;
 
-        // The distribution of an input that the other side can follow: a hash on the eq keys that
-        // an exchange can reproduce, i.e. not `UpstreamHashShard`. The input of a provider may be
-        // distributed in any way, as it is converted without the distribution the join requires.
-        fn followable_dist(plan: &StreamPlanRef, eq_keys: &[usize]) -> Option<RequiredDist> {
-            match plan.distribution() {
-                dist @ Distribution::HashShard(_)
-                    if dist
-                        .satisfies(&RequiredDist::shard_by_key(plan.schema().len(), eq_keys)) =>
-                {
-                    Some(RequiredDist::PhysicalDist(dist.clone()))
-                }
-                _ => None,
-            }
-        }
-
-        let left_len = self.left().schema().len();
-        let right_len = self.right().schema().len();
-        let r2l = predicate.r2l_eq_columns_mapping(left_len, right_len);
-        let l2r = predicate.l2r_eq_columns_mapping(left_len, right_len);
-
-        let right = LocalityInput::new(
-            &self.right(),
-            &RequiredDist::shard_by_key(right_len, &predicate.right_eq_indexes()),
+        let mut right = self.right().to_stream_with_dist_required(
+            &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
         )?;
-        // Whether a provider is built, and so its distribution, is known only after the eq keys
-        // are ordered by the watermark columns of both inputs. So the left input follows the right
-        // one only if it is not a provider.
-        let left_required_dist = match &right {
-            LocalityInput::Stream(right) => followable_dist(right, &predicate.right_eq_indexes()),
-            LocalityInput::Provider(..) => None,
+        let r2l =
+            predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
+        let l2r =
+            predicate.l2r_eq_columns_mapping(self.left().schema().len(), right.schema().len());
+        let mut left;
+        let right_dist = right.distribution();
+        match right_dist {
+            Distribution::HashShard(_) => {
+                let left_dist = r2l
+                    .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
+                left = self.left().to_stream_with_dist_required(&left_dist, ctx)?;
+            }
+            Distribution::UpstreamHashShard(_, _) => {
+                left = self.left().to_stream_with_dist_required(
+                    &RequiredDist::shard_by_key(
+                        self.left().schema().len(),
+                        &predicate.left_eq_indexes(),
+                    ),
+                    ctx,
+                )?;
+                let left_dist = left.distribution();
+                match left_dist {
+                    Distribution::HashShard(_) => {
+                        let right_dist = l2r.rewrite_required_distribution(
+                            &RequiredDist::PhysicalDist(left_dist.clone()),
+                        );
+                        right = right_dist.streaming_enforce_if_not_satisfies(right)?
+                    }
+                    Distribution::UpstreamHashShard(_, _) => {
+                        left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
+                            .streaming_enforce_if_not_satisfies(left)?;
+                        right = RequiredDist::hash_shard(&predicate.right_eq_indexes())
+                            .streaming_enforce_if_not_satisfies(right)?;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
         }
-        .map_or_else(
-            || RequiredDist::shard_by_key(left_len, &predicate.left_eq_indexes()),
-            |right_dist| r2l.rewrite_required_distribution(&right_dist),
+        let predicate = order_eq_keys(
+            predicate,
+            left.watermark_columns(),
+            right.watermark_columns(),
         );
-        let left = LocalityInput::new(&self.left(), &left_required_dist, ctx)?;
-
-        let ordered_predicate = order_eq_keys(
-            predicate.clone(),
-            left.stream().watermark_columns(),
-            right.stream().watermark_columns(),
-        );
-        let left_key = ordered_predicate.left_eq_indexes();
-        let right_key = ordered_predicate.right_eq_indexes();
-
-        // A provider is `UpstreamHashShard`, so an input that gets one cannot be followed.
-        let followable = |input: &LocalityInput, key: &[usize]| {
-            (!input.needs_provider(key))
-                .then(|| followable_dist(input.stream(), key))
-                .flatten()
-        };
-        let (left_dist, right_dist) =
-            match (followable(&left, &left_key), followable(&right, &right_key)) {
-                (_, Some(right_dist)) => {
-                    (r2l.rewrite_required_distribution(&right_dist), right_dist)
-                }
-                (Some(left_dist), None) => {
-                    let right_dist = l2r.rewrite_required_distribution(&left_dist);
-                    (left_dist, right_dist)
-                }
-                (None, None) => (
-                    RequiredDist::hash_shard(&predicate.left_eq_indexes()),
-                    RequiredDist::hash_shard(&predicate.right_eq_indexes()),
-                ),
-            };
-
-        let left = left.into_stream_with_layout(&left_key)?;
-        let right = right.into_stream_with_layout(&right_key)?;
-        Ok((
-            left_dist.streaming_enforce_if_not_satisfies(left)?,
-            right_dist.streaming_enforce_if_not_satisfies(right)?,
-            ordered_predicate,
-        ))
+        let left = StreamLocalityProvider::enforce(left, &predicate.left_eq_indexes(), ctx);
+        let right = StreamLocalityProvider::enforce(right, &predicate.right_eq_indexes(), ctx);
+        Ok((left, right, predicate))
     }
 
     fn to_stream_hash_join(
@@ -1363,9 +1338,7 @@ impl LogicalJoin {
             RequiredDist::hash_shard(&left_dist_key)
         };
 
-        // Replay rows in the order the lookups read the table.
-        let left = LocalityInput::new(&self.left(), &RequiredDist::Any, ctx)?
-            .into_stream_with_layout(&predicate.left_eq_indexes()[..lookup_prefix_len])?;
+        let left = self.left().to_stream(ctx)?;
         let left = if is_broadcast {
             // Always shuffle the LHS by its stream key. The point of a broadcast temporal join is
             // to make the join fragment independent: without an exchange here, the join would be
@@ -1384,6 +1357,12 @@ impl LogicalJoin {
             // the join fragment together with the RHS with a `no_shuffle` exchange.
             required_dist.stream_enforce(left)
         };
+        // Replay rows in the order the lookups read the table.
+        let left = StreamLocalityProvider::enforce_below_shuffle(
+            left,
+            &predicate.left_eq_indexes()[..lookup_prefix_len],
+            ctx,
+        );
 
         let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
             Self::temporal_join_scan_predicate_pull_up(
@@ -1755,26 +1734,14 @@ impl ToStream for LogicalJoin {
             let lhs_join_key_idx = eq_indexes.iter().map(|(l, _)| *l).collect_vec();
             if self.should_be_temporal_join() {
                 (
-                    try_enforce_locality_requirement(
-                        self.left(),
-                        &lhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
+                    with_better_locality(self.left(), &lhs_join_key_idx),
                     self.right(),
                 )
             } else {
                 let rhs_join_key_idx = eq_indexes.iter().map(|(_, r)| *r).collect_vec();
                 (
-                    try_enforce_locality_requirement(
-                        self.left(),
-                        &lhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
-                    try_enforce_locality_requirement(
-                        self.right(),
-                        &rhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
+                    with_better_locality(self.left(), &lhs_join_key_idx),
+                    with_better_locality(self.right(), &rhs_join_key_idx),
                 )
             }
         };

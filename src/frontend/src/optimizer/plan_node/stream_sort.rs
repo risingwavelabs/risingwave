@@ -24,7 +24,7 @@ use super::utils::{Distill, TableCatalogBuilder, childless_record};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Monotonicity, MonotonicityMap, WatermarkColumns};
+use crate::optimizer::property::{Monotonicity, MonotonicityMap, ReplayOrder, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -108,11 +108,12 @@ impl StreamEowcSort {
             watermark_columns,
             columns_monotonicity,
         )
-        .with_replay_order(
+        // The sort buffers the rows of all vnodes of the actor and outputs them in order.
+        .with_replay_order(ReplayOrder::across_vnodes(
             std::iter::once(sort_column_index)
                 .chain(secondary_order_columns.iter().copied())
                 .collect(),
-        );
+        ));
         Self {
             base,
             input,

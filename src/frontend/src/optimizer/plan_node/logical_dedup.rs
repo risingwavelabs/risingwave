@@ -19,11 +19,11 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchGroupTopN, BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, LocalityInput,
-    Logical, LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary,
-    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
-    StreamGroupTopN, ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
-    try_enforce_locality_requirement,
+    BatchGroupTopN, BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN,
+    StreamLocalityProvider, ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
+    with_better_locality,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -94,11 +94,7 @@ impl ToStream for LogicalDedup {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let logical_input = try_enforce_locality_requirement(
-            self.input(),
-            self.dedup_cols(),
-            ctx.locality_backfill_enabled(),
-        );
+        let logical_input = with_better_locality(self.input(), self.dedup_cols());
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (logical, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((logical.into(), out_col_change))
@@ -110,10 +106,10 @@ impl ToStream for LogicalDedup {
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         use super::stream::prelude::*;
 
-        let required_dist = RequiredDist::hash_shard(self.dedup_cols());
-        let input = LocalityInput::new(&self.input(), &RequiredDist::Any, ctx)?
-            .into_stream_with_layout(self.dedup_cols())?;
-        let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
+        let input = self.input().to_stream(ctx)?;
+        let input = RequiredDist::hash_shard(self.dedup_cols())
+            .streaming_enforce_if_not_satisfies(input)?;
+        let input = StreamLocalityProvider::enforce(input, self.dedup_cols(), ctx);
         if input.append_only() {
             // `LogicalDedup` is transformed to `StreamDedup` only when the input is append-only.
             let core = self.core.clone_with_input(input);

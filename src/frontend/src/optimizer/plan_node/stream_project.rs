@@ -118,7 +118,7 @@ impl StreamProject {
         }
         let i2o = core.i2o_col_mapping();
         let mut replay_order = vec![];
-        for &input_idx in input.replay_order() {
+        for &input_idx in input.replay_order().columns() {
             if let Some(output_idx) = i2o.try_map(input_idx) {
                 replay_order.push(output_idx);
                 continue;
@@ -144,7 +144,7 @@ impl StreamProject {
             out_watermark_columns,
             out_monotonicity_map,
         )
-        .with_replay_order(replay_order);
+        .with_replay_order(input.replay_order().with_columns(replay_order));
 
         StreamProject {
             base,

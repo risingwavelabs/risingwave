@@ -213,8 +213,8 @@ fn derive_watermark_for_hash_join(
 }
 
 impl StreamHashJoin {
-    /// Orders the eq keys, which lead the primary key of the join state: the keys with a watermark
-    /// on both sides come first, so that the state can be cleaned by a prefix of its primary key.
+    /// Orders the eq keys, which lead the primary key of the join state, by placing the keys with a
+    /// watermark on both sides at the beginning.
     pub fn order_eq_keys(
         predicate: EqJoinPredicate,
         left_watermark_columns: &WatermarkColumns,
@@ -231,17 +231,18 @@ impl StreamHashJoin {
         predicate.reorder(&reorder_idx)
     }
 
-    /// Keeps the order of the eq keys in `core`. The planner orders them with
-    /// [`Self::order_eq_keys`] before building the inputs, since a `LocalityProvider` input has to
-    /// follow that order.
-    pub fn new(core: generic::Join<PlanRef>) -> Result<Self> {
+    pub fn new(mut core: generic::Join<PlanRef>) -> Result<Self> {
         let stream_kind = core.stream_kind()?;
 
-        let eq_join_predicate = core
-            .on
-            .as_eq_predicate_ref()
-            .expect("StreamHashJoin requires JoinOn::EqPredicate in core")
-            .clone();
+        let eq_join_predicate = Self::order_eq_keys(
+            core.on
+                .as_eq_predicate_ref()
+                .expect("StreamHashJoin requires JoinOn::EqPredicate in core")
+                .clone(),
+            core.left.watermark_columns(),
+            core.right.watermark_columns(),
+        );
+        core.on = generic::JoinOn::EqPredicate(eq_join_predicate.clone());
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),

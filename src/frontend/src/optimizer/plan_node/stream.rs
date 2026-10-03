@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-
 use super::generic::PhysicalPlanRef;
-use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
+use crate::optimizer::property::{MonotonicityMap, ReplayOrder, StreamKind, WatermarkColumns};
 
 /// A subtrait of [`PhysicalPlanRef`] for stream plans.
 ///
@@ -34,15 +32,7 @@ pub trait StreamPlanNodeMetadata: PhysicalPlanRef {
     fn emit_on_window_close(&self) -> bool;
     fn watermark_columns(&self) -> &WatermarkColumns;
     fn columns_monotonicity(&self) -> &MonotonicityMap;
-    fn replay_order(&self) -> &[usize];
-
-    /// The part of [`Self::replay_order`] that a stateful operator keyed by `key` keeps: its longest
-    /// prefix within the key.
-    fn replay_order_within(&self, key: &[usize]) -> Vec<usize> {
-        (self.replay_order().iter().copied().unique())
-            .take_while(|col| key.contains(col))
-            .collect()
-    }
+    fn replay_order(&self) -> &ReplayOrder;
 }
 
 /// Prelude for stream plan nodes.

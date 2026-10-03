@@ -59,9 +59,7 @@ impl StreamHopWindow {
         }
 
         let i2o = core.i2o_col_mapping();
-        let replay_order = (input.replay_order().iter())
-            .map_while(|&idx| i2o.try_map(idx))
-            .collect();
+        let replay_order = input.replay_order().map_while(|&idx| i2o.try_map(idx));
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,

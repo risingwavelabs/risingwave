@@ -47,7 +47,7 @@ impl StreamDedup {
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         )
-        .with_replay_order(input.replay_order_within(&core.dedup_cols));
+        .with_replay_order(input.replay_order().within(&core.dedup_cols));
         StreamDedup { base, core }
     }
 

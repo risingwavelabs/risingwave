@@ -93,11 +93,9 @@ impl StreamHashAgg {
             }
         }
 
-        let replay_order = input
-            .replay_order_within(&core.group_key.to_vec())
-            .into_iter()
-            .map(|idx| mapping.map(idx))
-            .collect();
+        let replay_order = (input.replay_order())
+            .within(&core.group_key.to_vec())
+            .map_while(|&idx| mapping.try_map(idx));
 
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream_with_core(

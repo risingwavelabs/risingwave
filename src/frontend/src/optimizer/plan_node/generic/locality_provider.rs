@@ -25,8 +25,11 @@ use crate::optimizer::property::FunctionalDependencySet;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocalityProvider<PlanRef> {
     pub input: PlanRef,
-    /// Columns that define the locality
+    /// Columns that define the locality, in the order each vnode is replayed by
     pub locality_columns: Vec<usize>,
+    /// Columns added to the stream key of the input, so that the provider can be shuffled again:
+    /// its dist key, which a shuffle requires in the stream key.
+    pub extra_stream_key: Vec<usize>,
 }
 
 impl<PlanRef: GenericPlanRef> LocalityProvider<PlanRef> {
@@ -34,6 +37,7 @@ impl<PlanRef: GenericPlanRef> LocalityProvider<PlanRef> {
         Self {
             input,
             locality_columns,
+            extra_stream_key: vec![],
         }
     }
 
@@ -53,11 +57,10 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for LocalityProvider<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        let mut stream_key = self.locality_columns.clone();
-        let input_stream_key = self.input.stream_key()?;
-        for col in input_stream_key {
-            if !stream_key.contains(col) {
-                stream_key.push(*col);
+        let mut stream_key = self.input.stream_key()?.to_vec();
+        for &col in &self.extra_stream_key {
+            if !stream_key.contains(&col) {
+                stream_key.push(col);
             }
         }
         Some(stream_key)

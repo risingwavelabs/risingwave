@@ -25,7 +25,7 @@ use super::{ExprRewritable, StreamPlanRef as PlanRef, generic};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
-use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
+use crate::optimizer::property::{Distribution, MonotonicityMap, ReplayOrder, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
@@ -95,15 +95,7 @@ impl StreamUnion {
         };
 
         // The inputs are interleaved, so only the order they share is kept.
-        let replay_order = (inputs.iter().map(|input| input.replay_order()))
-            .reduce(|order, input_order| {
-                let len = (order.iter().enumerate())
-                    .take_while(|&(i, col)| input_order.get(i) == Some(col))
-                    .count();
-                &order[..len]
-            })
-            .unwrap_or_default()
-            .to_vec();
+        let replay_order = ReplayOrder::common(inputs.iter().map(|input| input.replay_order()));
 
         let base = PlanBase::new_stream_with_core(
             &core,

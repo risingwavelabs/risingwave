@@ -23,9 +23,9 @@ use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
-    PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamPlanRef, StreamProject,
-    StreamShare, StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
-    try_enforce_locality_requirement,
+    PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamLocalityProvider,
+    StreamPlanRef, StreamProject, StreamShare, StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch,
+    ToStream, with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -38,8 +38,8 @@ use crate::optimizer::plan_node::stream_global_approx_percentile::StreamGlobalAp
 use crate::optimizer::plan_node::stream_local_approx_percentile::StreamLocalApproxPercentile;
 use crate::optimizer::plan_node::stream_row_merge::StreamRowMerge;
 use crate::optimizer::plan_node::{
-    BatchSortAgg, ColumnPruningContext, LocalityInput, LogicalDedup, LogicalProject,
-    PredicatePushdownContext, RewriteStreamContext, ToStreamContext, gen_filter_and_pushdown,
+    BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject, PredicatePushdownContext,
+    RewriteStreamContext, ToStreamContext, gen_filter_and_pushdown,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{
@@ -228,16 +228,28 @@ impl LogicalAgg {
         Ok(new_stream_simple_agg(core, false)?.into())
     }
 
-    fn gen_shuffle_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
+    /// `ordered_group_key` is the group key in the order of the agg state.
+    fn gen_shuffle_plan(
+        &self,
+        stream_input: StreamPlanRef,
+        ordered_group_key: &[usize],
+        ctx: &ToStreamContext,
+    ) -> Result<StreamPlanRef> {
         let input =
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .streaming_enforce_if_not_satisfies(stream_input)?;
+        let input = StreamLocalityProvider::enforce(input, ordered_group_key, ctx);
         let core = self.core.clone_with_input(input);
         Ok(new_stream_hash_agg(core, None)?.into())
     }
 
     /// Generates distributed stream plan.
-    fn gen_dist_stream_agg_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
+    fn gen_dist_stream_agg_plan(
+        &self,
+        stream_input: StreamPlanRef,
+        ordered_group_key: &[usize],
+        ctx: &ToStreamContext,
+    ) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
         let input_dist = stream_input.distribution();
@@ -245,9 +257,12 @@ impl LogicalAgg {
 
         // Shuffle agg
         // If we have group key, and we won't try two phase agg optimization at all,
-        // we will always choose shuffle agg over single agg.
-        if !self.group_key().is_empty() && !self.core.must_try_two_phase_agg() {
-            return self.gen_shuffle_plan(stream_input);
+        // we will always choose shuffle agg over single agg. Locality backfill lays out the input
+        // of a shuffle agg like its state.
+        if !self.group_key().is_empty()
+            && (!self.core.must_try_two_phase_agg() || ctx.locality_backfill_enabled())
+        {
+            return self.gen_shuffle_plan(stream_input, ordered_group_key, ctx);
         }
 
         // Standalone agg
@@ -306,7 +321,7 @@ impl LogicalAgg {
 
         // Fallback to shuffle or single, if we can't generate any 2-phase plans.
         if !self.group_key().is_empty() {
-            self.gen_shuffle_plan(stream_input)
+            self.gen_shuffle_plan(stream_input, ordered_group_key, ctx)
         } else {
             self.gen_single_plan(stream_input)
         }
@@ -1438,12 +1453,10 @@ impl ToStream for LogicalAgg {
         let eowc = ctx.emit_on_window_close();
         let input = self.input();
 
-        let stream_input = LocalityInput::new(&input, &RequiredDist::Any, ctx)?;
+        let stream_input = input.to_stream(ctx)?;
 
         // Use Dedup operator, if possible.
-        if stream_input.stream().append_only()
-            && self.agg_calls().is_empty()
-            && !self.group_key().is_empty()
+        if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
         {
             let group_key = self.group_key().to_vec();
             let input_schema_len = input.schema().len();
@@ -1461,7 +1474,7 @@ impl ToStream for LogicalAgg {
                 AggType::Builtin(PbAggKind::ApproxCountDistinct)
             )
         }) {
-            if stream_input.stream().append_only() {
+            if stream_input.append_only() {
                 self.core.ctx().session_ctx().notice_to_user(
                     "Streaming `APPROX_COUNT_DISTINCT` is still a preview feature and subject to change. Please do not use it in production environment.",
                 );
@@ -1476,14 +1489,13 @@ impl ToStream for LogicalAgg {
         let window_col = if eowc && !self.group_key().is_empty() {
             Some(
                 self.core
-                    .eowc_window_column(stream_input.stream().watermark_columns())?,
+                    .eowc_window_column(stream_input.watermark_columns())?,
             )
         } else {
             None
         };
-        let stream_input =
-            stream_input.into_stream_with_layout(&self.core.get_ordered_group_key(window_col))?;
-        let plan = self.gen_dist_stream_agg_plan(stream_input)?;
+        let ordered_group_key = self.core.get_ordered_group_key(window_col);
+        let plan = self.gen_dist_stream_agg_plan(stream_input, &ordered_group_key, ctx)?;
 
         let (plan, n_final_agg_calls) = if let Some(final_agg) = plan.as_stream_simple_agg() {
             if eowc {
@@ -1556,11 +1568,7 @@ impl ToStream for LogicalAgg {
         let logical_input = if self.group_key().is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(
-                self.input(),
-                &self.group_key().to_vec(),
-                ctx.locality_backfill_enabled(),
-            )
+            with_better_locality(self.input(), &self.group_key().to_vec())
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);

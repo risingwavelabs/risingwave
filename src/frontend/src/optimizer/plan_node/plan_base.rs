@@ -16,7 +16,7 @@ use educe::Educe;
 
 use super::generic::GenericPlanNode;
 use super::*;
-use crate::optimizer::property::{Distribution, StreamKind, WatermarkColumns};
+use crate::optimizer::property::{Distribution, ReplayOrder, StreamKind, WatermarkColumns};
 
 /// No extra fields for logical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -61,17 +61,14 @@ pub struct StreamExtra {
     watermark_columns: WatermarkColumns,
     /// The monotonicity of columns in the output.
     columns_monotonicity: MonotonicityMap,
-    /// The order in which each actor of the `PlanNode` outputs its rows during backfill, as output
-    /// columns. An operator that needs its input replayed with locality on a prefix of it gets it
-    /// without a locality provider.
+    /// The order in which the `PlanNode` outputs the rows of each vnode during backfill.
     ///
     /// - A table scan reads its vnodes side by side in primary key order, and a locality provider
-    ///   replays them merged in its own.
-    /// - A stateful operator outputs the rows of each epoch clustered by its state key in the order
-    ///   they arrive, so it keeps the part of the order of its input within the key.
-    /// - An exchange interleaves the rows of the actors of its input, which keeps the order of each.
+    ///   replays them one after another in its own.
+    /// - A stateful operator keeps the part of its input's order within its state key.
+    /// - A no-shuffle exchange keeps the order, and a shuffle only one that holds across vnodes.
     ///   Other operators that keep the order of their input pass it on. Others have none.
-    replay_order: Vec<usize>,
+    replay_order: ReplayOrder,
 }
 
 impl GetPhysicalCommon for StreamExtra {
@@ -197,7 +194,7 @@ impl stream::StreamPlanNodeMetadata for PlanBase<Stream> {
         &self.extra.columns_monotonicity
     }
 
-    fn replay_order(&self) -> &[usize] {
+    fn replay_order(&self) -> &ReplayOrder {
         &self.extra.replay_order
     }
 }
@@ -322,7 +319,7 @@ impl PlanBase<Stream> {
                 emit_on_window_close,
                 watermark_columns,
                 columns_monotonicity,
-                replay_order: vec![],
+                replay_order: ReplayOrder::default(),
             },
         }
     }
@@ -348,7 +345,7 @@ impl PlanBase<Stream> {
         )
     }
 
-    pub fn with_replay_order(mut self, replay_order: Vec<usize>) -> Self {
+    pub fn with_replay_order(mut self, replay_order: ReplayOrder) -> Self {
         self.extra.replay_order = replay_order;
         self
     }

@@ -64,25 +64,11 @@ pub trait ToStream {
     }
 }
 
-/// Requires locality on the given columns for the backfill of the plan's consumer.
-///
-/// The plan switches to a better access path for the columns if there is one. If locality
-/// backfill is enabled, the plan is then wrapped with a `LogicalLocalityProvider`, which reserves
-/// the columns in the stream key. Whether the provider is built is decided in `to_stream` through
-/// [`LocalityInput`], where the order in which the input replays rows and the order the consumer
-/// needs are both known.
-pub fn try_enforce_locality_requirement(
-    plan: LogicalPlanRef,
-    columns: &[usize],
-    locality_backfill_enabled: bool,
-) -> LogicalPlanRef {
-    assert!(!columns.is_empty());
-    let plan = plan.try_better_locality(columns).unwrap_or(plan);
-    if locality_backfill_enabled {
-        LogicalLocalityProvider::new(plan, columns.to_owned()).into()
-    } else {
-        plan
-    }
+/// Switches the plan to a better access path for locality on the given columns, e.g. an index scan,
+/// if there is one. The locality itself is enforced in `to_stream` by
+/// [`StreamLocalityProvider::enforce`].
+pub fn with_better_locality(plan: LogicalPlanRef, columns: &[usize]) -> LogicalPlanRef {
+    plan.try_better_locality(columns).unwrap_or(plan)
 }
 
 pub fn stream_enforce_eowc_requirement(
@@ -122,27 +108,18 @@ pub struct RewriteStreamContext {
     // so operators above `LogicalScan` can preserve hidden primary-key columns before
     // `StreamTableScan` is built. Other backfill types keep logical stream-key semantics.
     backfill_type: BackfillType,
-    locality_backfill_enabled: bool,
 }
 
 impl RewriteStreamContext {
-    pub fn new_with_backfill_type(
-        backfill_type: BackfillType,
-        locality_backfill_enabled: bool,
-    ) -> Self {
+    pub fn new_with_backfill_type(backfill_type: BackfillType) -> Self {
         Self {
             share_rewrite_map: HashMap::new(),
             backfill_type,
-            locality_backfill_enabled,
         }
     }
 
     pub fn backfill_type(&self) -> BackfillType {
         self.backfill_type
-    }
-
-    pub fn locality_backfill_enabled(&self) -> bool {
-        self.locality_backfill_enabled
     }
 
     pub fn add_rewrite_result(
@@ -216,6 +193,7 @@ pub struct ToStreamContext {
     share_to_stream_map: HashMap<ShareId, StreamPlanRef>,
     emit_on_window_close: bool,
     backfill_type: BackfillType,
+    locality_backfill_enabled: bool,
 }
 
 impl ToStreamContext {
@@ -224,7 +202,19 @@ impl ToStreamContext {
             share_to_stream_map: HashMap::new(),
             emit_on_window_close,
             backfill_type,
+            locality_backfill_enabled: false,
         }
+    }
+
+    /// Lays out the inputs of stateful operators with locality providers, see
+    /// [`super::StreamLocalityProvider::enforce`].
+    pub fn with_locality_backfill(mut self, enabled: bool) -> Self {
+        self.locality_backfill_enabled = enabled;
+        self
+    }
+
+    pub fn locality_backfill_enabled(&self) -> bool {
+        self.locality_backfill_enabled
     }
 
     pub fn backfill_type(&self) -> BackfillType {

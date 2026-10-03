@@ -50,7 +50,7 @@ impl StreamShare {
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         )
-        .with_replay_order(input.replay_order().to_vec());
+        .with_replay_order(input.replay_order().clone());
 
         StreamShare { base, core }
     }
