@@ -20,6 +20,9 @@ use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
+use risingwave_connector::connector_common::sql_server::{
+    MssqlConnectionConfig, describe_mssql_query,
+};
 use risingwave_connector::connector_common::{PgConnectionConfig, create_pg_client};
 use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
@@ -35,6 +38,26 @@ use crate::error::ErrorCode::BindError;
 use crate::expr::reject_impure;
 use crate::utils::FRONTEND_RUNTIME;
 
+/// Parse a strict boolean TVF argument. Returns the default when the argument
+/// is absent (e.g. the 2-arg source-reference form) and an error when the user
+/// supplies a value that is not a case-insensitive `true` / `false`. We avoid
+/// `s.parse::<bool>().unwrap_or(default)` because that would silently coerce
+/// typos like `yes` or `1` — and a typo on a security-critical flag like
+/// `trust_cert` would weaken transport security without any user-visible error.
+fn parse_strict_bool_arg(value: Option<&String>, default: bool) -> anyhow::Result<bool> {
+    match value {
+        None => Ok(default),
+        Some(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            other => Err(anyhow::anyhow!(
+                "expected 'true' or 'false', got {:?}",
+                other
+            )),
+        },
+    }
+}
+
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
 ///
@@ -47,6 +70,14 @@ pub struct TableFunction {
     pub function_type: TableFunctionType,
     /// Catalog of user defined table function.
     pub user_defined: Option<Arc<FunctionCatalog>>,
+    /// 0-based ordinals of `MONEY` / `SMALLMONEY` columns in the
+    /// discovered result schema. Set by the `mssql_query` binder from
+    /// `describe_mssql_query`; `None` (or empty) for table functions
+    /// that don't surface MONEY data. Carried through to the
+    /// `BatchMssqlQuery` plan node so the executor can apply the
+    /// `i64 / 10000` → `Decimal` decoding even when Tiberius reports
+    /// `CAST(... AS MONEY)` as `ColumnType::Intn`.
+    pub money_column_indices: Vec<usize>,
 }
 
 impl TableFunction {
@@ -59,6 +90,7 @@ impl TableFunction {
             return_type,
             function_type: func_type,
             user_defined: None,
+            money_column_indices: vec![],
         })
     }
 
@@ -72,6 +104,7 @@ impl TableFunction {
             return_type: catalog.return_type.clone(),
             function_type: TableFunctionType::UserDefined,
             user_defined: Some(catalog),
+            money_column_indices: vec![],
         }
     }
 
@@ -289,6 +322,7 @@ impl TableFunction {
             return_type,
             function_type: TableFunctionType::FileScan,
             user_defined: None,
+            money_column_indices: vec![],
         })
     }
 
@@ -375,6 +409,7 @@ impl TableFunction {
                 return_type: schema,
                 function_type: TableFunctionType::PostgresQuery,
                 user_defined: None,
+                money_column_indices: vec![],
             })
         }
     }
@@ -509,6 +544,87 @@ impl TableFunction {
                 return_type: schema,
                 function_type: TableFunctionType::MysqlQuery,
                 user_defined: None,
+                money_column_indices: vec![],
+            })
+        }
+    }
+
+    /// Bind a `mssql_query(...)` table function call.
+    ///
+    /// `args` is the **pre-resolved** argument vector produced by the
+    /// binder (`Binder::bind_external_db_query_args`), so this function
+    /// only does the bind-time schema discovery — it does not look up the
+    /// source catalog or check privileges. See `bind_external_db_query_args`
+    /// for the inline / source-reference calling forms and the
+    /// privilege-check ordering.
+    ///
+    /// The returned `TableFunction` has a `return_type` that is a
+    /// `DataType::Struct` discovered at bind time by calling
+    /// `describe_mssql_query` against the user-provided query. The
+    /// `encrypt` and `trust_cert` flags are parsed strictly (any value
+    /// other than case-insensitive `true` / `false` is a bind error).
+    pub fn new_mssql_query(args: Vec<ExprImpl>) -> RwResult<Self> {
+        let evaled_args = args
+            .iter()
+            .map(expr_impl_to_string_fn)
+            .collect::<RwResult<Vec<_>>>()?;
+
+        #[cfg(madsim)]
+        {
+            return Err(crate::error::ErrorCode::BindError(
+                "mssql_query can't be used in the madsim mode".to_string(),
+            )
+            .into());
+        }
+
+        #[cfg(not(madsim))]
+        {
+            let schema = tokio::task::block_in_place(|| {
+                FRONTEND_RUNTIME.block_on(async {
+                    let port: u16 = evaled_args[1]
+                        .parse()
+                        .with_context(|| format!("invalid sql server port `{}`", evaled_args[1]))?;
+                    // The binder always emits encrypt/trust_cert (either
+                    // from the inline form or from the source-reference
+                    // form's defaults); both must parse cleanly to a
+                    // boolean. Reject anything else rather than silently
+                    // coercing — a typo could open a plaintext connection
+                    // or bypass certificate validation.
+                    let encrypt = parse_strict_bool_arg(evaled_args.get(6), false).context(
+                        "invalid `encrypt` value for mssql_query: expected 'true' or 'false'",
+                    )?;
+                    let trust_cert = parse_strict_bool_arg(evaled_args.get(7), true).context(
+                        "invalid `trust_cert` value for mssql_query: expected 'true' or 'false'",
+                    )?;
+
+                    let conn_config = MssqlConnectionConfig {
+                        host: evaled_args[0].clone(),
+                        port,
+                        user: evaled_args[2].clone(),
+                        password: evaled_args[3].clone(),
+                        database: evaled_args[4].clone(),
+                        encrypt,
+                        trust_cert,
+                    };
+
+                    let (rw_types, money_indices) =
+                        describe_mssql_query(&conn_config, &evaled_args[5]).await?;
+
+                    Ok::<(risingwave_common::types::DataType, Vec<usize>), anyhow::Error>((
+                        DataType::Struct(StructType::new(rw_types)),
+                        money_indices,
+                    ))
+                })
+            })?;
+
+            let (schema, money_indices) = schema;
+
+            Ok(TableFunction {
+                args,
+                return_type: schema,
+                function_type: TableFunctionType::MssqlQuery,
+                user_defined: None,
+                money_column_indices: money_indices,
             })
         }
     }
@@ -527,6 +643,7 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalBackfillProgress,
             user_defined: None,
+            money_column_indices: vec![],
         }
     }
 
@@ -542,6 +659,7 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalSourceBackfillProgress,
             user_defined: None,
+            money_column_indices: vec![],
         }
     }
 
@@ -557,6 +675,7 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalGetChannelDeltaStats,
             user_defined: None,
+            money_column_indices: vec![],
         }
     }
 
@@ -644,7 +763,7 @@ pub(crate) fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
         Some(Ok(value)) => {
             let Some(scalar) = value else {
                 return Err(BindError(
-                    "postgres_query function and mysql_query function do not accept null arguments"
+                    "postgres_query / mysql_query / mssql_query do not accept null arguments"
                         .to_owned(),
                 )
                 .into());
@@ -653,8 +772,7 @@ pub(crate) fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
         }
         Some(Err(err)) => Err(err),
         None => Err(BindError(
-            "postgres_query function and mysql_query function only accept constant arguments"
-                .to_owned(),
+            "postgres_query / mysql_query / mssql_query only accept constant arguments".to_owned(),
         )
         .into()),
     }
