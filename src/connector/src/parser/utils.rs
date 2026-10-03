@@ -147,6 +147,7 @@ pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
         SourceMeta::Pulsar(pulsar_meta) => pulsar_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
+        SourceMeta::Nats(nats_meta) => nats_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
         _ => None,
     }
 }
@@ -169,6 +170,7 @@ pub fn extract_header_inner_from_meta<'a>(
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
         SourceMeta::Pulsar(pulsar_meta) => pulsar_meta.extract_header_inner(inner_field, data_type),
+        SourceMeta::Nats(nats_meta) => nats_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
         _ => None,
     }
 }
@@ -177,5 +179,44 @@ pub fn extract_subject_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
     match meta {
         SourceMeta::Nats(nats_meta) => Some(nats_meta.extract_subject()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_nats::HeaderMap;
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+
+    use super::*;
+    use crate::source::nats::source::NatsMeta;
+
+    fn nats_meta(subject: &str, headers: Option<HeaderMap>) -> SourceMeta {
+        SourceMeta::Nats(NatsMeta {
+            subject: subject.to_owned(),
+            headers,
+        })
+    }
+
+    #[test]
+    fn extract_headers_from_meta_dispatches_to_nats() {
+        let mut headers = HeaderMap::new();
+        headers.insert("k", "v");
+        let meta = nats_meta("subj", Some(headers));
+
+        let datum = extract_headers_from_meta(&meta).expect("outer Option");
+        assert!(matches!(datum, Some(ScalarImpl::List(_))));
+    }
+
+    #[test]
+    fn extract_header_inner_from_meta_dispatches_to_nats() {
+        let mut headers = HeaderMap::new();
+        headers.insert("trace", "abc");
+        let meta = nats_meta("subj", Some(headers));
+        let pb = DataType::Varchar.to_protobuf();
+
+        let result = extract_header_inner_from_meta(&meta, "trace", Some(&pb))
+            .unwrap()
+            .to_owned_datum();
+        assert_eq!(result, Some(ScalarImpl::Utf8("abc".into())));
     }
 }

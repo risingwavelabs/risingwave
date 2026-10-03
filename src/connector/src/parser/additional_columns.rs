@@ -69,7 +69,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 NATS_CONNECTOR,
-                HashSet::from(["partition", "offset", "payload", "subject"]),
+                HashSet::from(["partition", "offset", "payload", "subject", "header"]),
             ),
             (
                 OPENDAL_S3_CONNECTOR,
