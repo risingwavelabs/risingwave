@@ -249,7 +249,7 @@ pub fn parse_transaction_meta(
                     let (tx_id, _) = id.split_once(':').unwrap();
                     return Ok(TransactionControl::Begin { id: tx_id.into() });
                 }
-                ConnectorProperties::MysqlCdc(_) => {
+                ConnectorProperties::MysqlCdc(_) | ConnectorProperties::MariadbCdc(_) => {
                     return Ok(TransactionControl::Begin { id: id.into() });
                 }
                 ConnectorProperties::SqlServerCdc(_) => {
@@ -262,7 +262,7 @@ pub fn parse_transaction_meta(
                     let (tx_id, _) = id.split_once(':').unwrap();
                     return Ok(TransactionControl::Commit { id: tx_id.into() });
                 }
-                ConnectorProperties::MysqlCdc(_) => {
+                ConnectorProperties::MysqlCdc(_) | ConnectorProperties::MariadbCdc(_) => {
                     return Ok(TransactionControl::Commit { id: id.into() });
                 }
                 ConnectorProperties::SqlServerCdc(_) => {
@@ -444,7 +444,7 @@ pub async fn parse_schema_change(
                                 }
                             }
                         }
-                        ConnectorProperties::MysqlCdc(_) => {
+                        ConnectorProperties::MysqlCdc(_) | ConnectorProperties::MariadbCdc(_) => {
                             let ty = type_name_to_mysql_type(type_name.as_str());
                             match ty {
                                 Some(ty) => match mysql_type_to_rw_type(&ty) {
@@ -505,7 +505,8 @@ pub async fn parse_schema_change(
                                         }
                                     }
                                 }
-                                ConnectorProperties::MysqlCdc(_) => {
+                                ConnectorProperties::MysqlCdc(_)
+                                | ConnectorProperties::MariadbCdc(_) => {
                                     // mysql timestamp is mapped to timestamptz, we use UTC timezone to
                                     // interpret its value
                                     if data_type == DataType::Timestamptz {

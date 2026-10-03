@@ -95,6 +95,41 @@ fn clear_mysql_cdc_state_file_seq_metric_if_unassigned(
     }
 }
 
+fn update_mariadb_cdc_state_file_seq_metric(
+    metric_guard: &mut Option<LabelGuardedIntGauge>,
+    metrics: &StreamingMetrics,
+    source_id: &str,
+    split_impl: &SplitImpl,
+) {
+    let SplitImpl::MariadbCdc(mariadb_split) = split_impl else {
+        return;
+    };
+
+    if let Some((file_seq, _)) = mariadb_split.mariadb_binlog_offset() {
+        metric_guard
+            .get_or_insert_with(|| {
+                metrics
+                    .mariadb_cdc_state_binlog_file_seq
+                    .with_guarded_label_values(&[source_id])
+            })
+            .set(file_seq as i64);
+    } else {
+        *metric_guard = None;
+    }
+}
+
+fn clear_mariadb_cdc_state_file_seq_metric_if_unassigned(
+    metric_guard: &mut Option<LabelGuardedIntGauge>,
+    target_state: &HashMap<SplitId, SplitImpl>,
+) {
+    if !target_state
+        .values()
+        .any(|split| matches!(split, SplitImpl::MariadbCdc(_)))
+    {
+        *metric_guard = None;
+    }
+}
+
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -106,6 +141,8 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Keep the MySQL CDC state file sequence metric alive while this executor owns the split.
     mysql_cdc_state_binlog_file_seq_guard: Option<LabelGuardedIntGauge>,
+    /// Keep the `MariaDB` CDC state file sequence metric alive while this executor owns the split.
+    mariadb_cdc_state_binlog_file_seq_guard: Option<LabelGuardedIntGauge>,
 
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
@@ -139,6 +176,7 @@ impl<S: StateStore> SourceExecutor<S> {
             stream_source_core,
             metrics,
             mysql_cdc_state_binlog_file_seq_guard: None,
+            mariadb_cdc_state_binlog_file_seq_guard: None,
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
@@ -250,6 +288,7 @@ impl<S: StateStore> SourceExecutor<S> {
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
         let mysql_file_seq_metric_guard = &mut self.mysql_cdc_state_binlog_file_seq_guard;
+        let mariadb_file_seq_metric_guard = &mut self.mariadb_cdc_state_binlog_file_seq_guard;
         let core = &mut self.stream_source_core;
 
         let target_splits: HashMap<_, _> = target_splits
@@ -328,6 +367,10 @@ impl<S: StateStore> SourceExecutor<S> {
 
         clear_mysql_cdc_state_file_seq_metric_if_unassigned(
             mysql_file_seq_metric_guard,
+            &core.latest_split_info,
+        );
+        clear_mariadb_cdc_state_file_seq_metric_if_unassigned(
+            mariadb_file_seq_metric_guard,
             &core.latest_split_info,
         );
 
@@ -488,6 +531,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = &mut self.stream_source_core;
         let mysql_file_seq_metric_guard = &mut self.mysql_cdc_state_binlog_file_seq_guard;
+        let mariadb_file_seq_metric_guard = &mut self.mariadb_cdc_state_binlog_file_seq_guard;
 
         let cache = core
             .updated_splits_in_epoch
@@ -521,6 +565,20 @@ impl<S: StateStore> SourceExecutor<S> {
                         if let Some((_, position)) = mysql_split.mysql_binlog_offset() {
                             self.metrics
                                 .mysql_cdc_state_binlog_position
+                                .with_guarded_label_values(&[&source_id])
+                                .set(position as i64);
+                        }
+                    }
+                    SplitImpl::MariadbCdc(mariadb_split) => {
+                        update_mariadb_cdc_state_file_seq_metric(
+                            mariadb_file_seq_metric_guard,
+                            &self.metrics,
+                            &source_id,
+                            split_impl,
+                        );
+                        if let Some((_, position)) = mariadb_split.mariadb_binlog_offset() {
+                            self.metrics
+                                .mariadb_cdc_state_binlog_position
                                 .with_guarded_label_values(&[&source_id])
                                 .set(position as i64);
                         }
@@ -635,10 +693,16 @@ impl<S: StateStore> SourceExecutor<S> {
                 tracing::debug!(?splits, "boot with splits");
                 // Skip report for non-CDC.
                 let must_report_cdc_offset_once = splits.iter().any(|split| split.is_cdc_split());
-                // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
+                // For MySQL-compatible and SQL Server CDC, wait for a non-empty offset before
+                // reporting the split.
                 let must_wait_cdc_offset_before_report = must_report_cdc_offset_once
                     && splits.iter().any(|split| {
-                        matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                        matches!(
+                            split,
+                            SplitImpl::MysqlCdc(_)
+                                | SplitImpl::MariadbCdc(_)
+                                | SplitImpl::SqlServerCdc(_)
+                        )
                     });
                 (
                     splits.to_vec(),
@@ -689,6 +753,12 @@ impl<S: StateStore> SourceExecutor<S> {
                     *ele = recover_state;
                     update_mysql_cdc_state_file_seq_metric(
                         &mut self.mysql_cdc_state_binlog_file_seq_guard,
+                        &self.metrics,
+                        &source_id,
+                        ele,
+                    );
+                    update_mariadb_cdc_state_file_seq_metric(
+                        &mut self.mariadb_cdc_state_binlog_file_seq_guard,
                         &self.metrics,
                         &source_id,
                         ele,
@@ -896,6 +966,16 @@ impl<S: StateStore> SourceExecutor<S> {
                                                             "Clearing MySQL CDC offset"
                                                         );
                                                         mysql_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::MariadbCdc(debezium_split) => {
+                                                    if let Some(mariadb_split) = debezium_split.mariadb_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?mariadb_split.inner.split_id,
+                                                            old_offset = ?mariadb_split.inner.start_offset,
+                                                            "Clearing MariaDB CDC offset"
+                                                        );
+                                                        mariadb_split.inner.start_offset = None;
                                                     }
                                                 }
                                                 SplitImpl::PostgresCdc(debezium_split) => {

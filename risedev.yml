@@ -840,6 +840,17 @@ profile:
       - use: schema-registry
       - use: mysql
       - use: postgres
+      - use: mariadb
+
+  local-mariadb-cdc-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: mariadb
+        persist-data: false
 
   ci-inline-source-test:
     config-path: src/config/ci-recovery.toml
@@ -914,6 +925,12 @@ profile:
       - use: mysql
         port: 3306
         address: mysql
+        user: root
+        password: 123456
+        user-managed: true
+      - use: mariadb
+        port: 3306
+        address: mariadb
         user: root
         password: 123456
         user-managed: true
@@ -1909,6 +1926,18 @@ template:
 
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # MariaDB service backed by Docker.
+  mariadb:
+    id: mariadb-${port}
+    address: "127.0.0.1"
+    port: 8307
+    user: root
+    password: "123456"
+    database: "risedev"
+    image: "mariadb:11.4"
+    persist-data: true
     user-managed: false
 
   # PostgreSQL service backed by docker.

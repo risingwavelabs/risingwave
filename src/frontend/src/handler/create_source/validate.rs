@@ -85,6 +85,10 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
+                MARIADB_CDC_CONNECTOR => hashmap!(
+                    Format::Debezium => vec![Encode::Json],
+                    Format::Plain => vec![Encode::Json],
+                ),
                 POSTGRES_CDC_CONNECTOR => hashmap!(
                     Format::Debezium => vec![Encode::Json],
                     // support source stream job
@@ -282,6 +286,7 @@ pub fn validate_compatibility(
 
     // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
     if (connector == MYSQL_CDC_CONNECTOR
+        || connector == MARIADB_CDC_CONNECTOR
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
@@ -299,6 +304,7 @@ pub fn validate_compatibility(
 
     // Validate debezium.max.queue.size for all CDC connectors
     if (connector == MYSQL_CDC_CONNECTOR
+        || connector == MARIADB_CDC_CONNECTOR
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR

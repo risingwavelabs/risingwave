@@ -40,8 +40,8 @@ use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::mysql::build_mysql_connection_pool;
 use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Oracle, Postgres,
-    SqlServer, table_schema_exclude_additional_columns,
+    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mariadb, Mongodb, Mysql, Oracle,
+    Postgres, SqlServer, table_schema_exclude_additional_columns,
 };
 use crate::source::monitor::metrics::EnumeratorMetrics;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
@@ -58,6 +58,8 @@ pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
     pg_cdc_confirmed_flush_lsn: Option<LabelGuardedIntGauge>,
     mysql_cdc_binlog_file_seq_min: Option<LabelGuardedIntGauge>,
     mysql_cdc_binlog_file_seq_max: Option<LabelGuardedIntGauge>,
+    mariadb_cdc_binlog_file_seq_min: Option<LabelGuardedIntGauge>,
+    mariadb_cdc_binlog_file_seq_max: Option<LabelGuardedIntGauge>,
     sqlserver_cdc_upstream_min_lsn: Option<LabelGuardedIntGauge>,
     sqlserver_cdc_upstream_max_lsn: Option<LabelGuardedIntGauge>,
     /// Properties specified in the WITH clause by user for database connection
@@ -159,6 +161,8 @@ where
             pg_cdc_confirmed_flush_lsn: None,
             mysql_cdc_binlog_file_seq_min: None,
             mysql_cdc_binlog_file_seq_max: None,
+            mariadb_cdc_binlog_file_seq_min: None,
+            mariadb_cdc_binlog_file_seq_max: None,
             sqlserver_cdc_upstream_min_lsn: None,
             sqlserver_cdc_upstream_max_lsn: None,
             properties: properties_arc,
@@ -572,6 +576,125 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
             None,
             None,
         )]
+    }
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<Mariadb> {
+    type CdcSourceType = Mariadb;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id.as_raw_id(),
+            None,
+            None,
+        )]
+    }
+}
+
+impl DebeziumSplitEnumerator<Mariadb> {
+    async fn monitor_mariadb_binlog_files(&mut self) -> ConnectorResult<()> {
+        let hostname = self.properties.get("hostname").ok_or_else(|| {
+            anyhow!("missing required property 'hostname' for MariaDB CDC source")
+        })?;
+        let port = self
+            .properties
+            .get("port")
+            .ok_or_else(|| anyhow!("missing required property 'port' for MariaDB CDC source"))?;
+        let binlog_files = query_mariadb_binlog_files(&self.properties)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to query binlog files for MariaDB CDC source {} ({}:{})",
+                    self.source_id, hostname, port
+                )
+            })?;
+        let labels = vec![
+            self.source_id.to_string(),
+            hostname.to_owned(),
+            port.to_owned(),
+        ];
+        if let Some((oldest_file, _)) = binlog_files.first()
+            && let Some(seq) = extract_binlog_file_seq(oldest_file)
+        {
+            get_or_create_guarded_int_gauge(
+                &mut self.mariadb_cdc_binlog_file_seq_min,
+                &self.metrics.mariadb_cdc_binlog_file_seq_min,
+                &labels,
+            )
+            .set(seq as i64);
+        }
+        if let Some((newest_file, _)) = binlog_files.last()
+            && let Some(seq) = extract_binlog_file_seq(newest_file)
+        {
+            get_or_create_guarded_int_gauge(
+                &mut self.mariadb_cdc_binlog_file_seq_max,
+                &self.metrics.mariadb_cdc_binlog_file_seq_max,
+                &labels,
+            )
+            .set(seq as i64);
+        }
+        Ok(())
+    }
+}
+
+async fn query_mariadb_binlog_files(
+    properties: &BTreeMap<String, String>,
+) -> ConnectorResult<Vec<(String, u64)>> {
+    let hostname = properties
+        .get("hostname")
+        .ok_or_else(|| anyhow!("missing `hostname` in CDC properties"))?;
+    let port = properties
+        .get("port")
+        .ok_or_else(|| anyhow!("missing `port` in CDC properties"))?
+        .parse::<u16>()
+        .context("failed to parse `port` as a u16")?;
+    let username = properties
+        .get("username")
+        .ok_or_else(|| anyhow!("missing `username` in CDC properties"))?;
+    let password = properties
+        .get("password")
+        .ok_or_else(|| anyhow!("missing `password` in CDC properties"))?;
+    let database = properties
+        .get("database.name")
+        .ok_or_else(|| anyhow!("missing `database.name` in CDC properties"))?;
+    let ssl_mode = properties
+        .get("ssl.mode")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(SslMode::Preferred);
+    let pool = build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
+    let mut conn = pool
+        .get_conn()
+        .await
+        .context("failed to connect to MariaDB")?;
+    let rows: Vec<Row> = conn
+        .query("SHOW BINARY LOGS")
+        .await
+        .context("failed to execute `SHOW BINARY LOGS`")?;
+    let result = rows
+        .into_iter()
+        .map(|mut row| -> ConnectorResult<(String, u64)> {
+            let name = row
+                .take_opt::<String, _>(0)
+                .transpose()
+                .context("failed to decode MariaDB binlog name")?
+                .ok_or_else(|| anyhow!("missing MariaDB binlog name"))?;
+            let size = row
+                .take_opt::<u64, _>(1)
+                .transpose()
+                .context("failed to decode MariaDB binlog size")?
+                .ok_or_else(|| anyhow!("missing MariaDB binlog size"))?;
+            Ok((name, size))
+        })
+        .collect::<ConnectorResult<Vec<_>>>()?;
+    drop(conn);
+    pool.disconnect().await.ok();
+    Ok(result)
+}
+
+#[async_trait]
+impl CdcMonitor for DebeziumSplitEnumerator<Mariadb> {
+    async fn monitor_cdc(&mut self) -> ConnectorResult<()> {
+        self.monitor_mariadb_binlog_files().await
     }
 }
 

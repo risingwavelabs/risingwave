@@ -10,6 +10,15 @@ mysql_cdc_binlog_file_seq_max = metric(
 stream_mysql_cdc_state_binlog_file_seq = metric(
     "stream_mysql_cdc_state_binlog_file_seq", node_filter_enabled=False
 )
+mariadb_cdc_binlog_file_seq_min = metric(
+    "mariadb_cdc_binlog_file_seq_min", node_filter_enabled=False
+)
+mariadb_cdc_binlog_file_seq_max = metric(
+    "mariadb_cdc_binlog_file_seq_max", node_filter_enabled=False
+)
+stream_mariadb_cdc_state_binlog_file_seq = metric(
+    "stream_mariadb_cdc_state_binlog_file_seq", node_filter_enabled=False
+)
 
 
 @section
@@ -159,6 +168,48 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"(({mysql_cdc_binlog_file_seq_max} + {mysql_cdc_binlog_file_seq_min}) / 2 - on(source_id) {stream_mysql_cdc_state_binlog_file_seq})",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Retention Risk Margin",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "MariaDB CDC Binlog Progression",
+                    "Binlog file sequence and position progression by source_id",
+                    [
+                        panels.target(
+                            f"{metric('stream_mariadb_cdc_state_binlog_file_seq')}",
+                            "source_id {{source_id}} - State Table Binlog File Seq",
+                        ),
+                        panels.target(
+                            f"{metric('stream_mariadb_cdc_state_binlog_position')}",
+                            "source_id {{source_id}} - State Table Binlog Position (bytes)",
+                        ),
+                        panels.target(
+                            f"{metric('mariadb_cdc_binlog_file_seq_min')}",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Upstream Binlog File Min Seq (oldest)",
+                        ),
+                        panels.target(
+                            f"{metric('mariadb_cdc_binlog_file_seq_max')}",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Upstream Binlog File Max Seq (newest)",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "MariaDB CDC Binlog File Lag",
+                    "Lag measured as the number of binlog files between the upstream newest file and the RisingWave checkpoint.",
+                    [
+                        panels.target(
+                            f"clamp_min({mariadb_cdc_binlog_file_seq_max} - on(source_id) {stream_mariadb_cdc_state_binlog_file_seq}, 0)",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Binlog File Lag",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "MariaDB CDC Binlog Retention Risk Margin",
+                    "Retained binlog range midpoint minus the RisingWave checkpoint file sequence.",
+                    [
+                        panels.target(
+                            f"(({mariadb_cdc_binlog_file_seq_max} + {mariadb_cdc_binlog_file_seq_min}) / 2 - on(source_id) {stream_mariadb_cdc_state_binlog_file_seq})",
                             "source_id {{source_id}} {{hostname}}:{{port}} - Retention Risk Margin",
                         ),
                     ],
