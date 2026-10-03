@@ -276,6 +276,8 @@ services:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - nats-server
+      - nats-nkey
+      - nats-jwt
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
@@ -883,6 +885,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+
+  nats-nkey:
+    image: nats:2.11.3
+    command: ["-c", "/etc/nats/auth.conf"]
+    volumes:
+      - ../e2e_test/source_inline/nats/auth/nkey.conf:/etc/nats/auth.conf:ro
+
+  nats-jwt:
+    image: nats:2.11.3
+    command: ["-c", "/etc/nats/auth.conf"]
+    volumes:
+      - ../e2e_test/source_inline/nats/auth/jwt.conf:/etc/nats/auth.conf:ro
 
   vault-server:
     image: hashicorp/vault:1.20

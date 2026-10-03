@@ -1041,8 +1041,7 @@ impl NatsCommon {
         }
     }
 
-    /// Build a new NATS client without caching.
-    async fn build_client_inner(&self) -> ConnectorResult<async_nats::Client> {
+    fn build_connect_options(&self) -> ConnectorResult<async_nats::ConnectOptions> {
         let mut connect_options = async_nats::ConnectOptions::new();
         match self.connect_mode.as_str() {
             "user_and_password" => {
@@ -1059,13 +1058,16 @@ impl NatsCommon {
             }
 
             "credential" => {
-                if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
-                    connect_options = connect_options
-                        .credentials(&self.create_credential(v_nkey, v_jwt)?)
-                        .expect("failed to parse static creds")
-                } else {
-                    bail!("NATS connect mode `credential` requires both `nkey` and `jwt`");
-                }
+                let nkey = self
+                    .nkey
+                    .as_ref()
+                    .context("NATS connect mode `credential` requires `nkey`")?;
+                connect_options = match self.jwt.as_ref() {
+                    Some(jwt) => connect_options
+                        .credentials(&self.create_credential(nkey, jwt)?)
+                        .context("failed to parse NATS credentials")?,
+                    None => connect_options.nkey(nkey.clone()),
+                };
             }
             "plain" => {}
             _ => {
@@ -1075,6 +1077,12 @@ impl NatsCommon {
             }
         };
 
+        Ok(connect_options)
+    }
+
+    /// Build a new NATS client without caching.
+    async fn build_client_inner(&self) -> ConnectorResult<async_nats::Client> {
+        let connect_options = self.build_connect_options()?;
         let servers = self.server_url.split(',').collect::<Vec<&str>>();
         let client = connect_options
             .connect(
