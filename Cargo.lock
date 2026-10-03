@@ -724,6 +724,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-schema"
+version = "60.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f85a9a58cd03560526b0066487574aacb9008e413504fa0ee23d61141e96c338"
+
+[[package]]
 name = "arrow-select"
 version = "56.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11616,7 +11622,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "object_store 0.13.2",
- "parquet-variant",
+ "parquet-variant 58.4.0",
  "parquet-variant-compute",
  "parquet-variant-json",
  "paste",
@@ -11647,6 +11653,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "parquet-variant"
+version = "60.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae8443f2224cbf220f0457a70ad8f41e62cbde25c2c0d0d7c6dfebdc389894b8"
+dependencies = [
+ "arrow-schema 60.0.0",
+ "chrono",
+ "half 2.7.1",
+ "indexmap 2.14.0",
+ "simdutf8",
+ "uuid",
+]
+
+[[package]]
 name = "parquet-variant-compute"
 version = "58.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11657,7 +11677,7 @@ dependencies = [
  "chrono",
  "half 2.7.1",
  "indexmap 2.14.0",
- "parquet-variant",
+ "parquet-variant 58.4.0",
  "parquet-variant-json",
  "serde_json",
  "uuid",
@@ -11672,7 +11692,7 @@ dependencies = [
  "arrow-schema 58.4.0",
  "base64 0.22.1",
  "chrono",
- "parquet-variant",
+ "parquet-variant 58.4.0",
  "serde_json",
  "uuid",
 ]
@@ -14075,7 +14095,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot 0.12.5",
- "parquet-variant",
+ "parquet-variant 60.0.0",
  "parquet-variant-compute",
  "parquet-variant-json",
  "parse-display",
