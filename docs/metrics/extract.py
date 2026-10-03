@@ -497,14 +497,19 @@ WRAPPER_SITES = {
     ("src/common/metrics/src/error_metrics.rs", 29),
     ("src/common/metrics/src/metrics.rs", 37),
     # `"test"` fixtures exposed via test_*_vec() helpers on LabelGuarded* types.
-    ("src/common/metrics/src/guarded_metrics.rs", 293),
-    ("src/common/metrics/src/guarded_metrics.rs", 301),
-    ("src/common/metrics/src/guarded_metrics.rs", 309),
-    ("src/common/metrics/src/guarded_metrics.rs", 317),
+    ("src/common/metrics/src/guarded_metrics.rs", 298),
+    ("src/common/metrics/src/guarded_metrics.rs", 306),
+    ("src/common/metrics/src/guarded_metrics.rs", 314),
+    ("src/common/metrics/src/guarded_metrics.rs", 322),
 }
 
 
 ERROR_METRIC_NEW_RE = re.compile(r"ErrorMetric::new\s*\(")
+
+# Metrics in this allowlist intentionally retain real actor IDs below Debug.
+ACTOR_ID_RETENTION_ALLOWLIST = {
+    "actor_info": "dashboards use it to map actors to fragments and compute nodes",
+}
 
 DIRECT_NEW_TYPES = {
     "IntCounter": "counter",
@@ -658,6 +663,59 @@ def scan_error_metric_callsites():
     return rows
 
 
+def validate_actor_id_relabeling(rows):
+    """Require every non-allowlisted actor metric to use actor-first Debug relabeling."""
+    errors = []
+    source_cache = {}
+
+    for name, _mtype, labels_csv, _help, _buckets, rel, line in rows:
+        labels = labels_csv.split(",") if labels_csv else []
+        if "actor_id" not in labels or name in ACTOR_ID_RETENTION_ALLOWLIST:
+            continue
+
+        location = f"{rel}:{line}"
+        if labels[0] != "actor_id":
+            errors.append(
+                f"{location}: {name} must place actor_id first so Debug relabeling masks it"
+            )
+            continue
+
+        if rel not in source_cache:
+            text = (REPO / rel).read_text(encoding="utf-8", errors="replace")
+            line_starts = [0]
+            for offset, char in enumerate(text):
+                if char == "\n":
+                    line_starts.append(offset + 1)
+            source_cache[rel] = (text, line_starts)
+        text, line_starts = source_cache[rel]
+        macro_start = line_starts[line - 1]
+        match = MACRO_RE.search(text, macro_start)
+        if match is None:
+            errors.append(f"{location}: cannot locate registration for {name}")
+            continue
+        close_idx = find_matching_paren(text, match.end() - 1)
+        if close_idx < 0:
+            errors.append(f"{location}: cannot locate complete registration for {name}")
+            continue
+        statement_end = text.find(";", close_idx)
+        if statement_end < 0:
+            errors.append(f"{location}: cannot locate complete registration for {name}")
+            continue
+        registration_suffix = text[close_idx + 1 : statement_end]
+        if ".relabel_debug_1" not in registration_suffix:
+            errors.append(
+                f"{location}: {name} exposes actor_id but is not relabeled below Debug"
+            )
+
+    if errors:
+        allowlist = ", ".join(sorted(ACTOR_ID_RETENTION_ALLOWLIST))
+        details = "\n".join(f"  - {error}" for error in errors)
+        raise SystemExit(
+            "actor_id metric policy validation failed "
+            f"(retention allowlist: {allowlist}):\n{details}"
+        )
+
+
 def main():
     import argparse
 
@@ -706,6 +764,8 @@ def main():
         seen.add(key)
         deduped.append(r)
     rows = deduped
+
+    validate_actor_id_relabeling(rows)
 
     rows.sort(key=lambda r: (r[5], r[0]))
 

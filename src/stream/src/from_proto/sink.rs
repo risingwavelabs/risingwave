@@ -334,6 +334,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let metrics = KvLogStoreMetrics::new(
                     &params.executor_stats,
                     params.actor_context.id,
+                    params.actor_context.fragment_id,
                     &sink_param,
                     connector,
                 );
