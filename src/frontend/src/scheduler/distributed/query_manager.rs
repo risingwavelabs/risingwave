@@ -106,6 +106,64 @@ impl QueryExecutionInfo {
 
 pub type QueryExecutionInfoRef = Arc<RwLock<QueryExecutionInfo>>;
 
+/// Owns cleanup of a registered distributed query until its result stream takes ownership.
+///
+/// Dropping an armed guard removes the registration and requests execution cancellation, including
+/// when the scheduling future is dropped at an await point. Dropping it requires a Tokio runtime.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired into query scheduling in the follow-up PR")
+)]
+struct DistributedQueryRegistrationGuard {
+    query_id: QueryId,
+    query_execution: Arc<QueryExecution>,
+    query_execution_info: QueryExecutionInfoRef,
+    armed: bool,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired into query scheduling in the follow-up PR")
+)]
+impl DistributedQueryRegistrationGuard {
+    /// Arms cleanup for a query already inserted into the execution registry.
+    fn new(
+        query_id: QueryId,
+        query_execution: Arc<QueryExecution>,
+        query_execution_info: QueryExecutionInfoRef,
+    ) -> Self {
+        Self {
+            query_id,
+            query_execution,
+            query_execution_info,
+            armed: true,
+        }
+    }
+
+    /// Relinquishes cleanup after the result stream has assumed ownership.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for DistributedQueryRegistrationGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.query_execution_info
+            .write()
+            .unwrap()
+            .delete_query(&self.query_id);
+        let query_execution = self.query_execution.clone();
+        tokio::spawn(async move {
+            query_execution
+                .abort("query scheduling was cancelled".to_owned())
+                .await;
+        });
+    }
+}
+
 impl QueryExecutionInfo {
     pub fn add_query(&mut self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
         self.query_execution_map.insert(query_id, query_execution);
@@ -242,6 +300,30 @@ impl QueryManager {
         Ok(query_result_fetcher.stream_from_channel())
     }
 
+    /// Requests cancellation of the query IDs selected by their owners, without applying session
+    /// or cursor classification. Queries no longer present in the registry are ignored.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "used by cursor-owned execution in the follow-up PR"
+        )
+    )]
+    pub(crate) fn cancel_queries_by_ids(&self, query_ids: &[QueryId], reason: impl Into<String>) {
+        let query_executions = {
+            let registry = self.query_execution_info.read().unwrap();
+            query_ids
+                .iter()
+                .filter_map(|query_id| registry.query_execution_map.get(query_id).cloned())
+                .collect::<Vec<_>>()
+        };
+        let reason = reason.into();
+        for query_execution in query_executions {
+            let reason = reason.clone();
+            tokio::spawn(async move { query_execution.abort(reason).await });
+        }
+    }
+
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
         let query_execution_info = self.query_execution_info.read().unwrap();
         query_execution_info.abort_queries(session_id);
@@ -290,5 +372,139 @@ impl Debug for QueryResultFetcher {
             .field("task_output_id", &self.task_output_id)
             .field("task_host", &self.task_host)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod cursor_lifecycle_tests {
+    use std::time::Duration;
+
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::scheduler::distributed::query::QueryMessage;
+    use crate::scheduler::distributed::query::tests::{
+        create_query, running_query_execution_with_control_receiver,
+    };
+
+    impl QueryManager {
+        /// Creates a result stream backed by a test-controlled channel and this query registry.
+        pub(crate) fn query_stream_for_test(
+            &self,
+            query_id: QueryId,
+            chunk_rx: mpsc::Receiver<SchedulerResult<DataChunk>>,
+        ) -> DistributedQueryStream {
+            DistributedQueryStream {
+                chunk_rx,
+                query_id,
+                query_execution_info: self.query_execution_info.clone(),
+            }
+        }
+
+        /// Returns whether the query is still present in the execution registry.
+        pub(crate) fn contains_query_for_test(&self, query_id: &QueryId) -> bool {
+            self.query_execution_info
+                .read()
+                .unwrap()
+                .query_execution_map
+                .contains_key(query_id)
+        }
+    }
+
+    /// Verifies that dropping an in-flight scheduling future removes its guarded registration
+    /// and requests cancellation of the unfinished query.
+    #[tokio::test]
+    async fn test_registration_guard_cleans_up_dropped_scheduling_future() {
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let (query_execution, mut control_rx) =
+            running_query_execution_with_control_receiver(query, (0, 0));
+        let registry = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
+            HashMap::from([(query_id.clone(), query_execution.clone())]),
+        )));
+        let registration = DistributedQueryRegistrationGuard::new(
+            query_id.clone(),
+            query_execution,
+            registry.clone(),
+        );
+        let mut scheduling = Box::pin(async move {
+            let _registration = registration;
+            std::future::pending::<()>().await;
+        });
+        assert!(futures::poll!(scheduling.as_mut()).is_pending());
+        assert!(
+            registry
+                .read()
+                .unwrap()
+                .query_execution_map
+                .contains_key(&query_id)
+        );
+
+        drop(scheduling);
+
+        assert!(
+            !registry
+                .read()
+                .unwrap()
+                .query_execution_map
+                .contains_key(&query_id)
+        );
+        let message = tokio::time::timeout(Duration::from_secs(1), control_rx.recv())
+            .await
+            .expect("dropping scheduling must request query cancellation")
+            .expect("query cancellation message must arrive");
+        assert!(matches!(
+            message,
+            QueryMessage::CancelQuery(reason) if reason == "query scheduling was cancelled"
+        ));
+    }
+
+    /// Verifies that disarming the guard preserves the query without cancellation and leaves
+    /// registration cleanup to the result stream's drop.
+    #[tokio::test]
+    async fn test_registration_guard_hands_cleanup_to_result_stream() {
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let (query_execution, mut control_rx) =
+            running_query_execution_with_control_receiver(query, (0, 0));
+        let registry = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
+            HashMap::from([(query_id.clone(), query_execution.clone())]),
+        )));
+        let mut registration = DistributedQueryRegistrationGuard::new(
+            query_id.clone(),
+            query_execution,
+            registry.clone(),
+        );
+        let (_chunk_tx, chunk_rx) = mpsc::channel(1);
+        let stream = DistributedQueryStream {
+            chunk_rx,
+            query_id: query_id.clone(),
+            query_execution_info: registry.clone(),
+        };
+        registration.disarm();
+        drop(registration);
+
+        assert!(
+            registry
+                .read()
+                .unwrap()
+                .query_execution_map
+                .contains_key(&query_id)
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), control_rx.recv())
+                .await
+                .is_err(),
+            "disarming the guard must leave the query control channel open without cancellation"
+        );
+
+        drop(stream);
+        assert!(
+            !registry
+                .read()
+                .unwrap()
+                .query_execution_map
+                .contains_key(&query_id)
+        );
     }
 }

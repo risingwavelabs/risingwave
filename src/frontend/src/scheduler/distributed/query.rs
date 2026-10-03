@@ -464,6 +464,7 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
+    use pgwire::pg_server::SessionId;
     use risingwave_batch::worker_manager::worker_node_manager::{
         WorkerNodeManager, WorkerNodeSelector,
     };
@@ -478,7 +479,9 @@ pub(crate) mod tests {
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
+    use tokio::sync::mpsc::{Receiver, channel};
 
+    use super::{QueryMessage, QueryState};
     use crate::TableCatalog;
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
@@ -495,6 +498,21 @@ pub(crate) mod tests {
     use crate::scheduler::{DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo};
     use crate::session::SessionImpl;
     use crate::utils::Condition;
+
+    pub(crate) fn running_query_execution_with_control_receiver(
+        query: Query,
+        session_id: SessionId,
+    ) -> (Arc<QueryExecution>, Receiver<QueryMessage>) {
+        let (shutdown_tx, shutdown_rx) = channel(100);
+        let query_execution = Arc::new(QueryExecution {
+            query: Arc::new(query),
+            state: tokio::sync::RwLock::new(QueryState::Running),
+            shutdown_tx,
+            session_id,
+            permit: None,
+        });
+        (query_execution, shutdown_rx)
+    }
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
