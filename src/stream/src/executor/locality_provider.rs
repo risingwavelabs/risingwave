@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -25,6 +26,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::cmp_datum_iter;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_pb::common::ThrottleType;
@@ -32,7 +34,7 @@ use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::{FlushedStateTableReader, StateTable};
-use crate::executor::backfill::utils::create_builder;
+use crate::executor::backfill::utils::{create_builder, normalize_unmatched_updates};
 use crate::executor::prelude::*;
 use crate::task::{CreateMviewProgressReporter, FragmentId};
 
@@ -410,11 +412,14 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         let chunk = chunk.compact_vis();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = risingwave_common::bitmap::BitmapBuilder::with_capacity(ops.len());
+        let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
+        let mut unmatched_update_delete = false;
+        let mut visible_update_delete = false;
 
         let pk_indices = state_table.pk_indices();
         let pk_order = state_table.pk_serde().get_order_types();
 
-        for row in data.rows() {
+        for (i, (op, row)) in ops.iter().zip_eq_debug(data.rows()).enumerate() {
             // Project to primary key columns for comparison
             let pk = row.project(pk_indices);
             let vnode = state_table.compute_vnode_by_pk(pk);
@@ -429,10 +434,21 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             };
 
             new_visibility.append(visible);
+
+            // The locality columns lead the primary key, so the rows of an update whose locality
+            // columns change may fall on both sides of `current_pos`.
+            normalize_unmatched_updates(
+                &mut new_ops,
+                &mut unmatched_update_delete,
+                &mut visible_update_delete,
+                visible,
+                i,
+                op,
+            );
         }
 
         let (columns, _) = data.into_parts();
-        let chunk = StreamChunk::with_visibility(ops, columns, new_visibility.finish());
+        let chunk = StreamChunk::with_visibility(new_ops, columns, new_visibility.finish());
         Ok(chunk)
     }
 
@@ -887,5 +903,80 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::StreamChunkTestExt;
+    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+
+    use super::*;
+    use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+
+    #[tokio::test]
+    async fn test_mark_chunk_splits_unmatched_updates() {
+        // Ordered by `(a, b)` and sharded by `b`, where `b` is the stream key and `a` the locality
+        // column, so the rows of an update that changes `a` stay in a vnode but may fall on both
+        // sides of the backfill position.
+        let table = gen_pbtable_with_dist_key(
+            TableId::new(1),
+            vec![
+                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+            ],
+            vec![OrderType::ascending(), OrderType::ascending()],
+            vec![0, 1],
+            0,
+            vec![1],
+        );
+        let state_table = StateTable::from_table_catalog(
+            &table,
+            MemoryStateStore::new(),
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+        )
+        .await;
+        let mut backfill_state = LocalityBackfillState::new(state_table.vnodes().iter_vnodes());
+        for b in 1..=3i64 {
+            let vnode = state_table
+                .compute_vnode_by_pk(OwnedRow::new(vec![Some(0i64.into()), Some(b.into())]));
+            backfill_state.update_progress(
+                vnode,
+                OwnedRow::new(vec![Some(5i64.into()), Some(0i64.into())]),
+                1,
+            );
+        }
+
+        let chunk = StreamChunk::from_pretty(
+            " I I
+            U- 3 1
+            U+ 7 1
+            U- 7 2
+            U+ 3 2
+            U- 1 3
+            U+ 2 3",
+        );
+        let marked = LocalityProviderExecutor::<MemoryStateStore>::mark_chunk(
+            chunk,
+            &backfill_state,
+            &state_table,
+        )
+        .unwrap();
+        assert_eq!(
+            marked.compact_vis().to_pretty().to_string(),
+            StreamChunk::from_pretty(
+                " I I
+                - 3 1
+                + 3 2
+                U- 1 3
+                U+ 2 3",
+            )
+            .to_pretty()
+            .to_string()
+        );
     }
 }

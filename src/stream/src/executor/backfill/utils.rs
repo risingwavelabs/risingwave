@@ -425,7 +425,7 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
 ///
 /// This hanging U-/U+ can lead to issues downstream, since we work with an assumption in the
 /// system that there's never hanging U-/U+.
-fn normalize_unmatched_updates(
+pub(crate) fn normalize_unmatched_updates(
     normalized_ops: &mut Cow<'_, [Op]>,
     unmatched_update_delete: &mut bool,
     visible_update_delete: &mut bool,
