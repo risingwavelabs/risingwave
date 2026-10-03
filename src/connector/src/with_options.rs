@@ -271,6 +271,11 @@ impl WithOptionsSecResolved {
         &self.secret_ref
     }
 
+    /// Merges plaintext and Secret updates, removing the previous representation of each key.
+    ///
+    /// Returns the Secret IDs whose dependencies must be added and removed, respectively.
+    /// Dependencies are computed across all options, so a Secret still used by another key
+    /// is retained. Conflicting updates are rejected before modifying the options.
     pub fn handle_update(
         &mut self,
         update_alter_props: BTreeMap<String, String>,
@@ -375,6 +380,122 @@ impl GetKeyIter for WithOptionsSecResolved {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn secret_ref(id: u32) -> PbSecretRef {
+        PbSecretRef {
+            secret_id: SecretId::new(id),
+            ref_as: risingwave_pb::secret::secret_ref::PbRefAsType::Text as i32,
+        }
+    }
+
+    #[test]
+    fn test_handle_update_secret_transitions() {
+        let mut options = WithOptionsSecResolved::without_secrets(BTreeMap::from([
+            ("password".into(), "old-password".into()),
+            ("connector".into(), "kafka".into()),
+        ]));
+
+        let deps = options
+            .handle_update(
+                BTreeMap::new(),
+                BTreeMap::from([("password".into(), secret_ref(1))]),
+            )
+            .unwrap();
+        assert_eq!(deps, (vec![SecretId::new(1)], vec![]));
+        assert!(!options.as_plaintext().contains_key("password"));
+        assert_eq!(options.as_secret()["password"], secret_ref(1));
+
+        let deps = options
+            .handle_update(
+                BTreeMap::new(),
+                BTreeMap::from([("password".into(), secret_ref(2))]),
+            )
+            .unwrap();
+        assert_eq!(deps, (vec![SecretId::new(2)], vec![SecretId::new(1)]));
+        assert_eq!(options.as_secret()["password"], secret_ref(2));
+
+        let deps = options
+            .handle_update(
+                BTreeMap::from([("password".into(), "new-password".into())]),
+                BTreeMap::new(),
+            )
+            .unwrap();
+        assert_eq!(deps, (vec![], vec![SecretId::new(2)]));
+        assert!(options.as_secret().is_empty());
+        assert_eq!(options.as_plaintext()["password"], "new-password");
+        assert_eq!(options.as_plaintext()["connector"], "kafka");
+    }
+
+    #[test]
+    fn test_handle_update_shared_secret_dependencies() {
+        let mut options = WithOptionsSecResolved::new(
+            BTreeMap::new(),
+            BTreeMap::from([
+                ("username".into(), secret_ref(1)),
+                ("password".into(), secret_ref(1)),
+            ]),
+        );
+        let deps = options
+            .handle_update(
+                BTreeMap::new(),
+                BTreeMap::from([("password".into(), secret_ref(2))]),
+            )
+            .unwrap();
+        assert_eq!(deps, (vec![SecretId::new(2)], vec![]));
+        assert_eq!(options.as_secret()["username"], secret_ref(1));
+
+        // Swapping references changes both fields but no object dependencies.
+        let deps = options
+            .handle_update(
+                BTreeMap::new(),
+                BTreeMap::from([
+                    ("username".into(), secret_ref(2)),
+                    ("password".into(), secret_ref(1)),
+                ]),
+            )
+            .unwrap();
+        assert_eq!(deps, (vec![], vec![]));
+
+        // Replacing the last reference removes the old dependency exactly once.
+        let deps = options
+            .handle_update(
+                BTreeMap::new(),
+                BTreeMap::from([("password".into(), secret_ref(2))]),
+            )
+            .unwrap();
+        assert_eq!(deps, (vec![], vec![SecretId::new(1)]));
+        let deps = options
+            .handle_update(
+                BTreeMap::from([
+                    ("username".into(), "user".into()),
+                    ("password".into(), "password".into()),
+                ]),
+                BTreeMap::new(),
+            )
+            .unwrap();
+        assert_eq!(deps, (vec![], vec![SecretId::new(2)]));
+    }
+
+    #[test]
+    fn test_handle_update_rejects_conflict_without_mutation() {
+        let mut options = WithOptionsSecResolved::new(
+            BTreeMap::from([("username".into(), "user".into())]),
+            BTreeMap::from([("password".into(), secret_ref(1))]),
+        );
+        let original = options.clone();
+        assert!(
+            options
+                .handle_update(
+                    BTreeMap::from([
+                        ("username".into(), "new-user".into()),
+                        ("password".into(), "password".into()),
+                    ]),
+                    BTreeMap::from([("password".into(), secret_ref(2))]),
+                )
+                .is_err()
+        );
+        assert_eq!(options, original);
+    }
 
     fn source_options(connector: &str) -> WithOptionsSecResolved {
         WithOptionsSecResolved::without_secrets(BTreeMap::from([(
