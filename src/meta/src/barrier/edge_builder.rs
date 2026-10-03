@@ -468,8 +468,54 @@ impl FragmentEdgeBuilder<AddingRelations> {
         fragment_id: FragmentId,
         downstream: &DownstreamFragmentRelation,
     ) -> MetaResult<Self> {
-        self.add_edge_inner(fragment_id, downstream)?;
+        let installs_existing_relation = matches!(
+            (
+                self.fragments.get(&fragment_id),
+                self.fragments.get(&downstream.downstream_fragment_id),
+            ),
+            (
+                Some(FragmentStatus::Existing(_)),
+                Some(FragmentStatus::Existing(_)),
+            )
+        );
+        if installs_existing_relation {
+            self.add_existing_relation(fragment_id, downstream);
+        } else {
+            self.add_edge_inner(fragment_id, downstream)?;
+        }
         Ok(self)
+    }
+
+    fn add_existing_relation(
+        &mut self,
+        fragment_id: FragmentId,
+        downstream: &DownstreamFragmentRelation,
+    ) {
+        let FragmentStatus::Existing(fragment) = &self.fragments[&fragment_id] else {
+            unreachable!("checked existing source fragment")
+        };
+        let FragmentStatus::Existing(downstream_fragment) =
+            &self.fragments[&downstream.downstream_fragment_id]
+        else {
+            unreachable!("checked existing downstream fragment")
+        };
+        let (dispatchers, upstreams, no_shuffle_map) =
+            Self::compose_edge(fragment_id, fragment, downstream, downstream_fragment);
+        Self::add_no_shuffle_mapping(
+            &mut self.actor_new_no_shuffle,
+            fragment_id,
+            downstream.downstream_fragment_id,
+            no_shuffle_map,
+        );
+        Self::add_dispatchers(&mut self.result.dispatchers, fragment_id, dispatchers);
+        Self::add_merge_updates(
+            &mut self.result.merge_updates,
+            fragment_id,
+            downstream.downstream_fragment_id,
+            downstream_fragment,
+            upstreams,
+            [],
+        );
     }
 
     fn add_edge_inner(
@@ -1252,5 +1298,32 @@ mod tests {
         let mut builder = FragmentEdgeBuilder::new();
         builder.add_existing_fragment_infos([(fragment, single_info(1))]);
         builder.replace_existing_fragment_actor_infos([(fragment, single_info(1))]);
+    }
+    #[test]
+    fn test_attach_new_relation_between_existing_fragments() {
+        let source = fragment(1);
+        let target = fragment(2);
+        let mut builder = FragmentEdgeBuilder::new();
+        builder.add_existing_fragment_infos([(source, single_info(1)), (target, single_info(11))]);
+        let mut mutation = UpdateMutation::default();
+
+        let (edges, _) = builder
+            .finish_fragments()
+            .add_edge(source, &relation(target, DispatcherType::Broadcast))
+            .unwrap()
+            .build();
+        edges.apply_to_update_mutation(&mut mutation);
+
+        assert!(mutation.dispatcher_update.is_empty());
+        assert_eq!(
+            mutation.actor_new_dispatchers[&actor(1)].dispatchers[0].downstream_actor_id,
+            vec![actor(11)]
+        );
+        assert_eq!(mutation.merge_update.len(), 1);
+        let merge_update = &mutation.merge_update[0];
+        assert_eq!(merge_update.actor_id, actor(11));
+        assert_eq!(merge_update.upstream_fragment_id, source);
+        assert_eq!(merge_update.added_upstream_actors[0].actor_id, actor(1));
+        assert!(merge_update.removed_upstream_actor_id.is_empty());
     }
 }
