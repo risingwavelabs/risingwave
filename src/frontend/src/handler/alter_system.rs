@@ -32,6 +32,15 @@ pub async fn handle_alter_system(
     let meta_client = handler_args.session.env().meta_client();
     let mut builder = RwPgResponse::builder(StatementType::ALTER_SYSTEM);
 
+    // ALTER SYSTEM is always a superuser-only operation, regardless of whether the target
+    // parameter lives in the session-param or system-param namespace.
+    if !handler_args.session.is_super_user() {
+        return Err(ErrorCode::PermissionDenied(
+            "must be superuser to execute ALTER SYSTEM command".to_owned(),
+        )
+        .into());
+    }
+
     // Currently session params are separated from system params. If the param exist in session params, we set it. Otherwise
     // we try to set it as a system param.
     if SessionConfig::contains_param(&param_name) {
@@ -60,12 +69,6 @@ pub async fn handle_alter_system(
             handler_args.session.reset_config(param_name.as_str())?;
         }
     } else {
-        if !handler_args.session.is_super_user() {
-            return Err(ErrorCode::PermissionDenied(
-                "must be superuser to execute ALTER SYSTEM command".to_owned(),
-            )
-            .into());
-        }
         let params = meta_client.set_system_param(param_name, value).await?;
         if let Some(params) = params {
             if params.barrier_interval_ms() >= NOTICE_BARRIER_INTERVAL_MS {
