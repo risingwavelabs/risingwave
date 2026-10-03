@@ -180,7 +180,7 @@ impl WorkloadDriver {
 
 pub fn spawn_continuous_workload(cluster: &mut Cluster, cfg: WorkloadConfig) -> WorkloadDriver {
     use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt as _, SeedableRng};
     let mut session = cluster.start_session();
     let task = tokio::spawn(async move {
         let mut rng = StdRng::seed_from_u64(cfg.seed);

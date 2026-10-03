@@ -256,9 +256,6 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
-  // The effective barrier interval for this database: the database-specific override when set,
-  // or the system-wide interval otherwise.
-  uint32 barrier_interval_ms = 10;
 }
 
 message Watermark {

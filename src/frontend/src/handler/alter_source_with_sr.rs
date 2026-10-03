@@ -325,16 +325,11 @@ pub fn alter_definition_format_encode(
         | Statement::CreateTable {
             format_encode: Some(format_encode),
             ..
-        } => {
-            match format_encode {
-                CompatibleFormatEncode::V2(schema) => {
-                    schema.row_options = format_encode_options;
-                }
-                // TODO: Confirm the behavior of legacy source schema.
-                // Legacy source schema should be rejected by the handler and never reaches here.
-                CompatibleFormatEncode::RowFormat(_schema) => unreachable!(),
+        } => match format_encode {
+            CompatibleFormatEncode::V2(schema) => {
+                schema.row_options = format_encode_options;
             }
-        }
+        },
         _ => unreachable!(),
     }
 

@@ -949,28 +949,6 @@ impl fmt::Display for Since {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RowSchemaLocation {
-    pub value: AstString,
-}
-
-impl ParseTo for RowSchemaLocation {
-    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
-        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
-        impl_parse_to!(value: AstString, p);
-        Ok(Self { value })
-    }
-}
-
-impl fmt::Display for RowSchemaLocation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut v = vec![];
-        impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
-        impl_fmt_display!(value, v, self);
-        v.iter().join(" ").fmt(f)
-    }
-}
-
 /// String literal. The difference with String is that it is displayed with
 /// single-quotes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

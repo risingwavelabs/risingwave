@@ -60,10 +60,11 @@ use tokio::time::{Instant, sleep};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::TracedEpoch;
+use super::{BarrierKind, TracedEpoch};
 use crate::barrier::BackfillOrderState;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
+use crate::barrier::checkpoint::independent_job::{IndependentJobControl, IndependentJobInfo};
 use crate::barrier::checkpoint::{
     BarrierWorkerState, BatchRefreshJobCheckpointControl, BatchRefreshRenderResult,
     CreatingStreamingJobControl, DatabaseCheckpointControl, DatabaseCheckpointControlMetrics,
@@ -619,7 +620,6 @@ impl PartialGraphRecoverer<'_> {
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
-        barrier_interval_ms: u32,
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
@@ -710,6 +710,24 @@ impl PartialGraphRecoverer<'_> {
             )
         }
 
+        fn recover_job_backfill_order(
+            job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
+            job_id: JobId,
+            downstreams: &FragmentDownstreamRelation,
+            fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        ) -> ExtendedFragmentBackfillOrder {
+            let backfill_order = job_backfill_orders(job_extra_info, job_id);
+            StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                backfill_order,
+                downstreams,
+                || {
+                    fragment_infos.iter().map(|(fragment_id, fragment)| {
+                        (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                    })
+                },
+            )
+        }
+
         let mut subscribers: HashMap<_, HashMap<_, _>> = jobs
             .keys()
             .filter_map(|job_id| {
@@ -793,7 +811,12 @@ impl PartialGraphRecoverer<'_> {
         );
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
-        let barrier_info = BarrierInfo::new_initial(prev_epoch, barrier_interval_ms);
+        let curr_epoch = prev_epoch.next();
+        let barrier_info = BarrierInfo {
+            prev_epoch,
+            curr_epoch,
+            kind: BarrierKind::Initial,
+        };
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<JobId, _> = HashMap::new();
         for (job_id, fragment_infos) in snapshot_backfill_jobs {
@@ -879,12 +902,9 @@ impl PartialGraphRecoverer<'_> {
                             || fragment_infos.iter().map(|(fragment_id, fragment)| {
                             (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
                         }));
-                        let locality_fragment_state_table_mapping =
-                            build_locality_fragment_state_table_mapping(&fragment_infos);
                         let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
                             &backfill_ordering,
                             &fragment_infos,
-                            locality_fragment_state_table_mapping,
                         );
                         CreateStreamingJobStatus::Creating {
                             tracker: CreateMviewProgressTracker::recover(
@@ -1028,6 +1048,7 @@ impl PartialGraphRecoverer<'_> {
         for (job_id, (info, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
         {
+            let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
             let node_actors = edges.collect_actors_to_create(info.values().map(|fragment_infos| {
                 (
                     fragment_infos.fragment_id,
@@ -1050,31 +1071,28 @@ impl PartialGraphRecoverer<'_> {
             if is_paused {
                 bail!("should not pause when having snapshot backfill job {job_id}");
             }
-            let job_backfill_orders = job_backfill_orders(job_extra_info, job_id);
             let job_backfill_orders =
-                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
-                    job_backfill_orders,
-                    fragment_relations,
-                    || {
-                        info.iter().map(|(fragment_id, fragment)| {
-                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
-                        })
-                    },
-                );
+                recover_job_backfill_order(job_extra_info, job_id, fragment_relations, &info);
             let mutation = build_mutation(
                 &job_source_splits,
                 Default::default(), // no cdc backfill job for
                 &job_backfill_orders,
                 false,
             );
+            let control = IndependentJobControl::recovered(
+                IndependentJobInfo::from_fragment_infos(
+                    database_id,
+                    job_id,
+                    snapshot_epoch,
+                    upstream_table_ids,
+                    info.values(),
+                ),
+                committed_epoch,
+            );
 
             let job = CreatingStreamingJobControl::recover(
-                database_id,
-                job_id,
-                upstream_table_ids,
+                control,
                 &database_job_log_epochs,
-                snapshot_epoch,
-                committed_epoch,
                 &barrier_info,
                 info,
                 job_backfill_orders,
@@ -1085,15 +1103,13 @@ impl PartialGraphRecoverer<'_> {
                 &term_id,
                 self,
             )?;
-            independent_checkpoint_job_controls.insert(
+            let job = IndependentCheckpointJobControl::creating_streaming_job(
                 job_id,
-                IndependentCheckpointJobControl::creating_streaming_job(
-                    job_id,
-                    to_partial_graph_id(database_id, Some(job_id)),
-                    IndependentCheckpointJobStatus::Ready,
-                    job,
-                ),
+                partial_graph_id,
+                IndependentCheckpointJobStatus::Ready,
+                job,
             );
+            independent_checkpoint_job_controls.insert(job_id, job);
         }
 
         // Recover batch refresh jobs (both idle and consuming snapshot).
@@ -1128,18 +1144,12 @@ impl PartialGraphRecoverer<'_> {
                 .find_map(|e| *e)
                 .unwrap_or(committed_epoch);
 
-            let job_backfill_orders = job_backfill_orders(job_extra_info, job_id);
-            let job_backfill_orders =
-                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
-                    job_backfill_orders,
-                    fragment_relations,
-                    || {
-                        render_result
-                            .fragment_infos
-                            .iter()
-                            .map(|(fid, f)| (*fid, f.fragment_type_mask, &f.nodes))
-                    },
-                );
+            let job_backfill_orders = recover_job_backfill_order(
+                job_extra_info,
+                job_id,
+                fragment_relations,
+                &render_result.fragment_infos,
+            );
             let mutation = build_mutation(
                 &Default::default(), // batch refresh has no source splits
                 Default::default(),
@@ -1151,14 +1161,20 @@ impl PartialGraphRecoverer<'_> {
                 .get(&job_id)
                 .and_then(|info| info.refresh_interval_sec)
                 .expect("batch refresh job should have refresh_interval_sec in job extra info");
+            let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+            let control = IndependentJobControl::recovered(
+                IndependentJobInfo::from_fragment_infos(
+                    database_id,
+                    job_id,
+                    snapshot_epoch,
+                    upstream_table_ids,
+                    render_result.fragment_infos.values(),
+                ),
+                committed_epoch,
+            );
 
             let job = BatchRefreshJobCheckpointControl::recover(
-                database_id,
-                job_id,
-                upstream_table_ids,
-                snapshot_epoch,
-                committed_epoch,
-                barrier_info.barrier_interval_ms,
+                control,
                 job_backfill_orders,
                 hummock_version_stats,
                 mutation,
@@ -1171,7 +1187,7 @@ impl PartialGraphRecoverer<'_> {
                 job_id,
                 IndependentCheckpointJobControl::batch_refresh(
                     job_id,
-                    to_partial_graph_id(database_id, Some(job_id)),
+                    partial_graph_id,
                     IndependentCheckpointJobStatus::Ready,
                     job,
                 ),
@@ -1278,7 +1294,16 @@ impl ControlStreamManager {
 
                 {
                     let mutation = mutation.clone();
-                    let barrier = barrier_to_protobuf(barrier_info, mutation);
+                    let barrier = Barrier {
+                        epoch: Some(risingwave_pb::data::Epoch {
+                            curr: barrier_info.curr_epoch(),
+                            prev: barrier_info.prev_epoch(),
+                        }),
+                        mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
+                        tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span())
+                            .to_protobuf(),
+                        kind: barrier_info.kind.to_protobuf() as i32,
+                    };
 
                     node.handle
                         .request_sender
@@ -1430,24 +1455,6 @@ impl ControlStreamManager {
                 }
             })
             .collect()
-    }
-}
-
-pub(super) fn barrier_to_protobuf(
-    barrier_info: &BarrierInfo,
-    mutation: Option<Mutation>,
-) -> Barrier {
-    Barrier {
-        epoch: Some(risingwave_pb::data::Epoch {
-            curr: barrier_info.curr_epoch(),
-            prev: barrier_info.prev_epoch(),
-        }),
-        mutation: mutation.map(|mutation| BarrierMutation {
-            mutation: Some(mutation),
-        }),
-        tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span()).to_protobuf(),
-        kind: barrier_info.kind.to_protobuf() as i32,
-        barrier_interval_ms: barrier_info.barrier_interval_ms,
     }
 }
 
