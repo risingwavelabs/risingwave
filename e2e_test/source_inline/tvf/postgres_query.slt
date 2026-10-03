@@ -45,6 +45,9 @@ select * from postgres_query('$PGHOST', '$PGPORT', 'ssl_user', 'ssl_password', '
 ----
 1
 
+statement error struct field "duplicate_column" specified more than once
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '$PGPASSWORD', 'source_test', 'select 1 as duplicate_column, 2 as duplicate_column;');
+
 query II retry 4 backoff 1s
 select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '$PGPASSWORD', 'source_test', 'select * from test where id > 90;');
 ----
