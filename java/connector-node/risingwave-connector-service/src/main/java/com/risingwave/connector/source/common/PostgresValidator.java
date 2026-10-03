@@ -60,12 +60,42 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         Long charMaxLength;
         String udtName;
         Integer atttypmod;
+        String arrayElementDataType;
+        String arrayElementUdtName;
 
-        ColumnInfo(String dataType, Long charMaxLength, String udtName, Integer atttypmod) {
+        ColumnInfo(
+                String dataType,
+                Long charMaxLength,
+                String udtName,
+                Integer atttypmod,
+                String arrayElementDataType,
+                String arrayElementUdtName) {
             this.dataType = dataType;
             this.charMaxLength = charMaxLength;
             this.udtName = udtName;
             this.atttypmod = atttypmod;
+            this.arrayElementDataType = arrayElementDataType;
+            this.arrayElementUdtName = arrayElementUdtName;
+        }
+
+        Long charMaxLengthForValidation() {
+            if (charMaxLength != null) {
+                return charMaxLength;
+            }
+
+            // information_schema.element_types does not expose the length of bit(n) array
+            // elements, PostgreSQL stores it in the array column's pg_attribute.atttypmod
+            //
+            // https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/varbit.c#L18-L19
+            var isBitArray =
+                    "array".equalsIgnoreCase(dataType)
+                            && "bit".equalsIgnoreCase(arrayElementDataType);
+
+            if (isBitArray && atttypmod != null && atttypmod >= 0) {
+                return atttypmod.longValue();
+            }
+
+            return null;
         }
     }
 
@@ -247,7 +277,17 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 var udtName = res.getString(4);
                 Integer atttypmod =
                         res.getObject(5) == null ? null : ((Number) res.getObject(5)).intValue();
-                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName, atttypmod));
+                var arrayElementDataType = res.getString(6);
+                var arrayElementUdtName = res.getString(7);
+                schema.put(
+                        field,
+                        new ColumnInfo(
+                                dataType,
+                                charMaxLength,
+                                udtName,
+                                atttypmod,
+                                arrayElementDataType,
+                                arrayElementUdtName));
             }
 
             for (var colDesc : tableSchema.getColumnDescs()) {
@@ -262,7 +302,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                             "Column '" + colName + "' not found in the upstream database");
                 }
                 var expectedType = colDesc.getDataType();
-                if (!isDataTypeCompatible(colInfo, expectedType.getTypeName())) {
+                if (!isDataTypeCompatible(colInfo, expectedType)) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + colName);
                 }
@@ -746,17 +786,20 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private boolean isDataTypeCompatible(ColumnInfo colInfo, Data.DataType.TypeName typeName) {
+    private boolean isDataTypeCompatible(ColumnInfo colInfo, Data.DataType dataType) {
         LOG.info(
                 "Data type compatibility check: PostgreSQL type '{}', colInfo.udtName: {}",
                 colInfo.dataType,
                 colInfo.udtName);
+        Long charMaxLength = colInfo.charMaxLengthForValidation();
         return Binding.validateCdcSourceColumnType(
                 CDC_TABLE_TYPE,
                 colInfo.dataType,
-                typeName.getNumber(),
-                colInfo.charMaxLength == null ? -1 : colInfo.charMaxLength,
+                dataType.toByteArray(),
+                charMaxLength == null ? -1 : charMaxLength,
                 false,
-                colInfo.udtName);
+                colInfo.udtName,
+                colInfo.arrayElementDataType,
+                colInfo.arrayElementUdtName);
     }
 }

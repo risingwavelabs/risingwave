@@ -416,6 +416,22 @@ create table t_bit8_mismatch (
   flags byteas
 ) from s table 'public.t_bit8';
 
+# Test 5: array element types must be compatible
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_numeric_array;
+    CREATE TABLE t_numeric_array (
+        id integer PRIMARY KEY,
+        amounts numeric[]
+    );
+"
+
+statement error Incompatible data type of column amounts
+create table t_numeric_array_mismatch (
+  id integer primary key,
+  amounts integer[]
+) from s table 'public.t_numeric_array';
+
 # Clean up all resources created during this test
 statement ok
 drop source s cascade;
@@ -427,6 +443,7 @@ psql -c "
     DROP TABLE IF EXISTS t_bit;
     DROP TABLE IF EXISTS t_hstore;
     DROP TABLE IF EXISTS t_bit8;
+    DROP TABLE IF EXISTS t_numeric_array;
     DROP TYPE IF EXISTS mood_enum_2;
     DROP EXTENSION IF EXISTS citext;
     DROP EXTENSION IF EXISTS ltree;

@@ -272,28 +272,30 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             }
 
             // All columns defined must exist in upstream database
-            for (var e : tableSchema.getColumnTypes().entrySet()) {
+            for (var colDesc : tableSchema.getColumnDescs()) {
+                var colName = colDesc.getName();
                 // skip validate internal columns
-                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                if (colName.startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var columnInfo = upstreamSchema.get(e.getKey().toLowerCase());
+                var columnInfo = upstreamSchema.get(colName.toLowerCase());
                 if (columnInfo == null) {
                     throw ValidatorUtils.invalidArgument(
-                            "Column '" + e.getKey() + "' not found in the upstream database");
+                            "Column '" + colName + "' not found in the upstream database");
                 }
+                var dataType = colDesc.getDataType();
                 if (!isDataTypeCompatible(
                         columnInfo.dataType,
-                        e.getValue(),
+                        dataType,
                         columnInfo.charMaxLength,
                         columnInfo.isUnsigned())) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column "
-                                    + e.getKey()
+                                    + colName
                                     + ". MySQL type: "
                                     + columnInfo.columnType
                                     + ", RisingWave type: "
-                                    + e.getValue());
+                                    + dataType.getTypeName());
                 }
             }
 
@@ -329,16 +331,15 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     private boolean isDataTypeCompatible(
-            String mysqlDataType,
-            Data.DataType.TypeName typeName,
-            long charMaxLength,
-            boolean isUnsigned) {
+            String mysqlDataType, Data.DataType dataType, long charMaxLength, boolean isUnsigned) {
         return Binding.validateCdcSourceColumnType(
                 CDC_TABLE_TYPE,
                 mysqlDataType,
-                typeName.getNumber(),
+                dataType.toByteArray(),
                 charMaxLength,
                 isUnsigned,
+                null,
+                null,
                 null);
     }
 }
