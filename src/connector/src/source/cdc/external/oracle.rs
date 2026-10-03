@@ -48,7 +48,7 @@ pub struct OracleOffset {
 
 impl OracleOffset {
     /// The per-event commit SCN is attached by RisingWave's Java CDC consumer; Debezium's
-    /// own sourceOffset.commit_scn is a per-redo-thread recovery map, not this event's SCN.
+    /// own `sourceOffset.commit_scn` is a per-redo-thread recovery map, not this event's SCN.
     pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
         // Native Oracle offset fields (such as the string txId) differ from other connectors.
         let dbz_offset: serde_json::Value = serde_json::from_str(offset)
