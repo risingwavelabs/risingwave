@@ -161,7 +161,6 @@ acquire_timeout_sec = 30
 worker_threads_num = ""
 distributed_query_limit = ""
 max_batch_queries_per_frontend_node = ""
-enable_barrier_read = false
 statement_timeout_in_sec = 3600
 frontend_compute_runtime_worker_threads = ""
 mask_worker_temporary_secs = 30

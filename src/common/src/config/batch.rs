@@ -37,9 +37,6 @@ pub struct BatchConfig {
     #[serde(default)]
     pub max_batch_queries_per_frontend_node: Option<u64>,
 
-    #[serde(default = "default::batch::enable_barrier_read")]
-    pub enable_barrier_read: bool,
-
     /// Timeout for a batch query in seconds.
     #[serde(default = "default::batch::statement_timeout_in_sec")]
     pub statement_timeout_in_sec: u32,
@@ -111,10 +108,6 @@ pub mod default {
     pub use crate::config::default::developer;
 
     pub mod batch {
-        pub fn enable_barrier_read() -> bool {
-            false
-        }
-
         pub fn enable_spill() -> bool {
             true
         }

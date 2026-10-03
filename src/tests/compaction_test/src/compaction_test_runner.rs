@@ -633,7 +633,7 @@ async fn open_hummock_iters(
     for &epoch in snapshots {
         let snapshot = hummock
             .new_read_snapshot(
-                HummockReadEpoch::NoWait(epoch),
+                HummockReadEpoch::Committed(epoch),
                 NewReadSnapshotOptions {
                     table_id,
                     table_option: TableOption::default(),

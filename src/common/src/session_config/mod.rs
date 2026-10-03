@@ -22,7 +22,6 @@ mod search_path;
 pub mod sink_decouple;
 mod statement_timeout;
 mod transaction_isolation_level;
-mod visibility_mode;
 
 use chrono_tz::Tz;
 pub use iceberg_query_storage_mode::IcebergQueryStorageMode;
@@ -44,7 +43,6 @@ use crate::hash::VirtualNode;
 use crate::session_config::parallelism::{ConfigBackfillParallelism, ConfigParallelism};
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
-pub use crate::session_config::visibility_mode::VisibilityMode;
 use crate::{PG_VERSION, SERVER_ENCODING, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS};
 
 pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
@@ -170,10 +168,6 @@ pub struct SessionConfig {
     /// See <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
     #[parameter(default = SearchPath::default())]
     search_path: SearchPath,
-
-    /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
-    #[parameter(default = VisibilityMode::default())]
-    visibility_mode: VisibilityMode,
 
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
     #[parameter(default = IsolationLevel::default())]

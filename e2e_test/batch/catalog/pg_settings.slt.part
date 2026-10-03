@@ -103,7 +103,6 @@ user timezone
 user transaction_isolation
 user unsafe_enable_storage_retention_for_non_append_only_tables
 user upsert_dml
-user visibility_mode
 
 query TT
 SELECT * FROM pg_catalog.pg_settings where name='dummy';
