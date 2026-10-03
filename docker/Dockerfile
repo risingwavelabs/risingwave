@@ -80,7 +80,9 @@ RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion && \
   mkdir -p /risingwave/bin && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
-  mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
+  if [ -f /risingwave/target/${CARGO_PROFILE}/risingwave.dwp ]; then \
+    mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/; \
+  fi && \
   cp ./target/${CARGO_PROFILE}/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib/adbc && \
@@ -139,8 +141,7 @@ RUN rustup show && sed -i '1s/^/default_toolchain = "stable"\n/' ~/.rustup/setti
 
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
-COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
-COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
+COPY --from=rust-builder /risingwave/bin/risingwave* /risingwave/bin/
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
