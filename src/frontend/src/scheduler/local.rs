@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyhow::anyhow;
+use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
@@ -50,6 +51,7 @@ use super::plan_fragmenter::{PartitionInfo, QueryStage};
 use crate::catalog::{FragmentId, TableId};
 use crate::error::RwError;
 use crate::optimizer::plan_node::BatchPlanNodeType;
+use crate::scheduler::await_tree_key::FrontendTask;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::{SchedulerError, SchedulerResult};
@@ -106,14 +108,18 @@ impl LocalQueryExecution {
         let plan_node = plan_fragment.root.unwrap();
 
         let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.shutdown_rx());
-        let executor = executor.build().await?;
+        let executor = executor.build().instrument_await("build_executor").await?;
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
         drop(plan_node);
         drop(self);
 
-        #[for_await]
-        for chunk in executor.execute() {
+        let mut data_stream = executor.execute();
+        while let Some(chunk) = data_stream
+            .next()
+            .instrument_await("next_executor_chunk")
+            .await
+        {
             yield chunk?;
         }
     }
@@ -125,6 +131,8 @@ impl LocalQueryExecution {
 
     pub fn stream_rows(self) -> LocalQueryStream {
         let compute_runtime = self.front_env.compute_runtime();
+        let await_tree_reg = self.front_env.await_tree_reg().cloned();
+        let query_id = self.query.query_id.clone();
         let (sender, receiver) = mpsc::channel(10);
         let shutdown_rx = self.shutdown_rx();
 
@@ -141,14 +149,23 @@ impl LocalQueryExecution {
         let sender1 = sender.clone();
         let exec = async move {
             let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
-            while let Some(mut r) = data_stream.next().await {
+            while let Some(mut r) = data_stream
+                .next()
+                .instrument_await("next_query_chunk")
+                .await
+            {
                 // append a query cancelled error if the query is cancelled.
                 if r.is_err() && shutdown_rx.is_cancelled() {
                     r = Err(Box::new(SchedulerError::QueryCancelled(
                         "Cancelled by user".to_owned(),
                     )) as BoxedError);
                 }
-                if sender1.send(r).await.is_err() {
+                if sender1
+                    .send(r)
+                    .instrument_await("send_query_chunk")
+                    .await
+                    .is_err()
+                {
                     tracing::info!("Receiver closed.");
                     return;
                 }
@@ -171,8 +188,8 @@ impl LocalQueryExecution {
         let exec = async move { STRICT_MODE::scope(strict_mode, exec).await }.boxed();
         let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
-        if let Some(timeout) = timeout {
-            let exec = async move {
+        let exec = async move {
+            if let Some(timeout) = timeout {
                 if let Err(_e) = tokio::time::timeout(timeout, exec).await {
                     tracing::error!(
                         "Local query execution timeout after {} seconds",
@@ -189,8 +206,17 @@ impl LocalQueryExecution {
                         tracing::info!("Receiver closed.");
                     }
                 }
-            };
-            compute_runtime.spawn(exec);
+            } else {
+                exec.await;
+            }
+        };
+
+        if let Some(reg) = await_tree_reg {
+            let span = await_tree::span!("Local Query ({})", query_id.id);
+            compute_runtime.spawn(
+                reg.register(FrontendTask::Query(query_id), span)
+                    .instrument(exec),
+            );
         } else {
             compute_runtime.spawn(exec);
         }

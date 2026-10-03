@@ -50,8 +50,8 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
-    RpcClientConfig, StreamingConfig, UdfConfig, load_config,
+    AsyncStackTraceOption, AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig,
+    MetricLevel, RpcClientConfig, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
@@ -152,6 +152,7 @@ pub(crate) struct FrontendEnv {
     user_info_reader: UserInfoReader,
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
+    await_tree_reg: Option<await_tree::Registry>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
     session_params: Arc<RwLock<SessionConfig>>,
@@ -269,6 +270,7 @@ impl FrontendEnv {
             user_info_reader,
             worker_node_manager,
             query_manager,
+            await_tree_reg: None,
             hummock_snapshot_manager,
             system_params_manager,
             session_params: Default::default(),
@@ -374,6 +376,14 @@ impl FrontendEnv {
             config.batch.developer.frontend_client_config.clone(),
         ));
         let monitor_client_pool = Arc::new(MonitorClientPool::new(1, RpcClientConfig::default()));
+        let await_tree_reg = match config.streaming.async_stack_trace {
+            AsyncStackTraceOption::Off => None,
+            option => await_tree::ConfigBuilder::default()
+                .verbose(option.is_verbose().unwrap())
+                .build()
+                .ok()
+                .map(await_tree::Registry::new),
+        };
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool.clone(),
@@ -432,7 +442,7 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let frontend_srv = FrontendServiceImpl::new(sessions_map.clone());
-        let monitor_srv = MonitorServiceImpl::new(config.server.clone());
+        let monitor_srv = MonitorServiceImpl::new(config.server.clone(), await_tree_reg.clone());
         let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
 
         let telemetry_manager = TelemetryManager::new(
@@ -560,6 +570,7 @@ impl FrontendEnv {
                 worker_node_manager,
                 meta_client: frontend_meta_client,
                 query_manager,
+                await_tree_reg,
                 hummock_snapshot_manager,
                 system_params_manager,
                 session_params,
@@ -630,6 +641,10 @@ impl FrontendEnv {
 
     pub fn query_manager(&self) -> &QueryManager {
         &self.query_manager
+    }
+
+    pub fn await_tree_reg(&self) -> Option<&await_tree::Registry> {
+        self.await_tree_reg.as_ref()
     }
 
     pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
