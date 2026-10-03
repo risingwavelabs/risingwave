@@ -163,6 +163,27 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "debezium.queue.memory.ratio".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // AzblobProperties
+    map.try_insert(
+        std::any::type_name::<AzblobProperties>().to_owned(),
+        [
+            "refresh.interval.sec".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // BatchPosixFsProperties
+    map.try_insert(
+        std::any::type_name::<BatchPosixFsProperties>().to_owned(),
+        [
+            "refresh.interval.sec".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // GcsProperties
+    map.try_insert(
+        std::any::type_name::<GcsProperties>().to_owned(),
+        [
+            "refresh.interval.sec".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // KafkaProperties
     map.try_insert(
         std::any::type_name::<KafkaProperties>().to_owned(),
@@ -210,6 +231,20 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.fetch.max.bytes".to_owned(),
             "properties.enable.auto.commit".to_owned(),
             "properties.auto.commit.interval.ms".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // OpendalS3Properties
+    map.try_insert(
+        std::any::type_name::<OpendalS3Properties>().to_owned(),
+        [
+            "refresh.interval.sec".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // PosixFsProperties
+    map.try_insert(
+        std::any::type_name::<PosixFsProperties>().to_owned(),
+        [
+            "refresh.interval.sec".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // PubsubProperties

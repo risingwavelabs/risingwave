@@ -120,7 +120,7 @@ impl<S: StateStore> FsListExecutor<S> {
 
         // Build source description from the builder.
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
@@ -149,16 +149,36 @@ impl<S: StateStore> FsListExecutor<S> {
                     // Barrier arrives.
                     Either::Left(msg) => match &msg {
                         Message::Barrier(barrier) => {
+                            let mut replace_listing_stream = false;
                             if let Some(mutation) = barrier.mutation.as_deref() {
                                 match mutation {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
+                                    Mutation::ConnectorPropsChange(props) => {
+                                        if let Some(new_props) = props
+                                            .get(&self.stream_source_core.source_id.as_raw_id())
+                                        {
+                                            tracing::info!(
+                                                actor_id = %self.actor_ctx.id,
+                                                source_id = %self.stream_source_core.source_id,
+                                                "updating file source connector properties",
+                                            );
+                                            source_desc.update_reader(new_props.clone())?;
+                                            replace_listing_stream = true;
+                                        }
+                                    }
                                     _ => (),
                                 }
                             }
 
                             // Propagate the barrier.
                             yield msg;
+
+                            if replace_listing_stream {
+                                stream.replace_data_stream(
+                                    self.build_chunked_paginate_stream(&source_desc)?,
+                                );
+                            }
                         }
                         // Only barrier can be received.
                         _ => unreachable!(),

@@ -34,6 +34,7 @@ risedev ci-start ci-1cn-1fe-with-recovery
 
 echo "--- Run generic source tests"
 risedev slt './e2e_test/source_inline/fs/posix_fs.slt'
+risedev slt './e2e_test/source_inline/fs/alter_refresh_interval.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_dirty_object.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_fixed_size_binary.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_time_units.slt'

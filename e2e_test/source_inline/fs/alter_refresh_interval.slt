@@ -1,0 +1,49 @@
+# Verify that a non-shared file source applies a new listing interval online.
+
+system ok
+rm -rf /tmp/rw_alter_file_source_refresh_interval && mkdir -p /tmp/rw_alter_file_source_refresh_interval && cp e2e_test/source_inline/fs/data/data1.csv /tmp/rw_alter_file_source_refresh_interval/data1.csv
+
+statement ok
+CREATE SOURCE alter_file_source_refresh_interval (
+    carat FLOAT,
+    cut TEXT,
+    color TEXT,
+    depth FLOAT
+) WITH (
+    connector = 'posix_fs',
+    match_pattern = 'data*.csv',
+    posix_fs.root = '/tmp/rw_alter_file_source_refresh_interval',
+    refresh.interval.sec = 86400
+) FORMAT PLAIN ENCODE CSV (without_header = 'false', delimiter = ',');
+
+statement ok
+CREATE MATERIALIZED VIEW alter_file_source_refresh_interval_mv AS
+SELECT * FROM alter_file_source_refresh_interval;
+
+query I retry 10 backoff 1s
+SELECT count(*) FROM alter_file_source_refresh_interval_mv;
+----
+5
+
+system ok
+cp e2e_test/source_inline/fs/data/data2.csv /tmp/rw_alter_file_source_refresh_interval/data2.csv
+
+# The original listing stream is sleeping for a day. ALTER must replace it so that
+# the second file is discovered without recovering the database or recreating the MV.
+statement ok
+ALTER SOURCE alter_file_source_refresh_interval
+CONNECTOR WITH (refresh.interval.sec = 1);
+
+query I retry 10 backoff 1s
+SELECT count(*) FROM alter_file_source_refresh_interval_mv;
+----
+10
+
+statement ok
+DROP MATERIALIZED VIEW alter_file_source_refresh_interval_mv;
+
+statement ok
+DROP SOURCE alter_file_source_refresh_interval;
+
+system ok
+rm -rf /tmp/rw_alter_file_source_refresh_interval

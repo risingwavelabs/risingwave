@@ -56,6 +56,7 @@ pub const DEFAULT_REFRESH_INTERVAL_SEC: u64 = 60;
 pub struct FsSourceCommon {
     #[serde(rename = "refresh.interval.sec")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub refresh_interval_sec: Option<u64>,
 
     #[serde(rename = "compression_format", default = "Default::default")]

@@ -90,6 +90,7 @@ AzblobProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+    allow_alter_on_fly: true
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -116,6 +117,7 @@ BatchPosixFsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+    allow_alter_on_fly: true
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -171,6 +173,7 @@ GcsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+    allow_alter_on_fly: true
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -1266,6 +1269,7 @@ OpendalS3Properties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+    allow_alter_on_fly: true
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -1288,6 +1292,7 @@ PosixFsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+    allow_alter_on_fly: true
   - name: compression_format
     field_type: CompressionFormat
     required: false
