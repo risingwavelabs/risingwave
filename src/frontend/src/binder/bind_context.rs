@@ -164,8 +164,8 @@ impl BindContext {
         match &self.get_column_binding_indices(schema_name, table_name, column_name)?[..] {
             [] => unreachable!(),
             [idx] => Ok(*idx),
-            _ => Err(ErrorCode::InternalError(format!(
-                "Ambiguous column name: {}",
+            _ => Err(ErrorCode::InvalidReference(format!(
+                "column reference \"{}\" is ambiguous",
                 column_name
             ))),
         }
@@ -258,8 +258,8 @@ impl BindContext {
                     }
                 }
             }
-            Err(ErrorCode::InternalError(format!(
-                "Ambiguous column name: {}",
+            Err(ErrorCode::InvalidReference(format!(
+                "column reference \"{}\" is ambiguous",
                 column_name
             )))
         } else {

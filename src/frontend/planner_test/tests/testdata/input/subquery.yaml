@@ -313,6 +313,21 @@
     SELECT generate_series(1, (select 1));
   expected_outputs:
     - batch_plan
+- name: an ambiguous correlated reference does not resolve to an outer query column
+  sql: |
+    create table a (a1 int);
+    create table b (b1 int);
+    select (select count(*) from (select 100 as a1) t1, (select 200 as a1) t2 where exists (select 1 from b where b1 > a1)) from a;
+  expected_outputs:
+    - binder_error
+- name: correlated reference to a column merged by FULL JOIN USING
+  sql: |
+    create table t1 (x int);
+    create table t2 (x int);
+    create table t3 (y int);
+    select x from t1 full join t2 using (x) where exists (select 1 from t3 where y = x);
+  expected_outputs:
+    - logical_plan
 - name: array subquery
   sql: |
     select Array(select 1 union select 2);
