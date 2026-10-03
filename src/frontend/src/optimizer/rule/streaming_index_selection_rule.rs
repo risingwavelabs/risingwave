@@ -66,7 +66,7 @@ impl StreamingIndexSelectionRule {
             return None;
         }
 
-        let rule = IndexSelectionRule {};
+        let rule = IndexSelectionRule::new_cost_only();
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
         let primary_cost = std::cmp::min(
             rule.estimate_table_scan_cost(logical_scan, primary_table_row_size),
