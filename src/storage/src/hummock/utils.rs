@@ -33,8 +33,9 @@ use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
-    EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
+    EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range, is_empty_key_range,
 };
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use tokio::sync::oneshot::{Receiver, Sender, channel};
 
@@ -127,8 +128,7 @@ where
         .filter(move |info| filter_single_sst(info, table_id, table_key_range))
 }
 
-/// Prune non-overlapping SSTs that does not overlap with a specific key range or does not overlap
-/// with a specific table id. Returns the sst ids after pruning.
+/// Select candidate SSTs for a table and user-key range from a non-overlapping level.
 #[expect(clippy::type_complexity)]
 pub fn prune_nonoverlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
@@ -136,15 +136,38 @@ pub fn prune_nonoverlapping_ssts<'a>(
     table_id: StateTableId,
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     debug_assert!(can_concat(ssts));
-    let start_table_idx = match user_key_range.0 {
+    let ssts = if is_empty_key_range(&user_key_range) {
+        &[]
+    } else {
+        ssts
+    };
+    let mut start_table_idx = match user_key_range.0 {
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => 0,
     };
+    // Use an exclusive slice end, excluding SSTs that start at an excluded query bound.
     let end_table_idx = match user_key_range.1 {
-        Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
-        _ => ssts.len().saturating_sub(1),
+        Included(key) => search_sst_idx(ssts, key),
+        Excluded(key) => {
+            ssts.partition_point(|sst| FullKey::decode(&sst.key_range.left).user_key < key)
+        }
+        Unbounded => ssts.len(),
     };
-    ssts[start_table_idx..=end_table_idx]
+    // The predecessor found by the lower-bound search may end before the query starts.
+    // Only this boundary SST needs a right-bound check; the remaining SSTs start in range.
+    if start_table_idx < end_table_idx {
+        let key_range = &ssts[start_table_idx].key_range;
+        let ends_before_query = match user_key_range.0 {
+            Included(key) => key_range.compare_right_with_user_key(key).is_lt(),
+            Excluded(key) => key_range.compare_right_with_user_key(key).is_le(),
+            Unbounded => false,
+        };
+        if ends_before_query {
+            start_table_idx += 1;
+        }
+    }
+    // The query may fall entirely before the first SST or between two SSTs.
+    ssts[start_table_idx.min(end_table_idx)..end_table_idx]
         .iter()
         .filter(move |sst| sst.table_ids.binary_search(&table_id).is_ok())
 }
@@ -877,6 +900,70 @@ mod tests {
     use rand::random_range;
 
     use crate::hummock::utils::MemoryLimiter;
+
+    #[test]
+    fn test_prune_nonoverlapping_sst_bounds() {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+
+        use risingwave_common::catalog::TableId;
+        use risingwave_hummock_sdk::key::{FullKey, UserKey};
+        use risingwave_hummock_sdk::key_range::KeyRange;
+        use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+
+        use super::prune_nonoverlapping_ssts;
+
+        let table_id = TableId::default();
+        let ssts: Vec<SstableInfo> = [(10, 20, true), (20, 30, false), (60, 70, false)]
+            .into_iter()
+            .enumerate()
+            .map(|(id, (left, right, right_exclusive))| {
+                SstableInfoInner {
+                    sst_id: (id as u64).into(),
+                    table_ids: vec![table_id],
+                    key_range: KeyRange {
+                        left: FullKey::for_test(table_id, vec![left], 0).encode().into(),
+                        right: FullKey::for_test(table_id, vec![right], 0).encode().into(),
+                        right_exclusive,
+                    },
+                    ..Default::default()
+                }
+                .into()
+            })
+            .collect();
+        for (left, right, expected) in [
+            (Unbounded, Unbounded, vec![0, 1, 2]),
+            (Included(5), Excluded(10), vec![]),
+            (Included(5), Included(10), vec![0]),
+            (Included(20), Included(20), vec![1]),
+            (Excluded(20), Included(20), vec![]),
+            (Included(10), Excluded(20), vec![0]),
+            (Included(10), Included(20), vec![0, 1]),
+            (Included(30), Included(40), vec![1]),
+            (Excluded(30), Included(40), vec![]),
+            (Included(40), Excluded(60), vec![]),
+            (Included(40), Included(60), vec![2]),
+            (Included(71), Unbounded, vec![]),
+        ] {
+            let left = left.map(|key| UserKey::for_test(table_id, vec![key]));
+            let right = right.map(|key| UserKey::for_test(table_id, vec![key]));
+            let range = (
+                left.as_ref().map(UserKey::as_ref),
+                right.as_ref().map(UserKey::as_ref),
+            );
+            let actual: Vec<_> = prune_nonoverlapping_ssts(&ssts, range, table_id)
+                .map(|sst| sst.sst_id.as_raw_id())
+                .collect();
+            assert_eq!(actual, expected, "{range:?}");
+        }
+        assert_eq!(
+            prune_nonoverlapping_ssts(&ssts, (Unbounded, Unbounded), TableId::new(1)).count(),
+            0
+        );
+        assert_eq!(
+            prune_nonoverlapping_ssts(&[], (Unbounded, Unbounded), table_id).count(),
+            0
+        );
+    }
 
     async fn assert_pending(future: &mut (impl Future + Unpin)) {
         for _ in 0..10 {
