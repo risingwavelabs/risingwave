@@ -157,6 +157,16 @@ pub(crate) fn gen_create_index_plan(
         );
     }
 
+    // A relation without primary key holds at most one row, e.g. a materialized view of a global
+    // aggregation. The index is still created for compatibility, but the planner will never
+    // prefer it over the primary table.
+    if table.pk().is_empty() {
+        session.notice_to_user(format!(
+            "index \"{}\" will never be used by the planner: \"{}\" has no primary key and holds at most one row",
+            index_table_name, table.name
+        ));
+    }
+
     if !session.is_super_user() && session.user_id() != table.owner {
         return Err(ErrorCode::PermissionDenied(format!(
             "must be owner of table \"{}\"",
