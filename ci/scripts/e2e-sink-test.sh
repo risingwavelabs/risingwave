@@ -105,6 +105,10 @@ python3 e2e_test/sink/turbopuffer_sink_check.py "$TURBOPUFFER_SINK_OUTPUT" "$TUR
 kill "$TURBOPUFFER_SINK_SERVER_PID" || true
 rm -f "$TURBOPUFFER_SINK_OUTPUT" "$TURBOPUFFER_SINK_HEADERS" "$TURBOPUFFER_SINK_PATHS"
 
+echo "--- e2e, qdrant sink"
+risedev slt './e2e_test/sink/qdrant_sink.slt'
+python3 e2e_test/sink/qdrant_sink_check.py http://qdrant-server:6333 qdrant_test_key
+
 echo "--- Kill cluster"
 risedev ci-kill
 

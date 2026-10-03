@@ -22,6 +22,7 @@ all-sinks-lite = [
     "sink-clickhouse",
     "sink-doris",
     "sink-starrocks",
+    "sink-qdrant",
 ]
 all-sources = ["source-adbc_snowflake"]
 source-adbc_snowflake = ["dep:adbc_core", "dep:adbc_snowflake"]
@@ -37,6 +38,7 @@ sink-google_pubsub = ["dep:google-cloud-googleapis"]
 sink-clickhouse = ["dep:clickhouse"]
 sink-doris = []
 sink-starrocks = []
+sink-qdrant = ["dep:qdrant-client"]
 
 [dependencies]
 # Rust ADBC crates (e.g., adbc_core 0.23) are built against the ADBC C/C++ core driver library version 0.19
@@ -139,6 +141,7 @@ pulsar = { version = "6.7", default-features = false, features = [
     "lz4",
     "zstd",
 ] }
+qdrant-client = { version = "1.19", default-features = false, optional = true }
 rand = { workspace = true }
 rdkafka = { workspace = true, features = [
     "cmake-build",
@@ -213,7 +216,7 @@ tracing = "0.1"
 typed-builder = "^0.23"
 url = "2"
 urlencoding = "2"
-uuid = { version = "1", features = ["v4", "v7", "fast-rng"] }
+uuid = { version = "1", features = ["v4", "v5", "v7", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "12.1.2"
 

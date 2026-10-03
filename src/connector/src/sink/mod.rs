@@ -30,6 +30,7 @@ pub mod file_sink;
 pub mod formatter;
 feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
 feature_gated_sink_mod!(lancedb, LanceDb, "lancedb");
+feature_gated_sink_mod!(qdrant, Qdrant, "qdrant");
 pub mod http;
 pub mod iceberg;
 pub mod kafka;
@@ -133,6 +134,7 @@ macro_rules! for_all_sinks {
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Http, $crate::sink::http::HttpSink, $crate::sink::http::HttpConfig },
                 { Turbopuffer, $crate::sink::turbopuffer::TurbopufferSink, $crate::sink::turbopuffer::TurbopufferConfig },
+                { Qdrant, $crate::sink::qdrant::QdrantSink, $crate::sink::qdrant::QdrantConfig },
                 { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
