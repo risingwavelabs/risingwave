@@ -21,6 +21,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Result, anyhow};
+use tokio_postgres::Client;
 
 use crate::parse_sql;
 use crate::sqlreduce::checker::Checker;
@@ -43,6 +44,7 @@ impl Reducer {
             checker,
         }
     }
+
 
     /// Perform reduction on a SQL input containing multiple statements,
     /// where only the **last** statement is considered the failing one.
@@ -101,6 +103,41 @@ impl Reducer {
         }
         reduced_sqls.push_str(&reduced_sql);
         reduced_sqls.push_str(";\n");
+
+        // Reconstruct a clean post-setup database state before running EXPLAIN.
+        // After the reduction loop, the connection's schema state is an
+        // implementation artifact of the last `is_failure_preserved` call,
+        // not an explicitly-prepared environment. Reset and replay setup so
+        // the logged plan is tied to a deliberately-reconstructed state.
+        self.checker.reset_and_replay_setup().await;
+
+        // Log the EXPLAIN plan for the reduced failing query before schema is dropped.
+        // This must run before drop_schema() so the referenced tables/views still exist.
+        let last_stmt = parse_sql(&reduced_sqls).into_iter().last();
+        if let Some(stmt) = last_stmt {
+            let explain_sql = format!("EXPLAIN {}", stmt);
+            match self.checker.client.simple_query(&explain_sql).await {
+                Ok(rows) => {
+                    let plan: Vec<String> = rows
+                        .iter()
+                        .filter_map(|msg| {
+                            if let tokio_postgres::SimpleQueryMessage::Row(row) = msg {
+                                row.get(0).map(|s| s.to_owned())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    tracing::info!(
+                        "EXPLAIN plan for reduced failing query:\n{}",
+                        plan.join("\n")
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to get EXPLAIN plan for reduced query: {}", e);
+                }
+            }
+        }
 
         // Drop the schema after the reduction is complete.
         self.checker.drop_schema().await;
@@ -199,7 +236,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
+                                "[OK] Valid list-batch reduction! Removed {} items, SQL len {} -> {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -246,7 +283,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "✓ Valid attr-batch reduction! Removed {} attributes, SQL len {} → {}",
+                                "[OK] Valid attr-batch reduction! Removed {} attributes, SQL len {} -> {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -293,7 +330,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "✓ Valid replace-batch reduction! Applied {} replacements, SQL len {} → {}",
+                                "[OK] Valid replace-batch reduction! Applied {} replacements, SQL len {} -> {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -340,7 +377,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "✓ Valid pullup-batch reduction! Applied {} pullups, SQL len {} → {}",
+                                "[OK] Valid pullup-batch reduction! Applied {} pullups, SQL len {} -> {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -420,7 +457,7 @@ impl Reducer {
                     continue;
                 }
 
-                tracing::info!("✓ Valid reduction found! SQL len {} → {}", sql_len, new_len);
+                tracing::info!("Valid reduction found: SQL len {} -> {}", sql_len, new_len);
                 tracing::info!("Applying candidate and continuing to next iteration");
                 ast_node = new_ast;
                 sql_len = new_len;
