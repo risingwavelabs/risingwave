@@ -47,7 +47,7 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
-    cmp_pk_unsigned_aware, get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message,
+    cmp_cdc_pk, get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message,
     mark_cdc_chunk,
 };
 use crate::executor::monitor::CdcBackfillMetrics;
@@ -61,7 +61,7 @@ const METADATA_STATE_LEN: usize = 4;
 struct PkCompareInfo<'a> {
     indices: &'a [usize],
     order: &'a [OrderType],
-    needs_unsigned_i64_compare: &'a [bool],
+    comparisons: &'a [CdcKeyComparison],
 }
 
 fn can_poll_upstream_while_creating_reader(
@@ -241,12 +241,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .is_none_or(|binlog_low| *binlog_low <= event_offset);
 
                 let row_pk = row.project(pk_compare.indices);
-                let reached_current_pos = cmp_pk_unsigned_aware(
+                let reached_current_pos = cmp_cdc_pk(
                     row_pk.iter(),
                     current_pos.iter(),
                     pk_compare.order,
-                    pk_compare.needs_unsigned_i64_compare,
-                )
+                    pk_compare.comparisons,
+                )?
                 .is_le();
                 if !in_binlog_range {
                     continue;
@@ -311,7 +311,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 current_pos,
                 pk_compare.indices,
                 pk_compare.order,
-                pk_compare.needs_unsigned_i64_compare,
+                pk_compare.comparisons,
                 last_binlog_offset.clone(),
             )?,
             output_indices,
@@ -330,13 +330,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
         let pk_order = self.external_table.pk_order_types().to_vec();
-        let mut pk_needs_unsigned_i64_compare =
-            self.external_table.pk_comparisons().map(|comparisons| {
-                comparisons
-                    .iter()
-                    .map(|comparison| *comparison == CdcKeyComparison::UnsignedInt64)
-                    .collect_vec()
-            });
+        let mut pk_comparisons = self.external_table.pk_comparisons().map(<[_]>::to_vec);
 
         let table_id = self.external_table.table_id();
         let upstream_table_name = self.external_table.qualified_table_name();
@@ -448,7 +442,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             });
             if can_poll_upstream_while_creating_reader(
                 current_pk_pos.as_ref(),
-                pk_needs_unsigned_i64_compare.is_some(),
+                pk_comparisons.is_some(),
             ) {
                 while let Some(msg) =
                     build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
@@ -461,10 +455,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         }
                         Message::Chunk(chunk) => {
                             if let Some(current_pos) = current_pk_pos.as_ref() {
-                                let pk_needs_unsigned_i64_compare =
-                                    pk_needs_unsigned_i64_compare.as_deref().expect(
-                                        "recovery may only poll upstream with known PK comparisons",
-                                    );
+                                let pk_comparisons = pk_comparisons.as_deref().expect(
+                                    "recovery may only poll upstream with known PK comparisons",
+                                );
                                 let (chunk, consumed_offset) = Self::filter_recovery_chunk(
                                     &offset_parse_func,
                                     chunk,
@@ -472,7 +465,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     PkCompareInfo {
                                         indices: &pk_indices,
                                         order: &pk_order,
-                                        needs_unsigned_i64_compare: pk_needs_unsigned_i64_compare,
+                                        comparisons: pk_comparisons,
                                     },
                                     &last_binlog_offset,
                                     &self.output_indices,
@@ -506,21 +499,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 table_reader = Some(future.as_mut().await);
             }
             let table_reader = table_reader.expect("table reader must be created");
-            if pk_needs_unsigned_i64_compare.is_none() {
+            if pk_comparisons.is_none() {
                 let pk_names = pk_indices
                     .iter()
                     .map(|&idx| self.external_table.schema().fields[idx].name.clone())
                     .collect_vec();
                 let comparisons = table_reader.pk_column_comparisons(&pk_names)?;
                 assert_eq!(comparisons.len(), pk_indices.len());
-                pk_needs_unsigned_i64_compare = Some(
-                    comparisons
-                        .into_iter()
-                        .map(|comparison| comparison == CdcKeyComparison::UnsignedInt64)
-                        .collect_vec(),
-                );
+                pk_comparisons = Some(comparisons);
             }
-            let pk_needs_unsigned_i64_compare = pk_needs_unsigned_i64_compare
+            let pk_comparisons = pk_comparisons
                 .expect("PK comparison metadata must be resolved after reader creation");
             tracing::info!(
                 %table_id,
@@ -601,7 +589,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 PkCompareInfo {
                                     indices: &pk_indices,
                                     order: &pk_order,
-                                    needs_unsigned_i64_compare: &pk_needs_unsigned_i64_compare,
+                                    comparisons: &pk_comparisons,
                                 },
                                 &last_binlog_offset,
                                 &self.output_indices,
@@ -753,8 +741,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             PkCompareInfo {
                                                 indices: &pk_indices,
                                                 order: &pk_order,
-                                                needs_unsigned_i64_compare:
-                                                    &pk_needs_unsigned_i64_compare,
+                                                comparisons: &pk_comparisons,
                                             },
                                             &last_binlog_offset,
                                             &self.output_indices,
@@ -969,7 +956,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 current_pos,
                                 &pk_indices,
                                 &pk_order,
-                                &pk_needs_unsigned_i64_compare,
+                                &pk_comparisons,
                                 last_binlog_offset.clone(),
                             )?,
                             &self.output_indices,
@@ -1217,6 +1204,7 @@ mod tests {
     use std::str::FromStr;
 
     use futures::{StreamExt, pin_mut, stream};
+    use itertools::Itertools;
     use risingwave_common::array::{Array, DataChunk, Op, StreamChunk};
     use risingwave_common::catalog::{
         CdcKeyComparison, ColumnDesc, ColumnId, Field, Schema, TableId,
@@ -1566,9 +1554,16 @@ mod tests {
     }
 
     async fn create_cdc_state_table(store: MemoryStateStore) -> StateTable<MemoryStateStore> {
+        create_cdc_state_table_with_pk_type(store, DataType::Int64).await
+    }
+
+    async fn create_cdc_state_table_with_pk_type(
+        store: MemoryStateStore,
+        pk_type: DataType,
+    ) -> StateTable<MemoryStateStore> {
         let state_schema = Schema::new(vec![
             Field::with_name(DataType::Varchar, "split_id"),
-            Field::with_name(DataType::Int64, "id"),
+            Field::with_name(pk_type, "id"),
             Field::with_name(DataType::Boolean, "backfill_finished"),
             Field::with_name(DataType::Int64, "row_count"),
             Field::with_name(DataType::Jsonb, "cdc_offset"),
@@ -1600,10 +1595,27 @@ mod tests {
         CdcBackfillExecutor<MemoryStateStore>,
         MemoryStateStore,
     ) {
+        create_recovering_cdc_backfill_with_key(
+            DataType::Int64,
+            ScalarImpl::Int64(5),
+            CdcKeyComparison::Native,
+        )
+        .await
+    }
+
+    async fn create_recovering_cdc_backfill_with_key(
+        pk_type: DataType,
+        position: ScalarImpl,
+        comparison: CdcKeyComparison,
+    ) -> (
+        MessageSender,
+        CdcBackfillExecutor<MemoryStateStore>,
+        MemoryStateStore,
+    ) {
         let memory_state_store = MemoryStateStore::new();
         let mut state_writer = CdcBackfillState::new(
             TableId::new(1234),
-            create_cdc_state_table(memory_state_store.clone()).await,
+            create_cdc_state_table_with_pk_type(memory_state_store.clone(), pk_type.clone()).await,
             5,
         );
         state_writer
@@ -1612,7 +1624,7 @@ mod tests {
             .unwrap();
         state_writer
             .mutate_state(
-                Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
+                Some(OwnedRow::new(vec![Some(position)])),
                 Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 5,
                 false,
@@ -1642,15 +1654,15 @@ mod tests {
             ExternalTableConfig::default(),
             ExternalCdcTableType::Mock,
             Schema::new(vec![
-                Field::with_name(DataType::Int64, "id"),
+                Field::with_name(pk_type.clone(), "id"),
                 Field::with_name(DataType::Float64, "price"),
             ]),
             vec![OrderType::ascending()],
-            Some(vec![CdcKeyComparison::Native]),
+            Some(vec![comparison]),
             vec![0],
         );
         let output_columns = vec![
-            ColumnDesc::named("id", ColumnId::new(1), DataType::Int64),
+            ColumnDesc::named("id", ColumnId::new(1), pk_type.clone()),
             ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
         ];
         let executor = CdcBackfillExecutor::new(
@@ -1661,7 +1673,7 @@ mod tests {
             output_columns,
             None,
             StreamingMetrics::unused().into(),
-            create_cdc_state_table(memory_state_store.clone()).await,
+            create_cdc_state_table_with_pk_type(memory_state_store.clone(), pk_type.clone()).await,
             None,
             CdcScanOptions::default(),
             BTreeMap::default(),
@@ -1748,7 +1760,7 @@ mod tests {
                 PkCompareInfo {
                     indices: &[0],
                     order: &[OrderType::ascending()],
-                    needs_unsigned_i64_compare: &[false],
+                    comparisons: &[CdcKeyComparison::Native],
                 },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
@@ -1770,6 +1782,109 @@ mod tests {
                 .unwrap(),
             Some(Message::Barrier(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn test_recovery_preserves_sql_server_uuid_prefix() {
+        let boundary = "00000000-0000-0000-0000-000000000002";
+        let (mut tx, executor, store) = create_recovering_cdc_backfill_with_key(
+            DataType::Varchar,
+            ScalarImpl::Utf8(boundary.into()),
+            CdcKeyComparison::SqlServerUniqueidentifier,
+        )
+        .await;
+        let executor = executor.execute_inner();
+        pin_mut!(executor);
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(3)));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+        tx.push_chunk(create_raw_cdc_chunk(&[
+            (
+                r#"{"payload":{"before":{"id":"FFFFFFFF-0000-0000-0000-000000000001","price":10.0},"after":null,"op":"d"}}"#,
+                r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#,
+            ),
+            (
+                r#"{"payload":{"before":{"id":"00000000-0000-0000-0000-000000000002","price":20.0},"after":{"id":"00000000-0000-0000-0000-000000000002","price":21.0},"op":"u"}}"#,
+                r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#,
+            ),
+            (
+                r#"{"payload":{"before":null,"after":{"id":"00000000-0000-0000-0000-000000000003","price":30.0},"op":"c"}}"#,
+                r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":5},"isHeartbeat":false}"#,
+            ),
+        ]));
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(4)));
+        let Message::Chunk(chunk) = executor.next().await.unwrap().unwrap() else {
+            panic!("missing prefix changes");
+        };
+        let rows = chunk
+            .rows()
+            .map(|(op, row)| (op, row.to_owned_row()))
+            .collect_vec();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, Op::Delete);
+        assert_eq!(
+            rows[0].1[0],
+            Some(ScalarImpl::Utf8(
+                "FFFFFFFF-0000-0000-0000-000000000001".into()
+            ))
+        );
+        assert_eq!(rows[1].0, Op::Insert);
+        assert_eq!(rows[1].1[0], Some(ScalarImpl::Utf8(boundary.into())));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+        // The UUID cursor survives the checkpoint without being converted to lexical order.
+        let mut restored = CdcBackfillState::new(
+            TableId::new(1234),
+            create_cdc_state_table_with_pk_type(store, DataType::Varchar).await,
+            5,
+        );
+        restored
+            .init_epoch(Barrier::new_test_barrier(test_epoch(4)).epoch)
+            .await
+            .unwrap();
+        let state = restored.restore_state().await.unwrap();
+        assert_eq!(
+            state.current_pk_pos,
+            Some(OwnedRow::new(vec![Some(ScalarImpl::Utf8(boundary.into()))]))
+        );
+        assert!(!state.is_finished);
+    }
+
+    #[test]
+    fn test_buffered_sql_server_uuid_changes_follow_snapshot_order() {
+        let a = "FFFFFFFF-0000-0000-0000-000000000001";
+        let b = "00000000-0000-0000-0000-000000000002";
+        let c = "00000000-0000-0000-0000-000000000003";
+        let rows = [(Op::Delete, a), (Op::Insert, b), (Op::Insert, c)].into_iter().map(|(op, id)| (
+            op, OwnedRow::new(vec![Some(ScalarImpl::Utf8(id.into())), Some(ScalarImpl::Utf8(r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#.into()))])
+        )).collect_vec();
+        let chunk = StreamChunk::from_rows(&rows, &[DataType::Varchar, DataType::Varchar]);
+        let parser = MockExternalTableReader::get_cdc_offset_parser();
+        // At A, lexical comparison incorrectly forwards B and C too. At B, it hides A.
+        for (cursor, emitted_count) in [(a, 1), (b, 2)] {
+            let mut buffer = vec![chunk.clone()];
+            let (emitted, count, _) =
+                CdcBackfillExecutor::<MemoryStateStore>::consume_upstream_chunk_buffer(
+                    &parser,
+                    &mut buffer,
+                    Some(&OwnedRow::new(vec![Some(ScalarImpl::Utf8(cursor.into()))])),
+                    PkCompareInfo {
+                        indices: &[0],
+                        order: &[OrderType::ascending()],
+                        comparisons: &[CdcKeyComparison::SqlServerUniqueidentifier],
+                    },
+                    &None,
+                    &[0],
+                )
+                .unwrap();
+            assert_eq!(count, emitted_count);
+            assert_eq!(emitted[0].rows().next().unwrap().0, Op::Delete);
+            assert_eq!(buffer[0].cardinality(), 3 - emitted_count as usize);
+        }
     }
 
     #[tokio::test]
@@ -1967,7 +2082,7 @@ mod tests {
                 PkCompareInfo {
                     indices: &[0],
                     order: &[OrderType::ascending()],
-                    needs_unsigned_i64_compare: &[false],
+                    comparisons: &[CdcKeyComparison::Native],
                 },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
@@ -2048,7 +2163,7 @@ mod tests {
                 PkCompareInfo {
                     indices: &[0],
                     order: &[OrderType::ascending()],
-                    needs_unsigned_i64_compare: &[true],
+                    comparisons: &[CdcKeyComparison::UnsignedInt64],
                 },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
@@ -2137,7 +2252,7 @@ mod tests {
                 PkCompareInfo {
                     indices: &[0],
                     order: &[OrderType::ascending()],
-                    needs_unsigned_i64_compare: &[false],
+                    comparisons: &[CdcKeyComparison::Native],
                 },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
@@ -2242,7 +2357,7 @@ mod tests {
                 PkCompareInfo {
                     indices: &[0],
                     order: &[OrderType::ascending()],
-                    needs_unsigned_i64_compare: &[false],
+                    comparisons: &[CdcKeyComparison::Native],
                 },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
@@ -2322,7 +2437,7 @@ mod tests {
                 PkCompareInfo {
                     indices: &[0],
                     order: &[OrderType::ascending()],
-                    needs_unsigned_i64_compare: &[false],
+                    comparisons: &[CdcKeyComparison::Native],
                 },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3))),
                 &[0, 1],
