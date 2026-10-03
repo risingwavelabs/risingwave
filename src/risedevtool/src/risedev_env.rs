@@ -116,6 +116,27 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::Cassandra(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let datacenter = &c.datacenter;
+                let url = format!("{host}:{port}");
+                writeln!(env, r#"CQLSH_HOST="{host}""#).unwrap();
+                writeln!(env, r#"CQLSH_PORT="{port}""#).unwrap();
+                writeln!(env, r#"CASSANDRA_DATACENTER="{datacenter}""#).unwrap();
+                writeln!(env, r#"RISEDEV_CASSANDRA_URL="{url}""#).unwrap();
+                if c.user_managed {
+                    let cqlsh = c.cqlsh.as_deref().unwrap_or("cqlsh");
+                    writeln!(env, r#"CASSANDRA_CQLSH="{cqlsh}""#).unwrap();
+                } else {
+                    writeln!(env, r#"CASSANDRA_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_CASSANDRA_WITH_OPTIONS_COMMON="connector='cassandra',cassandra.url='{url}',cassandra.datacenter='{datacenter}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::ClickHouse(c) => {
                 let host = &c.address;
                 let http_port = &c.http_port;
@@ -367,4 +388,66 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
         }
     }
     env
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ConfigExpander;
+
+    #[test]
+    fn test_cassandra_profile_env() {
+        let root = tempfile::tempdir().unwrap();
+        fs_err::write(
+            root.path().join("risedev.yml"),
+            include_str!("../../../risedev.yml"),
+        )
+        .unwrap();
+        let (config_path, _, steps) =
+            ConfigExpander::expand(root.path(), "local-cassandra-sink-test").unwrap();
+        assert_eq!(config_path.as_deref(), Some("src/config/ci.toml"));
+        let services = ConfigExpander::deserialize(&steps).unwrap();
+        let env = generate_risedev_env(&services);
+        assert!(env.contains("RISEDEV_RW_FRONTEND_PORT=\"4566\""));
+        assert!(env.contains("CASSANDRA_CONTAINER=\"risedev-cassandra\""));
+        assert!(env.contains("CQLSH_HOST=\"127.0.0.1\""));
+        assert!(env.contains("CQLSH_PORT=\"9042\""));
+        assert!(env.contains("cassandra.url='127.0.0.1:9042'"));
+        assert!(env.contains("cassandra.datacenter='datacenter1'"));
+        assert!(!env.contains("CASSANDRA_CQLSH="));
+
+        // User profiles must be able to override the service template and export the
+        // same endpoint used by the readiness check, without a managed container.
+        fs_err::write(
+            root.path().join("risedev-profiles.user.yml"),
+            "external-cassandra:
+  steps:
+    - use: cassandra
+      user-managed: true
+      address: cassandra.example
+      port: 19042
+      datacenter: test-dc
+      cqlsh: /path with spaces/cqlsh
+",
+        )
+        .unwrap();
+        let (_, _, steps) = ConfigExpander::expand(root.path(), "external-cassandra").unwrap();
+        let services = ConfigExpander::deserialize(&steps).unwrap();
+        let env = generate_risedev_env(&services);
+        assert!(env.contains("CQLSH_HOST=\"cassandra.example\""));
+        assert!(env.contains("CQLSH_PORT=\"19042\""));
+        assert!(env.contains("RISEDEV_CASSANDRA_URL=\"cassandra.example:19042\""));
+        assert!(env.contains("CASSANDRA_DATACENTER=\"test-dc\""));
+        assert!(env.contains("cassandra.url='cassandra.example:19042'"));
+        assert!(env.contains("cassandra.datacenter='test-dc'"));
+        assert!(env.contains("CASSANDRA_CQLSH=\"/path with spaces/cqlsh\""));
+        assert!(!env.contains("CASSANDRA_CONTAINER="));
+
+        let ServiceConfig::Cassandra(mut config) = services.into_iter().next().unwrap() else {
+            panic!("expected Cassandra service");
+        };
+        config.cqlsh = None;
+        let env = generate_risedev_env(&vec![ServiceConfig::Cassandra(config)]);
+        assert!(env.contains("CASSANDRA_CQLSH=\"cqlsh\""));
+    }
 }

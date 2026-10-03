@@ -1,8 +1,26 @@
+control substitution on
+
+statement ok
+DROP SINK IF EXISTS s6;
+
+statement ok
+DROP SINK IF EXISTS s7;
+
+statement ok
+DROP TABLE IF EXISTS t6;
+
+statement ok
+DROP TABLE IF EXISTS t7;
+
+system ok retry 30 backoff 1s
+cassandra-cqlsh -e "SELECT release_version FROM system.local;"
+
+# Recreate only this test's keyspace so a failed run cannot leave stale rows.
 system ok
-${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};use demo;CREATE table demo_bhv_table(v1 int primary key,v2 smallint,v3 bigint,v4 float,v5 double,v6 text,v7 date,v8 timestamp,v9 boolean);"
+cassandra-cqlsh -e "DROP KEYSPACE IF EXISTS risedev_cassandra_sink_test; CREATE KEYSPACE risedev_cassandra_sink_test WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}; USE risedev_cassandra_sink_test; CREATE TABLE demo_bhv_table(v1 int primary key,v2 smallint,v3 bigint,v4 float,v5 double,v6 text,v7 date,v8 timestamp,v9 boolean);"
 
 system ok
-${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "use demo;CREATE table \"Test_uppercase\"(\"TEST_V1\" int primary key, \"TEST_V2\" int,\"TEST_V3\" int);"
+cassandra-cqlsh -e 'USE risedev_cassandra_sink_test; CREATE TABLE "Test_uppercase"("TEST_V1" int primary key, "TEST_V2" int,"TEST_V3" int);'
 
 statement ok
 CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamptz, v9 boolean);
@@ -17,26 +35,22 @@ statement ok
 CREATE SINK s6
 FROM
     t6 WITH (
-    connector = 'cassandra',
+    ${RISEDEV_CASSANDRA_WITH_OPTIONS_COMMON},
     type = 'append-only',
     force_append_only='true',
-    cassandra.url = 'cassandra-server:9042',
-    cassandra.keyspace  = 'demo',
+    cassandra.keyspace = 'risedev_cassandra_sink_test',
     cassandra.table = 'demo_bhv_table',
-    cassandra.datacenter = 'datacenter1',
 );
 
 statement ok
 CREATE SINK s7
 FROM
     t7 WITH (
-    connector = 'cassandra',
+    ${RISEDEV_CASSANDRA_WITH_OPTIONS_COMMON},
     type = 'append-only',
     force_append_only='true',
-    cassandra.url = 'cassandra-server:9042',
-    cassandra.keyspace  = 'demo',
+    cassandra.keyspace = 'risedev_cassandra_sink_test',
     cassandra.table = 'Test_uppercase',
-    cassandra.datacenter = 'datacenter1',
 );
 
 statement ok
@@ -47,6 +61,19 @@ INSERT INTO t7 VALUES (1, 1, 1);
 
 statement ok
 FLUSH;
+
+# COPY TO STDOUT works with both a container client and a host client, without shared files.
+system ok retry 30 backoff 1s
+cassandra-cqlsh -e "COPY risedev_cassandra_sink_test.demo_bhv_table TO STDOUT WITH HEADER = false AND ENCODING = 'UTF-8';"
+----
+1,1,1,1.1,1.2,test,2013-01-01,2013-01-01 01:01:01.000+0000,False
+
+
+system ok retry 30 backoff 1s
+cassandra-cqlsh -e "COPY risedev_cassandra_sink_test.\"Test_uppercase\" TO STDOUT WITH HEADER = false AND ENCODING = 'UTF-8';"
+----
+1,1,1
+
 
 statement ok
 DROP SINK s6;
@@ -61,18 +88,4 @@ statement ok
 DROP TABLE t7;
 
 system ok
-${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "COPY demo.demo_bhv_table TO './query_result.csv' WITH HEADER = false AND ENCODING = 'UTF-8';"
-
-system ok
-${CASSANDRA_DIR}/bin/cqlsh --request-timeout=20 -e "COPY demo.\"Test_uppercase\" TO './query_result2.csv' WITH HEADER = false AND ENCODING = 'UTF-8';"
-
-system ok
-cat ./query_result.csv
-----
-1,1,1,1.1,1.2,test,2013-01-01,2013-01-01 01:01:01.000+0000,False
-
-
-system ok
-cat ./query_result2.csv
-----
-1,1,1
+cassandra-cqlsh -e "DROP KEYSPACE risedev_cassandra_sink_test;"
