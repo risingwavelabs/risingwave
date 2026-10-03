@@ -23,12 +23,15 @@ import com.github.shyiko.mysql.binlog.event.Event;
 import com.github.shyiko.mysql.binlog.event.EventData;
 import com.github.shyiko.mysql.binlog.event.EventType;
 import com.github.shyiko.mysql.binlog.event.GtidEventData;
+import com.github.shyiko.mysql.binlog.event.QueryEventData;
 import com.github.shyiko.mysql.binlog.event.RowsQueryEventData;
 import com.github.shyiko.mysql.binlog.network.SSLMode;
+import io.debezium.antlr.CaseChangingCharStream;
 import io.debezium.connector.binlog.BinlogConnectorConfig;
 import io.debezium.connector.binlog.BinlogStreamingChangeEventSource;
 import io.debezium.connector.binlog.BinlogTaskContext;
 import io.debezium.connector.binlog.jdbc.BinlogConnectorConnection;
+import io.debezium.ddl.parser.mysql.generated.MySqlLexer;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.relational.TableId;
@@ -39,6 +42,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
+import org.antlr.v4.runtime.CharStream;
+import org.antlr.v4.runtime.CharStreams;
+import org.antlr.v4.runtime.CommonTokenStream;
+import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.misc.Interval;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,6 +89,52 @@ public class MySqlStreamingChangeEventSource
 
     public void setOnConnectedCallback(Runnable callback) {
         this.onConnectedCallback = callback;
+    }
+
+    @Override
+    protected void handleQueryEvent(
+            MySqlPartition partition, MySqlOffsetContext offsetContext, Event event)
+            throws InterruptedException {
+        QueryEventData command = unwrapData(event);
+        String sql = command.getSql();
+        // MariaDB's per-statement variable wrapper is not supported by the MySQL DDL
+        // parser. Normalize before both the DDL filter and parser, preserving schema changes.
+        command.setSql(unwrapSetStatement(sql));
+        try {
+            super.handleQueryEvent(partition, offsetContext, event);
+        } finally {
+            command.setSql(sql);
+        }
+    }
+
+    static String unwrapSetStatement(String sql) {
+        CharStream input = CharStreams.fromString(sql);
+        CommonTokenStream tokens =
+                new CommonTokenStream(new MySqlLexer(new CaseChangingCharStream(input, true)));
+        if (tokens.LA(1) != MySqlLexer.SET || tokens.LA(2) != MySqlLexer.STATEMENT) {
+            return sql;
+        }
+        tokens.consume();
+        tokens.consume();
+        // Lexing keeps FOR inside quoted values, identifiers, and comments out of the
+        // delimiter search. Parentheses can also contain FOR, e.g. in SUBSTRING expressions.
+        int depth = 0;
+        while (tokens.LA(1) != Token.EOF && tokens.LA(1) != MySqlLexer.SEMI) {
+            Token token = tokens.LT(1);
+            if (token.getType() == MySqlLexer.FOR && depth == 0) {
+                String statement =
+                        input.getText(Interval.of(token.getStopIndex() + 1, input.size() - 1))
+                                .trim();
+                return statement.isEmpty() ? sql : statement;
+            }
+            if (token.getType() == MySqlLexer.LR_BRACKET) {
+                depth++;
+            } else if (token.getType() == MySqlLexer.RR_BRACKET) {
+                depth--;
+            }
+            tokens.consume();
+        }
+        return sql;
     }
 
     @Override
