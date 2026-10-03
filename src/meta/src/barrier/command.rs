@@ -537,7 +537,6 @@ pub enum Command {
     CreateSubscription {
         subscription_id: SubscriptionId,
         upstream_mv_table_id: TableId,
-        retention_second: u64,
     },
 
     /// `DropSubscription` command generates a `DropSubscriptionsMutation` to notify
@@ -546,13 +545,6 @@ pub enum Command {
     DropSubscription {
         subscription_id: SubscriptionId,
         upstream_mv_table_id: TableId,
-    },
-
-    /// `AlterSubscriptionRetention` command updates the subscription retention time.
-    AlterSubscriptionRetention {
-        subscription_id: SubscriptionId,
-        upstream_mv_table_id: TableId,
-        retention_second: u64,
     },
 
     ConnectorPropsChange(ConnectorPropsChange),
@@ -650,14 +642,6 @@ impl std::fmt::Display for Command {
             Command::DropSubscription {
                 subscription_id, ..
             } => write!(f, "DropSubscription: {subscription_id}"),
-            Command::AlterSubscriptionRetention {
-                subscription_id,
-                retention_second,
-                ..
-            } => write!(
-                f,
-                "AlterSubscriptionRetention: {subscription_id} -> {retention_second}"
-            ),
             Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
             Command::Refresh {
                 table_id,

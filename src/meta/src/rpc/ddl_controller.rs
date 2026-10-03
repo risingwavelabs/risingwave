@@ -72,7 +72,9 @@ use tokio::time::sleep;
 use tracing::Instrument;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
+use crate::controller::catalog::{
+    CrossDbSubscriptionInfo, DropTableConnectorContext, ReleaseContext,
+};
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
@@ -983,18 +985,10 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("alter subscription retention");
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-        let (version, subscription) = self
+        let version = self
             .metadata_manager
             .catalog_controller
             .alter_subscription_retention(subscription_id, retention_seconds, definition)
-            .await?;
-        self.stream_manager
-            .alter_subscription_retention(
-                subscription.database_id,
-                subscription.id,
-                subscription.dependent_table_id,
-                subscription.retention_seconds,
-            )
             .await?;
         tracing::debug!("finish alter subscription retention");
         Ok(version)
@@ -1277,6 +1271,11 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
+                let cross_db_subscriptions = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_cross_db_subscriptions_by_job(job_id)
+                    .await?;
                 let abort_result = self
                     .metadata_manager
                     .catalog_controller
@@ -1315,6 +1314,11 @@ impl DdlController {
                             .await;
                     }
                 }
+                for subscription in cross_db_subscriptions {
+                    self.stream_manager
+                        .drop_cross_db_subscription(&subscription)
+                        .await;
+                }
                 Err(err)
             }
         }
@@ -1335,6 +1339,17 @@ impl DdlController {
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_info_from_graph(&fragment_graph);
 
+        let cross_db_upstream_table_ids = fragment_graph
+            .collect_snapshot_backfill_info()?
+            .1
+            .upstream_mv_table_id_to_backfill_epoch
+            .into_keys();
+        let cross_db_subscriptions = self
+            .metadata_manager
+            .catalog_controller
+            .create_cross_db_subscriptions(streaming_job.id(), cross_db_upstream_table_ids)
+            .await?;
+
         // create internal table catalogs and refill table id.
         let incomplete_internal_tables = fragment_graph
             .incomplete_internal_tables()
@@ -1349,7 +1364,7 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = %streaming_job.id(), "building streaming job");
-        let (mut ctx, stream_job_fragments) = self
+        let (ctx, stream_job_fragments) = self
             .build_stream_job(
                 ctx,
                 streaming_job,
@@ -1357,9 +1372,10 @@ impl DdlController {
                 resource_type,
                 streaming_job_model,
                 since_timestamp_epoch,
+                cross_db_subscriptions,
+                replace_sink,
             )
             .await?;
-        ctx.replace_sink = replace_sink;
 
         let streaming_job = &ctx.streaming_job;
 
@@ -1502,6 +1518,7 @@ impl DdlController {
             removed_iceberg_table_sinks,
             removed_iceberg_sink_ids,
             removed_iceberg_pk_index_sink_ids,
+            removed_cross_db_subscriptions,
         } = release_ctx;
         let removed_job_ids_for_sink_coordinators = removed_streaming_job_ids.clone();
 
@@ -1527,6 +1544,14 @@ impl DdlController {
                     .collect(),
             )
             .await;
+
+        // Cross-database subscriptions keep the upstream log store alive for the downstream job,
+        // so remove them only after the downstream drop barrier has completed.
+        for subscription in removed_cross_db_subscriptions {
+            self.stream_manager
+                .drop_cross_db_subscription(&subscription)
+                .await;
+        }
 
         // clean up sources after dropping streaming jobs.
         // Otherwise, e.g., Kafka consumer groups might be recreated after deleted.
@@ -1963,6 +1988,8 @@ impl DdlController {
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
         since_timestamp_epoch: Option<u64>,
+        cross_db_subscriptions: Vec<CrossDbSubscriptionInfo>,
+        replace_sink: Option<SinkId>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
@@ -1993,12 +2020,6 @@ impl DdlController {
 
         let locality_fragment_state_table_mapping =
             fragment_graph.find_locality_provider_fragment_state_table_mapping();
-
-        // check if log store exists for all cross-db upstreams
-        self.metadata_manager
-            .catalog_controller
-            .validate_cross_db_snapshot_backfill(&cross_db_snapshot_backfill_info)
-            .await?;
 
         let upstream_table_ids = fragment_graph
             .dependent_table_ids()
@@ -2129,13 +2150,14 @@ impl DdlController {
             option: CreateStreamingJobOption {},
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
+            cross_db_subscriptions,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
             resource_type,
             streaming_job_model: streaming_job_model.clone(),
-            replace_sink: None,
+            replace_sink,
             refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
             since_timestamp_epoch,
         };

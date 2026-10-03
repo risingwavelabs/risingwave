@@ -723,7 +723,7 @@ impl CatalogWriter for MockCatalogWriter {
             for schema in database.iter_schemas() {
                 if let Some(subscription) = schema.get_subscription_by_id(subscription_id) {
                     let mut pb_subscription = subscription.to_proto();
-                    pb_subscription.retention_seconds = retention_seconds;
+                    pb_subscription.retention_seconds = Some(retention_seconds);
                     pb_subscription.definition = definition;
                     self.catalog.write().update_subscription(&pb_subscription);
                     return Ok(());

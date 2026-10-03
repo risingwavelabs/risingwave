@@ -160,6 +160,17 @@ pub struct ReleaseContext {
     /// owned by `IcebergPkIndexSinkManager`. Filtered via `is_iceberg_pk_index_sink` on
     /// the sink properties so user-created pk-index sinks (any name) are included.
     pub(crate) removed_iceberg_pk_index_sink_ids: Vec<SinkId>,
+
+    /// Internal subscriptions owned by dropped cross-database streaming jobs. Their upstream
+    /// barrier commands must be sent after the downstream jobs have stopped.
+    pub(crate) removed_cross_db_subscriptions: Vec<CrossDbSubscriptionInfo>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CrossDbSubscriptionInfo {
+    pub subscription_id: SubscriptionId,
+    pub upstream_table_id: TableId,
+    pub upstream_database_id: DatabaseId,
 }
 
 #[derive(Default)]
@@ -1076,7 +1087,7 @@ impl CatalogControllerInner {
         let tables = self.list_tables().await?;
         let sources = self.list_sources().await?;
         let sinks = self.list_sinks().await?;
-        let subscriptions = self.list_subscriptions().await?;
+        let subscriptions = self.list_user_created_subscriptions().await?;
         let indexes = self.list_indexes().await?;
         let views = self.list_views().await?;
         let functions = self.list_functions().await?;
@@ -1259,11 +1270,12 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_subscriptions` return all `CREATED` subscriptions.
-    async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
+    /// Returns all user-created subscriptions in the `CREATED` state.
+    async fn list_user_created_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
         let subscription_objs = Subscription::find()
             .find_also_related(Object)
             .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
+            .filter(subscription::Column::CrossDbDownstreamJobId.is_null())
             .all(&self.db)
             .await?;
 

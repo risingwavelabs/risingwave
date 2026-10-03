@@ -141,6 +141,7 @@ pub struct CreateStreamingJobContext {
 
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+    pub cross_db_subscriptions: Vec<crate::controller::catalog::CrossDbSubscriptionInfo>,
 
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
 
@@ -398,6 +399,12 @@ impl GlobalStreamManager {
         let stream_manager = self.clone();
         let fut = async move {
             let create_type = ctx.create_type;
+            for subscription in &ctx.cross_db_subscriptions {
+                stream_manager
+                    .create_cross_db_subscription(subscription)
+                    .await
+                    .map_err(|err| (err, false, None))?;
+            }
             let streaming_job = stream_manager
                 .run_create_streaming_job_command(stream_job_fragments, ctx)
                 .await
@@ -1125,7 +1132,6 @@ impl GlobalStreamManager {
         let command = Command::CreateSubscription {
             subscription_id: subscription.id,
             upstream_mv_table_id: subscription.dependent_table_id,
-            retention_second: subscription.retention_seconds,
         };
 
         tracing::debug!("sending Command::CreateSubscription");
@@ -1133,6 +1139,31 @@ impl GlobalStreamManager {
             .run_command(subscription.database_id, command)
             .await?;
         Ok(())
+    }
+
+    pub async fn create_cross_db_subscription(
+        self: &Arc<Self>,
+        info: &crate::controller::catalog::CrossDbSubscriptionInfo,
+    ) -> MetaResult<()> {
+        let command = Command::CreateSubscription {
+            subscription_id: info.subscription_id,
+            upstream_mv_table_id: info.upstream_table_id,
+        };
+        self.barrier_scheduler
+            .run_command(info.upstream_database_id, command)
+            .await
+    }
+
+    pub async fn drop_cross_db_subscription(
+        self: &Arc<Self>,
+        info: &crate::controller::catalog::CrossDbSubscriptionInfo,
+    ) {
+        self.drop_subscription(
+            info.upstream_database_id,
+            info.subscription_id,
+            info.upstream_table_id,
+        )
+        .await;
     }
 
     // Don't need to add actor, just send a command
@@ -1155,25 +1186,5 @@ impl GlobalStreamManager {
             .inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
-    }
-
-    pub async fn alter_subscription_retention(
-        self: &Arc<Self>,
-        database_id: DatabaseId,
-        subscription_id: SubscriptionId,
-        table_id: TableId,
-        retention_second: u64,
-    ) -> MetaResult<()> {
-        let command = Command::AlterSubscriptionRetention {
-            subscription_id,
-            upstream_mv_table_id: table_id,
-            retention_second,
-        };
-
-        tracing::debug!("sending Command::AlterSubscriptionRetention");
-        self.barrier_scheduler
-            .run_command(database_id, command)
-            .await?;
-        Ok(())
     }
 }

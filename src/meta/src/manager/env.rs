@@ -26,7 +26,8 @@ use risingwave_common::{bail, system_param};
 use risingwave_meta_model::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
-    FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
+    ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef,
+    StreamClientPool, StreamClientPoolRef,
 };
 use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
@@ -67,6 +68,9 @@ pub struct MetaSrvEnv {
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
+
+    /// RPC client pool for internal batch queries on compute nodes.
+    compute_client_pool: ComputeClientPoolRef,
 
     /// rpc client pool for frontend nodes.
     frontend_client_pool: FrontendClientPoolRef,
@@ -430,6 +434,10 @@ impl MetaSrvEnv {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool =
             Arc::new(StreamClientPool::new(1, opts.stream_client_config.clone())); // typically no need for plural clients
+        let compute_client_pool = Arc::new(ComputeClientPool::new(
+            1,
+            opts.compute_client_config.clone(),
+        ));
         let frontend_client_pool = Arc::new(FrontendClientPool::new(
             1,
             opts.frontend_client_config.clone(),
@@ -499,6 +507,7 @@ impl MetaSrvEnv {
             shared_actor_info: SharedActorInfos::new(notification_manager.clone()),
             notification_manager,
             stream_client_pool,
+            compute_client_pool,
             frontend_client_pool,
             idle_manager,
             event_log_manager,
@@ -561,6 +570,10 @@ impl MetaSrvEnv {
 
     pub fn stream_client_pool(&self) -> &StreamClientPool {
         self.stream_client_pool.deref()
+    }
+
+    pub fn compute_client_pool(&self) -> &ComputeClientPool {
+        self.compute_client_pool.deref()
     }
 
     pub fn frontend_client_pool(&self) -> &FrontendClientPool {

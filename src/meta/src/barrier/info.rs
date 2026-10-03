@@ -392,7 +392,7 @@ impl BarrierInfo {
 
 #[derive(Clone, Debug)]
 pub enum SubscriberType {
-    Subscription(u64),
+    Subscription,
     SnapshotBackfill,
 }
 
@@ -816,7 +816,7 @@ impl InflightDatabaseInfo {
         self.jobs.iter().filter_map(|(job_id, info)| {
             info.subscribers
                 .values()
-                .any(|subscriber| matches!(subscriber, SubscriberType::Subscription(_)))
+                .any(|subscriber| matches!(subscriber, SubscriberType::Subscription))
                 .then_some(job_id.as_mv_table_id())
         })
     }
@@ -845,30 +845,6 @@ impl InflightDatabaseInfo {
             .expect("should exist")
             .subscribers
             .remove(&subscriber_id)
-    }
-
-    pub fn update_subscription_retention(
-        &mut self,
-        job_id: JobId,
-        subscriber_id: SubscriberId,
-        retention_second: u64,
-    ) {
-        let job = self.jobs.get_mut(&job_id).expect("should exist");
-        match job.subscribers.get_mut(&subscriber_id) {
-            Some(SubscriberType::Subscription(current_retention)) => {
-                *current_retention = retention_second;
-            }
-            Some(SubscriberType::SnapshotBackfill) => {
-                warn!(
-                    %job_id,
-                    %subscriber_id,
-                    "cannot update retention for snapshot backfill subscriber"
-                );
-            }
-            None => {
-                warn!(%job_id, %subscriber_id, "subscription subscriber not found");
-            }
-        }
     }
 
     fn fragment_mut(&mut self, fragment_id: FragmentId) -> (&mut InflightFragmentInfo, JobId) {
