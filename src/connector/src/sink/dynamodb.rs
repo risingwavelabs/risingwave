@@ -40,6 +40,7 @@ use crate::error::ConnectorResult;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 
 pub const DYNAMO_DB_SINK: &str = "dynamodb";
+const MAX_BATCH_WRITE_ITEM_NUMS: usize = 25;
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -60,6 +61,7 @@ pub struct DynamoDbConfig {
         default = "default_max_batch_item_nums"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub max_batch_item_nums: usize,
 
     #[serde(
@@ -74,6 +76,7 @@ pub struct DynamoDbConfig {
         default = "default_batch_write_retry_times"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub batch_write_retry_times: usize,
 
     #[serde(
@@ -81,6 +84,7 @@ pub struct DynamoDbConfig {
         default = "default_batch_write_retry_backoff_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub batch_write_retry_backoff_ms: u64,
 
     #[serde(flatten)]
@@ -124,8 +128,21 @@ impl DynamoDbConfig {
     }
 
     fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
-        serde_json::from_value::<DynamoDbConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))
+        let config =
+            serde_json::from_value::<DynamoDbConfig>(serde_json::to_value(values).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        config.validate_batch_write_options()?;
+        Ok(config)
+    }
+
+    fn validate_batch_write_options(&self) -> Result<()> {
+        if !(1..=MAX_BATCH_WRITE_ITEM_NUMS).contains(&self.max_batch_item_nums) {
+            return Err(SinkError::Config(anyhow!(
+                "`dynamodb.max_batch_item_nums` must be between 1 and {MAX_BATCH_WRITE_ITEM_NUMS}, got {}",
+                self.max_batch_item_nums
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -185,6 +202,11 @@ impl Sink for DynamoDbSink {
         let dynamodb_keys = dynamodb_key_schema_names(table_name, table.key_schema())?;
         validate_pk_matches_dynamodb_key_schema(table_name, &rw_pk_names, &dynamodb_keys)?;
 
+        Ok(())
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        DynamoDbConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 
@@ -637,6 +659,57 @@ mod tests {
     use aws_sdk_dynamodb::types::{DeleteRequest, KeyType, PutRequest};
 
     use super::*;
+
+    fn dynamodb_config_options(
+        options: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> BTreeMap<String, String> {
+        [("table", "Movies")]
+            .into_iter()
+            .chain(options)
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn dynamodb_alter_config_validates_batch_write_options() {
+        DynamoDbSink::validate_alter_config(&dynamodb_config_options([
+            ("dynamodb.max_batch_item_nums", "25"),
+            ("dynamodb.batch_write_retry_times", "5"),
+            ("dynamodb.batch_write_retry_backoff_ms", "200"),
+        ]))
+        .unwrap();
+
+        for max_batch_item_nums in ["0", "26"] {
+            let err = DynamoDbSink::validate_alter_config(&dynamodb_config_options([(
+                "dynamodb.max_batch_item_nums",
+                max_batch_item_nums,
+            )]))
+            .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("`dynamodb.max_batch_item_nums` must be between 1 and 25"),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn dynamodb_alter_config_rejects_malformed_numbers() {
+        for option in [
+            "dynamodb.max_batch_item_nums",
+            "dynamodb.batch_write_retry_times",
+            "dynamodb.batch_write_retry_backoff_ms",
+        ] {
+            let err = DynamoDbSink::validate_alter_config(&dynamodb_config_options([(
+                option, "invalid",
+            )]))
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("invalid digit found in string"),
+                "unexpected error for {option}: {err}"
+            );
+        }
+    }
 
     fn dynamodb_put_request(
         items: impl IntoIterator<Item = (&'static str, &'static str)>,
