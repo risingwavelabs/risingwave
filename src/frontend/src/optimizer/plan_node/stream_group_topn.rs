@@ -81,7 +81,8 @@ impl StreamGroupTopN {
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
-        );
+        )
+        .with_replay_order(input.replay_order().within(&core.group_key));
 
         Ok(StreamGroupTopN {
             base,

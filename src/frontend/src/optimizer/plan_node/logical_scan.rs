@@ -769,7 +769,7 @@ impl ToStream for LogicalScan {
             };
 
             if primary_dist_key_satisfied && primary_order.satisfies(&required_order) {
-                return Some(self.clone().into());
+                return None;
             }
 
             if !enable_index_selection || !has_indexes {

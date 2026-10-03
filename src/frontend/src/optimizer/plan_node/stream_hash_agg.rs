@@ -93,6 +93,10 @@ impl StreamHashAgg {
             }
         }
 
+        let replay_order = (input.replay_order())
+            .within(&core.group_key.to_vec())
+            .map_while(|&idx| mapping.try_map(idx));
+
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -106,7 +110,8 @@ impl StreamHashAgg {
             emit_on_window_close,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
-        );
+        )
+        .with_replay_order(replay_order);
 
         Ok(StreamHashAgg {
             base,

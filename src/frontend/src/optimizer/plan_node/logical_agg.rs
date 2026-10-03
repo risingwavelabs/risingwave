@@ -23,9 +23,9 @@ use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
-    PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamPlanRef, StreamProject,
-    StreamShare, StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
-    try_enforce_locality_requirement,
+    PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamLocalityProvider,
+    StreamPlanRef, StreamProject, StreamShare, StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch,
+    ToStream, with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -228,16 +228,28 @@ impl LogicalAgg {
         Ok(new_stream_simple_agg(core, false)?.into())
     }
 
-    fn gen_shuffle_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
+    /// `ordered_group_key` is the group key in the order of the agg state.
+    fn gen_shuffle_plan(
+        &self,
+        stream_input: StreamPlanRef,
+        ordered_group_key: &[usize],
+        ctx: &ToStreamContext,
+    ) -> Result<StreamPlanRef> {
         let input =
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .streaming_enforce_if_not_satisfies(stream_input)?;
+        let input = StreamLocalityProvider::enforce(input, ordered_group_key, ctx);
         let core = self.core.clone_with_input(input);
         Ok(new_stream_hash_agg(core, None)?.into())
     }
 
     /// Generates distributed stream plan.
-    fn gen_dist_stream_agg_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
+    fn gen_dist_stream_agg_plan(
+        &self,
+        stream_input: StreamPlanRef,
+        ordered_group_key: &[usize],
+        ctx: &ToStreamContext,
+    ) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
         let input_dist = stream_input.distribution();
@@ -245,9 +257,12 @@ impl LogicalAgg {
 
         // Shuffle agg
         // If we have group key, and we won't try two phase agg optimization at all,
-        // we will always choose shuffle agg over single agg.
-        if !self.group_key().is_empty() && !self.core.must_try_two_phase_agg() {
-            return self.gen_shuffle_plan(stream_input);
+        // we will always choose shuffle agg over single agg. Locality backfill lays out the input
+        // of a shuffle agg like its state.
+        if !self.group_key().is_empty()
+            && (!self.core.must_try_two_phase_agg() || ctx.locality_backfill_enabled())
+        {
+            return self.gen_shuffle_plan(stream_input, ordered_group_key, ctx);
         }
 
         // Standalone agg
@@ -306,7 +321,7 @@ impl LogicalAgg {
 
         // Fallback to shuffle or single, if we can't generate any 2-phase plans.
         if !self.group_key().is_empty() {
-            self.gen_shuffle_plan(stream_input)
+            self.gen_shuffle_plan(stream_input, ordered_group_key, ctx)
         } else {
             self.gen_single_plan(stream_input)
         }
@@ -1470,7 +1485,17 @@ impl ToStream for LogicalAgg {
             }
         }
 
-        let plan = self.gen_dist_stream_agg_plan(stream_input)?;
+        // An EOWC hash agg keys its state by the window column first.
+        let window_col = if eowc && !self.group_key().is_empty() {
+            Some(
+                self.core
+                    .eowc_window_column(stream_input.watermark_columns())?,
+            )
+        } else {
+            None
+        };
+        let ordered_group_key = self.core.get_ordered_group_key(window_col);
+        let plan = self.gen_dist_stream_agg_plan(stream_input, &ordered_group_key, ctx)?;
 
         let (plan, n_final_agg_calls) = if let Some(final_agg) = plan.as_stream_simple_agg() {
             if eowc {
@@ -1536,24 +1561,6 @@ impl ToStream for LogicalAgg {
         }
     }
 
-    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if columns.is_empty() {
-            return None;
-        }
-
-        // Check if the given columns are a prefix of group keys.
-        let group_key = self.group_key().to_vec();
-        if columns.len() > group_key.len() || columns != &group_key[..columns.len()] {
-            return None;
-        }
-
-        // Return the same plan directly without calling `try_better_locality` on input.
-        // Because in `logical_rewrite_for_stream`, we will enforce the locality requirement on the group keys anyway.
-        // If we call `try_better_locality` on input, it would miss the chance to utilize the locality of the current agg,
-        // since the agg's input doesn't have the locality yet at that moment.
-        Some(self.clone_with_input(self.input()).into())
-    }
-
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
@@ -1561,11 +1568,7 @@ impl ToStream for LogicalAgg {
         let logical_input = if self.group_key().is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(
-                self.input(),
-                &self.group_key().to_vec(),
-                ctx.locality_backfill_enabled(),
-            )
+            with_better_locality(self.input(), &self.group_key().to_vec())
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);

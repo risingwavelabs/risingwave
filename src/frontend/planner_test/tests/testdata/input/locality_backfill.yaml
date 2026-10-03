@@ -59,7 +59,7 @@
     select distinct on(a) * from t ;
   expected_outputs:
     - stream_plan
-- name: dedup provides locality on its dedup columns, so no extra locality provider is needed for the downstream agg.
+- name: the order of a dedup holds within each of its vnodes, so an agg on a prefix of the dedup columns, sharded otherwise, gets its own provider.
   sql: |
     set enable_locality_backfill = true;
     set locality_backfill_mode = always;
@@ -174,5 +174,161 @@
       group by a, b
     )
     group by b;
+  expected_outputs:
+    - stream_plan
+- name: the provider replays rows in the order of the hash join state, which puts the eq keys with watermarks first.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t1 (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+    create table t2 (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+    select t1.k, t1.ts, t1.v, t2.v as v2 from t1 join t2 on t1.k = t2.k and t1.ts = t2.ts;
+  expected_outputs:
+    - stream_plan
+    - stream_dist_plan
+- name: the provider replays rows in the order of the EOWC agg state, which puts the window column first.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+    select k, window_start, count(*) from tumble(t, ts, interval '1' minute) group by k, window_start;
+  expected_outputs:
+    - eowc_stream_plan
+    - eowc_stream_dist_plan
+- name: the provider replays rows in the order the temporal join looks up the table.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table s (a int, b int, c int);
+    create table d (a int, b int, c int, primary key (a, b));
+    select s.a, s.b, s.c, d.c as dc from s join d for system_time as of proctime() on s.b = d.b and s.a = d.a;
+  expected_outputs:
+    - stream_plan
+    - stream_dist_plan
+- name: no provider when the table is read in the lookup order of the temporal join.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table s (a int, b int, c int, primary key (a, b));
+    create table d (a int, b int, c int, primary key (a, b));
+    select s.a, s.b, s.c, d.c as dc from s join d for system_time as of proctime() on s.b = d.b and s.a = d.a;
+  expected_outputs:
+    - stream_plan
+- name: a provider when the table is read in the written order but the join puts the watermark column first.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t1 (k int, ts timestamp, v int, primary key (k, ts), watermark for ts as ts - interval '1' second with ttl);
+    create table t2 (k int, ts timestamp, v int, primary key (k, ts), watermark for ts as ts - interval '1' second with ttl);
+    select t1.k, t1.ts, t1.v, t2.v as v2 from t1 join t2 on t1.k = t2.k and t1.ts = t2.ts;
+  expected_outputs:
+    - stream_plan
+- name: a provider between windowed aggs and the window join, which puts the window column first.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t1 (k int, ts timestamp, watermark for ts as ts - interval '1' second) append only;
+    create table t2 (k int, ts timestamp, watermark for ts as ts - interval '1' second) append only;
+    select a.k, a.window_start, a.c, b.c as c2 from
+      (select k, window_start, count(*) c from tumble(t1, ts, interval '1' minute) group by k, window_start) a
+      join
+      (select k, window_start, count(*) c from tumble(t2, ts, interval '1' minute) group by k, window_start) b
+      on a.k = b.k and a.window_start = b.window_start;
+  expected_outputs:
+    - stream_plan
+- name: no provider when joining on the group key of an agg, which outputs rows in that order.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int);
+    create table u (x int, y bigint);
+    select x.b, x.s, u.y from (select b, sum(a) as s from t group by b) x join u on x.b = u.x;
+  expected_outputs:
+    - stream_plan
+- name: a provider when joining on an agg call, which the agg does not output in order.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int);
+    create table u (x int, y bigint);
+    select x.b, x.s, u.x from (select b, sum(a) as s from t group by b) x join u on x.s = u.y;
+  expected_outputs:
+    - stream_plan
+- name: a temporal filter that only drops rows keeps the order of its input, so no provider.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (k int, ts timestamptz, v int, primary key (k, ts));
+    select k, count(*) from t where ts > now() - interval '1' hour group by k;
+  expected_outputs:
+    - stream_plan
+- name: a temporal filter that delays rows does not keep the order of its input, so a provider.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (k int, ts timestamptz, v int, primary key (k, ts));
+    select k, count(*) from t where ts < now() - interval '1' hour group by k;
+  expected_outputs:
+    - stream_plan
+- name: an expression that may map several values to one keeps the order of its column only, so a provider.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (ts timestamp, b int, v int, primary key (ts, b));
+    select date_trunc('hour', ts) as h, b, count(*) from t group by date_trunc('hour', ts), b;
+  expected_outputs:
+    - stream_plan
+- name: the hash join follows the distribution of an input that needs no provider.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t1 (ts timestamp, k int, c int, v int, primary key (ts, k, c), watermark for ts as ts - interval '1' second with ttl);
+    create table t2 (ts timestamp, k int, v int, watermark for ts as ts - interval '1' second) append only;
+    select a.ts, a.k, a.s, t2.v from (select ts, k, sum(v) as s from t1 group by ts, k) a join t2 on a.k = t2.k and a.ts = t2.ts;
+  expected_outputs:
+    - stream_plan
+- name: the hash join shuffles an input that needs no provider but is not hash distributed.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int);
+    create materialized view mv as select a, b from t order by a limit 10;
+    create table u (x int, y int);
+    select mv.a, mv.b, u.y from mv join u on mv.a = u.x;
+  expected_outputs:
+    - stream_plan
+- name: an EOWC over window outputs rows in the order of the sort by time below it, so a provider above it.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (k int, ts timestamp, v int, watermark for ts as ts - interval '1' second) append only;
+    select distinct on (k) k, ts, s from (select k, ts, sum(v) over (partition by k order by ts rows between 1 preceding and current row) as s from t);
+  expected_outputs:
+    - eowc_stream_plan
+- name: an agg fed through a shuffle gets its own provider, and a join on its group key above it none.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int, c int) append only;
+    create table u (x int, y int);
+    select x.a, x.cnt, u.y from (select a, count(*) as cnt from (select distinct on (a, b) a, b from t) group by a) x join u on x.a = u.x;
+  expected_outputs:
+    - stream_plan
+- name: the dedup outputs rows in the order its provider replays them, so no provider for an agg on the same key above it.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table t (a int, b int, c int) append only;
+    select a, b, count(*) from (select distinct on (a, b) a, b, c from t) group by a, b;
+  expected_outputs:
+    - stream_plan
+- name: the provider replays rows in the lookup order of an index sharded by its first column, and is sharded like the index.
+  sql: |
+    set enable_locality_backfill = true;
+    set locality_backfill_mode = always;
+    create table s (a int, b int, c int);
+    create table d (id int primary key, a int, b int, c int);
+    create index idx on d(a, b) include (c);
+    select s.a, s.b, s.c, d.c as dc from s join d for system_time as of proctime() on s.b = d.b and s.a = d.a;
   expected_outputs:
     - stream_plan

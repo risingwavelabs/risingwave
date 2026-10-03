@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::generic::PhysicalPlanRef;
-use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
+use crate::optimizer::property::{MonotonicityMap, ReplayOrder, StreamKind, WatermarkColumns};
 
 /// A subtrait of [`PhysicalPlanRef`] for stream plans.
 ///
@@ -32,6 +32,7 @@ pub trait StreamPlanNodeMetadata: PhysicalPlanRef {
     fn emit_on_window_close(&self) -> bool;
     fn watermark_columns(&self) -> &WatermarkColumns;
     fn columns_monotonicity(&self) -> &MonotonicityMap;
+    fn replay_order(&self) -> &ReplayOrder;
 }
 
 /// Prelude for stream plan nodes.

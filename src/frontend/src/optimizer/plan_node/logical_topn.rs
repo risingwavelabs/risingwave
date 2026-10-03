@@ -21,8 +21,8 @@ use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchGroupTopN, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamPlanRef, StreamProject, ToBatch,
-    ToStream, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamLocalityProvider, StreamPlanRef,
+    StreamProject, ToBatch, ToStream, gen_filter_and_pushdown, generic, with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -326,29 +326,12 @@ impl ToStream for LogicalTopN {
             let input = self.input().to_stream(ctx)?;
             let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
                 .streaming_enforce_if_not_satisfies(input)?;
+            let input = StreamLocalityProvider::enforce(input, self.group_key(), ctx);
             let core = self.core.clone_with_input(input);
             StreamGroupTopN::new(core, None)?.into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })
-    }
-
-    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if columns.is_empty() || self.group_key().is_empty() {
-            return None;
-        }
-
-        // GroupTopN stores rows with group keys as the primary key prefix in its internal state
-        // table, so it can directly satisfy locality requests on a prefix of its group key.
-        let group_key = self.group_key().to_vec();
-        if columns.len() > group_key.len() || columns != &group_key[..columns.len()] {
-            return None;
-        }
-
-        // Similar to agg, return the current plan directly instead of asking input for better
-        // locality first. The locality can be provided by the current TopN itself after
-        // `to_stream`, while its input does not have it yet during logical rewrite.
-        Some(self.clone_with_input(self.input()).into())
     }
 
     fn logical_rewrite_for_stream(
@@ -358,11 +341,7 @@ impl ToStream for LogicalTopN {
         let logical_input = if self.group_key().is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(
-                self.input(),
-                self.group_key(),
-                ctx.locality_backfill_enabled(),
-            )
+            with_better_locality(self.input(), self.group_key())
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);

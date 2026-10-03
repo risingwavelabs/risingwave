@@ -63,7 +63,8 @@ impl StreamEowcOverWindow {
             watermark_columns,
             // we cannot derive monotonicity for any column for the same reason as watermark columns
             MonotonicityMap::new(),
-        );
+        )
+        .with_replay_order(input.replay_order().within(&core.partition_key_indices()));
         StreamEowcOverWindow { base, core }
     }
 

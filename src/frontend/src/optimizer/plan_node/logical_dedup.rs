@@ -21,8 +21,9 @@ use super::utils::impl_distill_by_unit;
 use super::{
     BatchGroupTopN, BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
     LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
-    PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch,
-    ToStream, ToStreamContext, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
+    PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN,
+    StreamLocalityProvider, ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
+    with_better_locality,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -89,33 +90,11 @@ impl PredicatePushdown for LogicalDedup {
 }
 
 impl ToStream for LogicalDedup {
-    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if columns.is_empty() {
-            return None;
-        }
-
-        // Dedup stores rows with dedup columns as the primary key in its internal state
-        // table, so it can directly satisfy locality requests on a prefix of its dedup columns.
-        let dedup_cols = self.dedup_cols();
-        if columns.len() > dedup_cols.len() || columns != &dedup_cols[..columns.len()] {
-            return None;
-        }
-
-        // Similar to agg/topn, return the current plan directly instead of asking input for
-        // better locality first. The locality can be provided by the current Dedup itself
-        // after `to_stream`, while its input does not have it yet during logical rewrite.
-        Some(self.clone_with_input(self.input()).into())
-    }
-
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let logical_input = try_enforce_locality_requirement(
-            self.input(),
-            self.dedup_cols(),
-            ctx.locality_backfill_enabled(),
-        );
+        let logical_input = with_better_locality(self.input(), self.dedup_cols());
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (logical, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((logical.into(), out_col_change))
@@ -130,6 +109,7 @@ impl ToStream for LogicalDedup {
         let input = self.input().to_stream(ctx)?;
         let input = RequiredDist::hash_shard(self.dedup_cols())
             .streaming_enforce_if_not_satisfies(input)?;
+        let input = StreamLocalityProvider::enforce(input, self.dedup_cols(), ctx);
         if input.append_only() {
             // `LogicalDedup` is transformed to `StreamDedup` only when the input is append-only.
             let core = self.core.clone_with_input(input);

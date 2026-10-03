@@ -30,8 +30,8 @@ use super::generic::{
 use super::utils::{Distill, childless_record};
 use super::{
     BackfillType, BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
-    PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject,
-    ToBatch, ToStream, generic, try_enforce_locality_requirement,
+    PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamLocalityProvider,
+    StreamPlanRef, StreamProject, ToBatch, ToStream, generic, with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -45,7 +45,7 @@ use crate::optimizer::plan_node::{
     StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
-use crate::optimizer::property::{Distribution, RequiredDist};
+use crate::optimizer::property::{Distribution, RequiredDist, WatermarkColumns};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -973,11 +973,19 @@ impl<'a> Deref for TemporalJoinScan<'a> {
 }
 
 impl LogicalJoin {
+    /// Converts both inputs of a hash join with the distribution it needs, orders the eq keys,
+    /// which lead the primary key of the join state, with `order_eq_keys`, and lays out each input
+    /// like its join state. Returns the inputs and the ordered predicate.
     fn get_stream_input_for_hash_join(
         &self,
-        predicate: &EqJoinPredicate,
+        predicate: EqJoinPredicate,
+        order_eq_keys: impl FnOnce(
+            EqJoinPredicate,
+            &WatermarkColumns,
+            &WatermarkColumns,
+        ) -> EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<(StreamPlanRef, StreamPlanRef)> {
+    ) -> Result<(StreamPlanRef, StreamPlanRef, EqJoinPredicate)> {
         use super::stream::prelude::*;
 
         let mut right = self.right().to_stream_with_dist_required(
@@ -1023,7 +1031,14 @@ impl LogicalJoin {
             }
             _ => unreachable!(),
         }
-        Ok((left, right))
+        let predicate = order_eq_keys(
+            predicate,
+            left.watermark_columns(),
+            right.watermark_columns(),
+        );
+        let left = StreamLocalityProvider::enforce(left, &predicate.left_eq_indexes(), ctx);
+        let right = StreamLocalityProvider::enforce(right, &predicate.right_eq_indexes(), ctx);
+        Ok((left, right, predicate))
     }
 
     fn to_stream_hash_join(
@@ -1034,7 +1049,8 @@ impl LogicalJoin {
         use super::stream::prelude::*;
 
         assert!(predicate.has_eq());
-        let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
+        let (left, right, predicate) =
+            self.get_stream_input_for_hash_join(predicate, StreamHashJoin::order_eq_keys, ctx)?;
 
         let mut core = self.core.clone_with_inputs(left, right);
         core.on = generic::JoinOn::EqPredicate(predicate);
@@ -1341,6 +1357,12 @@ impl LogicalJoin {
             // the join fragment together with the RHS with a `no_shuffle` exchange.
             required_dist.stream_enforce(left)
         };
+        // Replay rows in the order the lookups read the table.
+        let left = StreamLocalityProvider::enforce_below_shuffle(
+            left,
+            &predicate.left_eq_indexes()[..lookup_prefix_len],
+            ctx,
+        );
 
         let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
             Self::temporal_join_scan_predicate_pull_up(
@@ -1520,7 +1542,9 @@ impl LogicalJoin {
             .into());
         }
 
-        let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
+        // The AsOf join keys its state by the eq keys in the written order.
+        let (left, right, predicate) =
+            self.get_stream_input_for_hash_join(predicate, |predicate, _, _| predicate, ctx)?;
         let left_len = left.schema().len();
         let mut core = self.core.clone_with_inputs(left, right);
         core.on = generic::JoinOn::EqPredicate(predicate);
@@ -1710,26 +1734,14 @@ impl ToStream for LogicalJoin {
             let lhs_join_key_idx = eq_indexes.iter().map(|(l, _)| *l).collect_vec();
             if self.should_be_temporal_join() {
                 (
-                    try_enforce_locality_requirement(
-                        self.left(),
-                        &lhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
+                    with_better_locality(self.left(), &lhs_join_key_idx),
                     self.right(),
                 )
             } else {
                 let rhs_join_key_idx = eq_indexes.iter().map(|(_, r)| *r).collect_vec();
                 (
-                    try_enforce_locality_requirement(
-                        self.left(),
-                        &lhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
-                    try_enforce_locality_requirement(
-                        self.right(),
-                        &rhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
+                    with_better_locality(self.left(), &lhs_join_key_idx),
+                    with_better_locality(self.right(), &rhs_join_key_idx),
                 )
             }
         };

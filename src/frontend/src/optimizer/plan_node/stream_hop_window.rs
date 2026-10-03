@@ -58,6 +58,8 @@ impl StreamHopWindow {
             internal_watermark_columns.insert(core.internal_window_end_col_idx(), wtmk_group);
         }
 
+        let i2o = core.i2o_col_mapping();
+        let replay_order = input.replay_order().map_while(|&idx| i2o.try_map(idx));
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
@@ -65,7 +67,8 @@ impl StreamHopWindow {
             input.emit_on_window_close(),
             internal_watermark_columns.map_clone(&internal2output),
             MonotonicityMap::new(), /* hop window start/end jumps, so monotonicity is not propagated */
-        );
+        )
+        .with_replay_order(replay_order);
         Self {
             base,
             core,

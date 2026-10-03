@@ -297,10 +297,9 @@ fn locality_backfill_requires_license(
 fn rewrite_logical_plan_for_stream(
     plan: &LogicalPlanRef,
     backfill_type: BackfillType,
-    locality_backfill_enabled: bool,
 ) -> Result<(LogicalPlanRef, ColIndexMapping)> {
     let (plan, out_col_change) = plan.logical_rewrite_for_stream(
-        &mut RewriteStreamContext::new_with_backfill_type(backfill_type, locality_backfill_enabled),
+        &mut RewriteStreamContext::new_with_backfill_type(backfill_type),
     )?;
     if out_col_change.is_injective() {
         Ok((plan, out_col_change))
@@ -786,11 +785,32 @@ impl LogicalPlanRoot {
                 let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
                 let locality_backfill_enabled =
                     resolve_locality_backfill(&ctx, optimized_plan.plan.clone(), backfill_type);
-                let (mut plan, mut out_col_change) = rewrite_logical_plan_for_stream(
-                    &optimized_plan.plan,
-                    backfill_type,
-                    locality_backfill_enabled,
-                )?;
+                let (plan, out_col_change) =
+                    rewrite_logical_plan_for_stream(&optimized_plan.plan, backfill_type)?;
+                if explain_trace {
+                    ctx.trace("Logical Rewrite For Stream:");
+                    ctx.trace(plan.explain_to_string());
+                }
+
+                optimized_plan.required_dist =
+                    out_col_change.rewrite_required_distribution(&optimized_plan.required_dist);
+                optimized_plan.required_order = out_col_change
+                    .rewrite_required_order(&optimized_plan.required_order)
+                    .unwrap();
+                optimized_plan.out_fields =
+                    out_col_change.rewrite_bitset(&optimized_plan.out_fields);
+                let to_stream = |locality_backfill_enabled| -> Result<StreamPlanRef> {
+                    let plan = plan.to_stream_with_dist_required(
+                        &optimized_plan.required_dist,
+                        &mut ToStreamContext::new_with_backfill_type(
+                            emit_on_window_close,
+                            backfill_type,
+                        )
+                        .with_locality_backfill(locality_backfill_enabled),
+                    )?;
+                    stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)
+                };
+                let mut plan = to_stream(locality_backfill_enabled)?;
 
                 let locality_provider_count = LocalityProviderCounter::count(plan.clone());
                 let locality_backfill_mode = ctx.session_ctx().config().locality_backfill_mode();
@@ -807,32 +827,8 @@ impl LogicalPlanRoot {
                         "The streaming job would use {locality_provider_count} locality providers, \
                          which are unavailable under the current license. Falling back to regular backfill."
                     ));
-                    (plan, out_col_change) = rewrite_logical_plan_for_stream(
-                        &optimized_plan.plan,
-                        backfill_type,
-                        false,
-                    )?;
+                    plan = to_stream(false)?;
                 }
-                if explain_trace {
-                    ctx.trace("Logical Rewrite For Stream:");
-                    ctx.trace(plan.explain_to_string());
-                }
-
-                optimized_plan.required_dist =
-                    out_col_change.rewrite_required_distribution(&optimized_plan.required_dist);
-                optimized_plan.required_order = out_col_change
-                    .rewrite_required_order(&optimized_plan.required_order)
-                    .unwrap();
-                optimized_plan.out_fields =
-                    out_col_change.rewrite_bitset(&optimized_plan.out_fields);
-                let mut plan = plan.to_stream_with_dist_required(
-                    &optimized_plan.required_dist,
-                    &mut ToStreamContext::new_with_backfill_type(
-                        emit_on_window_close,
-                        backfill_type,
-                    ),
-                )?;
-                plan = stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)?;
                 optimized_plan.into_phase(plan)
             }
         };

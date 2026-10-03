@@ -25,8 +25,8 @@ use super::utils::impl_distill_by_unit;
 use super::{
     BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
-    StreamEowcSort, StreamOverWindow, ToBatch, ToStream, gen_filter_and_pushdown,
-    try_enforce_locality_requirement,
+    StreamEowcSort, StreamLocalityProvider, StreamOverWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -693,6 +693,8 @@ impl ToStream for LogicalOverWindow {
             let sort_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .streaming_enforce_if_not_satisfies(stream_input)?;
+            let sort_input =
+                StreamLocalityProvider::enforce(sort_input, &partition_key_indices, ctx);
             // After sharding by partition key, `StreamEowcSort` gives rows in the same partition
             // and `ORDER BY` value a deterministic tie-break based on the preserved input stream
             // key. This matches `EowcOverWindow`'s persisted order
@@ -719,28 +721,11 @@ impl ToStream for LogicalOverWindow {
             let new_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .streaming_enforce_if_not_satisfies(stream_input)?;
+            let new_input = StreamLocalityProvider::enforce(new_input, &partition_key_indices, ctx);
             let core = self.core.clone_with_input(new_input);
 
             Ok(StreamOverWindow::new(core)?.into())
         }
-    }
-
-    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if columns.is_empty() {
-            return None;
-        }
-
-        let partition_key_indices = self.partition_key_indices();
-        if columns.len() > partition_key_indices.len()
-            || columns != &partition_key_indices[..columns.len()]
-        {
-            return None;
-        }
-
-        // Similar to agg/topn, keep the current over-window node so the locality can be provided
-        // by its own state table after `to_stream`, instead of trying to enforce it on input
-        // during logical rewrite.
-        Some(self.clone_with_input(self.input()).into())
     }
 
     fn logical_rewrite_for_stream(
@@ -755,11 +740,7 @@ impl ToStream for LogicalOverWindow {
         let logical_input = if partition_key_indices.is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(
-                self.input(),
-                &partition_key_indices,
-                ctx.locality_backfill_enabled(),
-            )
+            with_better_locality(self.input(), &partition_key_indices)
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (new_self, output_col_change) = self.rewrite_with_input(input, input_col_change);

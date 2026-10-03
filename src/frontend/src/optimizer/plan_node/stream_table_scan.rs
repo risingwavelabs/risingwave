@@ -37,7 +37,7 @@ use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
+use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap, ReplayOrder};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -100,6 +100,11 @@ impl StreamTableScan {
             StreamKind::Retract
         };
 
+        let replay_order = ReplayOrder::across_vnodes(
+            (core.get_out_column_index_order().column_orders.iter())
+                .map(|order| order.column_index)
+                .collect(),
+        );
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
@@ -107,7 +112,8 @@ impl StreamTableScan {
             false,
             core.watermark_columns(),
             MonotonicityMap::new(),
-        );
+        )
+        .with_replay_order(replay_order);
         Self {
             base,
             core,
