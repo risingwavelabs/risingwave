@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![feature(used_with_arg)]
 
 //! Data-driven tests.
 
@@ -26,10 +27,11 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail};
 pub use resolve_id::*;
+use risingwave_expr::sig::{CreateFunctionOutput, UDF_IMPLS, UdfImplDescriptor};
 use risingwave_frontend::handler::util::SourceSchemaCompatExt;
 use risingwave_frontend::handler::{
-    HandlerArgs, create_index, create_mv, create_schema, create_source, create_table, create_view,
-    drop_table, explain, variable,
+    HandlerArgs, create_function, create_index, create_mv, create_schema, create_source,
+    create_sql_function, create_table, create_view, drop_table, explain, variable,
 };
 use risingwave_frontend::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use risingwave_frontend::optimizer::plan_node::ConventionMarker;
@@ -46,6 +48,22 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
+
+/// Planner tests are built without the `udf` feature of `risingwave_expr_impl`, so
+/// `language javascript` UDFs are created with this implementation, which only records the
+/// function body. UDFs are never executed during planning.
+#[linkme::distributed_slice(UDF_IMPLS)]
+static PLANNER_TEST_JAVASCRIPT_UDF: UdfImplDescriptor = UdfImplDescriptor {
+    match_fn: |language, _runtime, _link| language == "javascript",
+    create_fn: |opts| {
+        Ok(CreateFunctionOutput {
+            name_in_runtime: opts.name.to_owned(),
+            body: opts.as_.map(str::to_owned),
+            compressed_binary: None,
+        })
+    },
+    build_fn: |_| bail!("UDFs are not executed in planner tests"),
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash, Eq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -601,6 +619,47 @@ impl TestCase {
                         owner,
                     )
                     .await?;
+                }
+                Statement::CreateFunction {
+                    or_replace,
+                    temporary,
+                    if_not_exists,
+                    name,
+                    args,
+                    returns,
+                    params,
+                    with_options,
+                } => {
+                    if params
+                        .language
+                        .as_ref()
+                        .is_some_and(|language| language.real_value().eq_ignore_ascii_case("sql"))
+                    {
+                        create_sql_function::handle_create_sql_function(
+                            handler_args,
+                            or_replace,
+                            temporary,
+                            if_not_exists,
+                            name,
+                            args,
+                            returns,
+                            params,
+                        )
+                        .await?;
+                    } else {
+                        create_function::handle_create_function(
+                            handler_args,
+                            or_replace,
+                            temporary,
+                            if_not_exists,
+                            name,
+                            args,
+                            returns,
+                            params,
+                            with_options,
+                        )
+                        .await?;
+                    }
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
