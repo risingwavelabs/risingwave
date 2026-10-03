@@ -82,6 +82,10 @@ where
 
     session_mgr: Arc<SM>,
     session: Option<Arc<SM::Session>>,
+    /// `application_name` from the startup message, reported back to the client once
+    /// authentication finishes. Kept here because the startup message is gone by the
+    /// time a password arrives.
+    application_name: Option<String>,
 
     result_cache: HashMap<String, ResultCache<<SM::Session as Session>::ValuesStream>>,
     unnamed_prepare_statement:
@@ -275,6 +279,7 @@ where
             state: PgProtocolState::Startup,
             session_mgr,
             session: None,
+            application_name: None,
             tls_context: tls_config
                 .as_ref()
                 .and_then(|e| build_ssl_ctx_from_config(e).ok()),
@@ -767,40 +772,21 @@ where
                 .map_err(|e| PsqlError::StartupError(e.into()))?;
         }
 
-        self.state = match session.user_authenticator() {
-            UserAuthenticator::None => {
-                self.stream.write_no_flush(BeMessage::AuthenticationOk)?;
+        self.application_name = application_name.cloned();
 
-                // Cancel request need this for identify and verification. According to postgres
-                // doc, it should be written to buffer after receive AuthenticationOk.
-                self.stream
-                    .write_no_flush(BeMessage::BackendKeyData(session.id()))?;
-
-                self.stream.write_no_flush(BeMessage::ParameterStatus(
-                    BeParameterStatusMessage::TimeZone(
-                        &session
-                            .get_config("timezone")
-                            .map_err(|e| PsqlError::StartupError(e.into()))?,
-                    ),
-                ))?;
-                self.stream
-                    .write_parameter_status_msg_no_flush(&ParameterStatus {
-                        application_name: application_name.cloned(),
-                    })?;
-                self.ready_for_query()?;
-                PgProtocolState::Regular
-            }
+        match session.user_authenticator() {
+            UserAuthenticator::None => self.finish_authentication(&session)?,
             UserAuthenticator::ClearText(_)
             | UserAuthenticator::OAuth { .. }
             | UserAuthenticator::Ldap(..) => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationCleartextPassword)?;
-                PgProtocolState::Authentication
+                self.state = PgProtocolState::Authentication;
             }
             UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationMd5Password(salt))?;
-                PgProtocolState::Authentication
+                self.state = PgProtocolState::Authentication;
             }
         };
 
@@ -808,11 +794,17 @@ where
         Ok(())
     }
 
-    async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
-        let session = self.session.as_ref().unwrap();
-        let authenticator = session.user_authenticator();
-        authenticator.authenticate(&msg.password).await?;
+    /// Completes the startup sequence once the user is authenticated: acknowledge the
+    /// authentication, hand the client the key it needs to cancel this session, report the
+    /// server parameters and open the connection for queries.
+    ///
+    /// Shared by every authentication method so that none of them can drift.
+    fn finish_authentication(&mut self, session: &SM::Session) -> PsqlResult<()> {
         self.stream.write_no_flush(BeMessage::AuthenticationOk)?;
+        // The client needs this to identify the session in a later `CancelRequest`, and
+        // postgres sends it once authentication has succeeded.
+        self.stream
+            .write_no_flush(BeMessage::BackendKeyData(session.id()))?;
         let timezone = session
             .get_config("timezone")
             .map_err(|e| PsqlError::StartupError(e.into()))?;
@@ -820,10 +812,21 @@ where
             BeParameterStatusMessage::TimeZone(&timezone),
         ))?;
         self.stream
-            .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
+            .write_parameter_status_msg_no_flush(&ParameterStatus {
+                application_name: self.application_name.clone(),
+            })?;
         self.ready_for_query()?;
         self.state = PgProtocolState::Regular;
         Ok(())
+    }
+
+    async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
+        let session = self.session.clone().unwrap();
+        session
+            .user_authenticator()
+            .authenticate(&msg.password)
+            .await?;
+        self.finish_authentication(&session)
     }
 
     fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
