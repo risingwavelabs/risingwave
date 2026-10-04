@@ -15,7 +15,8 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-/// Provides fragment level backfill progress.
+/// Provides the backfill progress of each backfill node. A locality provider backfills from its own
+/// state table.
 // source backfill progress has the following schema:
 // `{"num_consumed_rows": 530, "state": {"Backfilling": "529"}, "target_offset": "9999"}`
 #[system_catalog(
@@ -25,6 +26,7 @@ view,
 table_backfill_progress as (select
   progress.job_id,
   progress.fragment_id,
+  scan_info.operator_id,
   scan_info.backfill_target_relation_id,
   case
     when stats.total_key_count is null
@@ -45,6 +47,7 @@ table_backfill_progress as (select
   end as progress
 FROM internal_backfill_progress() progress
 JOIN rw_backfill_info scan_info ON progress.job_id = scan_info.job_id AND progress.fragment_id = scan_info.fragment_id
+  AND progress.backfill_state_table_id = scan_info.backfill_state_table_id
 LEFT JOIN rw_table_stats stats ON scan_info.backfill_target_relation_id = stats.id
 ),
 aggregated_source_backfill_progress as (
@@ -61,21 +64,29 @@ aggregated_source_backfill_progress as (
 source_backfill_progress as (select
   aggregated_source_backfill_progress.job_id,
   aggregated_source_backfill_progress.fragment_id,
+  scan_info.operator_id,
   scan_info.backfill_target_relation_id,
   concat(aggregated_source_backfill_progress.backfill_progress, ' consumed rows') as progress
 FROM aggregated_source_backfill_progress
 JOIN rw_backfill_info scan_info ON
   aggregated_source_backfill_progress.job_id = scan_info.job_id
     AND aggregated_source_backfill_progress.fragment_id = scan_info.fragment_id
+    AND scan_info.backfill_type = 'SOURCE'
 ),
 backfill_progress as (
   select * from table_backfill_progress
   UNION ALL
   select * from source_backfill_progress
+),
+upstream_relations as (
+  select id, name, schema_id from rw_relations
+  UNION ALL
+  select id, name, schema_id from rw_internal_tables
 )
 select
   backfill_progress.job_id,
   backfill_progress.fragment_id,
+  backfill_progress.operator_id,
   concat(job_schemas.name, '.', job_tables.name) as job_name,
   concat(upstream_schemas.name, '.', upstream_tables.name) as upstream_table_name,
   backfill_progress.progress
@@ -83,15 +94,16 @@ FROM
   backfill_progress
   join rw_relations job_tables on backfill_progress.job_id = job_tables.id
   join rw_schemas job_schemas on job_tables.schema_id = job_schemas.id
-  join rw_relations upstream_tables on backfill_progress.backfill_target_relation_id = upstream_tables.id
+  join upstream_relations upstream_tables on backfill_progress.backfill_target_relation_id = upstream_tables.id
   join rw_schemas upstream_schemas on upstream_tables.schema_id = upstream_schemas.id
 "
 )]
 #[derive(Fields)]
+#[primary_key(fragment_id, operator_id)]
 struct RwFragmentBackfillProgress {
     job_id: i32,
-    #[primary_key]
     fragment_id: i32,
+    operator_id: i32,
     job_name: String,
     upstream_table_name: String,
     progress: String,

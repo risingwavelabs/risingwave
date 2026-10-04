@@ -1,0 +1,81 @@
+# The backfill catalogs list each backfill node of a fragment, which may hold a scan and a locality
+# provider, or several providers.
+
+statement ok
+set enable_locality_backfill = true;
+
+statement ok
+set locality_backfill_mode = always;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+set backfill_rate_limit = 1;
+
+statement ok
+create table t (a int, b int, c int, primary key (b, a));
+
+statement ok
+insert into t select i, i, i from generate_series(1, 100) i;
+
+statement ok
+flush;
+
+# The scan is sharded by the group key, so the provider sits in its fragment.
+statement ok
+create materialized view m_scan as select a, b, count(*) as c from t group by a, b;
+
+query II retry 30 backoff 1s
+select count(*), count(distinct operator_id) from rw_catalog.rw_backfill_info where job_id = (select id from rw_catalog.rw_materialized_views where name = 'm_scan') group by fragment_id;
+----
+2 2
+
+# One row for the scan, which reads `t`, and one for the provider, which reads its own state table.
+query TT retry 30 backoff 1s
+select upstream_table_name = 'public.t', upstream_table_name like '%localityprovider%' from rw_catalog.rw_fragment_backfill_progress where job_name = 'public.m_scan' order by 1;
+----
+f t
+t f
+
+statement ok
+create table u (id int primary key, a int, v int);
+
+statement ok
+insert into u select i, i, i from generate_series(1, 100) i;
+
+statement ok
+flush;
+
+# A provider on each side of the join, in the fragment of the join.
+statement ok
+create materialized view m_join as select t.a, t.c, u.v from t join u on t.c = u.v;
+
+query II retry 30 backoff 1s
+select count(*), count(distinct operator_id) from rw_catalog.rw_rate_limit where table_id = (select id from rw_catalog.rw_materialized_views where name = 'm_join') and node_name = 'LOCALITY_PROVIDER' group by fragment_id;
+----
+2 2
+
+statement ok
+drop materialized view m_join;
+
+statement ok
+drop materialized view m_scan;
+
+statement ok
+drop table u;
+
+statement ok
+drop table t;
+
+statement ok
+set backfill_rate_limit = default;
+
+statement ok
+set background_ddl = default;
+
+statement ok
+set enable_locality_backfill = default;
+
+statement ok
+set locality_backfill_mode = default;

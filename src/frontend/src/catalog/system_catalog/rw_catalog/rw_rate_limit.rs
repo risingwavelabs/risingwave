@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::id::{FragmentId, JobId};
+use risingwave_common::id::{FragmentId, JobId, LocalOperatorId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,11 +21,12 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 #[derive(Fields)]
-#[primary_key(fragment_id, node_name)]
+#[primary_key(fragment_id, operator_id)]
 struct RwRateLimit {
     fragment_id: FragmentId,
     fragment_type: Vec<String>,
     node_name: String,
+    operator_id: LocalOperatorId,
     table_id: JobId,
     rate_limit: i32,
 }
@@ -45,6 +46,7 @@ async fn read_rw_rate_limit(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRateL
             table_id: info.job_id,
             rate_limit: info.rate_limit as i32,
             node_name: info.node_name,
+            operator_id: info.operator_id,
         })
         .collect())
 }

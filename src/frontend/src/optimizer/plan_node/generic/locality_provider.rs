@@ -15,7 +15,7 @@
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{FieldDisplay, Schema};
 
-use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
+use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
@@ -25,7 +25,7 @@ use crate::optimizer::property::FunctionalDependencySet;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocalityProvider<PlanRef> {
     pub input: PlanRef,
-    /// Columns that define the locality
+    /// Columns that define the locality, in the order in which each vnode is replayed
     pub locality_columns: Vec<usize>,
 }
 
@@ -53,14 +53,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for LocalityProvider<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        let mut stream_key = self.locality_columns.clone();
-        let input_stream_key = self.input.stream_key()?;
-        for col in input_stream_key {
-            if !stream_key.contains(col) {
-                stream_key.push(*col);
-            }
-        }
-        Some(stream_key)
+        Some(self.input.stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -81,5 +74,3 @@ impl<PlanRef: GenericPlanRef> LocalityProvider<PlanRef> {
         // LocalityProvider doesn't contain expressions to visit
     }
 }
-
-impl_distill_unit_from_fields!(LocalityProvider, GenericPlanRef);

@@ -79,6 +79,9 @@ impl StreamProjectSet {
             }
         }
 
+        let i2o = core.i2o_col_mapping();
+        let replay_order = input.replay_order().map_while(|&idx| i2o.try_map(idx));
+
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
         let base = PlanBase::new_stream_with_core(
@@ -88,7 +91,8 @@ impl StreamProjectSet {
             input.emit_on_window_close(),
             out_watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
-        );
+        )
+        .with_replay_order(replay_order);
         StreamProjectSet {
             base,
             core,

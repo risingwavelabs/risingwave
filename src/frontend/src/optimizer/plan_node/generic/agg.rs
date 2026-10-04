@@ -190,6 +190,22 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         .into())
     }
 
+    pub(crate) fn get_ordered_group_key(&self, window_col_idx: Option<usize>) -> Vec<usize> {
+        if let Some(window_col_idx) = window_col_idx {
+            assert!(self.group_key.contains(window_col_idx));
+            Either::Left(
+                std::iter::once(window_col_idx).chain(
+                    self.group_key
+                        .indices()
+                        .filter(move |&i| i != window_col_idx),
+                ),
+            )
+        } else {
+            Either::Right(self.group_key.indices())
+        }
+        .collect()
+    }
+
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
         let enable_two_phase = input.ctx().session_ctx().config().enable_two_phase_agg();
         Self {
@@ -334,22 +350,6 @@ impl Agg<StreamPlanRef> {
             self.infer_stream_agg_state(&me, vnode_col_idx, window_col_idx),
             self.infer_distinct_dedup_tables(&me, vnode_col_idx, window_col_idx),
         )
-    }
-
-    fn get_ordered_group_key(&self, window_col_idx: Option<usize>) -> Vec<usize> {
-        if let Some(window_col_idx) = window_col_idx {
-            assert!(self.group_key.contains(window_col_idx));
-            Either::Left(
-                std::iter::once(window_col_idx).chain(
-                    self.group_key
-                        .indices()
-                        .filter(move |&i| i != window_col_idx),
-                ),
-            )
-        } else {
-            Either::Right(self.group_key.indices())
-        }
-        .collect()
     }
 
     /// Create a new table builder with group key columns added.

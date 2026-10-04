@@ -12,27 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::LocalityProviderNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{LocalityProviderNode, StreamScanType};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, TableCatalogBuilder, childless_record};
-use super::{ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic};
+use super::{
+    ExprRewritable, PlanNodeId, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::TableCatalog;
-use crate::catalog::TableId;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::plan_rewriter::PlanRewriter;
+use crate::optimizer::property::{Distribution, ReplayOrder};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-/// `StreamLocalityProvider` implements [`super::LogicalLocalityProvider`]
+/// `StreamLocalityProvider` buffers its input during backfill and then replays each vnode in the
+/// order of its locality columns, so that the operator it feeds accesses its state in that order.
+/// It sits on the input of the operator, in the operator's fragment, so it replays each vnode of
+/// the operator in the order of the operator's state.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamLocalityProvider {
     pub base: PlanBase<Stream>,
@@ -42,33 +49,38 @@ pub struct StreamLocalityProvider {
 impl StreamLocalityProvider {
     pub fn new(core: generic::LocalityProvider<PlanRef>) -> Self {
         let input = core.input.clone();
-
-        let dist = match input.distribution() {
-            Distribution::HashShard(keys) => {
-                // If the input is hash-distributed, we make it a UpstreamHashShard distribution
-                // just like a normal table scan. It is used to ensure locality provider is in its own fragment.
-                // This is important to ensure the backfill ordering can recognize and build
-                // the dependency graph among different backfill-needed fragments.
-                Distribution::UpstreamHashShard(keys.clone(), TableId::placeholder())
-            }
-            Distribution::UpstreamHashShard(keys, table_id) => {
-                Distribution::UpstreamHashShard(keys.clone(), *table_id)
-            }
-            _ => {
-                panic!("LocalityProvider input must be hash-distributed");
-            }
-        };
-
+        let replay_order = ReplayOrder::new(
+            (core.locality_columns.iter())
+                .chain(input.expect_stream_key())
+                .copied()
+                .collect(),
+        );
         // LocalityProvider maintains the append-only behavior if input is append-only
         let base = PlanBase::new_stream_with_core(
             &core,
-            dist,
+            input.distribution().clone(),
             input.stream_kind(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
-        );
+        )
+        .with_replay_order(replay_order);
         StreamLocalityProvider { base, core }
+    }
+
+    /// Puts a provider on each input of the stateful operators of `plan` that needs one, in the
+    /// fragment of the operator. Runs after the rules that rewrite the structure of the stream plan,
+    /// which then never see a provider. Returns the plan and the number of providers.
+    pub fn place(plan: PlanRef) -> (PlanRef, usize) {
+        let mut placer = Placer::default();
+        let plan = plan.rewrite_with(&mut placer);
+        (plan, placer.count)
+    }
+
+    /// Whether [`Self::place`] puts a provider on `input` of an operator that accesses its state in
+    /// the order of `locality_columns`.
+    pub fn needed(input: &PlanRef, locality_columns: &[usize]) -> bool {
+        needs_provider(input, locality_columns, &mut HashMap::new())
     }
 
     pub fn locality_columns(&self) -> &[usize] {
@@ -204,5 +216,110 @@ impl StreamLocalityProvider {
         catalog_builder
             .build(vec![0], 1)
             .with_id(state.gen_table_id_wrapped())
+    }
+}
+
+/// The order in which a stateful operator accesses its state, as columns of each input it lays out
+/// like its state.
+fn state_orders(plan: &PlanRef) -> Vec<Option<Vec<usize>>> {
+    if let Some(agg) = plan.as_stream_hash_agg() {
+        vec![agg.ordered_group_key()]
+    } else if let Some(top_n) = plan.as_stream_group_top_n() {
+        vec![
+            top_n
+                .vnode_col_idx()
+                .is_none()
+                .then(|| top_n.group_key().to_vec()),
+        ]
+    } else if let Some(dedup) = plan.as_stream_dedup() {
+        vec![Some(dedup.dedup_cols().to_vec())]
+    } else if let Some(over_window) = plan.as_stream_over_window() {
+        vec![Some(over_window.partition_key_indices())]
+    } else if let Some(join) = plan.as_stream_hash_join() {
+        let predicate = join.eq_join_predicate();
+        vec![
+            Some(predicate.left_eq_indexes()),
+            Some(predicate.right_eq_indexes()),
+        ]
+    } else if let Some(join) = plan.as_stream_as_of_join() {
+        let predicate = join.eq_join_predicate();
+        vec![
+            Some(predicate.left_eq_indexes()),
+            Some(predicate.right_eq_indexes()),
+        ]
+    } else if let Some(join) = plan.as_stream_temporal_join()
+        && !join.is_nested_loop()
+    {
+        // The lookups read the table in the order of the predicate.
+        vec![Some(join.eq_join_predicate().left_eq_indexes()), None]
+    } else {
+        vec![]
+    }
+}
+
+/// Whether `input` of an operator that accesses its state in the order of `locality_columns` needs a
+/// provider: it carries backfilled rows, is hash distributed and doesn't replay its rows in that
+/// order already.
+fn needs_provider(
+    input: &PlanRef,
+    locality_columns: &[usize],
+    carries_backfill_memo: &mut HashMap<PlanNodeId, bool>,
+) -> bool {
+    !locality_columns.is_empty()
+        && !input.replay_order().starts_with(locality_columns)
+        && matches!(
+            input.distribution(),
+            Distribution::HashShard(_) | Distribution::UpstreamHashShard(..)
+        )
+        && carries_backfill(input, carries_backfill_memo)
+}
+
+/// Whether `plan` carries rows replayed by backfill. A provider has nothing to replay otherwise,
+/// e.g. on a source.
+fn carries_backfill(plan: &PlanRef, memo: &mut HashMap<PlanNodeId, bool>) -> bool {
+    if let Some(&carries_backfill) = memo.get(&plan.id()) {
+        return carries_backfill;
+    }
+    let carries_backfill = if let Some(scan) = plan.as_stream_table_scan() {
+        scan.stream_scan_type() != StreamScanType::UpstreamOnly
+    } else {
+        plan.as_stream_source_scan().is_some()
+            || plan.as_stream_locality_provider().is_some()
+            || plan
+                .inputs()
+                .iter()
+                .any(|input| carries_backfill(input, memo))
+    };
+    memo.insert(plan.id(), carries_backfill);
+    carries_backfill
+}
+
+#[derive(Default)]
+struct Placer {
+    count: usize,
+    carries_backfill: HashMap<PlanNodeId, bool>,
+}
+
+impl PlanRewriter<Stream> for Placer {
+    fn rewrite_with_inputs(&mut self, plan: &PlanRef, inputs: Vec<PlanRef>) -> PlanRef {
+        let state_orders = state_orders(plan);
+        let inputs = inputs
+            .into_iter()
+            .enumerate()
+            .map(|(i, input)| match state_orders.get(i) {
+                Some(Some(locality_columns))
+                    if needs_provider(&input, locality_columns, &mut self.carries_backfill) =>
+                {
+                    self.count += 1;
+                    StreamLocalityProvider::new(generic::LocalityProvider::new(
+                        input,
+                        locality_columns.clone(),
+                    ))
+                    .into()
+                }
+                _ => input,
+            })
+            .collect_vec();
+        plan.clone_root_with_inputs(&inputs)
     }
 }

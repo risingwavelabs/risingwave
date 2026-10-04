@@ -22,7 +22,7 @@ use super::{
     BatchGroupTopN, BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
     LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch,
-    ToStream, ToStreamContext, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
+    ToStream, ToStreamContext, gen_filter_and_pushdown, generic, with_better_locality,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -111,11 +111,7 @@ impl ToStream for LogicalDedup {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let logical_input = try_enforce_locality_requirement(
-            self.input(),
-            self.dedup_cols(),
-            ctx.locality_backfill_enabled(),
-        );
+        let logical_input = with_better_locality(self.input(), self.dedup_cols());
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (logical, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((logical.into(), out_col_change))

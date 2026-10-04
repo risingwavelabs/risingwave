@@ -25,7 +25,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::{
-    MonotonicityMap, WatermarkColumns, analyze_monotonicity, monotonicity_variants,
+    MonotonicityMap, ReplayOrder, WatermarkColumns, analyze_monotonicity, monotonicity_variants,
 };
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -116,6 +116,24 @@ impl StreamProject {
                 _FollowingInputInversely(_) => {}
             }
         }
+        let i2o = core.i2o_col_mapping();
+        let mut replay_order = vec![];
+        for &input_idx in input.replay_order().columns() {
+            if let Some(output_idx) = i2o.try_map(input_idx) {
+                replay_order.push(output_idx);
+                continue;
+            }
+            // An expression monotonic in the column, e.g. `date_trunc`, keeps the order of the
+            // column but not of the columns after it, since it may map several values to one.
+            replay_order.extend(core.exprs.iter().position(|expr| {
+                matches!(
+                    analyze_monotonicity(expr),
+                    monotonicity_variants::FollowingInput(idx) if idx == input_idx
+                )
+            }));
+            break;
+        }
+
         // Project executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
         let base = PlanBase::new_stream_with_core(
@@ -125,7 +143,8 @@ impl StreamProject {
             input.emit_on_window_close(),
             out_watermark_columns,
             out_monotonicity_map,
-        );
+        )
+        .with_replay_order(ReplayOrder::new(replay_order));
 
         StreamProject {
             base,

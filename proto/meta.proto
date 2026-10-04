@@ -1145,6 +1145,8 @@ message ListRateLimitsResponse {
     uint32 fragment_type_mask = 3;
     uint32 rate_limit = 4;
     string node_name = 5;
+    // The operator id of the node in its fragment.
+    uint32 operator_id = 6;
   }
   repeated RateLimitInfo rate_limits = 1;
 }

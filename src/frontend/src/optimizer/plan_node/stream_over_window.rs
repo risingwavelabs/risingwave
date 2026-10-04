@@ -66,9 +66,14 @@ impl StreamOverWindow {
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
-        );
+        )
+        .with_replay_order(input.replay_order().within(&core.partition_key_indices()));
 
         Ok(StreamOverWindow { base, core })
+    }
+
+    pub fn partition_key_indices(&self) -> Vec<usize> {
+        self.core.partition_key_indices()
     }
 
     fn infer_state_table(&self) -> TableCatalog {

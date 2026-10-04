@@ -81,7 +81,8 @@ impl StreamGroupTopN {
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
-        );
+        )
+        .with_replay_order(input.replay_order().within(&core.group_key));
 
         Ok(StreamGroupTopN {
             base,
@@ -100,6 +101,10 @@ impl StreamGroupTopN {
 
     pub fn topn_order(&self) -> &Order {
         &self.core.order
+    }
+
+    pub fn vnode_col_idx(&self) -> Option<usize> {
+        self.vnode_col_idx
     }
 
     pub fn group_key(&self) -> &[usize] {

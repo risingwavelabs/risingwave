@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::FragmentTypeFlag;
-use risingwave_common::id::{FragmentId, JobId, TableId};
+use risingwave_common::id::{FragmentId, JobId, LocalOperatorId, TableId};
 use risingwave_common::types::Fields;
-use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node_body, visit_stream_node_source_backfill, visit_stream_node_stream_scan,
-};
+use risingwave_common::util::stream_graph_visitor::visit_backfill_nodes;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::id::RelationId;
 use risingwave_pb::meta::FragmentDistribution;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -28,106 +26,78 @@ use crate::catalog::system_catalog::rw_catalog::common::CatalogBackfillType;
 use crate::error::Result;
 
 #[derive(Fields)]
+#[primary_key(fragment_id, operator_id)]
 struct RwBackfillInfo {
     job_id: JobId,
-    #[primary_key]
     fragment_id: FragmentId,
+    operator_id: LocalOperatorId,
     backfill_state_table_id: TableId,
     backfill_target_relation_id: RelationId,
     backfill_type: String,
     backfill_epoch: i64,
 }
 
-fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<RwBackfillInfo> {
-    let fragment_type_mask = fragment_distribution.fragment_type_mask;
-    let is_source_backfill = fragment_type_mask & (FragmentTypeFlag::SourceScan as u32) != 0;
-    let is_snapshot_backfill = fragment_type_mask
-        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
-            | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
-        != 0;
-    let is_arrangement_or_no_shuffle =
-        fragment_type_mask & (FragmentTypeFlag::StreamScan as u32) != 0;
-    let is_locality_backfill =
-        fragment_type_mask & (FragmentTypeFlag::LocalityProvider as u32) != 0;
-
-    let backfill_type = if is_source_backfill {
-        CatalogBackfillType::Source
-    } else if is_snapshot_backfill {
-        CatalogBackfillType::SnapshotBackfill
-    } else if is_arrangement_or_no_shuffle || is_locality_backfill {
-        CatalogBackfillType::ArrangementOrNoShuffle
-    } else {
-        return None;
+fn extract_backfill_nodes(fragment_distribution: &FragmentDistribution) -> Vec<RwBackfillInfo> {
+    let mut backfill_nodes = vec![];
+    let Some(stream_node) = fragment_distribution.node.as_ref() else {
+        return backfill_nodes;
     };
-
-    let stream_node = fragment_distribution.node.as_ref()?;
-
-    let mut scan = None;
-    match backfill_type {
-        CatalogBackfillType::Source => {
-            visit_stream_node_source_backfill(stream_node, |node| {
-                scan = Some(RwBackfillInfo {
-                    job_id: fragment_distribution.table_id,
-                    fragment_id: fragment_distribution.fragment_id,
-                    backfill_state_table_id: node
-                        .state_table
-                        .as_ref()
-                        .map(|table| table.id)
-                        .unwrap_or(TableId::placeholder()),
-                    backfill_target_relation_id: node.upstream_source_id.as_relation_id(),
-                    backfill_type: backfill_type.to_string(),
-                    backfill_epoch: 0,
-                });
-            });
-        }
-        CatalogBackfillType::SnapshotBackfill | CatalogBackfillType::ArrangementOrNoShuffle => {
-            if is_locality_backfill {
-                let mut backfill_state_table_id = None;
-                visit_stream_node_body(stream_node, |body| {
-                    if let NodeBody::LocalityProvider(node) = body
-                        && backfill_state_table_id.is_none()
-                    {
-                        backfill_state_table_id =
-                            node.progress_table.as_ref().map(|table| table.id);
+    visit_backfill_nodes(
+        fragment_distribution.fragment_id,
+        stream_node,
+        |_, _, stream_node| {
+            let (state_table, backfill_target_relation_id, backfill_type, backfill_epoch) =
+                match stream_node.node_body.as_ref().unwrap() {
+                    NodeBody::StreamScan(node) => {
+                        let backfill_type = if matches!(
+                            node.stream_scan_type(),
+                            StreamScanType::SnapshotBackfill
+                                | StreamScanType::CrossDbSnapshotBackfill
+                        ) {
+                            CatalogBackfillType::SnapshotBackfill
+                        } else {
+                            CatalogBackfillType::ArrangementOrNoShuffle
+                        };
+                        (
+                            &node.state_table,
+                            node.table_id.as_relation_id(),
+                            backfill_type,
+                            node.snapshot_backfill_epoch() as _,
+                        )
                     }
-                });
-
-                let mut backfill_target_relation_id = None;
-                visit_stream_node_stream_scan(stream_node, |node| {
-                    if backfill_target_relation_id.is_none() {
-                        backfill_target_relation_id = Some(node.table_id.as_relation_id());
-                    }
-                });
-
-                scan = Some(RwBackfillInfo {
-                    job_id: fragment_distribution.table_id,
-                    fragment_id: fragment_distribution.fragment_id,
-                    backfill_state_table_id: backfill_state_table_id
-                        .unwrap_or(TableId::placeholder()),
-                    backfill_target_relation_id: backfill_target_relation_id?,
-                    backfill_type: backfill_type.to_string(),
-                    backfill_epoch: 0,
-                });
-            } else {
-                visit_stream_node_stream_scan(stream_node, |node| {
-                    scan = Some(RwBackfillInfo {
-                        job_id: fragment_distribution.table_id,
-                        fragment_id: fragment_distribution.fragment_id,
-                        backfill_state_table_id: node
-                            .state_table
+                    NodeBody::SourceBackfill(node) => (
+                        &node.state_table,
+                        node.upstream_source_id.as_relation_id(),
+                        CatalogBackfillType::Source,
+                        0,
+                    ),
+                    // A locality provider backfills from its own state table.
+                    NodeBody::LocalityProvider(node) => (
+                        &node.progress_table,
+                        node.state_table
                             .as_ref()
-                            .map(|table| table.id)
-                            .unwrap_or(TableId::placeholder()),
-                        backfill_target_relation_id: node.table_id.as_relation_id(),
-                        backfill_type: backfill_type.to_string(),
-                        backfill_epoch: node.snapshot_backfill_epoch() as _,
-                    });
-                });
-            }
-        }
-    }
-
-    scan
+                            .map_or(TableId::placeholder(), |table| table.id)
+                            .as_relation_id(),
+                        CatalogBackfillType::ArrangementOrNoShuffle,
+                        0,
+                    ),
+                    // `Values` has no state to show.
+                    _ => return,
+                };
+            backfill_nodes.push(RwBackfillInfo {
+                job_id: fragment_distribution.table_id,
+                fragment_id: fragment_distribution.fragment_id,
+                operator_id: stream_node.operator_id.into(),
+                backfill_state_table_id: state_table
+                    .as_ref()
+                    .map_or(TableId::placeholder(), |table| table.id),
+                backfill_target_relation_id,
+                backfill_type: backfill_type.to_string(),
+                backfill_epoch,
+            });
+        },
+    );
+    backfill_nodes
 }
 
 #[system_catalog(table, "rw_catalog.rw_backfill_info")]
@@ -138,7 +108,7 @@ async fn read_rw_backfill_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwBa
         .await?;
 
     Ok(distributions
-        .into_iter()
-        .filter_map(|distribution| extract_stream_scan(&distribution))
+        .iter()
+        .flat_map(extract_backfill_nodes)
         .collect())
 }
