@@ -142,11 +142,12 @@ where
             .collect();
 
         let mut upstream = self.upstream.execute();
+        let backfill_operator_id = self.progress.backfill_operator_id();
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let mut global_pause = first_barrier.is_pause_on_startup();
-        let mut backfill_paused = first_barrier.is_backfill_pause_on_startup(self.fragment_id);
+        let mut backfill_paused = first_barrier.is_backfill_pause_on_startup(backfill_operator_id);
         let first_epoch = first_barrier.epoch;
         let is_newly_added = first_barrier.is_newly_added(self.actor_id);
         // The first barrier message should be propagated.
@@ -549,8 +550,10 @@ where
                         Mutation::Resume => {
                             global_pause = false;
                         }
-                        Mutation::StartFragmentBackfill { fragment_ids } if backfill_paused => {
-                            if fragment_ids.contains(&self.fragment_id) {
+                        Mutation::StartFragmentBackfill {
+                            backfill_operator_ids,
+                        } if backfill_paused => {
+                            if backfill_operator_ids.contains(&backfill_operator_id) {
                                 backfill_paused = false;
                             }
                         }

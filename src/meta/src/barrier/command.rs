@@ -29,6 +29,7 @@ use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation, streami
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
+use risingwave_pb::id::GlobalOperatorId;
 use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, PbField};
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplits,
@@ -49,9 +50,9 @@ use risingwave_pb::stream_plan::{
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use tracing::warn;
 
 use super::info::InflightDatabaseInfo;
+use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::complete_task::CompleteBarrierTask;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
@@ -69,11 +70,10 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
-    AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
-    RefreshCycleActors, ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState,
-    UpstreamSinkInfo, build_actor_connector_splits,
+    AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedBackfillOrder, RefreshCycleActors,
+    ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState, UpstreamSinkInfo,
+    build_actor_connector_splits,
 };
-use crate::{MetaError, MetaResult};
 
 pub(crate) type ThrottleConfigMap = HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>;
 
@@ -365,9 +365,8 @@ pub struct CreateStreamingJobCommandInfo {
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
-    pub fragment_backfill_ordering: ExtendedFragmentBackfillOrder,
+    pub fragment_backfill_ordering: ExtendedBackfillOrder,
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
-    pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
@@ -1086,7 +1085,7 @@ impl Command {
                         Default::default()
                     }
                 };
-                let backfill_nodes_to_pause: Vec<_> =
+                let backfill_operator_ids_to_pause: Vec<_> =
                     get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()
                         .collect();
@@ -1130,7 +1129,7 @@ impl Command {
                     // If the cluster is already paused, the new actors should be paused too.
                     pause: is_currently_paused,
                     subscriptions_to_add,
-                    backfill_nodes_to_pause,
+                    backfill_operator_ids_to_pause,
                     actor_cdc_table_snapshot_splits,
                     new_upstream_sinks,
                     dropped_actors,
@@ -1381,7 +1380,7 @@ impl Command {
                     upstream_mv_table_id,
                     subscriber_id: subscription_id.as_subscriber_id(),
                 }],
-                backfill_nodes_to_pause: vec![],
+                backfill_operator_ids_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: None,
                 new_upstream_sinks: Default::default(),
                 dropped_actors: Default::default(),
@@ -1457,42 +1456,34 @@ impl Command {
         })
     }
 
-    /// Build the `StartFragmentBackfill` mutation for `ResumeBackfill`.
+    /// The backfill nodes that `ResumeBackfill` starts: those of the target that wait for the
+    /// backfill order in the database's streaming graph. The backfills of snapshot backfill and
+    /// batch refresh jobs run in graphs of their own and are not included.
+    pub(super) fn resume_backfill_operator_ids(
+        target: &ResumeBackfillTarget,
+        database_info: &InflightDatabaseInfo,
+    ) -> HashSet<GlobalOperatorId> {
+        match target {
+            ResumeBackfillTarget::Job(job_id) => {
+                database_info.ordered_backfill_operator_ids_for_job(*job_id)
+            }
+            ResumeBackfillTarget::Fragment(fragment_id) => {
+                database_info.ordered_backfill_operator_ids_for_fragment(*fragment_id)
+            }
+        }
+    }
+
+    /// Build the `StartFragmentBackfill` mutation for `ResumeBackfill`. A target without backfill
+    /// nodes to start is rejected before the barrier is allocated.
     pub(super) fn resume_backfill_to_mutation(
         target: &ResumeBackfillTarget,
         database_info: &InflightDatabaseInfo,
-    ) -> MetaResult<Option<Mutation>> {
-        {
-            {
-                let fragment_ids: HashSet<_> = match target {
-                    ResumeBackfillTarget::Job(job_id) => {
-                        database_info.backfill_fragment_ids_for_job(*job_id)?
-                    }
-                    ResumeBackfillTarget::Fragment(fragment_id) => {
-                        if !database_info.is_backfill_fragment(*fragment_id)? {
-                            return Err(MetaError::invalid_parameter(format!(
-                                "fragment {} is not a backfill node",
-                                fragment_id
-                            )));
-                        }
-                        HashSet::from([*fragment_id])
-                    }
-                };
-                if fragment_ids.is_empty() {
-                    warn!(
-                        ?target,
-                        "resume backfill command ignored because no backfill fragments found"
-                    );
-                    Ok(None)
-                } else {
-                    Ok(Some(Mutation::StartFragmentBackfill(
-                        StartFragmentBackfillMutation {
-                            fragment_ids: fragment_ids.into_iter().collect(),
-                        },
-                    )))
-                }
-            }
-        }
+    ) -> Mutation {
+        Mutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+            backfill_operator_ids: Self::resume_backfill_operator_ids(target, database_info)
+                .into_iter()
+                .collect(),
+        })
     }
 
     /// Build the `InjectSourceOffsets` mutation.

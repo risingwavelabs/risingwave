@@ -30,7 +30,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::SubscriberId;
+use risingwave_pb::id::{GlobalOperatorId, SubscriberId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
@@ -40,6 +40,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
+use crate::MetaResult;
 use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReplaceStreamJobPlan, ThrottleConfigMap,
@@ -55,10 +56,10 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
 use crate::model::{
-    ActorId, ActorNewNoShuffle, BackfillUpstreamType, FragmentId, StreamActor, StreamJobFragments,
+    ActorId, ActorNewNoShuffle, BackfillExecutor, BackfillUpstreamType, FragmentId, StreamActor,
+    StreamJobFragments, visit_backfill_nodes,
 };
 use crate::stream::UpstreamSinkInfo;
-use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone)]
 pub struct SharedActorInfo {
@@ -417,26 +418,44 @@ impl InflightStreamingJobInfo {
         self.fragment_infos.values()
     }
 
-    pub fn snapshot_backfill_actor_ids(
+    /// Returns the snapshot backfill executors, which report the progress of consuming the log
+    /// store after the snapshot.
+    pub fn snapshot_backfill_executors(
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-    ) -> impl Iterator<Item = ActorId> + '_ {
-        fragment_infos
-            .values()
-            .filter(|fragment| {
-                fragment
-                    .fragment_type_mask
-                    .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
-            })
-            .flat_map(|fragment| fragment.actors.keys().copied())
+    ) -> Vec<BackfillExecutor> {
+        let mut executors = vec![];
+        for (fragment_id, fragment) in fragment_infos {
+            if !fragment
+                .fragment_type_mask
+                .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
+            {
+                continue;
+            }
+            visit_backfill_nodes(
+                *fragment_id,
+                &fragment.nodes,
+                |operator_id, upstream_type, _| {
+                    if upstream_type == BackfillUpstreamType::MView {
+                        executors.extend(fragment.actors.keys().map(|&actor_id| {
+                            BackfillExecutor {
+                                actor_id,
+                                operator_id,
+                            }
+                        }));
+                    }
+                },
+            );
+        }
+        executors
     }
 
-    pub fn tracking_progress_actor_ids(
+    pub fn tracking_backfill_executors(
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-    ) -> Vec<(ActorId, BackfillUpstreamType)> {
-        StreamJobFragments::tracking_progress_actor_ids_impl(fragment_infos.values().map(
-            |fragment| {
+    ) -> Vec<(BackfillExecutor, BackfillUpstreamType)> {
+        StreamJobFragments::tracking_backfill_executors_impl(fragment_infos.iter().map(
+            |(fragment_id, fragment)| {
                 (
-                    fragment.fragment_type_mask,
+                    *fragment_id,
                     &fragment.nodes,
                     fragment.actors.keys().copied(),
                 )
@@ -501,46 +520,49 @@ impl InflightDatabaseInfo {
             .expect("should exist")
     }
 
-    pub(super) fn backfill_fragment_ids_for_job(
+    /// The backfill nodes of a job that wait for the backfill order, if the job exists.
+    pub(super) fn ordered_backfill_operator_ids_for_job(
         &self,
         job_id: JobId,
-    ) -> MetaResult<HashSet<FragmentId>> {
-        let job = self
-            .jobs
+    ) -> HashSet<GlobalOperatorId> {
+        self.jobs
             .get(&job_id)
-            .ok_or_else(|| MetaError::invalid_parameter(format!("job {} not found", job_id)))?;
-        Ok(job
-            .fragment_infos
-            .iter()
-            .filter_map(|(fragment_id, fragment)| {
-                fragment
-                    .fragment_type_mask
-                    .contains_any([
-                        FragmentTypeFlag::StreamScan,
-                        FragmentTypeFlag::SourceScan,
-                        FragmentTypeFlag::LocalityProvider,
-                    ])
-                    .then_some(*fragment_id)
+            .into_iter()
+            .flat_map(|job| job.fragment_infos.iter())
+            .flat_map(|(fragment_id, fragment)| {
+                Self::ordered_backfill_operator_ids(*fragment_id, fragment)
             })
-            .collect())
+            .collect()
     }
 
-    pub(super) fn is_backfill_fragment(&self, fragment_id: FragmentId) -> MetaResult<bool> {
-        let job_id = self.fragment_location.get(&fragment_id).ok_or_else(|| {
-            MetaError::invalid_parameter(format!("fragment {} not found", fragment_id))
-        })?;
-        let fragment = self
-            .jobs
-            .get(job_id)
-            .expect("should exist")
-            .fragment_infos
+    /// The backfill nodes of a fragment that wait for the backfill order, if the fragment exists.
+    pub(super) fn ordered_backfill_operator_ids_for_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> HashSet<GlobalOperatorId> {
+        self.fragment_location
             .get(&fragment_id)
-            .expect("should exist");
-        Ok(fragment.fragment_type_mask.contains_any([
-            FragmentTypeFlag::StreamScan,
-            FragmentTypeFlag::SourceScan,
-            FragmentTypeFlag::LocalityProvider,
-        ]))
+            .and_then(|job_id| self.jobs.get(job_id))
+            .and_then(|job| job.fragment_infos.get(&fragment_id))
+            .map(|fragment| Self::ordered_backfill_operator_ids(fragment_id, fragment).collect())
+            .unwrap_or_default()
+    }
+
+    fn ordered_backfill_operator_ids(
+        fragment_id: FragmentId,
+        fragment: &InflightFragmentInfo,
+    ) -> impl Iterator<Item = GlobalOperatorId> {
+        let mut operator_ids = vec![];
+        visit_backfill_nodes(
+            fragment_id,
+            &fragment.nodes,
+            |operator_id, upstream_type, _| {
+                if upstream_type.is_ordered() {
+                    operator_ids.push(operator_id);
+                }
+            },
+        );
+        operator_ids.into_iter()
     }
 
     pub fn gen_backfill_progress(&self) -> impl Iterator<Item = (JobId, BackfillProgress)> + '_ {
@@ -764,7 +786,7 @@ impl InflightDatabaseInfo {
             .any(|tracker| tracker.is_finished())
     }
 
-    pub(super) fn take_pending_backfill_nodes(&mut self) -> Vec<FragmentId> {
+    pub(super) fn take_pending_backfill_nodes(&mut self) -> Vec<GlobalOperatorId> {
         self.iter_mut_creating_job_tracker()
             .flat_map(|tracker| tracker.take_pending_backfill_nodes())
             .collect()

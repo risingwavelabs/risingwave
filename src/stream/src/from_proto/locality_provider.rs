@@ -67,7 +67,7 @@ impl ExecutorBuilder for LocalityProviderBuilder {
 
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(&params.actor_context);
+            .register_create_mview_progress(&params.actor_context, params.operator_id);
 
         let exec = LocalityProviderExecutor::new(
             input,

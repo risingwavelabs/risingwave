@@ -14,9 +14,13 @@
 
 use itertools::Itertools;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::id::GlobalOperatorId;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{SourceBackfillNode, StreamNode, StreamScanNode, agg_call_state};
+
+use crate::id::FragmentId;
+use crate::operator::unique_operator_id;
 
 #[macro_export]
 macro_rules! dispatch_stream_node_body {
@@ -368,6 +372,57 @@ pub fn visit_stream_node_source_backfill(
             f(node)
         }
     })
+}
+
+/// The type of a backfill node, which backfills the existing rows of its upstream before following
+/// it.
+#[derive(Debug, strum_macros::Display, Clone, Copy, PartialEq, Eq)]
+pub enum BackfillUpstreamType {
+    MView,
+    Values,
+    Source,
+    LocalityProvider,
+}
+
+impl BackfillUpstreamType {
+    /// Returns the type of a backfill node, or `None` for a node that does not backfill.
+    /// `StreamCdcScan` is not one here: CDC table backfill has a tracker of its own.
+    pub fn from_node_body(node_body: &NodeBody) -> Option<Self> {
+        match node_body {
+            NodeBody::StreamScan(_) => Some(Self::MView),
+            NodeBody::Values(_) => Some(Self::Values),
+            NodeBody::SourceBackfill(_) => Some(Self::Source),
+            NodeBody::LocalityProvider(_) => Some(Self::LocalityProvider),
+            _ => None,
+        }
+    }
+
+    /// Whether the node waits for the backfill order. `Values` emits its rows at once.
+    pub fn is_ordered(self) -> bool {
+        self != Self::Values
+    }
+}
+
+/// Visits the backfill nodes of a fragment with their `unique_operator_id`.
+pub fn visit_backfill_nodes<'a>(
+    fragment_id: FragmentId,
+    stream_node: &'a StreamNode,
+    mut f: impl FnMut(GlobalOperatorId, BackfillUpstreamType, &'a StreamNode),
+) {
+    visit_stream_node_cont(stream_node, |node| {
+        if let Some(upstream_type) = node
+            .node_body
+            .as_ref()
+            .and_then(BackfillUpstreamType::from_node_body)
+        {
+            f(
+                unique_operator_id(fragment_id, node.operator_id),
+                upstream_type,
+                node,
+            );
+        }
+        true
+    });
 }
 
 pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F)

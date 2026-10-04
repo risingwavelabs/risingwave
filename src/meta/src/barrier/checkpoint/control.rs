@@ -56,6 +56,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{BarrierItemCollector, collect_independent_job_commit_epoch_info};
 use crate::barrier::{
     BackfillProgress, Command, CreateStreamingJobType, FragmentBackfillProgress, Reschedule,
+    ResumeBackfillTarget,
 };
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::{build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs};
@@ -1310,6 +1311,26 @@ impl DatabaseCheckpointControl {
                     anyhow!("cannot create streaming job with snapshot backfill when paused",)
                         .into(),
                 );
+            }
+            return Ok(());
+        }
+
+        // Rejected before a barrier is allocated, so it fails the command only and does not
+        // recover the database.
+        if let Some(Command::ResumeBackfill { target }) = &command
+            && Command::resume_backfill_operator_ids(target, &self.database_info).is_empty()
+        {
+            let target = match target {
+                ResumeBackfillTarget::Job(job_id) => format!("job {job_id}"),
+                ResumeBackfillTarget::Fragment(fragment_id) => format!("fragment {fragment_id}"),
+            };
+            warn!(%target, "reject resume backfill without backfill nodes to start");
+            if let Some(notifier) = notifier_start {
+                notifier.notify_start_failed(MetaError::invalid_parameter(format!(
+                    "{target} has no backfill node waiting for the backfill order (snapshot \
+                     backfill and batch refresh jobs are not supported), use ALTER ... SET \
+                     BACKFILL_RATE_LIMIT to control a backfill"
+                )));
             }
             return Ok(());
         }

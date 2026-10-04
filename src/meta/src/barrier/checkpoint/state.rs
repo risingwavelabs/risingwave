@@ -779,7 +779,7 @@ impl DatabaseCheckpointControl {
                                 upstream_mv_table_id: *table_id,
                             })
                             .collect(),
-                        backfill_nodes_to_pause: Default::default(),
+                        backfill_operator_ids_to_pause: Default::default(),
                         actor_cdc_table_snapshot_splits: None,
                         new_upstream_sinks: Default::default(),
                         dropped_actors: Default::default(),
@@ -1519,7 +1519,10 @@ impl DatabaseCheckpointControl {
             }
 
             Some(Command::ResumeBackfill { target }) => {
-                let mutation = Command::resume_backfill_to_mutation(&target, &self.database_info)?;
+                let mutation = Some(Command::resume_backfill_to_mutation(
+                    &target,
+                    &self.database_info,
+                ));
                 let (table_ids, node_actors) = self.collect_base_info();
                 (
                     mutation,
@@ -1731,12 +1734,14 @@ impl DatabaseCheckpointControl {
                     }
                     Some(PbMutation::Update(mutation))
                 } else {
-                    let fragment_ids = self.database_info.take_pending_backfill_nodes();
-                    if fragment_ids.is_empty() {
+                    let backfill_operator_ids = self.database_info.take_pending_backfill_nodes();
+                    if backfill_operator_ids.is_empty() {
                         None
                     } else {
                         Some(PbMutation::StartFragmentBackfill(
-                            PbStartFragmentBackfillMutation { fragment_ids },
+                            PbStartFragmentBackfillMutation {
+                                backfill_operator_ids,
+                            },
                         ))
                     }
                 }

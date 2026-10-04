@@ -41,8 +41,11 @@ message AddMutation {
   // TODO: we may allow multiple mutations in a single barrier.
   bool pause = 4;
   repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
-  // nodes which should be paused initially.
-  repeated uint32 backfill_nodes_to_pause = 6;
+  reserved 6;
+  reserved "backfill_nodes_to_pause";
+  // Backfill nodes (`unique_operator_id`) that start paused, waiting for
+  // `StartFragmentBackfillMutation`.
+  repeated uint64 backfill_operator_ids_to_pause = 11;
   // CDC table snapshot splits
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   // Use downstream_fragment_id as keys.
@@ -143,7 +146,10 @@ message ConnectorPropsChangeMutation {
 }
 
 message StartFragmentBackfillMutation {
-  repeated uint32 fragment_ids = 1;
+  reserved 1;
+  reserved "fragment_ids";
+  // Backfill nodes (`unique_operator_id`) to start.
+  repeated uint64 backfill_operator_ids = 2;
 }
 
 message RefreshStartMutation {

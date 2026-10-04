@@ -520,18 +520,13 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         let epoch = barrier.epoch;
                         Self::apply_throttle(&rate_limiter, self.fragment_id, &barrier);
 
-                        // Check for StartFragmentBackfill mutation
-                        if let Some(mutation) = barrier.mutation.as_deref() {
-                            use crate::executor::Mutation;
-                            if let Mutation::StartFragmentBackfill { fragment_ids } = mutation
-                                && fragment_ids.contains(&self.fragment_id)
-                            {
-                                tracing::info!(
-                                    "Start backfill of locality provider with fragment id: {:?}",
-                                    &self.fragment_id
-                                );
-                                start_backfill = true;
-                            }
+                        if barrier.should_start_backfill(self.progress.backfill_operator_id()) {
+                            tracing::info!(
+                                fragment_id = %self.fragment_id,
+                                backfill_operator_id = %self.progress.backfill_operator_id(),
+                                "Start backfill of locality provider",
+                            );
+                            start_backfill = true;
                         }
 
                         // Commit state tables

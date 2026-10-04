@@ -68,7 +68,7 @@ use crate::model::{
 };
 use crate::notification::NotifierStarter;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::ExtendedFragmentBackfillOrder;
+use crate::stream::ExtendedBackfillOrder;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -586,7 +586,7 @@ impl BatchRefreshJobCheckpointControl {
     /// - If `committed_epoch < snapshot_epoch` → `ConsumingSnapshot` using pre-rendered actors.
     pub(crate) fn recover(
         control: IndependentJobControl,
-        backfill_order: ExtendedFragmentBackfillOrder,
+        backfill_order: ExtendedBackfillOrder,
         version_stat: &HummockVersionStats,
         initial_mutation: Mutation,
         render_result: BatchRefreshRenderResult,
@@ -1169,7 +1169,7 @@ impl BatchRefreshJobCheckpointControl {
             actor_splits: Default::default(),
             pause: false,
             subscriptions_to_add: Default::default(),
-            backfill_nodes_to_pause: Default::default(),
+            backfill_operator_ids_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits: None,
             new_upstream_sinks: Default::default(),
             dropped_actors: Default::default(),

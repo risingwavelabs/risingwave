@@ -31,7 +31,6 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::retry::exponential_backoff;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
@@ -40,7 +39,6 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
@@ -90,7 +88,7 @@ use crate::stream::cdc::{
     CdcTableSnapshotSplits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
 use crate::stream::{
-    ExtendedFragmentBackfillOrder, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
+    ExtendedBackfillOrder, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
     build_actor_connector_splits,
 };
 use crate::{MetaError, MetaResult};
@@ -120,36 +118,6 @@ pub(super) fn from_partial_graph_id(
         Some(JobId::new(raw_creating_job_id))
     };
     (database_id.into(), creating_job_id)
-}
-
-pub(super) fn build_locality_fragment_state_table_mapping(
-    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-) -> HashMap<FragmentId, Vec<TableId>> {
-    let mut mapping = HashMap::new();
-
-    for (fragment_id, fragment_info) in fragment_infos {
-        let mut state_table_ids = Vec::new();
-        visit_stream_node_cont(&fragment_info.nodes, |stream_node| {
-            if let Some(NodeBody::LocalityProvider(locality_provider)) =
-                stream_node.node_body.as_ref()
-            {
-                let state_table_id = locality_provider
-                    .state_table
-                    .as_ref()
-                    .expect("must have state table")
-                    .id;
-                state_table_ids.push(state_table_id);
-                false
-            } else {
-                true
-            }
-        });
-        if !state_table_ids.is_empty() {
-            mapping.insert(*fragment_id, state_table_ids);
-        }
-    }
-
-    mapping
 }
 
 pub(super) fn database_partial_graphs<'a>(
@@ -653,12 +621,13 @@ impl PartialGraphRecoverer<'_> {
         fn build_mutation(
             splits: &HashMap<ActorId, Vec<SplitImpl>>,
             cdc_table_snapshot_split_assignment: HashMap<ActorId, PbCdcTableSnapshotSplits>,
-            backfill_orders: &ExtendedFragmentBackfillOrder,
+            backfill_orders: &ExtendedBackfillOrder,
             is_paused: bool,
         ) -> Mutation {
-            let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_orders)
-                .into_iter()
-                .collect();
+            let backfill_operator_ids_to_pause =
+                get_nodes_with_backfill_dependencies(backfill_orders)
+                    .into_iter()
+                    .collect();
             Mutation::Add(AddMutation {
                 // Actors built during recovery is not treated as newly added actors.
                 actor_dispatchers: Default::default(),
@@ -669,7 +638,7 @@ impl PartialGraphRecoverer<'_> {
                 }),
                 pause: is_paused,
                 subscriptions_to_add: Default::default(),
-                backfill_nodes_to_pause,
+                backfill_operator_ids_to_pause,
                 new_upstream_sinks: Default::default(),
                 dropped_actors: Default::default(),
                 sink_log_store_flush: Default::default(),
@@ -715,15 +684,15 @@ impl PartialGraphRecoverer<'_> {
             job_id: JobId,
             downstreams: &FragmentDownstreamRelation,
             fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-        ) -> ExtendedFragmentBackfillOrder {
+        ) -> ExtendedBackfillOrder {
             let backfill_order = job_backfill_orders(job_extra_info, job_id);
-            StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+            StreamFragmentGraph::extend_backfill_order_with_locality_backfill(
                 backfill_order,
                 downstreams,
                 || {
-                    fragment_infos.iter().map(|(fragment_id, fragment)| {
-                        (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
-                    })
+                    fragment_infos
+                        .iter()
+                        .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes))
                 },
             )
         }
@@ -896,16 +865,18 @@ impl PartialGraphRecoverer<'_> {
                 .map(|(job_id, (fragment_infos, is_creating))| {
                     let status = if is_creating {
                         let backfill_ordering = job_backfill_orders(job_extra_info, job_id);
-                        let backfill_ordering = StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
-                            backfill_ordering,
-                            fragment_relations,
-                            || fragment_infos.iter().map(|(fragment_id, fragment)| {
-                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
-                        }));
-                        let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
-                            &backfill_ordering,
-                            &fragment_infos,
-                        );
+                        let backfill_ordering =
+                            StreamFragmentGraph::extend_backfill_order_with_locality_backfill(
+                                backfill_ordering,
+                                fragment_relations,
+                                || {
+                                    fragment_infos.iter().map(|(fragment_id, fragment)| {
+                                        (*fragment_id, &fragment.nodes)
+                                    })
+                                },
+                            );
+                        let backfill_order_state =
+                            BackfillOrderState::new(&backfill_ordering, &fragment_infos);
                         CreateStreamingJobStatus::Creating {
                             tracker: CreateMviewProgressTracker::recover(
                                 job_id,
@@ -1003,7 +974,7 @@ impl PartialGraphRecoverer<'_> {
                     }
                 }));
             let database_backfill_orders =
-                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                StreamFragmentGraph::extend_backfill_order_with_locality_backfill(
                     database_backfill_orders,
                     fragment_relations,
                     || {
@@ -1011,9 +982,7 @@ impl PartialGraphRecoverer<'_> {
                             job_fragments
                                 .fragment_infos
                                 .iter()
-                                .map(|(fragment_id, fragment)| {
-                                    (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
-                                })
+                                .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes))
                         })
                     },
                 );

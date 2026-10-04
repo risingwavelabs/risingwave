@@ -59,11 +59,13 @@ use crate::barrier::{
     BackfillProgress, BarrierKind, Command, FragmentBackfillProgress, TracedEpoch,
 };
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
+use crate::model::{
+    BackfillExecutor, FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate,
+};
 use crate::notification::NotifierStarter;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::source_manager::SplitAssignment;
-use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
+use crate::stream::{ExtendedBackfillOrder, build_actor_connector_splits};
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -120,8 +122,10 @@ impl CreatingStreamingJobControl {
                 split_assignment,
             )
             .collect();
-        let snapshot_backfill_actors: HashSet<ActorId> =
-            InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
+        let snapshot_backfill_executors: HashSet<BackfillExecutor> =
+            InflightStreamingJobInfo::snapshot_backfill_executors(&fragment_infos)
+                .into_iter()
+                .collect();
         let actors_to_create = Command::create_streaming_job_actors_to_create(
             &info,
             edges,
@@ -248,7 +252,7 @@ impl CreatingStreamingJobControl {
                 tracking_job: TrackingJob::recovered(job_id, &job_info.fragment_infos),
                 info: job_info,
                 log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                    snapshot_backfill_actors.iter().cloned(),
+                    snapshot_backfill_executors.iter().cloned(),
                     upstream_lag,
                 ),
                 pending_barriers: log_store_barriers_to_inject.into(),
@@ -257,7 +261,7 @@ impl CreatingStreamingJobControl {
             job.status = CreatingStreamingJobStatus::ConsumingSnapshot {
                 snapshot: snapshot.expect("snapshot phase should be initialized"),
                 pending_upstream_barriers: vec![],
-                snapshot_backfill_actors,
+                snapshot_backfill_executors,
                 info: job_info,
             };
         }
@@ -518,7 +522,7 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         info: CreatingJobInfo,
-        backfill_order: &ExtendedFragmentBackfillOrder,
+        backfill_order: &ExtendedBackfillOrder,
         version_stat: &HummockVersionStats,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
         let (snapshot, barrier_info) = SnapshotPhaseControl::for_recovery(
@@ -538,9 +542,10 @@ impl CreatingStreamingJobControl {
                     snapshot_epoch,
                     upstream_barrier_info,
                 )?,
-                snapshot_backfill_actors: InflightStreamingJobInfo::snapshot_backfill_actor_ids(
+                snapshot_backfill_executors: InflightStreamingJobInfo::snapshot_backfill_executors(
                     &info.fragment_infos,
                 )
+                .into_iter()
                 .collect(),
                 info,
             },
@@ -572,7 +577,8 @@ impl CreatingStreamingJobControl {
             CreatingStreamingJobStatus::ConsumingLogStore {
                 tracking_job: TrackingJob::recovered(job_id, &info.fragment_infos),
                 log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                    InflightStreamingJobInfo::snapshot_backfill_actor_ids(&info.fragment_infos),
+                    InflightStreamingJobInfo::snapshot_backfill_executors(&info.fragment_infos)
+                        .into_iter(),
                     pending_barriers
                         .back()
                         .map(|info| info.prev_epoch() - committed_epoch)
@@ -591,7 +597,7 @@ impl CreatingStreamingJobControl {
         upstream_table_log_epochs: &UpstreamTableLogEpochs,
         upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
-        backfill_order: ExtendedFragmentBackfillOrder,
+        backfill_order: ExtendedBackfillOrder,
         fragment_relations: &FragmentDownstreamRelation,
         version_stat: &HummockVersionStats,
         new_actors: StreamJobActorsToCreate,

@@ -150,8 +150,6 @@ pub struct CreateStreamingJobContext {
 
     pub fragment_backfill_ordering: UserDefinedFragmentBackfillOrder,
 
-    pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
-
     pub is_serverless_backfill: bool,
 
     pub resource_type: streaming_job_resource_type::ResourceType,
@@ -607,7 +605,6 @@ impl GlobalStreamManager {
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
-            locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
             resource_type,
@@ -633,16 +630,14 @@ impl GlobalStreamManager {
             .await?;
 
         let fragment_backfill_ordering =
-            StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+            StreamFragmentGraph::extend_backfill_order_with_locality_backfill(
                 fragment_backfill_ordering,
                 &stream_job_fragments.downstreams,
                 || {
                     stream_job_fragments
                         .fragments
                         .iter()
-                        .map(|(fragment_id, fragment)| {
-                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
-                        })
+                        .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes))
                 },
             );
 
@@ -660,7 +655,6 @@ impl GlobalStreamManager {
             database_resource_group,
             fragment_backfill_ordering,
             cdc_table_snapshot_splits,
-            locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
             streaming_job_model,
             replace_sink,

@@ -797,7 +797,7 @@ for_all_wrapped_id_fields! (
         }
         AddMutation {
             new_upstream_sinks: FragmentId,
-            backfill_nodes_to_pause: FragmentId,
+            backfill_operator_ids_to_pause: GlobalOperatorId,
             added_actors: ActorId,
             dropped_actors: ActorId,
             actor_splits: ActorId,
@@ -858,7 +858,7 @@ for_all_wrapped_id_fields! (
             actor_splits: ActorId,
         }
         StartFragmentBackfillMutation {
-            fragment_ids: FragmentId,
+            backfill_operator_ids: GlobalOperatorId,
         }
         StopMutation {
             dropped_sink_fragments: FragmentId,
@@ -953,6 +953,7 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.CreateMviewProgress {
             backfill_actor_id: ActorId,
             fragment_id: FragmentId,
+            backfill_operator_id: GlobalOperatorId,
         }
         BarrierCompleteResponse.IcebergPkIndexSinkMetadata {
             reporter_actor_id: ActorId,

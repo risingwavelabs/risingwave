@@ -54,7 +54,7 @@ use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaOpts;
 use crate::model::StreamJobActorsToCreate;
 use crate::notification::{CollectionNotifier, NotifierStarter};
-use crate::stream::ExtendedFragmentBackfillOrder;
+use crate::stream::ExtendedBackfillOrder;
 
 #[derive(Debug)]
 struct SnapshotPhaseControl {
@@ -74,11 +74,8 @@ impl SnapshotPhaseControl {
         version_stats: &HummockVersionStats,
     ) -> (Self, BarrierInfo) {
         let job_id = create_info.stream_job_fragments.stream_job_id();
-        let backfill_order_state = BackfillOrderState::new(
-            &create_info.fragment_backfill_ordering,
-            fragment_infos,
-            create_info.locality_fragment_state_table_mapping.clone(),
-        );
+        let backfill_order_state =
+            BackfillOrderState::new(&create_info.fragment_backfill_ordering, fragment_infos);
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
             fragment_infos,
@@ -106,11 +103,10 @@ impl SnapshotPhaseControl {
         snapshot_epoch: u64,
         committed_epoch: u64,
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-        backfill_order: &ExtendedFragmentBackfillOrder,
+        backfill_order: &ExtendedBackfillOrder,
         version_stats: &HummockVersionStats,
     ) -> (Self, BarrierInfo) {
-        let backfill_order_state =
-            BackfillOrderState::recover_from_fragment_infos(backfill_order, fragment_infos);
+        let backfill_order_state = BackfillOrderState::new(backfill_order, fragment_infos);
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
             fragment_infos,
@@ -145,12 +141,14 @@ impl SnapshotPhaseControl {
     }
 
     fn take_start_backfill_mutation(&mut self) -> Option<Mutation> {
-        let fragment_ids = self
+        let backfill_operator_ids = self
             .create_mview_tracker
             .take_pending_backfill_nodes()
             .collect::<Vec<_>>();
-        (!fragment_ids.is_empty()).then_some(Mutation::StartFragmentBackfill(
-            StartFragmentBackfillMutation { fragment_ids },
+        (!backfill_operator_ids.is_empty()).then_some(Mutation::StartFragmentBackfill(
+            StartFragmentBackfillMutation {
+                backfill_operator_ids,
+            },
         ))
     }
 
@@ -182,7 +180,7 @@ impl SnapshotPhaseControl {
 
 fn build_initial_add_mutation(
     fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-    backfill_ordering: &ExtendedFragmentBackfillOrder,
+    backfill_ordering: &ExtendedBackfillOrder,
     actor_splits: HashMap<ActorId, ConnectorSplits>,
 ) -> Mutation {
     Mutation::Add(AddMutation {
@@ -194,7 +192,7 @@ fn build_initial_add_mutation(
         actor_splits,
         pause: false,
         subscriptions_to_add: Default::default(),
-        backfill_nodes_to_pause: get_nodes_with_backfill_dependencies(backfill_ordering)
+        backfill_operator_ids_to_pause: get_nodes_with_backfill_dependencies(backfill_ordering)
             .into_iter()
             .collect(),
         actor_cdc_table_snapshot_splits: None,

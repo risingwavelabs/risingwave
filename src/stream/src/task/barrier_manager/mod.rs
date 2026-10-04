@@ -21,7 +21,7 @@ pub use progress::CreateMviewProgressReporter;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::id::{FragmentId, PartialGraphId, SinkId};
+use risingwave_pb::id::{FragmentId, GlobalOperatorId, PartialGraphId, SinkId};
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -46,6 +46,7 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         fragment_id: FragmentId,
         actor: ActorId,
+        backfill_operator_id: GlobalOperatorId,
         state: BackfillState,
     },
     ReportSourceListFinished {
