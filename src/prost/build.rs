@@ -935,8 +935,6 @@ for_all_wrapped_id_fields! (
     }
     stream_service {
         BarrierCompleteResponse {
-            truncate_tables: TableId,
-            refresh_finished_tables: TableId,
             table_watermarks: TableId,
             vector_index_adds: TableId,
             worker_id: WorkerId,
@@ -972,6 +970,10 @@ for_all_wrapped_id_fields! (
         }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
+        }
+        BarrierCompleteResponse.RefreshFinishedActor {
+            reporter_actor_id: ActorId,
+            table_id: TableId,
         }
         GetMinUncommittedObjectIdResponse {
             min_uncommitted_object_id: HummockRawObjectId,

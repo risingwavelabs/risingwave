@@ -19,7 +19,7 @@
 use std::collections::HashSet;
 use std::vec;
 
-use rand::Rng;
+use rand::{Rng, RngExt as _};
 use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{

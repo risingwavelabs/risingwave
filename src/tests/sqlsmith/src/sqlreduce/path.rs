@@ -489,7 +489,7 @@ impl AstNode {
                 AstField::Alias => None, // TableAlias is complex, skip for now
                 AstField::CteInner => match &cte.cte_inner {
                     CteInner::Query(query) => Some(AstNode::Query(query.clone())),
-                    CteInner::ChangeLog(_) => None, // ObjectName is complex, skip for now
+                    CteInner::ChangeLog { .. } => None, // ObjectName is complex, skip for now
                 },
                 _ => None,
             },

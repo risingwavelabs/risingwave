@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use chrono::{Duration, NaiveDateTime};
-use rand::Rng;
 use rand::distr::Alphanumeric;
+use rand::{Rng, RngExt as _};
 use risingwave_sqlparser::ast::{
     DataType as AstDataType, Expr, FunctionArg, ObjectName, TableAlias, TableFactor, Value,
 };

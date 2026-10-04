@@ -25,7 +25,7 @@ use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
+    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -35,9 +35,9 @@ use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
-    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
-    CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
-    IndependentStreamingJobType, RecoveryReason, Scheduled, SnapshotBackfillInfo,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, IndependentStreamingJobType,
+    RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
@@ -151,9 +151,9 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
-    fn handle_refresh_finished_table_ids(
+    fn handle_refresh_finished_actors(
         &self,
-        refresh_finished_table_job_ids: Vec<JobId>,
+        refresh_finished_actors: Vec<PbRefreshFinishedActor>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     /// Load the trigger context for a batch refresh job: fragment metadata, job model,
@@ -199,9 +199,6 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     pub(super) env: MetaSrvEnv,
 
-    /// Barrier scheduler for scheduling load finish commands
-    barrier_scheduler: BarrierScheduler,
-
     pub(super) refresh_manager: GlobalRefreshManagerRef,
 
     sink_manager: SinkCoordinatorManager,
@@ -222,7 +219,6 @@ impl GlobalBarrierWorkerContextImpl {
         source_manager: SourceManagerRef,
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
-        barrier_scheduler: BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
@@ -237,7 +233,6 @@ impl GlobalBarrierWorkerContextImpl {
             source_manager,
             _scale_controller: scale_controller,
             env,
-            barrier_scheduler,
             refresh_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,

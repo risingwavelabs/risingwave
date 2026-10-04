@@ -226,7 +226,15 @@ impl GenericPlanNode for CdcScan {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        Some(self.cdc_table_desc.stream_key.clone())
+        self.cdc_table_desc
+            .stream_key
+            .iter()
+            .map(|table_index| {
+                self.output_col_idx
+                    .iter()
+                    .position(|output_index| output_index == table_index)
+            })
+            .collect()
     }
 
     fn ctx(&self) -> OptimizerContextRef {

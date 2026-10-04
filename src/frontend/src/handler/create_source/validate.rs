@@ -90,6 +90,11 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
+                ORACLE_CDC_CONNECTOR => hashmap!(
+                    Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
+                ),
                 MONGODB_CDC_CONNECTOR => hashmap!(
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
@@ -119,6 +124,17 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
 fn validate_license(connector: &str) -> Result<()> {
     if connector == SQL_SERVER_CDC_CONNECTOR {
         Feature::SqlServerCdcSource.check_available()?;
+    }
+    Ok(())
+}
+
+fn validate_decimal_handling_mode(props: &BTreeMap<String, String>) -> Result<()> {
+    if let Some(mode) = props.get("debezium.decimal.handling.mode")
+        && mode != "string"
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "'debezium.decimal.handling.mode' must be 'string', got: '{mode}'"
+        ))));
     }
     Ok(())
 }
@@ -175,6 +191,11 @@ pub fn validate_compatibility(
                 CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
+
+    // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
+    // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
+    // override must retain the common `string` default from `debezium.properties`.
+    validate_decimal_handling_mode(props)?;
 
     validate_license(&connector)?;
     if connector != KAFKA_CONNECTOR {
@@ -264,7 +285,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
         && timeout_value.parse::<u32>().is_err()
     {
@@ -280,7 +302,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(queue_size_value) = props.get("debezium.max.queue.size")
         && queue_size_value.parse::<u32>().is_err()
     {

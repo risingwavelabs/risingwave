@@ -21,7 +21,7 @@ use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
-use sea_orm::ActiveValue::{NotSet, Set};
+use sea_orm::ActiveValue::Set;
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseTransaction, SqlErr};
@@ -1062,60 +1062,60 @@ impl CatalogController {
         }
     }
 
-    pub async fn update_refresh_job_status(
+    /// Moves an idle refresh job to `Refreshing`, recording `trigger_time` as the cycle id.
+    /// Returns false if the job is not idle.
+    pub async fn begin_refresh_job(
         &self,
         table_id: TableId,
-        status: RefreshState,
-        trigger_time: Option<DateTime>,
-        is_success: bool,
-    ) -> MetaResult<()> {
+        trigger_time: DateTime,
+    ) -> MetaResult<bool> {
         self.ensure_refresh_job(table_id).await?;
         let inner = self.inner.read().await;
-
-        // expect only update trigger_time when the status changes to Refreshing
-        assert_eq!(trigger_time.is_some(), status == RefreshState::Refreshing);
-        let active = refresh_job::ActiveModel {
-            table_id: Set(table_id),
-            current_status: Set(status),
-            last_trigger_time: if trigger_time.is_some() {
-                Set(trigger_time.map(datetime_to_timestamp_millis))
-            } else {
-                NotSet
-            },
-            last_success_time: if is_success {
-                Set(Some(chrono::Utc::now().timestamp_millis()))
-            } else {
-                NotSet
-            },
-            ..Default::default()
-        };
-        match RefreshJob::update(active).exec(&inner.db).await {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                if should_skip_refresh_job_db_err(&inner.db, table_id, &e).await? {
-                    tracing::warn!(
-                        %table_id,
-                        error = %e.as_report(),
-                        "skip update_refresh_job_status for stale dropped table"
-                    );
-                    Ok(())
-                } else {
-                    Err(e.into())
-                }
-            }
-        }
-    }
-
-    pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
-        let inner = self.inner.read().await;
-        RefreshJob::update_many()
+        let res = RefreshJob::update_many()
             .col_expr(
                 refresh_job::Column::CurrentStatus,
-                Expr::value(RefreshState::Idle),
+                Expr::value(RefreshState::Refreshing),
+            )
+            .col_expr(
+                refresh_job::Column::LastTriggerTime,
+                Expr::value(Some(datetime_to_timestamp_millis(trigger_time))),
+            )
+            .filter(refresh_job::Column::TableId.eq(table_id))
+            .filter(refresh_job::Column::CurrentStatus.eq(RefreshState::Idle))
+            .exec(&inner.db)
+            .await?;
+        Ok(res.rows_affected == 1)
+    }
+
+    /// Moves the refresh cycle started at `trigger_time` back to `Idle`. Returns false if the job
+    /// is no longer in that cycle (already finished, or the table was dropped).
+    pub async fn finish_refresh_job(
+        &self,
+        table_id: TableId,
+        trigger_time: DateTime,
+        success: bool,
+    ) -> MetaResult<bool> {
+        let inner = self.inner.read().await;
+        let mut update = RefreshJob::update_many().col_expr(
+            refresh_job::Column::CurrentStatus,
+            Expr::value(RefreshState::Idle),
+        );
+        if success {
+            update = update.col_expr(
+                refresh_job::Column::LastSuccessTime,
+                Expr::value(Some(chrono::Utc::now().timestamp_millis())),
+            );
+        }
+        let res = update
+            .filter(refresh_job::Column::TableId.eq(table_id))
+            .filter(refresh_job::Column::CurrentStatus.ne(RefreshState::Idle))
+            .filter(
+                refresh_job::Column::LastTriggerTime
+                    .eq(Some(datetime_to_timestamp_millis(trigger_time))),
             )
             .exec(&inner.db)
             .await?;
-        Ok(())
+        Ok(res.rows_affected == 1)
     }
 
     pub async fn update_refresh_job_interval(

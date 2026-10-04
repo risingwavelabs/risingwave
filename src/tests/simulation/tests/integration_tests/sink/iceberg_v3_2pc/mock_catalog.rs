@@ -34,7 +34,7 @@ use iceberg::{
     Catalog, Error as IcebergError, ErrorKind as IcebergErrorKind, Namespace, NamespaceIdent,
     Result as IcebergResult, Runtime, TableCommit, TableCreation, TableIdent, TableUpdate,
 };
-use rand::Rng;
+use rand::RngExt as _;
 use tokio::time::sleep;
 
 static ICEBERG_RUNTIME: LazyLock<rw_tokio::runtime::Runtime> = LazyLock::new(|| {
@@ -315,7 +315,7 @@ impl Catalog for MockIcebergV3Catalog {
     async fn load_table(&self, table: &TableIdent) -> IcebergResult<Table> {
         // F9: probability-based catalog load failure
         let rate = self.inner().err_rate_catalog_load;
-        if rate > 0 && rand::thread_rng().gen_ratio(rate, u32::MAX) {
+        if rate > 0 && rand::rng().random_ratio(rate, u32::MAX) {
             self.inner().err_events.push('i');
             return Err(IcebergError::new(
                 IcebergErrorKind::Unexpected,
@@ -339,7 +339,7 @@ impl Catalog for MockIcebergV3Catalog {
     async fn update_table(&self, mut commit: TableCommit) -> IcebergResult<Table> {
         // F11: probability-based iceberg txn commit conflict
         let rate = self.inner().err_rate_txn_commit;
-        if rate > 0 && rand::thread_rng().gen_ratio(rate, u32::MAX) {
+        if rate > 0 && rand::rng().random_ratio(rate, u32::MAX) {
             self.inner().err_events.push('i');
             return Err(IcebergError::new(
                 IcebergErrorKind::Unexpected,

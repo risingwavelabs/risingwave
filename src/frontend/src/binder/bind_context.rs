@@ -85,12 +85,11 @@ pub struct LateralBindContext {
 #[derive(Debug, Clone)]
 pub enum BindingCteState {
     /// We get the whole bound result of the CTE.
-    Bound {
-        query: BoundQuery,
-    },
+    Bound { query: BoundQuery },
 
     ChangeLog {
         table: Relation,
+        key_indices: Option<Vec<usize>>,
     },
 }
 
