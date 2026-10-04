@@ -451,6 +451,16 @@ test_locality_backfill() {
   kill_cluster
 }
 
+test_backfill_reschedule() {
+  echo "--- e2e, backfill reschedule test, $RUNTIME_CLUSTER_PROFILE"
+
+  risedev ci-start $RUNTIME_CLUSTER_PROFILE
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/reschedule/*.slt'
+
+  kill_cluster
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
@@ -464,6 +474,7 @@ main() {
 
   test_cross_db_snapshot_backfill
   test_locality_backfill
+  test_backfill_reschedule
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then
