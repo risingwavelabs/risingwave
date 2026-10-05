@@ -124,7 +124,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_clones_share_schemas_but_new_resolvers_are_independent() {
-        let config = config("https://cache-lifetime-test:8443", Some("token-a"));
+        let config = config("http://cache-lifetime-test:8080", Some("token-a"));
         let first = Arc::new(PulsarSchemaCache::new(Client::new(&config).unwrap()));
         let cloned = Arc::clone(&first);
         let second = PulsarSchemaCache::new(Client::new(&config).unwrap());
