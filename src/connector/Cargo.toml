@@ -73,6 +73,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f
     "rustls-tls",
 ], optional = true }
 csv = "1.4"
+dashmap = "6.1"
 deltalake = { workspace = true, optional = true }
 duration-str = "0.21.0"
 easy-ext = "1"

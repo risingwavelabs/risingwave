@@ -152,7 +152,7 @@ impl AvroAccessBuilder {
                     Some(&self.schema.original_schema),
                 )?))
             }
-            WriterSchemaCache::Pulsar(resolver) => {
+            WriterSchemaCache::Pulsar { resolver, topic } => {
                 let SourceMeta::Pulsar(meta) = source_meta else {
                     bail!("Pulsar Avro parser received non-Pulsar source metadata");
                 };
@@ -162,7 +162,7 @@ impl AvroAccessBuilder {
                     .map(PulsarSchemaVersion::try_from)
                     .transpose()?
                 {
-                    Some(version) => resolver.get_by_version(version.0).await?,
+                    Some(version) => resolver.get_by_version(topic, version.0).await?,
                     None => Arc::clone(&self.schema.original_schema),
                 };
                 let mut raw_payload = payload;
@@ -190,7 +190,10 @@ pub struct AvroParserConfig {
 enum WriterSchemaCache {
     Confluent(Arc<ConfluentSchemaCache>),
     Glue(Arc<GlueSchemaCacheImpl>),
-    Pulsar(Arc<PulsarSchemaCache>),
+    Pulsar {
+        resolver: Arc<PulsarSchemaCache>,
+        topic: String,
+    },
     File,
 }
 
@@ -265,11 +268,12 @@ impl AvroParserConfig {
                 client_config,
                 topic,
             } => {
-                let resolver = PulsarSchemaCache::new(client_config, topic)?;
-                let schema = resolver.get_latest().await?;
+                let topic = PulsarSchemaCache::normalize_topic(&topic)?;
+                let resolver = PulsarSchemaCache::shared(client_config)?;
+                let schema = resolver.get_latest(&topic).await?;
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),
-                    writer_schema_cache: WriterSchemaCache::Pulsar(Arc::new(resolver)),
+                    writer_schema_cache: WriterSchemaCache::Pulsar { resolver, topic },
                     map_handling,
                 })
             }

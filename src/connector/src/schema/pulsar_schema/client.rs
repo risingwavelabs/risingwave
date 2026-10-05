@@ -66,7 +66,7 @@ impl RequestError {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PulsarSchemaConfig {
     url: String,
     auth_token: Option<String>,
