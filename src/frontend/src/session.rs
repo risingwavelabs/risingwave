@@ -786,6 +786,52 @@ pub struct SessionImpl {
 
     /// staging catalogs for the current session
     staging_catalog_manager: Arc<Mutex<StagingCatalogManager>>,
+
+    /// prepared statements created via simple-query-mode `PREPARE`, keyed by name
+    simple_prepared_statements: Arc<Mutex<SimplePreparedStatementManager>>,
+}
+
+/// Manages prepared statements created via the simple-query-mode `PREPARE` statement, as
+/// opposed to those created through the pgwire extended query protocol (see
+/// `crate::handler::extended_handle::PrepareStatement`). A prepared statement here is stored
+/// as its original SQL text so that `EXECUTE` can substitute `$n` parameters textually and
+/// re-parse/re-dispatch it like a fresh statement.
+#[derive(Default, Clone)]
+pub struct SimplePreparedStatementManager {
+    statements: HashMap<String, PreparedStatementEntry>,
+}
+
+#[derive(Clone)]
+pub struct PreparedStatementEntry {
+    pub data_types: Vec<risingwave_sqlparser::ast::DataType>,
+    pub statement_sql: String,
+}
+
+impl SimplePreparedStatementManager {
+    pub fn create(
+        &mut self,
+        name: String,
+        entry: PreparedStatementEntry,
+    ) -> std::result::Result<(), String> {
+        if self.statements.contains_key(&name) {
+            return Err(format!("prepared statement \"{name}\" already exists"));
+        }
+        self.statements.insert(name, entry);
+        Ok(())
+    }
+
+    pub fn get(&self, name: &str) -> Option<PreparedStatementEntry> {
+        self.statements.get(name).cloned()
+    }
+
+    pub fn deallocate(&mut self, name: Option<&str>) {
+        match name {
+            Some(name) => {
+                self.statements.remove(name);
+            }
+            None => self.statements.clear(),
+        }
+    }
 }
 
 /// If TEMPORARY or TEMP is specified, the source is created as a temporary source.
@@ -897,6 +943,7 @@ impl SessionImpl {
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
             temporary_source_manager: Default::default(),
             staging_catalog_manager: Default::default(),
+            simple_prepared_statements: Default::default(),
         }
     }
 
@@ -930,6 +977,7 @@ impl SessionImpl {
             cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics)),
             temporary_source_manager: Default::default(),
             staging_catalog_manager: Default::default(),
+            simple_prepared_statements: Default::default(),
         }
     }
 
@@ -1475,6 +1523,22 @@ impl SessionImpl {
 
     pub fn temporary_source_manager(&self) -> TemporarySourceManager {
         self.temporary_source_manager.lock().clone()
+    }
+
+    pub fn create_simple_prepared_statement(
+        &self,
+        name: String,
+        entry: PreparedStatementEntry,
+    ) -> std::result::Result<(), String> {
+        self.simple_prepared_statements.lock().create(name, entry)
+    }
+
+    pub fn get_simple_prepared_statement(&self, name: &str) -> Option<PreparedStatementEntry> {
+        self.simple_prepared_statements.lock().get(name)
+    }
+
+    pub fn deallocate_simple_prepared_statement(&self, name: Option<&str>) {
+        self.simple_prepared_statements.lock().deallocate(name);
     }
 
     pub fn create_staging_table(&self, table: TableCatalog) {
