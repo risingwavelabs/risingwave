@@ -78,6 +78,26 @@ SELECT count(*) FROM oracle_shared_empty;
 ----
 0
 
+# Invalid upstream table names must be rejected without leaving catalog objects.
+statement error (?s).*Invalid Oracle CDC table name.*expected schema.table.*
+CREATE TABLE oracle_invalid_table_name (*)
+FROM oracle_shared_source TABLE 'CUSTOMERS';
+
+statement error (?s).*Invalid Oracle CDC table name.*expected unquoted schema.table identifiers.*
+CREATE TABLE oracle_invalid_quoted_name (*)
+FROM oracle_shared_source TABLE 'APP."CUSTOMERS"';
+
+statement error (?s).*Oracle table 'APP.RW_DOES_NOT_EXIST' has no visible columns.*
+CREATE TABLE oracle_missing_upstream (*)
+FROM oracle_shared_source TABLE 'APP.RW_DOES_NOT_EXIST';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations
+WHERE name IN ('oracle_invalid_table_name', 'oracle_invalid_quoted_name',
+               'oracle_missing_upstream');
+----
+0
+
 # Only changes to RW_E2_ORDERS after this CREATE SOURCE should appear in the view.
 # The two existing rows should not appear.
 statement ok
