@@ -142,6 +142,7 @@ impl fmt::Debug for Client {
 }
 
 impl Client {
+    /// Creates a client, requiring HTTPS when bearer authentication is configured.
     pub fn new(config: &PulsarSchemaConfig) -> ConnectorResult<Self> {
         let url = Url::parse(&config.url).context("invalid Pulsar schema URL")?;
         if url.cannot_be_a_base() {
@@ -149,6 +150,9 @@ impl Client {
         }
         if !matches!(url.scheme(), "http" | "https") {
             bail!("Pulsar schema URL must use HTTP or HTTPS");
+        }
+        if config.auth_token.is_some() && url.scheme() != "https" {
+            bail!("`{PULSAR_SCHEMA_AUTH_TOKEN_KEY}` requires an HTTPS Pulsar schema URL");
         }
         if !url.username().is_empty() || url.password().is_some() {
             bail!("Pulsar schema URL must not contain credentials");
@@ -306,11 +310,7 @@ mod tests {
     }
 
     fn client() -> Client {
-        Client::new(&config(
-            "http://localhost:8080".to_owned(),
-            Some("test-token"),
-        ))
-        .unwrap()
+        Client::new(&config("http://localhost:8080".to_owned(), None)).unwrap()
     }
 
     #[test]
@@ -408,6 +408,28 @@ mod tests {
     }
 
     #[test]
+    fn bearer_authentication_requires_https() {
+        assert!(Client::new(&config("http://localhost:8080".to_owned(), None)).is_ok());
+        let error = Client::new(&config(
+            "http://localhost:8080".to_owned(),
+            Some("test-token"),
+        ))
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("requires an HTTPS Pulsar schema URL")
+        );
+        assert!(
+            Client::new(&config(
+                "https://localhost:8443".to_owned(),
+                Some("test-token"),
+            ))
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn config_debug_redacts_token() {
         let config = config("http://localhost:8080".to_owned(), Some("secret-token"));
         let debug = format!("{config:?}");
@@ -454,7 +476,7 @@ mod tests {
 
     #[cfg(not(madsim))]
     #[tokio::test]
-    async fn cross_host_redirect_is_followed_and_token_is_sent() {
+    async fn unauthenticated_cross_host_redirect_is_followed() {
         let body = r#"{"version":1,"type":"AVRO","data":"{}"}"#;
         let (target_url, target_requests, target_handle) =
             spawn_http_server(vec![response("200 OK", body)]);
@@ -462,14 +484,14 @@ mod tests {
             "HTTP/1.1 307 Temporary Redirect\r\nLocation: {target_url}/schema\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         );
         let (admin_url, admin_requests, admin_handle) = spawn_http_server(vec![redirect]);
-        let client = Client::new(&config(admin_url, Some("test-token"))).unwrap();
+        let client = Client::new(&config(admin_url, None)).unwrap();
 
         let schema = client.get_schema("tenant/ns/events", None).await.unwrap();
         assert_eq!(schema.version, 1);
         admin_requests.recv().unwrap();
         let redirected_request = target_requests.recv().unwrap().to_ascii_lowercase();
         assert!(redirected_request.starts_with("get /schema "));
-        assert!(redirected_request.contains("authorization: bearer test-token"));
+        assert!(!redirected_request.contains("authorization:"));
         admin_handle.join().unwrap();
         target_handle.join().unwrap();
     }
