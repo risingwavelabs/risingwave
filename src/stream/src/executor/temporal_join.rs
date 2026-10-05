@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 
 use anyhow::Context;
@@ -118,44 +118,63 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
     async fn fetch_or_promote_keys(
         &mut self,
         keys: impl Iterator<Item = &K>,
+        ordered_replay: bool,
         metrics: &TemporalJoinMetrics,
     ) -> StreamExecutorResult<()> {
-        let mut futs = Vec::with_capacity(keys.size_hint().1.unwrap_or(0));
+        let mut missing = Vec::with_capacity(keys.size_hint().1.unwrap_or(0));
+        // A key may occur several times in a chunk, and is looked up once.
+        let mut seen = HashSet::new();
         for key in keys {
             metrics.temporal_join_total_query_cache_count.inc();
 
-            if self.cache.get(key).is_none() {
+            if self.cache.get(key).is_none() && seen.insert(key) {
                 metrics.temporal_join_cache_miss_count.inc();
-
-                futs.push(async {
-                    let pk_prefix = key.deserialize(&self.join_key_data_types)?;
-
-                    let iter = self
-                        .source
-                        .iter_with_prefix(
-                            &pk_prefix,
-                            &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                            PrefetchOptions::default(),
-                        )
-                        .await?;
-
-                    let mut entry = JoinEntry::default();
-
-                    pin_mut!(iter);
-                    while let Some(row) = iter.next().await {
-                        let row: OwnedRow = row?;
-                        entry.insert(
-                            row.as_ref()
-                                .project(&self.table_stream_key_indices)
-                                .into_owned_row(),
-                            row,
-                        );
-                    }
-                    let key = key.clone();
-                    Ok((key, entry)) as StreamExecutorResult<_>
-                });
+                let pk_prefix: OwnedRow = key.deserialize(&self.join_key_data_types)?;
+                missing.push((key, pk_prefix));
             }
         }
+
+        // The lookups of an ordered replay walk the table forward. Read its blocks ahead, in one
+        // request from the first key of the chunk that misses the cache and one from the last,
+        // where the blocks of the next chunks start.
+        if ordered_replay && let Some((_, first)) = missing.first() {
+            let starts = match missing.last() {
+                Some((_, last)) if missing.len() > 1 => vec![first, last],
+                _ => vec![first],
+            };
+            futures::future::try_join_all(
+                starts
+                    .into_iter()
+                    .map(|pk_prefix| self.source.read_ahead_from(pk_prefix)),
+            )
+            .await?;
+        }
+
+        let source = &self.source;
+        let table_stream_key_indices = &self.table_stream_key_indices;
+        let futs = missing.into_iter().map(|(key, pk_prefix)| async move {
+            let iter = source
+                .iter_with_prefix(
+                    &pk_prefix,
+                    &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                    PrefetchOptions::default(),
+                )
+                .await?;
+
+            let mut entry = JoinEntry::default();
+
+            pin_mut!(iter);
+            while let Some(row) = iter.next().await {
+                let row: OwnedRow = row?;
+                entry.insert(
+                    row.as_ref()
+                        .project(table_stream_key_indices)
+                        .into_owned_row(),
+                    row,
+                );
+            }
+            Ok((key.clone(), entry)) as StreamExecutorResult<_>
+        });
 
         #[for_await]
         for res in stream::iter(futs).buffered(16) {
@@ -487,7 +506,7 @@ pub(super) mod phase1 {
                 }
             });
         right_table
-            .fetch_or_promote_keys(to_fetch_keys, metrics)
+            .fetch_or_promote_keys(to_fetch_keys, chunk.is_ordered_replay(), metrics)
             .await?;
 
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
@@ -903,7 +922,7 @@ mod tests {
     use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_common::util::value_encoding::BasicSerde;
-    use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+    use risingwave_hummock_test::test_utils::{HummockTestEnv, prepare_hummock_test_env};
     use risingwave_storage::hummock::HummockStorage;
 
     use super::*;
@@ -912,30 +931,18 @@ mod tests {
     };
     use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::monitor::StreamingMetrics;
-    use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
+    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, ExecutorInfo, JoinType};
 
-    /// Tests that a temporal join on a pk-prefix (join key is a strict prefix of the right table's
-    /// pk) correctly merges rows committed in epoch1 with rows staged/committed during epoch2, and
-    /// produces the right results when the left side arrives in epoch3.
-    ///
-    /// Right table: (key INT, seq INT, val INT), pk = (key, seq), SINGLETON distribution.
-    /// Join condition: `left.left_key` = right.key  (pk prefix: join uses only the first pk column).
-    ///
-    /// Pre-commit at epoch1: (1,1,100), (1,2,200), (2,1,300)
-    /// Epoch2:  right side sends insert (3,1,400) — written to replicated state table, committed
-    ///          at the epoch2 barrier.
-    /// Epoch3:  left side sends (`left_key=1`, `left_val=111`) and (`left_key=3`, `left_val=333`).
-    ///
-    /// Expected join output in epoch3:
-    ///   (1, 111, 1, 1, 100)  — key=1 row matched from epoch1 data (cache miss → state store read)
-    ///   (1, 111, 1, 2, 200)  — key=1 row matched from epoch1 data (same cache entry)
-    ///   (3, 333, 3, 1, 400)  — key=3 row matched from epoch2 data (cache miss → state store read)
-    #[tokio::test]
-    async fn test_temporal_join_pk_prefix_staging_merge() {
-        let test_env = prepare_hummock_test_env().await;
-        let table_id = TableId::new(1);
-
+    /// Commits (1,1,100), (1,2,200) and (2,1,300) in epoch1 to the right table (key INT, seq INT,
+    /// val INT) with pk = (key, seq) and SINGLETON distribution, and builds the inner join of a left
+    /// side (`left_key` INT, `left_val` INT) on `left_key` = key, a strict prefix of the pk. Returns
+    /// the senders of the left and the right side, and the output of the join, whose rows are
+    /// [`left_key`, `left_val`, key, seq, val].
+    async fn pk_prefix_join(
+        test_env: &HummockTestEnv,
+        table_id: TableId,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         // Right table schema: (key INT col_id=1, seq INT col_id=2, val INT col_id=3)
         // pk = (key idx=0, seq idx=1), SINGLETON distribution (empty distribution_key),
         // read_prefix_len_hint = 2 (= full pk length).
@@ -1004,13 +1011,13 @@ mod tests {
         .build()
         .await;
 
-        // Left source: (left_key INT, left_val INT), stream_key = [0].
+        // Left source: (left_key INT, left_val INT), stream_key = [0, 1].
         let left_schema = Schema::new(vec![
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Int32),
         ]);
-        let (mut left_tx, left_source) = MockSource::channel();
-        let left_executor = left_source.into_executor(left_schema.clone(), vec![0]);
+        let (left_tx, left_source) = MockSource::channel();
+        let left_executor = left_source.into_executor(left_schema, vec![0, 1]);
 
         // Right source: mirrors the right table columns (key INT, seq INT, val INT),
         // stream_key = [0, 1] (the pk).
@@ -1019,8 +1026,8 @@ mod tests {
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Int32),
         ]);
-        let (mut right_tx, right_source) = MockSource::channel();
-        let right_executor = right_source.into_executor(right_schema.clone(), vec![0, 1]);
+        let (right_tx, right_source) = MockSource::channel();
+        let right_executor = right_source.into_executor(right_schema, vec![0, 1]);
 
         // table_stream_key_indices: pk of right table within the output row = [0, 1] (key, seq).
         let table_stream_key_indices = vec![0usize, 1];
@@ -1050,7 +1057,7 @@ mod tests {
             true,
         >::new(
             ActorContext::for_test(0),
-            info.clone(),
+            info,
             left_executor,
             right_executor,
             right_table,
@@ -1068,7 +1075,49 @@ mod tests {
             false,
         );
 
-        let mut stream = Box::new(executor).execute();
+        let stream = Box::new(executor).execute();
+        (left_tx, right_tx, stream)
+    }
+
+    /// Collects the rows that `stream` outputs up to the next barrier, sorted.
+    async fn rows_until_barrier(stream: &mut BoxedMessageStream) -> Vec<[i32; 5]> {
+        let mut rows = vec![];
+        loop {
+            match stream.next().await.unwrap().unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        assert_eq!(op, Op::Insert);
+                        rows.push(std::array::from_fn(|i| match row.datum_at(i).unwrap() {
+                            ScalarRefImpl::Int32(v) => v,
+                            _ => panic!("expected Int32"),
+                        }));
+                    }
+                }
+                Message::Barrier(_) => break,
+                _ => {}
+            }
+        }
+        rows.sort();
+        rows
+    }
+
+    /// Tests that a temporal join on a pk-prefix (join key is a strict prefix of the right table's
+    /// pk) correctly merges rows committed in epoch1 with rows staged/committed during epoch2, and
+    /// produces the right results when the left side arrives in epoch3.
+    ///
+    /// Epoch2:  right side sends insert (3,1,400) — written to replicated state table, committed
+    ///          at the epoch2 barrier.
+    /// Epoch3:  left side sends (`left_key=1`, `left_val=111`) and (`left_key=3`, `left_val=333`).
+    ///
+    /// Expected join output in epoch3:
+    ///   (1, 111, 1, 1, 100)  — key=1 row matched from epoch1 data (cache miss → state store read)
+    ///   (1, 111, 1, 2, 200)  — key=1 row matched from epoch1 data (same cache entry)
+    ///   (3, 333, 3, 1, 400)  — key=3 row matched from epoch2 data (cache miss → state store read)
+    #[tokio::test]
+    async fn test_temporal_join_pk_prefix_staging_merge() {
+        let test_env = prepare_hummock_test_env().await;
+        let table_id = TableId::new(1);
+        let (mut left_tx, mut right_tx, mut stream) = pk_prefix_join(&test_env, table_id).await;
 
         // Push the first barrier (init epoch2, prev = epoch1) on both sides.
         left_tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
@@ -1106,33 +1155,61 @@ mod tests {
         left_tx.push_barrier_with_prev_epoch_for_test(test_epoch(4), test_epoch(3), true);
         right_tx.push_barrier_with_prev_epoch_for_test(test_epoch(4), test_epoch(3), true);
 
-        // Collect all output rows before the stop barrier.
-        let mut output_rows: Vec<[i32; 5]> = vec![];
-        loop {
-            match stream.next().await.unwrap().unwrap() {
-                Message::Chunk(chunk) => {
-                    for (op, row) in chunk.rows() {
-                        assert_eq!(op, Op::Insert);
-                        let row: [i32; 5] =
-                            std::array::from_fn(|i| match row.datum_at(i).unwrap() {
-                                ScalarRefImpl::Int32(v) => v,
-                                _ => panic!("expected Int32"),
-                            });
-                        output_rows.push(row);
-                    }
-                }
-                Message::Barrier(_) => break,
-                _ => {}
-            }
-        }
-
-        output_rows.sort();
         assert_eq!(
-            output_rows,
+            rows_until_barrier(&mut stream).await,
             vec![
                 [1, 111, 1, 1, 100], // key=1 matched epoch1 row (1,1,100)
                 [1, 111, 1, 2, 200], // key=1 matched epoch1 row (1,2,200)
                 [3, 333, 3, 1, 400], // key=3 matched epoch2 row (3,1,400)
+            ]
+        );
+    }
+
+    /// Tests that every left row joins all its matches when a key occurs several times in a chunk,
+    /// both in a chunk out of order and in one of an ordered replay, which reads the table ahead.
+    #[tokio::test]
+    async fn test_temporal_join_repeated_keys() {
+        let test_env = prepare_hummock_test_env().await;
+        let table_id = TableId::new(1);
+        let (mut left_tx, mut right_tx, mut stream) = pk_prefix_join(&test_env, table_id).await;
+
+        left_tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+        right_tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+        stream.expect_barrier().await;
+
+        test_env
+            .storage
+            .start_epoch(test_epoch(3), HashSet::from_iter([table_id]));
+        left_tx.push_chunk(StreamChunk::from_pretty(
+            " i  i
+            + 2 21
+            + 1 11
+            + 2 22",
+        ));
+        left_tx.push_chunk(
+            StreamChunk::from_pretty(
+                " i  i
+                + 1 12
+                + 1 13
+                + 2 23",
+            )
+            .with_ordered_replay(),
+        );
+        left_tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), true);
+        right_tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), true);
+
+        assert_eq!(
+            rows_until_barrier(&mut stream).await,
+            vec![
+                [1, 11, 1, 1, 100],
+                [1, 11, 1, 2, 200],
+                [1, 12, 1, 1, 100],
+                [1, 12, 1, 2, 200],
+                [1, 13, 1, 1, 100],
+                [1, 13, 1, 2, 200],
+                [2, 21, 2, 1, 300],
+                [2, 22, 2, 1, 300],
+                [2, 23, 2, 1, 300],
             ]
         );
     }

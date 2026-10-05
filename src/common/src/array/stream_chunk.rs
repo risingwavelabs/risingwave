@@ -103,11 +103,20 @@ impl Op {
 }
 
 /// `StreamChunk` is used to pass data over the streaming pathway.
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Arc<[Op]>,
     data: DataChunk,
+    /// See [`StreamChunk::is_ordered_replay`].
+    ordered_replay: bool,
+}
+
+/// Compares the rows only: the `ordered_replay` hint doesn't take part.
+impl PartialEq for StreamChunk {
+    fn eq(&self, other: &Self) -> bool {
+        self.ops == other.ops && self.data == other.data
+    }
 }
 
 impl Default for StreamChunk {
@@ -118,6 +127,7 @@ impl Default for StreamChunk {
         Self {
             ops: Arc::new([]),
             data: DataChunk::new(vec![], 0),
+            ordered_replay: false,
         }
     }
 }
@@ -141,7 +151,11 @@ impl StreamChunk {
             assert_eq!(col.len(), ops.len());
         }
         let data = DataChunk::new(columns, visibility);
-        StreamChunk { ops, data }
+        StreamChunk {
+            ops,
+            data,
+            ordered_replay: false,
+        }
     }
 
     /// Build a `StreamChunk` from rows.
@@ -229,6 +243,20 @@ impl StreamChunk {
     pub fn from_parts(ops: impl Into<Arc<[Op]>>, data_chunk: DataChunk) -> Self {
         let (columns, vis) = data_chunk.into_parts();
         Self::with_visibility(ops, columns, vis)
+    }
+
+    /// Whether the rows are a run of an ordered replay, such as a locality provider replays its
+    /// buffer: they belong to one vnode and continue its replay, in ascending order of the replay
+    /// order of the input. A hint for optimizations such as read-ahead only, never relied on for
+    /// correctness. Chunks built from this one don't keep it, and it isn't serialized.
+    pub fn is_ordered_replay(&self) -> bool {
+        self.ordered_replay
+    }
+
+    /// Marks the chunk as a run of an ordered replay. See [`Self::is_ordered_replay`].
+    pub fn with_ordered_replay(mut self) -> Self {
+        self.ordered_replay = true;
+        self
     }
 
     pub fn into_inner(self) -> (Arc<[Op]>, Vec<ArrayRef>, Bitmap) {
@@ -325,6 +353,7 @@ impl StreamChunk {
         Self {
             ops: self.ops.clone(),
             data: self.data.project(indices),
+            ordered_replay: false,
         }
     }
 
@@ -389,6 +418,7 @@ impl StreamChunk {
         Self {
             ops: self.ops.clone(),
             data: self.data.project_with_vis(indices, vis),
+            ordered_replay: false,
         }
     }
 
@@ -397,6 +427,7 @@ impl StreamChunk {
         Self {
             ops: self.ops.clone(),
             data: self.data.with_visibility(vis),
+            ordered_replay: false,
         }
     }
 
@@ -722,6 +753,7 @@ impl StreamChunk {
                 return StreamChunk {
                     ops: Arc::new([]),
                     data: DataChunk::from_pretty(s),
+                    ordered_replay: false,
                 };
             }
         };
@@ -749,6 +781,7 @@ impl StreamChunk {
         StreamChunk {
             ops: ops.into(),
             data: DataChunk::from_pretty(&chunk_str),
+            ordered_replay: false,
         }
     }
 
@@ -793,6 +826,7 @@ impl StreamChunk {
         StreamChunk {
             ops: idx.iter().map(|&i| self.ops[i]).collect(),
             data: self.data.reorder_rows(&idx),
+            ordered_replay: false,
         }
     }
 
@@ -855,6 +889,21 @@ impl StreamChunk {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_ordered_replay_hint() {
+        let chunk = StreamChunk::from_pretty(
+            " I
+            + 1
+            + 2",
+        );
+        assert!(!chunk.is_ordered_replay());
+        let replayed = chunk.clone().with_ordered_replay();
+        assert!(replayed.is_ordered_replay());
+        // The hint doesn't take part in equality, and chunks built from the chunk don't keep it.
+        assert_eq!(replayed, chunk);
+        assert!(!replayed.project(&[0]).is_ordered_replay());
+    }
 
     #[test]
     fn test_to_pretty_string() {

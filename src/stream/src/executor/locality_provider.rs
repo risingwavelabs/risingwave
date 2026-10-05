@@ -195,7 +195,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         backfill_state: &mut BackfillState,
         cur_barrier_snapshot_processed_rows: &mut u64,
     ) -> StreamExecutorResult<StreamChunk> {
-        let chunk = StreamChunk::from_parts(vec![Op::Insert; data_chunk.cardinality()], data_chunk);
+        let chunk = StreamChunk::from_parts(vec![Op::Insert; data_chunk.cardinality()], data_chunk)
+            .with_ordered_replay();
         let chunk_cardinality = chunk.cardinality() as u64;
         // As snapshot read streams are ordered by pk, the last row is the new position.
         update_pos_by_vnode(vnode, &chunk, pk_indices, backfill_state, chunk_cardinality)?;
