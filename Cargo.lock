@@ -14416,7 +14416,6 @@ dependencies = [
  "clickhouse",
  "criterion",
  "csv",
- "dashmap",
  "deltalake",
  "duration-str",
  "easy-ext",

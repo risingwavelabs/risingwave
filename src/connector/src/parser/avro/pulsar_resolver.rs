@@ -12,44 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::Arc;
 
 use anyhow::Context;
 use apache_avro::Schema;
-use dashmap::DashMap;
+use moka::future::Cache;
 use risingwave_common::bail;
-use tokio::sync::OnceCell;
 
 use crate::error::ConnectorResult;
-use crate::schema::pulsar_schema::{Client, PulsarSchemaConfig, PulsarSchemaInfo};
+use crate::schema::pulsar_schema::{Client, PulsarSchemaInfo};
 use crate::source::pulsar::topic::parse_topic;
 
-type SchemaVersions = DashMap<i64, Arc<OnceCell<Arc<Schema>>>>;
-
-// A resolver is shared only by sources using the same Admin API and credentials. Weak references
-// let its client and schemas be released when the last parser drops the resolver.
-static SHARED_SCHEMA_CACHES: LazyLock<DashMap<PulsarSchemaConfig, Weak<PulsarSchemaCache>>> =
-    LazyLock::new(DashMap::new);
+type SchemaVersions = Cache<i64, Arc<Schema>>;
 
 /// Fetch schemas from Pulsar and cache writer schemas by topic, then version.
+/// Each parser configuration owns a resolver and shares it with its clones through `Arc`.
 #[derive(Debug)]
 pub struct PulsarSchemaCache {
-    writer_schemas: DashMap<String, Arc<SchemaVersions>>,
+    writer_schemas: Cache<String, SchemaVersions>,
     pulsar_client: Client,
 }
 
 impl PulsarSchemaCache {
-    pub fn shared(config: PulsarSchemaConfig) -> ConnectorResult<Arc<Self>> {
-        let mut entry = SHARED_SCHEMA_CACHES.entry(config).or_default();
-        if let Some(cache) = entry.upgrade() {
-            return Ok(cache);
+    pub fn new(pulsar_client: Client) -> Self {
+        Self {
+            writer_schemas: Cache::new(u64::MAX),
+            pulsar_client,
         }
-        let cache = Arc::new(Self {
-            writer_schemas: DashMap::new(),
-            pulsar_client: Client::new(entry.key())?,
-        });
-        *entry = Arc::downgrade(&cache);
-        Ok(cache)
     }
 
     pub(super) fn normalize_topic(topic: &str) -> ConnectorResult<String> {
@@ -59,16 +48,16 @@ impl PulsarSchemaCache {
         Ok(topic.to_string())
     }
 
-    fn topic_schemas(&self, topic: &str) -> ConnectorResult<Arc<SchemaVersions>> {
-        if let Some(schemas) = self.writer_schemas.get(topic) {
-            return Ok(Arc::clone(&schemas));
+    async fn topic_schemas(&self, topic: &str) -> ConnectorResult<SchemaVersions> {
+        if let Some(schemas) = self.writer_schemas.get(topic).await {
+            return Ok(schemas);
         }
-        Ok(Arc::clone(
-            self.writer_schemas
-                .entry(Self::normalize_topic(topic)?)
-                .or_default()
-                .value(),
-        ))
+        Ok(self
+            .writer_schemas
+            .get_with(Self::normalize_topic(topic)?, async {
+                Cache::new(u64::MAX)
+            })
+            .await)
     }
 
     fn parse_schema(raw_schema: PulsarSchemaInfo) -> ConnectorResult<Arc<Schema>> {
@@ -80,26 +69,22 @@ impl PulsarSchemaCache {
         Ok(Arc::new(schema))
     }
 
-    /// Fetches the current latest schema for a parser's reader schema. Existing parsers retain
-    /// their own reader schema even when another parser fetches a newer version.
+    /// Fetches the current latest schema for a parser's reader schema and caches its version.
     pub async fn get_latest(&self, topic: &str) -> ConnectorResult<Arc<Schema>> {
-        let schemas = self.topic_schemas(topic)?;
+        let schemas = self.topic_schemas(topic).await?;
         let raw_schema = self.pulsar_client.get_schema(topic, None).await?;
-        let cell = Arc::clone(schemas.entry(raw_schema.version).or_default().value());
+        let version = raw_schema.version;
         let schema = Self::parse_schema(raw_schema)?;
-        Ok(Arc::clone(cell.get_or_init(|| async move { schema }).await))
+        schemas.insert(version, Arc::clone(&schema)).await;
+        Ok(schema)
     }
 
     /// Gets a specific writer schema. Concurrent misses share one lookup; failed lookups can
-    /// be retried. DashMap guards are released before awaiting network requests.
+    /// be retried because errors are not cached.
     pub async fn get_by_version(&self, topic: &str, version: i64) -> ConnectorResult<Arc<Schema>> {
-        let schemas = self.topic_schemas(topic)?;
-        let cell = schemas
-            .get(&version)
-            .map(|cell| Arc::clone(&cell))
-            .unwrap_or_else(|| Arc::clone(schemas.entry(version).or_default().value()));
-        let schema = cell
-            .get_or_try_init(|| async {
+        let schemas = self.topic_schemas(topic).await?;
+        schemas
+            .try_get_with(version, async {
                 let raw_schema = self.pulsar_client.get_schema(topic, Some(version)).await?;
                 if raw_schema.version != version {
                     bail!(
@@ -109,8 +94,8 @@ impl PulsarSchemaCache {
                 }
                 Self::parse_schema(raw_schema)
             })
-            .await?;
-        Ok(Arc::clone(schema))
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -125,7 +110,9 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use crate::schema::pulsar_schema::{PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY};
+    use crate::schema::pulsar_schema::{
+        PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY, PulsarSchemaConfig,
+    };
 
     fn config(url: &str, token: Option<&str>) -> PulsarSchemaConfig {
         let mut options = BTreeMap::from([(PULSAR_SCHEMA_URL_KEY.to_owned(), url.to_owned())]);
@@ -135,34 +122,44 @@ mod tests {
         PulsarSchemaConfig::from_options(&options).unwrap().unwrap()
     }
 
-    #[test]
-    fn shared_resolvers_are_scoped_to_endpoint_and_credentials() {
-        let config = config("http://shared-cache-test:8080", Some("token-a"));
-        let cache = PulsarSchemaCache::shared(config.clone()).unwrap();
+    #[tokio::test]
+    async fn resolver_clones_share_schemas_but_new_resolvers_are_independent() {
+        let config = config("http://cache-lifetime-test:8080", Some("token-a"));
+        let first = Arc::new(PulsarSchemaCache::new(Client::new(&config).unwrap()));
+        let cloned = Arc::clone(&first);
+        let second = PulsarSchemaCache::new(Client::new(&config).unwrap());
+        let schema =
+            Arc::new(Schema::parse_str(r#"{"type":"record","name":"Event","fields":[]}"#).unwrap());
+        first
+            .topic_schemas("events")
+            .await
+            .unwrap()
+            .insert(0, Arc::clone(&schema))
+            .await;
         assert!(Arc::ptr_eq(
-            &cache,
-            &PulsarSchemaCache::shared(config.clone()).unwrap()
+            &schema,
+            &cloned.get_by_version("events", 0).await.unwrap()
         ));
-        for other in [
-            self::config("http://other-cache-test:8080", Some("token-a")),
-            self::config("http://shared-cache-test:8080", Some("token-b")),
-        ] {
-            assert!(!Arc::ptr_eq(
-                &cache,
-                &PulsarSchemaCache::shared(other).unwrap()
-            ));
-        }
+        assert!(
+            second
+                .writer_schemas
+                .get("persistent://public/default/events")
+                .await
+                .is_none()
+        );
 
-        let weak = Arc::downgrade(&cache);
-        drop(cache);
+        let weak = Arc::downgrade(&first);
+        drop(first);
+        assert!(weak.upgrade().is_some());
+        drop(cloned);
         assert!(weak.upgrade().is_none());
-        assert!(PulsarSchemaCache::shared(config).is_ok());
     }
 
     #[tokio::test]
     async fn topic_versions_are_isolated_and_topic_aliases_share_entries() {
-        let cache =
-            PulsarSchemaCache::shared(config("http://topic-cache-test:8080", None)).unwrap();
+        let cache = PulsarSchemaCache::new(
+            Client::new(&config("http://topic-cache-test:8080", None)).unwrap(),
+        );
         let events =
             Arc::new(Schema::parse_str(r#"{"type":"record","name":"Event","fields":[]}"#).unwrap());
         let orders =
@@ -174,11 +171,10 @@ mod tests {
         ] {
             cache
                 .topic_schemas(topic)
+                .await
                 .unwrap()
-                .entry(version)
-                .or_default()
-                .set(Arc::clone(schema))
-                .unwrap();
+                .insert(version, Arc::clone(schema))
+                .await;
         }
         for topic in [
             "events",
@@ -197,7 +193,8 @@ mod tests {
                 &cache.get_by_version(topic, version).await.unwrap()
             ));
         }
-        assert_eq!(cache.writer_schemas.len(), 2);
+        cache.writer_schemas.run_pending_tasks().await;
+        assert_eq!(cache.writer_schemas.entry_count(), 2);
     }
 
     #[cfg(not(madsim))]
@@ -244,8 +241,8 @@ mod tests {
         let (url, server) =
             spawn_schema_server(vec![(404, String::new()), schema_response(0, data)]);
         let config = config(&url, None);
-        let first = PulsarSchemaCache::shared(config.clone()).unwrap();
-        let second = PulsarSchemaCache::shared(config).unwrap();
+        let first = Arc::new(PulsarSchemaCache::new(Client::new(&config).unwrap()));
+        let second = Arc::clone(&first);
         assert!(first.get_by_version("events", 0).await.is_err());
 
         let (a, b) = tokio::join!(
@@ -270,7 +267,7 @@ mod tests {
         let v1 = r#"{"type":"record","name":"Event","fields":[{"name":"id","type":"int"},{"name":"name","type":"string","default":"unknown"}]}"#;
         let (url, server) =
             spawn_schema_server(vec![schema_response(1, v1), schema_response(0, v0)]);
-        let cache = PulsarSchemaCache::shared(config(&url, None)).unwrap();
+        let cache = PulsarSchemaCache::new(Client::new(&config(&url, None)).unwrap());
         let reader = cache.get_latest("events").await.unwrap();
         let writer = cache.get_by_version("events", 0).await.unwrap();
         assert!(Arc::ptr_eq(

@@ -269,11 +269,15 @@ impl AvroParserConfig {
                 topic,
             } => {
                 let topic = PulsarSchemaCache::normalize_topic(&topic)?;
-                let resolver = PulsarSchemaCache::shared(client_config)?;
+                let client = crate::schema::pulsar_schema::Client::new(&client_config)?;
+                let resolver = PulsarSchemaCache::new(client);
                 let schema = resolver.get_latest(&topic).await?;
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),
-                    writer_schema_cache: WriterSchemaCache::Pulsar { resolver, topic },
+                    writer_schema_cache: WriterSchemaCache::Pulsar {
+                        resolver: Arc::new(resolver),
+                        topic,
+                    },
                     map_handling,
                 })
             }
