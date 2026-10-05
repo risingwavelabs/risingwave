@@ -125,6 +125,8 @@ impl PulsarSchemaConfig {
     }
 }
 
+/// HTTP client for Pulsar schemas. The configured Admin endpoint and the brokers it redirects to
+/// are trusted to receive the schema bearer token. Authenticated requests require HTTPS at every hop.
 pub struct Client {
     inner: HttpClient,
     url: Url,
@@ -162,8 +164,8 @@ impl Client {
             bail!("Pulsar schema URL must not contain a query or fragment");
         }
 
-        // Pulsar Admin APIs may redirect to the topic-owning broker. Validate redirects before
-        // sending a new request so credentials stay within the configured Admin API origin.
+        // Follow Pulsar's broker redirects manually so bearer authentication is retained across
+        // origins. Validate each redirect before sending a new request.
         let inner = HttpClient::builder()
             .timeout(DEFAULT_REQUEST_TIMEOUT)
             .redirect(Policy::none())
@@ -199,7 +201,7 @@ impl Client {
         Ok(url)
     }
 
-    fn redirect_url(&self, current_url: &Url, response: &Response) -> Result<Url, RequestError> {
+    fn redirect_url(current_url: &Url, response: &Response) -> Result<Url, RequestError> {
         let location = response
             .headers()
             .get(LOCATION)
@@ -223,12 +225,6 @@ impl Client {
         if !redirect_url.username().is_empty() || redirect_url.password().is_some() {
             return Err(RequestError::InvalidRedirect(
                 "redirect URL must not contain credentials".to_owned(),
-            ));
-        }
-        if self.auth_token.is_some() && redirect_url.origin() != self.url.origin() {
-            return Err(RequestError::InvalidRedirect(
-                "authenticated Pulsar schema redirects must stay within the configured Admin API origin"
-                    .to_owned(),
             ));
         }
         Ok(redirect_url)
@@ -256,7 +252,7 @@ impl Client {
                     return Err(RequestError::TooManyRedirects);
                 }
                 redirects += 1;
-                request_url = self.redirect_url(&request_url, &response)?;
+                request_url = Self::redirect_url(&request_url, &response)?;
                 continue;
             }
             if !response.status().is_success() {
@@ -523,7 +519,7 @@ mod tests {
 
     #[cfg(not(madsim))]
     #[tokio::test]
-    async fn authenticated_redirects_require_the_configured_https_origin() {
+    async fn authenticated_redirects_follow_https_brokers() {
         let client = Client::new(&config(
             "https://admin.example:8443".to_owned(),
             Some("test-token"),
@@ -532,10 +528,13 @@ mod tests {
         for (location, allowed) in [
             ("/schema", true),
             ("https://admin.example:8443/schema?authoritative=true", true),
-            ("https://other.example:8443/schema", false),
-            ("https://admin.example:8444/schema", false),
+            ("https://other.example:8443/schema?authoritative=true", true),
+            ("https://admin.example:8444/schema", true),
             ("http://admin.example:8443/schema", false),
+            ("http://other.example:8080/schema", false),
+            ("file:///tmp/schema", false),
             ("https://user:password@admin.example:8443/schema", false),
+            ("https://user:password@other.example:8443/schema", false),
         ] {
             let redirect = format!(
                 "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -549,7 +548,7 @@ mod tests {
                 .send()
                 .await
                 .unwrap();
-            let result = client.redirect_url(&client.url, &response);
+            let result = Client::redirect_url(&client.url, &response);
             assert_eq!(result.is_ok(), allowed, "{location}");
             if let Err(error) = result {
                 assert!(!error.is_retryable());
