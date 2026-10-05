@@ -159,7 +159,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
 deltalake = { version = "0.32.0", features = ["s3", "gcs"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
-foyer = { version = "0.22.3", default-features = false, features = [
+foyer = { version = "0.22.6", default-features = false, features = [
     "runtime-madsim-tokio",
     "serde",
     "tracing",
@@ -459,6 +459,8 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
+# Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
+foyer = { git = "https://github.com/Li0k/foyer.git", rev = "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Keep transitive madsim-family resolution aligned to the same upstream rev.
 madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
