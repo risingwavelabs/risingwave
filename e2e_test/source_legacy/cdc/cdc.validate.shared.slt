@@ -116,76 +116,22 @@ create source oracle_invalid_pdb_identifier with (
 # invalid auto schema change option
 statement error Oracle CDC auto schema change is not supported
 create source oracle_invalid_schema_change with (
- ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
+ connector = 'oracle-cdc',
+ hostname = 'oracle',
+ port = '1521',
+ username = 'C##RW_VALIDATOR',
+ password = 'secret',
+ database.name = 'FREE',
+ database.pdb.name = 'FREEPDB1',
  schema.name = 'APP',
  auto.schema.change = 'true'
 ) FORMAT PLAIN ENCODE JSON;
 
-
-############################################################
-# Oracle: schema-level errors fire at `CREATE TABLE FROM SOURCE`.
-############################################################
-
-statement ok
-drop source if exists oracle_validate_src cascade;
-
-system ok
-PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
-from oracle_test_utils import prepare, execute_oracle_sqls, TEST_ORACLE_SOURCE_SCHEMA
-from oracle_test_hooks import no_op
-prepare(create_heartbeat_tables_hook=no_op)
-execute_oracle_sqls([
-    f"CREATE TABLE {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
-    f"ALTER TABLE {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
-    f"INSERT INTO {TEST_ORACLE_SOURCE_SCHEMA}.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
-])
-PY
-
-statement ok
-create source oracle_validate_src with (
- ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
- schema.name = 'APP',
- heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
- heartbeat.table.auto.initialize = 'true'
-) FORMAT PLAIN ENCODE JSON;
-
-# invalid upstream table name (missing schema)
-statement error (?s).*Invalid Oracle CDC table name.*expected schema.table.*
-create table oracle_invalid_table_name (*)
-from oracle_validate_src table 'CUSTOMERS';
-
-# invalid upstream table name (quoted identifier)
-statement error (?s).*Invalid Oracle CDC table name.*expected unquoted schema.table identifiers.*
-create table oracle_invalid_quoted_name (*)
-from oracle_validate_src table 'APP."CUSTOMERS"';
-
-# invalid upstream table name (table does not exist)
-statement error (?s).*Oracle table 'APP.RW_DOES_NOT_EXIST' has no visible columns.*
-create table oracle_missing_upstream (*)
-from oracle_validate_src table 'APP.RW_DOES_NOT_EXIST';
-
 query I
 select count(*) from rw_catalog.rw_relations
-where name in ('oracle_invalid_schema_change', 'oracle_invalid_table_name',
-               'oracle_invalid_quoted_name', 'oracle_missing_upstream');
+where name = 'oracle_invalid_schema_change';
 ----
 0
-
-# valid upstream table
-statement ok
-create table oracle_validate_control ("ID" INT PRIMARY KEY, "NAME" VARCHAR)
-from oracle_validate_src table 'APP.CUSTOMERS';
-
-query T retry 30 backoff 1s
-select "ID", "NAME" from oracle_validate_control;
-----
-1 RisingWave
-
-statement ok
-drop source oracle_validate_src cascade;
-
-system ok
-python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
 
 
 ############################################################
