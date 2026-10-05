@@ -15,6 +15,12 @@ from functools import partial
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+# Local MinIO / dev-only fixture credentials (NOT production secrets).
+# Kept as module constants so a single place controls them and tests can
+# never silently reuse these if pointed at a real S3/MinIO backend.
+DEV_MINIO_ACCESS_KEY = "hummockadmin"
+DEV_MINIO_SECRET_KEY = "hummockadmin"
+
 
 def _test_parquet_struct_field_subset(minio_client: Minio):
     """Generate a Parquet file with struct superset fields and verify RW can read a subset.
@@ -81,8 +87,8 @@ CREATE TABLE {table_name}(
   match_pattern = '{s3_key}',
   s3.region_name = 'custom',
   s3.bucket_name = 'hummock001',
-  s3.credentials.access = 'hummockadmin',
-  s3.credentials.secret = 'hummockadmin',
+  s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+  s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
   s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
   refresh.interval.sec = 1
 ) FORMAT PLAIN ENCODE PARQUET;
@@ -182,8 +188,8 @@ CREATE TABLE {table_name}(
   match_pattern = '{s3_key}',
   s3.region_name = 'custom',
   s3.bucket_name = 'hummock001',
-  s3.credentials.access = 'hummockadmin',
-  s3.credentials.secret = 'hummockadmin',
+  s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+  s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
   s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
   refresh.interval.sec = 1
 ) FORMAT PLAIN ENCODE PARQUET;
@@ -259,8 +265,8 @@ CREATE TABLE {table_name}(
   match_pattern = '{s3_key}',
   s3.region_name = 'custom',
   s3.bucket_name = 'hummock001',
-  s3.credentials.access = 'hummockadmin',
-  s3.credentials.secret = 'hummockadmin',
+  s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+  s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
   s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
   refresh.interval.sec = 1,
   parquet.case_insensitive = 'true'
@@ -368,8 +374,8 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
             match_pattern = '{dir}*.{fmt}{compress}',
             s3.region_name = 'custom',
             s3.bucket_name = 'hummock001',
-            s3.credentials.access = 'hummockadmin',
-            s3.credentials.secret = 'hummockadmin',
+            s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+            s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
             s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
             refresh.interval.sec = 1,
         ) FORMAT PLAIN ENCODE {_encode()};''')
@@ -386,8 +392,8 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
             match_pattern =  '{dir}*.{fmt}',
             s3.region_name = 'custom',
             s3.bucket_name = 'hummock001',
-            s3.credentials.access = 'hummockadmin',
-            s3.credentials.secret = 'hummockadmin',
+            s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+            s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
             s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
             refresh.interval.sec = 1,
         ) FORMAT PLAIN ENCODE {_encode()};''')
@@ -477,8 +483,8 @@ def test_batch_read(config, file_num, item_num_per_file, prefix, fmt, dir = "", 
             match_pattern =  '{dir}*.{fmt}{compress}',
             s3.region_name = 'custom',
             s3.bucket_name = 'hummock001',
-            s3.credentials.access = 'hummockadmin',
-            s3.credentials.secret = 'hummockadmin',
+            s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+            s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
             s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
             refresh.interval.sec = 1
         ) FORMAT PLAIN ENCODE {_encode()};''')
@@ -493,8 +499,8 @@ def test_batch_read(config, file_num, item_num_per_file, prefix, fmt, dir = "", 
             match_pattern =  '{dir}{prefix}*.{fmt}',
             s3.region_name = 'custom',
             s3.bucket_name = 'hummock001',
-            s3.credentials.access = 'hummockadmin',
-            s3.credentials.secret = 'hummockadmin',
+            s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+            s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
             s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
             refresh.interval.sec = 1
         ) FORMAT PLAIN ENCODE {_encode()};''')
@@ -583,8 +589,8 @@ if __name__ == "__main__":
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
         endpoint="127.0.0.1:9301",
-        access_key="hummockadmin",
-        secret_key="hummockadmin",
+        access_key=DEV_MINIO_ACCESS_KEY,
+        secret_key=DEV_MINIO_SECRET_KEY,
         secure=False,
     )
     run_id = str(random.randint(1000, 9999))
