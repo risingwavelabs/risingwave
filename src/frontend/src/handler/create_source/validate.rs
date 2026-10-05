@@ -424,7 +424,7 @@ mod tests {
             Format::Plain,
             Encode::Avro,
             &[
-                (PULSAR_SCHEMA_URL_KEY, "http://localhost:8080"),
+                (PULSAR_SCHEMA_URL_KEY, "https://localhost:8443"),
                 (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
             ],
         );

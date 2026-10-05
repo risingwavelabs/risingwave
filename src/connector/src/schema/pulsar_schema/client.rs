@@ -44,6 +44,8 @@ const MAX_REDIRECTS: usize = 5;
 enum RequestError {
     #[error("failed to send request: {0}")]
     Send(#[source] reqwest::Error),
+    #[error("failed to read response body: {0}")]
+    Body(#[source] reqwest::Error),
     #[error("request returned HTTP status {0}")]
     Status(StatusCode),
     #[error("invalid redirect: {0}")]
@@ -51,13 +53,13 @@ enum RequestError {
     #[error("too many redirects")]
     TooManyRedirects,
     #[error("failed to parse response: {0}")]
-    Json(#[source] reqwest::Error),
+    Json(#[source] serde_json::Error),
 }
 
 impl RequestError {
     fn is_retryable(&self) -> bool {
         match self {
-            Self::Send(_) => true,
+            Self::Send(_) | Self::Body(_) => true,
             Self::Status(status) => {
                 *status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
             }
@@ -150,6 +152,9 @@ impl Client {
         if !matches!(url.scheme(), "http" | "https") {
             bail!("Pulsar schema URL must use HTTP or HTTPS");
         }
+        if config.auth_token.is_some() && url.scheme() != "https" {
+            bail!("Pulsar schema bearer authentication requires HTTPS");
+        }
         if !url.username().is_empty() || url.password().is_some() {
             bail!("Pulsar schema URL must not contain credentials");
         }
@@ -157,8 +162,8 @@ impl Client {
             bail!("Pulsar schema URL must not contain a query or fragment");
         }
 
-        // Pulsar Admin APIs may redirect to the topic-owning broker. Handle redirects below so
-        // bearer authentication can be applied again when the host changes.
+        // Pulsar Admin APIs may redirect to the topic-owning broker. Validate redirects before
+        // sending a new request so credentials stay within the configured Admin API origin.
         let inner = HttpClient::builder()
             .timeout(DEFAULT_REQUEST_TIMEOUT)
             .redirect(Policy::none())
@@ -178,7 +183,7 @@ impl Client {
         let mut path = url
             .path_segments_mut()
             .map_err(|_| anyhow::anyhow!("Pulsar schema URL must be a base URL"))?;
-        path.extend([
+        path.pop_if_empty().extend([
             "admin",
             "v2",
             "schemas",
@@ -194,7 +199,7 @@ impl Client {
         Ok(url)
     }
 
-    fn redirect_url(current_url: &Url, response: &Response) -> Result<Url, RequestError> {
+    fn redirect_url(&self, current_url: &Url, response: &Response) -> Result<Url, RequestError> {
         let location = response
             .headers()
             .get(LOCATION)
@@ -213,6 +218,17 @@ impl Client {
         if current_url.scheme() == "https" && redirect_url.scheme() == "http" {
             return Err(RequestError::InvalidRedirect(
                 "refusing to redirect from HTTPS to HTTP".to_owned(),
+            ));
+        }
+        if !redirect_url.username().is_empty() || redirect_url.password().is_some() {
+            return Err(RequestError::InvalidRedirect(
+                "redirect URL must not contain credentials".to_owned(),
+            ));
+        }
+        if self.auth_token.is_some() && redirect_url.origin() != self.url.origin() {
+            return Err(RequestError::InvalidRedirect(
+                "authenticated Pulsar schema redirects must stay within the configured Admin API origin"
+                    .to_owned(),
             ));
         }
         Ok(redirect_url)
@@ -240,13 +256,14 @@ impl Client {
                     return Err(RequestError::TooManyRedirects);
                 }
                 redirects += 1;
-                request_url = Self::redirect_url(&request_url, &response)?;
+                request_url = self.redirect_url(&request_url, &response)?;
                 continue;
             }
             if !response.status().is_success() {
                 return Err(RequestError::Status(response.status()));
             }
-            return response.json().await.map_err(RequestError::Json);
+            let body = response.bytes().await.map_err(RequestError::Body)?;
+            return serde_json::from_slice(&body).map_err(RequestError::Json);
         }
     }
 
@@ -306,11 +323,7 @@ mod tests {
     }
 
     fn client() -> Client {
-        Client::new(&config(
-            "http://localhost:8080".to_owned(),
-            Some("test-token"),
-        ))
-        .unwrap()
+        Client::new(&config("http://localhost:8080".to_owned(), None)).unwrap()
     }
 
     #[test]
@@ -329,6 +342,40 @@ mod tests {
                 .unwrap()
                 .as_str(),
             "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema/42"
+        );
+    }
+
+    #[test]
+    fn schema_url_preserves_base_paths_with_or_without_a_trailing_slash() {
+        for base in [
+            "http://localhost:8080/pulsar",
+            "http://localhost:8080/pulsar/",
+        ] {
+            let client = Client::new(&config(base.to_owned(), None)).unwrap();
+            assert_eq!(
+                client
+                    .build_schema_url("events", Some(42))
+                    .unwrap()
+                    .as_str(),
+                "http://localhost:8080/pulsar/admin/v2/schemas/public/default/events/schema/42"
+            );
+        }
+    }
+
+    #[test]
+    fn bearer_authentication_requires_https() {
+        let error = Client::new(&config(
+            "http://localhost:8080".to_owned(),
+            Some("test-token"),
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("requires HTTPS"));
+        assert!(
+            Client::new(&config(
+                "https://localhost:8443".to_owned(),
+                Some("test-token")
+            ))
+            .is_ok()
         );
     }
 
@@ -454,7 +501,7 @@ mod tests {
 
     #[cfg(not(madsim))]
     #[tokio::test]
-    async fn cross_host_redirect_is_followed_and_token_is_sent() {
+    async fn anonymous_cross_origin_redirect_is_followed() {
         let body = r#"{"version":1,"type":"AVRO","data":"{}"}"#;
         let (target_url, target_requests, target_handle) =
             spawn_http_server(vec![response("200 OK", body)]);
@@ -462,16 +509,71 @@ mod tests {
             "HTTP/1.1 307 Temporary Redirect\r\nLocation: {target_url}/schema\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         );
         let (admin_url, admin_requests, admin_handle) = spawn_http_server(vec![redirect]);
-        let client = Client::new(&config(admin_url, Some("test-token"))).unwrap();
+        let client = Client::new(&config(admin_url, None)).unwrap();
 
         let schema = client.get_schema("tenant/ns/events", None).await.unwrap();
         assert_eq!(schema.version, 1);
         admin_requests.recv().unwrap();
         let redirected_request = target_requests.recv().unwrap().to_ascii_lowercase();
         assert!(redirected_request.starts_with("get /schema "));
-        assert!(redirected_request.contains("authorization: bearer test-token"));
+        assert!(!redirected_request.contains("authorization:"));
         admin_handle.join().unwrap();
         target_handle.join().unwrap();
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn authenticated_redirects_require_the_configured_https_origin() {
+        let client = Client::new(&config(
+            "https://admin.example:8443".to_owned(),
+            Some("test-token"),
+        ))
+        .unwrap();
+        for (location, allowed) in [
+            ("/schema", true),
+            ("https://admin.example:8443/schema?authoritative=true", true),
+            ("https://other.example:8443/schema", false),
+            ("https://admin.example:8444/schema", false),
+            ("http://admin.example:8443/schema", false),
+            ("https://user:password@admin.example:8443/schema", false),
+        ] {
+            let redirect = format!(
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            let (url, _requests, handle) = spawn_http_server(vec![redirect]);
+            let response = HttpClient::builder()
+                .redirect(Policy::none())
+                .build()
+                .unwrap()
+                .get(url)
+                .send()
+                .await
+                .unwrap();
+            let result = client.redirect_url(&client.url, &response);
+            assert_eq!(result.is_ok(), allowed, "{location}");
+            if let Err(error) = result {
+                assert!(!error.is_retryable());
+            }
+            handle.join().unwrap();
+        }
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn interrupted_response_body_is_retried() {
+        let body = r#"{"version":2,"type":"AVRO","data":"{}"}"#;
+        let (admin_url, requests, handle) = spawn_http_server(vec![
+            "HTTP/1.1 200 OK\r\nContent-Length: 999\r\nConnection: close\r\n\r\n{\"version\":2"
+                .to_owned(),
+            response("200 OK", body),
+        ]);
+        let client = Client::new(&config(admin_url, None)).unwrap();
+
+        assert_eq!(client.get_schema("events", None).await.unwrap().version, 2);
+        requests.recv().unwrap();
+        requests.recv().unwrap();
+        assert!(requests.try_recv().is_err());
+        handle.join().unwrap();
     }
 
     #[cfg(not(madsim))]

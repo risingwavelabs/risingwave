@@ -27,7 +27,16 @@ python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/defa
 system ok
 python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --topic 'persistent://public/default/rw-schema-avro' <<EOF
 {"id":1,"name":"Alice"}
-{"id":2,"name":"Bob"}
+EOF
+
+system ok
+python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-version 1 --topic 'persistent://public/default/rw-schema-avro' <<EOF
+{"id":2,"name":"Bob","category":"premium"}
+EOF
+
+system ok
+python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --topic 'persistent://public/default/rw-schema-avro' <<EOF
+{"id":3,"name":"Carol"}
 EOF
 
 system ok
@@ -73,13 +82,14 @@ format plain encode avro (
 
 statement ok
 create materialized view pulsar_avro_schema_mv as
-select id, name from pulsar_avro_schema;
+select id, name, category from pulsar_avro_schema;
 
-query IT rowsort retry 10 backoff 1s
-select id, name from pulsar_avro_schema_mv;
+query ITT rowsort retry 10 backoff 1s
+select id, name, category from pulsar_avro_schema_mv;
 ----
-1 Alice
-2 Bob
+1 Alice unknown
+2 Bob premium
+3 Carol unknown
 
 
 statement ok
