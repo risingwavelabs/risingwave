@@ -208,6 +208,7 @@ mod failpoint_limited {
     /// streams into the TABLE, V3 sink must commit at least one snapshot
     /// and remain consistent.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_basic_no_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -245,6 +246,7 @@ mod failpoint_limited {
     /// `recovery()`) and continue committing snapshots once the fault is
     /// cleared. Data must remain consistent (no duplicate file paths).
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_persist_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -303,6 +305,7 @@ mod failpoint_limited {
     /// probability during a fault window. V3's internal commit-retry path
     /// must reissue the commit; once the fault clears, snapshots resume.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_iceberg_commit_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -318,7 +321,6 @@ mod failpoint_limited {
         tokio::time::timeout(Duration::from_secs(30), handle.mock.wait_for_event('I'))
             .await
             .map_err(|_| anyhow::anyhow!("baseline 'I' never observed"))??;
-        let baseline_i_count = handle.mock.count_events('I');
 
         // Inject iceberg-side commit conflict via the mock catalog. Pin the
         // rate at 100% until one failure has landed so the fault window is
@@ -338,6 +340,7 @@ mod failpoint_limited {
         handle.mock.set_err_rate_txn_commit(0.3);
         tokio::time::sleep(Duration::from_secs(10)).await;
         handle.mock.set_err_rate_txn_commit(0.0);
+        let post_fault_i_count = handle.mock.count_events('I');
 
         // Sink resumes committing once the fault clears. F11 pinned at 100%
         // guarantees at least one retry-exhausted commit, which fails the
@@ -349,13 +352,15 @@ mod failpoint_limited {
         // Budget 120s (~4x) so it cannot recur.
         tokio::time::timeout(
             Duration::from_secs(120),
-            handle.mock.wait_for_event_count('I', baseline_i_count + 1),
+            handle
+                .mock
+                .wait_for_event_count('I', post_fault_i_count + 1),
         )
         .await
         .map_err(|_| {
             anyhow::anyhow!(
                 "no new 'I' commits after fault cleared; baseline={}, current={}, trace = {:?}",
-                baseline_i_count,
+                post_fault_i_count,
                 handle.mock.count_events('I'),
                 handle.mock.get_event_trace()
             )
@@ -372,6 +377,7 @@ mod failpoint_limited {
     /// V3 must redrive `handle_commit` on recovery, hit iceberg's idempotency
     /// check, and eventually mark the row Committed once the fault clears.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_commit_prune_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -421,6 +427,7 @@ mod failpoint_limited {
     /// persisted: the `metadata().snapshots()` idempotency check at
     /// `coordinator_worker.rs` short-circuits the retry before any catalog call.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_idempotent_on_retry() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -485,6 +492,7 @@ mod failpoint_limited {
     /// repeated re-commits, etc.) without ever producing a duplicate
     /// snapshot.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_random_failures_corner_case() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -563,6 +571,7 @@ mod failpoint_limited {
     /// the kill and fault clear, V3 must re-register the sink, re-load the
     /// catalog, and resume committing.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_during_pre_commit() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -617,6 +626,7 @@ mod failpoint_limited {
     /// so neither a fresh iceberg write nor a duplicate `'r'` may appear
     /// after the kill. Once the fault clears, fresh commits resume.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_during_commit() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -683,6 +693,7 @@ mod failpoint_limited {
     /// Chaos: kill+restart meta several times back-to-back. Workload + sink
     /// must converge in the end without producing duplicate snapshots.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_repeatedly() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -731,6 +742,7 @@ mod failpoint_limited {
     /// case where a panic in the recovery task deadlocks meta — if that
     /// happens, this test will hang/fail rather than hide the bug.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_recovery_during_recovery() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 

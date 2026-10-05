@@ -108,6 +108,7 @@ impl StreamNode for StreamLocalityProvider {
             state_table: Some(state_table.to_prost()),
             // Progress table for tracking backfill progress
             progress_table: Some(progress_table.to_prost()),
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
         };
 
         PbNodeBody::LocalityProvider(Box::new(locality_provider_node))

@@ -495,7 +495,7 @@ mod tests {
     /// ```bash
     /// cargo test --package risingwave_common_rate_limit --lib -- tests::test_leak_bucket --exact --show-output --ignored
     /// ```
-    #[ignore]
+    #[ignore = "long-running (10s) timing-sensitive throughput test; run manually with --ignored"]
     #[test]
     fn test_leak_bucket() {
         let v = Arc::new(AtomicU64::new(0));
@@ -545,7 +545,7 @@ mod tests {
     /// ```bash
     /// cargo test --package risingwave_common_rate_limit --lib -- tests::test_leak_bucket_overflow --exact --show-output --ignored
     /// ```
-    #[ignore]
+    #[ignore = "long-running (10s) timing-sensitive throughput test; run manually with --ignored"]
     #[test]
     fn test_leak_bucket_overflow() {
         let v = Arc::new(AtomicU64::new(0));

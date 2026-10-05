@@ -28,12 +28,13 @@
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: salesperson.id = all_sales.salesperson_id AND max(all_sales.amount) = all_sales.amount, output: [salesperson.name, max(all_sales.amount), all_sales.customer_name] }
       ├─BatchExchange { order: [], dist: HashShard(salesperson.id, max(all_sales.amount)) }
-      │ └─BatchHashJoin { type: Inner, predicate: salesperson.id = all_sales.salesperson_id, output: [salesperson.id, salesperson.name, max(all_sales.amount)] }
+      │ └─BatchHashJoin { type: LeftOuter, predicate: salesperson.id = all_sales.salesperson_id, output: [salesperson.id, salesperson.name, max(all_sales.amount)] }
       │   ├─BatchExchange { order: [], dist: HashShard(salesperson.id) }
       │   │ └─BatchScan { table: salesperson, columns: [salesperson.id, salesperson.name], distribution: SomeShard }
-      │   └─BatchHashAgg { group_key: [all_sales.salesperson_id], aggs: [max(all_sales.amount)] }
-      │     └─BatchExchange { order: [], dist: HashShard(all_sales.salesperson_id) }
-      │       └─BatchScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.amount], distribution: SomeShard }
+      │   └─BatchProject { exprs: [max(all_sales.amount), all_sales.salesperson_id] }
+      │     └─BatchHashAgg { group_key: [all_sales.salesperson_id], aggs: [max(all_sales.amount)] }
+      │       └─BatchExchange { order: [], dist: HashShard(all_sales.salesperson_id) }
+      │         └─BatchScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.amount], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(all_sales.salesperson_id, all_sales.amount) }
         └─BatchScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount], distribution: SomeShard }
   stream_plan: |-
@@ -41,10 +42,10 @@
     └─StreamExchange { dist: HashShard(max(all_sales.amount), salesperson._row_id, salesperson.id, all_sales._row_id) }
       └─StreamHashJoin { type: Inner, predicate: salesperson.id = all_sales.salesperson_id AND max(all_sales.amount) = all_sales.amount, output: [salesperson.name, max(all_sales.amount), all_sales.customer_name, salesperson._row_id, salesperson.id, all_sales._row_id] }
         ├─StreamExchange { dist: HashShard(salesperson.id, max(all_sales.amount)) }
-        │ └─StreamHashJoin { type: Inner, predicate: salesperson.id = all_sales.salesperson_id, output: [salesperson.id, salesperson.name, max(all_sales.amount), salesperson._row_id, all_sales.salesperson_id] }
+        │ └─StreamHashJoin { type: LeftOuter, predicate: salesperson.id = all_sales.salesperson_id, output: [salesperson.id, salesperson.name, max(all_sales.amount), salesperson._row_id, all_sales.salesperson_id] }
         │   ├─StreamExchange { dist: HashShard(salesperson.id) }
         │   │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: SnapshotBackfill, stream_key: [salesperson._row_id], pk: [_row_id], dist: UpstreamHashShard(salesperson._row_id) }
-        │   └─StreamProject { exprs: [all_sales.salesperson_id, max(all_sales.amount)] }
+        │   └─StreamProject { exprs: [max(all_sales.amount), all_sales.salesperson_id] }
         │     └─StreamHashAgg { group_key: [all_sales.salesperson_id], aggs: [max(all_sales.amount), count] }
         │       └─StreamExchange { dist: HashShard(all_sales.salesperson_id) }
         │         └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.amount, all_sales._row_id], stream_scan_type: SnapshotBackfill, stream_key: [all_sales._row_id], pk: [_row_id], dist: UpstreamHashShard(all_sales._row_id) }
@@ -462,7 +463,7 @@
       │ └─BatchScan { table: t1, columns: [t1.price_at, t1.qid, t1.price, t1.currency], distribution: SomeShard }
       └─BatchGroupTopN { order: [t2.ex_date ASC], limit: 1, offset: 0, group_key: [t1.price_at, t1.qid] }
         └─BatchExchange { order: [], dist: HashShard(t1.price_at, t1.qid) }
-          └─BatchHashJoin { type: LeftSemi, predicate: t1.price_at = max(t3.price_at) AND t2.ex_date IS NOT DISTINCT FROM t2.ex_date AND t2.qid IS NOT DISTINCT FROM t2.qid AND t1.price_at IS NOT DISTINCT FROM t1.price_at AND t1.qid IS NOT DISTINCT FROM internal_last_seen_value(t1.qid), output: [t1.price_at, t1.qid, t2.ex_date, t2.factor] }
+          └─BatchHashJoin { type: LeftSemi, predicate: t1.price_at = max(t3.price_at) AND t2.ex_date IS NOT DISTINCT FROM t2.ex_date AND t2.qid IS NOT DISTINCT FROM t2.qid, output: [t1.price_at, t1.qid, t2.ex_date, t2.factor] }
             ├─BatchExchange { order: [], dist: HashShard(t2.qid) }
             │ └─BatchHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
             │   ├─BatchExchange { order: [], dist: HashShard(t1.qid) }
@@ -471,29 +472,17 @@
             │   │     └─BatchScan { table: t1, columns: [t1.price_at, t1.qid], distribution: SomeShard }
             │   └─BatchExchange { order: [], dist: HashShard(t2.qid) }
             │     └─BatchScan { table: t2, columns: [t2.ex_date, t2.qid, t2.factor], distribution: SomeShard }
-            └─BatchHashAgg { group_key: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid], aggs: [max(t3.price_at)] }
-              └─BatchHashJoin { type: LeftOuter, predicate: t2.ex_date IS NOT DISTINCT FROM t2.ex_date AND t2.qid IS NOT DISTINCT FROM t2.qid AND t1.price_at IS NOT DISTINCT FROM t1.price_at AND internal_last_seen_value(t1.qid) IS NOT DISTINCT FROM internal_last_seen_value(t1.qid), output: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid, t3.price_at] }
+            └─BatchHashAgg { group_key: [t2.ex_date, t2.qid], aggs: [max(t3.price_at)] }
+              └─BatchHashJoin { type: LeftOuter, predicate: t2.ex_date IS NOT DISTINCT FROM t2.ex_date AND t2.qid IS NOT DISTINCT FROM t2.qid, output: [t2.ex_date, t2.qid, t3.price_at] }
                 ├─BatchExchange { order: [], dist: HashShard(t2.qid) }
-                │ └─BatchHashAgg { group_key: [t1.price_at, t2.ex_date, t2.qid], aggs: [internal_last_seen_value(t1.qid)] }
-                │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t2.ex_date, t2.qid) }
-                │     └─BatchHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
-                │       ├─BatchExchange { order: [], dist: HashShard(t1.qid) }
-                │       │ └─BatchHashAgg { group_key: [t1.price_at, t1.qid], aggs: [] }
-                │       │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t1.qid) }
-                │       │     └─BatchScan { table: t1, columns: [t1.price_at, t1.qid], distribution: SomeShard }
-                │       └─BatchExchange { order: [], dist: HashShard(t2.qid) }
-                │         └─BatchScan { table: t2, columns: [t2.ex_date, t2.qid], distribution: SomeShard }
-                └─BatchHashJoin { type: Inner, predicate: t2.qid = t3.qid AND (t3.price_at < t2.ex_date), output: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid, t3.price_at] }
+                │ └─BatchHashAgg { group_key: [t2.ex_date, t2.qid], aggs: [] }
+                │   └─BatchExchange { order: [], dist: HashShard(t2.ex_date, t2.qid) }
+                │     └─BatchScan { table: t2, columns: [t2.ex_date, t2.qid], distribution: SomeShard }
+                └─BatchHashJoin { type: Inner, predicate: t2.qid = t3.qid AND (t3.price_at < t2.ex_date), output: [t2.ex_date, t2.qid, t3.price_at] }
                   ├─BatchExchange { order: [], dist: HashShard(t2.qid) }
-                  │ └─BatchHashAgg { group_key: [t1.price_at, t2.ex_date, t2.qid], aggs: [internal_last_seen_value(t1.qid)] }
-                  │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t2.ex_date, t2.qid) }
-                  │     └─BatchHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
-                  │       ├─BatchExchange { order: [], dist: HashShard(t1.qid) }
-                  │       │ └─BatchHashAgg { group_key: [t1.price_at, t1.qid], aggs: [] }
-                  │       │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t1.qid) }
-                  │       │     └─BatchScan { table: t1, columns: [t1.price_at, t1.qid], distribution: SomeShard }
-                  │       └─BatchExchange { order: [], dist: HashShard(t2.qid) }
-                  │         └─BatchScan { table: t2, columns: [t2.ex_date, t2.qid], distribution: SomeShard }
+                  │ └─BatchHashAgg { group_key: [t2.ex_date, t2.qid], aggs: [] }
+                  │   └─BatchExchange { order: [], dist: HashShard(t2.ex_date, t2.qid) }
+                  │     └─BatchScan { table: t2, columns: [t2.ex_date, t2.qid], distribution: SomeShard }
                   └─BatchExchange { order: [], dist: HashShard(t3.qid) }
                     └─BatchScan { table: t3, columns: [t3.price_at, t3.qid], distribution: SomeShard }
   stream_plan: |-

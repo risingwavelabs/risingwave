@@ -36,7 +36,8 @@ use risingwave_pb::serverless_backfill_controller::{
 use risingwave_rpc_client::error::TonicStatusWrapper;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use thiserror_ext::AsReport;
-use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, RwLockReadGuard, oneshot};
+use tokio::time::{Duration, Instant};
 use tracing::Instrument;
 
 use super::{
@@ -44,8 +45,8 @@ use super::{
     StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
-    BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, ReplaceStreamJobPlan, SinceEpochInfo, SnapshotBackfillInfo,
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    IndependentStreamingJobType, ReplaceStreamJobPlan, SinceEpochInfo, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -60,10 +61,21 @@ use crate::model::{
     FragmentReplaceUpstream, StreamActor, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate, SubscriptionId,
 };
+use crate::stream::cdc::is_parallelized_backfill_enabled_cdc_scan_fragment;
 use crate::stream::{ReplaceJobSplitPlan, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
+
+/// The error carries whether the caller should explicitly cancel the creating job and an optional
+/// notifier for an awaited cancellation request.
+pub type CreateStreamingJobResult =
+    Result<NotificationVersion, (MetaError, bool, Option<oneshot::Sender<bool>>)>;
+
+/// A user is assumed to stay focused on a streaming-job creation for at most 30 seconds. If an
+/// error occurs during that time, cancel the job so that they can investigate the error. After
+/// that, prioritize eventual completion by continuing to wait through transient errors.
+const FOREGROUND_DDL_EARLY_FAILURE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) async fn cleanup_dropped_streaming_jobs(
     refresh_manager: &GlobalRefreshManagerRef,
@@ -367,7 +379,8 @@ impl GlobalStreamManager {
         stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
         permit: OwnedSemaphorePermit,
-    ) -> MetaResult<NotificationVersion> {
+        reschedule_job_lock: RwLockReadGuard<'_, ()>,
+    ) -> CreateStreamingJobResult {
         let await_tree_key = format!("Create Streaming Job Worker ({})", ctx.streaming_job.id());
         let await_tree_span = span!(
             "{:?}({})",
@@ -387,7 +400,12 @@ impl GlobalStreamManager {
             let create_type = ctx.create_type;
             let streaming_job = stream_manager
                 .run_create_streaming_job_command(stream_job_fragments, ctx)
-                .await?;
+                .await
+                .map_err(|err| (err, false, None))?;
+            // The create command has been collected, so rescheduling no longer conflicts with
+            // planning or scheduling this job. In particular, do not hold this lock while a
+            // foreground job waits through recovery.
+            drop(reschedule_job_lock);
             let version = match create_type {
                 CreateType::Background => {
                     stream_manager
@@ -397,10 +415,39 @@ impl GlobalStreamManager {
                         .await
                 }
                 CreateType::Foreground => {
-                    stream_manager
-                        .metadata_manager
-                        .wait_streaming_job_finished(database_id, streaming_job.id() as _)
-                        .await?
+                    let job_id = streaming_job.id() as _;
+                    let wait_started_at = Instant::now();
+                    loop {
+                        match stream_manager
+                            .metadata_manager
+                            .wait_streaming_job_finished(database_id, job_id)
+                            .await
+                        {
+                            Ok(version) => break version,
+                            Err(err) if err.is_catalog_id_not_found("streaming job") => {
+                                return Err((err, false, None));
+                            }
+                            Err(err)
+                                if wait_started_at.elapsed()
+                                    < FOREGROUND_DDL_EARLY_FAILURE_TIMEOUT =>
+                            {
+                                tracing::warn!(
+                                    id = %job_id,
+                                    error = %err.as_report(),
+                                    elapsed = ?wait_started_at.elapsed(),
+                                    "foreground streaming job failed shortly after waiting started; cancelling it"
+                                );
+                                return Err((err, true, None));
+                            }
+                            Err(err) => {
+                                tracing::warn!(
+                                    id = %job_id,
+                                    error = %err.as_report(),
+                                    "failed to wait for foreground streaming job; registering another finish notifier"
+                                );
+                            }
+                        }
+                    }
                 }
                 CreateType::Unspecified => unreachable!(),
             };
@@ -424,9 +471,8 @@ impl GlobalStreamManager {
                     tracing::debug!(id=%job_id, "cancelling streaming job");
 
                     enum CancelResult {
-                        Completed(MetaResult<NotificationVersion>),
-                        Failed(MetaError),
-                        Cancelled,
+                        Completed(CreateStreamingJobResult),
+                        Cancelled { explicitly_cancel: bool },
                     }
 
                     let cancel_res = if let Ok(job_fragments) =
@@ -441,76 +487,43 @@ impl GlobalStreamManager {
                                 id=%job_id,
                                 "cancelling streaming job in buffer queue."
                             );
-                            CancelResult::Cancelled
+                            CancelResult::Cancelled {
+                                explicitly_cancel: false,
+                            }
                         } else if !job_fragments.is_created() {
                             tracing::debug!(
                                 id=%job_id,
                                 "cancelling streaming job by issue cancel command."
                             );
-
-                            let cancel_result: MetaResult<()> = async {
-                                let abort_result = Box::pin(
-                                    self.metadata_manager
-                                        .catalog_controller
-                                        .try_abort_creating_streaming_job(job_id, true),
-                                )
-                                .await?;
-                                self.iceberg_compaction_manager
-                                    .clear_maintenance_for_aborted_job(&abort_result);
-                                let Some(cancel_info) = abort_result.cancel_info else {
-                                    return Ok(());
-                                };
-
-                                self.barrier_scheduler
-                                    .run_command(database_id, cancel_info.command)
-                                    .await?;
-                                cleanup_dropped_streaming_jobs(
-                                    &self.refresh_manager,
-                                    &self.hummock_manager,
-                                    &self.metadata_manager,
-                                    cancel_info.streaming_job_ids,
-                                    cancel_info.state_table_ids,
-                                    "cancel_streaming_job",
-                                )
-                                .await?;
-                                Ok(())
-                            }
-                            .await;
-
-                            match cancel_result {
-                                Ok(()) => CancelResult::Cancelled,
-                                Err(err) => {
-                                    tracing::warn!(
-                                        error = ?err.as_report(),
-                                        id = %job_id,
-                                        "failed to run cancel command for creating streaming job"
-                                    );
-                                    CancelResult::Failed(err)
-                                }
+                            CancelResult::Cancelled {
+                                explicitly_cancel: true,
                             }
                         } else {
                             // streaming job is already completed
                             CancelResult::Completed(
                                 self.metadata_manager
                                     .wait_streaming_job_finished(database_id, job_id)
-                                    .await,
+                                    .await
+                                    .map_err(|err| (err, false, None)),
                             )
                         }
                     } else {
-                        CancelResult::Cancelled
+                        CancelResult::Cancelled {
+                            explicitly_cancel: false,
+                        }
                     };
 
-                    let (cancelled, result) = match cancel_res {
-                        CancelResult::Completed(result) => (false, result),
-                        CancelResult::Failed(err) => (false, Err(err)),
-                        CancelResult::Cancelled => (true, Err(MetaError::cancelled("create"))),
-                    };
-
-                    let _ = notifier
-                        .send(cancelled)
-                        .inspect_err(|err| tracing::warn!("failed to notify cancellation result: {err}"));
-
-                    result
+                    match cancel_res {
+                        CancelResult::Completed(result) => {
+                            let _ = notifier.send(false).inspect_err(|err| {
+                                tracing::warn!("failed to notify cancellation result: {err}")
+                            });
+                            result
+                        }
+                        CancelResult::Cancelled { explicitly_cancel } => {
+                            Err((MetaError::cancelled("create"), explicitly_cancel, Some(notifier)))
+                        }
+                    }
                 }
             }
         }
@@ -654,7 +667,7 @@ impl GlobalStreamManager {
             refresh_interval_sec,
         };
 
-        let job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+        let create_job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
             if since_timestamp_epoch.is_some() {
                 bail!("since_timestamp should not be specified when no snapshot backfill");
             }
@@ -682,21 +695,25 @@ impl GlobalStreamManager {
                 refresh_interval_sec,
                 "sending Command::CreateBatchRefreshStreamingJob"
             );
-            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+            CreateStreamingJobType::Independent {
                 snapshot_backfill_info,
-                refresh_interval_sec,
-            })
+                kind: IndependentStreamingJobType::BatchRefresh {
+                    refresh_interval_sec,
+                },
+            }
         } else if let Some(snapshot_backfill_info) = snapshot_backfill_info {
             tracing::debug!(
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
             );
-            CreateStreamingJobType::SnapshotBackfill {
+            CreateStreamingJobType::Independent {
                 snapshot_backfill_info,
-                since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
-                    provided_since_epoch,
-                    resolved: None,
-                }),
+                kind: IndependentStreamingJobType::SnapshotBackfill {
+                    since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
+                        provided_since_epoch,
+                        resolved: None,
+                    }),
+                },
             }
         } else {
             if since_timestamp_epoch.is_some() {
@@ -712,7 +729,7 @@ impl GlobalStreamManager {
 
         let command = Command::CreateStreamingJob {
             info,
-            job_type,
+            job_type: create_job_type,
             cross_db_snapshot_backfill_info,
         };
 
@@ -911,15 +928,12 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let background_jobs = self
-            .metadata_manager
-            .list_background_creating_jobs()
-            .await?;
+        let creating_jobs = self.metadata_manager.list_creating_jobs().await?;
 
-        if !background_jobs.is_empty() {
+        if !creating_jobs.is_empty() {
             let blocked_jobs = self
                 .metadata_manager
-                .collect_reschedule_blocked_jobs_for_creating_jobs(&background_jobs, !deferred)
+                .collect_reschedule_blocked_jobs_for_creating_jobs(&creating_jobs, !deferred)
                 .await?;
 
             if blocked_jobs.contains(&job_id) {
@@ -956,22 +970,21 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let background_jobs = self
-            .metadata_manager
-            .list_background_creating_jobs()
-            .await?;
+        if !deferred {
+            let creating_jobs = self.metadata_manager.list_creating_jobs().await?;
 
-        if !background_jobs.is_empty() {
-            let unreschedulable = self
-                .metadata_manager
-                .collect_unreschedulable_backfill_jobs(&background_jobs, !deferred)
-                .await?;
+            if !creating_jobs.is_empty() {
+                let jobs_with_unreschedulable_scan = self
+                    .metadata_manager
+                    .collect_online_unreschedulable_backfill_jobs(&creating_jobs)
+                    .await?;
 
-            if unreschedulable.contains(&job_id) {
-                bail!(
-                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
-                    job_id,
-                );
+                if jobs_with_unreschedulable_scan.contains(&job_id) {
+                    bail!(
+                        "Cannot alter the job {} because its creating backfill contains a scan type that does not support online rescheduling",
+                        job_id,
+                    );
+                }
             }
         }
 
@@ -1014,11 +1027,16 @@ impl GlobalStreamManager {
 
         let cdc_fragment_id = {
             let inner = self.metadata_manager.catalog_controller.inner.read().await;
-            let fragments: Vec<(risingwave_meta_model::FragmentId, i32)> = FragmentModel::find()
+            let fragments: Vec<(
+                risingwave_meta_model::FragmentId,
+                i32,
+                risingwave_meta_model::StreamNode,
+            )> = FragmentModel::find()
                 .select_only()
                 .columns([
                     fragment::Column::FragmentId,
                     fragment::Column::FragmentTypeMask,
+                    fragment::Column::StreamNode,
                 ])
                 .filter(fragment::Column::JobId.eq(job_id))
                 .into_tuple()
@@ -1027,10 +1045,13 @@ impl GlobalStreamManager {
 
             let cdc_fragments = fragments
                 .into_iter()
-                .filter_map(|(fragment_id, mask)| {
-                    FragmentTypeMask::from(mask)
-                        .contains(FragmentTypeFlag::StreamCdcScan)
-                        .then_some(fragment_id)
+                .filter_map(|(fragment_id, mask, stream_node)| {
+                    is_parallelized_backfill_enabled_cdc_scan_fragment(
+                        FragmentTypeMask::from(mask),
+                        &stream_node.to_protobuf(),
+                    )
+                    .is_some()
+                    .then_some(fragment_id)
                 })
                 .collect_vec();
 

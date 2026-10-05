@@ -136,7 +136,7 @@ impl AwsAuthProps {
                 .build()
                 .region()
                 .await
-                .context("region should be provided")?)
+                .context("region must be provided")?)
         }
     }
 
@@ -156,7 +156,7 @@ impl AwsAuthProps {
                 aws_config::default_provider::credentials::default_provider().await,
             ))
         } else {
-            bail!("Both \"access_key\" and \"secret_key\" are required.")
+            bail!("Both `access_key` and `secret_key` must be provided")
         }
     }
 
@@ -248,7 +248,7 @@ pub struct KafkaConnectionProps {
     #[with_option(allow_alter_on_fly)]
     ssl_key_password: Option<String>,
 
-    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
+    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, OAUTHBEARER, and `AWS_MSK_IAM`.
     #[serde(rename = "properties.sasl.mechanism")]
     #[with_option(allow_alter_on_fly)]
     sasl_mechanism: Option<String>,
@@ -265,27 +265,63 @@ pub struct KafkaConnectionProps {
 
     /// Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
     #[serde(rename = "properties.sasl.kerberos.service.name")]
+    #[with_option(allow_alter_on_fly)]
     sasl_kerberos_service_name: Option<String>,
 
     /// Path to client's Kerberos keytab file under SASL/GSSAPI.
     #[serde(rename = "properties.sasl.kerberos.keytab")]
+    #[with_option(allow_alter_on_fly)]
     sasl_kerberos_keytab: Option<String>,
 
     /// Client's Kerberos principal name under SASL/GSSAPI.
     #[serde(rename = "properties.sasl.kerberos.principal")]
+    #[with_option(allow_alter_on_fly)]
     sasl_kerberos_principal: Option<String>,
 
     /// Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
     #[serde(rename = "properties.sasl.kerberos.kinit.cmd")]
+    #[with_option(allow_alter_on_fly)]
     sasl_kerberos_kinit_cmd: Option<String>,
 
     /// Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
     #[serde(rename = "properties.sasl.kerberos.min.time.before.relogin")]
+    #[with_option(allow_alter_on_fly)]
     sasl_kerberos_min_time_before_relogin: Option<String>,
 
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
+    #[with_option(allow_alter_on_fly)]
     sasl_oathbearer_config: Option<String>,
+
+    /// SASL/OAUTHBEARER token acquisition method. Set to "oidc" to use the OIDC client credentials flow.
+    #[serde(rename = "properties.sasl.oauthbearer.method")]
+    #[with_option(allow_alter_on_fly)]
+    sasl_oauthbearer_method: Option<String>,
+
+    /// Client ID for SASL/OAUTHBEARER OIDC provider.
+    #[serde(rename = "properties.sasl.oauthbearer.client.id")]
+    #[with_option(allow_alter_on_fly)]
+    sasl_oauthbearer_client_id: Option<String>,
+
+    /// Client secret for SASL/OAUTHBEARER OIDC provider.
+    #[serde(rename = "properties.sasl.oauthbearer.client.secret")]
+    #[with_option(allow_alter_on_fly)]
+    sasl_oauthbearer_client_secret: Option<String>,
+
+    /// OIDC token endpoint URL for SASL/OAUTHBEARER.
+    #[serde(rename = "properties.sasl.oauthbearer.token.endpoint.url")]
+    #[with_option(allow_alter_on_fly)]
+    sasl_oauthbearer_token_endpoint_url: Option<String>,
+
+    /// OIDC scope for SASL/OAUTHBEARER.
+    #[serde(rename = "properties.sasl.oauthbearer.scope")]
+    #[with_option(allow_alter_on_fly)]
+    sasl_oauthbearer_scope: Option<String>,
+
+    /// SASL/OAUTHBEARER extensions for broker-facing claims (e.g. Confluent Cloud logicalCluster, identityPoolId).
+    #[serde(rename = "properties.sasl.oauthbearer.extensions")]
+    #[with_option(allow_alter_on_fly)]
+    sasl_oauthbearer_extensions: Option<String>,
 }
 
 impl EnforceSecret for KafkaConnectionProps {
@@ -293,6 +329,7 @@ impl EnforceSecret for KafkaConnectionProps {
         "properties.ssl.key.pem",
         "properties.ssl.key.password",
         "properties.sasl.password",
+        "properties.sasl.oauthbearer.client.secret",
     };
 }
 
@@ -469,6 +506,12 @@ impl KafkaConnectionProps {
             sasl_kerberos_kinit_cmd: None,
             sasl_kerberos_min_time_before_relogin: None,
             sasl_oathbearer_config: None,
+            sasl_oauthbearer_method: None,
+            sasl_oauthbearer_client_id: None,
+            sasl_oauthbearer_client_secret: None,
+            sasl_oauthbearer_token_endpoint_url: None,
+            sasl_oauthbearer_scope: None,
+            sasl_oauthbearer_extensions: None,
         }
     }
 
@@ -556,8 +599,42 @@ impl KafkaConnectionProps {
         if let Some(sasl_oathbearer_config) = self.sasl_oathbearer_config.as_ref() {
             config.set("sasl.oauthbearer.config", sasl_oathbearer_config);
         }
-        // Currently, we only support unsecured OAUTH.
-        config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+        if let Some(sasl_oauthbearer_method) = self.sasl_oauthbearer_method.as_ref() {
+            config.set("sasl.oauthbearer.method", sasl_oauthbearer_method);
+        }
+        if let Some(sasl_oauthbearer_client_id) = self.sasl_oauthbearer_client_id.as_ref() {
+            config.set("sasl.oauthbearer.client.id", sasl_oauthbearer_client_id);
+        }
+        if let Some(sasl_oauthbearer_client_secret) = self.sasl_oauthbearer_client_secret.as_ref() {
+            config.set(
+                "sasl.oauthbearer.client.secret",
+                sasl_oauthbearer_client_secret,
+            );
+        }
+        if let Some(sasl_oauthbearer_token_endpoint_url) =
+            self.sasl_oauthbearer_token_endpoint_url.as_ref()
+        {
+            config.set(
+                "sasl.oauthbearer.token.endpoint.url",
+                sasl_oauthbearer_token_endpoint_url,
+            );
+        }
+        if let Some(sasl_oauthbearer_scope) = self.sasl_oauthbearer_scope.as_ref() {
+            config.set("sasl.oauthbearer.scope", sasl_oauthbearer_scope);
+        }
+        if let Some(sasl_oauthbearer_extensions) = self.sasl_oauthbearer_extensions.as_ref() {
+            config.set("sasl.oauthbearer.extensions", sasl_oauthbearer_extensions);
+        }
+        // Only enable unsecured JWT when not using OIDC method.
+        if !self.is_oauthbearer_oidc() {
+            config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+        }
+    }
+
+    pub(crate) fn is_oauthbearer_oidc(&self) -> bool {
+        self.sasl_oauthbearer_method
+            .as_deref()
+            .is_some_and(|m| m.eq_ignore_ascii_case("oidc"))
     }
 
     pub(crate) fn is_aws_msk_iam(&self) -> bool {
@@ -975,7 +1052,9 @@ impl NatsCommon {
                     connect_options =
                         connect_options.user_and_password(v_user.into(), v_password.into())
                 } else {
-                    bail!("nats connect mode is user_and_password, but user or password is empty");
+                    bail!(
+                        "NATS connect mode `user_and_password` requires both `user` and `password`"
+                    );
                 }
             }
 
@@ -985,12 +1064,14 @@ impl NatsCommon {
                         .credentials(&self.create_credential(v_nkey, v_jwt)?)
                         .expect("failed to parse static creds")
                 } else {
-                    bail!("nats connect mode is credential, but nkey or jwt is empty");
+                    bail!("NATS connect mode `credential` requires both `nkey` and `jwt`");
                 }
             }
             "plain" => {}
             _ => {
-                bail!("nats connect mode only accepts user_and_password/credential/plain");
+                bail!(
+                    "NATS connect mode must be one of `user_and_password`, `credential`, or `plain`"
+                );
             }
         };
 
@@ -1003,7 +1084,7 @@ impl NatsCommon {
                     .collect::<Result<Vec<async_nats::ServerAddr>, _>>()?,
             )
             .await
-            .context("build nats client error")
+            .context("failed to build the NATS client")
             .map_err(SinkError::Nats)?;
         Ok(client)
     }
@@ -1023,21 +1104,21 @@ impl NatsCommon {
                 {
                     match existing_client.connection_state() {
                         async_nats::connection::State::Connected => {
-                            tracing::info!("reuse existing nats client for {}", self.server_url);
+                            tracing::info!("reusing existing NATS client for {}", self.server_url);
                             client = Some(existing_client);
                             return Ok(Op::Nop);
                         }
                         _ => {
                             tracing::warn!(
                                 server_url = self.server_url,
-                                "existing nats client is not connected",
+                                "existing NATS client is not connected",
                             );
                         }
                     }
                 }
                 tracing::info!(
                     server_url = self.server_url,
-                    "no cached client, or client disconnected, building new nats client"
+                    "no cached NATS client was found, or the cached client disconnected; building a new client"
                 );
                 let new_client = Arc::new(self.build_client_inner().await?);
                 client = Some(new_client.clone());
@@ -1206,7 +1287,7 @@ pub(crate) fn load_certs(
 
     CertificateDer::pem_slice_iter(&cert_bytes)
         .collect::<Result<Vec<_>, _>>()
-        .context("Failed to parse certificates")
+        .context("failed to parse certificates")
         .map_err(Into::into)
 }
 
@@ -1222,7 +1303,7 @@ pub(crate) fn load_private_key(
     let cert = PrivatePkcs8KeyDer::pem_slice_iter(&cert_bytes)
         .next()
         .ok_or_else(|| anyhow!("No private key found"))?
-        .context("Failed to parse private key")?;
+        .context("failed to parse the private key")?;
     Ok(cert.into())
 }
 
@@ -1250,5 +1331,133 @@ impl MongodbCommon {
         let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;
 
         Ok(client)
+    }
+}
+
+/// TCP keepalive knobs for long-lived Postgres clients, see `create_pg_client`.
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
+pub struct TcpKeepaliveConfig {
+    #[serde(rename = "tcp.keepalive.idle", default = "default_tcp_keepalive_idle")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_idle: u32,
+    #[serde(
+        rename = "tcp.keepalive.interval",
+        default = "default_tcp_keepalive_interval"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_interval: u32,
+    #[serde(
+        rename = "tcp.keepalive.count",
+        default = "default_tcp_keepalive_count"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_count: u32,
+}
+
+const fn default_tcp_keepalive_idle() -> u32 {
+    10 * 60
+}
+
+const fn default_tcp_keepalive_interval() -> u32 {
+    10
+}
+
+const fn default_tcp_keepalive_count() -> u32 {
+    3
+}
+
+#[cfg(all(test, not(madsim)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_oauthbearer_oidc_does_not_set_unsecure_jwt() {
+        let mut props = KafkaConnectionProps::test_default();
+        props.sasl_mechanism = Some("OAUTHBEARER".to_owned());
+        props.sasl_oauthbearer_method = Some("oidc".to_owned());
+        props.sasl_oauthbearer_client_id = Some("my-client".to_owned());
+        props.sasl_oauthbearer_client_secret = Some("my-secret".to_owned());
+        props.sasl_oauthbearer_token_endpoint_url =
+            Some("https://idp.example.com/token".to_owned());
+        props.sasl_oauthbearer_scope = Some("kafka".to_owned());
+
+        let mut config = rdkafka::ClientConfig::new();
+        props.set_security_properties(&mut config);
+
+        let map = config.config_map();
+        assert_eq!(map.get("sasl.mechanism").unwrap(), "OAUTHBEARER");
+        assert_eq!(map.get("sasl.oauthbearer.method").unwrap(), "oidc");
+        assert_eq!(map.get("sasl.oauthbearer.client.id").unwrap(), "my-client");
+        assert_eq!(
+            map.get("sasl.oauthbearer.client.secret").unwrap(),
+            "my-secret"
+        );
+        assert_eq!(
+            map.get("sasl.oauthbearer.token.endpoint.url").unwrap(),
+            "https://idp.example.com/token"
+        );
+        assert_eq!(map.get("sasl.oauthbearer.scope").unwrap(), "kafka");
+        assert!(
+            !map.contains_key("enable.sasl.oauthbearer.unsecure.jwt"),
+            "unsecure JWT must not be set when method=oidc"
+        );
+    }
+
+    #[test]
+    fn test_default_oauthbearer_sets_unsecure_jwt() {
+        let mut props = KafkaConnectionProps::test_default();
+        props.sasl_mechanism = Some("OAUTHBEARER".to_owned());
+        props.sasl_oathbearer_config = Some("principal=user".to_owned());
+
+        let mut config = rdkafka::ClientConfig::new();
+        props.set_security_properties(&mut config);
+
+        let map = config.config_map();
+        assert_eq!(map.get("sasl.mechanism").unwrap(), "OAUTHBEARER");
+        assert_eq!(
+            map.get("enable.sasl.oauthbearer.unsecure.jwt").unwrap(),
+            "true"
+        );
+        assert!(!map.contains_key("sasl.oauthbearer.method"));
+    }
+
+    #[test]
+    fn test_aws_msk_iam_unaffected_by_oidc() {
+        let mut props = KafkaConnectionProps::test_default();
+        props.sasl_mechanism = Some("AWS_MSK_IAM".to_owned());
+
+        let mut config = rdkafka::ClientConfig::new();
+        props.set_security_properties(&mut config);
+
+        let map = config.config_map();
+        // MSK IAM takes the early-return path
+        assert_eq!(map.get("security.protocol").unwrap(), "SASL_SSL");
+        assert_eq!(map.get("sasl.mechanism").unwrap(), "OAUTHBEARER");
+        // Should not have any OIDC or unsecure JWT settings
+        assert!(!map.contains_key("sasl.oauthbearer.method"));
+        assert!(!map.contains_key("enable.sasl.oauthbearer.unsecure.jwt"));
+    }
+
+    #[test]
+    fn test_oauthbearer_oidc_with_extensions() {
+        let mut props = KafkaConnectionProps::test_default();
+        props.sasl_mechanism = Some("OAUTHBEARER".to_owned());
+        props.sasl_oauthbearer_method = Some("oidc".to_owned());
+        props.sasl_oauthbearer_client_id = Some("client".to_owned());
+        props.sasl_oauthbearer_client_secret = Some("".to_owned());
+        props.sasl_oauthbearer_token_endpoint_url =
+            Some("https://idp.example.com/token".to_owned());
+        props.sasl_oauthbearer_extensions =
+            Some("logicalCluster=lkc-abc,identityPoolId=pool-xyz".to_owned());
+
+        let mut config = rdkafka::ClientConfig::new();
+        props.set_security_properties(&mut config);
+
+        let map = config.config_map();
+        assert_eq!(
+            map.get("sasl.oauthbearer.extensions").unwrap(),
+            "logicalCluster=lkc-abc,identityPoolId=pool-xyz"
+        );
     }
 }

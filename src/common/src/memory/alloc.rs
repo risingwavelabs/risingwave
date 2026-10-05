@@ -45,15 +45,17 @@ impl MonitoredGlobalAlloc {
 unsafe impl<A: Allocator> Allocator for MonitoredAlloc<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let ret = self.alloc.allocate(layout)?;
-        // We don't throw an AllocError if the memory context is out of memory, otherwise the whole process will crash.
-        self.ctx.add(layout.size() as i64);
+        // Ordinary collection operations may abort on AllocError. Do not turn a budget overrun
+        // into allocation failure, but always record the successful allocation for a matching
+        // deallocation. Higher-level callers decide whether to spill or fail the query.
+        self.ctx.add_unchecked(layout.size() as i64);
         Ok(ret)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         unsafe {
             self.alloc.deallocate(ptr, layout);
-            self.ctx.add(-(layout.size() as i64));
+            self.ctx.add_unchecked(-(layout.size() as i64));
         }
     }
 }
@@ -61,15 +63,15 @@ unsafe impl<A: Allocator> Allocator for MonitoredAlloc<A> {
 unsafe impl<A: Allocator> AllocatorApi2 for MonitoredAlloc<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocErrorApi2> {
         let ret = self.alloc.allocate(layout).map_err(|_| AllocErrorApi2)?;
-        // Keep memory accounting behavior consistent with the std::alloc::Allocator path.
-        self.ctx.add(layout.size() as i64);
+        // As in the std allocator path, record every successful allocation even over budget.
+        self.ctx.add_unchecked(layout.size() as i64);
         Ok(ret)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         unsafe {
             self.alloc.deallocate(ptr, layout);
-            self.ctx.add(-(layout.size() as i64));
+            self.ctx.add_unchecked(-(layout.size() as i64));
         }
     }
 }

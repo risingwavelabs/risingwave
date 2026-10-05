@@ -76,6 +76,70 @@ WHERE name = 'kafka_test_source'
 ----
 1
 
+# A source-level admin update must not override a property owned by its CONNECTION.
+statement ok
+CREATE CONNECTION safe_update_conn WITH (
+    type = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.security.protocol = 'plaintext'
+);
+
+statement ok
+CREATE SOURCE kafka_connection_test_source (id INT, data VARCHAR)
+WITH (
+    connector = 'kafka',
+    connection = safe_update_conn,
+    topic = 'test_safe_update'
+) FORMAT PLAIN ENCODE JSON;
+
+system ok
+SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    -p ${RISEDEV_RW_FRONTEND_PORT} \
+    -d $__DATABASE__ \
+    -U root \
+    -t -A \
+    -c "SELECT id FROM rw_sources WHERE name = 'kafka_connection_test_source'") && \
+if OUTPUT=$(./risedev ctl meta alter-source-properties-safe \
+    --source-id $SOURCE_ID \
+    --props '{"properties.bootstrap.server": "other-broker:9092"}' 2>&1); then \
+    echo "Expected connection-owned property update to fail" >&2; \
+    exit 1; \
+fi && \
+echo "$OUTPUT" | grep -Fq 'Use ALTER CONNECTION instead.'
+
+query I
+SELECT COUNT(*) FROM rw_sources
+WHERE name = 'kafka_connection_test_source'
+  AND definition LIKE '%connection = safe_update_conn%'
+  AND definition NOT LIKE '%properties.bootstrap.server%';
+----
+1
+
+# Replay the saved definition to detect conflicts between direct options and CONNECTION options.
+system ok
+SOURCE_DDL=$(psql -X -v ON_ERROR_STOP=1 \
+    -h "$SLT_HOST" -p "$SLT_PORT" -d "$__DATABASE__" -U root -t -A \
+    -c "SELECT definition FROM rw_sources WHERE name = 'kafka_connection_test_source'") && \
+test -n "$SOURCE_DDL" && \
+psql -X -v ON_ERROR_STOP=1 \
+    -h "$SLT_HOST" -p "$SLT_PORT" -d "$__DATABASE__" -U root \
+    -c "DROP SOURCE kafka_connection_test_source" \
+    -c "$SOURCE_DDL"
+
+query I
+SELECT COUNT(*) FROM rw_sources
+WHERE name = 'kafka_connection_test_source'
+  AND definition LIKE '%connection = safe_update_conn%'
+  AND definition NOT LIKE '%properties.bootstrap.server%';
+----
+1
+
+statement ok
+DROP SOURCE kafka_connection_test_source;
+
+statement ok
+DROP CONNECTION safe_update_conn;
+
 # Test 2: Reset splits (without property update)
 system ok
 SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \

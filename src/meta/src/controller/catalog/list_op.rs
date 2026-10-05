@@ -32,19 +32,40 @@ impl CatalogController {
         Ok(RefreshJob::find().all(&inner.db).await?)
     }
 
-    pub async fn get_refresh_job_state_by_table_id(
+    /// The refresh jobs that are not idle, of one database or of all.
+    pub async fn list_refreshing_jobs(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<refresh_job::Model>> {
+        let inner = self.inner.read().await;
+        let database_cond = database_id
+            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+            .unwrap_or_else(|| SimpleExpr::from(true));
+        Ok(RefreshJob::find()
+            .join(JoinType::InnerJoin, refresh_job::Relation::Table.def())
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .filter(
+                refresh_job::Column::CurrentStatus
+                    .ne(RefreshState::Idle)
+                    .and(database_cond),
+            )
+            .all(&inner.db)
+            .await?)
+    }
+
+    /// The refresh state of a table, or `None` if the table is not refreshable.
+    pub async fn get_refresh_job_state(
         &self,
         table_id: TableId,
-    ) -> MetaResult<RefreshState> {
+    ) -> MetaResult<Option<RefreshState>> {
         let inner = self.inner.read().await;
-        let (refresh_job_state,): (RefreshState,) = RefreshJob::find_by_id(table_id)
+        let state: Option<(RefreshState,)> = RefreshJob::find_by_id(table_id)
             .select_only()
             .select_column(refresh_job::Column::CurrentStatus)
             .into_tuple()
             .one(&inner.db)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("refresh_job", table_id))?;
-        Ok(refresh_job_state)
+            .await?;
+        Ok(state.map(|(state,)| state))
     }
 
     pub async fn list_refreshable_table_ids(&self) -> MetaResult<Vec<TableId>> {
@@ -96,34 +117,12 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn list_background_creating_jobs(
-        &self,
-        include_initial: bool,
-        database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashSet<JobId>> {
-        Ok(self
-            .list_creating_jobs(include_initial, false, database_id)
-            .await?
-            .into_iter()
-            .map(|(job_id, _, _, create_type, _)| {
-                assert_eq!(create_type, CreateType::Background);
-                job_id
-            })
-            .collect())
-    }
-
     pub async fn list_creating_jobs(
         &self,
         include_initial: bool,
-        include_foreground: bool,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<Vec<(JobId, String, DateTime, CreateType, bool)>> {
         let inner = self.inner.read().await;
-        let create_type_cond = if include_foreground {
-            SimpleExpr::from(true)
-        } else {
-            streaming_job::Column::CreateType.eq(CreateType::Background)
-        };
         let status_cond = if include_initial {
             streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating])
         } else {
@@ -132,7 +131,7 @@ impl CatalogController {
         let database_cond = database_id
             .map(|database_id| object::Column::DatabaseId.eq(database_id))
             .unwrap_or_else(|| SimpleExpr::from(true));
-        let filter_cond = create_type_cond.and(status_cond).and(database_cond);
+        let filter_cond = status_cond.and(database_cond);
         let object_columns = [object::Column::InitializedAt];
         let streaming_job_columns = [
             streaming_job::Column::CreateType,

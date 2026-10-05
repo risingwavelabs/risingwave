@@ -21,7 +21,7 @@ use std::mem::take;
 use std::ops::Bound::{Excluded, Unbounded};
 use std::time::Duration;
 
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
@@ -29,46 +29,41 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId, PartialGraphId};
-use risingwave_pb::stream_plan::barrier::PbBarrierKind;
+use risingwave_pb::stream_plan::StopMutation;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
+use self::barrier_control::CreatingStreamingJobBarrierStats;
 use super::super::state::RenderResult;
-use super::IndependentCheckpointJobControl;
+use super::{
+    IndependentCheckpointJob, IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
+    IndependentJobControl, IndependentJobInfo, InitialPartialGraphRequest, SnapshotPhaseControl,
+    add_initial_partial_graph, build_initial_add_mutation,
+    snapshot_backfill_max_pending_barrier_num,
+};
 use crate::MetaResult;
-use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
-use crate::barrier::checkpoint::independent_job::creating_job::barrier_control::CreatingStreamingJobBarrierStats;
 use crate::barrier::checkpoint::independent_job::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::command::{
     PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs,
 };
-use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
+use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
-use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
 };
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
-use crate::barrier::rpc::{build_locality_fragment_state_table_mapping, to_partial_graph_id};
+use crate::barrier::progress::{TrackingJob, collect_done_fragments};
 use crate::barrier::{
-    BackfillOrderState, BackfillProgress, BarrierKind, Command, FragmentBackfillProgress,
-    TracedEpoch,
+    BackfillProgress, BarrierKind, Command, FragmentBackfillProgress, TracedEpoch,
 };
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::manager::MetaOpts;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
+use crate::notification::NotifierStarter;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
-
-fn snapshot_backfill_max_pending_barrier_num(opts: &MetaOpts) -> usize {
-    opts.in_flight_barrier_nums
-        .saturating_mul(opts.snapshot_backfill_barrier_amplification_factor.max(1))
-}
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -81,15 +76,10 @@ pub(crate) struct CreatingJobInfo {
 
 #[derive(Debug)]
 pub(crate) struct CreatingStreamingJobControl {
-    job_id: JobId,
-    partial_graph_id: PartialGraphId,
-    snapshot_backfill_upstream_tables: HashSet<TableId>,
-    snapshot_epoch: u64,
+    control: IndependentJobControl,
 
     node_actors: HashMap<WorkerId, HashSet<ActorId>>,
-    state_table_ids: HashSet<TableId>,
 
-    max_committed_epoch: Option<u64>,
     status: CreatingStreamingJobStatus,
     max_lagged_barrier_num: usize,
     max_pending_barrier_num: usize,
@@ -101,12 +91,13 @@ impl CreatingStreamingJobControl {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new<'a>(
         entry: hash_map::VacantEntry<'a, JobId, IndependentCheckpointJobControl>,
-        create_info: CreateSnapshotBackfillJobCommandInfo,
+        create_info: CreateIndependentStreamingJobCommandInfo,
         notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         since_timestamp_upstream_log_epochs: Option<(&TableLogEpochs, PartialGraphId, u64)>,
         version_stat: &HummockVersionStats,
+        term_id: &str,
         partial_graph_manager: &mut PartialGraphManager,
         edges: &mut FragmentEdgeBuildResult,
         split_assignment: &SplitAssignment,
@@ -115,6 +106,7 @@ impl CreatingStreamingJobControl {
         let info = create_info.info.clone();
         let job_id = info.stream_job_fragments.stream_job_id();
         let database_id = info.streaming_job.database_id();
+        let is_since_timestamp = since_timestamp_upstream_log_epochs.is_some();
         debug!(
             %job_id,
             definition = info.definition,
@@ -130,22 +122,6 @@ impl CreatingStreamingJobControl {
             .collect();
         let snapshot_backfill_actors: HashSet<ActorId> =
             InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
-        let backfill_nodes_to_pause =
-            get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering)
-                .into_iter()
-                .collect();
-        let backfill_order_state = BackfillOrderState::new(
-            &info.fragment_backfill_ordering,
-            &fragment_infos,
-            info.locality_fragment_state_table_mapping.clone(),
-        );
-        let create_mview_tracker = CreateMviewProgressTracker::recover(
-            job_id,
-            &fragment_infos,
-            backfill_order_state,
-            version_stat,
-        );
-
         let actors_to_create = Command::create_streaming_job_actors_to_create(
             &info,
             edges,
@@ -153,10 +129,7 @@ impl CreatingStreamingJobControl {
             &actors.actor_location,
         );
 
-        let mut prev_epoch_fake_physical_time = 0;
-        let mut pending_non_checkpoint_barriers = vec![];
-
-        let (initial_barrier_info, log_store_barriers_to_inject) = if let Some((
+        let (snapshot, initial_barrier_info, log_store_barriers_to_inject) = if let Some((
             upstream_log_epochs,
             upstream_partial_graph_id,
             new_upstream_barrier_prev_epoch,
@@ -170,24 +143,17 @@ impl CreatingStreamingJobControl {
                     snapshot_epoch,
                     new_upstream_barrier_prev_epoch,
                 )?;
-            (initial_barrier, Some(barriers_to_inject))
+            (None, initial_barrier, Some(barriers_to_inject))
         } else {
-            (
-                CreatingStreamingJobStatus::new_fake_barrier(
-                    &mut prev_epoch_fake_physical_time,
-                    &mut pending_non_checkpoint_barriers,
-                    PbBarrierKind::Checkpoint,
-                ),
-                None,
-            )
+            let (snapshot, initial_barrier) = SnapshotPhaseControl::for_new_job(
+                snapshot_epoch,
+                &fragment_infos,
+                &info,
+                version_stat,
+            );
+            (Some(snapshot), initial_barrier, None)
         };
 
-        let added_actors: Vec<ActorId> = actors
-            .stream_actors
-            .values()
-            .flatten()
-            .map(|actor| actor.actor_id)
-            .collect();
         let actor_splits = split_assignment
             .values()
             .flat_map(build_actor_connector_splits)
@@ -198,26 +164,21 @@ impl CreatingStreamingJobControl {
             "should not have cdc backfill for snapshot backfill job"
         );
 
-        let initial_mutation = Mutation::Add(AddMutation {
-            // for mutation of snapshot backfill job, we won't include changes to dispatchers of upstream actors.
-            actor_dispatchers: Default::default(),
-            added_actors,
+        let initial_mutation = build_initial_add_mutation(
+            &fragment_infos,
+            &info.fragment_backfill_ordering,
             actor_splits,
-            // we assume that when handling snapshot backfill, the cluster must not be paused
-            pause: false,
-            subscriptions_to_add: Default::default(),
-            backfill_nodes_to_pause,
-            actor_cdc_table_snapshot_splits: None,
-            new_upstream_sinks: Default::default(),
-            dropped_actors: Default::default(),
-            sink_log_store_flush: Default::default(),
-        });
+        );
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
-        let state_table_ids =
-            InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
-
-        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+        let independent_job_info = IndependentJobInfo::from_fragment_infos(
+            database_id,
+            job_id,
+            snapshot_epoch,
+            snapshot_backfill_upstream_tables,
+            fragment_infos.values(),
+        );
+        let partial_graph_id = independent_job_info.partial_graph_id;
         let max_lagged_barrier_num = partial_graph_manager
             .control_stream_manager()
             .env
@@ -226,108 +187,118 @@ impl CreatingStreamingJobControl {
         let opts = &partial_graph_manager.control_stream_manager().env.opts;
         let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
 
-        let IndependentCheckpointJobControl::CreatingStreamingJob(job) = entry.insert(
-            IndependentCheckpointJobControl::CreatingStreamingJob(Self {
-                partial_graph_id,
-                job_id,
-                snapshot_backfill_upstream_tables,
-                max_committed_epoch: None,
-                snapshot_epoch,
-                status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
-                max_lagged_barrier_num,
-                max_pending_barrier_num,
-                upstream_lag: GLOBAL_META_METRICS
-                    .snapshot_backfill_lag
-                    .with_guarded_label_values(&[&format!("{}", job_id)]),
-                node_actors,
-                state_table_ids,
-            }),
-        ) else {
-            unreachable!()
+        let mut job = Self {
+            control: IndependentJobControl::new(independent_job_info),
+            status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
+            max_lagged_barrier_num,
+            max_pending_barrier_num,
+            upstream_lag: GLOBAL_META_METRICS
+                .snapshot_backfill_lag
+                .with_guarded_label_values(&[&format!("{}", job_id)]),
+            node_actors,
         };
 
         let mut graph_adder = partial_graph_manager.add_partial_graph(
             partial_graph_id,
+            term_id,
             CreatingStreamingJobBarrierStats::new(job_id, snapshot_epoch),
         );
-
-        if let Err(e) = Self::inject_barrier(
+        if let Err(e) = add_initial_partial_graph(
+            &mut graph_adder,
             partial_graph_id,
-            graph_adder.manager(),
-            &job.node_actors,
-            &job.state_table_ids,
-            false,
-            initial_barrier_info,
-            Some(actors_to_create),
-            Some(initial_mutation),
-            notifier,
-            Some(create_info),
+            InitialPartialGraphRequest {
+                node_actors: &job.node_actors,
+                state_table_ids: &job.control.info.state_table_ids,
+                barrier_info: initial_barrier_info,
+                actors_to_create,
+                mutation: initial_mutation,
+                notifier,
+                create_info,
+            },
         ) {
             graph_adder.failed();
-            job.status = CreatingStreamingJobStatus::Resetting(vec![]);
-            Err(e)
-        } else {
-            graph_adder.added();
-            let job_info = CreatingJobInfo {
-                fragment_infos,
-                upstream_fragment_downstreams: info.upstream_fragment_downstreams.clone(),
-                downstreams: info.stream_job_fragments.downstreams,
-                snapshot_backfill_upstream_tables: job.snapshot_backfill_upstream_tables.clone(),
-                stream_actors: actors
-                    .stream_actors
-                    .values()
-                    .flatten()
-                    .map(|actor| (actor.actor_id, actor.clone()))
-                    .collect(),
-            };
-            if let Some(log_store_barriers_to_inject) = log_store_barriers_to_inject {
-                let upstream_lag = log_store_barriers_to_inject
-                    .last()
-                    .map(|info| info.prev_epoch().saturating_sub(snapshot_epoch))
-                    .unwrap_or(0);
-                job.status = CreatingStreamingJobStatus::ConsumingLogStore {
-                    tracking_job: TrackingJob::recovered(job_id, &job_info.fragment_infos),
-                    info: job_info,
-                    log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                        snapshot_backfill_actors.iter().cloned(),
-                        upstream_lag,
-                    ),
-                    pending_barriers: log_store_barriers_to_inject.into(),
-                };
-            } else {
-                assert!(pending_non_checkpoint_barriers.is_empty());
-                job.status = CreatingStreamingJobStatus::ConsumingSnapshot {
-                    prev_epoch_fake_physical_time,
-                    pending_upstream_barriers: vec![],
-                    version_stats: version_stat.clone(),
-                    create_mview_tracker,
-                    snapshot_backfill_actors,
-                    snapshot_epoch,
-                    info: job_info,
-                    pending_non_checkpoint_barriers,
-                };
-            };
-            Ok(job)
+            entry.insert(IndependentCheckpointJobControl::resetting(
+                job.control.info.snapshot_backfill_upstream_tables,
+            ));
+            return Err(e);
         }
+        graph_adder.added();
+        let job_info = CreatingJobInfo {
+            fragment_infos,
+            upstream_fragment_downstreams: info.upstream_fragment_downstreams.clone(),
+            downstreams: info.stream_job_fragments.downstreams,
+            snapshot_backfill_upstream_tables: job
+                .control
+                .info
+                .snapshot_backfill_upstream_tables
+                .clone(),
+            stream_actors: actors
+                .stream_actors
+                .values()
+                .flatten()
+                .map(|actor| (actor.actor_id, actor.clone()))
+                .collect(),
+        };
+        if let Some(log_store_barriers_to_inject) = log_store_barriers_to_inject {
+            let upstream_lag = log_store_barriers_to_inject
+                .last()
+                .map(|info| info.prev_epoch().saturating_sub(snapshot_epoch))
+                .unwrap_or(0);
+            job.status = CreatingStreamingJobStatus::ConsumingLogStore {
+                tracking_job: TrackingJob::recovered(job_id, &job_info.fragment_infos),
+                info: job_info,
+                log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
+                    snapshot_backfill_actors.iter().cloned(),
+                    upstream_lag,
+                ),
+                pending_barriers: log_store_barriers_to_inject.into(),
+            };
+        } else {
+            job.status = CreatingStreamingJobStatus::ConsumingSnapshot {
+                snapshot: snapshot.expect("snapshot phase should be initialized"),
+                pending_upstream_barriers: vec![],
+                snapshot_backfill_actors,
+                info: job_info,
+            };
+        }
+        let job_control = entry.insert(if is_since_timestamp {
+            // Since-timestamp resolution waits for current completion work and requires the
+            // resolved snapshot epoch to be older than the upstream committed epoch.
+            IndependentCheckpointJobControl::creating_streaming_job(
+                job_id,
+                partial_graph_id,
+                IndependentCheckpointJobStatus::Ready,
+                job,
+            )
+        } else {
+            IndependentCheckpointJobControl::creating_streaming_job(
+                job_id,
+                partial_graph_id,
+                IndependentCheckpointJobStatus::Initial { snapshot_epoch },
+                job,
+            )
+        });
+        let Some(IndependentCheckpointJob::CreatingStreamingJob(job)) = job_control.running_mut()
+        else {
+            unreachable!()
+        };
+        Ok(job)
     }
 
     pub(super) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
         match &self.status {
-            CreatingStreamingJobStatus::ConsumingSnapshot {
-                create_mview_tracker,
-                info,
-                ..
-            } => create_mview_tracker.collect_fragment_progress(&info.fragment_infos, true),
+            CreatingStreamingJobStatus::ConsumingSnapshot { snapshot, info, .. } => snapshot
+                .create_mview_tracker
+                .collect_fragment_progress(&info.fragment_infos, true),
             CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
-                collect_done_fragments(self.job_id, &info.fragment_infos)
+                collect_done_fragments(self.control.info.job_id, &info.fragment_infos)
             }
             CreatingStreamingJobStatus::Finishing(_, _)
-            | CreatingStreamingJobStatus::Resetting(_)
             | CreatingStreamingJobStatus::PlaceHolder => vec![],
         }
     }
 
-    fn resolve_upstream_log_epochs(
+    pub(super) fn resolve_upstream_log_epochs(
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
         upstream_table_log_epochs: &UpstreamTableLogEpochs,
         exclusive_start_log_epoch: u64,
@@ -547,40 +518,31 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         info: CreatingJobInfo,
-        backfill_order_state: BackfillOrderState,
+        backfill_order: &ExtendedFragmentBackfillOrder,
         version_stat: &HummockVersionStats,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
-        let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
-        let mut pending_non_checkpoint_barriers = vec![];
-        let create_mview_tracker = CreateMviewProgressTracker::recover(
+        let (snapshot, barrier_info) = SnapshotPhaseControl::for_recovery(
             job_id,
+            snapshot_epoch,
+            committed_epoch,
             &info.fragment_infos,
-            backfill_order_state,
+            backfill_order,
             version_stat,
-        );
-        let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
-            &mut prev_epoch_fake_physical_time,
-            &mut pending_non_checkpoint_barriers,
-            PbBarrierKind::Initial,
         );
         Ok((
             CreatingStreamingJobStatus::ConsumingSnapshot {
-                prev_epoch_fake_physical_time,
+                snapshot,
                 pending_upstream_barriers: Self::resolve_upstream_log_epochs(
                     &info.snapshot_backfill_upstream_tables,
                     upstream_table_log_epochs,
                     snapshot_epoch,
                     upstream_barrier_info,
                 )?,
-                version_stats: version_stat.clone(),
-                create_mview_tracker,
                 snapshot_backfill_actors: InflightStreamingJobInfo::snapshot_backfill_actor_ids(
                     &info.fragment_infos,
                 )
                 .collect(),
                 info,
-                snapshot_epoch,
-                pending_non_checkpoint_barriers,
             },
             barrier_info,
         ))
@@ -625,12 +587,8 @@ impl CreatingStreamingJobControl {
 
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn recover(
-        database_id: DatabaseId,
-        job_id: JobId,
-        snapshot_backfill_upstream_tables: HashSet<TableId>,
+        control: IndependentJobControl,
         upstream_table_log_epochs: &UpstreamTableLogEpochs,
-        snapshot_epoch: u64,
-        committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         backfill_order: ExtendedFragmentBackfillOrder,
@@ -638,16 +596,21 @@ impl CreatingStreamingJobControl {
         version_stat: &HummockVersionStats,
         new_actors: StreamJobActorsToCreate,
         initial_mutation: Mutation,
+        term_id: &str,
         partial_graph_recoverer: &mut PartialGraphRecoverer<'_>,
     ) -> MetaResult<Self> {
+        let job_id = control.info.job_id;
+        let partial_graph_id = control.info.partial_graph_id;
+        let snapshot_epoch = control.info.snapshot_epoch;
+        let committed_epoch = control
+            .max_committed_epoch
+            .expect("recovered independent job should have committed");
         info!(
             %job_id,
             "recovered creating snapshot backfill job"
         );
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
-        let state_table_ids: HashSet<_> =
-            InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
 
         let mut upstream_fragment_downstreams: FragmentDownstreamRelation = Default::default();
         for (upstream_fragment_id, downstreams) in fragment_relations {
@@ -676,7 +639,10 @@ impl CreatingStreamingJobControl {
             fragment_infos,
             upstream_fragment_downstreams,
             downstreams,
-            snapshot_backfill_upstream_tables: snapshot_backfill_upstream_tables.clone(),
+            snapshot_backfill_upstream_tables: control
+                .info
+                .snapshot_backfill_upstream_tables
+                .clone(),
             stream_actors: new_actors
                 .values()
                 .flat_map(|fragments| {
@@ -690,13 +656,6 @@ impl CreatingStreamingJobControl {
         };
 
         let (status, first_barrier_info) = if committed_epoch < snapshot_epoch {
-            let locality_fragment_state_table_mapping =
-                build_locality_fragment_state_table_mapping(&info.fragment_infos);
-            let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
-                &backfill_order,
-                &info.fragment_infos,
-                locality_fragment_state_table_mapping,
-            );
             Self::recover_consuming_snapshot(
                 job_id,
                 upstream_table_log_epochs,
@@ -704,7 +663,7 @@ impl CreatingStreamingJobControl {
                 committed_epoch,
                 upstream_barrier_info,
                 info,
-                backfill_order_state,
+                &backfill_order,
                 version_stat,
             )?
         } else {
@@ -717,7 +676,6 @@ impl CreatingStreamingJobControl {
             )?
         };
 
-        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
         let max_lagged_barrier_num = partial_graph_recoverer
             .control_stream_manager()
             .env
@@ -728,22 +686,18 @@ impl CreatingStreamingJobControl {
 
         partial_graph_recoverer.recover_graph(
             partial_graph_id,
+            term_id,
             initial_mutation,
             &first_barrier_info,
             &node_actors,
-            state_table_ids.iter().copied(),
+            control.info.state_table_ids.iter().copied(),
             new_actors,
             CreatingStreamingJobBarrierStats::new(job_id, snapshot_epoch),
         )?;
 
         Ok(Self {
-            job_id,
-            partial_graph_id,
-            snapshot_backfill_upstream_tables,
-            snapshot_epoch,
+            control,
             node_actors,
-            state_table_ids,
-            max_committed_epoch: Some(committed_epoch),
             status,
             max_lagged_barrier_num,
             max_pending_barrier_num,
@@ -755,14 +709,11 @@ impl CreatingStreamingJobControl {
 
     pub(crate) fn gen_backfill_progress(&self) -> BackfillProgress {
         let progress = match &self.status {
-            CreatingStreamingJobStatus::ConsumingSnapshot {
-                create_mview_tracker,
-                ..
-            } => {
-                if create_mview_tracker.is_finished() {
+            CreatingStreamingJobStatus::ConsumingSnapshot { snapshot, .. } => {
+                if snapshot.create_mview_tracker.is_finished() {
                     "Snapshot finished".to_owned()
                 } else {
-                    let progress = create_mview_tracker.gen_backfill_progress();
+                    let progress = snapshot.create_mview_tracker.gen_backfill_progress();
                     format!("Snapshot [{}]", progress)
                 }
             }
@@ -776,13 +727,15 @@ impl CreatingStreamingJobControl {
                 )
             }
             CreatingStreamingJobStatus::Finishing(finish_epoch, ..) => {
-                let committed_epoch = self.max_committed_epoch.expect("should have committed");
+                let committed_epoch = self
+                    .control
+                    .max_committed_epoch
+                    .expect("should have committed");
                 let lag = Duration::from_millis(
                     Epoch(*finish_epoch).physical_time() - Epoch(committed_epoch).physical_time(),
                 );
                 format!("Finishing [epoch lag: {lag:?}]",)
             }
-            CreatingStreamingJobStatus::Resetting(_) => "Resetting".to_owned(),
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -793,11 +746,8 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn pinned_upstream_log_epoch(&self) -> (u64, HashSet<TableId>) {
-        (
-            max(self.max_committed_epoch.unwrap_or(0), self.snapshot_epoch),
-            self.snapshot_backfill_upstream_tables.clone(),
-        )
+    pub(super) fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
+        &self.control.info.snapshot_backfill_upstream_tables
     }
 
     fn inject_barrier(
@@ -810,7 +760,7 @@ impl CreatingStreamingJobControl {
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
         notifier: Option<&mut NotifierStarter>,
-        first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
+        first_create_info: Option<CreateIndependentStreamingJobCommandInfo>,
     ) -> MetaResult<()> {
         let (table_ids_to_sync, nodes_to_sync_table) = if !is_finishing {
             (Some(state_table_ids), Some(node_actors.keys().copied()))
@@ -827,7 +777,7 @@ impl CreatingStreamingJobControl {
             PartialGraphBarrierInfo::new(
                 first_create_info.map_or_else(
                     PostCollectCommand::barrier,
-                    CreateSnapshotBackfillJobCommandInfo::into_post_collect,
+                    CreateIndependentStreamingJobCommandInfo::into_post_collect,
                 ),
                 barrier_info,
                 notifier,
@@ -843,16 +793,16 @@ impl CreatingStreamingJobControl {
         barrier_info: &BarrierInfo,
     ) -> MetaResult<CreatingJobInfo> {
         info!(
-            job_id = %self.job_id,
+            job_id = %self.control.info.job_id,
             prev_epoch = barrier_info.prev_epoch(),
             "start consuming upstream"
         );
         let info = self.status.start_consume_upstream(barrier_info);
         Self::inject_barrier(
-            self.partial_graph_id,
+            self.control.info.partial_graph_id,
             partial_graph_manager,
             &self.node_actors,
-            &self.state_table_ids,
+            &self.control.info.state_table_ids,
             true,
             barrier_info.clone(),
             None,
@@ -877,10 +827,10 @@ impl CreatingStreamingJobControl {
         barrier_info: &BarrierInfo,
         mutation: Option<(Mutation, Option<&mut NotifierStarter>)>,
     ) -> MetaResult<()> {
-        let progress_epoch = if let Some(max_committed_epoch) = self.max_committed_epoch {
-            max(max_committed_epoch, self.snapshot_epoch)
+        let progress_epoch = if let Some(max_committed_epoch) = self.control.max_committed_epoch {
+            max(max_committed_epoch, self.control.info.snapshot_epoch)
         } else {
-            self.snapshot_epoch
+            self.control.info.snapshot_epoch
         };
         self.upstream_lag.set(
             barrier_info
@@ -895,16 +845,16 @@ impl CreatingStreamingJobControl {
         };
         for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(
             partial_graph_manager,
-            self.partial_graph_id,
+            self.control.info.partial_graph_id,
             self.max_pending_barrier_num,
             barrier_info,
             mutation.take(),
         ) {
             Self::inject_barrier(
-                self.partial_graph_id,
+                self.control.info.partial_graph_id,
                 partial_graph_manager,
                 &self.node_actors,
-                &self.state_table_ids,
+                &self.control.info.state_table_ids,
                 false,
                 barrier_to_inject,
                 None,
@@ -960,7 +910,7 @@ impl CreatingStreamingJobControl {
 
         // A job that is ready to merge has finished initialization and is not resetting, so its
         // partial graph must be running.
-        partial_graph_manager.pending_barrier_num(self.partial_graph_id)
+        partial_graph_manager.pending_barrier_num(self.control.info.partial_graph_id)
             <= self.max_lagged_barrier_num
     }
 }
@@ -970,17 +920,12 @@ impl CreatingStreamingJobControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         min_upstream_inflight_epoch: Option<u64>,
-        upstream_committed_epoch: u64,
     ) -> Option<(
         u64,
         HashMap<WorkerId, BarrierCompleteResponse>,
         PartialGraphBarrierInfo,
         bool,
     )> {
-        // do not commit snapshot backfill job until upstream has committed the snapshot epoch
-        if upstream_committed_epoch < self.snapshot_epoch {
-            return None;
-        }
         let (finished_at_epoch, epoch_end_bound) = match &self.status {
             CreatingStreamingJobStatus::Finishing(finish_at_epoch, _) => {
                 let epoch_end_bound = min_upstream_inflight_epoch
@@ -1001,16 +946,13 @@ impl CreatingStreamingJobControl {
                     .map(Excluded)
                     .unwrap_or(Unbounded),
             ),
-            CreatingStreamingJobStatus::Resetting(..) => {
-                return None;
-            }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
         };
         partial_graph_manager
             .start_completing(
-                self.partial_graph_id,
+                self.control.info.partial_graph_id,
                 epoch_end_bound,
                 |non_checkpoint_epoch, _, _| {
                     if let Some(finish_at_epoch) = finished_at_epoch {
@@ -1044,16 +986,9 @@ impl CreatingStreamingJobControl {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. }
             | CreatingStreamingJobStatus::Finishing(_, _) => {
-                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
-                if let Some(prev_max_committed_epoch) =
-                    self.max_committed_epoch.replace(completed_epoch)
-                {
-                    assert!(completed_epoch > prev_max_committed_epoch);
-                }
-            }
-            CreatingStreamingJobStatus::Resetting(_) => {
-                // The job was dropped while the completing task was running in the background.
-                // The partial graph has already been reset, so skip the ack.
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
             }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
@@ -1069,7 +1004,6 @@ impl CreatingStreamingJobControl {
         match self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. }
-            | CreatingStreamingJobStatus::Resetting(..)
             | CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!("expect finish")
             }
@@ -1077,69 +1011,15 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn on_partial_graph_reset(mut self) {
-        match &mut self.status {
-            CreatingStreamingJobStatus::Resetting(notifiers) => {
-                for notifier in notifiers.drain(..) {
-                    notifier.notify_collected();
-                }
-            }
+    /// Whether the job can be dropped by resetting its independent partial graph.
+    ///
+    /// A finishing job has already been merged into the database graph, so it must be handled by
+    /// the database-graph drop command instead.
+    pub(super) fn can_drop_independently(&self) -> bool {
+        match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
-            | CreatingStreamingJobStatus::Finishing(_, _) => {
-                panic!(
-                    "should be resetting when receiving reset partial graph resp, but at {:?}",
-                    self.status
-                )
-            }
-            CreatingStreamingJobStatus::PlaceHolder => {
-                unreachable!()
-            }
-        }
-    }
-
-    /// Drop a creating snapshot backfill job by directly resetting the partial graph
-    /// Return `false` if the partial graph has been merged to upstream database, and `true` otherwise
-    /// to mean that the job has been dropped.
-    pub(super) fn drop(
-        &mut self,
-        notifier: Option<&mut NotifierStarter>,
-        partial_graph_manager: &mut PartialGraphManager,
-    ) -> bool {
-        match &mut self.status {
-            CreatingStreamingJobStatus::Resetting(existing_notifiers) => {
-                existing_notifiers.extend(notifier.map(NotifierStarter::add_notify));
-                true
-            }
-            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => {
-                partial_graph_manager.reset_partial_graphs([self.partial_graph_id]);
-                self.status = CreatingStreamingJobStatus::Resetting(
-                    notifier
-                        .map(NotifierStarter::add_notify)
-                        .into_iter()
-                        .collect(),
-                );
-                true
-            }
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => true,
             CreatingStreamingJobStatus::Finishing(_, _) => false,
-            CreatingStreamingJobStatus::PlaceHolder => {
-                unreachable!()
-            }
-        }
-    }
-
-    pub(crate) fn reset(self) -> bool {
-        match self.status {
-            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
-            | CreatingStreamingJobStatus::Finishing(_, _) => false,
-            CreatingStreamingJobStatus::Resetting(notifiers) => {
-                for notifier in notifiers {
-                    notifier.notify_collected();
-                }
-                true
-            }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -1150,6 +1030,7 @@ impl CreatingStreamingJobControl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manager::MetaOpts;
 
     #[test]
     fn test_snapshot_backfill_max_pending_barrier_num() {

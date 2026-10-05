@@ -19,8 +19,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
-use risingwave_meta_model::refresh_job::{self, RefreshState};
-use risingwave_meta_model::{SinkId, SourceId, WorkerId};
+use risingwave_meta_model::{SinkId, SourceId, WorkerId, refresh_job};
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -236,7 +235,10 @@ impl ActiveStreamingWorkerNodes {
                 }
             }
             Err(e) => {
-                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+                warn!(
+                    e = ?e.as_report(),
+                    "failed to list active streaming compute nodes for comparison with the local snapshot",
+                );
             }
         }
     }
@@ -351,10 +353,14 @@ impl MetadataManager {
         Ok(ret)
     }
 
-    pub async fn list_background_creating_jobs(&self) -> MetaResult<HashSet<JobId>> {
-        self.catalog_controller
-            .list_background_creating_jobs(false, None)
-            .await
+    pub async fn list_creating_jobs(&self) -> MetaResult<HashSet<JobId>> {
+        Ok(self
+            .catalog_controller
+            .list_creating_jobs(false, None)
+            .await?
+            .into_iter()
+            .map(|(job_id, _, _, _, _)| job_id)
+            .collect())
     }
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
@@ -414,6 +420,15 @@ impl MetadataManager {
         self.catalog_controller.list_refresh_jobs().await
     }
 
+    pub async fn list_refreshing_jobs(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<refresh_job::Model>> {
+        self.catalog_controller
+            .list_refreshing_jobs(database_id)
+            .await
+    }
+
     pub async fn list_refreshable_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.catalog_controller.list_refreshable_table_ids().await
     }
@@ -422,21 +437,24 @@ impl MetadataManager {
         self.catalog_controller.ensure_refresh_job(table_id).await
     }
 
-    pub async fn update_refresh_job_status(
+    pub async fn begin_refresh_job(
         &self,
         table_id: TableId,
-        status: RefreshState,
-        trigger_time: Option<DateTime>,
-        is_success: bool,
-    ) -> MetaResult<()> {
+        trigger_time: DateTime,
+    ) -> MetaResult<bool> {
         self.catalog_controller
-            .update_refresh_job_status(table_id, status, trigger_time, is_success)
+            .begin_refresh_job(table_id, trigger_time)
             .await
     }
 
-    pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
+    pub async fn finish_refresh_job(
+        &self,
+        table_id: TableId,
+        trigger_time: DateTime,
+        success: bool,
+    ) -> MetaResult<bool> {
         self.catalog_controller
-            .reset_all_refresh_jobs_to_idle()
+            .finish_refresh_job(table_id, trigger_time, success)
             .await
     }
 
@@ -694,10 +712,10 @@ impl MetadataManager {
         Ok(backfill_types)
     }
 
-    pub async fn collect_unreschedulable_backfill_jobs(
+    /// Returns jobs containing a scan that cannot be rescheduled online.
+    pub async fn collect_online_unreschedulable_backfill_jobs(
         &self,
         job_ids: impl IntoIterator<Item = &JobId>,
-        is_online: bool,
     ) -> MetaResult<HashSet<JobId>> {
         let mut unreschedulable = HashSet::new();
 
@@ -708,7 +726,7 @@ impl MetadataManager {
                 .await?;
             if scan_types
                 .values()
-                .any(|scan_type| !scan_type.is_reschedulable(is_online))
+                .any(|scan_type| !scan_type.is_reschedulable(true))
             {
                 unreschedulable.insert(*job_id);
             }

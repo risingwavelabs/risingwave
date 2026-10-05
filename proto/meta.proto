@@ -481,6 +481,15 @@ message ListIcebergCompactionStatusResponse {
     // V1 approximates pending snapshot backlog with in-memory sink commit backlog.
     optional uint64 pending_snapshot_count = 7;
     bool is_triggerable = 8;
+    // Compaction health below is kept in meta memory and resets when meta restarts.
+    // Timestamps are Unix epoch milliseconds.
+    optional int64 last_success_at_ms = 9;
+    optional int64 last_failure_at_ms = 10;
+    optional string last_error = 11;
+    uint32 consecutive_failures = 12;
+    // Commit-time gap between the latest observed snapshot and the snapshot consumed
+    // by the last completed compaction.
+    optional uint64 compaction_lag_sec = 13;
   }
   repeated IcebergCompactionStatus statuses = 1;
 }
@@ -903,9 +912,17 @@ message SetSystemParamResponse {
   optional SystemParams params = 1;
 }
 
+message ClearFileCacheRequest {
+  bool clear_meta_cache = 1;
+  bool clear_data_cache = 2;
+}
+
+message ClearFileCacheResponse {}
+
 service SystemParamsService {
   rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
   rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
+  rpc ClearFileCache(ClearFileCacheRequest) returns (ClearFileCacheResponse);
 }
 
 message GetSessionParamsRequest {}

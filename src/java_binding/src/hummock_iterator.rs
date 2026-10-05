@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -114,11 +114,8 @@ pub(crate) async fn new_hummock_java_binding_iter(
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),
             vector_block_cache: CacheBuilder::new(1 << 10).build(),
         }));
-        let reader = HummockVersionReader::new(
-            sstable_store,
-            Arc::new(HummockStateStoreMetrics::unused()),
-            0,
-        );
+        let reader =
+            HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
         let table = read_plan.table_catalog.unwrap();
         let versioned = table.version.is_some();

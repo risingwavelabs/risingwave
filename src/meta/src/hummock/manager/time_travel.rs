@@ -46,7 +46,10 @@ use crate::hummock::error::{Error, Result};
 impl HummockManager {
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
         let sql_store = self.env.meta_store_ref();
-        let mut guard = self.versioning.write().await;
+        let mut guard = self
+            .versioning
+            .write_with_process_name("init_time_travel_state")
+            .await;
         guard.mark_next_time_travel_version_snapshot();
 
         guard.last_time_travel_snapshot_sst_ids = HashSet::new();
@@ -73,7 +76,11 @@ impl HummockManager {
             .metrics
             .time_travel_vacuum_metadata_latency
             .start_timer();
-        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let min_pinned_version_id = self
+            .context_info
+            .read_with_process_name("truncate_time_travel_metadata")
+            .await
+            .min_pinned_version_id();
         let sql_store = self.env.meta_store_ref();
         let txn = sql_store.conn.begin().await?;
 
@@ -271,17 +278,13 @@ impl HummockManager {
             sst_ids_to_delete: HashSet<HummockSstableId>,
             delete_sst_batch_size: usize,
         ) -> Result<()> {
-            for start_idx in 0..=(sst_ids_to_delete.len().saturating_sub(1) / delete_sst_batch_size)
-            {
+            assert!(delete_sst_batch_size > 0);
+            let mut sst_ids_to_delete = sst_ids_to_delete.into_iter();
+            while sst_ids_to_delete.len() > 0 {
                 hummock_sstable_info::Entity::delete_many()
                     .filter(
-                        hummock_sstable_info::Column::SstId.is_in(
-                            sst_ids_to_delete
-                                .iter()
-                                .skip(start_idx * delete_sst_batch_size)
-                                .take(delete_sst_batch_size)
-                                .copied(),
-                        ),
+                        hummock_sstable_info::Column::SstId
+                            .is_in(sst_ids_to_delete.by_ref().take(delete_sst_batch_size)),
                     )
                     .exec(txn)
                     .await?;
@@ -314,7 +317,7 @@ impl HummockManager {
                 );
                 let new_sst_ids = delta_to_delete.newly_added_sst_ids();
                 // The SST ids added and then deleted by compaction between the 2 versions.
-                sst_ids_to_delete.extend(&new_sst_ids - &retained_snapshot_sst_ids);
+                sst_ids_to_delete.extend(new_sst_ids.difference(&retained_snapshot_sst_ids));
                 if sst_ids_to_delete.len() >= delete_sst_batch_size {
                     delete_sst_in_batch(
                         &txn,
@@ -324,7 +327,8 @@ impl HummockManager {
                     .await?;
                 }
                 let new_object_ids = delta_to_delete.newly_added_object_ids();
-                object_ids_to_delete.extend(&new_object_ids - &retained_snapshot_object_ids);
+                object_ids_to_delete
+                    .extend(new_object_ids.difference(&retained_snapshot_object_ids));
             }
         }
         for prev_version_id in version_ids_to_delete {
@@ -343,7 +347,7 @@ impl HummockManager {
                 )
             };
             let sst_ids = prev_version.get_sst_ids();
-            sst_ids_to_delete.extend(&sst_ids - &retained_snapshot_sst_ids);
+            sst_ids_to_delete.extend(sst_ids.difference(&retained_snapshot_sst_ids));
             if sst_ids_to_delete.len() >= delete_sst_batch_size {
                 delete_sst_in_batch(
                     &txn,
@@ -353,7 +357,7 @@ impl HummockManager {
                 .await?;
             }
             let new_object_ids: HashSet<_> = prev_version.get_object_ids().collect();
-            object_ids_to_delete.extend(&new_object_ids - &retained_snapshot_object_ids);
+            object_ids_to_delete.extend(new_object_ids.difference(&retained_snapshot_object_ids));
         }
         if !sst_ids_to_delete.is_empty() {
             delete_sst_in_batch(&txn, sst_ids_to_delete, delete_sst_batch_size).await?;
@@ -430,6 +434,10 @@ impl HummockManager {
         Ok(result)
     }
 
+    /// Removes candidates referenced by retained time-travel metadata.
+    ///
+    /// The v2 scan only removes candidates, so it stops once none remain. It does not validate
+    /// the rest of the archive or report errors from skipped reads.
     pub(crate) async fn filter_out_objects_by_time_travel(
         &self,
         objects: impl Iterator<Item = HummockObjectId>,
@@ -438,6 +446,9 @@ impl HummockManager {
             return self.filter_out_objects_by_time_travel_v1(objects).await;
         }
         let mut result: HashSet<_> = objects.collect();
+        if result.is_empty() {
+            return Ok(result);
+        }
 
         // filtered out object id pinned by time travel hummock version
         {
@@ -465,6 +476,9 @@ impl HummockManager {
                         HummockVersion::from_persisted_protobuf_owned(model.version.to_protobuf());
                     for object_id in version.get_object_ids() {
                         result.remove(&object_id);
+                    }
+                    if result.is_empty() {
+                        return Ok(result);
                     }
                     next_prev_version_id = Some(model.version_id);
                 }
@@ -503,6 +517,9 @@ impl HummockManager {
                     );
                     for object_id in version_delta.newly_added_object_ids() {
                         result.remove(&object_id);
+                    }
+                    if result.is_empty() {
+                        return Ok(result);
                     }
                     next_prev_version_id = Some(model.version_id);
                 }

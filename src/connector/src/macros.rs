@@ -22,7 +22,8 @@ macro_rules! for_all_classified_sources {
                 { Postgres },
                 { Citus },
                 { Mongodb },
-                { SqlServer }
+                { SqlServer },
+                { Oracle }
             },
             // other sources
             // todo: file source do not nest with mq source.
@@ -304,7 +305,11 @@ macro_rules! impl_split {
                 fn try_from(split: SplitImpl) -> std::result::Result<Self, Self::Error> {
                     match split {
                         SplitImpl::$variant_name(inner) => Ok(inner),
-                        other => risingwave_common::bail!("expect {} but get {:?}", stringify!($split), other),
+                        other => risingwave_common::bail!(
+                            "expected {} but got {:?}",
+                            stringify!($split),
+                            other
+                        ),
                     }
                 }
             }

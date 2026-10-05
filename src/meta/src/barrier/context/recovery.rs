@@ -42,7 +42,7 @@ use crate::barrier::checkpoint::{
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
-use crate::barrier::rpc::to_partial_graph_id;
+use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragment, LoadedFragmentContext, RenderedGraph,
@@ -90,9 +90,10 @@ pub struct RenderedDatabaseRuntimeInfo {
     pub batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
 }
 
-pub fn render_runtime_info(
+pub(in crate::barrier) fn render_runtime_info(
     actor_id_generator: &AtomicU32,
     worker_nodes: &ActiveStreamingWorkerNodes,
+    control_stream_manager: &ControlStreamManager,
     recovery_context: &LoadedRecoveryContext,
     database_id: DatabaseId,
 ) -> MetaResult<Option<RenderedDatabaseRuntimeInfo>> {
@@ -175,6 +176,7 @@ pub fn render_runtime_info(
             &extra.job_definition,
             actor_id_generator,
             worker_nodes.current(),
+            control_stream_manager,
             &database_model.resource_group,
             streaming_job_model,
             partial_graph_id,
@@ -350,10 +352,10 @@ impl GlobalBarrierWorkerContextImpl {
         &self,
         recovery_context: &LoadedRecoveryContext,
         state_table_committed_epochs: &HashMap<TableId, u64>,
-        background_jobs: &mut HashSet<JobId>,
+        creating_jobs: &mut HashSet<JobId>,
     ) -> MetaResult<()> {
-        let background_job_ids = background_jobs.iter().copied().collect_vec();
-        for job_id in background_job_ids {
+        let creating_job_ids = creating_jobs.iter().copied().collect_vec();
+        for job_id in creating_job_ids {
             let Some(job) = recovery_context.fragment_context.job_map.get(&job_id) else {
                 continue;
             };
@@ -396,7 +398,7 @@ impl GlobalBarrierWorkerContextImpl {
                     .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes)),
             ))
             .await?;
-            background_jobs.remove(&job_id);
+            creating_jobs.remove(&job_id);
         }
 
         Ok(())
@@ -420,7 +422,8 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(has_drop_streaming_jobs)
     }
 
-    /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
+    /// Clean catalogs for jobs in the initial state and creating jobs whose progress cannot be
+    /// recovered.
     async fn clean_dirty_streaming_jobs(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
         self.metadata_manager
             .catalog_controller
@@ -449,10 +452,6 @@ impl GlobalBarrierWorkerContextImpl {
             )
             .await?;
         }
-        self.metadata_manager
-            .reset_all_refresh_jobs_to_idle()
-            .await?;
-
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
@@ -460,25 +459,6 @@ impl GlobalBarrierWorkerContextImpl {
             })
             .await;
 
-        Ok(())
-    }
-
-    async fn reset_sink_coordinator(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
-        if let Some(database_id) = database_id {
-            let sink_ids = self
-                .metadata_manager
-                .catalog_controller
-                .list_sink_ids(Some(database_id))
-                .await?;
-            self.sink_manager
-                .stop_sink_coordinator(sink_ids.clone())
-                .await;
-            self.iceberg_pk_index_sink_manager
-                .unregister_sinks(sink_ids);
-        } else {
-            self.sink_manager.reset().await;
-            self.iceberg_pk_index_sink_manager.reset();
-        }
         Ok(())
     }
 
@@ -613,14 +593,18 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn list_background_job_progress(
+    async fn list_creating_jobs(
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<HashSet<JobId>> {
         let mgr = &self.metadata_manager;
-        mgr.catalog_controller
-            .list_background_creating_jobs(false, database_id)
-            .await
+        Ok(mgr
+            .catalog_controller
+            .list_creating_jobs(false, database_id)
+            .await?
+            .into_iter()
+            .map(|(job_id, _, _, _, _)| job_id)
+            .collect())
     }
 
     async fn load_recovery_context(
@@ -741,7 +725,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     #[expect(clippy::type_complexity)]
     fn resolve_hummock_version_epochs(
-        background_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
+        creating_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
         version: &HummockVersion,
         table_change_log: &TableChangeLogs,
     ) -> MetaResult<(
@@ -760,7 +744,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?)
         };
         let mut min_downstream_committed_epochs = HashMap::new();
-        for (job_id, fragments) in background_jobs {
+        for (job_id, fragments) in creating_jobs {
             let job_committed_epoch =
                 Self::resolve_job_committed_epoch(job_id, fragments, &table_committed_epoch)?;
             if let (Some(snapshot_backfill_info), _) =
@@ -857,9 +841,6 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
-                    self.reset_sink_coordinator(None)
-                        .await
-                        .context("reset sink coordinator")?;
                     self.abort_dirty_pending_sink_state(None)
                         .await
                         .context("abort dirty pending sink state")?;
@@ -871,14 +852,14 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("re-register iceberg v3 sinks after recovery")?;
 
-                    // Background job progress needs to be recovered.
-                    tracing::info!("recovering background job progress");
-                    let mut initial_background_jobs = self
-                        .list_background_job_progress(None)
+                    // Creating job progress needs to be recovered.
+                    tracing::info!("recovering creating job progress");
+                    let mut initial_creating_jobs = self
+                        .list_creating_jobs(None)
                         .await
-                        .context("recover background job progress should not fail")?;
+                        .context("recover creating job progress should not fail")?;
 
-                    tracing::info!("recovered background job progress");
+                    tracing::info!("recovered creating job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.apply_pre_applied_drop_cancel(None).await?;
@@ -886,24 +867,25 @@ impl GlobalBarrierWorkerContextImpl {
                         .catalog_controller
                         .cleanup_dropped_tables()
                         .await;
+                    self.refresh_manager.abandon_cycles(None).await?;
 
                     let active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
                             .await?;
 
-                    let background_streaming_jobs =
-                        initial_background_jobs.iter().cloned().collect_vec();
+                    let creating_streaming_jobs =
+                        initial_creating_jobs.iter().cloned().collect_vec();
 
                     tracing::info!(
-                        "background streaming jobs: {:?} total {}",
-                        background_streaming_jobs,
-                        background_streaming_jobs.len()
+                        "creating streaming jobs: {:?} total {}",
+                        creating_streaming_jobs,
+                        creating_streaming_jobs.len()
                     );
 
                     let unreschedulable_jobs = {
                         let mut unreschedulable_jobs = HashSet::new();
 
-                        for job_id in background_streaming_jobs {
+                        for job_id in creating_streaming_jobs {
                             let scan_types = self
                                 .metadata_manager
                                 .get_job_backfill_scan_types(job_id)
@@ -921,10 +903,7 @@ impl GlobalBarrierWorkerContextImpl {
                     };
 
                     if !unreschedulable_jobs.is_empty() {
-                        info!(
-                            "unreschedulable background jobs: {:?}",
-                            unreschedulable_jobs
-                        );
+                        info!("unreschedulable creating jobs: {:?}", unreschedulable_jobs);
                     }
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
@@ -932,7 +911,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     if !unreschedulable_jobs.is_empty() {
                         bail!(
-                            "Recovery for unreschedulable background jobs is not yet implemented. \
+                            "Recovery for unreschedulable creating jobs is not yet implemented. \
                              This path is triggered when the following jobs have at least one scan type that is not reschedulable: {:?}.",
                             unreschedulable_jobs
                         );
@@ -964,7 +943,7 @@ impl GlobalBarrierWorkerContextImpl {
                                     .job_fragments
                                     .iter()
                                     .filter_map(|(job_id, job)| {
-                                        initial_background_jobs
+                                        initial_creating_jobs
                                             .contains(job_id)
                                             .then_some((*job_id, job))
                                     }),
@@ -977,7 +956,7 @@ impl GlobalBarrierWorkerContextImpl {
                     self.finish_completed_batch_refresh_background_jobs(
                         &recovery_context,
                         &state_table_committed_epochs,
-                        &mut initial_background_jobs,
+                        &mut initial_creating_jobs,
                     )
                     .await?;
 
@@ -986,18 +965,18 @@ impl GlobalBarrierWorkerContextImpl {
                         .get_mv_depended_subscriptions(None)
                         .await?;
 
-                    // Refresh background job progress for the final snapshot to reflect any catalog changes.
-                    let background_jobs = {
-                        let mut refreshed_background_jobs = self
-                            .list_background_job_progress(None)
+                    // Refresh creating job progress for the final snapshot to reflect any catalog changes.
+                    let creating_jobs = {
+                        let mut refreshed_creating_jobs = self
+                            .list_creating_jobs(None)
                             .await
-                            .context("recover background job progress should not fail")?;
+                            .context("recover creating job progress should not fail")?;
                         recovery_context
                             .fragment_context
                             .job_map
                             .keys()
                             .filter_map(|job_id| {
-                                refreshed_background_jobs.remove(job_id).then_some(*job_id)
+                                refreshed_creating_jobs.remove(job_id).then_some(*job_id)
                             })
                             .collect()
                     };
@@ -1018,7 +997,7 @@ impl GlobalBarrierWorkerContextImpl {
                         state_table_committed_epochs,
                         state_table_log_epochs,
                         mv_depended_subscriptions,
-                        background_jobs,
+                        creating_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
                         database_infos,
                         cdc_table_snapshot_splits,
@@ -1036,9 +1015,6 @@ impl GlobalBarrierWorkerContextImpl {
             .await
             .context("clean dirty streaming jobs")?;
 
-        self.reset_sink_coordinator(Some(database_id))
-            .await
-            .context("reset sink coordinator")?;
         self.abort_dirty_pending_sink_state(Some(database_id))
             .await
             .context("abort dirty pending sink state")?;
@@ -1046,17 +1022,14 @@ impl GlobalBarrierWorkerContextImpl {
             .await
             .context("re-register iceberg v3 sinks after recovery")?;
 
-        // Background job progress needs to be recovered.
-        tracing::info!(
-            ?database_id,
-            "recovering background job progress of database"
-        );
+        // Creating job progress needs to be recovered.
+        tracing::info!(?database_id, "recovering creating job progress of database");
 
-        let mut background_jobs = self
-            .list_background_job_progress(Some(database_id))
+        let mut creating_jobs = self
+            .list_creating_jobs(Some(database_id))
             .await
-            .context("recover background job progress of database should not fail")?;
-        tracing::info!(?database_id, "recovered background job progress");
+            .context("recover creating job progress of database should not fail")?;
+        tracing::info!(?database_id, "recovered creating job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
         let _ = self
@@ -1065,7 +1038,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         let recovery_context = self.load_recovery_context(Some(database_id)).await?;
 
-        let missing_background_jobs = background_jobs
+        let missing_creating_jobs = creating_jobs
             .iter()
             .filter(|job_id| {
                 !recovery_context
@@ -1075,11 +1048,11 @@ impl GlobalBarrierWorkerContextImpl {
             })
             .copied()
             .collect_vec();
-        if !missing_background_jobs.is_empty() {
+        if !missing_creating_jobs.is_empty() {
             warn!(
                 database_id = %database_id,
-                missing_job_ids = ?missing_background_jobs,
-                "background jobs missing in rendered info"
+                missing_job_ids = ?missing_creating_jobs,
+                "creating jobs missing in rendered info"
             );
         }
 
@@ -1087,7 +1060,7 @@ impl GlobalBarrierWorkerContextImpl {
             .hummock_manager
             .on_current_version_and_table_change_log(|version, table_change_log| {
                 Self::resolve_hummock_version_epochs(
-                    background_jobs.iter().filter_map(|job_id| {
+                    creating_jobs.iter().filter_map(|job_id| {
                         recovery_context
                             .fragment_context
                             .job_fragments
@@ -1103,7 +1076,7 @@ impl GlobalBarrierWorkerContextImpl {
         self.finish_completed_batch_refresh_background_jobs(
             &recovery_context,
             &state_table_committed_epochs,
-            &mut background_jobs,
+            &mut creating_jobs,
         )
         .await?;
 
@@ -1117,14 +1090,15 @@ impl GlobalBarrierWorkerContextImpl {
                 .await?;
 
         self.refresh_manager
-            .remove_trackers_by_database(database_id);
+            .abandon_cycles(Some(database_id))
+            .await?;
 
         Ok(DatabaseRuntimeInfoSnapshot {
             recovery_context,
             state_table_committed_epochs,
             state_table_log_epochs,
             mv_depended_subscriptions,
-            background_jobs,
+            creating_jobs,
             cdc_table_snapshot_splits,
         })
     }

@@ -19,7 +19,7 @@ use std::time::Duration;
 use risingwave_common::config::{
     AsyncStackTraceOption, MetricLevel, RwConfig, extract_storage_memory_config, load_config,
 };
-use risingwave_common::monitor::{RouterExt, TcpConfig};
+use risingwave_common::monitor::{GLOBAL_METRICS_REGISTRY, RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -183,6 +183,26 @@ pub async fn prepare_start_parameters(
     )
 }
 
+/// Resolves the memory budget dedicated to Iceberg compaction.
+fn resolve_iceberg_compaction_memory_budget(
+    configured_limit_mb: Option<usize>,
+    compactor_total_memory_bytes: usize,
+    available_proportion: f64,
+) -> usize {
+    const MB: usize = 1 << 20;
+    let budget = match configured_limit_mb {
+        Some(limit_mb) => limit_mb
+            .checked_mul(MB)
+            .expect("Iceberg compaction memory limit overflows usize"),
+        None => (compactor_total_memory_bytes as f64 * available_proportion) as usize,
+    };
+    assert!(
+        budget > 0,
+        "Iceberg compaction memory limit must be positive"
+    );
+    budget
+}
+
 /// Fetches and runs compaction tasks.
 ///
 /// Returns when the `shutdown` token is triggered.
@@ -206,6 +226,10 @@ pub async fn compactor_serve(
         compactor_mode,
         CompactorMode::DedicatedIceberg | CompactorMode::SharedIceberg
     );
+    if is_iceberg_compactor && config.server.metrics_level > MetricLevel::Disabled {
+        iceberg_storage_opendal::install_prometheus_metrics(&GLOBAL_METRICS_REGISTRY)
+            .expect("failed to install Iceberg OpenDAL metrics");
+    }
 
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
@@ -251,6 +275,14 @@ pub async fn compactor_serve(
         system_params_reader.clone(),
     ))
     .await;
+    let iceberg_memory_budget_bytes = matches!(compactor_mode, CompactorMode::DedicatedIceberg)
+        .then(|| {
+            resolve_iceberg_compaction_memory_budget(
+                config.storage.iceberg_compaction_memory_limit_mb,
+                opts.compactor_total_memory_bytes,
+                config.storage.compactor_memory_available_proportion,
+            )
+        });
 
     let compaction_catalog_manager_ref = Arc::new(CompactionCatalogManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
@@ -305,6 +337,8 @@ pub async fn compactor_serve(
                 risingwave_storage::hummock::compactor::start_iceberg_compactor(
                     compactor_context.clone(),
                     hummock_meta_client.clone(),
+                    iceberg_memory_budget_bytes
+                        .expect("Iceberg memory budget must be resolved for dedicated startup"),
                 )
             }
             CompactorMode::SharedIceberg => unreachable!(),
