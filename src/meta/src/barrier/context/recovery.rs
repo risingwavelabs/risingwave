@@ -778,7 +778,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     #[expect(clippy::type_complexity)]
     fn resolve_hummock_version_epochs(
-        creating_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
+        jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
         version: &HummockVersion,
         table_change_log: &TableChangeLogs,
     ) -> MetaResult<(
@@ -797,7 +797,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?)
         };
         let mut min_downstream_committed_epochs = HashMap::new();
-        for (job_id, fragments) in creating_jobs {
+        for (job_id, fragments) in jobs {
             let job_committed_epoch =
                 Self::resolve_job_committed_epoch(job_id, fragments, &table_committed_epoch)?;
             if let (Some(snapshot_backfill_info), _) =
@@ -996,9 +996,11 @@ impl GlobalBarrierWorkerContextImpl {
                                     .job_fragments
                                     .iter()
                                     .filter_map(|(job_id, job)| {
-                                        initial_creating_jobs
-                                            .contains(job_id)
-                                            .then_some((*job_id, job))
+                                        (initial_creating_jobs.contains(job_id)
+                                            || is_iceberg_v3_fragment_nodes(
+                                                job.values().map(|fragment| &fragment.nodes),
+                                            ))
+                                        .then_some((*job_id, job))
                                     }),
                                 version,
                                 table_change_log,
@@ -1113,13 +1115,17 @@ impl GlobalBarrierWorkerContextImpl {
             .hummock_manager
             .on_current_version_and_table_change_log(|version, table_change_log| {
                 Self::resolve_hummock_version_epochs(
-                    creating_jobs.iter().filter_map(|job_id| {
-                        recovery_context
-                            .fragment_context
-                            .job_fragments
-                            .get(job_id)
-                            .map(|job| (*job_id, job))
-                    }),
+                    recovery_context
+                        .fragment_context
+                        .job_fragments
+                        .iter()
+                        .filter_map(|(job_id, job)| {
+                            (creating_jobs.contains(job_id)
+                                || is_iceberg_v3_fragment_nodes(
+                                    job.values().map(|fragment| &fragment.nodes),
+                                ))
+                            .then_some((*job_id, job))
+                        }),
                     version,
                     table_change_log,
                 )
