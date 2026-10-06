@@ -30,7 +30,7 @@ use crate::opts::StorageOpts;
 #[tokio::test]
 #[should_panic(expected = "pin cache shard count must be greater than zero")]
 async fn test_zero_shards_rejected() {
-    PinCache::new(in_memory_object_store(), 0, 2, [])
+    PinCache::new(in_memory_object_store(), u64::MAX, 0, 2, [])
         .await
         .unwrap();
 }
@@ -38,7 +38,7 @@ async fn test_zero_shards_rejected() {
 #[tokio::test]
 #[should_panic(expected = "pin cache recovery concurrency must be greater than zero")]
 async fn test_zero_recovery_concurrency_is_rejected() {
-    PinCache::new(in_memory_object_store(), 1, 0, [])
+    PinCache::new(in_memory_object_store(), u64::MAX, 1, 0, [])
         .await
         .unwrap();
 }
@@ -47,7 +47,9 @@ async fn test_zero_recovery_concurrency_is_rejected() {
 async fn test_read_and_unregister_lifecycle() {
     let remote_store = in_memory_object_store();
     let (_dir, local_store) = local_object_store().await;
-    let pin_cache = PinCache::new(local_store, 1, 2, []).await.unwrap();
+    let pin_cache = PinCache::new(local_store, u64::MAX, 1, 2, [])
+        .await
+        .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
     let remote_path = "remote.sst";
     let original = Bytes::from_static(b"complete sst");
@@ -94,13 +96,15 @@ async fn test_read_and_unregister_lifecycle() {
     old_read.invalidate();
     assert!(pin_cache.get(object_id).is_some());
     drop(old_read);
-    assert!(old_file.upgrade().is_none());
+    // The completed object stays accounted until physical reclamation.
+    assert!(old_file.upgrade().is_some());
+    assert_eq!(current.read(..).await.unwrap(), original);
 }
 
 #[tokio::test]
 async fn test_failed_download_can_be_retried() {
     let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, 2, [])
+    let pin_cache = PinCache::new(in_memory_object_store(), 8, 1, 2, [])
         .await
         .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
@@ -112,6 +116,8 @@ async fn test_failed_download_can_be_retried() {
             .await
             .is_err()
     );
+    // Remote initialization failed before any local upload, so no GC is needed to retry.
+    assert_eq!(pin_cache.storage.lock().accounted_bytes, 0);
     assert!(pin_cache.get(object_id).is_none());
 
     remote_store
@@ -131,9 +137,11 @@ async fn test_failed_download_can_be_retried() {
 }
 
 #[tokio::test]
-async fn test_completed_invalid_fs_upload_cannot_publish() {
+async fn test_completed_invalid_fs_upload_reclaims_capacity() {
     let (_dir, local_store) = local_object_store().await;
-    let pin_cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
+    let pin_cache = PinCache::new(local_store.clone(), 8, 1, 2, [])
+        .await
+        .unwrap();
     let remote_store = in_memory_object_store();
     remote_store
         .upload("sst", Bytes::from_static(b"half"))
@@ -147,12 +155,14 @@ async fn test_completed_invalid_fs_upload_cannot_publish() {
             .is_err()
     );
     assert!(pin_cache.get(object_id).is_none());
+    // Validation failure releases logical capacity; full GC cleans the physical leftover.
+    assert_eq!(pin_cache.storage.lock().accounted_bytes, 0);
 }
 
 #[tokio::test]
 async fn test_read_failure_only_invalidates_selected_publication() {
     let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, 2, [])
+    let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX, 1, 2, [])
         .await
         .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
@@ -190,6 +200,7 @@ async fn test_other_shard_does_not_block_object_operations() {
     let opts = StorageOpts::from((&config, &system_params, &memory));
     let cache = PinCache::new(
         in_memory_object_store(),
+        u64::MAX,
         opts.pin_cache_shard_num,
         opts.pin_cache_recover_concurrency,
         [],
@@ -242,7 +253,7 @@ async fn test_other_shard_does_not_block_object_operations() {
 
 #[tokio::test]
 async fn test_object_membership_across_shards() {
-    let cache = PinCache::new(in_memory_object_store(), 3, 2, [])
+    let cache = PinCache::new(in_memory_object_store(), u64::MAX, 3, 2, [])
         .await
         .unwrap();
     let objects = [object_in_shard(0, 3), object_in_shard(2, 3)];
@@ -304,7 +315,9 @@ fn test_parse_finalized_object_path() {
 #[tokio::test]
 async fn test_recovery_rejects_inventory_initialization_error() {
     let local_store = in_memory_object_store();
-    let mut cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
+    let mut cache = PinCache::new(local_store.clone(), u64::MAX, 1, 2, [])
+        .await
+        .unwrap();
     local_store
         .upload("1001-42.sst", Bytes::from_static(b"complete"))
         .await
@@ -332,9 +345,15 @@ async fn test_recovery_returns_ready_routes_across_shards() {
             .await
             .unwrap();
     }
-    let cache = PinCache::new(local.clone(), 3, 2, objects.into_iter().map(|id| (id, 8)))
-        .await
-        .unwrap();
+    let cache = PinCache::new(
+        local.clone(),
+        u64::MAX,
+        3,
+        2,
+        objects.into_iter().map(|id| (id, 8)),
+    )
+    .await
+    .unwrap();
 
     for id in objects {
         assert!(cache.is_registered(id));

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, LazyLock};
 
+use risingwave_common::log::LogSuppressor;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectResult, ObjectStoreRef,
@@ -23,20 +24,30 @@ use risingwave_object_store::object::{
 use super::{PinCache, PinCacheFile, PinCacheRefillToken};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
+/// Download failures distinguish capacity pressure from object-store I/O errors.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum PinCacheDownloadError {
+    #[error("pin cache local capacity is exhausted")]
+    CapacityRejected,
+    #[error(transparent)]
+    Io(#[from] ObjectError),
+}
+
 /// Owns a complete, validated file until the caller publishes or discards it.
-/// Dropping it never changes the index. Physical reclamation is added separately.
+/// Dropping this lease leaves the unreferenced object eligible for full GC.
 pub(crate) struct PinCacheDownload {
     file: Arc<PinCacheFile>,
 }
 
-/// Copy and validate one file without reading or changing the cache index.
+/// Copy and validate one file. The caller protects the target and owns its capacity reservation.
 async fn write_file(
     store: &ObjectStoreRef,
     file: &PinCacheFile,
     mut reader: MonitoredStreamingReader,
 ) -> ObjectResult<()> {
     // TODO: Preallocate file.size bytes in the FS writer's temporary file once
-    // OpenDAL supports physical space reservation.
+    // OpenDAL supports physical space reservation. Cache capacity currently only
+    // limits logical usage.
     let mut writer = store
         .streaming_upload(&file.path)
         .await
@@ -107,28 +118,45 @@ impl PinCache {
         size: u64,
         remote_store: ObjectStoreRef,
         remote_path: String,
-    ) -> ObjectResult<PinCacheDownload> {
+    ) -> Result<PinCacheDownload, PinCacheDownloadError> {
         let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
         let path = format!("{}-{path_id}.sst", object_id.as_raw_id());
         let file = PinCacheFile { path, size };
+        if let Err(accounted_bytes) = self.try_reserve(&file) {
+            static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                LazyLock::new(|| LogSuppressor::per_minute(1));
+            if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                tracing::warn!(
+                    suppressed_count,
+                    object_id = object_id.as_raw_id(),
+                    object_size = size,
+                    accounted_bytes,
+                    capacity = self.capacity,
+                    "skipping pin cache refill because local capacity is exhausted"
+                );
+            }
+            return Err(PinCacheDownloadError::CapacityRejected);
+        }
+        let reservation = scopeguard::guard(file, |file| self.abort_upload(&file.path));
         let reader = remote_store
             .streaming_read(&remote_path, ..)
             .await
             .inspect_err(|_| record_io_failure("remote_read_init"))?;
-        write_file(&self.store, &file, reader).await?;
-        Ok(PinCacheDownload {
-            file: Arc::new(file),
-        })
+        write_file(&self.store, &reservation, reader).await?;
+        let file = self.commit_upload(scopeguard::ScopeGuard::into_inner(reservation));
+        Ok(PinCacheDownload { file })
     }
 
     /// Installs a downloaded file only if its original admission is still current.
     /// Returns false if the task was revoked while downloading. The caller must use the token
     /// for this file and serialize downloads per object; an existing publication is a bug.
-    /// A rejected download is dropped after the lock, so cleanup never runs while it is held.
+    /// A rejected download releases its lease after the shard lock.
     pub(crate) fn publish(&self, token: PinCacheRefillToken, download: PinCacheDownload) -> bool {
         let mut state = self.shard(token.object_id).write();
         let Some(object) = state.object_matching_token(token) else {
             // This download lost permission to publish when its object was unregistered or revoked.
+            drop(state);
+            drop(download);
             return false;
         };
         object.publish(download.file);
@@ -162,7 +190,7 @@ mod tests {
     #[tokio::test]
     async fn test_revoked_download_cannot_publish_and_replacement_can_retry() {
         for revoke_by_unregister in [false, true] {
-            let pin_cache = PinCache::new(in_memory_object_store(), 1, 2, [])
+            let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX, 1, 2, [])
                 .await
                 .unwrap();
             let object_id = HummockSstableObjectId::from(1001);
@@ -188,7 +216,6 @@ mod tests {
             // The executor waits for the revoked attempt to finish before starting its replacement.
             assert!(!pin_cache.publish(token, old));
             assert!(pin_cache.get(object_id).is_none());
-
             download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id)
                 .await
                 .unwrap();
@@ -201,10 +228,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_interrupted_fs_upload_cannot_publish() {
+    async fn test_interrupted_fs_upload_releases_capacity() {
         for cancel in [false, true] {
             let (_dir, local_store) = local_object_store().await;
-            let pin_cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
+            let pin_cache = PinCache::new(local_store.clone(), 8, 1, 2, [])
+                .await
+                .unwrap();
             let object_id = HummockSstableObjectId::from(1001);
             pin_cache.register_objects([(object_id, 8)]);
 
@@ -232,8 +261,13 @@ mod tests {
                 Arc::new(ObjectStoreMetrics::unused()),
                 None,
             );
-            let upload_store = local_store.clone();
-            let task = tokio::spawn(async move { write_file(&upload_store, &file, reader).await });
+            let upload_cache = pin_cache.clone();
+            let task = tokio::spawn(async move {
+                upload_cache.try_reserve(&file).unwrap();
+                let reservation =
+                    scopeguard::guard(file, |file| upload_cache.abort_upload(&file.path));
+                write_file(&upload_cache.store, &reservation, reader).await
+            });
             tokio::time::timeout(Duration::from_secs(5), started_rx)
                 .await
                 .unwrap()
@@ -257,6 +291,17 @@ mod tests {
             .await
             .unwrap();
             assert!(pin_cache.get(object_id).is_none());
+            assert_eq!(pin_cache.storage.lock().accounted_bytes, 8);
+            assert!(matches!(
+                download_and_publish_for_test(
+                    &pin_cache,
+                    in_memory_object_store(),
+                    "unused".into(),
+                    object_id
+                )
+                .await,
+                Err(super::PinCacheDownloadError::CapacityRejected)
+            ));
             if cancel {
                 task.abort();
                 assert!(task.await.unwrap_err().is_cancelled());
@@ -273,14 +318,22 @@ mod tests {
                     .unwrap_err()
                     .is_object_not_found_error()
             );
-            let remote = in_memory_object_store();
-            remote
+            // Capacity returns immediately, before the interrupted upload's residue is collected.
+            assert_eq!(pin_cache.storage.lock().accounted_bytes, 0);
+            let remote_store = in_memory_object_store();
+            remote_store
                 .upload("sst", Bytes::from_static(b"complete"))
                 .await
                 .unwrap();
-            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id)
+            download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id)
                 .await
                 .unwrap();
+            let published = pin_cache.get(object_id).unwrap();
+            assert_eq!(pin_cache.storage.lock().accounted_bytes, 8);
+            assert_eq!(
+                published.read(..).await.unwrap(),
+                Bytes::from_static(b"complete")
+            );
         }
     }
 }

@@ -29,6 +29,7 @@ async fn cache(shard_num: usize, ids: &[HummockSstableObjectId]) -> PinCache {
     Arc::try_unwrap(
         PinCache::new(
             in_memory_object_store(),
+            u64::MAX,
             shard_num,
             2,
             ids.iter().map(|&id| (id, 8)),
