@@ -304,6 +304,8 @@ public class UnbufferedLogMinerStreamingChangeEventSource
                         "Adjusting Min Commit SCN from {} to {}.", minCommitScn, lastCommitScn);
             }
 
+            dispatchHeartbeatEvent();
+
             return lastCommitScn;
         }
     }
