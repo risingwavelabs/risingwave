@@ -51,8 +51,6 @@ use crate::{
 pub struct SstDeltaInfo {
     pub insert_sst_level: u32,
     pub insert_sst_infos: Vec<SstableInfo>,
-    // Kept for the existing Foyer refiller until the sequencer stack layer.
-    pub delete_sst_object_ids: Vec<HummockSstableObjectId>,
     pub delete_sst_infos: Vec<SstableInfo>,
 }
 
@@ -484,7 +482,6 @@ impl HummockVersionCommon<SstableInfo> {
                 for l0_sub_level in &group.level0().sub_levels {
                     for sst_info in &l0_sub_level.table_infos {
                         if removed_l0_ssts.remove(&sst_info.sst_id) {
-                            info.delete_sst_object_ids.push(sst_info.object_id);
                             info.delete_sst_infos.push(sst_info.clone());
                         }
                     }
@@ -494,7 +491,6 @@ impl HummockVersionCommon<SstableInfo> {
                 if let Some(mut removed_level_ssts) = removed_ssts.remove(&level.level_idx) {
                     for sst_info in &level.table_infos {
                         if removed_level_ssts.remove(&sst_info.sst_id) {
-                            info.delete_sst_object_ids.push(sst_info.object_id);
                             info.delete_sst_infos.push(sst_info.clone());
                         }
                     }

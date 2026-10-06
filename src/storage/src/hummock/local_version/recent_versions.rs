@@ -45,10 +45,13 @@ impl RecentVersions {
         }
     }
 
-    fn has_table_committed(&self, new_version: &PinnedVersion) -> bool {
+    pub(crate) fn has_table_committed(
+        old_version: &PinnedVersion,
+        new_version: &PinnedVersion,
+    ) -> bool {
         let mut has_table_committed = false;
         for (table_id, info) in new_version.state_table_info.info() {
-            if let Some(prev_info) = self.latest_version.state_table_info.info().get(table_id) {
+            if let Some(prev_info) = old_version.state_table_info.info().get(table_id) {
                 match info.committed_epoch.cmp(&prev_info.committed_epoch) {
                     Ordering::Less => {
                         unreachable!(
@@ -71,7 +74,7 @@ impl RecentVersions {
     #[must_use]
     pub fn with_new_version(&self, version: PinnedVersion) -> Self {
         assert!(version.id > self.latest_version.id);
-        let is_committed = self.has_table_committed(&version);
+        let is_committed = Self::has_table_committed(&self.latest_version, &version);
         let recent_versions = if self.is_latest_committed {
             let prev_recent_versions = if self.recent_versions.len() >= self.max_version_num {
                 assert_eq!(self.recent_versions.len(), self.max_version_num);
