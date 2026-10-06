@@ -28,8 +28,8 @@ use anyhow::{Result, anyhow, bail};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::SourceSchemaCompatExt;
 use risingwave_frontend::handler::{
-    HandlerArgs, create_index, create_mv, create_schema, create_source, create_table, create_view,
-    drop_table, explain, variable,
+    HandlerArgs, create_index, create_mv, create_schema, create_source, create_sql_function,
+    create_table, create_view, drop_table, explain, variable,
 };
 use risingwave_frontend::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use risingwave_frontend::optimizer::plan_node::ConventionMarker;
@@ -599,6 +599,32 @@ impl TestCase {
                         schema_name,
                         if_not_exists,
                         owner,
+                    )
+                    .await?;
+                }
+                Statement::CreateFunction {
+                    or_replace,
+                    temporary,
+                    if_not_exists,
+                    name,
+                    args,
+                    returns,
+                    params,
+                    ..
+                } if params
+                    .language
+                    .as_ref()
+                    .is_some_and(|language| language.real_value().eq_ignore_ascii_case("sql")) =>
+                {
+                    create_sql_function::handle_create_sql_function(
+                        handler_args,
+                        or_replace,
+                        temporary,
+                        if_not_exists,
+                        name,
+                        args,
+                        returns,
+                        params,
                     )
                     .await?;
                 }

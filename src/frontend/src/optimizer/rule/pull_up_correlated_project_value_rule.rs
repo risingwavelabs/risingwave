@@ -17,6 +17,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::correlated_expr_rewriter::ProjectValueRewriter;
 use super::prelude::{PlanRef, *};
+use super::project_merge_rule::ProjectMergeRule;
 use crate::expr::{ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
@@ -74,6 +75,26 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
         // The apply condition must be trivial (true)
         if !apply_on.always_true() {
             return None;
+        }
+
+        // Multiple scalar subqueries in the same projection are combined into a full outer join
+        // before this rule runs. If every branch is only a projection over one empty Values row,
+        // the whole right side is still exactly one row and can be inlined without introducing a
+        // join or grouping by the correlated arguments.
+        if apply_right.as_logical_join().is_some() {
+            let proj_exprs = Self::extract_single_row_exprs(&apply_right)?;
+            let mut rewriter = ProjectValueRewriter::new(correlated_id);
+            let mut new_proj_exprs =
+                Vec::with_capacity(apply_left.schema().len() + proj_exprs.len());
+            for (i, field) in apply_left.schema().fields().iter().enumerate() {
+                new_proj_exprs.push(InputRef::new(i, field.data_type().clone()).into());
+            }
+            new_proj_exprs.extend(
+                proj_exprs
+                    .into_iter()
+                    .map(|expr| rewriter.rewrite_expr(expr)),
+            );
+            return Some(LogicalProject::new(apply_left, new_proj_exprs).into());
         }
 
         let project = apply_right.as_logical_project()?;
@@ -134,6 +155,31 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
 }
 
 impl PullUpCorrelatedProjectValueRule {
+    fn extract_single_row_exprs(plan: &PlanRef) -> Option<Vec<crate::expr::ExprImpl>> {
+        if let Some(values) = plan.as_logical_values() {
+            return (values.rows().len() == 1 && values.schema().fields().is_empty())
+                .then(Vec::new);
+        }
+
+        if let Some(project) = plan.as_logical_project() {
+            let input_exprs = Self::extract_single_row_exprs(&project.input())?;
+            return ProjectMergeRule::merge_project_exprs(project.exprs(), &input_exprs, true);
+        }
+
+        let join = plan.as_logical_join()?;
+        if join.join_type() != JoinType::FullOuter || !join.on().always_true() {
+            return None;
+        }
+        let mut exprs = Self::extract_single_row_exprs(&join.left())?;
+        exprs.extend(Self::extract_single_row_exprs(&join.right())?);
+        Some(
+            join.output_indices()
+                .iter()
+                .map(|index| exprs[*index].clone())
+                .collect(),
+        )
+    }
+
     pub fn create() -> BoxedRule {
         Box::new(PullUpCorrelatedProjectValueRule {})
     }
