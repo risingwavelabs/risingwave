@@ -40,7 +40,7 @@ use risingwave_storage::StateStore;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::table::collect_data_chunk_with_builder;
 
-use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
+use crate::common::table::state_table::StateTableInner;
 use crate::executor::{Message, StreamExecutorError, StreamExecutorResult, Watermark};
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
@@ -363,11 +363,15 @@ pub(crate) fn cmp_pk_unsigned_aware<'a>(
 /// For each row of the chunk, forward it to downstream if its pk <= `current_pos` for the
 /// corresponding `vnode`, otherwise ignore it.
 /// We implement it by changing the visibility bitmap.
-pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
+pub(crate) fn mark_chunk_ref_by_vnode<
+    S: StateStore,
+    SD: ValueRowSerde,
+    const IS_REPLICATED: bool,
+>(
     chunk: &StreamChunk,
     backfill_state: &BackfillState,
     pk_in_output_indices: &[usize],
-    upstream_table: &ReplicatedStateTable<S, SD>,
+    upstream_table: &StateTableInner<S, SD, IS_REPLICATED>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.clone();
@@ -647,6 +651,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
 ) -> StreamExecutorResult<Vec<(VirtualNode, BackfillStatePerVnode)>> {
     debug_assert!(!state_table.vnodes().is_empty());
+    let pos_start = vnode_in_value(state_table) as usize;
     let vnodes = state_table.vnodes().iter_vnodes();
     let mut result = Vec::with_capacity(state_table.vnodes().len());
     // 1. Get the vnode keys, so we can get the state per vnode.
@@ -656,7 +661,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     });
     let tasks = vnode_keys.map(|vnode_key| state_table.get_row(vnode_key));
     // 2. Fetch the state for each vnode.
-    //    It should have the following schema, it should not contain vnode:
+    //    It should have the following schema, after the vnode if the value contains it:
     //    | pk | `backfill_finished` | `row_count` |
     let state_for_vnodes = try_join_all(tasks).await?;
     for (vnode, state_for_vnode) in state_table
@@ -678,7 +683,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
                 let vnode_is_finished = vnode_is_finished.as_ref().unwrap();
 
                 // 5. Decode the `current_pos`.
-                let current_pos = row.as_inner().get(..row.len() - 2).unwrap();
+                let current_pos = row.as_inner().get(pos_start..row.len() - 2).unwrap();
                 let current_pos = current_pos.into_owned_row();
 
                 // 6. Construct the in-memory state per vnode, based on the decoded state.
@@ -716,6 +721,17 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     }
     assert_eq!(result.len(), state_table.vnodes().count_ones());
     Ok(result)
+}
+
+/// Whether the value of a progress table contains its vnode column, as the one of the locality
+/// provider does. The vnode is the first column of the table.
+fn vnode_in_value<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>(
+    table: &StateTableInner<S, SD, IS_REPLICATED>,
+) -> bool {
+    table
+        .value_indices()
+        .as_ref()
+        .is_none_or(|indices| indices.contains(&0))
 }
 
 /// Update backfill pos by vnode.
@@ -852,10 +868,10 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 match old_row {
                     Some(old_row) => {
                         let inner = old_row.as_inner();
-                        // value segment (without vnode) should be used for comparison
-                        assert_eq!(inner, &encoded_prev_state[1..]);
-                        assert_ne!(inner, &encoded_current_state[1..]);
-                        assert_eq!(old_row.len(), state_len - 1);
+                        let value_start = (!vnode_in_value(table)) as usize;
+                        assert_eq!(inner, &encoded_prev_state[value_start..]);
+                        assert_ne!(inner, &encoded_current_state[value_start..]);
+                        assert_eq!(old_row.len(), state_len - value_start);
                         assert_eq!(encoded_current_state.len(), state_len);
                     }
                     None => {

@@ -18,138 +18,28 @@ use std::sync::Arc;
 use futures::future::{Either as FutureEither, pending, select};
 use futures::{StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, ToOwnedDatum};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::sort_util::cmp_datum_iter;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_pb::common::ThrottleType;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::{FlushedStateTableReader, StateTable};
-use crate::executor::backfill::utils::create_builder;
+#[cfg(debug_assertions)]
+use crate::executor::backfill::utils::METADATA_STATE_LEN;
+use crate::executor::backfill::utils::{
+    BackfillProgressPerVnode, BackfillState, create_builder, get_progress_per_vnode,
+    mark_chunk_ref_by_vnode, persist_state_per_vnode, update_pos_by_vnode,
+};
 use crate::executor::prelude::*;
 use crate::task::{CreateMviewProgressReporter, FragmentId};
 
 type Builders = HashMap<VirtualNode, DataChunkBuilder>;
-
-/// Progress state for tracking backfill per vnode
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum LocalityBackfillProgress {
-    /// Backfill not started for this vnode
-    NotStarted,
-    /// Backfill in progress, tracking current position
-    InProgress {
-        /// Current position in the locality-ordered scan
-        current_pos: OwnedRow,
-        /// Number of rows processed for this vnode
-        processed_rows: u64,
-    },
-    /// Backfill completed for this vnode
-    Completed {
-        /// Final position reached
-        final_pos: OwnedRow,
-        /// Total rows processed for this vnode
-        total_rows: u64,
-    },
-}
-
-/// State management for locality provider backfill process
-#[derive(Clone, Debug)]
-struct LocalityBackfillState {
-    /// Progress per vnode
-    per_vnode: HashMap<VirtualNode, LocalityBackfillProgress>,
-    /// Total snapshot rows read across all vnodes
-    total_snapshot_rows: u64,
-}
-
-impl LocalityBackfillState {
-    fn new(vnodes: impl Iterator<Item = VirtualNode>) -> Self {
-        let per_vnode = vnodes
-            .map(|vnode| (vnode, LocalityBackfillProgress::NotStarted))
-            .collect();
-        Self {
-            per_vnode,
-            total_snapshot_rows: 0,
-        }
-    }
-
-    fn is_completed(&self) -> bool {
-        self.per_vnode
-            .values()
-            .all(|progress| matches!(progress, LocalityBackfillProgress::Completed { .. }))
-    }
-
-    fn vnodes(&self) -> impl Iterator<Item = (VirtualNode, &LocalityBackfillProgress)> {
-        self.per_vnode
-            .iter()
-            .map(|(&vnode, progress)| (vnode, progress))
-    }
-
-    /// Like `BackfillState::has_progress` of arrangement backfill.
-    fn has_progress(&self) -> bool {
-        self.per_vnode
-            .values()
-            .any(|progress| !matches!(progress, LocalityBackfillProgress::NotStarted))
-    }
-
-    fn update_progress(&mut self, vnode: VirtualNode, new_pos: OwnedRow, row_count_delta: u64) {
-        let progress = self.per_vnode.get_mut(&vnode).unwrap();
-        match progress {
-            LocalityBackfillProgress::NotStarted => {
-                *progress = LocalityBackfillProgress::InProgress {
-                    current_pos: new_pos,
-                    processed_rows: row_count_delta,
-                };
-            }
-            LocalityBackfillProgress::InProgress { processed_rows, .. } => {
-                *progress = LocalityBackfillProgress::InProgress {
-                    current_pos: new_pos,
-                    processed_rows: *processed_rows + row_count_delta,
-                };
-            }
-            LocalityBackfillProgress::Completed { .. } => {
-                // Already completed, shouldn't update
-            }
-        }
-        self.total_snapshot_rows += row_count_delta;
-    }
-
-    fn finish_vnode(&mut self, vnode: VirtualNode, pk_len: usize) {
-        let progress = self.per_vnode.get_mut(&vnode).unwrap();
-        match progress {
-            LocalityBackfillProgress::NotStarted => {
-                // Create a final position with pk_len NULL values to indicate completion
-                let final_pos = OwnedRow::new(vec![None; pk_len]);
-                *progress = LocalityBackfillProgress::Completed {
-                    final_pos,
-                    total_rows: 0,
-                };
-            }
-            LocalityBackfillProgress::InProgress {
-                current_pos,
-                processed_rows,
-            } => {
-                *progress = LocalityBackfillProgress::Completed {
-                    final_pos: current_pos.clone(),
-                    total_rows: *processed_rows,
-                };
-            }
-            LocalityBackfillProgress::Completed { .. } => {
-                // Already completed
-            }
-        }
-    }
-
-    fn get_progress(&self, vnode: &VirtualNode) -> &LocalityBackfillProgress {
-        self.per_vnode.get(vnode).unwrap()
-    }
-}
 
 /// The `LocalityProviderExecutor` provides locality for operators during backfilling.
 /// It buffers input data into a state table using locality columns as primary key prefix.
@@ -254,20 +144,18 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     #[try_stream(ok = (VirtualNode, OwnedRow), error = StreamExecutorError)]
     async fn make_snapshot_stream<'a>(
         reader: FlushedStateTableReader<S>,
-        backfill_state: LocalityBackfillState,
+        backfill_state: BackfillState,
         rate_limiter: &'a MonitoredRateLimiter,
     ) {
         // Read from state table per vnode in locality order
         for vnode in reader.vnodes().iter_vnodes() {
-            let progress = backfill_state.get_progress(&vnode);
-
-            let current_pos = match progress {
-                LocalityBackfillProgress::NotStarted => None,
-                LocalityBackfillProgress::Completed { .. } => {
+            let current_pos = match backfill_state.get_progress(&vnode)? {
+                BackfillProgressPerVnode::NotStarted => None,
+                BackfillProgressPerVnode::Completed { .. } => {
                     // Skip completed vnodes
                     continue;
                 }
-                LocalityBackfillProgress::InProgress { current_pos, .. } => {
+                BackfillProgressPerVnode::InProgress { current_pos, .. } => {
                     Some(current_pos.clone())
                 }
             };
@@ -300,161 +188,17 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         }
     }
 
-    /// Persist backfill state to progress table
-    async fn persist_backfill_state(
-        progress_table: &mut StateTable<S>,
-        backfill_state: &LocalityBackfillState,
-    ) -> StreamExecutorResult<()> {
-        for (vnode, progress) in &backfill_state.per_vnode {
-            let (is_finished, current_pos, row_count) = match progress {
-                LocalityBackfillProgress::NotStarted => continue, // Don't persist NotStarted
-                LocalityBackfillProgress::InProgress {
-                    current_pos,
-                    processed_rows,
-                } => (false, current_pos.clone(), *processed_rows),
-                LocalityBackfillProgress::Completed {
-                    final_pos,
-                    total_rows,
-                } => (true, final_pos.clone(), *total_rows),
-            };
-
-            // Build progress row: vnode + current_pos + is_finished + row_count
-            let mut row_data = vec![Some(vnode.to_scalar().into())];
-            row_data.extend(current_pos);
-            row_data.push(Some(risingwave_common::types::ScalarImpl::Bool(
-                is_finished,
-            )));
-            row_data.push(Some(risingwave_common::types::ScalarImpl::Int64(
-                row_count as i64,
-            )));
-
-            let new_row = OwnedRow::new(row_data);
-
-            // Check if there's an existing row for this vnode to determine insert vs update
-            // This ensures state operation consistency - update existing rows, insert new ones
-            let key_data = vec![Some(vnode.to_scalar().into())];
-            let key = OwnedRow::new(key_data);
-
-            if let Some(existing_row) = progress_table.get_row(&key).await? {
-                // Update existing state - ensures proper state transition for recovery
-                progress_table.update(existing_row, new_row);
-            } else {
-                // Insert new state - first time persisting for this vnode
-                progress_table.insert(new_row);
-            }
-        }
-        Ok(())
-    }
-
-    /// Load backfill state from progress table
-    async fn load_backfill_state(
-        progress_table: &StateTable<S>,
-    ) -> StreamExecutorResult<LocalityBackfillState> {
-        let mut backfill_state = LocalityBackfillState::new(progress_table.vnodes().iter_vnodes());
-        let mut total_snapshot_rows = 0;
-
-        // For each vnode, try to get its progress state
-        for vnode in progress_table.vnodes().iter_vnodes() {
-            // Build key: vnode + NULL values for locality columns (to match progress table schema)
-            let key_data = vec![Some(vnode.to_scalar().into())];
-
-            let key = OwnedRow::new(key_data);
-
-            if let Some(row) = progress_table.get_row(&key).await? {
-                // Parse is_finished flag (second to last column)
-                let finished_col_idx = row.len() - 2;
-                let is_finished = row
-                    .datum_at(finished_col_idx)
-                    .map(|d| d.into_bool())
-                    .unwrap_or(false);
-
-                // Parse row count (last column)
-                let row_count = row
-                    .datum_at(row.len() - 1)
-                    .map(|d| d.into_int64() as u64)
-                    .unwrap_or(0);
-
-                let current_pos_data: Vec<Datum> = (1..finished_col_idx)
-                    .map(|i| row.datum_at(i).to_owned_datum())
-                    .collect();
-                let current_pos = OwnedRow::new(current_pos_data);
-
-                // Set progress based on is_finished flag
-                let progress = if is_finished {
-                    LocalityBackfillProgress::Completed {
-                        final_pos: current_pos,
-                        total_rows: row_count,
-                    }
-                } else {
-                    LocalityBackfillProgress::InProgress {
-                        current_pos,
-                        processed_rows: row_count,
-                    }
-                };
-
-                backfill_state.per_vnode.insert(vnode, progress);
-                total_snapshot_rows += row_count;
-            }
-            // If no row found, keep the default NotStarted state
-        }
-
-        backfill_state.total_snapshot_rows = total_snapshot_rows;
-        Ok(backfill_state)
-    }
-
-    /// Mark chunk for forwarding based on backfill progress
-    fn mark_chunk(
-        chunk: StreamChunk,
-        backfill_state: &LocalityBackfillState,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<StreamChunk> {
-        let chunk = chunk.compact_vis();
-        let (data, ops) = chunk.into_parts();
-        let mut new_visibility = risingwave_common::bitmap::BitmapBuilder::with_capacity(ops.len());
-
-        let pk_indices = state_table.pk_indices();
-        let pk_order = state_table.pk_serde().get_order_types();
-
-        for row in data.rows() {
-            // Project to primary key columns for comparison
-            let pk = row.project(pk_indices);
-            let vnode = state_table.compute_vnode_by_pk(pk);
-
-            let visible = match backfill_state.get_progress(&vnode) {
-                LocalityBackfillProgress::Completed { .. } => true,
-                LocalityBackfillProgress::NotStarted => false,
-                LocalityBackfillProgress::InProgress { current_pos, .. } => {
-                    // Compare primary key with current position
-                    cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()).is_le()
-                }
-            };
-
-            new_visibility.append(visible);
-        }
-
-        let (columns, _) = data.into_parts();
-        let chunk = StreamChunk::with_visibility(ops, columns, new_visibility.finish());
-        Ok(chunk)
-    }
-
     fn handle_snapshot_chunk(
         data_chunk: DataChunk,
         vnode: VirtualNode,
         pk_indices: &[usize],
-        backfill_state: &mut LocalityBackfillState,
+        backfill_state: &mut BackfillState,
         cur_barrier_snapshot_processed_rows: &mut u64,
     ) -> StreamExecutorResult<StreamChunk> {
         let chunk = StreamChunk::from_parts(vec![Op::Insert; data_chunk.cardinality()], data_chunk);
         let chunk_cardinality = chunk.cardinality() as u64;
-
-        // Extract primary key from the last row to update progress
-        // As snapshot read streams are ordered by pk, we can use the last row to update current_pos
-        if let Some(last_row) = chunk.rows().last() {
-            let pk = last_row.1.project(pk_indices);
-            let pk_owned = pk.into_owned_row();
-            backfill_state.update_progress(vnode, pk_owned, chunk_cardinality);
-        }
-
+        // As snapshot read streams are ordered by pk, the last row is the new position.
+        update_pos_by_vnode(vnode, &chunk, pk_indices, backfill_state, chunk_cardinality)?;
         *cur_barrier_snapshot_processed_rows += chunk_cardinality;
         Ok(chunk)
     }
@@ -470,10 +214,12 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mut upstream = self.upstream.execute();
+        let backfill_operator_id = self.progress.backfill_operator_id();
 
         // Wait for first barrier to initialize
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let first_epoch = first_barrier.epoch;
+        let mut global_pause = first_barrier.is_pause_on_startup();
 
         // Propagate the first barrier
         yield Message::Barrier(first_barrier);
@@ -486,68 +232,27 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         state_table.init_epoch(first_epoch).await?;
         progress_table.init_epoch(first_epoch).await?;
 
-        // Load backfill state from progress table
-        let mut backfill_state = Self::load_backfill_state(&progress_table).await?;
+        let progress_per_vnode = get_progress_per_vnode(&progress_table).await?;
+        let is_completely_finished = progress_per_vnode.iter().all(|(_, progress)| {
+            matches!(
+                progress.current_state(),
+                BackfillProgressPerVnode::Completed { .. }
+            )
+        });
+        // A provider that has not replayed any vnode waits for `StartFragmentBackfill`.
+        let mut backfill_paused = progress_per_vnode.iter().all(|(_, progress)| {
+            matches!(
+                progress.current_state(),
+                BackfillProgressPerVnode::NotStarted
+            )
+        });
+        let mut backfill_state: BackfillState = progress_per_vnode.into();
 
         // Get pk info from state table
-        let pk_indices = state_table.pk_indices().iter().cloned().collect_vec();
-
-        let need_backfill = !backfill_state.is_completed();
-        let mut report_finished_on_first_barrier = !need_backfill;
-
-        let need_buffering = backfill_state
-            .per_vnode
-            .values()
-            .all(|progress| matches!(progress, LocalityBackfillProgress::NotStarted));
-        // Initial buffering phase before backfill - wait for StartFragmentBackfill mutation (if needed)
-        if need_buffering {
-            // Enter buffering phase - buffer data until StartFragmentBackfill is received
-            let mut start_backfill = false;
-
-            #[for_await]
-            for msg in upstream.by_ref() {
-                let msg = msg?;
-
-                match msg {
-                    Message::Watermark(_) => {
-                        // Ignore watermarks during initial buffering
-                    }
-                    Message::Chunk(chunk) => {
-                        state_table.write_chunk(chunk);
-                        state_table.try_flush().await?;
-                    }
-                    Message::Barrier(barrier) => {
-                        let epoch = barrier.epoch;
-                        Self::apply_throttle(&rate_limiter, self.fragment_id, &barrier);
-
-                        if barrier.should_start_backfill(self.progress.backfill_operator_id()) {
-                            tracing::info!(
-                                fragment_id = %self.fragment_id,
-                                backfill_operator_id = %self.progress.backfill_operator_id(),
-                                "Start backfill of locality provider",
-                            );
-                            start_backfill = true;
-                        }
-
-                        // Commit state tables
-                        barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
-                        state_table
-                            .commit_assert_no_update_vnode_bitmap(epoch)
-                            .await?;
-                        progress_table
-                            .commit_assert_no_update_vnode_bitmap(epoch)
-                            .await?;
-
-                        yield Message::Barrier(barrier);
-
-                        // Start backfill when StartFragmentBackfill mutation is received
-                        if start_backfill {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        let pk_indices = state_table.pk_indices().to_vec();
+        let pk_order = state_table.pk_serde().get_order_types().to_vec();
+        #[cfg(debug_assertions)]
+        let state_len = pk_indices.len() + METADATA_STATE_LEN;
 
         // Locality Provider Backfill Algorithm (adapted from Arrangement Backfill):
         //
@@ -575,7 +280,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
 
-        if need_backfill {
+        if !is_completely_finished {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
             let metrics = self
@@ -611,15 +316,17 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
+                let paused =
+                    global_pause || backfill_paused || rate_limiter.rate_limit().is_paused();
+                let mut state_table_changed = false;
 
                 // Prefer upstream so a ready barrier can pause snapshot output promptly, while
                 // keeping the snapshot stream itself alive across barriers with no upstream data.
                 let barrier = loop {
                     let upstream_next = upstream.next();
                     let mut snapshot_stream_ref = snapshot_stream.as_mut();
-                    let snapshot_paused = rate_limiter.rate_limit().is_paused();
                     let snapshot_next = async move {
-                        if snapshot_paused {
+                        if paused {
                             pending().await
                         } else {
                             snapshot_stream_ref.next().await
@@ -635,8 +342,27 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                 break barrier;
                             }
                             Some(Message::Chunk(chunk)) => {
-                                // Buffer the upstream chunk.
-                                upstream_chunk_buffer.push(chunk.compact_vis());
+                                let chunk = chunk.compact_vis();
+                                if paused {
+                                    // The positions don't move while paused, so the chunk is
+                                    // marked and written at once instead of buffered for the epoch.
+                                    cur_barrier_upstream_processed_rows +=
+                                        chunk.cardinality() as u64;
+                                    if backfill_state.has_progress() {
+                                        yield Message::Chunk(mark_chunk_ref_by_vnode(
+                                            &chunk,
+                                            &backfill_state,
+                                            &pk_indices,
+                                            &state_table,
+                                            &pk_order,
+                                        )?);
+                                    }
+                                    state_table.write_chunk(chunk);
+                                    state_table.try_flush().await?;
+                                    state_table_changed = true;
+                                } else {
+                                    upstream_chunk_buffer.push(chunk);
+                                }
                             }
                             Some(Message::Watermark(_)) => {
                                 // Ignore watermark during backfill.
@@ -650,10 +376,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         },
                         FutureEither::Right((msg, _)) => match msg.transpose()? {
                             Some((vnode, row)) => {
-                                // Use builder to batch rows efficiently
                                 let builder = builders.get_mut(&vnode).unwrap();
                                 if let Some(data_chunk) = builder.append_one_row(row) {
-                                    // Builder is full, handle the chunk
                                     let chunk = Self::handle_snapshot_chunk(
                                         data_chunk,
                                         vnode,
@@ -663,8 +387,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                     )?;
                                     yield Message::Chunk(chunk);
                                 }
-                                // If append_one_row returns None, row is buffered but no chunk is produced yet
-                                // Progress will be updated when the builder is consumed later
                             }
                             None => {
                                 // End of the snapshot read stream.
@@ -721,17 +443,18 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
 
                 // Process upstream buffer chunks with marking
-                let should_refresh_snapshot = !upstream_chunk_buffer.is_empty();
+                state_table_changed |= !upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
-
-                    // Mark chunk based on backfill progress
                     if backfill_state.has_progress() {
-                        let marked_chunk =
-                            Self::mark_chunk(chunk.clone(), &backfill_state, &state_table)?;
-                        yield Message::Chunk(marked_chunk);
+                        yield Message::Chunk(mark_chunk_ref_by_vnode(
+                            &chunk,
+                            &backfill_state,
+                            &pk_indices,
+                            &state_table,
+                            &pk_order,
+                        )?);
                     }
-
                     // Persist buffered upstream chunk into state table so subsequent snapshot
                     // iterations see the latest writes.
                     state_table.write_chunk(chunk);
@@ -743,31 +466,24 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     .commit_assert_no_update_vnode_bitmap(barrier_epoch)
                     .await?;
 
-                // Update progress with current epoch and snapshot read count
-                // Report both consumed rows and buffered rows separately for precise progress
-                let total_snapshot_processed_rows: u64 = backfill_state
-                    .vnodes()
-                    .map(|(_, progress)| match *progress {
-                        LocalityBackfillProgress::InProgress { processed_rows, .. } => {
-                            processed_rows
-                        }
-                        LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
-                        LocalityBackfillProgress::NotStarted => 0,
-                    })
-                    .sum();
+                if !backfill_paused {
+                    self.progress.update_with_buffered_rows(
+                        barrier_epoch,
+                        barrier_epoch.curr, // Use barrier epoch as snapshot read epoch
+                        backfill_state.get_snapshot_row_count(),
+                        0,
+                    );
+                }
 
-                self.progress.update_with_buffered_rows(
-                    barrier.epoch,
-                    barrier.epoch.curr, // Use barrier epoch as snapshot read epoch
-                    total_snapshot_processed_rows,
-                    0,
-                );
-
-                // Persist backfill progress
-                Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;
-                progress_table
-                    .commit_assert_no_update_vnode_bitmap(barrier_epoch)
-                    .await?;
+                persist_state_per_vnode(
+                    barrier_epoch,
+                    &mut progress_table,
+                    &mut backfill_state,
+                    #[cfg(debug_assertions)]
+                    state_len,
+                    vnodes.iter_vnodes(),
+                )
+                .await?;
 
                 metrics
                     .backfill_snapshot_read_row_count
@@ -776,9 +492,25 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     .backfill_upstream_output_row_count
                     .inc_by(cur_barrier_upstream_processed_rows);
 
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Pause => global_pause = true,
+                        Mutation::Resume => global_pause = false,
+                        _ => {}
+                    }
+                }
+                if backfill_paused && barrier.should_start_backfill(backfill_operator_id) {
+                    tracing::info!(
+                        fragment_id = %self.fragment_id,
+                        %backfill_operator_id,
+                        "Start backfill of locality provider",
+                    );
+                    backfill_paused = false;
+                }
+
                 yield Message::Barrier(barrier);
 
-                if should_refresh_snapshot {
+                if state_table_changed {
                     snapshot_stream.set(Self::make_snapshot_stream(
                         snapshot_reader.clone(),
                         backfill_state.clone(),
@@ -786,12 +518,10 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     ));
                 }
             }
-        }
 
-        tracing::debug!("Locality provider backfill finished, forwarding upstream directly");
+            tracing::debug!("Locality provider backfill finished, forwarding upstream directly");
 
-        // Wait for first barrier after backfill completion to mark progress as finished
-        if need_backfill && !backfill_state.is_completed() {
+            // Wait for first barrier after backfill completion to mark progress as finished
             while let Some(Ok(msg)) = upstream.next().await {
                 match msg {
                     Message::Barrier(barrier) => {
@@ -802,38 +532,28 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                             .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                             .await?;
 
-                        // Mark all vnodes as completed
                         for vnode in state_table.vnodes().iter_vnodes() {
-                            backfill_state.finish_vnode(vnode, pk_indices.len());
+                            backfill_state.finish_progress(vnode, pk_indices.len());
                         }
 
-                        // Calculate final total processed rows
-                        let total_snapshot_processed_rows: u64 = backfill_state
-                            .vnodes()
-                            .map(|(_, progress)| match *progress {
-                                LocalityBackfillProgress::Completed { total_rows, .. } => {
-                                    total_rows
-                                }
-                                LocalityBackfillProgress::InProgress { processed_rows, .. } => {
-                                    processed_rows
-                                }
-                                LocalityBackfillProgress::NotStarted => 0,
-                            })
-                            .sum();
-
-                        // Finish progress reporting with any remaining buffered rows
-                        // At completion, we report `total_snapshot_processed_rows` as buffered rows to make progress accurate.
+                        // At completion, we report the replayed rows as buffered rows to make
+                        // progress accurate.
+                        let total_snapshot_processed_rows = backfill_state.get_snapshot_row_count();
                         self.progress.finish_with_buffered_rows(
                             barrier.epoch,
                             total_snapshot_processed_rows,
                             total_snapshot_processed_rows,
                         );
 
-                        // Persist final state
-                        Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;
-                        progress_table
-                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
-                            .await?;
+                        persist_state_per_vnode(
+                            barrier.epoch,
+                            &mut progress_table,
+                            &mut backfill_state,
+                            #[cfg(debug_assertions)]
+                            state_len,
+                            state_table.vnodes().iter_vnodes(),
+                        )
+                        .await?;
 
                         yield Message::Barrier(barrier);
                         break; // Exit the loop after processing the barrier
@@ -850,6 +570,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             }
         }
 
+        let mut report_finished_on_first_barrier = is_completely_finished;
         // After backfill completion, forward messages directly
         #[for_await]
         for msg in upstream {
@@ -867,11 +588,13 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                         .await?;
                     if report_finished_on_first_barrier {
-                        // At completion, we report `total_snapshot_rows` as buffered rows to make progress accurate.
+                        // At completion, we report the replayed rows as buffered rows to make
+                        // progress accurate.
+                        let total_snapshot_rows = backfill_state.get_snapshot_row_count();
                         self.progress.finish_with_buffered_rows(
                             barrier.epoch,
-                            backfill_state.total_snapshot_rows,
-                            backfill_state.total_snapshot_rows,
+                            total_snapshot_rows,
+                            total_snapshot_rows,
                         );
                         report_finished_on_first_barrier = false;
                     }
@@ -883,5 +606,99 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use risingwave_common::array::StreamChunkTestExt;
+    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+
+    use super::*;
+    use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+    use crate::executor::backfill::utils::BackfillStatePerVnode;
+
+    #[tokio::test]
+    async fn test_mark_chunk_splits_unmatched_updates() {
+        // Ordered by `(a, b)` and sharded by `b`, where `b` is the stream key and `a` the locality
+        // column, so the rows of an update that changes `a` stay in a vnode but may fall on both
+        // sides of the backfill position.
+        let table = gen_pbtable_with_dist_key(
+            TableId::new(1),
+            vec![
+                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+            ],
+            vec![OrderType::ascending(), OrderType::ascending()],
+            vec![0, 1],
+            0,
+            vec![1],
+        );
+        let state_table = StateTable::from_table_catalog(
+            &table,
+            MemoryStateStore::new(),
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+        )
+        .await;
+        let in_progress_vnodes = (1..=3i64)
+            .map(|b| {
+                state_table
+                    .compute_vnode_by_pk(OwnedRow::new(vec![Some(0i64.into()), Some(b.into())]))
+            })
+            .collect_vec();
+        let backfill_state: BackfillState = state_table
+            .vnodes()
+            .iter_vnodes()
+            .map(|vnode| {
+                let progress = if in_progress_vnodes.contains(&vnode) {
+                    BackfillProgressPerVnode::InProgress {
+                        current_pos: OwnedRow::new(vec![Some(5i64.into()), Some(0i64.into())]),
+                        snapshot_row_count: 1,
+                    }
+                } else {
+                    BackfillProgressPerVnode::NotStarted
+                };
+                (
+                    vnode,
+                    BackfillStatePerVnode::new(progress.clone(), progress),
+                )
+            })
+            .collect_vec()
+            .into();
+
+        let chunk = StreamChunk::from_pretty(
+            " I I
+            U- 3 1
+            U+ 7 1
+            U- 7 2
+            U+ 3 2
+            U- 1 3
+            U+ 2 3",
+        );
+        let marked = mark_chunk_ref_by_vnode(
+            &chunk,
+            &backfill_state,
+            state_table.pk_indices(),
+            &state_table,
+            state_table.pk_serde().get_order_types(),
+        )
+        .unwrap();
+        assert_eq!(
+            marked.compact_vis().to_pretty().to_string(),
+            StreamChunk::from_pretty(
+                " I I
+                - 3 1
+                + 3 2
+                U- 1 3
+                U+ 2 3",
+            )
+            .to_pretty()
+            .to_string()
+        );
     }
 }
