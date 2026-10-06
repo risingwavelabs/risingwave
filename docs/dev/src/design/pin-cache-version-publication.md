@@ -13,7 +13,7 @@ These acceptance conditions govern the implementation; tests must not redefine t
 | Ownership lifetime | Foyer owns inputs retained across asynchronous work. Pin borrows current bitmap inputs while holding the metadata read guard through synchronous admission/submission; no bitmap snapshot is needed inside that scope. |
 | Foyer metadata-only work | Continue warming admitted SST metadata when disk data refill is disabled or the level is excluded, but skip block locality computation and data jobs. |
 | Independence and publication | Each backend executes and times out independently. After both attempts settle, each event reports whether it may be a publication endpoint. The queue publishes settled FIFO prefixes without splitting a selected Pin batch. Shared I/O limits do not create shared completion scheduling. |
-| Scope | Cross-event merging belongs to Pin. No retries, GC scans, queue deadlines, backlog force-release or production activation. Locality bounds remain conservative; downloads retain unit/whole-object granularity. |
+| Scope | Cross-event merging belongs to Pin. No retries, GC scans, queue deadlines, backlog force-release. Production activation is wired by the separate layer below. Locality bounds remain conservative; downloads retain unit/whole-object granularity. |
 
 ## Preparation boundary
 
@@ -151,6 +151,18 @@ updates remain intact; watch readers and the uploader receive the prefix's final
 
 Without Pin, each settled Foyer event is an endpoint and retains the original
 JoinError and detach behavior. Handler shutdown drops refillers and the publication
-queue together. Ownership-driven published-file reclamation, physical GC scheduling
-and production activation remain separate work. No read-through refill or automatic
-retry is introduced.
+queue together. Ownership-driven published-file reclamation remains separate work.
+No read-through refill or automatic retry is introduced.
+
+## Activation layer
+
+The activation layer enables the backend only with a configured local directory.
+Startup consumes the version and Pin intent from the same Meta snapshot before
+constructing the cache and starting event processing. Recovery restores files by
+version membership without remote data or metadata reads, and does not backfill
+missing objects. Subsequent delta insertions use the shared admission path above.
+
+After recovery, a storage-owned GC worker runs one full pass for startup garbage
+and periodic minor passes for withdrawn files whose readers have exited. Storage
+shutdown aborts this worker. This does not add ownership-driven scans of published
+files: unpin and version retirement still drive their withdrawal.

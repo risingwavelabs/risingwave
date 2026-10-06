@@ -21,6 +21,56 @@ use super::super::test_utils::{in_memory_object_store, local_object_store};
 use super::{DELETE_BATCH_SIZE, PinCache, PinCacheGcSelection};
 
 #[tokio::test]
+async fn test_gc_worker_reclaims_startup_garbage_and_withdrawn_files() {
+    let store = in_memory_object_store();
+    for path in ["1001-1.sst", "1002-2.sst", "orphan.tmp"] {
+        store
+            .upload(path, Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+    }
+    let cache = PinCache::new(store.clone(), 1, [(1001.into(), 8)])
+        .await
+        .unwrap();
+    let reader = cache.get(1001.into()).unwrap();
+    assert_eq!(cache.storage.lock().files.len(), 2);
+    let _gc = scopeguard::guard(cache.start_gc(), |task| task.abort());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let tracked = cache.storage.lock().files.len();
+            if tracked == 1
+                && store.metadata("1002-2.sst").await.is_err()
+                && store.metadata("orphan.tmp").await.is_err()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("startup GC must reclaim inventory rejects and temporary files");
+    assert!(store.metadata("1002-2.sst").await.is_err());
+
+    cache.unregister_objects([1001.into()]);
+    // Let minor GC inspect the withdrawn file while its reader still holds a lease.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert!(cache.storage.lock().files.contains_key("1001-1.sst"));
+    assert_eq!(
+        reader.read(..).await.unwrap(),
+        Bytes::from_static(b"complete")
+    );
+    drop(reader);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !cache.storage.lock().files.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("minor GC must reclaim a withdrawal after its final reader exits");
+    assert!(store.metadata("1001-1.sst").await.is_err());
+}
+
+#[tokio::test]
 async fn test_selection_protects_files_and_can_be_abandoned() {
     let store = in_memory_object_store();
     let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
