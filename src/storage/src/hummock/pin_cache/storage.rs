@@ -19,7 +19,7 @@
 //! Completed files remain owned here until confirmed absent or deleted, even after publication
 //! is withdrawn. Publications, readers and GC selections hold external file leases.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::{PinCache, PinCacheFile, metric_bytes};
@@ -30,6 +30,9 @@ pub(super) struct PinCacheStorageState {
     pub(super) files: HashMap<String, Arc<PinCacheFile>>,
     // Target paths only. Backend-generated temporary paths are discovered by LIST.
     pub(super) uploads: HashMap<String, u64>,
+    // A subset of `files`: exact paths of explicitly discarded, complete files.
+    // Keep entries until deletion succeeds, including while readers or selections hold them.
+    pub(super) pending_deletes: HashSet<String>,
     pub(super) accounted_bytes: u64,
 }
 
@@ -37,6 +40,15 @@ impl PinCacheStorageState {
     fn account(&mut self, size: u64) {
         self.accounted_bytes = self.accounted_bytes.saturating_add(size);
         self.report();
+    }
+
+    /// Forget a confirmed absent file and release its accounted bytes at most once.
+    pub(super) fn remove_file(&mut self, path: &str) {
+        if let Some(file) = self.files.remove(path) {
+            self.pending_deletes.remove(path);
+            self.accounted_bytes -= file.size;
+            self.report();
+        }
     }
 
     fn report(&self) {
@@ -104,5 +116,18 @@ impl PinCache {
         state.files.insert(path, file.clone());
         state.account(size);
         file
+    }
+
+    /// Hand off a complete, obsolete file after releasing its shard lock. This only records
+    /// deletion intent; readers may still hold the file, and no GC pass is started here.
+    pub(super) fn enqueue_delete(&self, file: Arc<PinCacheFile>) {
+        let mut state = self.storage.lock();
+        debug_assert!(
+            state
+                .files
+                .get(&file.path)
+                .is_some_and(|entry| Arc::ptr_eq(entry, &file))
+        );
+        state.pending_deletes.insert(file.path.clone());
     }
 }

@@ -150,13 +150,13 @@ impl PinCache {
     /// Installs a downloaded file only if its original admission is still current.
     /// Returns false if the task was revoked while downloading. The caller must use the token
     /// for this file and serialize downloads per object; an existing publication is a bug.
-    /// A rejected download releases its lease after the shard lock.
+    /// A rejected download is handed to GC after releasing the lock.
     pub(crate) fn publish(&self, token: PinCacheRefillToken, download: PinCacheDownload) -> bool {
         let mut state = self.shard(token.object_id).write();
         let Some(object) = state.object_matching_token(token) else {
             // This download lost permission to publish when its object was unregistered or revoked.
             drop(state);
-            drop(download);
+            self.enqueue_delete(download.file);
             return false;
         };
         object.publish(download.file);
@@ -216,6 +216,16 @@ mod tests {
             // The executor waits for the revoked attempt to finish before starting its replacement.
             assert!(!pin_cache.publish(token, old));
             assert!(pin_cache.get(object_id).is_none());
+            pin_cache.select_minor().delete().await.unwrap();
+            assert!(
+                pin_cache
+                    .store
+                    .metadata(&old_path)
+                    .await
+                    .unwrap_err()
+                    .is_object_not_found_error()
+            );
+
             download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id)
                 .await
                 .unwrap();
@@ -228,7 +238,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_interrupted_fs_upload_releases_capacity() {
+    async fn test_full_gc_reclaims_interrupted_fs_upload() {
         for cancel in [false, true] {
             let (_dir, local_store) = local_object_store().await;
             let pin_cache = PinCache::new(local_store.clone(), 8, 1, 2, [])
@@ -291,6 +301,24 @@ mod tests {
             .await
             .unwrap();
             assert!(pin_cache.get(object_id).is_none());
+            // Full GC must associate the real backend's temporary file with this live upload,
+            // even though there is no published route and the age cutoff would allow deletion.
+            pin_cache.select_minor().delete().await.unwrap();
+            pin_cache
+                .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+                .await
+                .unwrap()
+                .delete()
+                .await
+                .unwrap();
+            let files: Vec<_> = local_store
+                .list("", None, None)
+                .await
+                .unwrap()
+                .try_collect()
+                .await
+                .unwrap();
+            assert!(files.iter().any(|file| file.total_size == 4));
             assert_eq!(pin_cache.storage.lock().accounted_bytes, 8);
             assert!(matches!(
                 download_and_publish_for_test(
@@ -329,7 +357,26 @@ mod tests {
                 .await
                 .unwrap();
             let published = pin_cache.get(object_id).unwrap();
+            pin_cache
+                .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+                .await
+                .unwrap()
+                .delete()
+                .await
+                .unwrap();
             assert_eq!(pin_cache.storage.lock().accounted_bytes, 8);
+            let files: Vec<_> = local_store
+                .list("", None, None)
+                .await
+                .unwrap()
+                .try_collect()
+                .await
+                .unwrap();
+            assert!(
+                files
+                    .iter()
+                    .all(|file| file.key.ends_with('/') || file.key == published.file.path)
+            );
             assert_eq!(
                 published.read(..).await.unwrap(),
                 Bytes::from_static(b"complete")

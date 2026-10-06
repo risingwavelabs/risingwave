@@ -33,6 +33,7 @@ pub(crate) struct PinCacheMetrics {
     pub published_bytes: IntGauge,
     pub recovery_ready: IntGauge,
     pub recovery_failures: IntCounter,
+    pub gc_failures: IntCounter,
 }
 
 impl PinCacheMetrics {
@@ -75,6 +76,12 @@ impl PinCacheMetrics {
             registry
         )
         .unwrap();
+        let gc_failures = register_int_counter_with_registry!(
+            "pin_cache_gc_failure_total",
+            "Failed Pin Cache reclaim batches",
+            registry
+        )
+        .unwrap();
 
         Self {
             io_failures,
@@ -84,6 +91,7 @@ impl PinCacheMetrics {
             published_bytes,
             recovery_ready,
             recovery_failures,
+            gc_failures,
         }
     }
 }

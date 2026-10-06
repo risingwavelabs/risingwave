@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::TryStreamExt;
 use risingwave_common::config::{RwConfig, extract_storage_memory_config};
 use risingwave_common::system_param::system_params_for_test;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -96,8 +97,8 @@ async fn test_read_and_unregister_lifecycle() {
     old_read.invalidate();
     assert!(pin_cache.get(object_id).is_some());
     drop(old_read);
-    // The completed object stays accounted until physical reclamation.
-    assert!(old_file.upgrade().is_some());
+    pin_cache.select_minor().delete().await.unwrap();
+    assert!(old_file.upgrade().is_none());
     assert_eq!(current.read(..).await.unwrap(), original);
 }
 
@@ -157,6 +158,23 @@ async fn test_completed_invalid_fs_upload_reclaims_capacity() {
     assert!(pin_cache.get(object_id).is_none());
     // Validation failure releases logical capacity; full GC cleans the physical leftover.
     assert_eq!(pin_cache.storage.lock().accounted_bytes, 0);
+    pin_cache.select_minor().delete().await.unwrap();
+    pin_cache
+        .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+        .await
+        .unwrap()
+        .delete()
+        .await
+        .unwrap();
+    assert_eq!(pin_cache.storage.lock().accounted_bytes, 0);
+    let files: Vec<_> = local_store
+        .list("", None, None)
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(files.iter().all(|file| file.key.ends_with('/')));
 }
 
 #[tokio::test]
@@ -362,4 +380,66 @@ async fn test_recovery_returns_ready_routes_across_shards() {
             Bytes::from_static(b"complete")
         );
     }
+}
+
+#[tokio::test]
+async fn test_gc_waits_for_readers_and_preserves_shutdown_files() {
+    let local = in_memory_object_store();
+    let remote = in_memory_object_store();
+    remote
+        .upload("sst", Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    for invalidate in [false, true] {
+        let cache = PinCache::new(local.clone(), 8, 1, 2, [(1001.into(), 8)])
+            .await
+            .unwrap();
+        download_and_publish_for_test(&cache, remote.clone(), "sst".into(), 1001.into())
+            .await
+            .unwrap();
+        let reader = cache.get(1001.into()).unwrap();
+        let path = reader.file.path.clone();
+        if invalidate {
+            reader.invalidate();
+        } else {
+            cache.unregister_objects([1001.into()]);
+        }
+        assert!(cache.get(1001.into()).is_none());
+        cache.select_minor().delete().await.unwrap();
+        cache
+            .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+            .await
+            .unwrap()
+            .delete()
+            .await
+            .unwrap();
+        assert_eq!(
+            reader.read(..).await.unwrap(),
+            Bytes::from_static(b"complete")
+        );
+        assert_eq!(cache.storage.lock().accounted_bytes, 8);
+        drop(reader);
+        cache.select_minor().delete().await.unwrap();
+        assert!(
+            local
+                .metadata(&path)
+                .await
+                .unwrap_err()
+                .is_object_not_found_error()
+        );
+    }
+    let cache = PinCache::new(local.clone(), 8, 1, 2, [(1001.into(), 8)])
+        .await
+        .unwrap();
+    download_and_publish_for_test(&cache, remote, "sst".into(), 1001.into())
+        .await
+        .unwrap();
+    let path = cache.get(1001.into()).unwrap().file.path.clone();
+    drop(cache);
+    tokio::task::yield_now().await;
+    assert!(local.metadata(&path).await.is_ok());
+    let recovered = PinCache::new(local, 8, 1, 2, [(1001.into(), 8)])
+        .await
+        .unwrap();
+    assert!(recovered.get(1001.into()).is_some());
 }

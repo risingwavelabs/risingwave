@@ -24,8 +24,9 @@
 //! invalidates all object tokens.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
 //! Reads use `get` and never create refill work. Recovery completes before sharing the cache.
-//! Storage owns completed files and in-flight capacity independently of the read-index shards.
-//! Physical reclamation is added before production activation.
+//! GC reclaims withdrawn files after their last reader releases them.
+//! `storage` owns file registration and capacity; `gc` selects and deletes files using that state.
+//! They share one storage lock, separate from the shard locks used by the read index.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,6 +37,7 @@ use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectStoreRef};
 
+mod gc;
 mod membership;
 mod recovery;
 mod refill;
@@ -89,9 +91,9 @@ impl PinCacheObject {
         }
     }
 
-    /// Withdraws the read route and returns the detached file lease.
+    /// Withdraws the read route and returns the exact file to enqueue for deletion.
     /// Membership and refill admission remain valid.
-    /// The caller must release the returned reference outside the shard lock.
+    /// The caller must hand the returned reference to GC outside the shard lock.
     fn unpublish(&mut self) -> Option<Arc<PinCacheFile>> {
         let size = self.published()?.size;
         let PinCacheObjectState::Published(file) =
@@ -215,7 +217,7 @@ impl PinCacheReadHandle {
         {
             let file = object.unpublish().unwrap();
             drop(state);
-            drop(file);
+            self.pin_cache.enqueue_delete(file);
         }
     }
 
