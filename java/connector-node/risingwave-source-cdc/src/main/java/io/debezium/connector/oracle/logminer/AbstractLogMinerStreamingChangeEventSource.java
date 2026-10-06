@@ -98,8 +98,8 @@ import org.slf4j.LoggerFactory;
  * An abstract implementation of the {@link StreamingChangeEventSource} for Oracle LogMiner, that is
  * the basis for both the buffered and unbuffered adapter implementations.
  *
- * <p>Debezium 3.2.4.Final override checking heartbeats after each mining query in both adapters.
- * Backports debezium/debezium@b135919a8d408d980176fd3d1950254b06007eb3 (debezium/dbz#2781).
+ * <p>Debezium 3.2.4.Final override providing a shared heartbeat check that both adapters call after
+ * each mining iteration's offset bookkeeping. Backports debezium/debezium#8169 (debezium/dbz#2781).
  *
  * @author Chris Cranford
  */
@@ -443,9 +443,6 @@ public abstract class AbstractLogMinerStreamingChangeEventSource
 
             getBatchMetrics().updateStreamingMetrics();
 
-            // Check heartbeats even when there are no captured row changes.
-            getEventDispatcher().dispatchHeartbeatEvent(getPartition(), getOffsetContext());
-
             if (getBatchMetrics().hasProcessedAnyTransactions()) {
                 getOffsetActivityMonitor().checkForStaleOffsets();
             }
@@ -459,6 +456,19 @@ public abstract class AbstractLogMinerStreamingChangeEventSource
                     getMetrics().getSleepTimeInMilliseconds(),
                     getOffsetContext());
         }
+    }
+
+    /**
+     * Checks whether a heartbeat should be emitted after a mining iteration.
+     *
+     * <p>This must be called once the iteration's offset bookkeeping is complete so that any
+     * heartbeat that is emitted carries the up-to-date offsets, even when no captured row changes
+     * were dispatched.
+     *
+     * @throws InterruptedException if the thread is interrupted
+     */
+    protected void dispatchHeartbeatEvent() throws InterruptedException {
+        getEventDispatcher().dispatchHeartbeatEvent(getPartition(), getOffsetContext());
     }
 
     /**

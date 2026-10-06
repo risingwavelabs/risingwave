@@ -84,9 +84,9 @@ import org.slf4j.LoggerFactory;
  *
  * <p>The event handler loop is executed in a separate executor.
  *
- * <p>Debezium 3.2.4.Final override relying on the shared mining-query heartbeat check instead of
- * adapter-specific dispatch sites. Backports
- * debezium/debezium@b135919a8d408d980176fd3d1950254b06007eb3 (debezium/dbz#2781).
+ * <p>Debezium 3.2.4.Final override checking heartbeats once per mining iteration, after the new
+ * resume position is calculated, instead of at adapter-specific dispatch sites. Backports
+ * debezium/debezium#8169 (debezium/dbz#2781).
  */
 public class BufferedLogMinerStreamingChangeEventSource
         extends AbstractLogMinerStreamingChangeEventSource {
@@ -291,8 +291,15 @@ public class BufferedLogMinerStreamingChangeEventSource
 
             logActiveTransactions();
 
-            return calculateNewStartScn(
-                    startScn, endScn, getOffsetContext().getCommitScn().getMaxCommittedScn());
+            final ProcessResult result =
+                    calculateNewStartScn(
+                            startScn,
+                            endScn,
+                            getOffsetContext().getCommitScn().getMaxCommittedScn());
+
+            dispatchHeartbeatEvent();
+
+            return result;
         }
     }
 
