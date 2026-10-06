@@ -1205,6 +1205,11 @@ impl InflightDatabaseInfo {
                     node.rate_limit = rate_limit;
                 }
             }
+            ThrottleType::SyncLogStoreRead => {
+                if let NodeBody::SyncLogStore(node) = node {
+                    node.read_rate_limit = rate_limit;
+                }
+            }
             ThrottleType::Unspecified => {}
         });
     }
@@ -1489,5 +1494,67 @@ impl InflightDatabaseInfo {
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::stream_plan::StreamNode;
+
+    use super::*;
+    use crate::manager::MetaSrvEnv;
+
+    #[tokio::test]
+    async fn test_sync_log_store_read_rate_limit_inflight() {
+        let env = MetaSrvEnv::for_test().await;
+        let fragment_id = FragmentId::new(42);
+        let job_id = JobId::new(43);
+        let fragment = InflightFragmentInfo {
+            fragment_id,
+            distribution_type: DistributionType::Hash,
+            fragment_type_mask: 0.into(),
+            vnode_count: 1,
+            nodes: StreamNode {
+                node_body: Some(NodeBody::SyncLogStore(Box::default())),
+                ..Default::default()
+            },
+            actors: [(
+                ActorId::new(44),
+                InflightActorInfo {
+                    worker_id: WorkerId::new(1),
+                    vnode_bitmap: Some(Bitmap::ones(1)),
+                    splits: vec![],
+                },
+            )]
+            .into(),
+            state_table_ids: HashSet::new(),
+        };
+        let job = InflightStreamingJobInfo {
+            job_id,
+            fragment_infos: [(fragment_id, fragment)].into(),
+            subscribers: HashMap::new(),
+            status: CreateStreamingJobStatus::Created,
+            cdc_table_backfill_tracker: None,
+        };
+        let mut info = InflightDatabaseInfo::recover(
+            DatabaseId::new(1),
+            std::iter::once(job),
+            env.shared_actor_infos().clone(),
+        );
+        for rate_limit in [Some(12), Some(23), None] {
+            info.pre_apply_throttle(
+                fragment_id,
+                &ThrottleConfig {
+                    rate_limit,
+                    throttle_type: ThrottleType::SyncLogStoreRead.into(),
+                },
+            );
+            let NodeBody::SyncLogStore(sync) =
+                info.fragment(fragment_id).nodes.node_body.as_ref().unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(sync.read_rate_limit, rate_limit);
+        }
     }
 }

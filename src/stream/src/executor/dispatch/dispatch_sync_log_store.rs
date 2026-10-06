@@ -37,8 +37,8 @@ use crate::common::log_store_impl::kv_log_store::{
 };
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::{
-    ReadFuture, SyncKvLogStoreContext, SyncedKvLogStoreExecutor, SyncedLogStoreBuffer, WriteFuture,
-    WriteFutureEvent,
+    ReadFuture, SyncKvLogStoreContext, SyncLogStoreReadLimiter, SyncedKvLogStoreExecutor,
+    SyncedLogStoreBuffer, WriteFuture, WriteFutureEvent,
 };
 use crate::executor::{MessageBatch, StreamConsumer, SyncedKvLogStoreMetrics};
 use crate::task::NewOutputRequest;
@@ -95,6 +95,7 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
             max_buffer_size,
             pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
             aligned: sync.aligned,
+            read_rate_limit: sync.read_rate_limit,
             chunk_size,
             metrics: log_store_metrics,
         };
@@ -219,6 +220,7 @@ impl ConsumerFuture {
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &SyncedKvLogStoreMetrics,
+        read_limiter: &SyncLogStoreReadLimiter,
     ) -> StreamResult<ConsumerFutureEvent> {
         loop {
             match self.as_mut().project() {
@@ -228,7 +230,7 @@ impl ConsumerFuture {
                     }
 
                     let chunk = read_future
-                        .next_chunk(progress, read_state, buffer, metrics)
+                        .next_chunk(progress, read_state, buffer, metrics, read_limiter)
                         .await?;
                     metrics.total_read_count.inc_by(chunk.cardinality() as _);
 
@@ -284,10 +286,15 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
         async move {
             let actor_id = self.inner.actor_id;
             let log_store_config = self.log_store_context;
+            let read_limiter = SyncLogStoreReadLimiter::new(
+                log_store_config.fragment_id,
+                log_store_config.read_rate_limit,
+            )?;
 
             let mut input = self.input.execute();
 
             let first_barrier = expect_first_barrier(&mut input).await?;
+            read_limiter.apply_barrier(&first_barrier)?;
             let first_write_epoch = first_barrier.epoch;
 
             // Dispatch the first barrier before initializing the log store states
@@ -322,6 +329,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                     initial_write_state,
                     log_store_config.metrics.clone(),
                     initial_write_epoch,
+                    read_limiter,
                 );
 
                 #[for_await]
@@ -380,6 +388,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                 &read_state,
                                 &mut buffer,
                                 &log_store_config.metrics,
+                                &read_limiter,
                             )
                             .await
                     };
@@ -417,6 +426,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                     write_future_state = next_write_future;
                                 }
                                 Message::Barrier(barrier) => {
+                                    read_limiter.apply_barrier(&barrier)?;
                                     if clean_state
                                         && barrier.kind.is_checkpoint()
                                         && !buffer.is_empty()
@@ -544,7 +554,7 @@ mod tests {
             .try_init();
     }
 
-    async fn run_barrier_chunk_ordering_test(aligned: bool) {
+    async fn run_barrier_chunk_ordering_test(aligned: bool, read_rate_limit: Option<u32>) {
         init_logger();
 
         let actor_id = ActorId::new(ACTOR_ID);
@@ -555,8 +565,8 @@ mod tests {
             .send((downstream_actor, NewOutputRequest::Local(down_tx)))
             .unwrap();
 
-        let barrier1 = Barrier::new_test_barrier(test_epoch(1));
-        let barrier2 = Barrier::new_test_barrier(test_epoch(2));
+        let barrier1 = Barrier::new_test_barrier(test_epoch(2));
+        let barrier2 = Barrier::new_test_barrier(test_epoch(3));
         let chunk_1 = StreamChunk::from_pretty(
             "  I   T
             +  5  10
@@ -592,9 +602,29 @@ mod tests {
             max_buffer_size: 1024,
             pause_duration_ms: Duration::from_millis(10),
             aligned,
+            read_rate_limit,
             chunk_size: 1024,
             metrics: SyncedKvLogStoreMetrics::for_test(),
         };
+        if read_rate_limit.is_some() {
+            let (_, mut writer) = SyncedKvLogStoreExecutor::init_local_log_store_state(
+                &log_store_config,
+                risingwave_common::util::epoch::EpochPair::new_test_epoch(test_epoch(1)),
+            )
+            .await
+            .unwrap();
+            let mut batch = writer.start_writer(false);
+            batch
+                .write_chunk(&chunk_1, test_epoch(1), FIRST_SEQ_ID, FIRST_SEQ_ID + 4)
+                .unwrap();
+            batch.write_barrier(test_epoch(1), true).unwrap();
+            batch.finish().await.unwrap();
+            writer
+                .seal_current_epoch(test_epoch(2), LogStoreVnodeProgress::None)
+                .post_yield_barrier(None)
+                .await
+                .unwrap();
+        }
         let (mut input_tx, source) = MockSource::channel();
         let input = source.into_executor(
             Schema {
@@ -631,7 +661,7 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
-        assert_eq!(observed1.epoch.curr, test_epoch(1));
+        assert_eq!(observed1.epoch.curr, test_epoch(2));
 
         let msg = timeout(Duration::from_secs(1), down_rx.recv())
             .await
@@ -639,10 +669,44 @@ mod tests {
             .expect("downstream should receive barrier(1)");
         let barriers = msg.as_barrier_batch().unwrap();
         assert_eq!(barriers.len(), 1);
-        assert_eq!(barriers[0].epoch.curr, test_epoch(1));
+        assert_eq!(barriers[0].epoch.curr, test_epoch(2));
 
-        input_tx.push_chunk(chunk_1.clone());
+        if read_rate_limit.is_none() {
+            input_tx.push_chunk(chunk_1.clone());
+        }
         input_tx.push_chunk(chunk_2.clone());
+        if read_rate_limit.is_some() {
+            assert!(
+                timeout(Duration::from_millis(50), down_rx.recv())
+                    .await
+                    .is_err()
+            );
+            // Clear a slow replay limit with a barrier while fresh input continues writing.
+            let resume =
+                Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Throttle(
+                    [(
+                        0.into(),
+                        stream_plan::throttle_mutation::ThrottleConfig {
+                            rate_limit: None,
+                            throttle_type: risingwave_pb::common::ThrottleType::SyncLogStoreRead
+                                .into(),
+                        },
+                    )]
+                    .into(),
+                ));
+            input_tx.send_barrier(resume);
+            let msg = timeout(Duration::from_millis(500), down_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(msg.as_barrier_batch().unwrap()[0].epoch.curr, test_epoch(3));
+            let barrier = timeout(Duration::from_millis(500), barrier_out_rx.recv())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(barrier.epoch.curr, test_epoch(3));
+        }
         let msg = timeout(Duration::from_secs(1), down_rx.recv())
             .await
             .unwrap()
@@ -655,6 +719,11 @@ mod tests {
             .expect("downstream should receive chunk(2)");
         assert_stream_chunk_eq!(msg.as_chunk().unwrap(), chunk_2);
 
+        let barrier2 = if read_rate_limit.is_some() {
+            Barrier::new_test_barrier(test_epoch(4)).with_stop()
+        } else {
+            barrier2
+        };
         input_tx.send_barrier(barrier2.clone());
         let msg = timeout(Duration::from_secs(1), down_rx.recv())
             .await
@@ -662,14 +731,14 @@ mod tests {
             .expect("downstream should receive barrier(2)");
         let barriers = msg.as_barrier_batch().unwrap();
         assert_eq!(barriers.len(), 1);
-        assert_eq!(barriers[0].epoch.curr, test_epoch(2));
+        assert_eq!(barriers[0].epoch.curr, barrier2.epoch.curr);
 
         let observed2 = timeout(Duration::from_secs(1), barrier_out_rx.recv())
             .await
             .unwrap()
             .unwrap()
             .unwrap();
-        assert_eq!(observed2.epoch.curr, test_epoch(2));
+        assert_eq!(observed2.epoch.curr, barrier2.epoch.curr);
 
         barrier_driver.abort();
     }
@@ -678,11 +747,15 @@ mod tests {
     /// order: chunk(1) -> chunk(2) -> barrier(2), while barrier(1) is surfaced via barrier stream.
     #[tokio::test]
     async fn test_barrier_chunk_ordering_in_dispatch() {
-        run_barrier_chunk_ordering_test(false).await;
+        run_barrier_chunk_ordering_test(false, None).await;
     }
 
     #[tokio::test]
     async fn test_aligned_barrier_chunk_ordering_in_dispatch() {
-        run_barrier_chunk_ordering_test(true).await;
+        run_barrier_chunk_ordering_test(true, None).await;
+    }
+    #[tokio::test]
+    async fn test_read_rate_limit_replay_dispatch() {
+        run_barrier_chunk_ordering_test(false, Some(1)).await;
     }
 }

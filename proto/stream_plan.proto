@@ -1085,6 +1085,8 @@ message SyncLogStoreNode {
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   optional uint32 buffer_size = 3 [deprecated = true];
   bool aligned = 4;
+  // Visible change records consumed per second, per actor. Absent means unlimited.
+  optional uint32 read_rate_limit = 5;
 }
 
 message MaterializedExprsNode {

@@ -80,6 +80,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             upstream,
             Duration::from_millis(pause_duration_ms as _),
             node.aligned,
+            node.read_rate_limit,
         );
         Ok((params.info, executor).into())
     }
