@@ -369,13 +369,18 @@ impl HummockEventHandler {
     // and update notifications.
     fn apply_table_refill_runtime_config(&mut self, config: PbTableRefillRuntimeConfig) {
         if let Some(policies) = config.table_cache_refill_policies {
-            let policies = policies
+            let pinned_table_ids = policies
+                .pinned_table_ids
+                .into_iter()
+                .map(TableId::new)
+                .collect();
+            let foyer_policies = policies
                 .table_policies
                 .into_iter()
                 .chain(policies.internal_table_policies)
                 .filter_map(table_cache_refill_policy_from_protobuf)
                 .collect();
-            self.replace_table_cache_refill_runtime_snapshot(policies, HashSet::new());
+            self.replace_table_cache_refill_runtime_snapshot(foyer_policies, pinned_table_ids);
         }
         if let Some(mappings) = config.serving_table_vnode_mappings {
             self.replace_serving_table_vnode_mapping(serving_table_vnode_mappings_to_map(mappings));
@@ -736,7 +741,7 @@ impl HummockEventHandler {
         info!("clear finished");
     }
 
-    fn handle_observer_event(&mut self, event: HummockObserverEvent) {
+    pub(crate) fn handle_observer_event(&mut self, event: HummockObserverEvent) {
         match event {
             HummockObserverEvent::VersionUpdate(version_update) => {
                 self.handle_version_update(version_update);
@@ -1288,6 +1293,14 @@ pub(super) mod tests {
                 .handle_version_update(HummockVersionUpdate::VersionDeltas(deltas));
         }
 
+        pub(in crate::hummock::event_handler) fn receive_snapshot(
+            &mut self,
+            version: HummockVersion,
+        ) {
+            self.handler
+                .handle_version_update(HummockVersionUpdate::PinnedVersion(Box::new(version)));
+        }
+
         pub(in crate::hummock::event_handler) fn publish(
             &mut self,
             events: &[super::VersionUpdateEvent],
@@ -1571,18 +1584,12 @@ pub(super) mod tests {
                         policy: PbCacheRefillPolicy::Streaming as i32,
                     }],
                     internal_table_policies: vec![],
+                    pinned_table_ids: vec![table.as_raw_id()],
                 }),
                 serving_table_vnode_mappings: None,
                 ..Default::default()
             },
         ));
-        // Pin activation is a sidecar test input; ordinary policy still comes from the Meta event.
-        let policies = handler
-            .cache_metadata
-            .read()
-            .table_cache_refill_policies
-            .clone();
-        handler.replace_table_cache_refill_runtime_snapshot(policies, [table].into());
         let notifier = handler.version_update_notifier_tx.clone();
         let recent_versions = handler.recent_versions.clone();
         let events = handler.hummock_event_tx.clone();
@@ -1740,6 +1747,7 @@ pub(super) mod tests {
                     table_id: internal_table_id.as_raw_id(),
                     policy: PbCacheRefillPolicy::Both as i32,
                 }],
+                pinned_table_ids: vec![internal_table_id.as_raw_id()],
             }),
             serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
                 mappings: vec![PbServingTableVnodeMapping {
@@ -1760,6 +1768,11 @@ pub(super) mod tests {
         assert_eq!(
             snapshot.serving_table_vnode_mapping,
             HashMap::from([(old_table_id, old_vnodes)])
+        );
+        // Without a local Pin backend, pin intent must not replace the Foyer policy.
+        assert_eq!(
+            snapshot.contexts[&internal_table_id].policy,
+            CacheRefillPolicy::Both
         );
 
         handler.apply_table_refill_runtime_config(PbTableRefillRuntimeConfig {

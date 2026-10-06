@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,6 +31,9 @@ use super::super::test_utils::{
     wait_for_pin_downloads,
 };
 use super::super::{SstDeltaInfo, default_spawn_refill_task};
+use crate::hummock::iterator::test_utils::mock_sstable_store;
+use crate::hummock::pin_cache::PinCache;
+use crate::hummock::pin_cache::test_utils::in_memory_object_store;
 use crate::hummock::test_utils::gen_test_sstable_with_table_vnodes;
 
 // With Pin-only inputs, the worker is the only metadata waiter. A failed try_acquire
@@ -477,4 +480,82 @@ async fn test_pin_changes_before_and_after_submission() {
             "{change:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn test_pin_recovery_keeps_local_files_without_remote_backfill() {
+    let table = TableId::from(233);
+    let store = mock_sstable_store().await;
+    let (_, recovered) = gen_test_sst_with_object_id(table, store.clone(), 826).await;
+    let (_, missing) = gen_test_sst_with_object_id(table, store.clone(), 827).await;
+    let version = pinned_version_with_ssts(&[table], &[recovered.clone(), missing.clone()]);
+    let local_store = in_memory_object_store();
+    let bytes = store
+        .store()
+        .read(&store.get_sst_data_path(recovered.object_id), ..)
+        .await
+        .unwrap();
+    local_store
+        .upload(
+            &format!("{}-42.sst", recovered.object_id.as_raw_id()),
+            bytes,
+        )
+        .await
+        .unwrap();
+    // A fresh SstableStore has no cached metadata or remote objects. Recovery must use
+    // only local inventory and the version, even after ownership becomes available.
+    let store = mock_sstable_store().await;
+    let cache = PinCache::new(
+        local_store,
+        u64::MAX,
+        1,
+        [recovered.object_id, missing.object_id],
+    )
+    .await
+    .unwrap();
+    let store = Arc::new(
+        Arc::into_inner(store)
+            .unwrap()
+            .with_pin_cache(cache.clone()),
+    );
+    let mut config = test_refill_config();
+    config.timeout = Duration::from_secs(60);
+    let mut refiller = RefillTest::new(
+        Role::Streaming,
+        CacheRefillPolicy::Disabled,
+        config,
+        store,
+        default_spawn_refill_task(),
+        version.clone(),
+    );
+    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+    assert!(cache.get(recovered.object_id).is_some());
+    // Block downloads to prove a full snapshot does not schedule missing-object backfill.
+    let _permit = refiller
+        .cache()
+        .foyer
+        .concurrency
+        .clone()
+        .acquire_owned()
+        .await
+        .unwrap();
+    refiller.update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+    let mut snapshot = (*version).clone();
+    snapshot.id = 2.into();
+    refiller.receive_snapshot(snapshot);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), apply_next_events(&mut refiller))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    assert!(cache.get(recovered.object_id).is_some());
+    assert!(cache.get(missing.object_id).is_none());
+    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), HashSet::new());
+    assert!(
+        cache.get(recovered.object_id).is_none(),
+        "unpin still revokes recovered routes"
+    );
 }

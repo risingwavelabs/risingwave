@@ -51,3 +51,35 @@ impl OpendalObjectStore {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use prometheus::IntCounter;
+    use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+
+    use super::*;
+
+    #[test]
+    fn test_fs_initialization_preserves_external_opendal_metrics() {
+        // Iceberg installs OpenDAL metrics independently into this same registry.
+        let external =
+            IntCounter::new("opendal_operation_bytes", "external OpenDAL metric").unwrap();
+        GLOBAL_METRICS_REGISTRY
+            .register(Box::new(external.clone()))
+            .unwrap();
+        external.inc();
+        for _ in 0..2 {
+            let dir = tempfile::tempdir().unwrap();
+            OpendalObjectStore::new_fs_engine(
+                dir.path().to_str().unwrap().to_owned(),
+                Arc::new(ObjectStoreConfig::default()),
+                Arc::new(ObjectStoreMetrics::unused()),
+            )
+            .unwrap();
+        }
+        assert_eq!(external.get(), 1);
+        GLOBAL_METRICS_REGISTRY
+            .unregister(Box::new(external))
+            .unwrap();
+    }
+}

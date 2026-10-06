@@ -34,6 +34,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
+use risingwave_object_store::object::ObjectStoreRef;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_rpc_client::error::RpcError;
 use thiserror_ext::AsReport;
@@ -60,6 +61,8 @@ use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_version_worker};
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
+use crate::hummock::pin_cache::PinCache;
+use crate::hummock::pin_cache::membership::PinCacheMembershipIndex;
 use crate::hummock::store::vector_writer::HummockVectorWriter;
 use crate::hummock::table_change_log_manager::TableChangeLogManager;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
@@ -76,10 +79,14 @@ use crate::store::*;
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: HummockEventSender,
+    pin_cache_gc: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Drop for HummockStorageShutdownGuard {
     fn drop(&mut self) {
+        if let Some(gc) = &self.pin_cache_gc {
+            gc.abort();
+        }
         let _ = self
             .shutdown_sender
             .send(HummockEvent::Shutdown)
@@ -165,6 +172,7 @@ impl HummockStorage {
         compaction_catalog_manager_ref: CompactionCatalogManagerRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
+        pin_cache_store: Option<ObjectStoreRef>,
         await_tree_config: Option<await_tree::Config>,
     ) -> HummockResult<Self> {
         let object_id_manager = Arc::new(ObjectIdManager::new(
@@ -191,7 +199,8 @@ impl HummockStorage {
             ),
         )
         .await;
-        observer_manager.start().await;
+        // Abort the observer if initialization fails before the storage takes ownership.
+        let observer = scopeguard::guard(observer_manager.start().await, |task| task.abort());
 
         let hummock_version = match observer_event_rx.recv().await {
             Some(HummockObserverEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(
@@ -209,6 +218,40 @@ impl HummockStorage {
             options.max_version_pinning_duration_sec,
         ));
 
+        // The observer emits version and refill config from the same initial Meta snapshot,
+        // in that order. Build PinCache only after both are available, before starting workers.
+        let (sstable_store, initial_refill_config) = if let Some(store) = pin_cache_store {
+            let event = observer_event_rx
+                .recv()
+                .await
+                .expect("initial refill config");
+            let HummockObserverEvent::TableRefillRuntimeConfig(_, config) = &event else {
+                unreachable!("initial version must be followed by refill config");
+            };
+            let pinned_tables = config
+                .table_cache_refill_policies
+                .as_ref()
+                .into_iter()
+                .flat_map(|policies| &policies.pinned_table_ids)
+                .map(|&id| TableId::new(id))
+                .collect();
+            let cache = PinCache::new(
+                store,
+                (options.pin_cache_capacity_mb as u64).saturating_mul(1 << 20),
+                options.pin_cache_shard_num,
+                PinCacheMembershipIndex::pinned_ssts(&pinned_version, &pinned_tables)
+                    .map(|sst| sst.object_id),
+            )
+            .await
+            .map_err(HummockError::from)?;
+            let store = Arc::into_inner(sstable_store).ok_or_else(|| {
+                HummockError::other("PinCache must be attached before sharing SstableStore")
+            })?;
+            (Arc::new(store.with_pin_cache(cache)), Some(event))
+        } else {
+            (sstable_store, None)
+        };
+
         let await_tree_reg = await_tree_config.map(new_compaction_await_tree_reg_ref);
 
         let compactor_context = CompactorContext::new_local_compact_context(
@@ -218,7 +261,7 @@ impl HummockStorage {
             await_tree_reg.clone(),
         );
 
-        let hummock_event_handler = HummockEventHandler::new(
+        let mut hummock_event_handler = HummockEventHandler::new(
             role,
             observer_event_rx,
             pinned_version,
@@ -228,28 +271,33 @@ impl HummockStorage {
             state_store_metrics.clone(),
         );
 
+        if let Some(config) = initial_refill_config {
+            hummock_event_handler.handle_observer_event(config);
+        }
         let event_tx = hummock_event_handler.event_sender();
         let table_change_log_manager = Arc::new(TableChangeLogManager::new(
             options.table_change_log_cache_capacity,
             hummock_meta_client.clone(),
             state_store_metrics.clone(),
         ));
+        let shutdown_guard = Arc::new(HummockStorageShutdownGuard {
+            shutdown_sender: event_tx.clone(),
+            pin_cache_gc: sstable_store.pin_cache().map(|cache| cache.start_gc()),
+        });
         let instance = Self {
             context: compactor_context,
             compaction_catalog_manager_ref: compaction_catalog_manager_ref.clone(),
             object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
-            hummock_event_sender: event_tx.clone(),
+            hummock_event_sender: event_tx,
             _observer_event_sender: observer_event_tx,
             recent_versions: hummock_event_handler.recent_versions(),
             hummock_version_reader: HummockVersionReader::new(
                 sstable_store,
                 state_store_metrics.clone(),
             ),
-            _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
-                shutdown_sender: event_tx,
-            }),
+            _shutdown_guard: shutdown_guard,
             read_version_mapping: hummock_event_handler.read_version_mapping(),
             backup_reader,
             write_limiter,
@@ -263,6 +311,7 @@ impl HummockStorage {
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
+        drop(scopeguard::ScopeGuard::into_inner(observer));
         Ok(instance)
     }
 }
@@ -1062,6 +1111,7 @@ impl HummockStorage {
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(CompactorMetrics::unused()),
             None,
+            None,
         )
         .await
     }
@@ -1095,5 +1145,42 @@ impl HummockStorage {
             .send(HummockEvent::FlushEvent(tx))
             .expect("flush event should succeed");
         rx.await.expect("flush event receiver dropped");
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_storage_shutdown_cancels_pin_gc_before_and_after_first_poll() {
+        for poll in [false, true] {
+            let metrics = HummockStateStoreMetrics::unused();
+            let (shutdown_sender, _receiver) =
+                crate::hummock::event_handler::hummock_event_handler::event_channel(
+                    metrics.event_handler_pending_event,
+                );
+            let (started, started_rx) = oneshot::channel();
+            let (finished, finished_rx) = oneshot::channel();
+            let cleanup = scopeguard::guard(finished, |sender| {
+                let _ = sender.send(());
+            });
+            let gc = tokio::spawn(async move {
+                let _cleanup = cleanup;
+                let _ = started.send(());
+                std::future::pending::<()>().await;
+            });
+            if poll {
+                started_rx.await.unwrap();
+            }
+            drop(HummockStorageShutdownGuard {
+                shutdown_sender,
+                pin_cache_gc: Some(gc),
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(1), finished_rx)
+                .await
+                .unwrap()
+                .unwrap();
+        }
     }
 }
