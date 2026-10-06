@@ -64,6 +64,8 @@ pub struct StorageOpts {
     pub meta_cache_eviction_config: EvictionConfig,
     /// Number of lifecycle lock shards in the Pin Cache.
     pub pin_cache_shard_num: usize,
+    /// Maximum number of concurrent Pin Cache index recovery tasks.
+    pub pin_cache_recover_concurrency: usize,
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
 
@@ -250,6 +252,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_cache_shard_num: s.meta_cache_shard_num,
             meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
             pin_cache_shard_num: c.storage.cache.pin_cache_shard_num,
+            pin_cache_recover_concurrency: c.storage.cache.pin_cache_recover_concurrency,
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_cached_recent_versions_number: c.storage.max_cached_recent_versions_number,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
@@ -401,6 +404,24 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pin_cache_recover_concurrency_config() {
+        use risingwave_common::config::{NoOverride, load_config};
+
+        for (contents, expected) in [
+            ("", 8),
+            ("[storage.cache]\npin_cache_recover_concurrency = 2", 2),
+        ] {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), contents).unwrap();
+            let config = load_config(file.path().to_str().unwrap(), NoOverride);
+            let system_params = system_params_for_test().into();
+            let memory = extract_storage_memory_config(&config);
+            let opts = StorageOpts::from((&config, &system_params, &memory));
+            assert_eq!(opts.pin_cache_recover_concurrency, expected);
+        }
+    }
 
     #[test]
     fn test_file_cache_submit_queue_size_threshold() {
