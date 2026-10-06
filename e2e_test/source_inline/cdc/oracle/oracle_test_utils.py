@@ -541,12 +541,24 @@ def __main() -> None:
                             cursor.executemany(sql, rows)
                     cursor.execute("SELECT CURRENT_SCN FROM V$DATABASE")
                     operation_scn = int(cursor.fetchone()[0])
+                    cursor.execute(
+                        "SELECT RAWTOHEX(t.XID) FROM V$TRANSACTION t "
+                        "JOIN V$SESSION s ON s.TADDR = t.ADDR "
+                        "WHERE s.SID = SYS_CONTEXT('USERENV', 'SID')"
+                    )
+                    row = cursor.fetchone()
+                    if row is None:
+                        raise RuntimeError(
+                            "held transaction has no Oracle transaction ID"
+                        )
+                    transaction_id = row[0].lower()
                 __publish(
                     directory / "ready.json",
                     {
                         "name": name,
                         "before_scn": before_scn,
                         "operation_scn": operation_scn,
+                        "transaction_id": transaction_id,
                     },
                 )
                 # Preserve the existing fixture's automatic rollback on an abandoned SLT.

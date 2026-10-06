@@ -72,7 +72,10 @@ begin_tx("oracle_recovery_other", [
 end_tx(
     "oracle_recovery_other",
     after_tx_end_hook=check_source_offset,
-    after_tx_end_hook_kwargs={"source": "oracle_recovery_source"},
+    after_tx_end_hook_kwargs={
+        "source": "oracle_recovery_source",
+        "snapshot_pending_transactions": {"oracle_recovery_source": True},
+    },
 )
 PY
 
@@ -139,12 +142,20 @@ RECOVER;
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import begin_tx, end_tx
+from oracle_test_hooks import check_source_offset
 begin_tx("oracle_after_recovery", [
     "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'after-recovery' WHERE ID = 50",
     "DELETE FROM APP.RW_LIVE_PAGE WHERE ID = 2",
     "INSERT INTO APP.RW_LIVE_PAGE VALUES (1001, 'after-recovery-insert')",
 ])
-end_tx("oracle_after_recovery")
+end_tx(
+    "oracle_after_recovery",
+    after_tx_end_hook=check_source_offset,
+    after_tx_end_hook_kwargs={
+        "source": "oracle_recovery_source",
+        "snapshot_pending_transactions": {"oracle_recovery_source": False},
+    },
+)
 PY
 
 query T retry 90 backoff 1s

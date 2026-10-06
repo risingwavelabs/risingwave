@@ -322,10 +322,15 @@ def check_source_offset(
     *,
     source: str,
     paused_table=None,
+    snapshot_pending_transactions: dict[str, bool] | None = None,
     timeout=CHECKPOINT_TIMEOUT_SECONDS,
 ) -> None:
     check_success(context)
     before_scn = context.transaction["before_scn"]
+    expected_pending = {
+        _transaction_state(name)["transaction_id"]: present
+        for name, present in (snapshot_pending_transactions or {}).items()
+    }
     source_table = _source_state_table(source)
     deadline = time.monotonic() + timeout
     split = None
@@ -333,15 +338,37 @@ def check_source_offset(
         split = _read_source_split(source_table)
         raw = split["inner"].get("start_offset") if split else None
         offset = json.loads(raw) if raw else {}
-        decoded = offset.get("sourceOffset", {}).get("decoded_commit_scn")
-        if offset.get("isHeartbeat") is False and decoded is not None:
-            if int(decoded) > before_scn:
-                if paused_table is not None:
-                    check_backfill_unchanged(context, table=paused_table)
-                print(f"checkpointed mutation: decoded_commit_scn={decoded}")
-                return
+        source_offset = offset.get("sourceOffset", {})
+        decoded = source_offset.get("decoded_commit_scn")
+        pending = source_offset.get("snapshot_pending_tx")
+        pending_ids = {
+            entry.strip().split(":", 1)[0].lower()
+            for entry in (pending or "").split(",")
+            if entry.strip()
+        }
+        if (
+            offset.get("isHeartbeat") is False
+            and decoded is not None
+            and int(decoded) > before_scn
+            and all(
+                (transaction_id in pending_ids) == present
+                for transaction_id, present in expected_pending.items()
+            )
+        ):
+            if paused_table is not None:
+                check_backfill_unchanged(context, table=paused_table)
+            print(
+                f"checkpointed mutation: decoded_commit_scn={decoded}, "
+                f"snapshot_pending_tx={pending!r}, expected_membership={expected_pending}"
+            )
+            return
         time.sleep(CHECKPOINT_POLL_INTERVAL_SECONDS)
-    raise RuntimeError(f"source did not checkpoint the mutation: {split}")
+    requirement = (
+        f" with snapshot transaction membership {expected_pending}"
+        if expected_pending
+        else ""
+    )
+    raise RuntimeError(f"source did not checkpoint the mutation{requirement}: {split}")
 
 
 def check_heartbeat_progress(
