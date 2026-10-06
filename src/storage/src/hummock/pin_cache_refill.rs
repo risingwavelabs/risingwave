@@ -38,6 +38,7 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 mod tests;
 
 /// Captures table admission while waiting for submission. Vnode ownership is resolved at submit.
+/// The version gate narrows admission to its selected batch target before submission.
 #[derive(Clone, Default)]
 pub(crate) struct PinCacheRefillPlan {
     pub objects: HashMap<HummockSstableObjectId, PinCacheRefillObject>,
@@ -105,7 +106,7 @@ pub(crate) struct PinCacheRefillController {
     executor: PinCacheRefillExecutor,
     pinned_table_ids: HashSet<TableId>,
     object_ref_counts: HashMap<HummockSstableObjectId, u32>,
-    pub(crate) planning_version: PinnedVersion,
+    planning_version: PinnedVersion,
 }
 
 impl PinCacheRefillController {
@@ -122,6 +123,10 @@ impl PinCacheRefillController {
             object_ref_counts: HashMap::new(),
             planning_version,
         }
+    }
+
+    pub(crate) fn planning_version(&self) -> &PinnedVersion {
+        &self.planning_version
     }
 
     /// Advances the planning version and returns `(plan, membership_changes)`.

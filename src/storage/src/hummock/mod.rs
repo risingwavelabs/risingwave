@@ -45,8 +45,7 @@ pub mod observer_manager;
 // The backend is exercised by component tests before production wiring in the final stack layer.
 #[allow(dead_code)]
 pub(crate) mod pin_cache;
-// The controller is exercised by component tests before the event handler is wired.
-#[allow(dead_code)]
+// The controller is wired to the event handler; production initialization follows in the final layer.
 pub(crate) mod pin_cache_refill;
 pub(crate) mod refill_locality;
 pub mod store;
