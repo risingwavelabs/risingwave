@@ -27,6 +27,7 @@ use risingwave_pb::meta::{
     WarmUpTableCacheRequest, WarmUpTableCacheResponse,
 };
 use risingwave_pb::stream_service::WarmUpTableCacheRequest as WorkerWarmUpTableCacheRequest;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::serving::ServingVnodeMappingRef;
@@ -221,7 +222,8 @@ impl ServingService for ServingServiceImpl {
         .await
         .map_err(|error| {
             Status::internal(format!(
-                "failed to warm up cache for table {table_id}: {error}"
+                "failed to warm up cache for table {table_id}: {}",
+                error.as_report()
             ))
         })?;
 
