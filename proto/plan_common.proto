@@ -321,13 +321,27 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_PULSAR_MESSAGE_ID_DATA = 9; // for pulsar source, used for ack message
 }
 
+message IcebergBoundedScan {
+  message Snapshot {
+    int64 snapshot_id = 1;
+  }
+
+  oneof scan {
+    Snapshot snapshot = 1;
+  }
+}
+
 message SourceRefreshMode {
   message SourceRefreshModeStreaming {}
   message SourceRefreshModeFullReload {
     optional int64 refresh_interval_sec = 1;
   }
 
-  message SourceRefreshModeBounded {}
+  message SourceRefreshModeBounded {
+    oneof input {
+      IcebergBoundedScan iceberg = 1;
+    }
+  }
 
   oneof refresh_mode {
     SourceRefreshModeStreaming streaming = 1;

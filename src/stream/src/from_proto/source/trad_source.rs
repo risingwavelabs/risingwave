@@ -36,7 +36,7 @@ use crate::executor::source::{
     BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
     SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
-use crate::from_proto::source::is_full_reload_refresh;
+use crate::from_proto::source::{iceberg_bounded_scan, is_full_reload_refresh};
 
 pub struct SourceExecutorBuilder;
 
@@ -148,6 +148,16 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
         if let Some(source) = &node.source_inner {
             let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
+            let bounded_scan = iceberg_bounded_scan(&source.refresh_mode)?;
+            let is_bounded = bounded_scan.is_some();
+            if is_bounded {
+                if !source.with_properties.is_iceberg_connector() {
+                    bail!("bounded ingestion is only supported for Iceberg");
+                }
+                if source.rate_limit.is_some() {
+                    bail!("source rate limit is not supported for bounded Iceberg ingestion");
+                }
+            }
             let exec = {
                 let source_id = source.source_id;
                 let source_name = source.source_name.clone();
@@ -254,7 +264,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    if is_full_reload_refresh {
+                    if is_full_reload_refresh || is_bounded {
                         BatchIcebergListExecutor::new(
                             params.actor_context.clone(),
                             stream_source_core,
@@ -266,6 +276,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             barrier_receiver,
                             params.local_barrier_manager.clone(),
                             associated_table_id,
+                            bounded_scan,
                         )
                         .boxed()
                     } else {

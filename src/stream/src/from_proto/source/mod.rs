@@ -18,10 +18,13 @@ mod fs_fetch;
 
 use std::collections::BTreeMap;
 
+use risingwave_common::bail;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
+use risingwave_connector::source::iceberg::IcebergBoundedScan;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::SourceRefreshMode;
 use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
+use risingwave_pb::plan_common::source_refresh_mode::source_refresh_mode_bounded::Input;
 pub use trad_source::create_source_desc_builder;
 
 use super::*;
@@ -38,4 +41,20 @@ fn is_full_reload_refresh(refresh_mode: &Option<SourceRefreshMode>) -> bool {
         .as_ref()
         .map(|refresh_mode| matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_))))
         .unwrap_or(false)
+}
+
+fn iceberg_bounded_scan(
+    refresh_mode: &Option<SourceRefreshMode>,
+) -> StreamResult<Option<IcebergBoundedScan>> {
+    let Some(RefreshMode::Bounded(bounded)) = refresh_mode
+        .as_ref()
+        .and_then(|mode| mode.refresh_mode.as_ref())
+    else {
+        return Ok(None);
+    };
+
+    match bounded.input {
+        Some(Input::Iceberg(scan)) => Ok(Some(scan.try_into()?)),
+        None => bail!("bounded source requires a resolved input boundary"),
+    }
 }

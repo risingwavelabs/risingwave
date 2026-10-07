@@ -32,9 +32,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata, PbCdcSourceOffsetUpdated,
-    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
-    PbRefreshFinishedActor,
+    BoundedLoadProgress, IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata,
+    PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
+    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
 };
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc;
@@ -76,6 +76,7 @@ enum ManagedBarrierStateInner {
         create_mview_progress: Vec<PbCreateMviewProgress>,
         list_finished_source_ids: Vec<PbListFinishedSource>,
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
+        bounded_load_progress: Vec<BoundedLoadProgress>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
         iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
@@ -317,6 +318,8 @@ pub(crate) struct PartialGraphManagedBarrierState {
     /// a list of pb messages reported by actors.
     pub(crate) load_finished_source_ids: HashMap<u64, Vec<PbLoadFinishedSource>>,
 
+    pub(crate) bounded_load_progress: HashMap<u64, Vec<BoundedLoadProgress>>,
+
     pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
 
     /// Record CDC source offset updated reports for each epoch of concurrent checkpoints.
@@ -382,6 +385,7 @@ impl PartialGraphManagedBarrierState {
             create_mview_progress: Default::default(),
             list_finished_source_ids: Default::default(),
             load_finished_source_ids: Default::default(),
+            bounded_load_progress: Default::default(),
             cdc_table_backfill_progress: Default::default(),
             cdc_source_offset_updated: Default::default(),
             iceberg_pk_index_sink_metadata: Default::default(),
@@ -944,6 +948,9 @@ impl PartialGraphState {
                         associated_source_id,
                     );
                 }
+                LocalBarrierEvent::ReportBoundedLoadProgress { epoch, report } => {
+                    self.report_bounded_load_progress(epoch, report);
+                }
                 LocalBarrierEvent::RefreshFinished {
                     epoch,
                     actor_id,
@@ -1122,6 +1129,22 @@ impl PartialGraphState {
         }
     }
 
+    fn report_bounded_load_progress(&mut self, epoch: EpochPair, report: BoundedLoadProgress) {
+        if self
+            .actor_states
+            .get(&report.actor_id)
+            .is_some_and(|actor_state| actor_state.inflight_barriers.contains(&epoch.prev))
+        {
+            self.graph_state
+                .bounded_load_progress
+                .entry(epoch.curr)
+                .or_default()
+                .push(report);
+        } else {
+            warn!(?epoch, ?report, "ignore bounded load progress");
+        }
+    }
+
     /// Report that a CDC source has updated its offset at least once
     pub(super) fn report_cdc_source_offset_updated(
         &mut self,
@@ -1246,6 +1269,11 @@ impl PartialGraphManagedBarrierState {
                 .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default();
 
+            let bounded_load_progress = self
+                .bounded_load_progress
+                .remove(&barrier_state.barrier.epoch.curr)
+                .unwrap_or_default();
+
             let cdc_table_backfill_progress = self
                 .cdc_table_backfill_progress
                 .remove(&barrier_state.barrier.epoch.curr)
@@ -1274,6 +1302,7 @@ impl PartialGraphManagedBarrierState {
                     create_mview_progress,
                     list_finished_source_ids,
                     load_finished_source_ids,
+                    bounded_load_progress,
                     refresh_finished_actors,
                     cdc_table_backfill_progress,
                     cdc_source_offset_updated,
@@ -1305,6 +1334,7 @@ impl PartialGraphManagedBarrierState {
             create_mview_progress,
             list_finished_source_ids,
             load_finished_source_ids,
+            bounded_load_progress,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
             iceberg_pk_index_sink_metadata,
@@ -1313,12 +1343,13 @@ impl PartialGraphManagedBarrierState {
             create_mview_progress,
             list_finished_source_ids,
             load_finished_source_ids,
+            bounded_load_progress,
             refresh_finished_actors,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
             iceberg_pk_index_sink_metadata,
         } => {
-            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, cdc_source_offset_updated, iceberg_pk_index_sink_metadata, refresh_finished_actors)
+            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, bounded_load_progress, cdc_table_backfill_progress, cdc_source_offset_updated, iceberg_pk_index_sink_metadata, refresh_finished_actors)
         });
         BarrierToComplete {
             barrier: barrier_state.barrier,
@@ -1326,6 +1357,7 @@ impl PartialGraphManagedBarrierState {
             create_mview_progress,
             list_finished_source_ids,
             load_finished_source_ids,
+            bounded_load_progress,
             refresh_finished_actors,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
@@ -1344,6 +1376,7 @@ pub(crate) struct BarrierToComplete {
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
     pub list_finished_source_ids: Vec<PbListFinishedSource>,
     pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
+    pub bounded_load_progress: Vec<BoundedLoadProgress>,
     pub refresh_finished_actors: Vec<PbRefreshFinishedActor>,
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
     pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,

@@ -29,11 +29,13 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::types::{JsonbRef, JsonbVal, ScalarRef};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
+use risingwave_pb::plan_common::IcebergBoundedScan as PbIcebergBoundedScan;
+use risingwave_pb::plan_common::iceberg_bounded_scan::Scan;
 use serde::{Deserialize, Serialize};
 
 use super::metrics::GLOBAL_ICEBERG_SCAN_METRICS;
 use super::{IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit};
-use crate::error::ConnectorResult;
+use crate::error::{ConnectorError, ConnectorResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IcebergScanTaskBatchMode {
@@ -241,6 +243,24 @@ pub enum IcebergIncrementalScan {
     Planned(IcebergScanPlan),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IcebergBoundedScan {
+    Snapshot { snapshot_id: i64 },
+}
+
+impl TryFrom<PbIcebergBoundedScan> for IcebergBoundedScan {
+    type Error = ConnectorError;
+
+    fn try_from(scan: PbIcebergBoundedScan) -> ConnectorResult<Self> {
+        match scan.scan {
+            Some(Scan::Snapshot(snapshot)) => Ok(Self::Snapshot {
+                snapshot_id: snapshot.snapshot_id,
+            }),
+            None => bail!("bounded Iceberg scan requires a resolved input boundary"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct IcebergScanPlanner {
     properties: IcebergProperties,
@@ -269,6 +289,18 @@ impl IcebergScanPlanner {
         self.plan_snapshot(&table, current_snapshot.snapshot_id())
             .await
             .map(Some)
+    }
+
+    pub async fn plan_bounded_scan(
+        &self,
+        scan: IcebergBoundedScan,
+    ) -> ConnectorResult<IcebergScanPlan> {
+        let table = self.properties.load_table().await?;
+        match scan {
+            IcebergBoundedScan::Snapshot { snapshot_id } => {
+                self.plan_snapshot(&table, snapshot_id).await
+            }
+        }
     }
 
     pub async fn plan_incremental(

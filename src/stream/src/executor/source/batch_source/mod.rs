@@ -20,6 +20,7 @@ mod batch_opendal_fs_list;
 pub(crate) use batch_opendal_fs_list::*;
 mod batch_opendal_fs_fetch;
 pub use batch_opendal_fs_fetch::*;
+mod load_mode;
 mod batch_iceberg_list;
 pub use batch_iceberg_list::*;
 mod batch_iceberg_fetch;

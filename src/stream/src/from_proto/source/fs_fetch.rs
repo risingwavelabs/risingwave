@@ -14,12 +14,13 @@
 
 use std::sync::Arc;
 
-use risingwave_connector::WithOptionsSecResolved;
+use risingwave_common::bail;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 
@@ -31,7 +32,7 @@ use crate::executor::source::{
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
-use crate::from_proto::source::is_full_reload_refresh;
+use crate::from_proto::source::{iceberg_bounded_scan, is_full_reload_refresh};
 use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
@@ -50,6 +51,16 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
 
         let source = node.node_inner.as_ref().unwrap();
         let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
+        let bounded_scan = iceberg_bounded_scan(&source.refresh_mode)?;
+        let is_bounded = bounded_scan.is_some();
+        if is_bounded {
+            if !source.with_properties.is_iceberg_connector() {
+                bail!("bounded ingestion is only supported for Iceberg");
+            }
+            if source.rate_limit.is_some() {
+                bail!("source rate limit is not supported for bounded Iceberg ingestion");
+            }
+        }
 
         let source_id = source.source_id;
         let source_name = source.source_name.clone();
@@ -136,7 +147,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                 }
             }
             risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
-                if is_full_reload_refresh {
+                if is_full_reload_refresh || is_bounded {
                     BatchIcebergFetchExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
@@ -144,6 +155,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         params.local_barrier_manager.clone(),
                         params.config.clone(),
                         source.associated_table_id,
+                        is_bounded,
                     )
                     .boxed()
                 } else {
