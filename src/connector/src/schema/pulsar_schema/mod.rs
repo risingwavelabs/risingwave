@@ -15,8 +15,5 @@
 mod client;
 mod schema;
 
-pub use client::{
-    Client, PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_PREFIX, PULSAR_SCHEMA_URL_KEY,
-    PulsarSchemaConfig,
-};
+pub use client::{Client, PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY, PulsarSchemaConfig};
 pub use schema::{PulsarSchemaInfo, PulsarSchemaVersion};

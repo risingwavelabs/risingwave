@@ -159,45 +159,17 @@ pub fn validate_heartbeat_interval(props: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
-fn option_is_set(options: &WithOptions, key: &str) -> bool {
-    options.contains_key(key)
-        || options.secret_ref().contains_key(key)
-        || options.connection_ref().contains_key(key)
-}
-
-fn option_keys(options: &WithOptions) -> impl Iterator<Item = &str> {
-    options
-        .keys()
-        .chain(options.secret_ref().keys())
-        .chain(options.connection_ref().keys())
-        .map(String::as_str)
-}
-
+/// Returns whether the Pulsar schema is used. The Pulsar schema options themselves are validated by
+/// `PulsarSchemaConfig::from_options` when building the parser config. Only the connector and
+/// format, which that config is unaware of, are checked here.
 fn validate_pulsar_schema_options(
     format_encode: &FormatEncodeOptions,
     connector: &str,
 ) -> Result<bool> {
     let options = WithOptions::try_from(format_encode.row_options())?;
-    if let Some(option) = option_keys(&options).find(|option| {
-        option.starts_with(PULSAR_SCHEMA_PREFIX)
-            && !matches!(
-                *option,
-                PULSAR_SCHEMA_URL_KEY | PULSAR_SCHEMA_AUTH_TOKEN_KEY
-            )
-    }) {
-        return Err(RwError::from(ProtocolError(format!(
-            "unsupported Pulsar schema option `{option}`"
-        ))));
-    }
-
-    let has_url = option_is_set(&options, PULSAR_SCHEMA_URL_KEY);
-    let has_token = option_is_set(&options, PULSAR_SCHEMA_AUTH_TOKEN_KEY);
-    if has_token && !has_url {
-        return Err(RwError::from(ProtocolError(format!(
-            "`{PULSAR_SCHEMA_AUTH_TOKEN_KEY}` requires `{PULSAR_SCHEMA_URL_KEY}`"
-        ))));
-    }
-    if !has_url {
+    if !options.contains_key(PULSAR_SCHEMA_URL_KEY)
+        && !options.secret_ref().contains_key(PULSAR_SCHEMA_URL_KEY)
+    {
         return Ok(false);
     }
 
@@ -207,21 +179,6 @@ fn validate_pulsar_schema_options(
     {
         return Err(RwError::from(ProtocolError(format!(
             "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO"
-        ))));
-    }
-    if !options.connection_ref().is_empty() {
-        return Err(RwError::from(ProtocolError(
-            "Pulsar schema options do not support connection references".to_owned(),
-        )));
-    }
-
-    if let Some(option) = option_keys(&options).find(|option| {
-        matches!(*option, "schema.location" | AWS_GLUE_SCHEMA_ARN_KEY)
-            || *option == "schema.registry"
-            || option.starts_with("schema.registry.")
-    }) {
-        return Err(RwError::from(ProtocolError(format!(
-            "`{option}` cannot be combined with `{PULSAR_SCHEMA_URL_KEY}`"
         ))));
     }
 
@@ -432,18 +389,6 @@ mod tests {
     }
 
     #[test]
-    fn pulsar_schema_token_requires_url() {
-        let format_encode = format_encode(
-            Format::Plain,
-            Encode::Avro,
-            &[(PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token")],
-        );
-        assert!(
-            validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).is_err()
-        );
-    }
-
-    #[test]
     fn pulsar_schema_rejects_other_connectors_and_formats() {
         for (connector, format, encode) in [
             (KAFKA_CONNECTOR, Format::Plain, Encode::Avro),
@@ -461,31 +406,6 @@ mod tests {
             assert!(error.to_string().contains(
                 "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
             ));
-        }
-    }
-
-    #[test]
-    fn pulsar_schema_rejects_overlapping_and_unknown_options() {
-        for option in [
-            "schema.registry",
-            "schema.registry.username",
-            "schema.location",
-            AWS_GLUE_SCHEMA_ARN_KEY,
-            "schema.pulsar.ca",
-        ] {
-            let format_encode = format_encode(
-                Format::Plain,
-                Encode::Avro,
-                &[
-                    (PULSAR_SCHEMA_URL_KEY, "http://localhost:8080"),
-                    (option, "value"),
-                ],
-            );
-            assert!(
-                validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR))
-                    .is_err(),
-                "expected `{option}` to be rejected"
-            );
         }
     }
 

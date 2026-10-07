@@ -46,7 +46,7 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::pulsar_schema::{
-    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_PREFIX, PULSAR_SCHEMA_URL_KEY,
+    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,

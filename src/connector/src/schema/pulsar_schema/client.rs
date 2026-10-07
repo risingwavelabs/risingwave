@@ -21,16 +21,17 @@ use reqwest::redirect::Policy;
 use reqwest::{Client as HttpClient, Response, StatusCode, Url};
 use risingwave_common::bail;
 use risingwave_common::util::retry::exponential_backoff;
+use thiserror_ext::AsReport;
 use tokio_retry::RetryIf;
 use tokio_retry::strategy::jitter;
 
 use super::PulsarSchemaInfo;
 use crate::error::ConnectorResult;
 use crate::schema::{AWS_GLUE_SCHEMA_ARN_KEY, SCHEMA_LOCATION_KEY, SCHEMA_REGISTRY_KEY};
-use crate::source::pulsar::topic::parse_topic;
+use crate::source::pulsar::topic::Topic;
 use crate::with_options::{Get, GetKeyIter};
 
-pub const PULSAR_SCHEMA_PREFIX: &str = "schema.pulsar.";
+const PULSAR_SCHEMA_PREFIX: &str = "schema.pulsar.";
 pub const PULSAR_SCHEMA_URL_KEY: &str = "schema.pulsar.url";
 pub const PULSAR_SCHEMA_AUTH_TOKEN_KEY: &str = "schema.pulsar.auth.token";
 
@@ -42,9 +43,9 @@ const MAX_REDIRECTS: usize = 5;
 
 #[derive(Debug, thiserror::Error)]
 enum RequestError {
-    #[error("failed to send request: {0}")]
+    #[error("failed to send request")]
     Send(#[source] reqwest::Error),
-    #[error("failed to read response body: {0}")]
+    #[error("failed to read response body")]
     Body(#[source] reqwest::Error),
     #[error("request returned HTTP status {0}")]
     Status(StatusCode),
@@ -52,7 +53,7 @@ enum RequestError {
     InvalidRedirect(String),
     #[error("too many redirects")]
     TooManyRedirects,
-    #[error("failed to parse response: {0}")]
+    #[error("failed to parse response")]
     Json(#[source] serde_json::Error),
 }
 
@@ -178,9 +179,7 @@ impl Client {
         })
     }
 
-    fn build_schema_url(&self, topic: &str, version: Option<i64>) -> ConnectorResult<Url> {
-        let topic = parse_topic(topic)?;
-        let topic_name = topic.topic_str_without_partition()?;
+    fn build_schema_url(&self, topic: &Topic, version: Option<i64>) -> ConnectorResult<Url> {
         let mut url = self.url.clone();
         let mut path = url
             .path_segments_mut()
@@ -191,7 +190,7 @@ impl Client {
             "schemas",
             topic.tenant.as_str(),
             topic.namespace.as_str(),
-            topic_name.as_str(),
+            topic.topic.as_str(),
             "schema",
         ]);
         if let Some(version) = version {
@@ -207,10 +206,10 @@ impl Client {
             .get(LOCATION)
             .ok_or_else(|| RequestError::InvalidRedirect("missing Location header".to_owned()))?
             .to_str()
-            .map_err(|error| RequestError::InvalidRedirect(error.to_string()))?;
+            .map_err(|error| RequestError::InvalidRedirect(error.to_report_string()))?;
         let redirect_url = current_url
             .join(location)
-            .map_err(|error| RequestError::InvalidRedirect(error.to_string()))?;
+            .map_err(|error| RequestError::InvalidRedirect(error.to_report_string()))?;
         if !matches!(redirect_url.scheme(), "http" | "https") {
             return Err(RequestError::InvalidRedirect(format!(
                 "unsupported URL scheme `{}`",
@@ -263,9 +262,11 @@ impl Client {
         }
     }
 
+    /// Fetches the schema of `topic`, which should be the non-partitioned topic since all
+    /// partitions share the same schema.
     pub async fn get_schema(
         &self,
-        topic: &str,
+        topic: &Topic,
         version: Option<i64>,
     ) -> ConnectorResult<PulsarSchemaInfo> {
         let url = self.build_schema_url(topic, version)?;
@@ -282,7 +283,7 @@ impl Client {
             |error: &RequestError| {
                 let retryable = error.is_retryable();
                 if retryable {
-                    tracing::debug!(%error, "retrying Pulsar schema request");
+                    tracing::debug!(error = %error.as_report(), "retrying Pulsar schema request");
                 }
                 retryable
             },
@@ -309,6 +310,11 @@ mod tests {
     use std::thread;
 
     use super::*;
+    use crate::source::pulsar::topic::parse_topic;
+
+    fn topic(topic: &str) -> Topic {
+        parse_topic(topic).unwrap()
+    }
 
     fn config(url: String, token: Option<&str>) -> PulsarSchemaConfig {
         let mut options = BTreeMap::from([(PULSAR_SCHEMA_URL_KEY.to_owned(), url)]);
@@ -327,14 +333,14 @@ mod tests {
         let client = client();
         assert_eq!(
             client
-                .build_schema_url("persistent://tenant/ns/events", None)
+                .build_schema_url(&topic("persistent://tenant/ns/events"), None)
                 .unwrap()
                 .as_str(),
             "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema"
         );
         assert_eq!(
             client
-                .build_schema_url("persistent://tenant/ns/events", Some(42))
+                .build_schema_url(&topic("persistent://tenant/ns/events"), Some(42))
                 .unwrap()
                 .as_str(),
             "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema/42"
@@ -350,7 +356,7 @@ mod tests {
             let client = Client::new(&config(base.to_owned(), None)).unwrap();
             assert_eq!(
                 client
-                    .build_schema_url("events", Some(42))
+                    .build_schema_url(&topic("events"), Some(42))
                     .unwrap()
                     .as_str(),
                 "http://localhost:8080/pulsar/admin/v2/schemas/public/default/events/schema/42"
@@ -376,22 +382,18 @@ mod tests {
     }
 
     #[test]
-    fn schema_url_from_short_partitioned_and_escaped_topics() {
+    fn schema_url_from_short_and_escaped_topics() {
         let client = client();
         assert_eq!(
-            client.build_schema_url("events", None).unwrap().as_str(),
+            client
+                .build_schema_url(&topic("events"), None)
+                .unwrap()
+                .as_str(),
             "http://localhost:8080/admin/v2/schemas/public/default/events/schema"
         );
         assert_eq!(
             client
-                .build_schema_url("persistent://tenant/ns/events-partition-1", None)
-                .unwrap()
-                .as_str(),
-            "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema"
-        );
-        assert_eq!(
-            client
-                .build_schema_url("persistent://tenant/ns/events?region=us", None)
+                .build_schema_url(&topic("persistent://tenant/ns/events?region=us"), None)
                 .unwrap()
                 .as_str(),
             "http://localhost:8080/admin/v2/schemas/tenant/ns/events%3Fregion=us/schema"
@@ -507,7 +509,10 @@ mod tests {
         let (admin_url, admin_requests, admin_handle) = spawn_http_server(vec![redirect]);
         let client = Client::new(&config(admin_url, None)).unwrap();
 
-        let schema = client.get_schema("tenant/ns/events", None).await.unwrap();
+        let schema = client
+            .get_schema(&topic("tenant/ns/events"), None)
+            .await
+            .unwrap();
         assert_eq!(schema.version, 1);
         admin_requests.recv().unwrap();
         let redirected_request = target_requests.recv().unwrap().to_ascii_lowercase();
@@ -568,7 +573,14 @@ mod tests {
         ]);
         let client = Client::new(&config(admin_url, None)).unwrap();
 
-        assert_eq!(client.get_schema("events", None).await.unwrap().version, 2);
+        assert_eq!(
+            client
+                .get_schema(&topic("events"), None)
+                .await
+                .unwrap()
+                .version,
+            2
+        );
         requests.recv().unwrap();
         requests.recv().unwrap();
         assert!(requests.try_recv().is_err());
@@ -585,7 +597,10 @@ mod tests {
         ]);
         let client = Client::new(&config(admin_url, None)).unwrap();
 
-        let schema = client.get_schema("tenant/ns/events", None).await.unwrap();
+        let schema = client
+            .get_schema(&topic("tenant/ns/events"), None)
+            .await
+            .unwrap();
         assert_eq!(schema.version, 2);
         requests.recv().unwrap();
         requests.recv().unwrap();
@@ -601,7 +616,7 @@ mod tests {
             let client = Client::new(&config(admin_url, None)).unwrap();
 
             client
-                .get_schema("tenant/ns/events", None)
+                .get_schema(&topic("tenant/ns/events"), None)
                 .await
                 .unwrap_err();
             requests.recv().unwrap();
