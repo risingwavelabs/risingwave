@@ -1929,6 +1929,22 @@ where
             }))
     }
 
+    /// Loads the block of `pk_prefix` and the blocks after it in its vnode into the block cache in
+    /// one request, ahead of lookups that walk the table forward from it.
+    pub async fn read_ahead_from(&self, pk_prefix: impl Row) -> StreamExecutorResult<()> {
+        let vnode = self.compute_prefix_vnode(&pk_prefix);
+        let iter = self
+            .iter_with_vnode(
+                vnode,
+                &(Bound::Included(&pk_prefix), Bound::<&OwnedRow>::Unbounded),
+                PrefetchOptions::prefetch_for_small_range_scan(),
+            )
+            .await?;
+        pin_mut!(iter);
+        iter.next().await.transpose()?;
+        Ok(())
+    }
+
     pub async fn iter_keyed_row_with_vnode(
         &self,
         vnode: VirtualNode,
