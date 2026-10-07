@@ -854,6 +854,7 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(|sst| sst.sst_info.into())
                             .collect(),
+                        bounded_load_progress: vec![],
                         list_finished_sources: list_finished_source_ids,
                         load_finished_sources: load_finished_source_ids,
                         cdc_source_offset_updated,

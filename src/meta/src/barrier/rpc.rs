@@ -663,6 +663,7 @@ impl PartialGraphRecoverer<'_> {
                 .into_iter()
                 .collect();
             Mutation::Add(AddMutation {
+                actor_bounded_starts: Default::default(),
                 // Actors built during recovery is not treated as newly added actors.
                 actor_dispatchers: Default::default(),
                 added_actors: Default::default(),

@@ -1164,6 +1164,7 @@ impl BatchRefreshJobCheckpointControl {
             .collect();
 
         let initial_mutation = Mutation::Add(AddMutation {
+            actor_bounded_starts: Default::default(),
             actor_dispatchers: Default::default(),
             added_actors,
             actor_splits: Default::default(),

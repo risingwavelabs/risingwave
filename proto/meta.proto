@@ -455,6 +455,26 @@ message ListCdcProgressResponse {
   map<uint32, CdcProgress> cdc_progress = 1;
 }
 
+message ListBoundedJobsRequest {}
+
+message ListBoundedJobsResponse {
+  message BoundedJob {
+    message IcebergSnapshot {
+      int64 snapshot_id = 1;
+    }
+
+    uint32 job_id = 1;
+    uint32 source_id = 2;
+    // LOADING or COMPLETED
+    string status = 3;
+    oneof pinned_input {
+      IcebergSnapshot iceberg_snapshot = 4;
+    }
+    optional int64 completed_at = 5;
+  }
+  repeated BoundedJob jobs = 1;
+}
+
 message ListRefreshTableStatesRequest {}
 
 message ListRefreshTableStatesResponse {
@@ -521,6 +541,7 @@ service StreamManagerService {
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
   rpc ListUnmigratedTables(ListUnmigratedTablesRequest) returns (ListUnmigratedTablesResponse);
   rpc ListRefreshTableStates(ListRefreshTableStatesRequest) returns (ListRefreshTableStatesResponse);
+  rpc ListBoundedJobs(ListBoundedJobsRequest) returns (ListBoundedJobsResponse);
   rpc ListIcebergCompactionStatus(ListIcebergCompactionStatusRequest) returns (ListIcebergCompactionStatusResponse);
 }
 

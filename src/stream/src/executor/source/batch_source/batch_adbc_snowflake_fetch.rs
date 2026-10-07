@@ -141,6 +141,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
                                         need_rebuild_reader = true;
                                     }
                                     Mutation::ListFinish {
+                                        bounded_load: None,
                                         associated_source_id,
                                     } if associated_source_id == &core.source_id => {
                                         tracing::info!(

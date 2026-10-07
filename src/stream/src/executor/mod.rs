@@ -53,7 +53,7 @@ use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    IcebergPkIndexCompactionContext, PbBarrier, PbBarrierMutation, PbDispatcher,
+    BoundedLoadStart, IcebergPkIndexCompactionContext, PbBarrier, PbBarrierMutation, PbDispatcher,
     PbSinkSchemaChange, PbStreamMessageBatch, PbWatermark, SubscriptionUpstreamInfo,
 };
 use smallvec::SmallVec;
@@ -348,6 +348,7 @@ pub struct AddMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
     pub sink_log_store_flush: HashSet<SinkId>,
+    pub actor_bounded_starts: HashMap<ActorId, BoundedLoadStart>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -381,6 +382,7 @@ pub enum Mutation {
     },
     ListFinish {
         associated_source_id: SourceId,
+        bounded_load: Option<BoundedLoadStart>,
     },
     LoadFinish {
         associated_source_id: SourceId,
@@ -929,7 +931,9 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits,
                 new_upstream_sinks,
                 sink_log_store_flush,
+                actor_bounded_starts,
             }) => PbMutation::Add(PbAddMutation {
+                actor_bounded_starts: actor_bounded_starts.clone(),
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -1029,8 +1033,10 @@ impl Mutation {
             }),
             Mutation::ListFinish {
                 associated_source_id,
+                bounded_load,
             } => PbMutation::ListFinish(risingwave_pb::stream_plan::ListFinishMutation {
                 associated_source_id: *associated_source_id,
+                bounded_load: *bounded_load,
             }),
             Mutation::LoadFinish {
                 associated_source_id,
@@ -1114,6 +1120,7 @@ impl Mutation {
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
+                actor_bounded_starts: add.actor_bounded_starts.clone(),
                 adds: add
                     .actor_dispatchers
                     .iter()
@@ -1218,6 +1225,7 @@ impl Mutation {
                 associated_source_id: refresh_start.associated_source_id,
             },
             PbMutation::ListFinish(list_finish) => Mutation::ListFinish {
+                bounded_load: list_finish.bounded_load,
                 associated_source_id: list_finish.associated_source_id,
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {

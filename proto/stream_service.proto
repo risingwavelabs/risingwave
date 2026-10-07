@@ -121,6 +121,23 @@ message BarrierCompleteResponse {
     uint32 associated_source_id = 3;
   }
   repeated ListFinishedSource list_finished_sources = 16;
+  message BoundedLoadProgress {
+    // No more file assignments will be emitted by this list actor.
+    message ListSealed {}
+    // Listing is sealed and all assigned files have been read.
+    message FetchDone {}
+
+    uint32 actor_id = 1;
+    uint32 fragment_id = 2;
+    // Checkpoint prev_epoch at which the actor reports completion.
+    uint64 epoch = 3;
+    uint64 generation = 4;
+    oneof progress {
+      ListSealed list_sealed = 5;
+      FetchDone fetch_done = 6;
+    }
+  }
+  repeated BoundedLoadProgress bounded_load_progress = 20;
   // SourceExecutor reports that CDC source has updated offset at least once.
   // Meta will mark the CDC source as created only after receiving this notification.
   message CdcSourceOffsetUpdated {

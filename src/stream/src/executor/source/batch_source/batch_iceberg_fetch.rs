@@ -434,6 +434,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 true
             }
             Mutation::ListFinish {
+                bounded_load: None,
                 associated_source_id,
             } if associated_source_id == &core.source_id => {
                 tracing::info!(

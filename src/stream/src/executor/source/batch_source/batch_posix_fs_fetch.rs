@@ -353,6 +353,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         stream.replace_data_stream(stream::pending().boxed());
                                     }
                                     Mutation::ListFinish {
+                                        bounded_load: None,
                                         associated_source_id,
                                     } if associated_source_id.as_raw_id()
                                         == core.source_id.as_raw_id() =>
