@@ -157,7 +157,7 @@ axum-extra = "0.10"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
-deltalake = { version = "0.32.0", features = ["s3", "gcs"] }
+deltalake = { version = "1.0.0", features = ["s3", "gcs"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 foyer = { version = "0.22.6", default-features = false, features = [
     "runtime-madsim-tokio",
