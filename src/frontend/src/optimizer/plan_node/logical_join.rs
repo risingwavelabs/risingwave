@@ -31,8 +31,9 @@ use super::utils::{Distill, childless_record};
 use super::{
     BackfillType, BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject,
-    ToBatch, ToStream, generic, try_enforce_locality_requirement,
+    ToBatch, ToStream, generic, with_better_locality,
 };
+use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -1139,59 +1140,107 @@ impl LogicalJoin {
         })
     }
 
+    /// The positions of the distribution key of `table` in its order key.
+    fn dist_key_in_order_key_pos(table: &TableCatalog) -> Vec<usize> {
+        (table.distribution_key.iter())
+            .map(|&d| {
+                table
+                    .order_column_indices()
+                    .position(|x| x == d)
+                    .expect("dist_key must in order_key")
+            })
+            .collect()
+    }
+
+    /// The positions of the eq keys in the order of the primary key of the table of `scan`, in
+    /// which the lookups of a temporal join read it, if they match a prefix of the primary key that
+    /// contains the distribution key.
+    fn temporal_join_lookup_prefix(
+        scan: &LogicalScan,
+        predicate: &EqJoinPredicate,
+    ) -> Option<Vec<usize>> {
+        let table = scan.table();
+        // The shortest prefix of order key that contains distribution key.
+        let shortest_prefix_len = (Self::dist_key_in_order_key_pos(table).into_iter())
+            .max()
+            .map_or(0, |pos| pos + 1);
+        let reorder_idx = Self::lookup_prefix_reorder_idx(
+            predicate,
+            &scan.output_column_ids(),
+            &table.order_column_ids(),
+        );
+        (reorder_idx.len() >= shortest_prefix_len).then_some(reorder_idx)
+    }
+
+    /// The covering index of the lookup table that a temporal join looks up instead of the table,
+    /// if any: the one whose primary key the eq keys match the longest prefix of, unless they match
+    /// the whole primary key of the table.
+    fn temporal_join_lookup_index(
+        &self,
+        scan: TemporalJoinScan<'_>,
+        predicate: &EqJoinPredicate,
+    ) -> Option<LogicalScan> {
+        let mut longest_prefix_len =
+            Self::temporal_join_lookup_prefix(&scan, predicate).map(|prefix| prefix.len());
+        if longest_prefix_len == Some(scan.primary_key().len())
+            || !self
+                .core
+                .ctx()
+                .session_ctx()
+                .config()
+                .enable_index_selection()
+        {
+            return None;
+        }
+        let mut lookup_index = None;
+        for index in scan.table_indexes() {
+            if let Some(index_scan) = scan.to_index_scan_if_index_covered(index)
+                && let Some(prefix) = Self::temporal_join_lookup_prefix(&index_scan, predicate)
+                && longest_prefix_len.is_none_or(|len| len < prefix.len())
+            {
+                longest_prefix_len = Some(prefix.len());
+                lookup_index = Some(index_scan);
+            }
+        }
+        lookup_index
+    }
+
+    /// The left eq keys of a temporal join in the order its lookups read the lookup table.
+    fn temporal_join_lookup_order(&self, scan: TemporalJoinScan<'_>) -> Vec<usize> {
+        let predicate = EqJoinPredicate::create(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.on().clone(),
+        );
+        let lookup_index = self.temporal_join_lookup_index(scan, &predicate);
+        let left_eq_indexes = predicate.left_eq_indexes();
+        Self::temporal_join_lookup_prefix(lookup_index.as_ref().unwrap_or(scan.0), &predicate)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|i| left_eq_indexes[i])
+            .collect()
+    }
+
     fn to_stream_temporal_join_with_index_selection(
         &self,
         logical_scan: TemporalJoinScan<'_>,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<StreamPlanRef> {
-        // Use primary table.
-        let mut result_plan: Result<StreamTemporalJoin> =
-            self.to_stream_temporal_join(logical_scan, predicate.clone(), ctx);
-        // Return directly if this temporal join can match the pk of its right table.
-        if let Ok(temporal_join) = &result_plan
-            && temporal_join.eq_join_predicate().eq_indexes().len()
-                == logical_scan.primary_key().len()
-        {
-            return result_plan.map(|x| x.into());
-        }
-        if self
-            .core
-            .ctx()
-            .session_ctx()
-            .config()
-            .enable_index_selection()
-        {
-            let indexes = logical_scan.table_indexes();
-            for index in indexes {
-                // Use index table
-                if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                    let index_scan: PlanRef = index_scan.into();
-                    let that = self.clone_with_left_right(self.left(), index_scan.clone());
-                    if let Ok(temporal_join) = that.to_stream_temporal_join(
-                        that.temporal_join_on().expect(
-                            "index scan created from temporal join scan must also be temporal join",
-                        ),
-                        predicate.clone(),
-                        ctx,
-                    ) {
-                        match &result_plan {
-                            Err(_) => result_plan = Ok(temporal_join),
-                            Ok(prev_temporal_join) => {
-                                // Prefer to the temporal join with a longer lookup prefix len.
-                                if prev_temporal_join.eq_join_predicate().eq_indexes().len()
-                                    < temporal_join.eq_join_predicate().eq_indexes().len()
-                                {
-                                    result_plan = Ok(temporal_join)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        result_plan.map(|x| x.into())
+        let temporal_join =
+            if let Some(index_scan) = self.temporal_join_lookup_index(logical_scan, &predicate) {
+                let that = self.clone_with_left_right(self.left(), index_scan.into());
+                that.to_stream_temporal_join(
+                    that.temporal_join_on().expect(
+                        "index scan created from temporal join scan must also be temporal join",
+                    ),
+                    predicate,
+                    ctx,
+                )
+            } else {
+                self.to_stream_temporal_join(logical_scan, predicate, ctx)
+            };
+        temporal_join.map(|x| x.into())
     }
 
     fn temporal_join_scan_predicate_pull_up(
@@ -1273,32 +1322,9 @@ impl LogicalJoin {
 
         let is_broadcast = matches!(logical_scan.as_of(), Some(AsOf::ProcessTimeBroadcast));
 
-        let table = logical_scan.table();
-        let output_column_ids = logical_scan.output_column_ids();
-
-        // Verify that the right join key columns are the the prefix of the primary key and
-        // also contain the distribution key.
-        let order_col_ids = table.order_column_ids();
-        let dist_key = table.distribution_key.clone();
-
-        let mut dist_key_in_order_key_pos = vec![];
-        for d in dist_key {
-            let pos = table
-                .order_column_indices()
-                .position(|x| x == d)
-                .expect("dist_key must in order_key");
-            dist_key_in_order_key_pos.push(pos);
-        }
-        // The shortest prefix of order key that contains distribution key.
-        let shortest_prefix_len = dist_key_in_order_key_pos
-            .iter()
-            .max()
-            .map_or(0, |pos| pos + 1);
-
+        let dist_key_in_order_key_pos = Self::dist_key_in_order_key_pos(logical_scan.table());
         // Reorder the join equal predicate to match the order key.
-        let reorder_idx =
-            Self::lookup_prefix_reorder_idx(&predicate, &output_column_ids, &order_col_ids);
-        if reorder_idx.len() < shortest_prefix_len {
+        let Some(reorder_idx) = Self::temporal_join_lookup_prefix(&logical_scan, &predicate) else {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires the equivalence join condition includes the key columns that form the distribution key of the lookup table".into(),
                 concat!(
@@ -1306,7 +1332,7 @@ impl LogicalJoin {
                     "You can create an index on the lookup table to facilitate the temporal join if necessary."
                 ).into(),
             )));
-        }
+        };
         let lookup_prefix_len = reorder_idx.len();
         let predicate = predicate.reorder(&reorder_idx);
 
@@ -1706,32 +1732,18 @@ impl ToStream for LogicalJoin {
         let eq_indexes = self.eq_indexes();
         let (logical_left, logical_right) = if eq_indexes.is_empty() {
             (self.left(), self.right())
+        } else if let Some(scan) = self.temporal_join_on() {
+            (
+                with_better_locality(self.left(), &self.temporal_join_lookup_order(scan)),
+                self.right(),
+            )
         } else {
             let lhs_join_key_idx = eq_indexes.iter().map(|(l, _)| *l).collect_vec();
-            if self.should_be_temporal_join() {
-                (
-                    try_enforce_locality_requirement(
-                        self.left(),
-                        &lhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
-                    self.right(),
-                )
-            } else {
-                let rhs_join_key_idx = eq_indexes.iter().map(|(_, r)| *r).collect_vec();
-                (
-                    try_enforce_locality_requirement(
-                        self.left(),
-                        &lhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
-                    try_enforce_locality_requirement(
-                        self.right(),
-                        &rhs_join_key_idx,
-                        ctx.locality_backfill_enabled(),
-                    ),
-                )
-            }
+            let rhs_join_key_idx = eq_indexes.iter().map(|(_, r)| *r).collect_vec();
+            (
+                with_better_locality(self.left(), &lhs_join_key_idx),
+                with_better_locality(self.right(), &rhs_join_key_idx),
+            )
         };
 
         let (left, left_col_change) = logical_left.logical_rewrite_for_stream(ctx)?;

@@ -690,6 +690,7 @@ for_all_wrapped_id_fields! (
         ListRateLimitsResponse.RateLimitInfo {
             job_id: JobId,
             fragment_id: FragmentId,
+            operator_id: LocalOperatorId,
         }
         ListRefreshTableStatesResponse.RefreshTableState {
             table_id: TableId,

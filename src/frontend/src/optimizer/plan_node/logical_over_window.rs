@@ -26,7 +26,7 @@ use super::{
     BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
     StreamEowcSort, StreamOverWindow, ToBatch, ToStream, gen_filter_and_pushdown,
-    try_enforce_locality_requirement,
+    with_better_locality,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -755,11 +755,7 @@ impl ToStream for LogicalOverWindow {
         let logical_input = if partition_key_indices.is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(
-                self.input(),
-                &partition_key_indices,
-                ctx.locality_backfill_enabled(),
-            )
+            with_better_locality(self.input(), &partition_key_indices)
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (new_self, output_col_change) = self.rewrite_with_input(input, input_col_change);

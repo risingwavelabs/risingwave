@@ -87,6 +87,7 @@ impl StreamExchange {
         } else {
             MonotonicityMap::new()
         };
+        let replay_order = input.replay_order().exchanged(input.distribution(), &dist);
         assert!(!input.schema().is_empty());
         let base = PlanBase::new_stream(
             input.ctx(),
@@ -98,7 +99,8 @@ impl StreamExchange {
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             columns_monotonicity,
-        );
+        )
+        .with_replay_order(replay_order);
         StreamExchange {
             base,
             input,
@@ -118,7 +120,8 @@ impl StreamExchange {
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
-        );
+        )
+        .with_replay_order(input.replay_order().clone());
         StreamExchange {
             base,
             input,

@@ -16,7 +16,7 @@ use educe::Educe;
 
 use super::generic::GenericPlanNode;
 use super::*;
-use crate::optimizer::property::{Distribution, StreamKind, WatermarkColumns};
+use crate::optimizer::property::{Distribution, ReplayOrder, StreamKind, WatermarkColumns};
 
 /// No extra fields for logical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -61,6 +61,8 @@ pub struct StreamExtra {
     watermark_columns: WatermarkColumns,
     /// The monotonicity of columns in the output.
     columns_monotonicity: MonotonicityMap,
+    /// The order in which the `PlanNode` outputs the rows of each vnode during backfill.
+    replay_order: ReplayOrder,
 }
 
 impl GetPhysicalCommon for StreamExtra {
@@ -185,6 +187,10 @@ impl stream::StreamPlanNodeMetadata for PlanBase<Stream> {
     fn columns_monotonicity(&self) -> &MonotonicityMap {
         &self.extra.columns_monotonicity
     }
+
+    fn replay_order(&self) -> &ReplayOrder {
+        &self.extra.replay_order
+    }
 }
 
 impl batch::BatchPlanNodeMetadata for PlanBase<Batch> {
@@ -307,6 +313,7 @@ impl PlanBase<Stream> {
                 emit_on_window_close,
                 watermark_columns,
                 columns_monotonicity,
+                replay_order: ReplayOrder::default(),
             },
         }
     }
@@ -330,6 +337,11 @@ impl PlanBase<Stream> {
             watermark_columns,
             columns_monotonicity,
         )
+    }
+
+    pub fn with_replay_order(mut self, replay_order: ReplayOrder) -> Self {
+        self.extra.replay_order = replay_order;
+        self
     }
 
     pub fn new_stream_share(

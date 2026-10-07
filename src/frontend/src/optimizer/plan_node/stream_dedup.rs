@@ -46,8 +46,13 @@ impl StreamDedup {
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
-        );
+        )
+        .with_replay_order(input.replay_order().within(&core.dedup_cols));
         StreamDedup { base, core }
+    }
+
+    pub fn dedup_cols(&self) -> &[usize] {
+        &self.core.dedup_cols
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {

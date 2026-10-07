@@ -71,8 +71,8 @@ use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     BatchProject, LogicalProject, LogicalSource, PartitionComputeInfo, StreamDml,
-    StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
-    ToStreamContext, stream_enforce_eowc_requirement,
+    StreamLocalityProvider, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
+    StreamWatermarkFilter, ToStreamContext, stream_enforce_eowc_requirement,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -93,8 +93,7 @@ use crate::optimizer::plan_node::{
     StreamUpstreamSinkUnion, StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{
-    LocalityBackfillScanEstimator, LocalityProviderCounter, RwTimestampValidator,
-    TemporalJoinValidator,
+    LocalityBackfillScanEstimator, RwTimestampValidator, TemporalJoinValidator,
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::{
@@ -297,10 +296,9 @@ fn locality_backfill_requires_license(
 fn rewrite_logical_plan_for_stream(
     plan: &LogicalPlanRef,
     backfill_type: BackfillType,
-    locality_backfill_enabled: bool,
 ) -> Result<(LogicalPlanRef, ColIndexMapping)> {
     let (plan, out_col_change) = plan.logical_rewrite_for_stream(
-        &mut RewriteStreamContext::new_with_backfill_type(backfill_type, locality_backfill_enabled),
+        &mut RewriteStreamContext::new_with_backfill_type(backfill_type),
     )?;
     if out_col_change.is_injective() {
         Ok((plan, out_col_change))
@@ -644,9 +642,40 @@ impl LogicalPlanRoot {
         backfill_type: BackfillType,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
         let ctx = self.plan.ctx();
+        let root = self.clone();
+        let (plan, locality_provider_count) =
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type, true)?;
+        if locality_backfill_requires_license(
+            ctx.session_ctx().config().locality_backfill_mode(),
+            locality_provider_count,
+        ) && risingwave_common::license::Feature::LocalityBackfill
+            .check_available()
+            .is_err()
+        {
+            ctx.warn_to_user(format!(
+                "The streaming job would use {locality_provider_count} locality providers, \
+                 which are unavailable under the current license. Falling back to regular backfill."
+            ));
+            return Ok(root
+                .gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type, false)?
+                .0);
+        }
+        Ok(plan)
+    }
+
+    /// Also returns the number of locality providers in the plan, which has none unless
+    /// `allow_locality_backfill`.
+    fn gen_optimized_stream_plan_inner(
+        self,
+        emit_on_window_close: bool,
+        backfill_type: BackfillType,
+        allow_locality_backfill: bool,
+    ) -> Result<(StreamOptimizedLogicalPlanRoot, usize)> {
+        let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
-        let optimized_plan = self.gen_stream_plan(emit_on_window_close, backfill_type)?;
+        let (optimized_plan, locality_backfill_enabled) =
+            self.gen_stream_plan(emit_on_window_close, backfill_type, allow_locality_backfill)?;
 
         let mut plan = optimized_plan
             .plan
@@ -691,6 +720,15 @@ impl LogicalPlanRoot {
                 ApplyOrder::BottomUp,
             ))?;
         }
+
+        let mut locality_provider_count = 0;
+        if locality_backfill_enabled {
+            (plan, locality_provider_count) = StreamLocalityProvider::place(plan);
+            if ctx.is_explain_trace() {
+                ctx.trace("Place locality providers:");
+                ctx.trace(plan.explain_to_string());
+            }
+        }
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
@@ -724,7 +762,7 @@ impl LogicalPlanRoot {
             ).into());
         }
 
-        Ok(optimized_plan.into_phase(plan))
+        Ok((optimized_plan.into_phase(plan), locality_provider_count))
     }
 
     pub(crate) fn require_snapshot_backfill_for_batch_refresh(&self) -> Result<()> {
@@ -757,16 +795,18 @@ impl LogicalPlanRoot {
         Ok(())
     }
 
-    /// Generate create index or create materialize view plan.
+    /// Generate create index or create materialize view plan, and whether its job backfills with
+    /// locality providers, which it may only if `allow_locality_backfill`.
     fn gen_stream_plan(
         self,
         emit_on_window_close: bool,
         backfill_type: BackfillType,
-    ) -> Result<StreamOptimizedLogicalPlanRoot> {
+        allow_locality_backfill: bool,
+    ) -> Result<(StreamOptimizedLogicalPlanRoot, bool)> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
-        let plan = {
+        let (plan, locality_backfill_enabled) = {
             {
                 if let Some(err) = StreamKeyChecker::Variant.visit(self.plan.clone()) {
                     return Err(variant_key_error(err));
@@ -784,35 +824,10 @@ impl LogicalPlanRoot {
                     ).into());
                 }
                 let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
-                let locality_backfill_enabled =
-                    resolve_locality_backfill(&ctx, optimized_plan.plan.clone(), backfill_type);
-                let (mut plan, mut out_col_change) = rewrite_logical_plan_for_stream(
-                    &optimized_plan.plan,
-                    backfill_type,
-                    locality_backfill_enabled,
-                )?;
-
-                let locality_provider_count = LocalityProviderCounter::count(plan.clone());
-                let locality_backfill_mode = ctx.session_ctx().config().locality_backfill_mode();
-                if locality_backfill_enabled
-                    && locality_backfill_requires_license(
-                        locality_backfill_mode,
-                        locality_provider_count,
-                    )
-                    && risingwave_common::license::Feature::LocalityBackfill
-                        .check_available()
-                        .is_err()
-                {
-                    ctx.warn_to_user(format!(
-                        "The streaming job would use {locality_provider_count} locality providers, \
-                         which are unavailable under the current license. Falling back to regular backfill."
-                    ));
-                    (plan, out_col_change) = rewrite_logical_plan_for_stream(
-                        &optimized_plan.plan,
-                        backfill_type,
-                        false,
-                    )?;
-                }
+                let locality_backfill_enabled = allow_locality_backfill
+                    && resolve_locality_backfill(&ctx, optimized_plan.plan.clone(), backfill_type);
+                let (plan, out_col_change) =
+                    rewrite_logical_plan_for_stream(&optimized_plan.plan, backfill_type)?;
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
                     ctx.trace(plan.explain_to_string());
@@ -830,10 +845,11 @@ impl LogicalPlanRoot {
                     &mut ToStreamContext::new_with_backfill_type(
                         emit_on_window_close,
                         backfill_type,
-                    ),
+                    )
+                    .with_locality_backfill(locality_backfill_enabled),
                 )?;
                 plan = stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)?;
-                optimized_plan.into_phase(plan)
+                (optimized_plan.into_phase(plan), locality_backfill_enabled)
             }
         };
 
@@ -842,7 +858,7 @@ impl LogicalPlanRoot {
             // TODO: can be `plan.plan.explain_to_string()`, but should explicitly specify the type due to some limitation of rust compiler
             ctx.trace(<PlanRef<Stream> as Explain>::explain_to_string(&plan.plan));
         }
-        Ok(plan)
+        Ok((plan, locality_backfill_enabled))
     }
 
     /// Visit the plan root and compute the cardinality.
@@ -1519,8 +1535,58 @@ fn require_additional_exchange_on_root_in_local_mode(plan: BatchPlanRef) -> bool
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::license::{LicenseKey, LicenseManager};
+
     use super::*;
     use crate::optimizer::plan_node::LogicalValues;
+    use crate::test_utils::LocalFrontend;
+
+    /// Without a license, a job that would use more locality providers than allowed is planned as
+    /// with locality backfill disabled.
+    #[tokio::test]
+    async fn test_locality_backfill_over_license_limit() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        for sql in [
+            "create table t1 (a int, b int)",
+            "create table t2 (a int, c int)",
+            "create table t3 (c int, d int)",
+            "create table t4 (d int, e int)",
+            "set force_two_phase_agg = true",
+            "set enable_locality_backfill = true",
+            "set locality_backfill_mode = always",
+        ] {
+            frontend
+                .run_sql_with_session(session.clone(), sql)
+                .await
+                .unwrap();
+        }
+        let explain = "explain create materialized view mv as select t1.b, count(*) from t1 \
+            join t2 on t1.a = t2.a join t3 on t2.c = t3.c join t4 on t3.d = t4.d group by t1.b";
+
+        LicenseManager::get().refresh(LicenseKey::default().as_ref());
+        let licensed = frontend
+            .get_explain_output_with_session(session.clone(), explain)
+            .await;
+        assert!(
+            licensed.matches("StreamLocalityProvider").count() > UNLICENSED_LOCALITY_PROVIDER_LIMIT
+        );
+
+        LicenseManager::get().refresh(LicenseKey::empty().as_ref());
+        let unlicensed = frontend
+            .get_explain_output_with_session(session.clone(), explain)
+            .await;
+        LicenseManager::get().refresh(LicenseKey::default().as_ref());
+
+        frontend
+            .run_sql_with_session(session.clone(), "set enable_locality_backfill = false")
+            .await
+            .unwrap();
+        let disabled = frontend
+            .get_explain_output_with_session(session, explain)
+            .await;
+        assert_eq!(unlicensed, disabled);
+    }
 
     #[tokio::test]
     async fn test_as_subplan() {

@@ -1,0 +1,112 @@
+# A locality provider sharded by fewer columns than it orders by gets updates whose two rows fall on
+# both sides of its backfill position in a vnode. They must reach the downstream as a delete and an
+# insert.
+#
+# The provider of the temporal join is sharded like the index it looks up (by `a`) and replays rows
+# in the lookup order `(a, b)`. All rows of `st_s` have `a = 1`, so one vnode holds them. While the
+# provider replays them, `b` of replayed rows moves past the end and `b` of rows not replayed yet
+# moves before the start.
+
+control substitution on
+
+statement ok
+set enable_locality_backfill = true;
+
+statement ok
+set locality_backfill_mode = always;
+
+statement ok
+create table st_s (a int, b int, c int);
+
+statement ok
+create table st_d (id int primary key, a int, b int, c int);
+
+statement ok
+create index st_idx on st_d(a, b) include (c);
+
+statement ok
+insert into st_s select 1, i, i * 10 from generate_series(1, 1000) i;
+
+statement ok
+insert into st_d select i, 1, i, i * 100 from generate_series(-1000, 101000) i where i <= 1000 or i > 100000;
+
+statement ok
+flush;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+set backfill_rate_limit = 50;
+
+statement ok
+create materialized view mv_straddle as select st_s.a, st_s.b, st_s.c, st_d.c as dc from st_s left join st_d for system_time as of proctime() on st_s.b = st_d.b and st_s.a = st_d.a;
+
+query T retry 30 backoff 1s
+select count(*) = 1 from rw_catalog.rw_internal_tables where job_id = (select id from rw_catalog.rw_materialized_views where name = 'mv_straddle') and name like '%localityproviderprogress%';
+----
+t
+
+let provider_progress
+select name from rw_catalog.rw_internal_tables where job_id = (select id from rw_catalog.rw_materialized_views where name = 'mv_straddle') and name like '%localityproviderprogress%'
+
+query T retry 120 backoff 1s
+select count(*) = 1 from ${provider_progress} where not backfill_finished and row_count > 20;
+----
+t
+
+statement ok
+update st_s set b = b + 100000 where b <= 20;
+
+statement ok
+update st_s set b = -b where b > 900;
+
+statement ok
+flush;
+
+query T
+select bool_or(not backfill_finished) from ${provider_progress};
+----
+t
+
+statement ok
+alter materialized view mv_straddle set backfill_rate_limit = default;
+
+statement ok
+wait;
+
+# The rows are distinct, as `c` is.
+query II
+select (select count(*) from mv_straddle), count(*) from (
+  (select a, b, c, dc from mv_straddle except select st_s.a, st_s.b, st_s.c, st_d.c from st_s left join st_d on st_s.b = st_d.b and st_s.a = st_d.a)
+  union all
+  (select st_s.a, st_s.b, st_s.c, st_d.c from st_s left join st_d on st_s.b = st_d.b and st_s.a = st_d.a except select a, b, c, dc from mv_straddle)
+) d;
+----
+1000 0
+
+query II
+select count(*) filter (where b < 1 or b > 1000), count(dc) from mv_straddle;
+----
+120 1000
+
+statement ok
+drop materialized view mv_straddle;
+
+statement ok
+drop table st_s;
+
+statement ok
+drop table st_d;
+
+statement ok
+set backfill_rate_limit = default;
+
+statement ok
+set background_ddl = default;
+
+statement ok
+set enable_locality_backfill = default;
+
+statement ok
+set locality_backfill_mode = default;

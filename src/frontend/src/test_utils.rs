@@ -193,7 +193,16 @@ impl LocalFrontend {
     }
 
     pub async fn get_explain_output(&self, sql: impl Into<String>) -> String {
-        let mut rsp = self.run_sql(sql).await.unwrap();
+        self.get_explain_output_with_session(self.session_ref(), sql)
+            .await
+    }
+
+    pub async fn get_explain_output_with_session(
+        &self,
+        session_ref: Arc<SessionImpl>,
+        sql: impl Into<String>,
+    ) -> String {
+        let mut rsp = self.run_sql_with_session(session_ref, sql).await.unwrap();
         assert_eq!(rsp.stmt_type(), StatementType::EXPLAIN);
         let mut res = String::new();
         #[for_await]

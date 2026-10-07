@@ -30,7 +30,7 @@ use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node_body, visit_stream_node_mut, visit_stream_node_stream_scan,
+    visit_stream_node, visit_stream_node_mut, visit_stream_node_stream_scan,
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
@@ -3859,11 +3859,11 @@ impl CatalogController {
         let mut rate_limits = Vec::new();
         for (fragment_id, job_id, fragment_type_mask, stream_node) in fragments {
             let stream_node = stream_node.to_protobuf();
-            visit_stream_node_body(&stream_node, |node| {
+            visit_stream_node(&stream_node, |stream_node| {
                 let mut rate_limit = None;
                 let mut node_name = None;
 
-                match node {
+                match stream_node.node_body.as_ref().unwrap() {
                     // source rate limit
                     PbNodeBody::Source(node) => {
                         if let Some(node_inner) = &node.source_inner {
@@ -3912,6 +3912,7 @@ impl CatalogController {
                         fragment_type_mask: fragment_type_mask as u32,
                         rate_limit,
                         node_name: node_name.unwrap().to_owned(),
+                        operator_id: stream_node.operator_id.into(),
                     });
                 }
             });
