@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bytes::Bytes;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
-use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::group_split::build_split_key;
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, prefix_slice_with_vnode};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::InputLevel;
 use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 use risingwave_hummock_sdk::version::{GroupDeltas, IntraLevelDelta};
+use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap};
 use risingwave_pb::hummock::compact_task::TaskType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -29,11 +30,64 @@ use risingwave_pb::hummock::{
     HummockVersion as PbHummockVersion, Level, LevelType, OverlappingLevel, StateTableInfo,
     StateTableInfoDelta,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 
 use super::*;
+use crate::hummock::TableHolder;
+use crate::hummock::iterator::test_utils::mock_sstable_store;
+use crate::hummock::pin_cache::PinCache;
+use crate::hummock::pin_cache::test_utils::in_memory_object_store;
+use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_with_table_ids};
+use crate::hummock::value::HummockValue;
 
-fn version_with_ssts(ssts: &[SstableInfo]) -> PinnedVersion {
+// Fixture setup only: registration and publication remain explicit in each test.
+pub(super) async fn with_pin_cache(
+    store: SstableStoreRef,
+    capacity: u64,
+) -> (SstableStoreRef, Arc<PinCache>) {
+    let cache = PinCache::new(in_memory_object_store(), capacity, 1, [])
+        .await
+        .unwrap();
+    let store = Arc::new(
+        Arc::into_inner(store)
+            .unwrap()
+            .with_pin_cache(cache.clone()),
+    );
+    (store, cache)
+}
+
+// Sorted rows define the physical table/vnode layout; one entry per block exposes boundaries.
+pub(super) async fn sst_with_vnodes(
+    store: &SstableStoreRef,
+    object: u64,
+    rows: &[(TableId, usize)],
+) -> (TableHolder, SstableInfo) {
+    let mut options = default_builder_opt_for_test();
+    options.block_capacity = 1;
+    let mut tables: Vec<_> = rows.iter().map(|(table, _)| table.as_raw_id()).collect();
+    tables.dedup();
+    gen_test_sstable_with_table_ids(
+        options,
+        object,
+        rows.iter().map(|&(table, vnode)| {
+            (
+                FullKey {
+                    user_key: UserKey::for_test(
+                        table,
+                        prefix_slice_with_vnode(VirtualNode::from_index(vnode), b"key"),
+                    ),
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+                },
+                HummockValue::put(Bytes::from_static(b"value")),
+            )
+        }),
+        store.clone(),
+        tables,
+    )
+    .await
+}
+
+pub(super) fn version_with_ssts(ssts: &[SstableInfo]) -> PinnedVersion {
     let group = 1.into();
     let version = PbHummockVersion {
         id: 1.into(),
@@ -73,7 +127,7 @@ fn version_with_ssts(ssts: &[SstableInfo]) -> PinnedVersion {
     )
 }
 
-fn intra_level_delta(
+pub(super) fn intra_level_delta(
     deleted: &[SstableInfo],
     inserted: &[SstableInfo],
     group_version: u64,
@@ -136,7 +190,7 @@ fn assert_reference_counts(controller: &PinCacheRefillController) {
 fn apply_and_check_version_deltas(
     controller: &mut PinCacheRefillController,
     deltas: &[HummockVersionDelta],
-) -> (HashSet<HummockSstableObjectId>, PinCacheObjectChanges) {
+) -> (PinCacheRefillPlan, PinCacheObjectChanges) {
     let before = reference_counts(&controller.planning_version, &controller.pinned_table_ids);
     let mut version = (*controller.planning_version).clone();
     let mut deltas = deltas.to_vec();
@@ -208,8 +262,8 @@ fn compaction_delta(
     delta
 }
 
-#[test]
-fn test_membership_tracks_physical_references() {
+#[tokio::test]
+async fn test_membership_tracks_physical_references() {
     let tables = [TableId::from(233), TableId::from(234)];
     let branches = tables.map(|table| {
         SstableInfo::from(SstableInfoInner {
@@ -232,11 +286,17 @@ fn test_membership_tracks_physical_references() {
         .sub_levels
         .clear();
     let empty = PinnedVersion::new(empty, mpsc::unbounded_channel().0);
-    let mut controller = PinCacheRefillController::new(empty.clone());
-    let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&empty));
+    let (store, cache) = with_pin_cache(mock_sstable_store().await, u64::MAX).await;
+    let mut controller =
+        PinCacheRefillController::new(store, empty.clone(), Arc::new(Semaphore::new(1)));
+    let changes = controller.replace_pinned_tables(
+        tables.into(),
+        std::slice::from_ref(&empty),
+        RefillOwnership::default(),
+    );
     assert_reference_counts(&controller);
     assert!(changes.inserted.is_empty() && changes.removed.is_empty());
-    let (candidates, changes) = controller.apply_version_update(
+    let (plan, changes) = controller.apply_version_update(
         &[SstDeltaInfo {
             insert_sst_infos: branches[1..].to_vec(),
             ..Default::default()
@@ -245,10 +305,17 @@ fn test_membership_tracks_physical_references() {
         Some(&[intra_level_delta(&[], &branches[1..], 0)]),
     );
     assert_reference_counts(&controller);
-    assert_eq!(candidates, [1001.into()].into());
+    assert_eq!(
+        plan.objects.keys().copied().collect::<HashSet<_>>(),
+        [1001.into()].into()
+    );
     assert_eq!(changes.inserted, [1001.into()].into());
+    assert!(
+        !cache.is_registered(1001.into()),
+        "planning must not register future objects"
+    );
     // A new logical reference can require refill without adding physical membership.
-    let (candidates, changes) = controller.apply_version_update(
+    let (plan, changes) = controller.apply_version_update(
         &[SstDeltaInfo {
             insert_sst_infos: branches[..1].to_vec(),
             ..Default::default()
@@ -257,7 +324,10 @@ fn test_membership_tracks_physical_references() {
         Some(&[intra_level_delta(&[], &branches[..1], 0)]),
     );
     assert_reference_counts(&controller);
-    assert_eq!(candidates, [1001.into()].into());
+    assert_eq!(
+        plan.objects.keys().copied().collect::<HashSet<_>>(),
+        [1001.into()].into()
+    );
     assert!(changes.inserted.is_empty() && changes.removed.is_empty());
     let (_, changes) = controller.apply_version_update(
         &[SstDeltaInfo {
@@ -282,25 +352,37 @@ fn test_membership_tracks_physical_references() {
 
     // The planning version is now empty, but the resident snapshot still contains both SSTs.
     // Policy diffs must use the resident snapshot, while reference counts follow planning.
-    let changes = controller.replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&both));
+    let changes = controller.replace_pinned_tables(
+        [tables[1]].into(),
+        std::slice::from_ref(&both),
+        RefillOwnership::default(),
+    );
     assert_reference_counts(&controller);
     assert!(changes.inserted.is_empty() && changes.removed.is_empty());
-    let changes = controller.replace_pinned_tables(HashSet::new(), std::slice::from_ref(&both));
+    let changes = controller.replace_pinned_tables(
+        HashSet::new(),
+        std::slice::from_ref(&both),
+        RefillOwnership::default(),
+    );
     assert_reference_counts(&controller);
     assert_eq!(changes.removed, [1001.into()].into());
-    let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&both));
+    let changes = controller.replace_pinned_tables(
+        tables.into(),
+        std::slice::from_ref(&both),
+        RefillOwnership::default(),
+    );
     assert_reference_counts(&controller);
     assert_eq!(changes.inserted, [1001.into()].into());
 
     // A full snapshot restores membership without scheduling a backfill.
-    let (candidates, changes) = controller.apply_version_update(&[], both.clone(), None);
+    let (plan, changes) = controller.apply_version_update(&[], both.clone(), None);
     assert_reference_counts(&controller);
-    assert!(candidates.is_empty());
+    assert!(plan.objects.is_empty());
     assert_eq!(changes.inserted, [1001.into()].into());
     assert!(changes.removed.is_empty());
-    let (candidates, changes) = controller.apply_version_update(&[], both.clone(), Some(&[]));
+    let (plan, changes) = controller.apply_version_update(&[], both.clone(), Some(&[]));
     assert_reference_counts(&controller);
-    assert!(candidates.is_empty() && changes.inserted.is_empty() && changes.removed.is_empty());
+    assert!(plan.objects.is_empty() && changes.inserted.is_empty() && changes.removed.is_empty());
 
     // Meta unregisters tables and prunes their SST projections in the same delta.
     for table in tables {
@@ -334,8 +416,8 @@ fn test_membership_tracks_physical_references() {
     );
 }
 
-#[test]
-fn test_pin_reference_counts_match_versions_across_batch_boundaries() {
+#[tokio::test]
+async fn test_pin_reference_counts_match_versions_across_batch_boundaries() {
     let tables = [TableId::from(233), TableId::from(234)];
     let group = CompactionGroupId::new(10);
     let split_group = CompactionGroupId::new(11);
@@ -510,8 +592,13 @@ fn test_pin_reference_counts_match_versions_across_batch_boundaries() {
 
     for batch_size in [1, 2, deltas.len()] {
         let initial = PinnedVersion::new(initial.clone(), mpsc::unbounded_channel().0);
-        let mut controller = PinCacheRefillController::new(initial.clone());
-        let changes = controller.replace_pinned_tables(tables.into(), &[initial]);
+        let mut controller = PinCacheRefillController::new(
+            mock_sstable_store().await,
+            initial.clone(),
+            Arc::new(Semaphore::new(1)),
+        );
+        let changes =
+            controller.replace_pinned_tables(tables.into(), &[initial], RefillOwnership::default());
         assert_eq!(changes.inserted, [shared.object_id].into());
         assert_reference_counts(&controller);
         for batch in deltas.chunks(batch_size) {
