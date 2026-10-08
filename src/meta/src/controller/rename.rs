@@ -110,6 +110,15 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                 ..
             }),
             ..
+        } | Statement::CreateSource {
+            stmt: CreateSourceStatement {
+                cdc_table_info:
+                    Some(CdcTableInfo {
+                        source_name: table_name,
+                        ..
+                    }),
+                ..
+            },
         } => replace_table_name(table_name, to),
         Statement::CreateSink {
             stmt: CreateSinkStatement {
@@ -159,7 +168,10 @@ impl QueryRewriter<'_> {
             for cte_table in &mut with.cte_tables {
                 match &mut cte_table.cte_inner {
                     risingwave_sqlparser::ast::CteInner::Query(query) => self.visit_query(query),
-                    risingwave_sqlparser::ast::CteInner::ChangeLog(name) => {
+                    risingwave_sqlparser::ast::CteInner::ChangeLog {
+                        from: name,
+                        key: _key,
+                    } => {
                         let idx = name.0.len() - 1;
                         if name.0[idx].real_value() == self.from {
                             replace_table_name(name, self.to);

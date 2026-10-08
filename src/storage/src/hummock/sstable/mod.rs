@@ -520,7 +520,6 @@ pub struct SstableIteratorReadOptions {
     pub scan_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
     /// Whether to prefetch blocks within the already-bounded scan window.
     pub prefetch: bool,
-    pub max_preload_retry_times: usize,
 }
 
 impl SstableIteratorReadOptions {
@@ -532,7 +531,6 @@ impl SstableIteratorReadOptions {
             read_table_id: None,
             scan_end_user_key: None,
             prefetch: false,
-            max_preload_retry_times: 0,
         }
     }
 }

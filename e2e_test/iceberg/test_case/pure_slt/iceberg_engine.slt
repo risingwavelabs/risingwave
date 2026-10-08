@@ -20,6 +20,46 @@ with (
 statement ok
 set iceberg_engine_connection = 'public.my_conn';
 
+# Equality-delete keys must be non-floating-point scalar columns. Reject invalid
+# keys during CREATE TABLE, before creating the Iceberg table or streaming jobs.
+statement error Iceberg engine table primary key column "period" has unsupported type
+CREATE TABLE invalid_pk (
+    user_id INT,
+    period STRUCT<"start" TIMESTAMPTZ, "end" TIMESTAMPTZ>,
+    amount INT,
+    PRIMARY KEY (user_id, period)
+) WITH (write_mode = 'merge-on-read') ENGINE = iceberg;
+
+statement error Iceberg engine table primary key column "period" has unsupported type
+CREATE TABLE invalid_pk (
+    user_id INT,
+    period STRUCT<"start" TIMESTAMPTZ, "end" TIMESTAMPTZ>,
+    amount INT,
+    PRIMARY KEY (user_id, period)
+) WITH (write_mode = 'copy-on-write') ENGINE = iceberg;
+
+statement error Iceberg engine table primary key column "items" has unsupported type
+CREATE TABLE invalid_pk (items INT[] PRIMARY KEY) ENGINE = iceberg;
+
+statement error Iceberg engine table primary key column "mapping" has unsupported type
+CREATE TABLE invalid_pk (mapping MAP(INT, INT) PRIMARY KEY) ENGINE = iceberg;
+
+statement error Iceberg engine table primary key column "value" has unsupported type real
+CREATE TABLE invalid_pk (value REAL PRIMARY KEY) ENGINE = iceberg;
+
+statement error Iceberg engine table primary key column "value" has unsupported type double precision
+CREATE TABLE invalid_pk (value DOUBLE PRECISION PRIMARY KEY) ENGINE = iceberg;
+
+query I
+SELECT count(*) FROM rw_catalog.rw_tables WHERE name = 'invalid_pk';
+----
+0
+
+query I
+SELECT count(*) FROM rw_catalog.rw_sinks WHERE name LIKE '%invalid_pk';
+----
+0
+
 statement ok
 create table t(id int primary key, name varchar, extra varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
 

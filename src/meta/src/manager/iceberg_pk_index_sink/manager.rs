@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::RwLock;
-use risingwave_common::id::PartialGraphId;
+use risingwave_common::id::{JobId, PartialGraphId};
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use sea_orm::DatabaseConnection;
@@ -46,7 +46,7 @@ struct ManagerInner {
     coordinators: RwLock<HashMap<SinkId, (PartialGraphId, CoordinatorRef)>>,
     /// Per-partial-graph committed-epoch cursor. A cursor entry exists exactly while a partial graph has
     /// a registered pk-index sink: created by `ensure` in `register_sink` and dropped by `remove` in
-    /// `unregister_sinks` (and `clear` in `reset`), all under the `coordinators` write lock. Advanced on
+    /// `unregister_jobs` (and `clear` in `reset`), all under the `coordinators` write lock. Advanced on
     /// every checkpoint completion via `advance_committed_epochs` (a no-op for partial graphs with no
     /// registered sink).
     committed_epochs: PartialGraphCommittedEpochs,
@@ -145,12 +145,13 @@ impl IcebergPkIndexSinkManager {
         Ok(snapshot_id)
     }
 
-    /// Unregister the given `sink_id`(s)' coordinator(s) (e.g. at DROP SINK time). Unregistering an unknown
-    /// `sink_id` is a no-op.
-    pub fn unregister_sinks(&self, sink_ids: Vec<SinkId>) {
+    /// Unregister the sink coordinators belonging to the given streaming jobs. Non-sink and unknown
+    /// job IDs are no-ops.
+    pub fn unregister_jobs(&self, job_ids: impl IntoIterator<Item = JobId>) {
         let mut coordinators = self.inner.coordinators.write();
         let mut touched_graphs = Vec::new();
-        for sink_id in sink_ids {
+        for job_id in job_ids {
+            let sink_id = job_id.as_sink_id();
             if let Some((partial_graph_id, _coord)) = coordinators.remove(&sink_id) {
                 touched_graphs.push(partial_graph_id);
             }

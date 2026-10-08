@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -80,6 +80,44 @@ struct ScheduledCompactionTask {
     compactor_context_id: HummockContextId,
 }
 
+/// Outcome history of one sink's compaction attempts.
+///
+/// This is observability-only state: it never affects scheduling decisions, and it
+/// is lost when meta restarts or the track is removed.
+#[derive(Debug, Clone, Default)]
+struct CompactionHealth {
+    last_success_at: Option<SystemTime>,
+    last_failure_at: Option<SystemTime>,
+    last_error: Option<String>,
+    consecutive_failures: u32,
+    /// Latest observed snapshot whose commits have been consumed by a completed
+    /// compaction.
+    compacted_snapshot: Option<IcebergCommittedSnapshot>,
+    /// Snapshot that started the active sequence-bounded round. It becomes
+    /// `compacted_snapshot` when the round drains.
+    round_start_snapshot: Option<IcebergCommittedSnapshot>,
+}
+
+impl CompactionHealth {
+    fn record_progress(&mut self) {
+        self.last_success_at = Some(SystemTime::now());
+        self.consecutive_failures = 0;
+    }
+
+    fn record_completion(&mut self, compacted_snapshot: Option<IcebergCommittedSnapshot>) {
+        self.record_progress();
+        if compacted_snapshot.is_some() {
+            self.compacted_snapshot = compacted_snapshot;
+        }
+    }
+
+    fn record_failure(&mut self, error: String) {
+        self.last_failure_at = Some(SystemTime::now());
+        self.last_error = Some(error);
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompactionTrackFinishAction {
     KeepTrack,
@@ -106,6 +144,7 @@ pub(super) struct CompactionTrack {
     /// removing its track; re-enabling can restore `KeepTrack`.
     finish_action: CompactionTrackFinishAction,
     state: CompactionTrackState,
+    health: CompactionHealth,
 }
 
 impl CompactionTrack {
@@ -132,6 +171,7 @@ impl CompactionTrack {
                 next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
                 manual_task_type: None,
             },
+            health: CompactionHealth::default(),
         }
     }
 
@@ -244,6 +284,7 @@ impl CompactionTrack {
         if let Some(max_file_sequence_number) = new_round_boundary {
             self.round_max_file_sequence_number = Some(max_file_sequence_number);
             self.pending_commit_count = 0;
+            self.health.round_start_snapshot = self.latest_observed_snapshot.clone();
         }
         let attempt = Arc::new(CompactionAttempt {
             task_type,
@@ -341,10 +382,11 @@ impl CompactionTrack {
         )
     }
 
-    fn finish_failed(&mut self, now: Instant) -> CompactionTrackFinishAction {
+    fn finish_failed(&mut self, now: Instant, error: String) -> CompactionTrackFinishAction {
         if !matches!(self.state, CompactionTrackState::InFlight { .. }) {
             unreachable!("Only an in-flight attempt can finish")
         }
+        self.health.record_failure(error);
         self.state = CompactionTrackState::Idle {
             next_compaction_time: now + COMPACTION_RETRY_BACKOFF,
             manual_task_type: None,
@@ -366,6 +408,8 @@ impl CompactionTrack {
         if !self.is_pending_dispatch() {
             unreachable!("Only a pending attempt can be reverted")
         }
+        self.health
+            .record_failure("compaction task failed before dispatch to a compactor".to_owned());
         self.state = CompactionTrackState::Idle {
             next_compaction_time: now + COMPACTION_RETRY_BACKOFF,
             manual_task_type: None,
@@ -404,6 +448,7 @@ impl CompactionTrack {
         if attempt.max_file_sequence_number.is_some() {
             // Success means this attempt made progress, but only `Drained`
             // proves that no work remains below the fixed boundary.
+            self.health.record_progress();
             self.state = CompactionTrackState::Idle {
                 next_compaction_time: now,
                 manual_task_type: None,
@@ -412,6 +457,8 @@ impl CompactionTrack {
             self.pending_commit_count = self
                 .pending_commit_count
                 .saturating_sub(attempt.pending_commit_count_at_start);
+            self.health
+                .record_completion(attempt.gc_watermark_snapshot.clone());
             self.state = CompactionTrackState::Idle {
                 next_compaction_time: now + Duration::from_secs(self.trigger_interval_sec),
                 manual_task_type: None,
@@ -432,11 +479,20 @@ impl CompactionTrack {
         );
         debug_assert!(attempt.max_file_sequence_number.is_some());
         self.round_max_file_sequence_number = None;
+        let round_start_snapshot = self.health.round_start_snapshot.take();
+        self.health.record_completion(round_start_snapshot);
         self.state = CompactionTrackState::Idle {
             next_compaction_time: now + Duration::from_secs(self.trigger_interval_sec),
             manual_task_type: None,
         };
         self.finish_action
+    }
+
+    fn compaction_lag(&self) -> Option<Duration> {
+        let latest = self.latest_observed_snapshot.as_ref()?;
+        let compacted = self.health.compacted_snapshot.as_ref()?;
+        let lag_ms = latest.timestamp_ms.saturating_sub(compacted.timestamp_ms);
+        Some(Duration::from_millis(lag_ms.max(0) as u64))
     }
 
     fn is_in_flight_bounded_attempt(&self) -> bool {
@@ -643,6 +699,14 @@ pub struct IcebergCompactionScheduleStatus {
     pub next_compaction_after_sec: Option<u64>,
     pub pending_snapshot_count: Option<usize>,
     pub is_triggerable: bool,
+    pub last_success_at: Option<SystemTime>,
+    pub last_failure_at: Option<SystemTime>,
+    pub last_error: Option<String>,
+    pub consecutive_failures: u32,
+    /// Commit-time gap between the latest observed snapshot and the snapshot
+    /// consumed by the last completed compaction. For copy-on-write sinks, this
+    /// is how far `main` lags behind the ingestion branch.
+    pub compaction_lag: Option<Duration>,
 }
 
 impl IcebergCompactionManager {
@@ -988,7 +1052,11 @@ impl IcebergCompactionManager {
                     sink_id = %sink_id,
                     "iceberg_compaction_task_report_timed_out",
                 );
-                timed_out_tasks.push((sink_id, track.finish_failed(now)));
+                let error = format!(
+                    "compaction task report timed out after {}s",
+                    track.report_timeout.as_secs()
+                );
+                timed_out_tasks.push((sink_id, track.finish_failed(now, error)));
             }
         }
 
@@ -1152,6 +1220,7 @@ impl IcebergCompactionManager {
                     | CompactionTrackState::InFlight { .. } => None,
                 };
                 let is_triggerable = track.should_trigger(now);
+                let compaction_lag = track.compaction_lag();
 
                 IcebergCompactionScheduleStatus {
                     sink_id,
@@ -1169,6 +1238,11 @@ impl IcebergCompactionManager {
                     next_compaction_after_sec,
                     pending_snapshot_count: Some(track.pending_commit_count),
                     is_triggerable,
+                    last_success_at: track.health.last_success_at,
+                    last_failure_at: track.health.last_failure_at,
+                    last_error: track.health.last_error,
+                    consecutive_failures: track.health.consecutive_failures,
+                    compaction_lag,
                 }
             })
             .collect_vec();
@@ -1209,7 +1283,10 @@ impl IcebergCompactionManager {
                                 error_message = report.error_message.as_deref().unwrap_or_default(),
                                 "iceberg_compaction_task_reported_failure",
                             );
-                            track.finish_failed(now)
+                            let error = report.error_message.clone().unwrap_or_else(|| {
+                                format!("compaction task reported {}", status.as_str_name())
+                            });
+                            track.finish_failed(now, error)
                         }
                     };
 
