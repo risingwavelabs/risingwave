@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Bound;
 
@@ -28,6 +29,25 @@ use super::Sstable;
 pub(crate) struct RefillOwnership<'a> {
     pub streaming: Option<&'a HashMap<TableId, Bitmap>>,
     pub serving: Option<&'a HashMap<TableId, Bitmap>>,
+}
+
+impl<'a> RefillOwnership<'a> {
+    /// Only task snapshots own a merged bitmap; this view stores no derived ownership state.
+    pub(crate) fn owned_vnodes(self, table: &TableId) -> Option<Cow<'a, Bitmap>> {
+        let streaming = self
+            .streaming
+            .and_then(|map| map.get(table))
+            .filter(|b| b.any());
+        let serving = self
+            .serving
+            .and_then(|map| map.get(table))
+            .filter(|b| b.any());
+        match (streaming, serving) {
+            (Some(streaming), Some(serving)) => Some(Cow::Owned(streaming | serving)),
+            (Some(bitmap), None) | (None, Some(bitmap)) => Some(Cow::Borrowed(bitmap)),
+            (None, None) => None,
+        }
+    }
 }
 
 pub(crate) fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> bool {

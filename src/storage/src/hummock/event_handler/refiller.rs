@@ -1420,6 +1420,41 @@ mod tests {
                 )
             });
             assert_eq!(actual, expected, "{}", case.name);
+            // Pin uses the same source, independently of Foyer policy, but scoped to worker role.
+            let expected_vnodes: Vec<_> = [1, 2, 3, 4]
+                .into_iter()
+                .filter(|vnode| {
+                    if vnode % 2 == 1 {
+                        case.role.for_streaming() && case.has_streaming_vnodes
+                    } else {
+                        case.role.for_serving() && case.has_serving_vnodes
+                    }
+                })
+                .collect();
+            let owned = refiller.refill_ownership().owned_vnodes(&table_id);
+            assert_eq!(
+                owned.is_some(),
+                !expected_vnodes.is_empty(),
+                "{}",
+                case.name
+            );
+            if let Some(owned) = owned {
+                assert_eq!(
+                    owned.as_ref(),
+                    &Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, expected_vnodes)
+                );
+            }
+
+            // Mapping presence alone must not admit a table with no owned vnodes.
+            let empty_vnodes = Bitmap::zeros(VirtualNode::COUNT_FOR_TEST);
+            refiller.update_streaming_table_vnodes(table_id, Some(empty_vnodes.clone()));
+            refiller.replace_serving_table_vnode_mapping([(table_id, empty_vnodes)].into());
+            assert!(
+                refiller
+                    .refill_ownership()
+                    .owned_vnodes(&table_id)
+                    .is_none()
+            );
         }
     }
 
@@ -1463,7 +1498,15 @@ mod tests {
             table_id,
             CacheRefillPolicy::Disabled,
         )]));
-        refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, new_vnodes)]));
+        refiller
+            .replace_serving_table_vnode_mapping(HashMap::from([(table_id, new_vnodes.clone())]));
+        assert_eq!(
+            refiller
+                .refill_ownership()
+                .owned_vnodes(&table_id)
+                .as_deref(),
+            Some(&new_vnodes)
+        );
 
         let captured_context = captured_context.lock();
         let context = captured_context

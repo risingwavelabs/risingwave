@@ -14,9 +14,12 @@
 
 //! The controller plans physical membership changes; the version gate applies them.
 //! Policy changes take effect immediately, while version inserts wait for activation and
-//! removals wait for application. The Pin backend owns cached bytes and file retirement.
+//! removals wait for application. Policy revocation also withdraws already admitted work.
+//! The executor owns downloads and retries independently of version-gate ticket lifetimes;
+//! the Pin backend owns publication tokens, cached bytes, and file retirement.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
@@ -26,9 +29,56 @@ use risingwave_pb::id::TableId;
 
 use crate::hummock::SstableStoreRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::refill_locality::RefillOwnership;
+
+mod executor;
+use executor::{PinCacheRefillExecutor, Ticket};
 
 #[cfg(test)]
 mod tests;
+
+/// Captures table admission while waiting for submission. Vnode ownership is resolved at submit.
+#[derive(Clone, Default)]
+pub(crate) struct PinCacheRefillPlan {
+    pub objects: HashMap<HummockSstableObjectId, Vec<SstableInfo>>,
+    pub admitted_tables: HashSet<TableId>,
+}
+
+impl PinCacheRefillPlan {
+    pub(crate) fn new(
+        deltas: &[SstDeltaInfo],
+        candidates: &HashSet<HummockSstableObjectId>,
+        admitted_tables: HashSet<TableId>,
+    ) -> Self {
+        let mut objects: HashMap<_, Vec<_>> = HashMap::new();
+        for sst in deltas.iter().flat_map(|delta| &delta.insert_sst_infos) {
+            if candidates.contains(&sst.object_id)
+                && sst
+                    .table_ids
+                    .iter()
+                    .any(|table| admitted_tables.contains(table))
+            {
+                objects.entry(sst.object_id).or_default().push(sst.clone());
+            }
+        }
+        Self {
+            objects,
+            admitted_tables,
+        }
+    }
+
+    pub(crate) fn retain_tables(&mut self, pinned_tables: &HashSet<TableId>) {
+        self.admitted_tables
+            .retain(|table| pinned_tables.contains(table));
+        self.objects.retain(|_, infos| {
+            infos.iter().any(|info| {
+                info.table_ids
+                    .iter()
+                    .any(|table| self.admitted_tables.contains(table))
+            })
+        });
+    }
+}
 
 /// Physical membership changes for the version gate to apply at the appropriate boundary.
 #[derive(Default)]
@@ -63,15 +113,22 @@ pub(crate) struct PinCacheRefillController {
     pinned_table_ids: HashSet<TableId>,
     object_ref_counts: HashMap<HummockSstableObjectId, u32>,
     pub(crate) version: PinnedVersion,
+    executor: PinCacheRefillExecutor,
 }
 
 impl PinCacheRefillController {
-    pub(crate) fn new(sstable_store: SstableStoreRef, version: PinnedVersion) -> Self {
+    pub(crate) fn new(
+        sstable_store: SstableStoreRef,
+        version: PinnedVersion,
+        concurrency: Arc<tokio::sync::Semaphore>,
+    ) -> Self {
+        let executor = PinCacheRefillExecutor::new(sstable_store.clone(), concurrency);
         Self {
             sstable_store,
             pinned_table_ids: HashSet::new(),
             object_ref_counts: HashMap::new(),
             version,
+            executor,
         }
     }
 
@@ -81,10 +138,12 @@ impl PinCacheRefillController {
         &mut self,
         pinned_table_ids: HashSet<TableId>,
         resident_versions: &[PinnedVersion],
+        ownership: RefillOwnership<'_>,
     ) -> PinCacheObjectChanges {
         if self.pinned_table_ids == pinned_table_ids {
             return PinCacheObjectChanges::default();
         }
+        let revoked_tables = !self.pinned_table_ids.is_subset(&pinned_table_ids);
         let before = resident_versions
             .iter()
             .flat_map(|version| Self::pinned_objects(version, &self.pinned_table_ids))
@@ -96,7 +155,28 @@ impl PinCacheRefillController {
         let changes = PinCacheObjectChanges::between(before, after);
         self.pinned_table_ids = pinned_table_ids;
         self.rebuild_object_ref_counts();
+        if revoked_tables {
+            // A shared object may remain registered through another table. RESET must still
+            // permanently withdraw this table from work that was already submitted.
+            self.executor.reproject(ownership, &self.pinned_table_ids);
+        }
         changes
+    }
+
+    /// Reprojects admitted work only. Ownership arrival or changes do not warm existing SSTs
+    /// or validate recovered files through remote metadata reads. Recovery keeps local files
+    /// selected by the pin policy and version; locality is checked when admitting a new refill.
+    /// Published files are not rescanned on vnode changes and may stay until unpin/version removal.
+    pub(crate) fn update_ownership(&self, ownership: RefillOwnership<'_>) {
+        self.executor.reproject(ownership, &self.pinned_table_ids);
+    }
+
+    pub(crate) fn submit(
+        &self,
+        plan: PinCacheRefillPlan,
+        ownership: RefillOwnership<'_>,
+    ) -> Ticket {
+        self.executor.submit(plan, ownership)
     }
 
     /// Called after version application (or immediate policy revocation), never at enqueue time.
@@ -104,9 +184,14 @@ impl PinCacheRefillController {
         &self,
         objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) {
-        if let Some(cache) = self.sstable_store.pin_cache() {
-            cache.unregister_objects(objects);
+        let objects: Vec<_> = objects.into_iter().collect();
+        if objects.is_empty() {
+            return;
         }
+        if let Some(cache) = self.sstable_store.pin_cache() {
+            cache.unregister_objects(objects.iter().copied());
+        }
+        self.executor.remove_objects(&objects);
     }
 
     /// `None` denotes a full version snapshot; `Some` carries every raw delta in order,
