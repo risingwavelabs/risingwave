@@ -24,8 +24,8 @@ use risingwave_common::catalog::{
 use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::catalog::{
-    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
-    PbSubscription, PbTable, PbView,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
+    PbTable, PbView,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::replace_job_plan::{
@@ -369,7 +369,6 @@ impl CatalogWriter for CatalogWriterImpl {
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
-        let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
             .create_materialized_view(
@@ -381,9 +380,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 refresh_interval_sec,
             )
             .await?;
-        if matches!(create_type, PbCreateType::Foreground) {
-            self.wait_version(version).await?
-        }
+        self.wait_version(version).await?;
         Ok(())
     }
 

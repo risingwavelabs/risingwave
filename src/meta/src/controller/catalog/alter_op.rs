@@ -1012,16 +1012,13 @@ impl CatalogController {
 
         if updates_cache_refill_policy {
             let policies = self.table_cache_refill_policies_snapshot().await?;
-            self.env
-                .notification_manager()
-                .notify_hummock(
-                    NotificationOperation::Update,
-                    NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
-                        table_cache_refill_policies: Some(policies),
-                        ..Default::default()
-                    }),
-                )
-                .await;
+            self.env.notification_manager().notify_hummock(
+                NotificationOperation::Update,
+                NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                    table_cache_refill_policies: Some(policies),
+                    ..Default::default()
+                }),
+            );
         }
 
         Ok(IGNORED_NOTIFICATION_VERSION)

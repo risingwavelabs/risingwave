@@ -293,22 +293,22 @@ impl CatalogController {
         txn.commit().await?;
 
         // notify about them.
-        self.notify_users_update(user_infos).await;
+        let mut notifications = self.frontend_notification_batch();
+        Self::add_users_update_notifications(&mut notifications, user_infos);
         inner
             .dropped_tables
             .extend(dropped_tables.map(|t| (t.id, t)));
 
-        let version = match object_type {
+        match object_type {
             ObjectType::Database => {
                 // TODO: Notify objects in other databases when the cross-database query is supported.
-                self.notify_frontend(
+                notifications.add(
                     NotificationOperation::Delete,
                     NotificationInfo::Database(PbDatabase {
                         id: database_id,
                         ..Default::default()
                     }),
-                )
-                .await
+                );
             }
             ObjectType::Schema => {
                 let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = removed_objects
@@ -319,18 +319,20 @@ impl CatalogController {
                 to_notify_objs.push(schema_obj);
 
                 let relation_group = build_object_group_for_delete(to_notify_objs);
-                self.notify_frontend(NotificationOperation::Delete, relation_group)
-                    .await
+                notifications.add(NotificationOperation::Delete, relation_group);
             }
             _ => {
                 // Hummock observers and compactor observers are notified once the corresponding barrier is completed.
                 // They only need RelationInfo::Table.
                 let relation_group =
                     build_object_group_for_delete(removed_objects.into_values().collect());
-                self.notify_frontend(NotificationOperation::Delete, relation_group)
-                    .await
+                notifications.add(NotificationOperation::Delete, relation_group);
             }
-        };
+        }
+        let version = notifications
+            .publish()
+            .await
+            .expect("the drop notification batch contains the dropped object");
 
         Ok((
             ReleaseContext {

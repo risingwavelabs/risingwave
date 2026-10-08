@@ -44,21 +44,31 @@ use crate::controller::utils::{
     get_object_owner, get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
     upsert_user_privileges,
 };
-use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationVersion};
+use crate::manager::{
+    FrontendNotificationBatch, IGNORED_NOTIFICATION_VERSION, NotificationVersion,
+};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
+    pub(crate) fn add_users_update_notifications(
+        notifications: &mut FrontendNotificationBatch<'_>,
+        user_infos: Vec<PbUserInfo>,
+    ) {
+        for info in user_infos {
+            notifications.add(NotificationOperation::Update, NotificationInfo::User(info));
+        }
+    }
+
     pub(crate) async fn notify_users_update(
         &self,
         user_infos: Vec<PbUserInfo>,
     ) -> NotificationVersion {
-        let mut version = 0;
-        for info in user_infos {
-            version = self
-                .notify_frontend(NotificationOperation::Update, NotificationInfo::User(info))
-                .await;
-        }
-        version
+        let mut notifications = self.frontend_notification_batch();
+        Self::add_users_update_notifications(&mut notifications, user_infos);
+        notifications
+            .publish()
+            .await
+            .expect("a user update notification must contain at least one user")
     }
 
     pub async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
@@ -107,13 +117,14 @@ impl CatalogController {
         update_fields: &[PbUpdateField],
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
         let rename_flag = update_fields.contains(&PbUpdateField::Rename);
         if rename_flag {
-            check_user_name_duplicate(&update_user.name, &inner.db).await?;
+            check_user_name_duplicate(&update_user.name, &txn).await?;
         }
 
         let user = User::find_by_id(update_user.id as UserId)
-            .one(&inner.db)
+            .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", update_user.id))?;
         let mut user = user.into_active_model();
@@ -130,9 +141,11 @@ impl CatalogController {
             PbUpdateField::Admin => user.is_admin = Set(update_user.is_admin),
         });
 
-        let user = user.update(&inner.db).await?;
+        let user = user.update(&txn).await?;
         let mut user_info: PbUserInfo = user.into();
-        user_info.grant_privileges = get_user_privilege(user_info.id as _, &inner.db).await?;
+        user_info.grant_privileges = get_user_privilege(user_info.id as _, &txn).await?;
+        txn.commit().await?;
+
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,

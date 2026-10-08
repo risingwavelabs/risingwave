@@ -280,7 +280,7 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
 
             if !self.disable_apply_to_txn {
                 let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();
-                self.notification_manager.notify_hummock_without_version(
+                self.notification_manager.notify_hummock(
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                         version_deltas: pb_deltas,

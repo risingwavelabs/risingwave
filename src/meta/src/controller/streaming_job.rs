@@ -1212,7 +1212,8 @@ impl CatalogController {
         if !objs.is_empty() {
             // We also have notified the frontend about these objects,
             // so we need to notify the frontend to delete them here.
-            self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
+            let _version = self
+                .notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
         let aborted_sink_ids = objects_to_abort
@@ -1485,15 +1486,15 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        let mut notifications = self.frontend_notification_batch();
         if let Some(objects) = creating_objects {
-            self.notify_frontend(
+            notifications.add(
                 NotificationOperation::Add,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects,
                     dependencies: vec![],
                 }),
-            )
-            .await;
+            );
         }
 
         let Some((
@@ -1506,6 +1507,9 @@ impl CatalogController {
             updated_user_info,
         )) = replace_sink_post_collect
         else {
+            if let Some(version) = notifications.publish().await {
+                tracing::debug!(job_id = %job_id, version, "notified frontend of creating streaming job");
+            }
             return Ok(None);
         };
 
@@ -1520,28 +1524,27 @@ impl CatalogController {
                 old_fragment_ids.iter().map(|id| *id as _).collect(),
             );
 
-        let _ = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                build_object_group_for_delete(old_objects),
-            )
-            .await;
+        notifications.add(
+            NotificationOperation::Delete,
+            build_object_group_for_delete(old_objects),
+        );
 
-        let _ = self
-            .notify_frontend(
-                // The replacement sink is not pre-notified to frontend while creating, so the
-                // cutover should add the new finalized sink after deleting the old one.
-                NotificationOperation::Add,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: new_objects,
-                    dependencies,
-                }),
-            )
-            .await;
+        // The replacement sink is not pre-notified to frontend while creating, so the cutover
+        // should add the new finalized sink after deleting the old one.
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: new_objects,
+                dependencies,
+            }),
+        );
 
-        if !updated_user_info.is_empty() {
-            let _ = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the replacement notification batch contains the replacement sink");
+        tracing::debug!(job_id = %job_id, version, "notified frontend of replacement streaming job");
 
         Ok(Some(old_state_table_ids))
     }
@@ -1691,20 +1694,21 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let mut version = self
-            .notify_frontend(
-                notification_op,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects,
-                    dependencies,
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            notification_op,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects,
+                dependencies,
+            }),
+        );
 
         // notify users about the default privileges
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the streaming job notification batch contains the streaming job");
 
         inner
             .creating_table_finish_notifier
@@ -1952,25 +1956,26 @@ impl CatalogController {
             new_fragment_ids.iter().map(|id| *id as _).collect(),
         );
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects,
-                    dependencies: vec![],
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects,
+                dependencies: vec![],
+            }),
+        );
 
         if let Some((user_infos, to_drop_objects)) = delete_notification_objs {
-            self.notify_users_update(user_infos).await;
-            version = self
-                .notify_frontend(
-                    NotificationOperation::Delete,
-                    build_object_group_for_delete(to_drop_objects),
-                )
-                .await;
+            Self::add_users_update_notifications(&mut notifications, user_infos);
+            notifications.add(
+                NotificationOperation::Delete,
+                build_object_group_for_delete(to_drop_objects),
+            );
         }
+        let version = notifications
+            .publish()
+            .await
+            .expect("the replacement notification batch contains the updated object");
 
         Ok(version)
     }
@@ -3078,14 +3083,15 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        self.notify_frontend(
-            NotificationOperation::Update,
-            NotificationInfo::ObjectGroup(PbObjectGroup {
-                objects: to_update_objs,
-                dependencies: vec![],
-            }),
-        )
-        .await;
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: to_update_objs,
+                    dependencies: vec![],
+                }),
+            )
+            .await;
 
         Ok(options_with_secret)
     }
@@ -3727,14 +3733,15 @@ impl CatalogController {
 
         // Notify frontend about all updated objects
         if !updated_objects.is_empty() {
-            self.notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: updated_objects,
-                    dependencies: vec![],
-                }),
-            )
-            .await;
+            let _version = self
+                .notify_frontend(
+                    NotificationOperation::Update,
+                    NotificationInfo::ObjectGroup(PbObjectGroup {
+                        objects: updated_objects,
+                        dependencies: vec![],
+                    }),
+                )
+                .await;
         }
 
         Ok((

@@ -90,7 +90,7 @@ use crate::controller::catalog::util::{
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::*;
 use crate::manager::{
-    IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
+    FrontendNotificationBatch, IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
     get_referred_connection_ids_from_source, get_referred_secret_ids_from_source,
 };
 use crate::rpc::ddl_controller::DropMode;
@@ -300,6 +300,10 @@ impl CatalogControllerInner {
 }
 
 impl CatalogController {
+    pub(crate) fn frontend_notification_batch(&self) -> FrontendNotificationBatch<'_> {
+        FrontendNotificationBatch::new(self.env.notification_manager())
+    }
+
     pub(crate) async fn notify_hummock_table_cache_refill_policy_if_explicit(
         &self,
         inner: &CatalogControllerInner,
@@ -309,16 +313,13 @@ impl CatalogController {
             .table_cache_refill_policies_snapshot_if_job_has_explicit_policy(job_id)
             .await?
         {
-            self.env
-                .notification_manager()
-                .notify_hummock(
-                    NotificationOperation::Update,
-                    NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
-                        table_cache_refill_policies: Some(policies),
-                        ..Default::default()
-                    }),
-                )
-                .await;
+            self.env.notification_manager().notify_hummock(
+                NotificationOperation::Update,
+                NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                    table_cache_refill_policies: Some(policies),
+                    ..Default::default()
+                }),
+            );
         }
         Ok(())
     }
@@ -370,45 +371,41 @@ pub struct CatalogControllerInner {
 }
 
 impl CatalogController {
+    #[must_use]
     pub(crate) async fn notify_frontend(
         &self,
         operation: NotificationOperation,
         info: NotificationInfo,
     ) -> NotificationVersion {
-        self.env
-            .notification_manager()
-            .notify_frontend(operation, info)
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(operation, info);
+        notifications
+            .publish()
             .await
+            .expect("the frontend notification batch contains the added notification")
     }
 
+    #[must_use]
     pub(crate) async fn notify_frontend_relation_info(
         &self,
         operation: NotificationOperation,
         relation_info: PbObjectInfo,
     ) -> NotificationVersion {
-        self.env
-            .notification_manager()
-            .notify_frontend_object_info(operation, relation_info)
-            .await
+        self.notify_frontend(
+            operation,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: relation_info.into(),
+                }],
+                dependencies: vec![],
+            }),
+        )
+        .await
     }
 
-    /// Trivially advance the notification version and notify to frontend,
-    /// return the notification version for frontend to wait for.
-    ///
-    /// Cannot simply return the current version, because the current version may not be sent
-    /// to frontend, and the frontend may endlessly wait for this version, until a frontend
-    /// related notification is sent.
-    pub(crate) async fn notify_frontend_trivial(&self) -> NotificationVersion {
-        self.env
-            .notification_manager()
-            .notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: vec![],
-                    dependencies: vec![],
-                }),
-            )
-            .await
+    /// Return the latest version published to frontend catalog observers.
+    pub(crate) async fn current_notification_version(&self) -> NotificationVersion {
+        self.env.notification_manager().current_version().await
     }
 }
 
@@ -469,20 +466,19 @@ impl CatalogController {
             list_object_dependencies_by_object_id(&txn, subscription_id.into()).await?;
         txn.commit().await?;
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: vec![PbObject {
-                        object_info: PbObjectInfo::Subscription(
-                            ObjectModel(subscription, obj.unwrap(), None).into(),
-                        )
-                        .into(),
-                    }],
-                    dependencies,
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: PbObjectInfo::Subscription(
+                        ObjectModel(subscription, obj.unwrap(), None).into(),
+                    )
+                    .into(),
+                }],
+                dependencies,
+            }),
+        );
 
         // notify default privileges about the new subscription
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -496,8 +492,12 @@ impl CatalogController {
 
         if !updated_user_ids.is_empty() {
             let updated_user_infos = list_user_info_by_ids(updated_user_ids, &inner.db).await?;
-            version = self.notify_users_update(updated_user_infos).await;
+            Self::add_users_update_notifications(&mut notifications, updated_user_infos);
         }
+        let version = notifications
+            .publish()
+            .await
+            .expect("the subscription notification batch contains the subscription");
 
         Ok(version)
     }
@@ -893,7 +893,7 @@ impl CatalogController {
         Ok(version)
     }
 
-    async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
+    fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
         if tables.is_empty() {
             return;
         }
@@ -909,24 +909,22 @@ impl CatalogController {
         });
         self.env
             .notification_manager()
-            .notify_hummock(NotificationOperation::Delete, group.clone())
-            .await;
+            .notify_hummock(NotificationOperation::Delete, group.clone());
         self.env
             .notification_manager()
-            .notify_compactor(NotificationOperation::Delete, group)
-            .await;
+            .notify_compactor(NotificationOperation::Delete, group);
     }
 
     pub async fn complete_dropped_tables(&self, table_ids: impl IntoIterator<Item = TableId>) {
         let mut inner = self.inner.write().await;
         let tables = inner.complete_dropped_tables(table_ids);
-        self.notify_hummock_dropped_tables(tables).await;
+        self.notify_hummock_dropped_tables(tables);
     }
 
     pub async fn cleanup_dropped_tables(&self) {
         let mut inner = self.inner.write().await;
         let tables = inner.dropped_tables.drain().map(|(_, t)| t).collect();
-        self.notify_hummock_dropped_tables(tables).await;
+        self.notify_hummock_dropped_tables(tables);
     }
 
     pub async fn stats(&self) -> MetaResult<CatalogStats> {
