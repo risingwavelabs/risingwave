@@ -153,6 +153,10 @@ pub struct Block {
     restart_points: Vec<RestartPoint>,
 
     hitmap: Hitmap<{ Self::HITMAP_ELEMS }>,
+
+    /// Read provenance shared by fetch waiters, independent of cache admission policy.
+    /// This is not serialized into SSTs or the disk cache.
+    pub(crate) loaded_from_pin_cache: bool,
 }
 
 impl Clone for Block {
@@ -163,6 +167,7 @@ impl Clone for Block {
             table_id: self.table_id,
             restart_points: self.restart_points.clone(),
             hitmap: self.hitmap.clone(),
+            loaded_from_pin_cache: self.loaded_from_pin_cache,
         }
     }
 }
@@ -309,6 +314,7 @@ impl Block {
             restart_points,
             table_id: TableId::new(table_id),
             hitmap: Hitmap::default(),
+            loaded_from_pin_cache: false,
         }
     }
 
@@ -1133,10 +1139,13 @@ mod tests {
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
 
-        let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
+        let mut block = Box::new(Block::decode(buf.into(), capacity).unwrap());
 
         let buffer = bincode::serialize(&block).unwrap();
+        block.loaded_from_pin_cache = true;
+        assert_eq!(bincode::serialize(&block).unwrap(), buffer);
         let blk: Block = bincode::deserialize(&buffer).unwrap();
+        assert!(!blk.loaded_from_pin_cache);
 
         assert_eq!(block.data, blk.data);
         assert_eq!(block.data_len, blk.data_len);
