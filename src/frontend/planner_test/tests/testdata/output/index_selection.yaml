@@ -1143,6 +1143,26 @@
     └─BatchProject { exprs: [mv.id] }
       └─BatchFilter { predicate: ((JsonbAccessStr(mv.j, 'k1':Varchar) = 'v':Varchar) OR (JsonbAccessStr(mv.j, 'k1':Varchar) = 'w':Varchar)) }
         └─BatchScan { table: mv, columns: [mv.id, mv.j], distribution: Single }
+- name: plain-column index on a TopN mv with an INCLUDE list that leaves out the order key can not be used for index lookup (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, k int);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index i_plain on mv(k) include (id);
+    select tag from mv where k = 10;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv.tag] }
+      └─BatchFilter { predicate: (mv.k = 10:Int32) }
+        └─BatchScan { table: mv, columns: [mv.tag, mv.k], distribution: Single }
+- name: plain-column index on a TopN mv with an INCLUDE list that leaves out the order key still serves covered queries (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, k int);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index i_plain on mv(k) include (id);
+    select id from mv where k = 10;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: i_plain, columns: [i_plain.id], scan_ranges: [i_plain.k = Int32(10)], distribution: SomeShard }
 - name: index on a single-row mv is never selected for a predicate scan (issue 27125)
   sql: |
     create table t (a int, b int);

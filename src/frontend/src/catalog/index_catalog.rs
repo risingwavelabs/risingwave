@@ -66,7 +66,12 @@ pub struct VectorIndex {
     pub vector_expr: ExprImpl,
     #[educe(Hash(ignore))]
     pub primary_to_included_info_column_mapping: HashMap<usize, usize>,
-    pub primary_key_idx_in_info_columns: Vec<usize>,
+    /// Positions of the primary table's primary key columns in the info columns.
+    ///
+    /// `None` if some primary key column is not stored in the index, e.g. the order key of an
+    /// `ORDER BY` materialized view left out of `INCLUDE`. Such an index can serve only queries it
+    /// fully covers, since it cannot locate rows of the primary table.
+    pub primary_key_idx_in_info_columns: Option<Vec<usize>>,
     pub included_info_columns: Vec<usize>,
     pub vector_index_info: PbVectorIndexInfo,
 }
@@ -195,7 +200,11 @@ impl IndexCatalog {
                 let primary_key_idx_in_info_columns = primary_table
                     .pk()
                     .iter()
-                    .map(|order| primary_to_included_info_column_mapping[&order.column_index])
+                    .map(|order| {
+                        primary_to_included_info_column_mapping
+                            .get(&order.column_index)
+                            .copied()
+                    })
                     .collect();
                 IndexType::Vector(Arc::new(VectorIndex {
                     index_table: index_table.clone(),

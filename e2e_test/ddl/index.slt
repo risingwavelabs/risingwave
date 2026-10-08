@@ -223,3 +223,33 @@ drop materialized view mv_27125_b;
 
 statement ok
 drop table t_27125_b;
+
+# issue 27125 case B: a plain-column index whose INCLUDE list leaves out the order key of a TopN mv
+statement ok
+create table t_27125_c (id int, tag varchar, k int);
+
+statement ok
+insert into t_27125_c values (1, 'x', 10), (2, 'y', 20);
+
+statement ok
+create materialized view mv_27125_c as select * from t_27125_c order by tag limit 1000;
+
+# accepted with a notice that the index can not look up rows of the mv
+statement ok
+create index i_27125_c on mv_27125_c(k) include (id);
+
+query T
+select tag from mv_27125_c where k = 10;
+----
+x
+
+query I
+select id from mv_27125_c where k = 20;
+----
+2
+
+statement ok
+drop materialized view mv_27125_c;
+
+statement ok
+drop table t_27125_c;
