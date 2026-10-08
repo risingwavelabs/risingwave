@@ -29,6 +29,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 };
 use tokio::task::JoinHandle;
 
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::checkpoint::CheckpointControl;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::info::BarrierInfo;
@@ -64,6 +65,7 @@ pub(super) struct CompleteBarrierTask {
     pub(super) commit_info: CommitEpochInfo,
     pub(super) finished_jobs: Vec<TrackingJob>,
     pub(super) finished_cdc_table_backfill: Vec<JobId>,
+    pub(super) bounded_load_actions: Vec<BoundedLoadAction>,
     /// `partial_graph_id` -> barrier info for post-collect processing
     pub(super) epoch_infos: HashMap<PartialGraphId, PartialGraphBarrierInfo>,
     /// Source listing completion events that need `ListFinish` commands
@@ -201,6 +203,12 @@ impl CompleteBarrierTask {
                 self.finished_cdc_table_backfill
                     .into_iter()
                     .map(|job_id| context.finish_cdc_table_backfill(job_id)),
+            )
+            .await?;
+            try_join_all(
+                self.bounded_load_actions
+                    .into_iter()
+                    .map(|action| context.apply_bounded_load_action(action)),
             )
             .await?;
             version_stats

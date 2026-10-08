@@ -349,7 +349,7 @@ pub struct AddMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
     pub sink_log_store_flush: HashSet<SinkId>,
-    pub actor_bounded_starts: HashMap<ActorId, BoundedLoadAttempt>,
+    pub actor_bounded_attempts: HashMap<ActorId, BoundedLoadAttempt>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -936,9 +936,9 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits,
                 new_upstream_sinks,
                 sink_log_store_flush,
-                actor_bounded_starts,
+                actor_bounded_attempts,
             }) => PbMutation::Add(PbAddMutation {
-                actor_bounded_starts: actor_bounded_starts.clone(),
+                actor_bounded_attempts: actor_bounded_attempts.clone(),
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -1129,7 +1129,7 @@ impl Mutation {
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
-                actor_bounded_starts: add.actor_bounded_starts.clone(),
+                actor_bounded_attempts: add.actor_bounded_attempts.clone(),
                 adds: add
                     .actor_dispatchers
                     .iter()

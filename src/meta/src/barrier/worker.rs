@@ -294,6 +294,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     #[expect(clippy::too_many_arguments)]
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
+        barrier_scheduler: schedule::BarrierScheduler,
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
@@ -310,6 +311,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
         let context = Arc::new(GlobalBarrierWorkerContextImpl::new(
             scheduled_barriers,
+            barrier_scheduler,
             status,
             metadata_manager,
             hummock_manager,
@@ -1196,6 +1198,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 hummock_version_stats,
                 database_infos,
                 mut cdc_table_snapshot_splits,
+                mut bounded_jobs,
             } = runtime_info_snapshot;
 
             // Derive a conservative job set from the snapshot already loaded for recovery. It
@@ -1270,6 +1273,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             is_paused,
                             &hummock_version_stats,
                             &mut cdc_table_snapshot_splits,
+                            &mut bounded_jobs,
                             batch_refresh,
                             iceberg_v3,
                         )?

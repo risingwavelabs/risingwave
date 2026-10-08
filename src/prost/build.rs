@@ -803,7 +803,7 @@ for_all_wrapped_id_fields! (
             data: ActorId,
         }
         AddMutation {
-            actor_bounded_starts: ActorId,
+            actor_bounded_attempts: ActorId,
             new_upstream_sinks: FragmentId,
             backfill_nodes_to_pause: FragmentId,
             added_actors: ActorId,

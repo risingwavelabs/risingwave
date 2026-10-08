@@ -58,7 +58,7 @@ message AddMutation {
   // Sink ids whose log store must be drained before this add barrier can be collected.
   repeated uint32 sink_log_store_flush = 10;
   // Actors participating in a bounded load attempt.
-  map<uint32, BoundedLoadAttempt> actor_bounded_starts = 11;
+  map<uint32, BoundedLoadAttempt> actor_bounded_attempts = 11;
 }
 
 message StopMutation {

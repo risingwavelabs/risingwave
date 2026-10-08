@@ -243,7 +243,6 @@ impl LocalBarrierManager {
             report: BoundedLoadProgress {
                 actor_id,
                 fragment_id,
-                epoch: epoch.prev,
                 generation,
                 progress: Some(progress),
             },

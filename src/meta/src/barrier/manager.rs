@@ -187,6 +187,7 @@ impl GlobalBarrierManager {
     #[expect(clippy::too_many_arguments)]
     pub async fn start(
         scheduled_barriers: schedule::ScheduledBarriers,
+        barrier_scheduler: schedule::BarrierScheduler,
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
@@ -203,6 +204,7 @@ impl GlobalBarrierManager {
         let metadata_manager_clone = metadata_manager.clone();
         let barrier_worker = GlobalBarrierWorker::new(
             scheduled_barriers,
+            barrier_scheduler,
             env,
             metadata_manager,
             hummock_manager,

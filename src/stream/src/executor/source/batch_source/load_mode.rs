@@ -42,7 +42,7 @@ impl LoadMode {
         }
 
         let attempt = match first_barrier.mutation.as_deref() {
-            Some(Mutation::Add(add)) => add.actor_bounded_starts.get(&actor_id).copied(),
+            Some(Mutation::Add(add)) => add.actor_bounded_attempts.get(&actor_id).copied(),
             _ => None,
         };
         Self::Bounded { attempt }

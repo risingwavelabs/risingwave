@@ -12,10 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail;
 use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_common::id::JobId;
+use risingwave_meta_model::bounded_job;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
+use risingwave_pb::meta::list_bounded_jobs_response::BoundedJob as PbBoundedJob;
+use risingwave_pb::meta::list_bounded_jobs_response::bounded_job::{IcebergSnapshot, PinnedInput};
+use risingwave_pb::plan_common::iceberg_bounded_scan::Scan;
+use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
+use risingwave_pb::plan_common::source_refresh_mode::source_refresh_mode_bounded::Input;
 use sea_orm::prelude::DateTime;
 
 use super::*;
@@ -25,6 +32,58 @@ use crate::controller::utils::load_streaming_jobs_by_ids;
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.inner.read().await.list_time_travel_table_ids().await
+    }
+
+    pub async fn list_bounded_jobs(&self) -> MetaResult<Vec<PbBoundedJob>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let jobs = bounded_job::Entity::find().all(&txn).await?;
+
+        let sources: HashMap<_, _> = Source::find()
+            .filter(source::Column::SourceId.is_in(jobs.iter().map(|job| job.source_id)))
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|source| (source.source_id, source))
+            .collect();
+
+        jobs.into_iter()
+            .map(|job| {
+                let source = sources
+                    .get(&job.source_id)
+                    .ok_or_else(|| anyhow!("bounded source {} missing", job.source_id))?;
+
+                let mode = source.refresh_mode.as_ref().map(|mode| mode.to_protobuf());
+
+                let Some(RefreshMode::Bounded(bounded)) = mode.and_then(|mode| mode.refresh_mode)
+                else {
+                    bail!("bounded source {} has no bounded input", job.source_id);
+                };
+
+                let Some(Input::Iceberg(scan)) = bounded.input else {
+                    bail!("bounded source {} has no Iceberg scan", job.source_id);
+                };
+
+                let Some(Scan::Snapshot(snapshot)) = scan.scan else {
+                    bail!("bounded source {} has no snapshot", job.source_id);
+                };
+
+                Ok(PbBoundedJob {
+                    job_id: job.job_id,
+                    source_id: job.source_id,
+                    status: if job.completed_at.is_some() {
+                        "COMPLETED"
+                    } else {
+                        "LOADING"
+                    }
+                    .to_owned(),
+                    pinned_input: Some(PinnedInput::IcebergSnapshot(IcebergSnapshot {
+                        snapshot_id: snapshot.snapshot_id,
+                    })),
+                    completed_at: job.completed_at,
+                })
+            })
+            .collect()
     }
 
     pub async fn list_refresh_jobs(&self) -> MetaResult<Vec<refresh_job::Model>> {

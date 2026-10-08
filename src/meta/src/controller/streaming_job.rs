@@ -80,6 +80,7 @@ use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
 use crate::barrier::Command;
+use crate::barrier::bounded_progress::ensure_not_loading_bounded;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{
     CatalogController, DropTableConnectorContext, load_object_models,
@@ -697,6 +698,24 @@ impl CatalogController {
                 }
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
+
+                if let Some(source) = src.as_ref()
+                    && matches!(
+                        source
+                            .refresh_mode
+                            .as_ref()
+                            .and_then(|mode| mode.refresh_mode.as_ref()),
+                        Some(RefreshMode::Bounded(_))
+                    )
+                {
+                    BoundedJob::insert(bounded_job::ActiveModel {
+                        job_id: Set(job_id),
+                        source_id: Set(source.id),
+                        completed_at: Set(None),
+                    })
+                    .exec(&txn)
+                    .await?;
+                }
 
                 if table.refreshable {
                     let trigger_interval_secs = src
@@ -1561,6 +1580,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
+        ensure_not_loading_bounded(&txn, [id]).await?;
         // 1. check version.
         streaming_job.verify_version_for_replace(&txn).await?;
         // 2. check concurrent replace.

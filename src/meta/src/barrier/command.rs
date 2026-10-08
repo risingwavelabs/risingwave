@@ -38,15 +38,16 @@ use risingwave_pb::source::{
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::bounded_load_mutation::Action as PbBoundedLoadAction;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, ConnectorPropsChangeMutation, Dispatcher, DropSubscriptionsMutation,
-    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
-    PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    AddMutation, BoundedLoadAttempt, BoundedLoadMutation, ConnectorPropsChangeMutation, Dispatcher,
+    DropSubscriptionsMutation, ListFinishMutation, LoadFinishMutation, PauseMutation,
+    PbSinkAddColumnsOp, PbSinkDropColumnsOp, PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo,
+    ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -612,6 +613,11 @@ pub enum Command {
         task_id: risingwave_pb::id::IcebergCompactionTaskId,
         overwrite: IcebergPkIndexCompactionOverwrite,
     },
+
+    BoundedLoad {
+        attempt: BoundedLoadAttempt,
+        action: PbBoundedLoadAction,
+    },
 }
 
 #[derive(Clone, educe::Educe)]
@@ -690,6 +696,7 @@ impl std::fmt::Display for Command {
             Command::ListFinish {
                 table_id,
                 associated_source_id,
+                ..
             } => write!(
                 f,
                 "ListFinish: {} (source: {})",
@@ -731,6 +738,11 @@ impl std::fmt::Display for Command {
             } => write!(
                 f,
                 "ApplyIcebergPkIndexCompaction: sink={sink_id} task={task_id}"
+            ),
+            Command::BoundedLoad { attempt, action } => write!(
+                f,
+                "BoundedLoad: {} (generation: {}, action: {:?})",
+                attempt.job_id, attempt.generation, action
             ),
         }
     }
@@ -1070,6 +1082,7 @@ impl Command {
         is_currently_paused: bool,
         mut edges: FragmentEdgeBuildResult,
         actor_cdc_table_snapshot_splits: Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>,
+        actor_bounded_attempts: HashMap<ActorId, BoundedLoadAttempt>,
         split_assignment: &SplitAssignment,
         stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
     ) -> MetaResult<Mutation> {
@@ -1148,7 +1161,7 @@ impl Command {
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
 
                 let mut add_mutation = AddMutation {
-                    actor_bounded_starts: Default::default(),
+                    actor_bounded_attempts,
                     actor_dispatchers: Default::default(),
                     added_actors,
                     actor_splits,
@@ -1398,7 +1411,7 @@ impl Command {
     ) -> Mutation {
         {
             Mutation::Add(AddMutation {
-                actor_bounded_starts: Default::default(),
+                actor_bounded_attempts: Default::default(),
                 actor_dispatchers: Default::default(),
                 added_actors: vec![],
                 actor_splits: Default::default(),
@@ -1466,6 +1479,17 @@ impl Command {
     pub(super) fn list_finish_to_mutation(associated_source_id: SourceId) -> Mutation {
         Mutation::ListFinish(ListFinishMutation {
             associated_source_id,
+        })
+    }
+
+    /// Build the `BoundedLoad` mutation.
+    pub(super) fn bounded_load_to_mutation(
+        attempt: BoundedLoadAttempt,
+        action: PbBoundedLoadAction,
+    ) -> Mutation {
+        Mutation::BoundedLoad(BoundedLoadMutation {
+            attempt: Some(attempt),
+            action: Some(action),
         })
     }
 
