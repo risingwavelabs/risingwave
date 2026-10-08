@@ -44,7 +44,9 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
+use crate::hummock::refill_locality::{
+    RefillOwnership, block_vnode_range, vnode_range_overlaps_bitmap,
+};
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
     SstableStoreRef, TableHolder,
@@ -498,17 +500,29 @@ impl CacheRefiller {
         }
     }
 
+    pub(crate) fn refill_ownership(&self) -> RefillOwnership<'_> {
+        RefillOwnership {
+            streaming: self
+                .role
+                .for_streaming()
+                .then_some(&self.streaming_table_vnode_mapping),
+            serving: self
+                .role
+                .for_serving()
+                .then_some(&self.serving_table_vnode_mapping),
+        }
+    }
+
     fn table_cache_refill_contexts(
         &self,
         table_ids: impl IntoIterator<Item = TableId>,
     ) -> TableCacheRefillContextMap {
-        let for_streaming = self.role.for_streaming();
-        let for_serving = self.role.for_serving();
+        let ownership = self.refill_ownership();
         table_ids
             .into_iter()
             .filter_map(|table_id| {
-                if for_serving
-                    && !for_streaming
+                if ownership.serving.is_some()
+                    && ownership.streaming.is_none()
                     && !self.serving_table_vnode_mapping.contains_key(&table_id)
                 {
                     return None;
@@ -518,15 +532,18 @@ impl CacheRefiller {
                     .get(&table_id)
                     .copied()
                     .unwrap_or(self.default_policy);
-                let streaming_vnode_bitmap = (for_streaming && policy.is_streaming_scoped())
-                    .then(|| self.streaming_table_vnode_mapping.get(&table_id).cloned())
-                    .flatten();
+                let streaming_vnode_bitmap = ownership
+                    .streaming
+                    .filter(|_| policy.is_streaming_scoped())
+                    .and_then(|map| map.get(&table_id))
+                    .cloned();
                 // `Enabled` normally does not use bitmap filtering. The only exception is L0
                 // insert-only refill, where serving workers still need serving-locality evidence.
-                let serving_vnode_bitmap = (for_serving
-                    && (policy.is_serving_scoped() || policy.is_unscoped_enabled()))
-                .then(|| self.serving_table_vnode_mapping.get(&table_id).cloned())
-                .flatten();
+                let serving_vnode_bitmap = ownership
+                    .serving
+                    .filter(|_| policy.is_serving_scoped() || policy.is_unscoped_enabled())
+                    .and_then(|map| map.get(&table_id))
+                    .cloned();
                 Some((
                     table_id,
                     TableCacheRefillContext {
@@ -1403,6 +1420,41 @@ mod tests {
                 )
             });
             assert_eq!(actual, expected, "{}", case.name);
+            // Pin uses the same source, independently of Foyer policy, but scoped to worker role.
+            let expected_vnodes: Vec<_> = [1, 2, 3, 4]
+                .into_iter()
+                .filter(|vnode| {
+                    if vnode % 2 == 1 {
+                        case.role.for_streaming() && case.has_streaming_vnodes
+                    } else {
+                        case.role.for_serving() && case.has_serving_vnodes
+                    }
+                })
+                .collect();
+            let owned = refiller.refill_ownership().owned_vnodes(&table_id);
+            assert_eq!(
+                owned.is_some(),
+                !expected_vnodes.is_empty(),
+                "{}",
+                case.name
+            );
+            if let Some(owned) = owned {
+                assert_eq!(
+                    owned.as_ref(),
+                    &Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, expected_vnodes)
+                );
+            }
+
+            // Mapping presence alone must not admit a table with no owned vnodes.
+            let empty_vnodes = Bitmap::zeros(VirtualNode::COUNT_FOR_TEST);
+            refiller.update_streaming_table_vnodes(table_id, Some(empty_vnodes.clone()));
+            refiller.replace_serving_table_vnode_mapping([(table_id, empty_vnodes)].into());
+            assert!(
+                refiller
+                    .refill_ownership()
+                    .owned_vnodes(&table_id)
+                    .is_none()
+            );
         }
     }
 
@@ -1446,7 +1498,15 @@ mod tests {
             table_id,
             CacheRefillPolicy::Disabled,
         )]));
-        refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, new_vnodes)]));
+        refiller
+            .replace_serving_table_vnode_mapping(HashMap::from([(table_id, new_vnodes.clone())]));
+        assert_eq!(
+            refiller
+                .refill_ownership()
+                .owned_vnodes(&table_id)
+                .as_deref(),
+            Some(&new_vnodes)
+        );
 
         let captured_context = captured_context.lock();
         let context = captured_context

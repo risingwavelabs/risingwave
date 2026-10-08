@@ -21,7 +21,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use risingwave_common::bitmap::Bitmap;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -30,6 +29,7 @@ use risingwave_pb::id::TableId;
 
 use crate::hummock::SstableStoreRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::refill_locality::RefillOwnership;
 
 mod executor;
 use executor::{PinCacheRefillExecutor, Ticket};
@@ -113,7 +113,6 @@ pub(crate) struct PinCacheRefillController {
     pinned_table_ids: HashSet<TableId>,
     object_ref_counts: HashMap<HummockSstableObjectId, u32>,
     pub(crate) version: PinnedVersion,
-    ownership: Arc<HashMap<TableId, Bitmap>>,
     executor: PinCacheRefillExecutor,
 }
 
@@ -129,7 +128,6 @@ impl PinCacheRefillController {
             pinned_table_ids: HashSet::new(),
             object_ref_counts: HashMap::new(),
             version,
-            ownership: Arc::default(),
             executor,
         }
     }
@@ -140,6 +138,7 @@ impl PinCacheRefillController {
         &mut self,
         pinned_table_ids: HashSet<TableId>,
         resident_versions: &[PinnedVersion],
+        ownership: RefillOwnership<'_>,
     ) -> PinCacheObjectChanges {
         if self.pinned_table_ids == pinned_table_ids {
             return PinCacheObjectChanges::default();
@@ -159,8 +158,7 @@ impl PinCacheRefillController {
         if revoked_tables {
             // A shared object may remain registered through another table. RESET must still
             // permanently withdraw this table from work that was already submitted.
-            self.executor
-                .reproject(&self.ownership, &self.pinned_table_ids);
+            self.executor.reproject(ownership, &self.pinned_table_ids);
         }
         changes
     }
@@ -169,17 +167,16 @@ impl PinCacheRefillController {
     /// or validate recovered files through remote metadata reads. Recovery keeps local files
     /// selected by the pin policy and version; locality is checked when admitting a new refill.
     /// Published files are not rescanned on vnode changes and may stay until unpin/version removal.
-    pub(crate) fn update_ownership(&mut self, ownership: HashMap<TableId, Bitmap>) {
-        if self.ownership.as_ref() == &ownership {
-            return;
-        }
-        self.ownership = Arc::new(ownership);
-        self.executor
-            .reproject(&self.ownership, &self.pinned_table_ids);
+    pub(crate) fn update_ownership(&self, ownership: RefillOwnership<'_>) {
+        self.executor.reproject(ownership, &self.pinned_table_ids);
     }
 
-    pub(crate) fn submit(&self, plan: PinCacheRefillPlan) -> Ticket {
-        self.executor.submit(plan, &self.ownership)
+    pub(crate) fn submit(
+        &self,
+        plan: PinCacheRefillPlan,
+        ownership: RefillOwnership<'_>,
+    ) -> Ticket {
+        self.executor.submit(plan, ownership)
     }
 
     /// Called after version application (or immediate policy revocation), never at enqueue time.

@@ -43,7 +43,9 @@ use super::PinCacheRefillPlan;
 use crate::hummock::pin_cache::{
     PinCache, PinCacheDownloadError, PinCacheReadHandle, PinCacheRefillToken,
 };
-use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
+use crate::hummock::refill_locality::{
+    RefillOwnership, block_vnode_range, vnode_range_overlaps_bitmap,
+};
 use crate::hummock::{HummockError, HummockResult, Sstable, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
@@ -338,7 +340,7 @@ impl Work {
     fn reproject(
         &mut self,
         cache: &Arc<PinCache>,
-        ownership: &HashMap<TableId, Bitmap>,
+        ownership: RefillOwnership<'_>,
         pinned_tables: &HashSet<TableId>,
     ) -> bool {
         let object = self.cache_token.object_id();
@@ -350,28 +352,29 @@ impl Work {
         // must not shrink this set, and later SET cannot restore a revoked table.
         self.admitted_tables
             .retain(|table| pinned_tables.contains(table));
-        let projected = self
+        let projected: Vec<_> = self
             .admitted_tables
             .iter()
-            .filter_map(|table| ownership.get_key_value(table));
-        let count = projected.clone().count();
-        if count == 0 {
+            .filter_map(|table| ownership.owned_vnodes(table).map(|bitmap| (*table, bitmap)))
+            .collect();
+        if projected.is_empty() {
             cache.revoke_refill(object);
             if let Some(route) = cache.get(object) {
                 route.invalidate();
             }
             return false;
         }
-        if count == self.ownership.len()
+        if projected.len() == self.ownership.len()
             && projected
-                .clone()
-                .all(|(table, bitmap)| self.ownership.get(table) == Some(bitmap))
+                .iter()
+                .all(|(table, bitmap)| self.ownership.get(table) == Some(bitmap.as_ref()))
         {
             return true;
         }
         let ownership = Arc::new(
             projected
-                .map(|(&table, bitmap)| (table, bitmap.clone()))
+                .into_iter()
+                .map(|(table, bitmap)| (table, bitmap.into_owned()))
                 .collect(),
         );
         cache.revoke_refill(object);
@@ -499,7 +502,7 @@ impl PinCacheRefillExecutor {
     pub(super) fn submit(
         &self,
         plan: PinCacheRefillPlan,
-        ownership: &HashMap<TableId, Bitmap>,
+        ownership: RefillOwnership<'_>,
     ) -> Ticket {
         let mut completions = Vec::new();
         let Some(cache) = self.store.pin_cache() else {
@@ -511,23 +514,24 @@ impl PinCacheRefillExecutor {
             .objects
             .into_iter()
             .filter_map(|(object, projections)| {
-                let admitted_tables: HashSet<_> = projections
+                let mut admitted_tables: HashSet<_> = projections
                     .iter()
                     .flat_map(|info| info.table_ids.iter().copied())
-                    .filter(|table| {
-                        plan.admitted_tables.contains(table) && ownership.contains_key(table)
+                    .filter(|table| plan.admitted_tables.contains(table))
+                    .collect();
+                let ownership: HashMap<_, _> = admitted_tables
+                    .iter()
+                    .filter_map(|table| {
+                        ownership
+                            .owned_vnodes(table)
+                            .map(|bitmap| (*table, bitmap.into_owned()))
                     })
                     .collect();
-                if admitted_tables.is_empty() {
+                if ownership.is_empty() {
                     return None;
                 }
-                let ownership = Arc::new(
-                    ownership
-                        .iter()
-                        .filter(|(table, _)| admitted_tables.contains(*table))
-                        .map(|(&table, bitmap)| (table, bitmap.clone()))
-                        .collect::<HashMap<_, _>>(),
-                );
+                admitted_tables.retain(|table| ownership.contains_key(table));
+                let ownership = Arc::new(ownership);
                 Some((object, projections, admitted_tables, ownership))
             })
             .collect::<Vec<_>>();
@@ -593,7 +597,7 @@ impl PinCacheRefillExecutor {
 
     pub(super) fn reproject(
         &self,
-        ownership: &HashMap<TableId, Bitmap>,
+        ownership: RefillOwnership<'_>,
         pinned_tables: &HashSet<TableId>,
     ) {
         let Some(cache) = self.store.pin_cache() else {

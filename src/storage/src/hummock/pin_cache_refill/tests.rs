@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bytes::Bytes;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, prefix_slice_with_vnode};
@@ -132,7 +133,11 @@ async fn test_membership_tracks_physical_references_without_registering_future_o
     let empty = PinnedVersion::new(empty, mpsc::unbounded_channel().0);
     let mut controller =
         PinCacheRefillController::new(store, empty.clone(), Arc::new(Semaphore::new(1)));
-    let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&empty));
+    let changes = controller.replace_pinned_tables(
+        tables.into(),
+        std::slice::from_ref(&empty),
+        RefillOwnership::default(),
+    );
     assert!(changes.inserted.is_empty() && changes.removed.is_empty());
     let (candidates, changes) = controller.apply_version_update(
         &[SstDeltaInfo {
@@ -150,13 +155,25 @@ async fn test_membership_tracks_physical_references_without_registering_future_o
     );
     cache.register_objects(changes.inserted);
     // Policy diffs use the resident snapshot and leave physical application to the gate.
-    let changes = controller.replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&both));
+    let changes = controller.replace_pinned_tables(
+        [tables[1]].into(),
+        std::slice::from_ref(&both),
+        RefillOwnership::default(),
+    );
     assert!(changes.inserted.is_empty() && changes.removed.is_empty());
-    let changes = controller.replace_pinned_tables(HashSet::new(), std::slice::from_ref(&both));
+    let changes = controller.replace_pinned_tables(
+        HashSet::new(),
+        std::slice::from_ref(&both),
+        RefillOwnership::default(),
+    );
     assert_eq!(changes.removed, [1001.into()].into());
     assert!(cache.is_registered(1001.into()));
     controller.unregister_objects(changes.removed);
-    let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&both));
+    let changes = controller.replace_pinned_tables(
+        tables.into(),
+        std::slice::from_ref(&both),
+        RefillOwnership::default(),
+    );
     assert_eq!(changes.inserted, [(1001.into(), 8)].into());
     assert!(!cache.is_registered(1001.into()));
     cache.register_objects(changes.inserted);
@@ -240,11 +257,16 @@ async fn test_submission_intersects_projection_admission_and_current_ownership()
     // Keep A last so its exact last key excludes vnode 255, without a table-switch separator.
     let b = TableId::from(233);
     let a = TableId::from(234);
-    for (project_b, admit_b, current_vnode) in [
-        (false, true, Some(255)), // B is owned and admitted, but outside the logical projection.
-        (true, false, Some(255)), // B is owned and projected, but was not admitted by the plan.
-        (false, false, None),     // A lost all ownership before submission.
-        (false, false, Some(0)),  // A gained the matching vnode before submission.
+    for (project_b, admit_b, current_vnode, empty_bitmap) in [
+        // B is owned and admitted, but outside the logical projection.
+        (false, true, Some(255), false),
+        // B is owned and projected, but was not admitted by the plan.
+        (true, false, Some(255), false),
+        // A is unowned at submission, with an absent or empty bitmap.
+        (false, false, None, false),
+        (false, false, None, true),
+        // A owns the matching vnode at submission.
+        (false, false, Some(0), false),
     ] {
         let store = mock_sstable_store().await;
         let (_, info) = gen_test_sstable_with_table_ids(
@@ -284,19 +306,9 @@ async fn test_submission_intersects_projection_admission_and_current_ownership()
         );
         let mut controller =
             PinCacheRefillController::new(store, version.clone(), Arc::new(Semaphore::new(1)));
-        let changes = controller.replace_pinned_tables([a, b].into(), &[version]);
+        let changes =
+            controller.replace_pinned_tables([a, b].into(), &[version], RefillOwnership::default());
         cache.register_objects(changes.inserted);
-        let mut ownership = HashMap::from([
-            (b, Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-            (
-                a,
-                Bitmap::from_indices(
-                    VirtualNode::COUNT_FOR_TEST,
-                    [if current_vnode == Some(0) { 255 } else { 0 }],
-                ),
-            ),
-        ]);
-        controller.update_ownership(ownership.clone());
         let mut projection = info.get_inner();
         if !project_b {
             projection.table_ids = vec![a];
@@ -309,19 +321,23 @@ async fn test_submission_intersects_projection_admission_and_current_ownership()
             &[object].into(),
             if admit_b { [a, b].into() } else { [a].into() },
         );
+        let mut ownership = HashMap::from([(b, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))]);
         if let Some(vnode) = current_vnode {
             ownership.insert(
                 a,
                 Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode]),
             );
-        } else {
-            ownership.remove(&a);
+        } else if empty_bitmap {
+            ownership.insert(a, Bitmap::zeros(VirtualNode::COUNT_FOR_TEST));
         }
-        controller.update_ownership(ownership);
+        let ownership = RefillOwnership {
+            streaming: Some(&ownership),
+            serving: None,
+        };
         assert!(
             tokio::time::timeout(
                 std::time::Duration::from_secs(1),
-                controller.submit(plan).wait()
+                controller.submit(plan, ownership).wait()
             )
             .await
             .unwrap()

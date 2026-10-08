@@ -3275,9 +3275,9 @@ mod tests {
                     levels: vec![Level {
                         level_idx: 1,
                         level_type: LevelType::Nonoverlapping,
-                        table_infos: vec![],
-                        total_file_size: 0,
-                        uncompressed_file_size: 0,
+                        table_infos: vec![make_sst(4, vec![4], 400)],
+                        total_file_size: 400,
+                        uncompressed_file_size: 800,
                         ..Default::default()
                     }],
                     group_id: 1.into(),
@@ -3307,8 +3307,8 @@ mod tests {
                         GroupDelta::IntraLevel(IntraLevelDelta::new(
                             1, // L1
                             0,
-                            HashSet::new(),
-                            vec![make_sst(10, vec![1, 2, 3], 500)],
+                            HashSet::from([4.into()]),
+                            vec![make_sst(10, vec![1, 2, 3, 4], 500)],
                             0,
                             0,
                         )),
@@ -3317,6 +3317,18 @@ mod tests {
             )]),
             ..Default::default()
         };
+
+        let infos = version.build_sst_delta_infos(&version_delta);
+        assert_eq!(infos.len(), 1);
+        assert_eq!(
+            infos[0].delete_sst_infos,
+            vec![
+                make_sst(1, vec![1], 100),
+                make_sst(2, vec![2], 200),
+                make_sst(3, vec![3], 300),
+                make_sst(4, vec![4], 400),
+            ]
+        );
 
         version.apply_version_delta(&version_delta);
 
@@ -3329,45 +3341,5 @@ mod tests {
         assert_eq!(cg.levels[0].table_infos.len(), 1);
         assert_eq!(10, cg.levels[0].table_infos[0].sst_id);
         assert_eq!(cg.levels[0].total_file_size, 500);
-    }
-
-    #[test]
-    fn test_sst_delta_info_preserves_removed_sst() {
-        let removed = make_sst(1, vec![100], 100);
-        let version = HummockVersion {
-            levels: HashMap::from([(
-                1.into(),
-                Levels {
-                    group_id: 1.into(),
-                    levels: vec![Level {
-                        level_idx: 1,
-                        table_infos: vec![removed.clone()],
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                },
-            )]),
-            ..Default::default()
-        };
-        let delta = HummockVersionDelta {
-            group_deltas: HashMap::from([(
-                1.into(),
-                GroupDeltas {
-                    group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
-                        1,
-                        0,
-                        HashSet::from([removed.sst_id]),
-                        vec![make_sst(2, vec![100], 100)],
-                        0,
-                        0,
-                    ))],
-                },
-            )]),
-            ..Default::default()
-        };
-
-        let infos = version.build_sst_delta_infos(&delta);
-        assert_eq!(infos.len(), 1);
-        assert_eq!(infos[0].delete_sst_infos, vec![removed]);
     }
 }

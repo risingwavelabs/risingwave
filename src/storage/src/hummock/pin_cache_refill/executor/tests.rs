@@ -75,15 +75,24 @@ async fn test_policy_reset_cannot_revive_shared_object_admission_but_vnode_chang
                 Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [255]),
             ),
         ]);
-        let changes =
-            controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&version));
+        let ownership_view = RefillOwnership {
+            streaming: Some(&ownership),
+            serving: None,
+        };
+        let changes = controller.replace_pinned_tables(
+            tables.into(),
+            std::slice::from_ref(&version),
+            ownership_view,
+        );
         cache.register_objects(changes.inserted);
         controller.unregister_objects(changes.removed);
-        controller.update_ownership(ownership.clone());
-        let ticket = controller.submit(PinCacheRefillPlan {
-            objects: [(object, vec![info])].into(),
-            admitted_tables: ownership.keys().copied().collect(),
-        });
+        let ticket = controller.submit(
+            PinCacheRefillPlan {
+                objects: [(object, vec![info])].into(),
+                admitted_tables: ownership.keys().copied().collect(),
+            },
+            ownership_view,
+        );
         tokio::time::timeout(Duration::from_secs(1), async {
             while !matches!(
                 controller.executor.state.lock().objects[&object].status,
@@ -97,24 +106,38 @@ async fn test_policy_reset_cannot_revive_shared_object_admission_but_vnode_chang
 
         // B keeps the physical object and its work alive, but none of O's B blocks are local.
         let without_a = HashMap::from([(tables[1], ownership[&tables[1]].clone())]);
+        let without_a_view = RefillOwnership {
+            streaming: Some(&without_a),
+            serving: None,
+        };
         if migrate_first {
             // RESET must also take effect when ownership is unchanged by the policy update.
-            controller.update_ownership(without_a.clone());
+            controller.update_ownership(without_a_view);
         }
         if reset_policy {
-            let changes = controller
-                .replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&version));
+            let changes = controller.replace_pinned_tables(
+                [tables[1]].into(),
+                std::slice::from_ref(&version),
+                if migrate_first {
+                    without_a_view
+                } else {
+                    ownership_view
+                },
+            );
             cache.register_objects(changes.inserted);
             controller.unregister_objects(changes.removed);
         }
-        controller.update_ownership(without_a);
+        controller.update_ownership(without_a_view);
         if reset_policy {
-            let changes =
-                controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&version));
+            let changes = controller.replace_pinned_tables(
+                tables.into(),
+                std::slice::from_ref(&version),
+                without_a_view,
+            );
             cache.register_objects(changes.inserted);
             controller.unregister_objects(changes.removed);
         }
-        controller.update_ownership(ownership);
+        controller.update_ownership(ownership_view);
         assert!(cache.is_registered(object));
         assert!(
             !tokio::time::timeout(Duration::from_secs(1), ticket.wait())
@@ -138,113 +161,104 @@ async fn test_policy_reset_cannot_revive_shared_object_admission_but_vnode_chang
 }
 
 #[tokio::test]
-async fn test_cached_object_skips_download_but_still_checks_ownership() {
-    let store = mock_sstable_store().await;
-    let (_, info) = gen_test_sstable(
-        default_builder_opt_for_test(),
-        873,
-        std::iter::once((
-            FullKey::new(
-                TableId::default(),
-                TableKey(iterator_test_table_key_of(0)),
-                test_epoch(1),
-            ),
-            HummockValue::put(vec![1]),
-        )),
-        store.clone(),
-    )
-    .await;
-    let object = info.object_id;
-    // Exactly one file fits: a second download would return CapacityRejected.
-    let cache = PinCache::new(
-        mock_sstable_store().await.store(),
-        info.file_size,
-        1,
-        2,
-        [(object, info.file_size)],
-    )
-    .await
-    .unwrap();
-    let store = Arc::new(
-        Arc::into_inner(store)
-            .unwrap()
-            .with_pin_cache(cache.clone()),
-    );
-    let token = cache.prepare_refill(object).unwrap();
-    let ownership = [(
-        TableId::default(),
-        Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
-    )]
-    .into();
-    let projections = [info];
-    assert!(matches!(
-        refill_pin_cache_object(&store, &projections, &ownership, token).await,
-        Ok(Published)
-    ));
-    assert!(matches!(
-        refill_pin_cache_object(&store, &projections, &ownership, token).await,
-        Ok(AlreadyPublished)
-    ));
-    assert!(matches!(
-        refill_pin_cache_object(&store, &projections, &HashMap::new(), token).await,
-        Ok(NotOwned(Some(_)))
-    ));
-}
-
-#[tokio::test]
-async fn test_capacity_rejection_finishes_without_retry_debt() {
-    let store = mock_sstable_store().await;
-    let (_, info) = gen_test_sstable(
-        default_builder_opt_for_test(),
-        874,
-        std::iter::once((
-            FullKey::new(
-                TableId::default(),
-                TableKey(iterator_test_table_key_of(0)),
-                test_epoch(1),
-            ),
-            HummockValue::put(vec![1]),
-        )),
-        store.clone(),
-    )
-    .await;
-    let object = info.object_id;
-    let cache = PinCache::new(
-        mock_sstable_store().await.store(),
-        info.file_size - 1,
-        1,
-        2,
-        [(object, info.file_size)],
-    )
-    .await
-    .unwrap();
-    let store = Arc::new(
-        Arc::into_inner(store)
-            .unwrap()
-            .with_pin_cache(cache.clone()),
-    );
-    let executor = PinCacheRefillExecutor::new(store, Arc::new(Semaphore::new(1)));
-    let ticket = executor.submit(
-        PinCacheRefillPlan {
-            objects: [(object, vec![info])].into(),
-            admitted_tables: [TableId::default()].into(),
-        },
-        &[(
-            TableId::default(),
-            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
-        )]
-        .into(),
-    );
-    assert!(
-        !tokio::time::timeout(Duration::from_secs(1), ticket.wait())
+async fn test_pin_refill_projection_admission_and_capacity() {
+    for fits in [true, false] {
+        let table = TableId::from(233);
+        let store = mock_sstable_store().await;
+        let mut options = default_builder_opt_for_test();
+        options.block_capacity = 1;
+        let (sst, info) = gen_test_sstable_with_table_ids(
+            options,
+            873,
+            [0, 128].into_iter().map(|vnode| {
+                (
+                    FullKey {
+                        user_key: UserKey::for_test(
+                            table,
+                            prefix_slice_with_vnode(VirtualNode::from_index(vnode), b"key"),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(Bytes::from_static(b"value")),
+                )
+            }),
+            store.clone(),
+            vec![table.as_raw_id()],
+        )
+        .await;
+        for (vnode, expected) in [(0, true), (128, true), (255, false)] {
+            let ownership = HashMap::from([(
+                table,
+                Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode]),
+            )]);
+            assert_eq!(owns_object(&sst, &ownership), expected);
+        }
+        assert!(!owns_object(&sst, &HashMap::new()));
+        let object = info.object_id;
+        // An exact fit also ensures a cached object cannot download a second copy.
+        let cache = PinCache::new(
+            mock_sstable_store().await.store(),
+            info.file_size - u64::from(!fits),
+            1,
+            2,
+            [(object, info.file_size)],
+        )
+        .await
+        .unwrap();
+        let store = Arc::new(
+            Arc::into_inner(store)
+                .unwrap()
+                .with_pin_cache(cache.clone()),
+        );
+        let plan = PinCacheRefillPlan::new(
+            &[SstDeltaInfo {
+                insert_sst_infos: vec![info.clone(), info],
+                ..Default::default()
+            }],
+            &[object].into(),
+            [table].into(),
+        );
+        assert_eq!(plan.objects.len(), 1, "physical downloads are deduplicated");
+        let ownership = [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into();
+        let ownership_view = RefillOwnership {
+            streaming: Some(&ownership),
+            serving: None,
+        };
+        if fits {
+            let token = cache.prepare_refill(object).unwrap();
+            assert!(matches!(
+                refill_pin_cache_object(&store, &plan.objects[&object], &ownership, token).await,
+                Ok(Published)
+            ));
+        }
+        let executor = PinCacheRefillExecutor::new(store.clone(), Arc::new(Semaphore::new(1)));
+        assert_eq!(
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                executor.submit(plan.clone(), ownership_view).wait()
+            )
             .await
-            .unwrap()
-    );
-    assert!(cache.get(object).is_none());
-    assert!(cache.is_registered(object));
-    let state = executor.state.lock();
-    assert!(state.objects.is_empty() && state.schedule.is_empty());
-    assert_eq!(state.backlog, [[0; 2]; 3]);
+            .unwrap(),
+            fits
+        );
+        assert_eq!(cache.get(object).is_some(), fits);
+        assert!(cache.is_registered(object));
+        if fits {
+            let token = cache.prepare_refill(object).unwrap();
+            assert!(matches!(
+                refill_pin_cache_object(&store, &plan.objects[&object], &ownership, token).await,
+                Ok(AlreadyPublished)
+            ));
+            assert!(matches!(
+                refill_pin_cache_object(&store, &plan.objects[&object], &HashMap::new(), token)
+                    .await,
+                Ok(NotOwned(Some(_)))
+            ));
+        }
+        let state = executor.state.lock();
+        assert!(state.objects.is_empty() && state.schedule.is_empty());
+        assert_eq!(state.backlog, [[0; 2]; 3]);
+    }
 }
 
 #[tokio::test]
@@ -280,6 +294,10 @@ async fn test_failed_admission_is_sticky_for_identical_tickets_and_reset_clears_
         admitted_tables: [table].into(),
     };
     let ownership = [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into();
+    let ownership_view = RefillOwnership {
+        streaming: Some(&ownership),
+        serving: None,
+    };
     // Revoked attempts must skip the missing metadata; live attempts must still report it.
     let revoked = cache.prepare_refill(object).unwrap();
     cache.revoke_refill(object);
@@ -287,7 +305,7 @@ async fn test_failed_admission_is_sticky_for_identical_tickets_and_reset_clears_
         refill_pin_cache_object(&store, &plan.objects[&object], &ownership, revoked).await,
         Ok(Obsolete)
     ));
-    let first = executor.submit(plan.clone(), &ownership);
+    let first = executor.submit(plan.clone(), ownership_view);
     let completion = first.completions[0].clone();
     assert!(
         !tokio::time::timeout(Duration::from_secs(1), first.wait())
@@ -302,7 +320,7 @@ async fn test_failed_admission_is_sticky_for_identical_tickets_and_reset_clears_
     })
     .await
     .unwrap();
-    let next = executor.submit(plan, &ownership);
+    let next = executor.submit(plan, ownership_view);
     assert!(completion.ptr_eq(&next.completions[0]));
     assert!(
         !next.wait().await,
@@ -357,7 +375,11 @@ async fn test_revoked_work_is_not_reused_after_membership_replacement() {
             Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
         )]
         .into();
-        let ticket = executor.submit(plan.clone(), &ownership);
+        let ownership_view = RefillOwnership {
+            streaming: Some(&ownership),
+            serving: None,
+        };
+        let ticket = executor.submit(plan.clone(), ownership_view);
         tokio::time::timeout(Duration::from_secs(1), async {
             while !matches!(
                 executor.state.lock().objects[&object].status,
@@ -372,7 +394,7 @@ async fn test_revoked_work_is_not_reused_after_membership_replacement() {
         cache.unregister_objects([object]);
         cache.register_objects([(object, size)]);
         if resubmit {
-            let replacement = executor.submit(plan.clone(), &ownership);
+            let replacement = executor.submit(plan.clone(), ownership_view);
             assert!(!ticket.completions[0].ptr_eq(&replacement.completions[0]));
             // Leave a second executor slot available: the running-object check, not the
             // global concurrency limit, must keep the replacement queued.
@@ -387,7 +409,7 @@ async fn test_revoked_work_is_not_reused_after_membership_replacement() {
                 executor.state.lock().objects[&object].status,
                 Status::Queued(_)
             ));
-            executor.reproject(&ownership, &plan.admitted_tables);
+            executor.reproject(ownership_view, &plan.admitted_tables);
             assert!(
                 executor.state.lock().schedule.is_empty(),
                 "unchanged ownership must not requeue work waiting for an older transfer"
@@ -402,12 +424,12 @@ async fn test_revoked_work_is_not_reused_after_membership_replacement() {
         } else {
             // Reprojection may drop old work, but must not revoke the new admission.
             let token = cache.prepare_refill(object).unwrap();
-            executor.reproject(&ownership, &plan.admitted_tables);
+            executor.reproject(ownership_view, &plan.admitted_tables);
             assert!(executor.state.lock().objects.is_empty());
             assert_eq!(cache.prepare_refill(object), Some(token));
             drop(permit);
             assert!(!ticket.wait().await);
-            let replacement = executor.submit(plan, &ownership);
+            let replacement = executor.submit(plan, ownership_view);
             assert!(
                 tokio::time::timeout(Duration::from_secs(1), replacement.wait())
                     .await
@@ -463,10 +485,14 @@ fn test_driver_shutdown_finishes_pending_and_future_tickets() {
             Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
         )]
         .into();
+        let ownership_view = RefillOwnership {
+            streaming: Some(&ownership),
+            serving: None,
+        };
         let (executor, ticket) = {
             let _entered = runtime.enter();
             let executor = PinCacheRefillExecutor::new(store, Arc::new(Semaphore::new(0)));
-            let ticket = executor.submit(plan.clone(), &ownership);
+            let ticket = executor.submit(plan.clone(), ownership_view);
             (executor, ticket)
         };
         if poll_driver {
@@ -505,7 +531,7 @@ fn test_driver_shutdown_finishes_pending_and_future_tickets() {
         );
         assert!(
             !executor
-                .submit(plan, &ownership)
+                .submit(plan, ownership_view)
                 .wait()
                 .now_or_never()
                 .expect("a stopped driver cannot accept work")
@@ -554,12 +580,16 @@ async fn test_pin_executor_uses_bounded_parallelism_and_targeted_removal() {
         Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
     )]
     .into();
+    let ownership_view = RefillOwnership {
+        streaming: Some(&ownership),
+        serving: None,
+    };
     let all = executor.submit(
         PinCacheRefillPlan {
             objects: objects.clone(),
             admitted_tables: ownership.keys().copied().collect(),
         },
-        &ownership,
+        ownership_view,
     );
     let mut tickets: HashMap<_, _> = objects
         .into_iter()
@@ -571,7 +601,7 @@ async fn test_pin_executor_uses_bounded_parallelism_and_targeted_removal() {
                         objects: [(object, infos)].into(),
                         admitted_tables: ownership.keys().copied().collect(),
                     },
-                    &ownership,
+                    ownership_view,
                 ),
             )
         })
@@ -686,51 +716,4 @@ async fn test_pin_executor_uses_bounded_parallelism_and_targeted_removal() {
         executor.state.lock().objects.is_empty(),
         "completed work must not become another live-set"
     );
-}
-
-#[tokio::test]
-async fn test_pin_projection_uses_owned_blocks_and_deduplicates_whole_object() {
-    let table = TableId::from(233);
-    let store = mock_sstable_store().await;
-    let mut options = default_builder_opt_for_test();
-    options.block_capacity = 1;
-    let (sst, info) = gen_test_sstable_with_table_ids(
-        options,
-        701,
-        [0, 128].into_iter().map(|vnode| {
-            (
-                FullKey {
-                    user_key: UserKey::for_test(
-                        table,
-                        prefix_slice_with_vnode(VirtualNode::from_index(vnode), b"key"),
-                    ),
-                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
-                },
-                HummockValue::put(Bytes::from_static(b"value")),
-            )
-        }),
-        store,
-        vec![table.as_raw_id()],
-    )
-    .await;
-    let projections = vec![info.clone(), info.clone()];
-    for (vnode, expected) in [(0, true), (128, true), (255, false)] {
-        let ownership = HashMap::from([(
-            table,
-            Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode]),
-        )]);
-        assert_eq!(owns_object(&sst, &ownership), expected);
-    }
-    assert!(!owns_object(&sst, &HashMap::new()));
-
-    // Physical-object accounting is independent of the vnode selected above.
-    let plan = PinCacheRefillPlan::new(
-        &[SstDeltaInfo {
-            insert_sst_infos: projections,
-            ..Default::default()
-        }],
-        &[info.object_id].into(),
-        [table].into(),
-    );
-    assert_eq!(plan.objects.len(), 1, "physical downloads are deduplicated");
 }
