@@ -5,12 +5,14 @@ on:
     types: [opened]
 
 permissions:
+  contents: write
   issues: write
   pull-requests: write
 
 jobs:
   label-community-contributor:
-    # Only label unaffiliated users and contributors, not owners, members, or collaborators.
+    # The public event payload can hide private organization membership, so the step below also
+    # checks whether the author is a repository collaborator with the authenticated workflow token.
     if: >-
       github.event.pull_request.user.type == 'User' &&
       contains(
@@ -23,6 +25,20 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
+            const author = context.payload.pull_request.user.login;
+            try {
+              await github.rest.repos.checkCollaborator({
+                ...context.repo,
+                username: author,
+              });
+              core.info(`Skipping ${author}, who is a repository collaborator.`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
             const label = {
               name: "community",
               color: "0e8a16",

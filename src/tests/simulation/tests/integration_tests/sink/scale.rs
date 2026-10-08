@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use rand::{Rng, rng as thread_rng};
+use rand::{RngExt as _, rng as thread_rng};
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, KillOpts};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;

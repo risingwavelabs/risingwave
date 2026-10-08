@@ -93,9 +93,12 @@ impl OpendalObjectStore {
         let http_client = Self::new_http_client(&config)?;
         let transport = HttpTransporter::new(ReqwestTransport::new(http_client));
 
-        let op = Operator::new(builder)?
-            .with_context(OperationContext::new().with_http_transport(transport))
-            .layer(LoggingLayer::default());
+        let op = new_operator(
+            &config,
+            Operator::new(builder)?
+                .with_context(OperationContext::new().with_http_transport(transport))
+                .layer(LoggingLayer::default()),
+        );
 
         Ok(Self {
             op,

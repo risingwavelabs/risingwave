@@ -15,7 +15,7 @@ create function int_42() returns int as int_42 using link '555.0.0.1:8815';
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: failed to parse address: http://555.0.0.1:8815
+  1: failed to parse UDF link: 555.0.0.1:8815
   2: invalid IPv4 address
 
 

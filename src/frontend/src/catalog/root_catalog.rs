@@ -700,6 +700,20 @@ impl Catalog {
             .ok_or_else(|| CatalogError::not_found("source", source_id.to_string()))
     }
 
+    /// Finds a source by ID across all schemas in the given database.
+    pub fn get_source_by_id_with_db(
+        &self,
+        db_name: &str,
+        source_id: SourceId,
+    ) -> CatalogResult<&Arc<SourceCatalog>> {
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(source) = schema.get_source_by_id(source_id) {
+                return Ok(source);
+            }
+        }
+        Err(CatalogError::not_found("source", source_id.to_string()))
+    }
+
     pub fn get_table_by_name<'a>(
         &self,
         db_name: &str,

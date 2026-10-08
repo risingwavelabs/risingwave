@@ -26,6 +26,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
 use risingwave_common::row::RowExt;
+use risingwave_common::util::retry::exponential_backoff;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
@@ -46,7 +47,7 @@ use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
-use tokio_retry::strategy::{ExponentialBackoff, jitter};
+use tokio_retry::strategy::jitter;
 
 use crate::common::change_buffer::{OutputKind, output_kind};
 use crate::common::compact_chunk::{
@@ -71,10 +72,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
 const SINK_RETRY_BACKOFF_RESET_INTERVAL: Duration = Duration::from_secs(60);
 
 fn sink_retry_backoff() -> impl Iterator<Item = Duration> {
-    ExponentialBackoff::from_millis(2)
-        .factor(500)
-        .max_delay(Duration::from_secs(30))
-        .map(jitter)
+    exponential_backoff(Duration::from_secs(1), 2, Duration::from_secs(30)).map(jitter)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.

@@ -120,6 +120,7 @@ impl StreamNode for StreamLocalityProvider {
             progress_table: Some(progress_table.to_prost()),
             // Ephemeral sorted log table for the post-backfill sort buffer
             sort_buffer_table,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
         };
 
         PbNodeBody::LocalityProvider(Box::new(locality_provider_node))

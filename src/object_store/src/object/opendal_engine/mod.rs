@@ -15,7 +15,7 @@
 pub mod opendal_object_store;
 
 use opendal::Operator;
-use opendal::layers::{ConcurrentLimitLayer, LoggingLayer};
+use opendal::layers::ConcurrentLimitLayer;
 pub use opendal_object_store::*;
 use risingwave_common::config::ObjectStoreConfig;
 
@@ -53,6 +53,6 @@ fn new_operator(config: &ObjectStoreConfig, op: Operator) -> Operator {
         }
         op.layer(concurrent_limit_layer)
     } else {
-        op.layer(LoggingLayer::default())
+        op
     }
 }

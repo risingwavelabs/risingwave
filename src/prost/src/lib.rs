@@ -677,6 +677,16 @@ impl catalog::Table {
     }
 }
 
+impl catalog::table::TableType {
+    /// Whether this table type is backed by the normal state store iterator.
+    pub fn supports_cache_warm_up(self) -> bool {
+        matches!(
+            self,
+            Self::Table | Self::MaterializedView | Self::Index | Self::Internal
+        )
+    }
+}
+
 impl std::fmt::Debug for meta::SystemParams {
     /// Directly formatting `SystemParams` can be inaccurate or leak sensitive information.
     ///
@@ -844,6 +854,7 @@ impl streaming_job_resource_type::ResourceType {
 
 #[cfg(test)]
 mod tests {
+    use crate::catalog::table::TableType;
     use crate::data::{DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
@@ -894,6 +905,16 @@ mod tests {
         // box all fields in NodeBody to avoid large_enum_variant
         // see https://github.com/risingwavelabs/risingwave/issues/19910
         const_assert_eq!(std::mem::size_of::<NodeBody>(), 16);
+    }
+
+    #[test]
+    fn test_table_type_supports_cache_warm_up() {
+        assert!(TableType::Table.supports_cache_warm_up());
+        assert!(TableType::MaterializedView.supports_cache_warm_up());
+        assert!(TableType::Index.supports_cache_warm_up());
+        assert!(TableType::Internal.supports_cache_warm_up());
+        assert!(!TableType::VectorIndex.supports_cache_warm_up());
+        assert!(!TableType::Unspecified.supports_cache_warm_up());
     }
 
     #[test]

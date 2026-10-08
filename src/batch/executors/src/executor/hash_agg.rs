@@ -20,11 +20,13 @@ use bytes::Bytes;
 use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::bitmap::{Bitmap, FilterByBitmap};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -491,6 +493,9 @@ impl AggSpillManager {
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        // Keep this partition's charges separate from the shared parent. Its private context
+        // releases remaining state charges on completion, errors, or cancellation.
+        let mem_context = MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0));
         let child_schema = self.child.schema().clone();
         let mut need_to_spill = false;
         // If the memory upper bound is less than 1MB, we don't need to check memory usage.
@@ -499,10 +504,12 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             None => true,
         };
 
+        // Track only this executor's manual charges; spill partitions share the parent counter.
+        let mut states_heap_size = 0;
         // hash map for each agg groups
         let mut groups = AggHashMap::<K, _>::with_hasher_in(
             PrecomputedBuildHasher,
-            self.mem_context.global_allocator(),
+            mem_context.global_allocator(),
         );
 
         if let Some(init_agg_state_executor) = self.init_agg_state_executor {
@@ -531,7 +538,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     groups.try_insert(key, agg_states).unwrap();
                 }
 
-                if !self.mem_context.add(memory_usage_diff) && check_memory {
+                // Restored states are retained even when loading the partition exceeds the limit.
+                states_heap_size += memory_usage_diff;
+                mem_context.add_unchecked(memory_usage_diff);
+                if check_memory && !mem_context.check_memory_usage() {
                     warn!(
                         "not enough memory to load one partition agg state after spill which is not a normal case, so keep going"
                     );
@@ -574,8 +584,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     memory_usage_diff += state.estimated_size() as i64;
                 }
             }
-            // update memory usage
-            if !self.mem_context.add(memory_usage_diff) && check_memory {
+            // States have already been updated and must remain charged until they are released.
+            states_heap_size += memory_usage_diff;
+            mem_context.add_unchecked(memory_usage_diff);
+            if check_memory && !mem_context.check_memory_usage() {
                 if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
@@ -627,7 +639,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             }
 
             // Release memory occupied by agg hash map.
-            self.mem_context.add(memory_usage_diff);
+            debug_assert_eq!(memory_usage_diff, -states_heap_size);
+            mem_context.add_unchecked(memory_usage_diff);
 
             // Spill input chunks.
             #[for_await]
@@ -846,8 +859,8 @@ mod tests {
             ));
             diff_executor_output(actual_exec, expect_exec).await;
 
-            // check estimated memory usage = 4 groups x state size
-            assert_eq!(mem_context.get_bytes_used() as usize, 4 * 24);
+            // Finishing a partition promptly clears its memory usage accounting.
+            assert_eq!(mem_context.get_bytes_used(), 0);
         }
 
         // Ensure that agg memory counter has been dropped.

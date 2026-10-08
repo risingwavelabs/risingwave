@@ -32,6 +32,7 @@ use risingwave_storage::StateStore;
 use risingwave_storage::store::TryWaitEpochOptions;
 use tokio::sync::oneshot;
 
+use crate::common::rate_limit::rate_limited_pieces;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
@@ -401,40 +402,11 @@ async fn apply_dml_rate_limit(
             TxnMsg::Rollback(txn_id) => {
                 yield TxnMsg::Rollback(txn_id);
             }
-            TxnMsg::Data(txn_id, chunk) => {
-                let chunk_size = chunk.capacity();
-                if chunk_size == 0 {
-                    // empty chunk
+            TxnMsg::Data(txn_id, chunk) =>
+            {
+                #[for_await]
+                for chunk in rate_limited_pieces(&rate_limiter, chunk) {
                     yield TxnMsg::Data(txn_id, chunk);
-                    continue;
-                }
-                let rate_limit = loop {
-                    match rate_limiter.rate_limit() {
-                        RateLimit::Pause => rate_limiter.wait(0).await,
-                        limit => break limit,
-                    }
-                };
-
-                match rate_limit {
-                    RateLimit::Pause => unreachable!(),
-                    RateLimit::Disabled => {
-                        yield TxnMsg::Data(txn_id, chunk);
-                        continue;
-                    }
-                    RateLimit::Fixed(limit) => {
-                        let max_permits = limit.get();
-                        let required_permits = chunk.rate_limit_permits();
-                        if required_permits <= max_permits {
-                            rate_limiter.wait(required_permits).await;
-                            yield TxnMsg::Data(txn_id, chunk);
-                        } else {
-                            // Split the chunk into smaller chunks.
-                            for small_chunk in chunk.split(max_permits as _) {
-                                rate_limiter.wait_chunk(&small_chunk).await;
-                                yield TxnMsg::Data(txn_id, small_chunk);
-                            }
-                        }
-                    }
                 }
             }
         }
