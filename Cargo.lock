@@ -14603,6 +14603,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-smithy-types-convert",
  "aws-types",
+ "axum",
  "base64 0.23.1",
  "byteorder",
  "bytes",
