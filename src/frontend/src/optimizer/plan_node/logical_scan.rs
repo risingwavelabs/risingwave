@@ -591,7 +591,17 @@ impl ToBatch for LogicalScan {
                 .config()
                 .enable_index_selection()
         {
-            let index_selection_rule = IndexSelectionRule::create();
+            // Pass `required_order` down so that the cost comparison itself knows which covering
+            // indexes save a sort. Without this the cost-only winner below returns unconditionally
+            // and `use_index_scan_if_order_is_satisfied` is never reached.
+            let index_selection_rule = IndexSelectionRule::create_with_order(
+                required_order.clone(),
+                self.base
+                    .ctx()
+                    .session_ctx()
+                    .config()
+                    .index_order_satisfied_reward(),
+            );
             if let ApplyResult::Ok(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
@@ -609,6 +619,17 @@ impl ToBatch for LogicalScan {
             // Try to make use of index if it satisfies the required order.
             // Also reach here when a cost-selected non-covering index candidate cannot be
             // converted to a physical lookup join.
+            //
+            // Note this is a second, *unbounded* version of the preference the rule above bounds
+            // by `index_order_satisfied_reward`: it takes the first order-satisfying covering
+            // index with no cost check at all. It predates order-aware index selection and is
+            // deliberately left alone here, because the rule declines for reasons that have
+            // nothing to do with order -- a primary-key lookup being cheapest, or a chosen
+            // non-covering candidate failing to become a lookup join -- and folding the two
+            // decisions together would change plans on those paths. Worth unifying, separately.
+            //
+            // In particular `index_order_satisfied_reward = 1` turns the preference off in the
+            // rule above but not here, so it is not a switch for "never prefer an ordered index".
             if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order) {
                 return plan_ref;
             }
