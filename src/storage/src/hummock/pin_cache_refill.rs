@@ -25,7 +25,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersionDelta};
 use risingwave_pb::id::TableId;
 
 use crate::hummock::SstableStoreRef;
@@ -78,12 +78,6 @@ impl PinCacheRefillPlan {
             })
         });
     }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum PinCacheMembershipUpdate {
-    Delta,
-    Rebuild,
 }
 
 /// Physical membership changes for the version gate to apply at the appropriate boundary.
@@ -203,21 +197,48 @@ impl PinCacheRefillController {
         self.executor.remove_objects(&objects);
     }
 
+    /// `None` denotes a full version snapshot; `Some` carries every raw delta in order,
+    /// including changes omitted by SST extraction. An empty delta batch is not a snapshot.
     pub(crate) fn apply_version_update(
         &mut self,
         deltas: &[SstDeltaInfo],
         new_version: PinnedVersion,
-        membership_update: PinCacheMembershipUpdate,
+        version_deltas: Option<&[HummockVersionDelta]>,
     ) -> (HashSet<HummockSstableObjectId>, PinCacheObjectChanges) {
+        // Any membership change in the batch requires a rebuild. Compare table assignments
+        // against the starting version so even a change that is later reversed is detected.
+        let requires_rebuild = version_deltas.is_none_or(|version_deltas| {
+            version_deltas.iter().any(|delta| {
+                !delta.removed_table_ids.is_empty()
+                    || delta.state_table_info_delta.iter().any(|(table_id, info)| {
+                        self.version
+                            .state_table_info
+                            .info()
+                            .get(table_id)
+                            .is_none_or(|previous| {
+                                previous.compaction_group_id != info.compaction_group_id
+                            })
+                    })
+                    || delta.group_deltas.values().any(|deltas| {
+                        deltas.group_deltas.iter().any(|delta| {
+                            !matches!(
+                                delta,
+                                GroupDelta::IntraLevel(_) | GroupDelta::NewL0SubLevel(_)
+                            )
+                        })
+                    })
+            })
+        });
         let previous_version = std::mem::replace(&mut self.version, new_version);
-        let changes = match membership_update {
-            PinCacheMembershipUpdate::Delta => self.apply_desired_object_delta(deltas),
-            PinCacheMembershipUpdate::Rebuild => None,
+        let changes = if requires_rebuild {
+            None
+        } else {
+            self.apply_desired_object_delta(deltas)
         }
         .unwrap_or_else(|| {
             // A malformed delta may have partially changed counts. Derive the fallback diff
             // from authoritative snapshots, never from those partial counts.
-            if matches!(membership_update, PinCacheMembershipUpdate::Delta) {
+            if !requires_rebuild {
                 tracing::warn!(
                     "pin-cache object reference count is inconsistent; rebuilding membership"
                 );
