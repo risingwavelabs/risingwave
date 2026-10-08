@@ -94,7 +94,7 @@ impl PinCache {
         &self,
         object_id: HummockSstableObjectId,
     ) -> Option<PinCacheRefillToken> {
-        let state = self.shard(object_id).read();
+        let state = self.shard(object_id).state.read();
         let object = state.objects.get(&object_id)?;
         Some(PinCacheRefillToken {
             object_id,
@@ -106,7 +106,7 @@ impl PinCache {
     /// Running I/O is not aborted, but its result can no longer be published. A subsequent
     /// `prepare_refill` issues fresh admission for the object if it is still needed.
     pub(crate) fn revoke_refill(&self, object_id: HummockSstableObjectId) {
-        self.shard(object_id).write().revoke_refill(object_id);
+        self.shard(object_id).state.write().revoke_refill(object_id);
     }
 
     /// Copies and validates a whole SST without reading or changing the cache index.
@@ -152,7 +152,7 @@ impl PinCache {
     /// for this file and serialize downloads per object; an existing publication is a bug.
     /// A rejected download is handed to GC after releasing the lock.
     pub(crate) fn publish(&self, token: PinCacheRefillToken, download: PinCacheDownload) -> bool {
-        let mut state = self.shard(token.object_id).write();
+        let mut state = self.shard(token.object_id).state.write();
         let Some(object) = state.object_matching_token(token) else {
             // This download lost permission to publish when its object was unregistered or revoked.
             drop(state);

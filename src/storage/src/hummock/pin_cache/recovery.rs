@@ -19,7 +19,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectError, ObjectMetadataIter, ObjectResult};
 
-use super::{PinCache, PinCacheFile, PinCacheObjectState, PinCacheShard};
+use super::{PinCache, PinCacheFile, PinCacheObjectState, PinCacheShardState};
 
 #[derive(Debug, Default)]
 pub(super) struct RecoveryStats {
@@ -72,7 +72,7 @@ impl PinCache {
             .filter(|(_, (_, files))| !files.is_empty());
         let results = stream::iter(shards)
             .map(|(index, (shard, files))| {
-                let mut state = std::mem::take(shard.get_mut());
+                let mut state = std::mem::take(shard.state.get_mut());
                 tokio::task::spawn_blocking(move || {
                     let stats = state.recover(files);
                     (index, state, stats)
@@ -90,7 +90,7 @@ impl PinCache {
             })?;
         let mut stats = RecoveryStats::default();
         for (index, state, recovered) in results {
-            *self.shards[index].get_mut() = state;
+            *self.shards[index].state.get_mut() = state;
             stats.objects += recovered.objects;
             stats.bytes += recovered.bytes;
         }
@@ -98,7 +98,7 @@ impl PinCache {
     }
 }
 
-impl PinCacheShard {
+impl PinCacheShardState {
     fn recover(
         &mut self,
         files: Vec<(HummockSstableObjectId, Arc<PinCacheFile>)>,

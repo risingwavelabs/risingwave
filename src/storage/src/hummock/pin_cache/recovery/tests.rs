@@ -55,7 +55,7 @@ async fn test_recovery_handles_sparse_shards_at_different_concurrency() {
         assert_eq!(stats.objects, 3);
         assert_eq!(stats.bytes, 24);
         for id in ids {
-            let shard = cache.shard(id).read();
+            let shard = cache.shard(id).state.read();
             assert_eq!(
                 shard.objects[&id].published().unwrap().path,
                 format!("{}-1.sst", id.as_raw_id())
@@ -129,7 +129,7 @@ async fn test_recovery_reclaims_rejected_files_across_shards() {
     }
     for id in ids {
         assert_eq!(
-            cache.shard(id).read().objects[&id]
+            cache.shard(id).state.read().objects[&id]
                 .published()
                 .unwrap()
                 .path,
@@ -181,7 +181,7 @@ async fn test_incomplete_recovery_preserves_files_and_accounting() {
         tokio::task::yield_now().await;
         assert_eq!(cache.storage.lock().accounted_bytes, 24);
         for id in ids {
-            let shard = cache.shard(id).read();
+            let shard = cache.shard(id).state.read();
             let object = &shard.objects[&id];
             assert_eq!(object.size(), 8);
             assert!(object.published().is_none());
