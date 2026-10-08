@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! The controller plans physical membership changes; the version gate applies them.
+//! Policy changes take effect immediately, while version inserts wait for activation and
+//! removals wait for application. Policy revocation also withdraws already admitted work.
+//! The executor owns downloads and retries independently of version-gate ticket lifetimes;
+//! the Pin backend owns publication tokens, cached bytes, and file retirement.
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -197,8 +203,9 @@ pub(crate) enum PinCacheMembershipUpdate {
     Rebuild,
 }
 
-/// Physical-object changes for one version transition. Planning does not mutate the cache.
+/// Physical membership changes for the version gate to apply at the appropriate boundary.
 #[derive(Default)]
+#[must_use]
 pub(crate) struct PinCacheObjectChanges {
     pub inserted: HashMap<HummockSstableObjectId, u64>,
     pub removed: HashSet<HummockSstableObjectId>,
@@ -256,9 +263,9 @@ impl PinCacheRefillController {
         &mut self,
         pinned_table_ids: HashSet<TableId>,
         resident_versions: &[PinnedVersion],
-    ) {
+    ) -> PinCacheObjectChanges {
         if self.pinned_table_ids == pinned_table_ids {
-            return;
+            return PinCacheObjectChanges::default();
         }
         let revoked_tables = !self.pinned_table_ids.is_subset(&pinned_table_ids);
         let before = resident_versions
@@ -272,16 +279,13 @@ impl PinCacheRefillController {
         let changes = PinCacheObjectChanges::between(before, after);
         self.pinned_table_ids = pinned_table_ids;
         self.rebuild_object_ref_counts();
-        if let Some(cache) = self.sstable_store.pin_cache() {
-            cache.register_objects(changes.inserted);
-        }
-        self.unregister_objects(changes.removed);
         if revoked_tables {
             // A shared object may remain registered through another table. RESET must still
             // permanently withdraw this table from work that was already submitted.
             self.executor
                 .reproject(&self.ownership, &self.pinned_table_ids);
         }
+        changes
     }
 
     /// Reprojects admitted work only. Ownership arrival or changes do not warm existing SSTs

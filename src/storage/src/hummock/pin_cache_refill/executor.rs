@@ -14,12 +14,12 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::future::{Shared, try_join_all};
 use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 use parking_lot::Mutex;
 use prometheus::{
     Histogram, HistogramVec, IntCounterVec, IntGaugeVec, exponential_buckets, histogram_opts,
@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
-use tokio::sync::{Notify, Semaphore, watch};
+use tokio::sync::{Semaphore, oneshot, watch};
 use tokio::time::Instant;
 
 use super::PinCacheRefillAttemptOutcome::{
@@ -43,7 +43,7 @@ use super::{
     PinCacheRefillAttemptOutcome, PinCacheRefillError, PinCacheRefillPlan, refill_pin_cache_object,
 };
 use crate::hummock::SstableStoreRef;
-use crate::hummock::pin_cache::PinCacheRefillToken;
+use crate::hummock::pin_cache::{PinCache, PinCacheRefillToken};
 
 static REFILL_OUTCOMES: LazyLock<IntCounterVec> = LazyLock::new(|| {
     register_int_counter_vec_with_registry!(
@@ -205,17 +205,82 @@ impl Status {
     }
 }
 
+type Completion = Shared<oneshot::Receiver<bool>>;
+
 struct Work {
     projections: Arc<[SstableInfo]>,
     cache_token: PinCacheRefillToken,
     admitted_tables: HashSet<TableId>,
     ownership: Arc<HashMap<TableId, Bitmap>>,
-    completion: Arc<AtomicU8>,
+    completion: Completion,
+    completion_sender: Option<oneshot::Sender<bool>>,
     attempts: u32,
     status: Status,
 }
 
 impl Work {
+    // Only the first result belongs to admission tickets. Later retries cannot turn
+    // a failed admission into a successful one after its version has already degraded.
+    fn finish(&mut self, ready: bool) {
+        if let Some(sender) = self.completion_sender.take() {
+            let _ = sender.send(ready);
+        }
+    }
+
+    fn reproject(
+        &mut self,
+        cache: &Arc<PinCache>,
+        ownership: &HashMap<TableId, Bitmap>,
+        pinned_tables: &HashSet<TableId>,
+    ) -> bool {
+        let object = self.cache_token.object_id();
+        // Do not revive revoked work or invalidate a publication from a new admission.
+        if cache.prepare_refill(object) != Some(self.cache_token) {
+            return false;
+        }
+        // Policy revocation is permanent for this admission. Temporary vnode changes
+        // must not shrink this set, and later SET cannot restore a revoked table.
+        self.admitted_tables
+            .retain(|table| pinned_tables.contains(table));
+        let projected = self
+            .admitted_tables
+            .iter()
+            .filter_map(|table| ownership.get_key_value(table));
+        let count = projected.clone().count();
+        if count == 0 {
+            cache.revoke_refill(object);
+            if let Some(route) = cache.get(object) {
+                route.invalidate();
+            }
+            return false;
+        }
+        if count == self.ownership.len()
+            && projected
+                .clone()
+                .all(|(table, bitmap)| self.ownership.get(table) == Some(bitmap))
+        {
+            return true;
+        }
+        let ownership = Arc::new(
+            projected
+                .map(|(&table, bitmap)| (table, bitmap.clone()))
+                .collect(),
+        );
+        cache.revoke_refill(object);
+        let Some(cache_token) = cache.prepare_refill(object) else {
+            return false;
+        };
+        let (sender, receiver) = oneshot::channel();
+        self.cache_token = cache_token;
+        self.completion = receiver.shared();
+        // Dropping the previous sender fails all tickets for the superseded admission.
+        self.completion_sender = Some(sender);
+        self.ownership = ownership;
+        self.status = Status::Queued(Instant::now());
+        self.attempts = 0;
+        true
+    }
+
     // Retry debt is an observation of queued work, not a separate scheduling state.
     fn backlog_index(&self) -> usize {
         match self.status {
@@ -231,6 +296,7 @@ struct State {
     objects: HashMap<HummockSstableObjectId, Work>,
     schedule: BTreeSet<(Instant, HummockSstableObjectId)>,
     backlog: [[i64; 2]; 3],
+    stopped: bool,
 }
 
 impl State {
@@ -258,45 +324,29 @@ impl State {
 /// A bounded object executor, not a version queue. Version deadlines only drop tickets;
 /// this worker continues owning open uploads and retries live-owned I/O failures.
 /// Capacity rejection completes the attempt without retrying or waiting for GC.
-#[derive(Clone)]
 pub(super) struct PinCacheRefillExecutor {
     // Lock order: executor state -> PinCache shard. PinCache never calls back into this lock.
     // Keep admission checks and route revocation atomic; never hold state across await.
     state: Arc<Mutex<State>>,
     wake: watch::Sender<()>,
-    changed: Arc<Notify>,
-    alive: Arc<AtomicBool>,
     store: SstableStoreRef,
 }
 
 pub(crate) struct Ticket {
-    executor: PinCacheRefillExecutor,
-    // Cells outlive successful work records: 0 pending, 1 ready, 2 failed/revoked.
-    completions: Vec<Arc<AtomicU8>>,
+    // Shared receivers outlive completed work, but do not keep the executor alive.
+    completions: Vec<Completion>,
 }
 
 impl Ticket {
     pub(crate) async fn wait(self) -> bool {
-        loop {
-            let notified = self.executor.changed.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if !self.executor.alive.load(Ordering::Acquire) {
-                return false;
+        try_join_all(self.completions.into_iter().map(|completion| async move {
+            match completion.await {
+                Ok(true) => Ok(()),
+                Ok(false) | Err(_) => Err(()),
             }
-            let mut ready = true;
-            for completion in &self.completions {
-                match completion.load(Ordering::Acquire) {
-                    0 => ready = false,
-                    1 => {}
-                    _ => return false,
-                }
-            }
-            if ready {
-                return true;
-            }
-            notified.await;
-        }
+        }))
+        .await
+        .is_ok()
     }
 }
 
@@ -319,35 +369,29 @@ impl PinCacheRefillExecutor {
             let _ = REFILL_FAILURES.with_label_values(&[phase]);
         }
         let state = Arc::new(Mutex::new(State::default()));
-        let changed = Arc::new(Notify::new());
-        let alive = Arc::new(AtomicBool::new(true));
         let (wake, receiver) = watch::channel(());
         let limit = concurrency.available_permits().max(1);
-        tokio::spawn(Self::run(
-            store.clone(),
-            state.clone(),
-            changed.clone(),
-            alive.clone(),
-            receiver,
-            concurrency,
-            limit,
-        ));
-        Self {
-            state,
-            wake,
-            changed,
-            alive,
-            store,
-        }
+        // Capture cleanup before spawning, so even an unpolled driver cancels its tickets.
+        let cleanup = scopeguard::guard(state.clone(), |state| {
+            let mut state = state.lock();
+            state.stopped = true;
+            state.objects.clear();
+            state.schedule.clear();
+            state.backlog = [[0; 2]; 3];
+        });
+        let worker_store = store.clone();
+        let worker_state = state.clone();
+        tokio::spawn(async move {
+            let _cleanup = cleanup;
+            Self::run(worker_store, worker_state, receiver, concurrency, limit).await;
+        });
+        Self { state, wake, store }
     }
 
     pub(super) fn submit(&self, plan: PinCacheRefillPlan) -> Ticket {
         let mut completions = Vec::new();
         let Some(cache) = self.store.pin_cache() else {
-            return Ticket {
-                executor: self.clone(),
-                completions,
-            };
+            return Ticket { completions };
         };
         // Ownership projections depend only on the immutable plan. Build them before locking
         // the executor so a large submission does not block completions while allocating maps.
@@ -371,10 +415,10 @@ impl PinCacheRefillExecutor {
             })
             .collect::<Vec<_>>();
         let mut state = self.state.lock();
-        if !self.alive.load(Ordering::Acquire) {
+        if state.stopped {
+            // An already cancelled receiver makes a stopped executor fail immediately.
             return Ticket {
-                executor: self.clone(),
-                completions,
+                completions: vec![oneshot::channel().1.shared()],
             };
         }
         for (object, projections, admitted_tables, ownership) in objects {
@@ -391,16 +435,14 @@ impl PinCacheRefillExecutor {
                 completions.push(work.completion.clone());
                 continue;
             }
-            if let Some(previous) = state.objects.get(&object) {
-                previous.completion.store(2, Ordering::Release);
-            }
             // A new ownership/projection generation must not publish an older in-flight token.
             cache.revoke_refill(object);
             let Some(cache_token) = cache.prepare_refill(object) else {
                 state.remove(object);
                 continue;
             };
-            let completion = Arc::new(AtomicU8::new(0));
+            let (sender, receiver) = oneshot::channel();
+            let completion = receiver.shared();
             state.insert(
                 object,
                 Work {
@@ -409,6 +451,7 @@ impl PinCacheRefillExecutor {
                     admitted_tables,
                     ownership,
                     completion: completion.clone(),
+                    completion_sender: Some(sender),
                     attempts: 0,
                     status: Status::Queued(Instant::now()),
                 },
@@ -417,11 +460,7 @@ impl PinCacheRefillExecutor {
         }
         drop(state);
         self.wake.send_replace(());
-        self.changed.notify_waiters();
-        Ticket {
-            executor: self.clone(),
-            completions,
-        }
+        Ticket { completions }
     }
 
     /// Removes only the work whose backend membership has already been withdrawn.
@@ -429,13 +468,10 @@ impl PinCacheRefillExecutor {
     pub(super) fn remove_objects(&self, objects: &[HummockSstableObjectId]) {
         let mut state = self.state.lock();
         for &object in objects {
-            if let Some(work) = state.remove(object) {
-                work.completion.store(2, Ordering::Release);
-            }
+            state.remove(object);
         }
         drop(state);
         self.wake.send_replace(());
-        self.changed.notify_waiters();
     }
 
     pub(super) fn reproject(
@@ -447,80 +483,51 @@ impl PinCacheRefillExecutor {
             return;
         };
         let mut state = self.state.lock();
-        if !self.alive.load(Ordering::Acquire) {
+        if state.stopped {
             return;
         }
-        let mut objects = std::mem::take(&mut state.objects);
-        state.schedule.clear();
-        state.backlog = [[0; 2]; 3];
+        let State {
+            objects,
+            schedule,
+            backlog,
+            ..
+        } = &mut *state;
         objects.retain(|object, work| {
-            // Membership may have been removed and reintroduced with unchanged ownership.
-            // Do not revive revoked work or invalidate a publication from the new admission.
-            if cache.prepare_refill(*object) != Some(work.cache_token) {
-                work.completion.store(2, Ordering::Release);
-                return false;
-            }
-            // Policy revocation is permanent for this admission. Temporary vnode changes
-            // must not shrink this set, and later SET cannot restore a revoked table.
-            work.admitted_tables
-                .retain(|table| pinned_tables.contains(table));
-            let ownership = Arc::new(
-                work.admitted_tables
-                    .iter()
-                    .filter_map(|table| ownership.get(table).map(|bitmap| (*table, bitmap.clone())))
-                    .collect::<HashMap<_, _>>(),
-            );
-            if ownership.is_empty() {
-                cache.revoke_refill(*object);
-                work.completion.store(2, Ordering::Release);
-                if let Some(route) = cache.get(*object) {
-                    route.invalidate();
+            let old_deadline = work.status.deadline();
+            let old_bucket = work.backlog_index();
+            let bytes = work.projections[0].file_size as i64;
+            let keep = work.reproject(cache, ownership, pinned_tables);
+            let new_deadline = if keep { work.status.deadline() } else { None };
+            if old_deadline != new_deadline {
+                if let Some(at) = old_deadline {
+                    schedule.remove(&(at, *object));
                 }
-                return false;
+                if let Some(at) = new_deadline {
+                    schedule.insert((at, *object));
+                }
             }
-            if work.ownership != ownership {
-                cache.revoke_refill(*object);
-                work.completion.store(2, Ordering::Release);
-                let Some(cache_token) = cache.prepare_refill(*object) else {
-                    return false;
-                };
-                work.cache_token = cache_token;
-                work.completion = Arc::new(AtomicU8::new(0));
-                work.ownership = ownership;
-                work.status = Status::Queued(Instant::now());
-                work.attempts = 0;
+            let new_bucket = keep.then(|| work.backlog_index());
+            if Some(old_bucket) != new_bucket {
+                backlog[old_bucket][0] -= 1;
+                backlog[old_bucket][1] -= bytes;
+                if let Some(bucket) = new_bucket {
+                    backlog[bucket][0] += 1;
+                    backlog[bucket][1] += bytes;
+                }
             }
-            true
+            keep
         });
-        for (object, work) in objects {
-            state.insert(object, work);
-        }
         drop(state);
         self.wake.send_replace(());
-        self.changed.notify_waiters();
     }
 
     async fn run(
         store: SstableStoreRef,
         state: Arc<Mutex<State>>,
-        changed: Arc<Notify>,
-        alive: Arc<AtomicBool>,
         mut receiver: watch::Receiver<()>,
         concurrency: Arc<Semaphore>,
         limit: usize,
     ) {
-        let _alive = scopeguard::guard((), |_| {
-            let mut state = state.lock();
-            alive.store(false, Ordering::Release);
-            for work in state.objects.values() {
-                work.completion.store(2, Ordering::Release);
-            }
-            state.objects.clear();
-            state.schedule.clear();
-            state.backlog = [[0; 2]; 3];
-            drop(state);
-            changed.notify_waiters();
-        });
         let mut tasks = FuturesUnordered::new();
         // This worker owns per-object download serialization, including across admission changes.
         // A replacement Work may already be queued while its revoked attempt is still doing I/O.
@@ -604,7 +611,7 @@ impl PinCacheRefillExecutor {
                         let mut work = state.remove(object).unwrap();
                         let retry = match result {
                             Ok(Ok(Published | AlreadyPublished | Obsolete)) => {
-                                let _ = work.completion.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
+                                work.finish(true);
                                 false
                             },
                             Ok(Ok(NotOwned(route))) => {
@@ -612,14 +619,14 @@ impl PinCacheRefillExecutor {
                                 if let Some(route) = route {
                                     route.invalidate();
                                 }
-                                let _ = work.completion.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
+                                work.finish(true);
                                 false
                             },
                             Ok(Ok(CapacityRejected)) => {
                                 // Cache pressure must not keep a refill admission alive. Report
                                 // fallback to the version gate and let version application retire
                                 // old files; a later explicit submission may attempt this object again.
-                                work.completion.store(2, Ordering::Release);
+                                work.finish(false);
                                 false
                             },
                             Ok(Err(PinCacheRefillError { phase, error })) => {
@@ -657,7 +664,7 @@ impl PinCacheRefillExecutor {
                                         100 * (1_u64 << work.attempts.min(8)),
                                     ),
                             );
-                            work.completion.store(2, Ordering::Release);
+                            work.finish(false);
                             state.insert(object, work);
                         }
                     }
@@ -667,7 +674,6 @@ impl PinCacheRefillExecutor {
                         state.schedule.insert((at, object));
                     }
                     drop(state);
-                    changed.notify_waiters();
                 }
             }
         }
@@ -676,13 +682,16 @@ impl PinCacheRefillExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+
+    use futures::task::{ArcWake, waker_ref};
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
 
     use super::*;
     use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
-    use crate::hummock::pin_cache::PinCache;
     use crate::hummock::pin_cache_refill::PinCacheRefillController;
     use crate::hummock::pin_cache_refill::tests::version_with_ssts;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable};
@@ -731,7 +740,10 @@ mod tests {
                     Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [255]),
                 ),
             ]);
-            controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&version));
+            let changes =
+                controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&version));
+            cache.register_objects(changes.inserted);
+            controller.unregister_objects(changes.removed);
             controller.update_ownership(ownership.clone());
             let ticket = controller.submit(PinCacheRefillPlan {
                 objects: [(object, vec![info])].into(),
@@ -755,12 +767,17 @@ mod tests {
                 controller.update_ownership(without_a.clone());
             }
             if reset_policy {
-                controller
+                let changes = controller
                     .replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&version));
+                cache.register_objects(changes.inserted);
+                controller.unregister_objects(changes.removed);
             }
             controller.update_ownership(without_a);
             if reset_policy {
-                controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&version));
+                let changes =
+                    controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&version));
+                cache.register_objects(changes.inserted);
+                controller.unregister_objects(changes.removed);
             }
             controller.update_ownership(ownership);
             assert!(cache.is_registered(object));
@@ -949,7 +966,7 @@ mod tests {
         .await
         .unwrap();
         let next = executor.submit(plan);
-        assert!(Arc::ptr_eq(&completion, &next.completions[0]));
+        assert!(completion.ptr_eq(&next.completions[0]));
         assert!(
             !next.wait().await,
             "new identical tickets do not reset failed admission"
@@ -1019,11 +1036,8 @@ mod tests {
             cache.unregister_objects([object]);
             cache.register_objects([(object, size)]);
             if resubmit {
-                let replacement = executor.submit(plan);
-                assert!(!Arc::ptr_eq(
-                    &ticket.completions[0],
-                    &replacement.completions[0]
-                ));
+                let replacement = executor.submit(plan.clone());
+                assert!(!ticket.completions[0].ptr_eq(&replacement.completions[0]));
                 // Leave a second executor slot available: the running-object check, not the
                 // global concurrency limit, must keep the replacement queued.
                 tokio::time::timeout(Duration::from_secs(1), async {
@@ -1037,6 +1051,11 @@ mod tests {
                     executor.state.lock().objects[&object].status,
                     Status::Queued(_)
                 ));
+                executor.reproject(&plan.ownership, &plan.ownership.keys().copied().collect());
+                assert!(
+                    executor.state.lock().schedule.is_empty(),
+                    "unchanged ownership must not requeue work waiting for an older transfer"
+                );
                 drop(permit);
                 assert!(!ticket.wait().await);
                 assert!(
@@ -1062,6 +1081,100 @@ mod tests {
             assert!(
                 cache.get(object).is_some(),
                 "old work cannot revoke the current route"
+            );
+        }
+    }
+
+    #[cfg(not(madsim))]
+    #[test]
+    fn test_driver_shutdown_finishes_pending_and_future_tickets() {
+        for (poll_driver, drop_owner) in [(false, false), (true, false), (true, true)] {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let store = runtime.block_on(async {
+                let store = mock_sstable_store().await;
+                let cache = PinCache::new(
+                    mock_sstable_store().await.store(),
+                    u64::MAX,
+                    1,
+                    2,
+                    [(HummockSstableObjectId::from(880), 1)],
+                )
+                .await
+                .unwrap();
+                Arc::new(Arc::into_inner(store).unwrap().with_pin_cache(cache))
+            });
+            let plan = PinCacheRefillPlan {
+                objects: [(
+                    880.into(),
+                    vec![
+                        risingwave_hummock_sdk::sstable_info::SstableInfoInner {
+                            object_id: 880.into(),
+                            file_size: 1,
+                            table_ids: vec![TableId::default()],
+                            ..Default::default()
+                        }
+                        .into(),
+                    ],
+                )]
+                .into(),
+                ownership: Arc::new(
+                    [(
+                        TableId::default(),
+                        Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+                    )]
+                    .into(),
+                ),
+            };
+            let (executor, ticket) = {
+                let _entered = runtime.enter();
+                let executor = PinCacheRefillExecutor::new(store, Arc::new(Semaphore::new(0)));
+                let ticket = executor.submit(plan.clone());
+                (executor, ticket)
+            };
+            if poll_driver {
+                runtime.block_on(async {
+                    tokio::time::timeout(Duration::from_secs(1), async {
+                        while !matches!(
+                            executor.state.lock().objects[&HummockSstableObjectId::from(880)]
+                                .status,
+                            Status::Running
+                        ) {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                });
+            }
+            if drop_owner {
+                runtime.block_on(async {
+                    drop(executor);
+                    assert!(
+                        !tokio::time::timeout(Duration::from_secs(1), ticket.wait())
+                            .await
+                            .unwrap(),
+                        "a ticket must not keep its driver alive after the owner exits"
+                    );
+                });
+                continue;
+            }
+            drop(runtime);
+            assert!(executor.state.lock().stopped);
+            assert!(
+                !ticket
+                    .wait()
+                    .now_or_never()
+                    .expect("shutdown must finish pending tickets")
+            );
+            assert!(
+                !executor
+                    .submit(plan)
+                    .wait()
+                    .now_or_never()
+                    .expect("a stopped driver cannot accept work")
             );
         }
     }
@@ -1109,6 +1222,10 @@ mod tests {
             )]
             .into(),
         );
+        let all = executor.submit(PinCacheRefillPlan {
+            objects: objects.clone(),
+            ownership: ownership.clone(),
+        });
         let mut tickets: HashMap<_, _> = objects
             .into_iter()
             .map(|(object, infos)| {
@@ -1162,30 +1279,69 @@ mod tests {
                 .0;
             ([removed_running, queued], survivor)
         };
+        struct WakeCount(AtomicUsize);
+        impl ArcWake for WakeCount {
+            fn wake_by_ref(arc_self: &Arc<Self>) {
+                arc_self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let survivor_wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
+        let removed_wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
+        let survivor_ticket = tickets.remove(&survivor).unwrap().wait();
+        let removed_ticket = tickets.remove(&removed[0]).unwrap().wait();
+        tokio::pin!(survivor_ticket, removed_ticket);
+        let survivor_waker = waker_ref(&survivor_wakes);
+        let removed_waker = waker_ref(&removed_wakes);
+        assert!(
+            survivor_ticket
+                .as_mut()
+                .poll(&mut Context::from_waker(&survivor_waker))
+                .is_pending()
+        );
+        assert!(
+            removed_ticket
+                .as_mut()
+                .poll(&mut Context::from_waker(&removed_waker))
+                .is_pending()
+        );
         let survivor_token = cache.prepare_refill(survivor);
         controller.unregister_objects([]);
         controller.unregister_objects(removed);
-        for object in removed {
-            assert!(
-                !tokio::time::timeout(
-                    Duration::from_secs(1),
-                    tickets.remove(&object).unwrap().wait()
-                )
+        assert!(removed_wakes.0.load(Ordering::Relaxed) > 0);
+        assert_eq!(
+            survivor_wakes.0.load(Ordering::Relaxed),
+            0,
+            "one admission must not wake unrelated tickets"
+        );
+        assert_eq!(
+            removed_ticket
+                .as_mut()
+                .poll(&mut Context::from_waker(&removed_waker)),
+            Poll::Ready(false)
+        );
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), all.wait())
                 .await
                 .unwrap(),
-                "withdrawal must finish queued and running tickets without waiting for a permit"
-            );
-            assert!(!cache.is_registered(object));
-        }
+            "a failed member must finish the batch ticket while its survivor is blocked"
+        );
+        assert!(!cache.is_registered(removed[0]));
+        assert!(
+            !tokio::time::timeout(
+                Duration::from_secs(1),
+                tickets.remove(&removed[1]).unwrap().wait()
+            )
+            .await
+            .unwrap(),
+            "withdrawal must finish queued tickets without waiting for a permit"
+        );
+        assert!(!cache.is_registered(removed[1]));
         assert_eq!(cache.prepare_refill(survivor), survivor_token);
         drop(foyer_permits);
         assert!(
-            tokio::time::timeout(
-                Duration::from_secs(1),
-                tickets.remove(&survivor).unwrap().wait()
-            )
-            .await
-            .unwrap()
+            tokio::time::timeout(Duration::from_secs(1), survivor_ticket)
+                .await
+                .unwrap()
         );
         assert!(cache.get(survivor).is_some());
         assert!(

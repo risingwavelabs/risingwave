@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bytes::Bytes;
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::{FullKey, UserKey, prefix_slice_with_vnode};
 use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -21,6 +26,8 @@ use tokio::sync::{Semaphore, mpsc};
 
 use super::*;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
+use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_with_table_ids};
+use crate::hummock::value::HummockValue;
 
 pub(super) fn version_with_ssts(ssts: &[SstableInfo]) -> PinnedVersion {
     let group = 1.into();
@@ -98,7 +105,8 @@ async fn test_membership_tracks_physical_references_without_registering_future_o
         let empty = version_with_ssts(&[]);
         let mut controller =
             PinCacheRefillController::new(store, empty.clone(), Arc::new(Semaphore::new(1)));
-        controller.replace_pinned_tables(tables.into(), &[empty]);
+        let changes = controller.replace_pinned_tables(tables.into(), &[empty]);
+        assert!(changes.inserted.is_empty() && changes.removed.is_empty());
         let (candidates, changes) = controller.apply_version_update(
             &[SstDeltaInfo {
                 insert_sst_infos: branches.to_vec(),
@@ -114,6 +122,19 @@ async fn test_membership_tracks_physical_references_without_registering_future_o
             "planning must not register future objects"
         );
         cache.register_objects(changes.inserted);
+        // Policy diffs use the resident snapshot and leave physical application to the gate.
+        let changes =
+            controller.replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&both));
+        assert!(changes.inserted.is_empty() && changes.removed.is_empty());
+        let changes = controller.replace_pinned_tables(HashSet::new(), std::slice::from_ref(&both));
+        assert_eq!(changes.removed, [1001.into()].into());
+        assert!(cache.is_registered(1001.into()));
+        controller.unregister_objects(changes.removed);
+        let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&both));
+        assert_eq!(changes.inserted, [(1001.into(), 8)].into());
+        assert!(!cache.is_registered(1001.into()));
+        cache.register_objects(changes.inserted);
+
         let (_, changes) = controller.apply_version_update(
             &[SstDeltaInfo {
                 delete_sst_infos: vec![branches[0].clone()],
@@ -139,4 +160,58 @@ async fn test_membership_tracks_physical_references_without_registering_future_o
         controller.unregister_objects(changes.removed);
         assert!(!cache.is_registered(1001.into()));
     }
+}
+
+#[tokio::test]
+async fn test_pin_projection_uses_owned_blocks_and_deduplicates_whole_object() {
+    let table = TableId::from(233);
+    let store = mock_sstable_store().await;
+    let mut options = default_builder_opt_for_test();
+    options.block_capacity = 1;
+    let (sst, info) = gen_test_sstable_with_table_ids(
+        options,
+        701,
+        [0, 128].into_iter().map(|vnode| {
+            (
+                FullKey {
+                    user_key: UserKey::for_test(
+                        table,
+                        prefix_slice_with_vnode(VirtualNode::from_index(vnode), b"key"),
+                    ),
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                },
+                HummockValue::put(Bytes::from_static(b"value")),
+            )
+        }),
+        store,
+        vec![table.as_raw_id()],
+    )
+    .await;
+    let projections = vec![info.clone(), info.clone()];
+    for (vnode, expected) in [(0, true), (128, true), (255, false)] {
+        let ownership = HashMap::from([(
+            table,
+            Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode]),
+        )]);
+        assert_eq!(
+            PinCacheRefillPlan::owns_object(&sst, &projections, &ownership),
+            expected
+        );
+    }
+    assert!(!PinCacheRefillPlan::owns_object(
+        &sst,
+        &projections,
+        &HashMap::new()
+    ));
+
+    // Physical-object accounting is independent of the vnode selected above.
+    let plan = PinCacheRefillPlan::new(
+        &[SstDeltaInfo {
+            insert_sst_infos: projections,
+            ..Default::default()
+        }],
+        &[info.object_id].into(),
+        [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
+    );
+    assert_eq!(plan.objects.len(), 1, "physical downloads are deduplicated");
 }
