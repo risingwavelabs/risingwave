@@ -1,0 +1,124 @@
+# Sink from a Kafka source with generated primary-key columns into a table.
+control substitution on
+
+system ok
+rpk topic delete generated-pk-sink || true
+
+system ok
+rpk topic create generated-pk-sink -p 1
+
+# Exercise historical data as well as records produced after sink creation.
+system ok
+echo '{"tenant":1,"after":{"id":101,"category":"generated-pk","amount":42,"insert_date":1772745299}}' | rpk topic produce generated-pk-sink
+
+statement ok
+CREATE SOURCE src_generated_pk (
+    after JSONB,
+    id BIGINT AS (after ->> 'id')::BIGINT,
+    category VARCHAR AS after ->> 'category',
+    amount BIGINT AS (after ->> 'amount')::BIGINT,
+    insert_date_tz TIMESTAMPTZ
+        AS to_timestamp((after ->> 'insert_date')::DOUBLE PRECISION),
+    PRIMARY KEY (id)
+)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'generated-pk-sink',
+    group.id.prefix = 'rw-generated-pk-sink',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE table_generated_pk (
+    id BIGINT PRIMARY KEY,
+    category VARCHAR,
+    amount BIGINT,
+    insert_date_tz TIMESTAMPTZ
+)
+ON CONFLICT OVERWRITE;
+
+statement ok
+CREATE SINK sink_generated_pk
+INTO table_generated_pk
+AS
+SELECT id, category, amount, insert_date_tz
+FROM src_generated_pk;
+
+query ITII retry 10 backoff 1s
+SELECT id, category, amount, extract(epoch FROM insert_date_tz)::BIGINT
+FROM table_generated_pk;
+----
+101 generated-pk 42 1772745299
+
+system ok
+echo '{"tenant":1,"after":{"id":102,"category":"streaming","amount":43,"insert_date":1772745300}}' | rpk topic produce generated-pk-sink
+
+query ITII retry 10 backoff 1s
+SELECT id, category, amount, extract(epoch FROM insert_date_tz)::BIGINT
+FROM table_generated_pk ORDER BY id;
+----
+101 generated-pk 42 1772745299
+102 streaming 43 1772745300
+
+statement ok
+DROP SINK sink_generated_pk;
+
+statement ok
+DROP TABLE table_generated_pk;
+
+statement ok
+DROP SOURCE src_generated_pk;
+
+# A composite key must retain both the raw and generated key columns even when
+# the sink projection changes their positions.
+statement ok
+CREATE SOURCE src_generated_pk_composite (
+    tenant INT,
+    after JSONB,
+    id BIGINT AS (after ->> 'id')::BIGINT,
+    category VARCHAR AS after ->> 'category',
+    PRIMARY KEY (tenant, id)
+)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'generated-pk-sink',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE table_generated_pk_composite (
+    category VARCHAR,
+    id BIGINT,
+    tenant INT,
+    PRIMARY KEY (tenant, id)
+);
+
+statement ok
+CREATE SINK sink_generated_pk_composite
+INTO table_generated_pk_composite
+AS SELECT category, id, tenant FROM src_generated_pk_composite;
+
+system ok
+echo '{"tenant":2,"after":{"id":101,"category":"other-tenant"}}' | rpk topic produce generated-pk-sink
+
+query TII retry 10 backoff 1s
+SELECT category, id, tenant
+FROM table_generated_pk_composite ORDER BY tenant, id;
+----
+generated-pk 101 1
+streaming 102 1
+other-tenant 101 2
+
+statement ok
+DROP SINK sink_generated_pk_composite;
+
+statement ok
+DROP TABLE table_generated_pk_composite;
+
+statement ok
+DROP SOURCE src_generated_pk_composite;
+
+system ok
+rpk topic delete generated-pk-sink
