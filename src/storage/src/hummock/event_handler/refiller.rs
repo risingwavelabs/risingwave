@@ -16,7 +16,7 @@ use std::collections::hash_map::HashMap;
 use std::collections::{HashSet, VecDeque};
 use std::future::poll_fn;
 use std::hash::Hash;
-use std::ops::{Bound, Range};
+use std::ops::Range;
 use std::sync::{Arc, LazyLock};
 use std::task::Poll;
 use std::time::{Duration, Instant};
@@ -33,12 +33,10 @@ use prometheus::{
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
-use risingwave_common::hash::VirtualNode;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::key::{FullKey, vnode_range};
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
@@ -46,6 +44,9 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::refill_locality::{
+    RefillOwnership, block_vnode_range, vnode_range_overlaps_bitmap,
+};
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
     SstableStoreRef, TableHolder,
@@ -289,19 +290,6 @@ pub struct TableCacheRefillMonitorSnapshot {
     pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
 }
 
-fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> bool {
-    assert!(vnode_range.0 <= vnode_range.1);
-    let start = vnode_range.0.min(bitmap.len());
-    let end = vnode_range.1.min(bitmap.len());
-    if start == end || !bitmap.any() {
-        return false;
-    }
-    if bitmap.all() {
-        return true;
-    }
-    (start..end).any(|vnode| bitmap.is_set(vnode))
-}
-
 impl TableCacheRefillContext {
     fn allows_normal_data_refill_block(&self, sstable: &Sstable, block_index: usize) -> bool {
         if self.policy.is_unscoped_enabled() {
@@ -335,51 +323,6 @@ impl TableCacheRefillContext {
             vnode_range_overlaps_bitmap(vnode_range, bitmap)
         })
     }
-}
-
-fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize, usize) {
-    let block_meta = &sstable.meta.block_metas[block_index];
-    let block_smallest_key = FullKey::decode(&block_meta.smallest_key);
-    let table_key_end = match sstable.meta.block_metas.get(block_index + 1) {
-        // A table switch always starts a new block. The next table's smallest key has an
-        // unrelated vnode, so use the current table's terminal range instead.
-        Some(next_block_meta) if next_block_meta.table_id() != block_meta.table_id() => {
-            Bound::Unbounded
-        }
-        // Full-key versions of the same table key may span adjacent blocks. After projecting
-        // away the epoch, the boundary vnode therefore remains part of the current block.
-        Some(next_block_meta) => Bound::Included(
-            FullKey::decode(&next_block_meta.smallest_key)
-                .user_key
-                .table_key,
-        ),
-        // `SstableMeta::largest_key` is the actual last key, unlike the next block's smallest
-        // key above. Keep it inclusive, especially for singleton tables whose key contains only
-        // the vnode prefix.
-        None => Bound::Included(
-            FullKey::decode(&sstable.meta.largest_key)
-                .user_key
-                .table_key,
-        ),
-    };
-
-    let table_key_range = (
-        Bound::Included(block_smallest_key.user_key.table_key),
-        table_key_end,
-    );
-    // Block-meta separators may shorten the table key below the vnode prefix. They are valid
-    // full-key search boundaries but cannot identify a vnode, so fail open instead of panicking
-    // or dropping a block that may belong to this worker.
-    if match &table_key_range.0 {
-        Bound::Included(key) | Bound::Excluded(key) => key.as_ref().len() < VirtualNode::SIZE,
-        Bound::Unbounded => false,
-    } || match &table_key_range.1 {
-        Bound::Included(key) | Bound::Excluded(key) => key.as_ref().len() < VirtualNode::SIZE,
-        Bound::Unbounded => false,
-    } {
-        return (0, VirtualNode::MAX_REPRESENTABLE.to_index() + 1);
-    }
-    vnode_range(&table_key_range)
 }
 
 /// A cache refiller for hummock data.
@@ -557,17 +500,29 @@ impl CacheRefiller {
         }
     }
 
+    pub(crate) fn refill_ownership(&self) -> RefillOwnership<'_> {
+        RefillOwnership {
+            streaming: self
+                .role
+                .for_streaming()
+                .then_some(&self.streaming_table_vnode_mapping),
+            serving: self
+                .role
+                .for_serving()
+                .then_some(&self.serving_table_vnode_mapping),
+        }
+    }
+
     fn table_cache_refill_contexts(
         &self,
         table_ids: impl IntoIterator<Item = TableId>,
     ) -> TableCacheRefillContextMap {
-        let for_streaming = self.role.for_streaming();
-        let for_serving = self.role.for_serving();
+        let ownership = self.refill_ownership();
         table_ids
             .into_iter()
             .filter_map(|table_id| {
-                if for_serving
-                    && !for_streaming
+                if ownership.serving.is_some()
+                    && ownership.streaming.is_none()
                     && !self.serving_table_vnode_mapping.contains_key(&table_id)
                 {
                     return None;
@@ -577,15 +532,18 @@ impl CacheRefiller {
                     .get(&table_id)
                     .copied()
                     .unwrap_or(self.default_policy);
-                let streaming_vnode_bitmap = (for_streaming && policy.is_streaming_scoped())
-                    .then(|| self.streaming_table_vnode_mapping.get(&table_id).cloned())
-                    .flatten();
+                let streaming_vnode_bitmap = ownership
+                    .streaming
+                    .filter(|_| policy.is_streaming_scoped())
+                    .and_then(|map| map.get(&table_id))
+                    .cloned();
                 // `Enabled` normally does not use bitmap filtering. The only exception is L0
                 // insert-only refill, where serving workers still need serving-locality evidence.
-                let serving_vnode_bitmap = (for_serving
-                    && (policy.is_serving_scoped() || policy.is_unscoped_enabled()))
-                .then(|| self.serving_table_vnode_mapping.get(&table_id).cloned())
-                .flatten();
+                let serving_vnode_bitmap = ownership
+                    .serving
+                    .filter(|_| policy.is_serving_scoped() || policy.is_unscoped_enabled())
+                    .and_then(|map| map.get(&table_id))
+                    .cloned();
                 Some((
                     table_id,
                     TableCacheRefillContext {
@@ -1138,7 +1096,7 @@ mod tests {
 
     use super::{
         CacheRefillConfig, CacheRefillContext, CacheRefiller, DataCacheRefillTaskGenerator,
-        SpawnRefillTask, SstDeltaInfo, block_vnode_range, vnode_range_overlaps_bitmap,
+        SpawnRefillTask, SstDeltaInfo,
     };
     use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
     use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -2246,96 +2204,5 @@ mod tests {
         ))
         .await;
         assert!(non_matching_tasks.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_block_vnode_range_handles_vnode_only_block_boundaries() {
-        let table_id = TableId::from(233);
-        let vnode = VirtualNode::ZERO;
-        let sstable_store = mock_sstable_store().await;
-        let mut builder_options = default_builder_opt_for_test();
-        builder_options.block_capacity = 1;
-        let (sst, _) = gen_test_sstable_with_table_ids(
-            builder_options,
-            1,
-            [234, 233].into_iter().map(|epoch| {
-                (
-                    FullKey {
-                        user_key: UserKey::for_test(table_id, prefix_slice_with_vnode(vnode, b"")),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(epoch)),
-                    },
-                    HummockValue::put(Bytes::from_static(b"value")),
-                )
-            }),
-            sstable_store.clone(),
-            vec![table_id.as_raw_id()],
-        )
-        .await;
-        assert_eq!(sst.block_count(), 2);
-        let expected = (vnode.to_index(), vnode.to_index() + 1);
-        assert_eq!(block_vnode_range(&sst, 0), expected);
-        assert_eq!(block_vnode_range(&sst, 1), expected);
-    }
-
-    #[tokio::test]
-    async fn test_block_vnode_range_fails_open_for_shortened_meta_keys() {
-        let table_id = TableId::from(233);
-        let sstable_store = mock_sstable_store().await;
-        let mut builder_options = default_builder_opt_for_test();
-        builder_options.block_capacity = 1;
-        builder_options.shorten_block_meta_key_threshold = Some(0);
-        let (sst, _) = gen_test_sstable_with_table_ids(
-            builder_options,
-            1,
-            [255, 256].into_iter().map(|vnode| {
-                (
-                    FullKey {
-                        user_key: UserKey::for_test(
-                            table_id,
-                            prefix_slice_with_vnode(VirtualNode::from_index(vnode), b"long-key"),
-                        ),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
-                    },
-                    HummockValue::put(Bytes::from_static(b"value")),
-                )
-            }),
-            sstable_store,
-            vec![table_id.as_raw_id()],
-        )
-        .await;
-        assert_eq!(sst.block_count(), 2);
-        assert!(
-            FullKey::decode(&sst.meta.block_metas[1].smallest_key)
-                .user_key
-                .table_key
-                .as_ref()
-                .len()
-                < VirtualNode::SIZE
-        );
-        let full_range = (0, VirtualNode::MAX_REPRESENTABLE.to_index() + 1);
-        assert_eq!(block_vnode_range(&sst, 0), full_range);
-        assert_eq!(block_vnode_range(&sst, 1), full_range);
-    }
-
-    #[test]
-    fn test_vnode_range_overlaps_bitmap_uses_right_exclusive_end() {
-        let right_exclusive = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [12]);
-        assert!(!vnode_range_overlaps_bitmap((10, 12), &right_exclusive));
-
-        let inside_range = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [11]);
-        assert!(vnode_range_overlaps_bitmap((10, 12), &inside_range));
-
-        let last_vnode = Bitmap::from_indices(
-            VirtualNode::COUNT_FOR_TEST,
-            [VirtualNode::COUNT_FOR_TEST - 1],
-        );
-        assert!(vnode_range_overlaps_bitmap(
-            (VirtualNode::COUNT_FOR_TEST - 1, VirtualNode::COUNT_FOR_TEST),
-            &last_vnode
-        ));
-        assert!(!vnode_range_overlaps_bitmap(
-            (VirtualNode::COUNT_FOR_TEST, VirtualNode::COUNT_FOR_TEST + 1),
-            &last_vnode
-        ));
     }
 }
