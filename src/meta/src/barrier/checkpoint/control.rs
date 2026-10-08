@@ -1033,10 +1033,13 @@ impl DatabaseCheckpointControl {
                     }
                 }
                 IndependentCheckpointJob::IcebergV3(iceberg_job) => {
-                    if let Some((epoch, resps, info, is_finish_epoch)) = iceberg_job
+                    if let Some((epoch, resps, info, tracking_job)) = iceberg_job
                         .start_completing(partial_graph_manager, min_upstream_inflight_barrier)
                     {
-                        assert!(!is_finish_epoch, "Iceberg V3 jobs remain independent");
+                        if let Some(tracking_job) = tracking_job {
+                            let task = task.get_or_insert_default();
+                            task.finished_jobs.push(tracking_job);
+                        }
                         independent_jobs_task.push((
                             *job_id,
                             epoch,

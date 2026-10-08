@@ -16,7 +16,7 @@ mod render;
 
 use std::cmp::max;
 use std::collections::{HashMap, HashSet, VecDeque, hash_map};
-use std::mem::take;
+use std::mem::replace;
 use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::atomic::AtomicU32;
 
@@ -50,6 +50,7 @@ use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
     PartialGraphStat,
 };
+use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -100,21 +101,22 @@ impl PartialGraphStat for IcebergV3BarrierStats {
 }
 
 #[derive(Debug)]
+struct IcebergV3Input {
+    phase: IcebergV3InputPhase,
+    /// Original upstream barriers retained during snapshot consumption and then replayed from the
+    /// log store after the snapshot finishes.
+    pending_upstream_barriers: VecDeque<BarrierInfo>,
+}
+
+#[derive(Debug)]
 enum IcebergV3InputPhase {
-    Snapshot {
-        snapshot: SnapshotPhaseControl,
-        /// Original upstream barriers retained until the input starts log-store replay.
-        pending_upstream_barriers: VecDeque<BarrierInfo>,
-    },
-    LogStore {
-        /// Original upstream barriers waiting to be consumed from the log store.
-        pending_upstream_barriers: VecDeque<BarrierInfo>,
-    },
+    Snapshot(SnapshotPhaseControl),
+    LogStore { tracking_job: Option<TrackingJob> },
 }
 
 #[derive(Debug)]
 enum IcebergV3JobStatus {
-    Running(IcebergV3InputPhase),
+    Running(IcebergV3Input),
 }
 
 #[derive(Debug)]
@@ -243,8 +245,8 @@ impl IcebergV3JobCheckpointControl {
                     .values()
                     .chain(std::iter::once(&resolver.fragment_info)),
             )),
-            status: IcebergV3JobStatus::Running(IcebergV3InputPhase::Snapshot {
-                snapshot,
+            status: IcebergV3JobStatus::Running(IcebergV3Input {
+                phase: IcebergV3InputPhase::Snapshot(snapshot),
                 pending_upstream_barriers: VecDeque::new(),
             }),
             fragment_infos,
@@ -305,7 +307,7 @@ impl IcebergV3JobCheckpointControl {
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
         backfill_order: &ExtendedFragmentBackfillOrder,
         version_stat: &HummockVersionStats,
-    ) -> MetaResult<(IcebergV3InputPhase, BarrierInfo)> {
+    ) -> MetaResult<(IcebergV3Input, BarrierInfo)> {
         let (snapshot, first_barrier_info) = SnapshotPhaseControl::for_recovery(
             job_id,
             snapshot_epoch,
@@ -315,8 +317,8 @@ impl IcebergV3JobCheckpointControl {
             version_stat,
         );
         Ok((
-            IcebergV3InputPhase::Snapshot {
-                snapshot,
+            IcebergV3Input {
+                phase: IcebergV3InputPhase::Snapshot(snapshot),
                 pending_upstream_barriers:
                     CreatingStreamingJobControl::resolve_upstream_log_epochs(
                         snapshot_backfill_upstream_tables,
@@ -335,7 +337,7 @@ impl IcebergV3JobCheckpointControl {
         upstream_table_log_epochs: &UpstreamTableLogEpochs,
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
-    ) -> MetaResult<(IcebergV3InputPhase, BarrierInfo)> {
+    ) -> MetaResult<(IcebergV3Input, BarrierInfo)> {
         let mut pending_upstream_barriers: VecDeque<_> =
             CreatingStreamingJobControl::resolve_upstream_log_epochs(
                 snapshot_backfill_upstream_tables,
@@ -350,7 +352,8 @@ impl IcebergV3JobCheckpointControl {
         assert!(first_barrier_info.kind.is_checkpoint());
         first_barrier_info.kind = BarrierKind::Initial;
         Ok((
-            IcebergV3InputPhase::LogStore {
+            IcebergV3Input {
+                phase: IcebergV3InputPhase::LogStore { tracking_job: None },
                 pending_upstream_barriers,
             },
             first_barrier_info,
@@ -439,7 +442,10 @@ impl IcebergV3JobCheckpointControl {
 
     pub(crate) fn gen_backfill_progress(&self) -> Option<BackfillProgress> {
         match &self.status {
-            IcebergV3JobStatus::Running(IcebergV3InputPhase::Snapshot { snapshot, .. }) => {
+            IcebergV3JobStatus::Running(IcebergV3Input {
+                phase: IcebergV3InputPhase::Snapshot(snapshot),
+                ..
+            }) => {
                 let progress = if snapshot.create_mview_tracker.is_finished() {
                     "Snapshot finished".to_owned()
                 } else {
@@ -453,16 +459,25 @@ impl IcebergV3JobCheckpointControl {
                     backfill_type: PbBackfillType::SnapshotBackfill,
                 })
             }
-            IcebergV3JobStatus::Running(IcebergV3InputPhase::LogStore { .. }) => None,
+            IcebergV3JobStatus::Running(IcebergV3Input {
+                phase: IcebergV3InputPhase::LogStore { .. },
+                ..
+            }) => None,
         }
     }
 
     pub(crate) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
         match &self.status {
-            IcebergV3JobStatus::Running(IcebergV3InputPhase::Snapshot { snapshot, .. }) => snapshot
+            IcebergV3JobStatus::Running(IcebergV3Input {
+                phase: IcebergV3InputPhase::Snapshot(snapshot),
+                ..
+            }) => snapshot
                 .create_mview_tracker
                 .collect_fragment_progress(&self.fragment_infos, true),
-            IcebergV3JobStatus::Running(IcebergV3InputPhase::LogStore { .. }) => vec![],
+            IcebergV3JobStatus::Running(IcebergV3Input {
+                phase: IcebergV3InputPhase::LogStore { .. },
+                ..
+            }) => vec![],
         }
     }
 
@@ -503,13 +518,12 @@ impl IcebergV3JobCheckpointControl {
             partial_graph_manager.pending_barrier_num(self.control.info.partial_graph_id),
         );
         match &mut self.status {
-            IcebergV3JobStatus::Running(input_phase) => {
-                let barriers_to_inject = match input_phase {
-                    IcebergV3InputPhase::Snapshot {
-                        snapshot,
-                        pending_upstream_barriers,
-                    } => {
-                        pending_upstream_barriers.push_back(barrier_info.clone());
+            IcebergV3JobStatus::Running(input) => {
+                input
+                    .pending_upstream_barriers
+                    .push_back(barrier_info.clone());
+                let barriers_to_inject = match &mut input.phase {
+                    IcebergV3InputPhase::Snapshot(snapshot) => {
                         mutation = mutation.or_else(|| snapshot.take_start_backfill_mutation());
                         if available == 0 && mutation.is_none() {
                             vec![]
@@ -517,13 +531,13 @@ impl IcebergV3JobCheckpointControl {
                             vec![snapshot.next_fake_barrier(&barrier_info.kind)]
                         }
                     }
-                    IcebergV3InputPhase::LogStore {
-                        pending_upstream_barriers,
-                    } => {
-                        pending_upstream_barriers.push_back(barrier_info.clone());
+                    IcebergV3InputPhase::LogStore { .. } => {
                         let barrier_num_to_inject = available.max(usize::from(mutation.is_some()));
-                        pending_upstream_barriers
-                            .drain(..barrier_num_to_inject.min(pending_upstream_barriers.len()))
+                        let barrier_num_to_inject =
+                            barrier_num_to_inject.min(input.pending_upstream_barriers.len());
+                        input
+                            .pending_upstream_barriers
+                            .drain(..barrier_num_to_inject)
                             .collect()
                     }
                 };
@@ -567,20 +581,27 @@ impl IcebergV3JobCheckpointControl {
 
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
         match &mut self.status {
-            IcebergV3JobStatus::Running(input_phase) => {
+            IcebergV3JobStatus::Running(input) => {
                 let progress = collected_barrier
                     .resps
                     .values()
                     .flat_map(|response| &response.create_mview_progress);
-                if let IcebergV3InputPhase::Snapshot {
-                    snapshot,
-                    pending_upstream_barriers,
-                } = input_phase
-                    && snapshot.apply_progress(progress)
-                {
-                    pending_upstream_barriers.push_front(snapshot.finish_snapshot_barrier());
-                    *input_phase = IcebergV3InputPhase::LogStore {
-                        pending_upstream_barriers: take(pending_upstream_barriers),
+                let snapshot_finished = match &mut input.phase {
+                    IcebergV3InputPhase::Snapshot(snapshot) => snapshot.apply_progress(progress),
+                    IcebergV3InputPhase::LogStore { .. } => false,
+                };
+                if snapshot_finished {
+                    let IcebergV3InputPhase::Snapshot(mut snapshot) = replace(
+                        &mut input.phase,
+                        IcebergV3InputPhase::LogStore { tracking_job: None },
+                    ) else {
+                        unreachable!("snapshot finished outside the snapshot phase")
+                    };
+                    input
+                        .pending_upstream_barriers
+                        .push_front(snapshot.finish_snapshot_barrier());
+                    input.phase = IcebergV3InputPhase::LogStore {
+                        tracking_job: Some(snapshot.create_mview_tracker.into_tracking_job()),
                     };
                 }
             }
@@ -590,6 +611,7 @@ impl IcebergV3JobCheckpointControl {
         false
     }
 
+    #[expect(clippy::type_complexity)]
     pub(crate) fn start_completing(
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
@@ -598,7 +620,7 @@ impl IcebergV3JobCheckpointControl {
         u64,
         HashMap<WorkerId, BarrierCompleteResponse>,
         PartialGraphBarrierInfo,
-        bool,
+        Option<TrackingJob>,
     )> {
         let epoch_end_bound = min_upstream_inflight_barrier
             .map(Excluded)
@@ -609,7 +631,16 @@ impl IcebergV3JobCheckpointControl {
                 epoch_end_bound,
                 |_non_checkpoint_epoch, _, _| {},
             )
-            .map(|(epoch, responses, info)| (epoch, responses, info, false))
+            .map(|(epoch, responses, info)| {
+                let tracking_job = match &mut self.status {
+                    IcebergV3JobStatus::Running(IcebergV3Input {
+                        phase: IcebergV3InputPhase::LogStore { tracking_job },
+                        ..
+                    }) if epoch == self.control.info.snapshot_epoch => tracking_job.take(),
+                    _ => None,
+                };
+                (epoch, responses, info, tracking_job)
+            })
     }
 
     pub(crate) fn ack_completed(
@@ -617,11 +648,20 @@ impl IcebergV3JobCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         completed_epoch: u64,
     ) {
-        match &self.status {
-            IcebergV3JobStatus::Running(_) => {
+        match &mut self.status {
+            IcebergV3JobStatus::Running(input) => {
                 partial_graph_manager
                     .ack_completed(self.control.info.partial_graph_id, completed_epoch);
                 self.control.ack_completed(completed_epoch);
+                if completed_epoch == self.control.info.snapshot_epoch {
+                    let IcebergV3InputPhase::LogStore { tracking_job } = &input.phase else {
+                        unreachable!("snapshot epoch completed outside the log-store phase")
+                    };
+                    assert!(
+                        tracking_job.is_none(),
+                        "tracking job should have been taken at start_completing"
+                    );
+                }
             }
         }
     }

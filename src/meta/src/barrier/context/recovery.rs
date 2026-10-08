@@ -400,7 +400,7 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(committed_epoch)
     }
 
-    async fn finish_completed_batch_refresh_background_jobs(
+    async fn finish_completed_independent_snapshot_jobs(
         &self,
         recovery_context: &LoadedRecoveryContext,
         state_table_committed_epochs: &HashMap<TableId, u64>,
@@ -411,27 +411,34 @@ impl GlobalBarrierWorkerContextImpl {
             let Some(job) = recovery_context.fragment_context.job_map.get(&job_id) else {
                 continue;
             };
-            if job.refresh_interval_sec.is_none() {
-                continue;
-            }
             let Some(fragments) = recovery_context.fragment_context.job_fragments.get(&job_id)
             else {
                 continue;
             };
+            let is_batch_refresh = job.refresh_interval_sec.is_some();
+            let is_iceberg_v3 =
+                is_iceberg_v3_fragment_nodes(fragments.values().map(|fragment| &fragment.nodes));
+            let job_type = if is_batch_refresh {
+                "batch refresh"
+            } else if is_iceberg_v3 {
+                "Iceberg V3"
+            } else {
+                continue;
+            };
 
-            let committed_epoch =
-                Self::resolve_job_committed_epoch(job_id, fragments, state_table_committed_epochs)?;
             let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
                 fragments
                     .values()
                     .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
             )?
             .0
-            .ok_or_else(|| anyhow!("batch refresh job {} has no snapshot backfill info", job_id))?;
+            .ok_or_else(|| anyhow!("independent job {} has no snapshot backfill info", job_id))?;
+            let committed_epoch =
+                Self::resolve_job_committed_epoch(job_id, fragments, state_table_committed_epochs)?;
             let snapshot_epoch = snapshot_backfill_info
                 .upstream_mv_table_id_to_backfill_epoch
                 .values()
-                .find_map(|e| *e)
+                .find_map(|epoch| *epoch)
                 .unwrap_or(committed_epoch);
             if committed_epoch < snapshot_epoch {
                 continue;
@@ -441,7 +448,8 @@ impl GlobalBarrierWorkerContextImpl {
                 %job_id,
                 committed_epoch,
                 snapshot_epoch,
-                "finish completed batch refresh background job during recovery"
+                job_type,
+                "finish completed independent snapshot job during recovery"
             );
             self.finish_creating_job(TrackingJob::recovered_from_fragment_nodes(
                 job_id,
@@ -1008,7 +1016,7 @@ impl GlobalBarrierWorkerContextImpl {
                         })
                         .await?;
 
-                    self.finish_completed_batch_refresh_background_jobs(
+                    self.finish_completed_independent_snapshot_jobs(
                         &recovery_context,
                         &state_table_committed_epochs,
                         &mut initial_creating_jobs,
@@ -1132,7 +1140,7 @@ impl GlobalBarrierWorkerContextImpl {
             })
             .await?;
 
-        self.finish_completed_batch_refresh_background_jobs(
+        self.finish_completed_independent_snapshot_jobs(
             &recovery_context,
             &state_table_committed_epochs,
             &mut creating_jobs,
