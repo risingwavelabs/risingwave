@@ -70,6 +70,13 @@ impl Display for StackTraceResponseOutput<'_> {
                 writeln!(s, "{trace}")?;
             }
         }
+        if !self.frontend_traces.is_empty() {
+            writeln!(s, "--- Frontend Traces ---")?;
+            for (name, trace) in &self.frontend_traces {
+                writeln!(s, ">> Frontend Query {name}")?;
+                writeln!(s, "{trace}")?;
+            }
+        }
         if !self.compaction_task_traces.is_empty() {
             writeln!(s, "--- Compactor Traces ---")?;
             for (name, trace) in &self.compaction_task_traces {
@@ -118,6 +125,7 @@ impl StackTraceResponse {
         self.actor_traces.extend(b.actor_traces);
         self.rpc_traces.extend(b.rpc_traces);
         self.batch_traces.extend(b.batch_traces);
+        self.frontend_traces.extend(b.frontend_traces);
         self.compaction_task_traces.extend(b.compaction_task_traces);
         self.inflight_barrier_traces
             .extend(b.inflight_barrier_traces);
