@@ -37,13 +37,33 @@ use thiserror_ext::AsReport;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcTableSnapshotSplitOption, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, ExternalTableConfig,
+    ExternalTableReader, SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct OracleOffset {
-    pub scn: u64,
+    pub decoded_commit_scn: u64,
+}
+
+impl OracleOffset {
+    /// The per-event commit SCN is attached by RisingWave's Java CDC consumer; Debezium's
+    /// own `sourceOffset.commit_scn` is a per-redo-thread recovery map, not this event's SCN.
+    pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
+        // Native Oracle offset fields (such as the string txId) differ from other connectors.
+        let dbz_offset: serde_json::Value = serde_json::from_str(offset)
+            .with_context(|| format!("invalid upstream Oracle CDC offset: {offset}"))?;
+        let decoded_commit_scn = dbz_offset
+            .pointer("/sourceOffset/decoded_commit_scn")
+            .and_then(serde_json::Value::as_str)
+            .context("Oracle CDC data offset is missing decoded_commit_scn")?
+            .parse::<u64>()
+            .context("invalid Oracle CDC commit SCN")?;
+        if decoded_commit_scn == 0 {
+            bail!("Oracle CDC commit SCN must be positive");
+        }
+        Ok(Self { decoded_commit_scn })
+    }
 }
 
 pub struct OracleExternalTable {
@@ -128,7 +148,7 @@ impl ExternalTableReader for OracleExternalTableReader {
             bail!("Oracle returned an invalid current SCN");
         }
         Ok(CdcOffset::Oracle(OracleOffset {
-            scn: response.snapshot_scn,
+            decoded_commit_scn: response.snapshot_scn,
         }))
     }
 
@@ -166,6 +186,14 @@ impl ExternalTableReader for OracleExternalTableReader {
 }
 
 impl OracleExternalTableReader {
+    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
+        Box::new(|offset| {
+            Ok(CdcOffset::Oracle(OracleOffset::parse_debezium_offset(
+                offset,
+            )?))
+        })
+    }
+
     pub fn new(
         config: ExternalTableConfig,
         rw_schema: Schema,

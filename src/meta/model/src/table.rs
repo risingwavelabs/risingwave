@@ -150,6 +150,8 @@ pub enum CdcTableType {
     Mongo,
     #[sea_orm(string_value = "CITUS")]
     Citus,
+    #[sea_orm(string_value = "ORACLE")]
+    Oracle,
 }
 
 impl From<CdcTableType> for PbCdcTableType {
@@ -160,6 +162,7 @@ impl From<CdcTableType> for PbCdcTableType {
             CdcTableType::Sqlserver => Self::Sqlserver,
             CdcTableType::Mongo => Self::Mongo,
             CdcTableType::Citus => Self::Citus,
+            CdcTableType::Oracle => Self::Oracle,
             CdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -173,6 +176,7 @@ impl From<PbCdcTableType> for CdcTableType {
             PbCdcTableType::Sqlserver => Self::Sqlserver,
             PbCdcTableType::Mongo => Self::Mongo,
             PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Oracle => Self::Oracle,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -392,6 +396,7 @@ impl From<PbTable> for ActiveModel {
                     2 => CdcTableType::Mysql,
                     3 => CdcTableType::Sqlserver,
                     4 => CdcTableType::Mongo,
+                    6 => CdcTableType::Oracle,
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),

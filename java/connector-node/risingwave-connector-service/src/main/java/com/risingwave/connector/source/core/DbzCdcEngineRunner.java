@@ -139,7 +139,7 @@ public class DbzCdcEngineRunner {
         executor.execute(engine);
 
         boolean startOk = true;
-        // For backfill source, we need to wait for the streaming source to start before proceeding
+        // Wait for connector-specific streaming startup before sending the handshake.
         if (config.isBackfillSource()) {
             var databaseServerName =
                     config.getResolvedDebeziumProps()

@@ -1110,7 +1110,6 @@ pub(super) async fn handle_create_table_plan(
                     &source.with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
-
             let (columns, pk_names, pk_comparisons) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
                 None => {

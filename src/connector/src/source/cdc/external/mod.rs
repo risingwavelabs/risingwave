@@ -42,7 +42,9 @@ use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
     MySqlExternalTable, MySqlExternalTableReader, MySqlOffset,
 };
-use crate::source::cdc::external::oracle::{OracleExternalTable, OracleOffset};
+use crate::source::cdc::external::oracle::{
+    OracleExternalTable, OracleExternalTableReader, OracleOffset,
+};
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 use crate::source::cdc::external::sql_server::{
     SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
@@ -57,6 +59,7 @@ pub enum ExternalCdcTableType {
     SqlServer,
     Citus,
     Mongo,
+    Oracle,
 }
 
 impl ExternalCdcTableType {
@@ -68,12 +71,16 @@ impl ExternalCdcTableType {
             "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
             "mongodb-cdc" => Self::Mongo,
+            "oracle-cdc" => Self::Oracle,
             _ => Self::Undefined,
         }
     }
 
     pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::MySql | Self::Postgres | Self::SqlServer)
+        matches!(
+            self,
+            Self::MySql | Self::Postgres | Self::SqlServer | Self::Oracle
+        )
     }
 
     pub fn enable_transaction_metadata(&self) -> bool {
@@ -88,6 +95,7 @@ impl ExternalCdcTableType {
             Self::MySql => Ok(MySqlExternalTableReader::get_cdc_offset_parser()),
             Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
             Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
+            Self::Oracle => Ok(OracleExternalTableReader::get_cdc_offset_parser()),
             Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -118,6 +126,9 @@ impl ExternalCdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
+            Self::Oracle => Ok(ExternalTableReaderImpl::Oracle(
+                OracleExternalTableReader::new(config, schema, pk_indices)?,
+            )),
             // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
@@ -134,6 +145,7 @@ impl From<ExternalCdcTableType> for PbCdcTableType {
 
             ExternalCdcTableType::Citus => Self::Citus,
             ExternalCdcTableType::Mongo => Self::Mongo,
+            ExternalCdcTableType::Oracle => Self::Oracle,
             ExternalCdcTableType::Undefined | ExternalCdcTableType::Mock => Self::Unspecified,
         }
     }
@@ -147,6 +159,7 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
             PbCdcTableType::Sqlserver => Self::SqlServer,
             PbCdcTableType::Mongo => Self::Mongo,
             PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Oracle => Self::Oracle,
             PbCdcTableType::Unspecified => Self::Undefined,
         }
     }
@@ -173,10 +186,10 @@ impl SchemaTableName {
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            ExternalCdcTableType::Postgres | ExternalCdcTableType::Citus => {
-                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
-            }
-            ExternalCdcTableType::SqlServer => {
+            ExternalCdcTableType::Postgres
+            | ExternalCdcTableType::Citus
+            | ExternalCdcTableType::Oracle
+            | ExternalCdcTableType::SqlServer => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
             _ => {
@@ -246,6 +259,12 @@ pub struct DebeziumSourceOffset {
     // sql server offset
     pub commit_lsn: Option<String>,
     pub change_lsn: Option<String>,
+    // oracle offset
+    // Oracle's sourceOffset can emit a string txId, which conflicts with the
+    // PostgreSQL txid field above using the same serde name. Oracle offsets are
+    // parsed directly with serde_json::Value instead of declaring this field here;
+    // the comparison SCN is read as a string and converted to u64.
+    // pub decoded_commit_scn: Option<u64>
 }
 
 pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
@@ -287,12 +306,11 @@ pub struct CdcTableSnapshotSplitOption {
     pub backfill_split_pk_column_index: u32,
 }
 
-// TODO(#26804): Add `OracleExternalTableReader` when Oracle CDC backfill and offset
-// parsing are implemented.
 pub enum ExternalTableReaderImpl {
     MySql(MySqlExternalTableReader),
     Postgres(PostgresExternalTableReader),
     SqlServer(SqlServerExternalTableReader),
+    Oracle(OracleExternalTableReader),
     Mock(MockExternalTableReader),
 }
 
@@ -374,6 +392,7 @@ impl ExternalTableReader for ExternalTableReaderImpl {
             ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
             ExternalTableReaderImpl::Postgres(postgres) => postgres.current_cdc_offset().await,
             ExternalTableReaderImpl::SqlServer(sql_server) => sql_server.current_cdc_offset().await,
+            ExternalTableReaderImpl::Oracle(oracle) => oracle.current_cdc_offset().await,
             ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
         }
     }
@@ -427,6 +446,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::SqlServer(_) => {
                 SqlServerExternalTableReader::get_cdc_offset_parser()
             }
+            ExternalTableReaderImpl::Oracle(_) => {
+                OracleExternalTableReader::get_cdc_offset_parser()
+            }
             ExternalTableReaderImpl::Mock(_) => MockExternalTableReader::get_cdc_offset_parser(),
         }
     }
@@ -449,6 +471,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::SqlServer(sql_server) => {
                 sql_server.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
+            ExternalTableReaderImpl::Oracle(oracle) => {
+                oracle.snapshot_read(table_name, start_pk, primary_keys, limit)
+            }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
@@ -468,6 +493,7 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::MySql(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Postgres(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::SqlServer(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Oracle(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Mock(e) => e.get_parallel_cdc_splits(options),
         };
         pin_mut!(stream);
@@ -495,6 +521,9 @@ impl ExternalTableReaderImpl {
             }
             ExternalTableReaderImpl::SqlServer(sql_server) => {
                 sql_server.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::Oracle(oracle) => {
+                oracle.split_snapshot_read(table_name, left, right, split_columns)
             }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.split_snapshot_read(table_name, left, right, split_columns)
