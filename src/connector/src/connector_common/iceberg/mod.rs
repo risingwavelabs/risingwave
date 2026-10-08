@@ -181,10 +181,9 @@ pub struct IcebergCommon {
     #[serde(rename = "catalog.header")]
     pub catalog_header: Option<String>,
 
-    /// Request vended credentials from the native Iceberg REST catalog with
-    /// `X-Iceberg-Access-Delegation: vended-credentials`. ADLS SAS and S3
-    /// credentials are selected per file path and refreshed during storage I/O,
-    /// including for existing readers and writers.
+    /// Enable vended credentials for Iceberg REST catalog.
+    /// For Google Cloud Lakehouse Iceberg REST catalogs, this sends
+    /// `X-Iceberg-Access-Delegation: vended-credentials`.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub vended_credentials: Option<bool>,
 

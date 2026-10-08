@@ -222,7 +222,6 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-axum = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true }
 expect-test = "1"
