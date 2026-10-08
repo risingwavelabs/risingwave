@@ -44,9 +44,7 @@ use crate::controller::utils::{
     get_object_owner, get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
     upsert_user_privileges,
 };
-use crate::manager::{
-    FrontendNotificationBatch, IGNORED_NOTIFICATION_VERSION, NotificationVersion,
-};
+use crate::manager::{FrontendNotificationBatch, NotificationVersion};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -62,13 +60,10 @@ impl CatalogController {
     pub(crate) async fn notify_users_update(
         &self,
         user_infos: Vec<PbUserInfo>,
-    ) -> NotificationVersion {
+    ) -> Option<NotificationVersion> {
         let mut notifications = self.frontend_notification_batch();
         Self::add_users_update_notifications(&mut notifications, user_infos);
-        notifications
-            .publish()
-            .await
-            .expect("a user update notification must contain at least one user")
+        notifications.publish().await
     }
 
     pub async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
@@ -240,7 +235,7 @@ impl CatalogController {
         new_grant_privileges: &[PbGrantPrivilege],
         grantor: UserId,
         with_grant_option: bool,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<Option<NotificationVersion>> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         for user_id in &user_ids {
@@ -358,7 +353,7 @@ impl CatalogController {
         revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<Option<NotificationVersion>> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         for user_id in &user_ids {
@@ -475,7 +470,7 @@ impl CatalogController {
         }
         if root_user_privileges.is_empty() {
             tracing::warn!("no privilege to revoke, ignore it");
-            return Ok(IGNORED_NOTIFICATION_VERSION);
+            return Ok(None);
         }
 
         // check if the user granted any privileges to other users.
@@ -526,8 +521,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let version = self.notify_users_update(user_infos).await;
-        Ok(version)
+        Ok(self.notify_users_update(user_infos).await)
     }
 
     pub async fn grant_default_privileges(
@@ -794,6 +788,11 @@ mod tests {
     #[tokio::test]
     async fn test_user_and_privilege() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        assert_eq!(
+            mgr.grant_privilege(vec![], &[], TEST_ROOT_USER_ID, false)
+                .await?,
+            None
+        );
         mgr.create_user(make_test_user("test_user_1")).await?;
         mgr.create_user(make_test_user("test_user_2")).await?;
         let user_1 = mgr.get_user_by_name("test_user_1").await?;
