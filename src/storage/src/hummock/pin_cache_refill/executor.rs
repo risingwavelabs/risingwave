@@ -424,7 +424,25 @@ impl PinCacheRefillExecutor {
         }
     }
 
-    pub(super) fn reproject(&self, ownership: Arc<HashMap<TableId, Bitmap>>) {
+    /// Removes only the work whose backend membership has already been withdrawn.
+    /// Running attempts retain their physical slots until they observe the revoked token.
+    pub(super) fn remove_objects(&self, objects: &[HummockSstableObjectId]) {
+        let mut state = self.state.lock();
+        for &object in objects {
+            if let Some(work) = state.remove(object) {
+                work.completion.store(2, Ordering::Release);
+            }
+        }
+        drop(state);
+        self.wake.send_replace(());
+        self.changed.notify_waiters();
+    }
+
+    pub(super) fn reproject(
+        &self,
+        ownership: &HashMap<TableId, Bitmap>,
+        pinned_tables: &HashSet<TableId>,
+    ) {
         let Some(cache) = self.store.pin_cache() else {
             return;
         };
@@ -442,11 +460,14 @@ impl PinCacheRefillExecutor {
                 work.completion.store(2, Ordering::Release);
                 return false;
             }
+            // Policy revocation is permanent for this admission. Temporary vnode changes
+            // must not shrink this set, and later SET cannot restore a revoked table.
+            work.admitted_tables
+                .retain(|table| pinned_tables.contains(table));
             let ownership = Arc::new(
-                ownership
+                work.admitted_tables
                     .iter()
-                    .filter(|(table, _)| work.admitted_tables.contains(*table))
-                    .map(|(&table, bitmap)| (table, bitmap.clone()))
+                    .filter_map(|table| ownership.get(table).map(|bitmap| (*table, bitmap.clone())))
                     .collect::<HashMap<_, _>>(),
             );
             if ownership.is_empty() {
@@ -662,8 +683,107 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
     use crate::hummock::pin_cache::PinCache;
+    use crate::hummock::pin_cache_refill::PinCacheRefillController;
+    use crate::hummock::pin_cache_refill::tests::version_with_ssts;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable};
     use crate::hummock::value::HummockValue;
+
+    #[tokio::test]
+    async fn test_policy_reset_cannot_revive_shared_object_admission_but_vnode_changes_can() {
+        for (reset_policy, migrate_first) in [(false, false), (true, false), (true, true)] {
+            let tables = [TableId::from(233), TableId::from(234)];
+            let store = mock_sstable_store().await;
+            let (_, info) = crate::hummock::test_utils::gen_test_sstable_with_table_ids(
+                default_builder_opt_for_test(),
+                874,
+                tables.into_iter().map(|table| {
+                    (
+                        FullKey::new(
+                            table,
+                            TableKey(iterator_test_table_key_of(0)),
+                            test_epoch(1),
+                        ),
+                        HummockValue::put(vec![1]),
+                    )
+                }),
+                store.clone(),
+                tables.map(|table| table.as_raw_id()).to_vec(),
+            )
+            .await;
+            let object = info.object_id;
+            let cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, 2, [])
+                .await
+                .unwrap();
+            let store = Arc::new(
+                Arc::into_inner(store)
+                    .unwrap()
+                    .with_pin_cache(cache.clone()),
+            );
+            let version = version_with_ssts(std::slice::from_ref(&info));
+            let concurrency = Arc::new(Semaphore::new(1));
+            let mut controller =
+                PinCacheRefillController::new(store, version.clone(), concurrency.clone());
+            let permit = concurrency.acquire().await.unwrap();
+            let ownership = HashMap::from([
+                (tables[0], Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                (
+                    tables[1],
+                    Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [255]),
+                ),
+            ]);
+            controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&version));
+            controller.update_ownership(ownership.clone());
+            let ticket = controller.submit(PinCacheRefillPlan {
+                objects: [(object, vec![info])].into(),
+                ownership: Arc::new(ownership.clone()),
+            });
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while !matches!(
+                    controller.executor.state.lock().objects[&object].status,
+                    Status::Running
+                ) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+
+            // B keeps the physical object and its work alive, but none of O's B blocks are local.
+            let without_a = HashMap::from([(tables[1], ownership[&tables[1]].clone())]);
+            if migrate_first {
+                // RESET must also take effect when ownership is unchanged by the policy update.
+                controller.update_ownership(without_a.clone());
+            }
+            if reset_policy {
+                controller
+                    .replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&version));
+            }
+            controller.update_ownership(without_a);
+            if reset_policy {
+                controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&version));
+            }
+            controller.update_ownership(ownership);
+            assert!(cache.is_registered(object));
+            assert!(
+                !tokio::time::timeout(Duration::from_secs(1), ticket.wait())
+                    .await
+                    .unwrap()
+            );
+            drop(permit);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while !controller.executor.state.lock().objects.is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                cache.get(object).is_some(),
+                !reset_policy,
+                "only vnode changes may reuse an admitted table; SET cannot undo RESET"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_cached_object_skips_download_but_still_checks_ownership() {
@@ -836,7 +956,7 @@ mod tests {
         );
         assert_eq!(executor.state.lock().backlog, [[0, 0], [0, 0], [1, 1]]);
         cache.unregister_objects([object]);
-        executor.reproject(Arc::default());
+        executor.remove_objects(&[object]);
         let state = executor.state.lock();
         assert!(state.objects.is_empty() && state.schedule.is_empty());
         assert_eq!(state.backlog, [[0; 2]; 3]);
@@ -927,7 +1047,7 @@ mod tests {
             } else {
                 // Reprojection may drop old work, but must not revoke the new admission.
                 let token = cache.prepare_refill(object).unwrap();
-                executor.reproject(plan.ownership.clone());
+                executor.reproject(&plan.ownership, &plan.ownership.keys().copied().collect());
                 assert!(executor.state.lock().objects.is_empty());
                 assert_eq!(cache.prepare_refill(object), Some(token));
                 drop(permit);
@@ -947,7 +1067,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pin_executor_uses_bounded_parallelism() {
+    async fn test_pin_executor_uses_bounded_parallelism_and_targeted_removal() {
         let store = mock_sstable_store().await;
         let cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX, 1, 2, [])
             .await
@@ -977,19 +1097,30 @@ mod tests {
                 .with_pin_cache(cache.clone()),
         );
         let concurrency = Arc::new(Semaphore::new(2));
-        let executor = PinCacheRefillExecutor::new(store, concurrency.clone());
+        let controller =
+            PinCacheRefillController::new(store, version_with_ssts(&[]), concurrency.clone());
+        let executor = &controller.executor;
         // Occupy the shared data budget with Foyer work while Pin queues its attempts.
         let foyer_permits = concurrency.acquire_many(2).await.unwrap();
-        let ticket = executor.submit(PinCacheRefillPlan {
-            objects,
-            ownership: Arc::new(
-                [(
-                    TableId::default(),
-                    Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
-                )]
-                .into(),
-            ),
-        });
+        let ownership: Arc<HashMap<_, _>> = Arc::new(
+            [(
+                TableId::default(),
+                Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            )]
+            .into(),
+        );
+        let mut tickets: HashMap<_, _> = objects
+            .into_iter()
+            .map(|(object, infos)| {
+                (
+                    object,
+                    executor.submit(PinCacheRefillPlan {
+                        objects: [(object, infos)].into(),
+                        ownership: ownership.clone(),
+                    }),
+                )
+            })
+            .collect();
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
                 let counts = {
@@ -1015,12 +1146,48 @@ mod tests {
         })
         .await
         .unwrap();
+        let (removed, survivor) = {
+            let state = executor.state.lock();
+            let mut running = state
+                .objects
+                .iter()
+                .filter(|(_, work)| matches!(work.status, Status::Running));
+            let removed_running = *running.next().unwrap().0;
+            let survivor = *running.next().unwrap().0;
+            let queued = *state
+                .objects
+                .iter()
+                .find(|(_, work)| matches!(work.status, Status::Queued(_)))
+                .unwrap()
+                .0;
+            ([removed_running, queued], survivor)
+        };
+        let survivor_token = cache.prepare_refill(survivor);
+        controller.unregister_objects([]);
+        controller.unregister_objects(removed);
+        for object in removed {
+            assert!(
+                !tokio::time::timeout(
+                    Duration::from_secs(1),
+                    tickets.remove(&object).unwrap().wait()
+                )
+                .await
+                .unwrap(),
+                "withdrawal must finish queued and running tickets without waiting for a permit"
+            );
+            assert!(!cache.is_registered(object));
+        }
+        assert_eq!(cache.prepare_refill(survivor), survivor_token);
         drop(foyer_permits);
         assert!(
-            tokio::time::timeout(Duration::from_secs(1), ticket.wait())
-                .await
-                .unwrap()
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                tickets.remove(&survivor).unwrap().wait()
+            )
+            .await
+            .unwrap()
         );
+        assert!(cache.get(survivor).is_some());
         assert!(
             executor.state.lock().objects.is_empty(),
             "completed work must not become another live-set"

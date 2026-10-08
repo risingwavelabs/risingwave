@@ -31,6 +31,9 @@ use crate::monitor::StoreLocalStatistic;
 mod executor;
 use executor::{PinCacheRefillExecutor, Ticket};
 
+#[cfg(test)]
+mod tests;
+
 /// Immutable worker-local admission. A matching block admits the complete physical object.
 #[derive(Clone, Default)]
 pub(crate) struct PinCacheRefillPlan {
@@ -257,6 +260,7 @@ impl PinCacheRefillController {
         if self.pinned_table_ids == pinned_table_ids {
             return;
         }
+        let revoked_tables = !self.pinned_table_ids.is_subset(&pinned_table_ids);
         let before = resident_versions
             .iter()
             .flat_map(|version| Self::pinned_objects(version, &self.pinned_table_ids))
@@ -272,6 +276,12 @@ impl PinCacheRefillController {
             cache.register_objects(changes.inserted);
         }
         self.unregister_objects(changes.removed);
+        if revoked_tables {
+            // A shared object may remain registered through another table. RESET must still
+            // permanently withdraw this table from work that was already submitted.
+            self.executor
+                .reproject(&self.ownership, &self.pinned_table_ids);
+        }
     }
 
     /// Reprojects admitted work only. Ownership arrival or changes do not warm existing SSTs
@@ -283,7 +293,8 @@ impl PinCacheRefillController {
             return;
         }
         self.ownership = Arc::new(ownership);
-        self.executor.reproject(self.ownership.clone());
+        self.executor
+            .reproject(&self.ownership, &self.pinned_table_ids);
     }
 
     pub(crate) fn submit(&self, mut plan: PinCacheRefillPlan) -> Ticket {
@@ -310,10 +321,14 @@ impl PinCacheRefillController {
         &self,
         objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) {
-        if let Some(cache) = self.sstable_store.pin_cache() {
-            cache.unregister_objects(objects);
+        let objects: Vec<_> = objects.into_iter().collect();
+        if objects.is_empty() {
+            return;
         }
-        self.executor.reproject(self.ownership.clone());
+        if let Some(cache) = self.sstable_store.pin_cache() {
+            cache.unregister_objects(objects.iter().copied());
+        }
+        self.executor.remove_objects(&objects);
     }
 
     pub(crate) fn apply_version_update(

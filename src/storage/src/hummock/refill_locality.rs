@@ -77,3 +77,110 @@ pub(crate) fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize
     }
     vnode_range(&table_key_range)
 }
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_hummock_sdk::key::{UserKey, prefix_slice_with_vnode};
+    use risingwave_pb::id::TableId;
+
+    use super::*;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_with_table_ids,
+    };
+    use crate::hummock::value::HummockValue;
+
+    #[tokio::test]
+    async fn test_block_vnode_range_handles_vnode_only_block_boundaries() {
+        let table_id = TableId::from(233);
+        let vnode = VirtualNode::ZERO;
+        let sstable_store = mock_sstable_store().await;
+        let mut builder_options = default_builder_opt_for_test();
+        builder_options.block_capacity = 1;
+        let (sst, _) = gen_test_sstable_with_table_ids(
+            builder_options,
+            1,
+            [234, 233].into_iter().map(|epoch| {
+                (
+                    FullKey {
+                        user_key: UserKey::for_test(table_id, prefix_slice_with_vnode(vnode, b"")),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(epoch)),
+                    },
+                    HummockValue::put(Bytes::from_static(b"value")),
+                )
+            }),
+            sstable_store.clone(),
+            vec![table_id.as_raw_id()],
+        )
+        .await;
+        assert_eq!(sst.block_count(), 2);
+        let expected = (vnode.to_index(), vnode.to_index() + 1);
+        assert_eq!(block_vnode_range(&sst, 0), expected);
+        assert_eq!(block_vnode_range(&sst, 1), expected);
+    }
+
+    #[tokio::test]
+    async fn test_block_vnode_range_fails_open_for_shortened_meta_keys() {
+        let table_id = TableId::from(233);
+        let sstable_store = mock_sstable_store().await;
+        let mut builder_options = default_builder_opt_for_test();
+        builder_options.block_capacity = 1;
+        builder_options.shorten_block_meta_key_threshold = Some(0);
+        let (sst, _) = gen_test_sstable_with_table_ids(
+            builder_options,
+            1,
+            [255, 256].into_iter().map(|vnode| {
+                (
+                    FullKey {
+                        user_key: UserKey::for_test(
+                            table_id,
+                            prefix_slice_with_vnode(VirtualNode::from_index(vnode), b"long-key"),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(Bytes::from_static(b"value")),
+                )
+            }),
+            sstable_store,
+            vec![table_id.as_raw_id()],
+        )
+        .await;
+        assert_eq!(sst.block_count(), 2);
+        assert!(
+            FullKey::decode(&sst.meta.block_metas[1].smallest_key)
+                .user_key
+                .table_key
+                .as_ref()
+                .len()
+                < VirtualNode::SIZE
+        );
+        let full_range = (0, VirtualNode::MAX_REPRESENTABLE.to_index() + 1);
+        assert_eq!(block_vnode_range(&sst, 0), full_range);
+        assert_eq!(block_vnode_range(&sst, 1), full_range);
+    }
+
+    #[test]
+    fn test_vnode_range_overlaps_bitmap_uses_right_exclusive_end() {
+        let right_exclusive = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [12]);
+        assert!(!vnode_range_overlaps_bitmap((10, 12), &right_exclusive));
+
+        let inside_range = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [11]);
+        assert!(vnode_range_overlaps_bitmap((10, 12), &inside_range));
+
+        let last_vnode = Bitmap::from_indices(
+            VirtualNode::COUNT_FOR_TEST,
+            [VirtualNode::COUNT_FOR_TEST - 1],
+        );
+        assert!(vnode_range_overlaps_bitmap(
+            (VirtualNode::COUNT_FOR_TEST - 1, VirtualNode::COUNT_FOR_TEST),
+            &last_vnode
+        ));
+        assert!(!vnode_range_overlaps_bitmap(
+            (VirtualNode::COUNT_FOR_TEST, VirtualNode::COUNT_FOR_TEST + 1),
+            &last_vnode
+        ));
+    }
+}
