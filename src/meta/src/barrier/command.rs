@@ -1466,7 +1466,6 @@ impl Command {
     pub(super) fn list_finish_to_mutation(associated_source_id: SourceId) -> Mutation {
         Mutation::ListFinish(ListFinishMutation {
             associated_source_id,
-            bounded_load: None,
         })
     }
 

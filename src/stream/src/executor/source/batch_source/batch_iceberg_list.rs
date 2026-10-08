@@ -226,7 +226,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                         ..
                                     } if associated_source_id
                                         == &self.stream_source_core.source_id
-                                        && mode.accepts_refresh_start() =>
+                                        && mode.accepts_refresh_mutations() =>
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,
@@ -266,18 +266,20 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                             self.stream_source_core.source_id,
                                         );
                                     }
-                                    LoadMode::Bounded { start: Some(start) } => {
+                                    LoadMode::Bounded {
+                                        attempt: Some(attempt),
+                                    } => {
                                         self.barrier_manager.report_bounded_load_progress(
                                             barrier.epoch,
                                             self.actor_ctx.id,
                                             self.actor_ctx.fragment_id,
-                                            start.generation,
+                                            attempt.generation,
                                             Progress::ListSealed(ListSealed {}),
                                         );
                                     }
-                                    LoadMode::Bounded { start: None } => {
+                                    LoadMode::Bounded { attempt: None } => {
                                         unreachable!(
-                                            "bounded actor without a start cannot finish listing"
+                                            "bounded actor without an attempt cannot finish listing"
                                         );
                                     }
                                 }

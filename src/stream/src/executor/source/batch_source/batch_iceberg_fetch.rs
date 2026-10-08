@@ -30,6 +30,7 @@ use risingwave_connector::source::iceberg::{
     PersistedFileScanTask, scan_task_to_chunk_with_deletes,
 };
 use risingwave_connector::source::reader::desc::SourceDesc;
+use risingwave_pb::stream_plan::bounded_load_mutation::Action as BoundedLoadAction;
 use risingwave_pb::stream_service::barrier_complete_response::bounded_load_progress::{
     FetchDone, Progress,
 };
@@ -371,18 +372,20 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                         core.source_id,
                                     );
                                 }
-                                LoadMode::Bounded { start: Some(start) } => {
+                                LoadMode::Bounded {
+                                    attempt: Some(attempt),
+                                } => {
                                     self.barrier_manager.report_bounded_load_progress(
                                         barrier.epoch,
                                         self.actor_ctx.id,
                                         self.actor_ctx.fragment_id,
-                                        start.generation,
+                                        attempt.generation,
                                         Progress::FetchDone(FetchDone {}),
                                     );
                                 }
-                                LoadMode::Bounded { start: None } => {
+                                LoadMode::Bounded { attempt: None } => {
                                     unreachable!(
-                                        "bounded actor without a start cannot finish a load"
+                                        "bounded actor without an attempt cannot finish a load"
                                     );
                                 }
                             }
@@ -456,7 +459,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             Mutation::RefreshStart {
                 associated_source_id,
                 ..
-            } if associated_source_id == &source_id && mode.accepts_refresh_start() => {
+            } if associated_source_id == &source_id && mode.accepts_refresh_mutations() => {
                 tracing::info!(
                     ?barrier.epoch,
                     source_id = %source_id,
@@ -467,11 +470,8 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 true
             }
             Mutation::ListFinish {
-                bounded_load: sealed_attempt,
                 associated_source_id,
-            } if associated_source_id == &source_id
-                && mode.accepts_list_finish(sealed_attempt.as_ref()) =>
-            {
+            } if associated_source_id == &source_id && mode.accepts_refresh_mutations() => {
                 tracing::info!(
                     ?barrier.epoch,
                     source_id = %source_id,
@@ -481,6 +481,20 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 state.seal_listing();
                 false
             }
+            Mutation::BoundedLoad { attempt, action } if mode.owns_attempt(attempt) => match action
+            {
+                BoundedLoadAction::ListSealed(_) => {
+                    tracing::info!(
+                        ?barrier.epoch,
+                        source_id = %source_id,
+                        ?attempt,
+                        is_checkpoint = barrier.is_checkpoint(),
+                        "BoundedLoad: upstream sealed listing"
+                    );
+                    state.seal_listing();
+                    false
+                }
+            },
             _ => false,
         }
     }

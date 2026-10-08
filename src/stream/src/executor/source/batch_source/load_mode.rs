@@ -17,7 +17,7 @@
 //! Refreshable tables wait for `RefreshStart` and can run multiple loads.
 //! Bounded jobs run once per attempt, authorized by the first creation or recovery barrier.
 
-use risingwave_pb::stream_plan::BoundedLoadStart;
+use risingwave_pb::stream_plan::BoundedLoadAttempt;
 
 use crate::executor::{Barrier, Mutation};
 use crate::task::ActorId;
@@ -27,46 +27,40 @@ pub(super) enum LoadMode {
     /// Start a new full-reload cycle on each `RefreshStart` mutation.
     FullReload,
     Bounded {
-        /// The job and generation assigned to this actor by the first `AddMutation`.
-        /// Meta omits the start when recovering a completed job. Such actors stay idle
+        /// The attempt assigned to this actor by the first `AddMutation`.
+        /// Meta omits the attempt when recovering a completed job. Such actors stay idle
         /// and forward barriers without reading the source again.
-        start: Option<BoundedLoadStart>,
+        attempt: Option<BoundedLoadAttempt>,
     },
 }
 
 impl LoadMode {
-    /// Read the actor's bounded start once from its creation or recovery barrier.
+    /// Read the actor's bounded attempt once from its creation or recovery barrier.
     pub(super) fn new(is_bounded: bool, first_barrier: &Barrier, actor_id: ActorId) -> Self {
         if !is_bounded {
             return Self::FullReload;
         }
 
-        let start = match first_barrier.mutation.as_deref() {
+        let attempt = match first_barrier.mutation.as_deref() {
             Some(Mutation::Add(add)) => add.actor_bounded_starts.get(&actor_id).copied(),
             _ => None,
         };
-        Self::Bounded { start }
+        Self::Bounded { attempt }
     }
 
     /// Whether to start loading immediately after the first barrier, including on recovery.
     pub(super) fn starts_on_creation(&self) -> bool {
-        matches!(self, Self::Bounded { start: Some(_) })
+        matches!(self, Self::Bounded { attempt: Some(_) })
     }
 
-    /// Only refreshable tables may start another load through `RefreshStart`.
-    pub(super) fn accepts_refresh_start(&self) -> bool {
+    /// Only refreshable tables follow `RefreshStart` and `ListFinish`.
+    pub(super) fn accepts_refresh_mutations(&self) -> bool {
         matches!(self, Self::FullReload)
     }
 
-    /// Validate the attempt tag on `ListFinish` before fetch seals its input.
-    /// Full reload uses an untagged seal. Bounded loads require the same job and
-    /// generation as their start; bounded actors without a start reject all seals.
-    /// The fetch phase separately determines whether a load is still running.
-    pub(super) fn accepts_list_finish(&self, sealed_attempt: Option<&BoundedLoadStart>) -> bool {
-        match self {
-            Self::FullReload => sealed_attempt.is_none(),
-            Self::Bounded { start: Some(start) } => sealed_attempt == Some(start),
-            Self::Bounded { start: None } => false,
-        }
+    /// Whether a `BoundedLoad` mutation targets this actor's attempt.
+    /// Bounded actors without an attempt reject all of them.
+    pub(super) fn owns_attempt(&self, attempt: &BoundedLoadAttempt) -> bool {
+        matches!(self, Self::Bounded { attempt: Some(own) } if own == attempt)
     }
 }

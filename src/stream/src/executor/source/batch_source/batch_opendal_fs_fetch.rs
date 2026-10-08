@@ -263,7 +263,6 @@ where
                                         stream.replace_data_stream(stream::pending().boxed());
                                     }
                                     Mutation::ListFinish {
-                                        bounded_load: None,
                                         associated_source_id,
                                     } if associated_source_id == &core.source_id => {
                                         tracing::info!(

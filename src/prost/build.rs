@@ -815,7 +815,7 @@ for_all_wrapped_id_fields! (
         BackfillOrder {
             order: RelationId,
         }
-        BoundedLoadStart {
+        BoundedLoadAttempt {
             job_id: JobId,
         }
         CdcFilterNode {

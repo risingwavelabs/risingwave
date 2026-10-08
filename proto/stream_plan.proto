@@ -24,8 +24,8 @@ message UpstreamSinkInfo {
   repeated expr.ExprNode project_exprs = 3;
 }
 
-// Starts one bounded load attempt for an actor
-message BoundedLoadStart {
+// Identifies one bounded load attempt
+message BoundedLoadAttempt {
   uint64 generation = 1;
   uint32 job_id = 2;
 }
@@ -58,7 +58,7 @@ message AddMutation {
   // Sink ids whose log store must be drained before this add barrier can be collected.
   repeated uint32 sink_log_store_flush = 10;
   // Actors participating in a bounded load attempt.
-  map<uint32, BoundedLoadStart> actor_bounded_starts = 11;
+  map<uint32, BoundedLoadAttempt> actor_bounded_starts = 11;
 }
 
 message StopMutation {
@@ -163,12 +163,22 @@ message RefreshStartMutation {
 message ListFinishMutation {
   // Associated source ID for this list operation.
   uint32 associated_source_id = 1;
-  // Identifies the consumer and attempt being sealed; absent for FULL_RELOAD.
-  BoundedLoadStart bounded_load = 2;
 }
 message LoadFinishMutation {
   // Associated source ID for this load operation.
   uint32 associated_source_id = 1;
+}
+
+// Controls a bounded load attempt after it has started.
+message BoundedLoadMutation {
+  // No more file assignments will be emitted for this attempt.
+  message ListSealed {}
+
+  BoundedLoadAttempt attempt = 1;
+
+  oneof action {
+    ListSealed list_sealed = 2;
+  }
 }
 
 message ResetSourceMutation {
@@ -243,6 +253,8 @@ message BarrierMutation {
     ResetSourceMutation reset_source = 18;
     // Inject specific offsets into source splits (UNSAFE)
     InjectSourceOffsetsMutation inject_source_offsets = 19;
+    // Control signal for a bounded load attempt
+    BoundedLoadMutation bounded_load = 20;
   }
 }
 

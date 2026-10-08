@@ -49,12 +49,13 @@ use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
+use risingwave_pb::stream_plan::bounded_load_mutation::Action as BoundedLoadAction;
 use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BoundedLoadStart, IcebergPkIndexCompactionContext, PbBarrier, PbBarrierMutation, PbDispatcher,
-    PbSinkSchemaChange, PbStreamMessageBatch, PbWatermark, SubscriptionUpstreamInfo,
+    BoundedLoadAttempt, IcebergPkIndexCompactionContext, PbBarrier, PbBarrierMutation,
+    PbDispatcher, PbSinkSchemaChange, PbStreamMessageBatch, PbWatermark, SubscriptionUpstreamInfo,
 };
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
@@ -348,7 +349,7 @@ pub struct AddMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
     pub sink_log_store_flush: HashSet<SinkId>,
-    pub actor_bounded_starts: HashMap<ActorId, BoundedLoadStart>,
+    pub actor_bounded_starts: HashMap<ActorId, BoundedLoadAttempt>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -382,7 +383,6 @@ pub enum Mutation {
     },
     ListFinish {
         associated_source_id: SourceId,
-        bounded_load: Option<BoundedLoadStart>,
     },
     LoadFinish {
         associated_source_id: SourceId,
@@ -394,6 +394,10 @@ pub enum Mutation {
         source_id: SourceId,
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
+    },
+    BoundedLoad {
+        attempt: BoundedLoadAttempt,
+        action: BoundedLoadAction,
     },
 }
 
@@ -591,7 +595,8 @@ impl Barrier {
             | Mutation::ListFinish { .. }
             | Mutation::LoadFinish { .. }
             | Mutation::ResetSource { .. }
-            | Mutation::InjectSourceOffsets { .. } => false,
+            | Mutation::InjectSourceOffsets { .. }
+            | Mutation::BoundedLoad { .. } => false,
         }
     }
 
@@ -1033,10 +1038,8 @@ impl Mutation {
             }),
             Mutation::ListFinish {
                 associated_source_id,
-                bounded_load,
             } => PbMutation::ListFinish(risingwave_pb::stream_plan::ListFinishMutation {
                 associated_source_id: *associated_source_id,
-                bounded_load: *bounded_load,
             }),
             Mutation::LoadFinish {
                 associated_source_id,
@@ -1057,6 +1060,12 @@ impl Mutation {
                     split_offsets: split_offsets.clone(),
                 },
             ),
+            Mutation::BoundedLoad { attempt, action } => {
+                PbMutation::BoundedLoad(risingwave_pb::stream_plan::BoundedLoadMutation {
+                    attempt: Some(*attempt),
+                    action: Some(*action),
+                })
+            }
         }
     }
 
@@ -1225,7 +1234,6 @@ impl Mutation {
                 associated_source_id: refresh_start.associated_source_id,
             },
             PbMutation::ListFinish(list_finish) => Mutation::ListFinish {
-                bounded_load: list_finish.bounded_load,
                 associated_source_id: list_finish.associated_source_id,
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
@@ -1237,6 +1245,10 @@ impl Mutation {
             PbMutation::InjectSourceOffsets(inject) => Mutation::InjectSourceOffsets {
                 source_id: SourceId::from(inject.source_id),
                 split_offsets: inject.split_offsets.clone(),
+            },
+            PbMutation::BoundedLoad(bounded_load) => Mutation::BoundedLoad {
+                attempt: bounded_load.attempt.unwrap(),
+                action: bounded_load.action.unwrap(),
             },
         };
         Ok(mutation)
