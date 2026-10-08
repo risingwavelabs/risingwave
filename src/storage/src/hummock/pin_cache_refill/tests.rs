@@ -163,55 +163,96 @@ async fn test_membership_tracks_physical_references_without_registering_future_o
 }
 
 #[tokio::test]
-async fn test_pin_projection_uses_owned_blocks_and_deduplicates_whole_object() {
-    let table = TableId::from(233);
-    let store = mock_sstable_store().await;
-    let mut options = default_builder_opt_for_test();
-    options.block_capacity = 1;
-    let (sst, info) = gen_test_sstable_with_table_ids(
-        options,
-        701,
-        [0, 128].into_iter().map(|vnode| {
-            (
-                FullKey {
-                    user_key: UserKey::for_test(
-                        table,
-                        prefix_slice_with_vnode(VirtualNode::from_index(vnode), b"key"),
-                    ),
-                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
-                },
-                HummockValue::put(Bytes::from_static(b"value")),
-            )
-        }),
-        store,
-        vec![table.as_raw_id()],
-    )
-    .await;
-    let projections = vec![info.clone(), info.clone()];
-    for (vnode, expected) in [(0, true), (128, true), (255, false)] {
-        let ownership = HashMap::from([(
-            table,
-            Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode]),
-        )]);
-        assert_eq!(
-            PinCacheRefillPlan::owns_object(&sst, &projections, &ownership),
-            expected
+async fn test_submission_intersects_projection_admission_and_current_ownership() {
+    // Keep A last so its exact last key excludes vnode 255, without a table-switch separator.
+    let b = TableId::from(233);
+    let a = TableId::from(234);
+    for (project_b, admit_b, current_vnode) in [
+        (false, true, Some(255)), // B is owned and admitted, but outside the logical projection.
+        (true, false, Some(255)), // B is owned and projected, but was not admitted by the plan.
+        (false, false, None),     // A lost all ownership before submission.
+        (false, false, Some(0)),  // A gained the matching vnode before submission.
+    ] {
+        let store = mock_sstable_store().await;
+        let (_, info) = gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            702,
+            [b, a].into_iter().map(|table| {
+                (
+                    FullKey {
+                        user_key: UserKey::for_test(
+                            table,
+                            prefix_slice_with_vnode(VirtualNode::ZERO, b"key"),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(Bytes::from_static(b"value")),
+                )
+            }),
+            store.clone(),
+            vec![b.as_raw_id(), a.as_raw_id()],
+        )
+        .await;
+        let object = info.object_id;
+        let version = version_with_ssts(std::slice::from_ref(&info));
+        let cache = crate::hummock::pin_cache::PinCache::new(
+            crate::hummock::pin_cache::test_utils::in_memory_object_store(),
+            u64::MAX,
+            1,
+            2,
+            [],
+        )
+        .await
+        .unwrap();
+        let store = Arc::new(
+            Arc::into_inner(store)
+                .unwrap()
+                .with_pin_cache(cache.clone()),
         );
+        let mut controller =
+            PinCacheRefillController::new(store, version.clone(), Arc::new(Semaphore::new(1)));
+        let changes = controller.replace_pinned_tables([a, b].into(), &[version]);
+        cache.register_objects(changes.inserted);
+        let mut ownership = HashMap::from([
+            (b, Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            (
+                a,
+                Bitmap::from_indices(
+                    VirtualNode::COUNT_FOR_TEST,
+                    [if current_vnode == Some(0) { 255 } else { 0 }],
+                ),
+            ),
+        ]);
+        controller.update_ownership(ownership.clone());
+        let mut projection = info.get_inner();
+        if !project_b {
+            projection.table_ids = vec![a];
+        }
+        let plan = PinCacheRefillPlan::new(
+            &[SstDeltaInfo {
+                insert_sst_infos: vec![projection.into()],
+                ..Default::default()
+            }],
+            &[object].into(),
+            if admit_b { [a, b].into() } else { [a].into() },
+        );
+        if let Some(vnode) = current_vnode {
+            ownership.insert(
+                a,
+                Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode]),
+            );
+        } else {
+            ownership.remove(&a);
+        }
+        controller.update_ownership(ownership);
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                controller.submit(plan).wait()
+            )
+            .await
+            .unwrap()
+        );
+        assert_eq!(cache.get(object).is_some(), current_vnode == Some(0));
     }
-    assert!(!PinCacheRefillPlan::owns_object(
-        &sst,
-        &projections,
-        &HashMap::new()
-    ));
-
-    // Physical-object accounting is independent of the vnode selected above.
-    let plan = PinCacheRefillPlan::new(
-        &[SstDeltaInfo {
-            insert_sst_infos: projections,
-            ..Default::default()
-        }],
-        &[info.object_id].into(),
-        [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
-    );
-    assert_eq!(plan.objects.len(), 1, "physical downloads are deduplicated");
 }

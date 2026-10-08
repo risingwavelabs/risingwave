@@ -28,11 +28,8 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::id::TableId;
 
+use crate::hummock::SstableStoreRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::pin_cache::{PinCacheDownloadError, PinCacheReadHandle, PinCacheRefillToken};
-use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
-use crate::hummock::{HummockError, HummockResult, Sstable, SstableStoreRef};
-use crate::monitor::StoreLocalStatistic;
 
 mod executor;
 use executor::{PinCacheRefillExecutor, Ticket};
@@ -40,18 +37,18 @@ use executor::{PinCacheRefillExecutor, Ticket};
 #[cfg(test)]
 mod tests;
 
-/// Immutable worker-local admission. A matching block admits the complete physical object.
+/// Captures table admission while waiting for submission. Vnode ownership is resolved at submit.
 #[derive(Clone, Default)]
 pub(crate) struct PinCacheRefillPlan {
     pub objects: HashMap<HummockSstableObjectId, Vec<SstableInfo>>,
-    pub ownership: Arc<HashMap<TableId, Bitmap>>,
+    pub admitted_tables: HashSet<TableId>,
 }
 
 impl PinCacheRefillPlan {
     pub(crate) fn new(
         deltas: &[SstDeltaInfo],
         candidates: &HashSet<HummockSstableObjectId>,
-        ownership: HashMap<TableId, Bitmap>,
+        admitted_tables: HashSet<TableId>,
     ) -> Self {
         let mut objects: HashMap<_, Vec<_>> = HashMap::new();
         for sst in deltas.iter().flat_map(|delta| &delta.insert_sst_infos) {
@@ -59,142 +56,28 @@ impl PinCacheRefillPlan {
                 && sst
                     .table_ids
                     .iter()
-                    .any(|table| ownership.contains_key(table))
+                    .any(|table| admitted_tables.contains(table))
             {
                 objects.entry(sst.object_id).or_default().push(sst.clone());
             }
         }
         Self {
             objects,
-            ownership: Arc::new(ownership),
+            admitted_tables,
         }
     }
 
     pub(crate) fn retain_tables(&mut self, pinned_tables: &HashSet<TableId>) {
-        Arc::make_mut(&mut self.ownership).retain(|table, _| pinned_tables.contains(table));
+        self.admitted_tables
+            .retain(|table| pinned_tables.contains(table));
         self.objects.retain(|_, infos| {
             infos.iter().any(|info| {
                 info.table_ids
                     .iter()
-                    .any(|table| self.ownership.contains_key(table))
+                    .any(|table| self.admitted_tables.contains(table))
             })
         });
     }
-
-    pub(crate) fn owns_object(
-        sst: &Sstable,
-        projections: &[SstableInfo],
-        ownership: &HashMap<TableId, Bitmap>,
-    ) -> bool {
-        sst.meta
-            .block_metas
-            .iter()
-            .enumerate()
-            .any(|(index, block)| {
-                let table = block.table_id();
-                projections
-                    .iter()
-                    .any(|info| info.table_ids.contains(&table))
-                    && ownership.get(&table).is_some_and(|bitmap| {
-                        vnode_range_overlaps_bitmap(block_vnode_range(sst, index), bitmap)
-                    })
-            })
-    }
-}
-
-/// Ownership rejection can retire only the publication that was checked. A stale backend
-/// token says nothing about ownership of the currently published route.
-enum PinCacheRefillAttemptOutcome {
-    Published,
-    AlreadyPublished,
-    Obsolete,
-    CapacityRejected,
-    NotOwned(Option<PinCacheReadHandle>),
-}
-
-async fn refill_pin_cache_object(
-    store: &SstableStoreRef,
-    projections: &[SstableInfo],
-    ownership: &HashMap<TableId, Bitmap>,
-    token: PinCacheRefillToken,
-) -> Result<PinCacheRefillAttemptOutcome, PinCacheRefillError> {
-    let Some(cache) = store.pin_cache() else {
-        return Ok(PinCacheRefillAttemptOutcome::Obsolete);
-    };
-    // Work may have been revoked while waiting for the executor's permit. Skip its metadata
-    // read as well as its download. Publication also rejects revocation during the download.
-    if cache.prepare_refill(token.object_id()) != Some(token) {
-        return Ok(PinCacheRefillAttemptOutcome::Obsolete);
-    }
-    let route = cache.get(token.object_id());
-    if !pin_cache_object_is_owned(store, projections, ownership)
-        .await
-        .map_err(|error| PinCacheRefillError {
-            phase: "ownership_meta",
-            error,
-        })?
-    {
-        return Ok(PinCacheRefillAttemptOutcome::NotOwned(route));
-    }
-    // Ownership validation may await remote metadata. Do not start a whole-SST transfer for
-    // work revoked during that wait; only the final publication check belongs to the backend.
-    if cache.prepare_refill(token.object_id()) != Some(token) {
-        return Ok(PinCacheRefillAttemptOutcome::Obsolete);
-    }
-    // Check the current route after ownership validation. The captured route above is only
-    // for withdrawing that specific publication if the ownership check rejects it.
-    if cache.get(token.object_id()).is_some() {
-        return Ok(PinCacheRefillAttemptOutcome::AlreadyPublished);
-    }
-    let download = match cache
-        .download(
-            token.object_id(),
-            projections[0].file_size,
-            store.store(),
-            store.get_sst_data_path(token.object_id()),
-        )
-        .await
-    {
-        Ok(download) => download,
-        Err(PinCacheDownloadError::CapacityRejected) => {
-            return Ok(PinCacheRefillAttemptOutcome::CapacityRejected);
-        }
-        Err(PinCacheDownloadError::Io(error)) => {
-            return Err(PinCacheRefillError {
-                phase: "object_copy",
-                error: error.into(),
-            });
-        }
-    };
-    Ok(if cache.publish(token, download) {
-        PinCacheRefillAttemptOutcome::Published
-    } else {
-        PinCacheRefillAttemptOutcome::Obsolete
-    })
-}
-
-struct PinCacheRefillError {
-    phase: &'static str,
-    error: HummockError,
-}
-
-async fn pin_cache_object_is_owned(
-    store: &SstableStoreRef,
-    projections: &[SstableInfo],
-    ownership: &HashMap<TableId, Bitmap>,
-) -> HummockResult<bool> {
-    let Some(info) = projections.first() else {
-        return Ok(false);
-    };
-    let mut stats = StoreLocalStatistic::default();
-    let sst = store.sstable(info, &mut stats).await;
-    stats.discard();
-    let sst = sst?;
-    Ok(PinCacheRefillPlan::owns_object(
-        &sst,
-        projections,
-        ownership,
-    ))
 }
 
 #[derive(Clone, Copy)]
@@ -301,23 +184,8 @@ impl PinCacheRefillController {
             .reproject(&self.ownership, &self.pinned_table_ids);
     }
 
-    pub(crate) fn submit(&self, mut plan: PinCacheRefillPlan) -> Ticket {
-        // Retain policy admission while projecting unstarted work onto current ownership.
-        plan.ownership = Arc::new(
-            self.ownership
-                .iter()
-                .filter(|(table, _)| plan.ownership.contains_key(*table))
-                .map(|(&table, bitmap)| (table, bitmap.clone()))
-                .collect(),
-        );
-        plan.objects.retain(|_, infos| {
-            infos.iter().any(|info| {
-                info.table_ids
-                    .iter()
-                    .any(|table| plan.ownership.contains_key(table))
-            })
-        });
-        self.executor.submit(plan)
+    pub(crate) fn submit(&self, plan: PinCacheRefillPlan) -> Ticket {
+        self.executor.submit(plan, &self.ownership)
     }
 
     /// Called after version application (or immediate policy revocation), never at enqueue time.
