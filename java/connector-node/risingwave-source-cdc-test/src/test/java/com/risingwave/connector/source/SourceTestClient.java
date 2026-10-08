@@ -97,11 +97,20 @@ public class SourceTestClient {
 
     public ConnectorServiceProto.ValidateSourceResponse validateSource(
             ConnectorServiceProto.SourceType sourceType, Map<String, String> properties) {
+        return validateSource(
+                sourceType, properties, ConnectorServiceProto.TableSchema.getDefaultInstance());
+    }
+
+    public ConnectorServiceProto.ValidateSourceResponse validateSource(
+            ConnectorServiceProto.SourceType sourceType,
+            Map<String, String> properties,
+            ConnectorServiceProto.TableSchema tableSchema) {
         ConnectorServiceProto.ValidateSourceRequest req =
                 ConnectorServiceProto.ValidateSourceRequest.newBuilder()
                         .setSourceId(0)
                         .setSourceType(sourceType)
                         .putAllProperties(properties)
+                        .setTableSchema(tableSchema)
                         .build();
         return blockingStub.validateSource(req);
     }
