@@ -335,6 +335,7 @@ pub fn visit_stream_node_tables_inner<F>(
             NodeBody::LocalityProvider(node) => {
                 always!(node.state_table, "LocalityProviderState");
                 always!(node.progress_table, "LocalityProviderProgress");
+                optional!(node.sort_buffer_table, "LocalityProviderSortBuffer");
             }
 
             NodeBody::IcebergWithPkIndexWriter(node) => {
