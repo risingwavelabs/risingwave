@@ -42,6 +42,23 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Match Recognize Retained Partitions",
+                    "Partitions the executor holds in memory, including emptied entries kept "
+                    "for their capacity until the next watermark sweep. The watermark wakeup "
+                    "index is bounded by this count; a gap between it and the partitions with "
+                    "retained rows is where a missed sweep of empty entries would show.",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_match_recognize_retained_partitions')}) by (table_id, fragment_id)",
+                            "table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"{metric('stream_match_recognize_retained_partitions', actor_level_filter)}",
+                            "actor {{actor_id}} table {{table_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_ops(
                     "Match Recognize Matches Emitted",
                     "Matches emitted per second.",
