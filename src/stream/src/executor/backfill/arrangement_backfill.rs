@@ -475,10 +475,6 @@ where
                 // consume upstream buffer chunk
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
-                    // FIXME: Replace with `snapshot_is_processed`
-                    // Flush downstream.
-                    // If no current_pos, means no snapshot processed yet.
-                    // Also means we don't need propagate any updates <= current_pos.
                     if backfill_state.has_progress() {
                         let chunk = mapping_chunk(
                             mark_chunk_ref_by_vnode(

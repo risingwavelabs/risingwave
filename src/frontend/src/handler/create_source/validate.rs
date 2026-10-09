@@ -159,6 +159,32 @@ pub fn validate_heartbeat_interval(props: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
+/// Returns whether the Pulsar schema is used. The Pulsar schema options themselves are validated by
+/// `PulsarSchemaConfig::from_options` when building the parser config. Only the connector and
+/// format, which that config is unaware of, are checked here.
+fn validate_pulsar_schema_options(
+    format_encode: &FormatEncodeOptions,
+    connector: &str,
+) -> Result<bool> {
+    let options = WithOptions::try_from(format_encode.row_options())?;
+    if !options.contains_key(PULSAR_SCHEMA_URL_KEY)
+        && !options.secret_ref().contains_key(PULSAR_SCHEMA_URL_KEY)
+    {
+        return Ok(false);
+    }
+
+    if connector != PULSAR_CONNECTOR
+        || format_encode.format != Format::Plain
+        || format_encode.row_encode != Encode::Avro
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO"
+        ))));
+    }
+
+    Ok(true)
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -198,7 +224,8 @@ pub fn validate_compatibility(
     validate_decimal_handling_mode(props)?;
 
     validate_license(&connector)?;
-    if connector != KAFKA_CONNECTOR {
+    let uses_pulsar_schema = validate_pulsar_schema_options(format_encode, &connector)?;
+    if connector != KAFKA_CONNECTOR && !uses_pulsar_schema {
         let res = match (&format_encode.format, &format_encode.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
                 let mut options = WithOptions::try_from(format_encode.row_options())?;
@@ -315,4 +342,80 @@ pub fn validate_compatibility(
     }
 
     validate_heartbeat_interval(props)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::ast::SqlOption;
+
+    use super::*;
+
+    fn format_encode(
+        format: Format,
+        encode: Encode,
+        options: &[(&str, &str)],
+    ) -> FormatEncodeOptions {
+        let row_options = options
+            .iter()
+            .map(|(name, value)| {
+                let name = name.to_string();
+                let value = value.to_string();
+                SqlOption::try_from((&name, &value)).unwrap()
+            })
+            .collect();
+        FormatEncodeOptions {
+            format,
+            row_encode: encode,
+            row_options,
+            key_encode: None,
+        }
+    }
+
+    fn source_options(connector: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([(UPSTREAM_SOURCE_KEY.to_owned(), connector.to_owned())])
+    }
+
+    #[test]
+    fn pulsar_schema_accepts_minimal_plain_avro_options() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[
+                (PULSAR_SCHEMA_URL_KEY, "https://localhost:8443"),
+                (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
+            ],
+        );
+        validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+    }
+
+    #[test]
+    fn pulsar_schema_rejects_other_connectors_and_formats() {
+        for (connector, format, encode) in [
+            (KAFKA_CONNECTOR, Format::Plain, Encode::Avro),
+            (PULSAR_CONNECTOR, Format::Upsert, Encode::Avro),
+            (PULSAR_CONNECTOR, Format::Plain, Encode::Protobuf),
+            (PULSAR_CONNECTOR, Format::Plain, Encode::Json),
+        ] {
+            let format_encode = format_encode(
+                format,
+                encode,
+                &[(PULSAR_SCHEMA_URL_KEY, "http://localhost:8080")],
+            );
+            let error =
+                validate_compatibility(&format_encode, &mut source_options(connector)).unwrap_err();
+            assert!(error.to_string().contains(
+                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
+            ));
+        }
+    }
+
+    #[test]
+    fn confluent_schema_registry_behavior_is_unchanged() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[("schema.registry", "http://localhost:8081")],
+        );
+        validate_compatibility(&format_encode, &mut source_options(KAFKA_CONNECTOR)).unwrap();
+    }
 }

@@ -15,7 +15,7 @@ anyhow = "1"
 bytes = "1"
 chrono = { workspace = true }
 clap = { workspace = true }
-comfy-table = "7"
+comfy-table = "8"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"

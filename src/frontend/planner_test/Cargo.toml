@@ -14,7 +14,9 @@ test = false
 anyhow = "1"
 expect-test = "1"
 itertools = { workspace = true }
+linkme = { workspace = true }
 paste = "1"
+risingwave_expr = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_license = { workspace = true }
