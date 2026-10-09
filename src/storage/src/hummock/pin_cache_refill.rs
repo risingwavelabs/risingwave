@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The controller plans physical membership changes; the version gate applies them.
-//! Policy changes take effect immediately, while version inserts wait for activation and
-//! removals wait for application. The Pin backend owns cached bytes and file retirement.
+//! Tracks physical object membership from pin policy and Hummock versions.
+//! Reports membership changes and candidates from observed SST insertions.
+//! The caller controls when to apply these changes to the backend and schedule refill.
 
 use std::collections::{HashMap, HashSet};
 
@@ -57,7 +57,7 @@ impl PinCacheObjectChanges {
     }
 }
 
-/// Maintains logical pin-cache membership separately from Foyer block-refill policy.
+/// Tracks physical object membership through pinned logical SST references.
 pub(crate) struct PinCacheRefillController {
     pinned_table_ids: HashSet<TableId>,
     object_ref_counts: HashMap<HummockSstableObjectId, u32>,
@@ -105,47 +105,22 @@ impl PinCacheRefillController {
         new_version: PinnedVersion,
         version_deltas: Option<&[HummockVersionDelta]>,
     ) -> (HashSet<HummockSstableObjectId>, PinCacheObjectChanges) {
-        // Any membership change in the batch requires a rebuild. Compare table assignments
-        // against the starting version so even a change that is later reversed is detected.
-        let requires_rebuild = version_deltas.is_none_or(|version_deltas| {
-            version_deltas.iter().any(|delta| {
-                !delta.removed_table_ids.is_empty()
-                    || delta.state_table_info_delta.iter().any(|(table_id, info)| {
-                        self.version
-                            .state_table_info
-                            .info()
-                            .get(table_id)
-                            .is_none_or(|previous| {
-                                previous.compaction_group_id != info.compaction_group_id
-                            })
-                    })
-                    || delta.group_deltas.values().any(|deltas| {
-                        deltas.group_deltas.iter().any(|delta| {
-                            !matches!(
-                                delta,
-                                GroupDelta::IntraLevel(_) | GroupDelta::NewL0SubLevel(_)
-                            )
-                        })
-                    })
-            })
-        });
+        let requires_rebuild = self.requires_membership_rebuild(version_deltas);
         let previous_version = std::mem::replace(&mut self.version, new_version);
         let changes = if requires_rebuild {
-            None
-        } else {
-            self.apply_desired_object_delta(deltas)
-        }
-        .unwrap_or_else(|| {
-            // A malformed delta may have partially changed counts. Derive the fallback diff
-            // from authoritative snapshots, never from those partial counts.
-            if !requires_rebuild {
-                tracing::warn!(
-                    "pin-cache object reference count is inconsistent; rebuilding membership"
-                );
-            }
             self.rebuild_object_ref_counts();
             self.changes_between_versions(&previous_version, &self.version)
-        });
+        } else if let Some(changes) = self.apply_desired_object_delta(deltas) {
+            changes
+        } else {
+            // A malformed delta may have partially changed counts. Derive the fallback diff
+            // from authoritative snapshots, never from those partial counts.
+            tracing::warn!(
+                "pin-cache object reference count is inconsistent; rebuilding membership"
+            );
+            self.rebuild_object_ref_counts();
+            self.changes_between_versions(&previous_version, &self.version)
+        };
         let candidates = deltas
             .iter()
             .flat_map(|delta| &delta.insert_sst_infos)
@@ -153,6 +128,44 @@ impl PinCacheRefillController {
             .map(|sst| sst.object_id)
             .collect();
         (candidates, changes)
+    }
+
+    /// Detects membership changes that SST insertion/deletion alone cannot describe.
+    fn requires_membership_rebuild(&self, version_deltas: Option<&[HummockVersionDelta]>) -> bool {
+        let Some(version_deltas) = version_deltas else {
+            return true;
+        };
+        for delta in version_deltas {
+            if !delta.removed_table_ids.is_empty() {
+                return true;
+            }
+            // Compare every delta against the starting version, including changes that
+            // are reversed later in the same batch.
+            for (table_id, info) in &delta.state_table_info_delta {
+                let previous_group = self
+                    .version
+                    .state_table_info
+                    .info()
+                    .get(table_id)
+                    .map(|previous| previous.compaction_group_id);
+                if previous_group != Some(info.compaction_group_id) {
+                    return true;
+                }
+            }
+            for group_delta in delta
+                .group_deltas
+                .values()
+                .flat_map(|deltas| &deltas.group_deltas)
+            {
+                if !matches!(
+                    group_delta,
+                    GroupDelta::IntraLevel(_) | GroupDelta::NewL0SubLevel(_)
+                ) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub(crate) fn changes_between_versions(
