@@ -46,10 +46,11 @@ b
 c
 
 
-# There are 2 consumer groups, 1 for batch query (not listed below), 1 for MV.
-# All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
-# At the beginning, the MV's consumer group will not occur. They will be created after committing offset to Kafka.
+# The MV's consumer group is "Empty" with 0 members, because we manually `assign` partitions to it.
+# At the beginning, it will not occur. It will be created after committing offset to Kafka.
 # (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
+# Consumers skip the final commit on drop, so the batch query creates a group only if it lives longer
+# than the commit interval.
 sleep 5s
 
 system ok retry 3 backoff 5s
@@ -99,12 +100,12 @@ pkill rpk
 
 # Test delete consumer group on drop
 
-# my_group_non_shared: 1 source fragment, 1 batch query
+# Count my_group_non_shared groups except the batch query's (fragment id u32::MAX), which is never deleted.
 # We only check my_group_non_shared to avoid interfering with other tests.
 system ok retry 3 backoff 5s
-./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group_non_shared
+rpk group list | grep -ow 'my_group_non_shared-[0-9]*' | grep -vxc 'my_group_non_shared-4294967295' || true
 ----
-my_group_non_shared: 2
+1
 
 
 statement ok
@@ -113,9 +114,9 @@ DROP MATERIALIZED VIEW mv;
 sleep 1s
 
 system ok retry 3 backoff 5s
-./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group_non_shared
+rpk group list | grep -ow 'my_group_non_shared-[0-9]*' | grep -vxc 'my_group_non_shared-4294967295' || true
 ----
-my_group_non_shared: 1
+0
 
 
 
