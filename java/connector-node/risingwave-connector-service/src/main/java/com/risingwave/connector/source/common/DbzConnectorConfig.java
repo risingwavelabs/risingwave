@@ -341,7 +341,6 @@ public class DbzConnectorConfig {
         // Calculate max.queue.size.in.bytes based on JVM heap size and ratio
         calculateAndSetMaxQueueSizeInBytes(dbzProps);
 
-        LOG.info("Final Debezium properties: {}", dbzProps);
         LOG.info(
                 "Debezium max.queue.size.in.bytes: {} bytes ({} MB)",
                 dbzProps.getProperty("max.queue.size.in.bytes", "not set"),
