@@ -210,6 +210,8 @@ select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER
 statement ok
 drop table if exists test;
 
+sleep 1s
+
 statement ok
 create table test (
     id bigint primary key,
