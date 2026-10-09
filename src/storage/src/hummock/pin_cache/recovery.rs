@@ -14,12 +14,11 @@
 
 use std::sync::Arc;
 
-use futures::{StreamExt, TryStreamExt, stream};
-use risingwave_common::util::iter_util::ZipEqFast;
+use futures::TryStreamExt;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::{ObjectError, ObjectMetadataIter, ObjectResult};
+use risingwave_object_store::object::{ObjectMetadataIter, ObjectResult};
 
-use super::{PinCache, PinCacheFile, PinCacheObjectState, PinCacheShard};
+use super::{PinCache, PinCacheFile};
 
 #[derive(Debug, Default)]
 pub(super) struct RecoveryStats {
@@ -37,96 +36,45 @@ impl PinCache {
         object_id.parse::<u64>().ok().map(Into::into)
     }
 
-    /// Recovers only existing local files matching the initial membership and expected size.
-    /// This runs before sharing the cache. Each task exclusively owns one shard, without locks.
-    /// Lists and partitions all file metadata first, then recovers shards with bounded concurrency.
-    /// Any inventory error fails construction. Unselected files remain on disk until GC is added.
-    /// No remote SST metadata is read for vnode pruning; unpin/version removal withdraws stale routes.
-    /// There is no persisted refill watermark: objects missed during downtime are not backfilled.
-    /// Reads of missing objects use the normal fallback; subsequent version deltas drive refill.
+    /// Restores local routes matching the initial membership and records their actual sizes.
+    /// Callers validate content lazily on reads and invalidate a failed publication before fallback.
+    /// The cache remains private until the complete inventory succeeds. Rejected files stay
+    /// on disk for later reclamation; failure or cancellation drops the private index without deleting files.
+    /// No remote SST metadata is read, and missing objects are not backfilled.
     pub(super) async fn recover_local_files(
         &mut self,
         objects: ObjectResult<ObjectMetadataIter>,
-        concurrency: usize,
     ) -> ObjectResult<RecoveryStats> {
-        let mut files: Vec<Vec<_>> = (0..self.shards.len()).map(|_| Vec::new()).collect();
+        let mut stats = RecoveryStats::default();
         let mut objects = objects?;
         while let Some(metadata) = objects.try_next().await? {
+            // An in-memory or buffered listing may stay ready for the entire inventory.
+            tokio::task::consume_budget().await;
             if metadata.key.is_empty() || metadata.key.ends_with('/') {
                 continue;
             }
-            let entry = PinCacheFile {
+            let Some(object_id) = Self::parse_object_id(&metadata.key) else {
+                // Temporary and malformed files are left for later reclamation.
+                tracing::warn!(path = %metadata.key, "skipping pin cache file with invalid name during recovery");
+                continue;
+            };
+            let shard_index = Self::shard_index(object_id, self.shards.len());
+            let state = self.shards[shard_index].get_mut();
+            let Some(object) = state.objects.get_mut(&object_id) else {
+                continue;
+            };
+            if object.published.is_some() {
+                continue;
+            }
+            let entry = Arc::new(PinCacheFile {
                 path: metadata.key,
                 size: metadata.total_size as u64,
-            };
-            if let Some(object_id) = Self::parse_object_id(&entry.path) {
-                let shard_index = Self::shard_index(object_id, self.shards.len());
-                files[shard_index].push((object_id, entry));
-            } else {
-                tracing::warn!(path = %entry.path, "skipping pin cache file with invalid name during recovery");
-            }
-        }
-        let shards = self
-            .shards
-            .iter_mut()
-            .zip_eq_fast(files)
-            .enumerate()
-            .filter(|(_, (_, files))| !files.is_empty());
-        let results = stream::iter(shards)
-            .map(|(index, (shard, files))| {
-                let mut state = std::mem::take(shard.get_mut());
-                tokio::task::spawn_blocking(move || {
-                    let stats = state.recover(files);
-                    (index, state, stats)
-                })
-            })
-            .buffer_unordered(concurrency)
-            // Join all tasks before propagating a panic. On cancellation, running tasks own
-            // only private shard state and never access the store or global metrics.
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| {
-                ObjectError::internal(format!("pin cache recovery task failed: {err}"))
-            })?;
-        let mut stats = RecoveryStats::default();
-        for (index, state, recovered) in results {
-            *self.shards[index].get_mut() = state;
-            stats.objects += recovered.objects;
-            stats.bytes += recovered.bytes;
-        }
-        Ok(stats)
-    }
-}
-
-impl PinCacheShard {
-    fn recover(&mut self, files: Vec<(HummockSstableObjectId, PinCacheFile)>) -> RecoveryStats {
-        let mut stats = RecoveryStats::default();
-        for (object_id, entry) in files {
-            let Some(object) = self.objects.get_mut(&object_id) else {
-                tracing::debug!(path = %entry.path, "skipping pin cache file outside current membership during recovery");
-                continue;
-            };
-            let expected_size = object.size();
-            if entry.size != expected_size {
-                tracing::warn!(
-                    path = %entry.path,
-                    actual_size = entry.size,
-                    expected_size,
-                    "skipping pin cache file with unexpected size during recovery"
-                );
-                continue;
-            }
-            if object.published().is_some() {
-                tracing::debug!(path = %entry.path, "skipping duplicate pin cache file during recovery");
-                continue;
-            }
+            });
             stats.objects += 1;
             stats.bytes += entry.size;
-            object.state = PinCacheObjectState::Published(Arc::new(entry));
+            object.published = Some(entry);
         }
-        stats
+        Ok(stats)
     }
 }
 

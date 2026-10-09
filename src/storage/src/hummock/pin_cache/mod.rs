@@ -19,7 +19,7 @@
 //! this index does not track versions.
 //! A refill captures a `PinCacheRefillToken` with `prepare_refill` before it is queued;
 //! the caller checks it before I/O, and `publish` checks it atomically with the index update.
-//! Each object has one file state: `NotCached` or `Published`. The executor owns running attempts; downloads leave the
+//! Each object has an optional published file. The executor owns running attempts; downloads leave the
 //! index unchanged until publication. Revocation changes the admission identity; unregistering
 //! invalidates all object tokens.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
@@ -55,62 +55,34 @@ struct PinCacheFile {
     size: u64,
 }
 
-/// One object's file lifecycle. Only `Published` can be read. A revoked download may
-/// still be doing I/O, but its guard owns that obsolete file, not this index.
-/// `NotCached` means no readable copy; obsolete files may still await reclamation.
-enum PinCacheObjectState {
-    NotCached { size: u64 },
-    Published(Arc<PinCacheFile>),
-}
-
 /// One registered SST object; registration alone does not make it readable or start refill.
 struct PinCacheObject {
     // Admission identity, shared by queued work and its download. Stable across retries;
     // replaced on revocation. It is not a version ID or a persisted file sequence.
     generation: u64,
-    state: PinCacheObjectState,
+    published: Option<Arc<PinCacheFile>>,
 }
 
 impl PinCacheObject {
-    fn size(&self) -> u64 {
-        match &self.state {
-            PinCacheObjectState::NotCached { size } => *size,
-            PinCacheObjectState::Published(file) => file.size,
-        }
-    }
-
-    fn published(&self) -> Option<&Arc<PinCacheFile>> {
-        match &self.state {
-            PinCacheObjectState::Published(file) => Some(file),
-            _ => None,
-        }
-    }
-
     /// Withdraws the read route and returns the detached file.
     /// Membership and refill admission remain valid.
     /// The caller must release the returned reference outside the shard lock.
     fn unpublish(&mut self) -> Option<Arc<PinCacheFile>> {
-        let size = self.published()?.size;
-        let PinCacheObjectState::Published(file) =
-            std::mem::replace(&mut self.state, PinCacheObjectState::NotCached { size })
-        else {
-            unreachable!()
-        };
+        let file = self.published.take()?;
         GLOBAL_PIN_CACHE_METRICS.published_objects.dec();
         GLOBAL_PIN_CACHE_METRICS
             .published_bytes
-            .sub(metric_bytes(size));
+            .sub(metric_bytes(file.size));
         Some(file)
     }
 
     fn publish(&mut self, file: Arc<PinCacheFile>) {
-        assert!(self.published().is_none());
-        assert_eq!(self.size(), file.size);
+        assert!(self.published.is_none());
         GLOBAL_PIN_CACHE_METRICS.published_objects.inc();
         GLOBAL_PIN_CACHE_METRICS
             .published_bytes
             .add(metric_bytes(file.size));
-        self.state = PinCacheObjectState::Published(file);
+        self.published = Some(file);
     }
 }
 
@@ -123,19 +95,14 @@ struct PinCacheShard {
 }
 
 impl PinCacheShard {
-    fn register_object(&mut self, id: HummockSstableObjectId, size: u64) {
-        let object = self.objects.entry(id).or_insert_with(|| {
+    fn register_object(&mut self, id: HummockSstableObjectId) {
+        self.objects.entry(id).or_insert_with(|| {
             self.next_generation += 1;
             PinCacheObject {
                 generation: self.next_generation,
-                state: PinCacheObjectState::NotCached { size },
+                published: None,
             }
         });
-        assert_eq!(
-            object.size(),
-            size,
-            "one object must have one physical size"
-        );
     }
 
     fn revoke_refill(&mut self, object_id: HummockSstableObjectId) {
@@ -202,7 +169,8 @@ impl PinCacheReadHandle {
         // A late failure must not invalidate a newer publication of the same object.
         if let Some(object) = state.objects.get_mut(&self.object_id)
             && object
-                .published()
+                .published
+                .as_ref()
                 .is_some_and(|file| Arc::ptr_eq(file, &self.file))
         {
             let file = object.unpublish().unwrap();
@@ -228,16 +196,11 @@ impl PinCache {
     pub(crate) async fn new(
         store: ObjectStoreRef,
         shard_num: usize,
-        recover_concurrency: usize,
-        objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
+        objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) -> ObjectResult<Arc<Self>> {
         assert!(
             shard_num > 0,
             "pin cache shard count must be greater than zero"
-        );
-        assert!(
-            recover_concurrency > 0,
-            "pin cache recovery concurrency must be greater than zero"
         );
         let mut pin_cache = Self {
             store,
@@ -246,14 +209,14 @@ impl PinCache {
                 .collect(),
             next_path_id: AtomicU64::new(rand::random()),
         };
-        for (id, size) in objects {
+        for id in objects {
             let state = pin_cache.shards[Self::shard_index(id, shard_num)].get_mut();
-            state.register_object(id, size);
+            state.register_object(id);
         }
         let metrics = &*GLOBAL_PIN_CACHE_METRICS;
         let objects = pin_cache.store.list("", None, None).await;
         let recovered = pin_cache
-            .recover_local_files(objects, recover_concurrency)
+            .recover_local_files(objects)
             .await
             .inspect_err(|_| {
                 metrics.recovery_failures.inc();
@@ -271,7 +234,7 @@ impl PinCache {
         object_id: HummockSstableObjectId,
     ) -> Option<PinCacheReadHandle> {
         let state = self.shard(object_id).read();
-        let file = Arc::clone(state.objects.get(&object_id)?.published()?);
+        let file = Arc::clone(state.objects.get(&object_id)?.published.as_ref()?);
         Some(PinCacheReadHandle {
             pin_cache: Arc::clone(self),
             object_id,
