@@ -962,12 +962,12 @@ impl LogicalPlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
-        let mut not_null_idxs = vec![];
-        for (idx, column) in column_descs.iter().enumerate() {
-            if !column.nullable {
-                not_null_idxs.push(idx);
-            }
-        }
+        // The NOT NULL filter goes on the union below, after generated columns are computed, so its
+        // schema has all `columns`, generated ones included, in order.
+        let not_null_idxs = columns
+            .iter()
+            .positions(|c| !c.column_desc.nullable)
+            .collect_vec();
 
         let version_column_indices = if !with_version_columns.is_empty() {
             find_version_column_indices(&columns, with_version_columns)?
@@ -1389,15 +1389,17 @@ impl<P: PlanPhase> PlanRoot<P> {
             .map(|(i, name)| (name.as_ref(), *i))
             .collect::<BTreeMap<_, _>>();
 
+        // Without a column list, the plan's columns go to the target's DML columns by position,
+        // skipping generated columns.
         tar_cols
             .iter()
+            .filter(|tar_col| tar_col.can_dml())
             .enumerate()
-            .filter(|(_, tar_col)| tar_col.can_dml())
-            .map(|(tar_i, tar_col)| {
+            .map(|(dml_i, tar_col)| {
                 if user_specified_columns {
                     visible_col_idxes_by_name.get(tar_col.name()).cloned()
                 } else {
-                    (tar_i < visible_col_idxes.len()).then(|| visible_cols[tar_i].0)
+                    (dml_i < visible_col_idxes.len()).then(|| visible_cols[dml_i].0)
                 }
             })
             .collect()

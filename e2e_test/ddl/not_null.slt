@@ -183,3 +183,75 @@ DROP TABLE test_person_source;
 
 statement ok
 DROP TABLE test_person;
+
+### Test generated columns
+
+# NOT NULL on a generated column applies to its computed value.
+statement ok
+CREATE TABLE test_generated_not_null (id INT PRIMARY KEY, v INT, g INT NOT NULL AS v + 1);
+
+statement ok
+INSERT INTO test_generated_not_null (id, v) VALUES (1, 10), (2, NULL);
+
+statement ok
+FLUSH;
+
+query II
+SELECT id, g FROM test_generated_not_null ORDER BY id;
+----
+1 11
+
+statement ok
+DROP TABLE test_generated_not_null;
+
+# So does NOT NULL on a generated primary key.
+statement ok
+CREATE TABLE test_generated_pk (v INT, g INT PRIMARY KEY NOT NULL AS v + 1);
+
+statement ok
+INSERT INTO test_generated_pk (v) VALUES (1), (NULL);
+
+statement ok
+FLUSH;
+
+query I
+SELECT g FROM test_generated_pk;
+----
+2
+
+statement ok
+DROP TABLE test_generated_pk;
+
+# NOT NULL on a column after a generated column checks that column, not the generated one.
+statement ok
+CREATE TABLE test_generated_before (id INT PRIMARY KEY, g INT AS NULL::INT, v INT NOT NULL);
+
+statement ok
+INSERT INTO test_generated_before (id, v) VALUES (1, 10);
+
+statement ok
+CREATE TABLE test_generated_before_source (id INT PRIMARY KEY, v INT);
+
+statement ok
+INSERT INTO test_generated_before_source (id, v) VALUES (2, 20), (3, NULL);
+
+statement ok
+CREATE SINK test_generated_before_sink INTO test_generated_before AS SELECT id, v FROM test_generated_before_source;
+
+statement ok
+FLUSH;
+
+query II
+SELECT id, v FROM test_generated_before ORDER BY id;
+----
+1 10
+2 20
+
+statement ok
+DROP SINK test_generated_before_sink;
+
+statement ok
+DROP TABLE test_generated_before_source;
+
+statement ok
+DROP TABLE test_generated_before;
