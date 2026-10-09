@@ -18,13 +18,7 @@ DROP TABLE IF EXISTS t6;
 statement ok
 DROP TABLE IF EXISTS t6_variant;
 
-system ok retry 120 backoff 1s
-doris -N -B -e "SELECT COUNT(*) > 0 FROM backends() WHERE Alive = 'true'"
-----
-1
-
-
-system ok
+system ok retry 60 backoff 2s
 doris <<SQL
 DROP DATABASE IF EXISTS ${DORIS_DATABASE};
 CREATE DATABASE ${DORIS_DATABASE};
