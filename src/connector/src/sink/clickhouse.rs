@@ -24,7 +24,7 @@ use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{FieldLike, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
+use risingwave_common::types::{DataType, DecimalParts, ScalarRefImpl, Serial};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Serialize};
@@ -1010,13 +1010,13 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Utf8(v) => ClickHouseField::String(v.to_owned()),
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
             ScalarRefImpl::Decimal(d) => {
-                let d = if let Decimal::Normalized(d) = d {
-                    let scale = clickhouse_schema_feature.unwrap().accuracy_decimal.1 as i32
-                        - d.scale() as i32;
+                let d = if let DecimalParts::Finite { mantissa, scale } = d.to_parts() {
+                    let scale =
+                        clickhouse_schema_feature.unwrap().accuracy_decimal.1 as i32 - scale as i32;
                     if scale < 0 {
-                        d.mantissa() / 10_i128.pow(scale.unsigned_abs())
+                        mantissa / 10_i128.pow(scale.unsigned_abs())
                     } else {
-                        d.mantissa() * 10_i128.pow(scale as u32)
+                        mantissa * 10_i128.pow(scale as u32)
                     }
                 } else if clickhouse_schema_feature.unwrap().can_null {
                     warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse null!");

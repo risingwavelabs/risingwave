@@ -14925,7 +14925,6 @@ dependencies = [
  "risingwave_expr",
  "risingwave_pb",
  "risingwave_sqlparser",
- "rust_decimal",
  "self_cell",
  "serde",
  "serde_json",

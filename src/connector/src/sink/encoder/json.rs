@@ -639,7 +639,7 @@ mod tests {
                     data_type: DataType::Decimal,
                     ..mock_field.clone()
                 },
-                Some(ScalarImpl::Decimal(Decimal::NaN).as_scalar_ref_impl()),
+                Some(ScalarImpl::Decimal(Decimal::NAN).as_scalar_ref_impl()),
                 &turbopuffer_config,
             )
             .unwrap_err()
