@@ -372,6 +372,20 @@ impl<P: ByteStreamSourceParser> P {
     }
 }
 
+/// Wait for the source executor to acknowledge a schema change.
+///
+/// A failure must stop the stream: the reader's schema tracker records the change
+/// before this ack, so continuing would suppress the records that carry it, and only
+/// the rebuilt reader (with an empty tracker) re-emits it.
+async fn await_schema_change_ack(
+    ack: tokio::sync::oneshot::Receiver<ConnectorResult<()>>,
+) -> ConnectorResult<()> {
+    match ack.await {
+        Ok(result) => result,
+        Err(e) => Err(anyhow::anyhow!("schema change acknowledgment lost: {e}").into()),
+    }
+}
+
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = SourceReaderEvent, error = crate::error::ConnectorError)]
@@ -521,12 +535,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                         tx.send((schema_change, oneshot_tx))
                             .await
                             .expect("send schema change to executor");
-                        match oneshot_rx.await {
-                            Ok(()) => {}
-                            Err(e) => {
-                                tracing::error!(error = %e.as_report(), "failed to wait for schema change");
-                            }
-                        }
+                        await_schema_change_ack(oneshot_rx).await?;
                     }
                 }
             }
@@ -686,5 +695,34 @@ pub mod test_utils {
             .unwrap()
             .unwrap()
         }
+    }
+}
+
+#[cfg(test)]
+mod schema_change_ack_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn applied_change_is_ok() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tx.send(Ok(())).unwrap();
+        await_schema_change_ack(rx).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_change_propagates_the_error() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tx.send(Err(anyhow::anyhow!("meta rejected the change").into()))
+            .unwrap();
+        let err = await_schema_change_ack(rx).await.unwrap_err();
+        assert!(err.to_string().contains("meta rejected"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn lost_acknowledgment_is_an_error() {
+        let (tx, rx) = tokio::sync::oneshot::channel::<ConnectorResult<()>>();
+        drop(tx);
+        let err = await_schema_change_ack(rx).await.unwrap_err();
+        assert!(err.to_string().contains("acknowledgment lost"), "{err}");
     }
 }
