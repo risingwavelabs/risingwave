@@ -897,16 +897,23 @@ impl IcebergCommon {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
                         let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
-                        // Lakehouse Iceberg REST catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables.
+                        // BigQuery catalog federation (bq://) and the Lakehouse runtime
+                        // catalog (bl://) use catalog identifiers rather than parseable
+                        // object-store URLs.
                         let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
+                        let is_bl_catalog = warehouse_path.starts_with("bl://");
                         let url = Url::parse(warehouse_path);
-                        if (url.is_err() || is_s3_tables || is_bq_catalog_federation)
+                        if (url.is_err()
+                            || is_s3_tables
+                            || is_bq_catalog_federation
+                            || is_bl_catalog)
                             && catalog_impl == JniCatalogImpl::Rest
                         {
                             // If the warehouse path is not a valid URL, it could be:
                             // - A warehouse name in REST catalog
                             // - An S3 Tables path (arn:aws:s3tables:...)
-                            // - A Lakehouse path (bq://projects/...) for Google Cloud BigQuery integration
+                            // - A BigQuery catalog federation path (bq://projects/...)
+                            // - A Lakehouse runtime catalog path (bl://projects/.../catalogs/...)
                             // We allow these to pass through for REST catalogs.
                             (None, None)
                         } else {
