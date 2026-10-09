@@ -33,13 +33,12 @@ pub fn scaled_bigint_to_rust_decimal(
     ))
 }
 
-/// Converts a Rust Decimal back to a `BigInt` with scale for Avro encoding
-pub fn rust_decimal_to_scaled_bigint(
-    decimal: rust_decimal::Decimal,
+/// Converts a decimal `mantissa * 10^-scale` to a `BigInt` with `expect_scale` for Avro encoding
+pub fn decimal_to_scaled_bigint(
+    mantissa: i128,
+    scale: u32,
     expect_scale: usize,
 ) -> Result<Vec<u8>, String> {
-    let mantissa = decimal.mantissa();
-    let scale = decimal.scale();
     let big_decimal = bigdecimal::BigDecimal::from((mantissa, scale as i64));
     let scaled_big_decimal = big_decimal.with_scale(expect_scale as i64);
     let (scaled_big_int, _) = scaled_big_decimal.as_bigint_and_scale();

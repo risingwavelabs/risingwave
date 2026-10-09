@@ -27,6 +27,7 @@ pub use super::arrow_58::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{Array, ArrayError, DataChunk, Decimal, DecimalArray};
+use crate::types::DecimalParts;
 
 pub struct DeltaLakeConvert;
 
@@ -40,10 +41,12 @@ impl DeltaLakeConvert {
     }
 
     fn decimal_to_i128(decimal: Decimal, precision: u8, max_scale: i8) -> Option<i128> {
-        match decimal {
-            crate::array::Decimal::Normalized(e) => {
-                let value = e.mantissa();
-                let scale = e.scale() as i8;
+        match decimal.to_parts() {
+            DecimalParts::Finite {
+                mantissa: value,
+                scale,
+            } => {
+                let scale = scale as i8;
                 let diff_scale = abs(max_scale - scale);
                 let value = match scale {
                     _ if scale < max_scale => value.mul(10_i32.pow(diff_scale as u32) as i128),
@@ -53,15 +56,15 @@ impl DeltaLakeConvert {
                 Some(value)
             }
             // For Inf, we replace them with the max/min value within the precision.
-            crate::array::Decimal::PositiveInf => {
+            DecimalParts::PositiveInf => {
                 let max_value = 10_i128.pow(precision as u32) - 1;
                 Some(max_value)
             }
-            crate::array::Decimal::NegativeInf => {
+            DecimalParts::NegativeInf => {
                 let max_value = 10_i128.pow(precision as u32) - 1;
                 Some(-max_value)
             }
-            crate::array::Decimal::NaN => None,
+            DecimalParts::NaN => None,
         }
     }
 }
@@ -107,11 +110,11 @@ mod test {
     fn test_decimal_list_chunk() {
         let value = ListValue::new(crate::array::ArrayImpl::Decimal(DecimalArray::from_iter([
             None,
-            Some(Decimal::NaN),
-            Some(Decimal::PositiveInf),
-            Some(Decimal::NegativeInf),
-            Some(Decimal::Normalized("1".parse().unwrap())),
-            Some(Decimal::Normalized("123.456".parse().unwrap())),
+            Some(Decimal::NAN),
+            Some(Decimal::POSITIVE_INF),
+            Some(Decimal::NEGATIVE_INF),
+            Some("1".parse::<Decimal>().unwrap()),
+            Some("123.456".parse::<Decimal>().unwrap()),
         ])));
         let array = Arc::new(ArrayImpl::List(ListArray::from_iter(vec![value])));
         let chunk = crate::array::DataChunk::new(vec![array], Bitmap::ones(1));
