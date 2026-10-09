@@ -33,48 +33,68 @@ mod tests;
 #[derive(Default)]
 #[must_use]
 pub(crate) struct PinCacheObjectChanges {
-    /// Newly referenced physical object IDs and their file sizes in bytes.
-    pub inserted: HashMap<HummockSstableObjectId, u64>,
+    pub inserted: HashSet<HummockSstableObjectId>,
     pub removed: HashSet<HummockSstableObjectId>,
 }
 
-impl PinCacheObjectChanges {
-    fn between(
-        before: HashMap<HummockSstableObjectId, u64>,
-        after: HashMap<HummockSstableObjectId, u64>,
-    ) -> Self {
-        Self {
-            removed: before
-                .keys()
-                .filter(|id| !after.contains_key(*id))
-                .copied()
-                .collect(),
-            inserted: after
-                .into_iter()
-                .filter(|(id, _)| !before.contains_key(id))
-                .collect(),
-        }
-    }
-}
-
 /// Tracks physical object membership through pinned logical SST references.
+///
+/// `object_ref_counts` counts references in `planning_version` under `pinned_table_ids`.
+/// The planning version may be ahead of the resident snapshots supplied by the caller.
 pub(crate) struct PinCacheRefillController {
     pinned_table_ids: HashSet<TableId>,
     object_ref_counts: HashMap<HummockSstableObjectId, u32>,
-    version: PinnedVersion,
+    planning_version: PinnedVersion,
 }
 
 impl PinCacheRefillController {
-    pub(crate) fn new(version: PinnedVersion) -> Self {
+    pub(crate) fn new(planning_version: PinnedVersion) -> Self {
         Self {
             pinned_table_ids: HashSet::new(),
             object_ref_counts: HashMap::new(),
-            version,
+            planning_version,
         }
     }
 
-    /// Reconciles policy against applied/active snapshots supplied by the version gate.
-    /// The planning version may be ahead of these snapshots and must not define current residency.
+    /// Advances the planning version and returns `(candidates, membership_changes)`.
+    /// Candidates appeared in SST insertions and remain referenced in the new version;
+    /// an already-referenced object can be a candidate without being newly inserted.
+    ///
+    /// `None` denotes a full version snapshot; `Some` carries every raw delta in order,
+    /// including changes omitted by SST extraction. An empty delta batch is not a snapshot.
+    pub(crate) fn apply_version_update(
+        &mut self,
+        deltas: &[SstDeltaInfo],
+        new_version: PinnedVersion,
+        version_deltas: Option<&[HummockVersionDelta]>,
+    ) -> (HashSet<HummockSstableObjectId>, PinCacheObjectChanges) {
+        let requires_rebuild = self.requires_membership_rebuild(version_deltas);
+        let previous_version = std::mem::replace(&mut self.planning_version, new_version);
+        let changes = if requires_rebuild {
+            self.rebuild_object_ref_counts();
+            self.changes_between_versions(&previous_version, &self.planning_version)
+        } else if let Some(changes) = self.try_apply_sst_deltas(deltas) {
+            changes
+        } else {
+            // A malformed delta may have partially changed counts. Derive the fallback diff
+            // from authoritative snapshots, never from those partial counts.
+            tracing::warn!(
+                "pin-cache object reference count is inconsistent; rebuilding membership"
+            );
+            self.rebuild_object_ref_counts();
+            self.changes_between_versions(&previous_version, &self.planning_version)
+        };
+        let candidates = deltas
+            .iter()
+            .flat_map(|delta| &delta.insert_sst_infos)
+            .filter(|sst| self.object_ref_counts.contains_key(&sst.object_id))
+            .map(|sst| sst.object_id)
+            .collect();
+        (candidates, changes)
+    }
+
+    /// Updates pin policy and returns membership changes over the supplied resident snapshots.
+    /// Reference counts are rebuilt for `planning_version`, which may be ahead of residency.
     pub(crate) fn replace_pinned_tables(
         &mut self,
         pinned_table_ids: HashSet<TableId>,
@@ -97,77 +117,6 @@ impl PinCacheRefillController {
         changes
     }
 
-    /// `None` denotes a full version snapshot; `Some` carries every raw delta in order,
-    /// including changes omitted by SST extraction. An empty delta batch is not a snapshot.
-    pub(crate) fn apply_version_update(
-        &mut self,
-        deltas: &[SstDeltaInfo],
-        new_version: PinnedVersion,
-        version_deltas: Option<&[HummockVersionDelta]>,
-    ) -> (HashSet<HummockSstableObjectId>, PinCacheObjectChanges) {
-        let requires_rebuild = self.requires_membership_rebuild(version_deltas);
-        let previous_version = std::mem::replace(&mut self.version, new_version);
-        let changes = if requires_rebuild {
-            self.rebuild_object_ref_counts();
-            self.changes_between_versions(&previous_version, &self.version)
-        } else if let Some(changes) = self.apply_desired_object_delta(deltas) {
-            changes
-        } else {
-            // A malformed delta may have partially changed counts. Derive the fallback diff
-            // from authoritative snapshots, never from those partial counts.
-            tracing::warn!(
-                "pin-cache object reference count is inconsistent; rebuilding membership"
-            );
-            self.rebuild_object_ref_counts();
-            self.changes_between_versions(&previous_version, &self.version)
-        };
-        let candidates = deltas
-            .iter()
-            .flat_map(|delta| &delta.insert_sst_infos)
-            .filter(|sst| self.object_ref_counts.contains_key(&sst.object_id))
-            .map(|sst| sst.object_id)
-            .collect();
-        (candidates, changes)
-    }
-
-    /// Detects membership changes that SST insertion/deletion alone cannot describe.
-    fn requires_membership_rebuild(&self, version_deltas: Option<&[HummockVersionDelta]>) -> bool {
-        let Some(version_deltas) = version_deltas else {
-            return true;
-        };
-        for delta in version_deltas {
-            if !delta.removed_table_ids.is_empty() {
-                return true;
-            }
-            // Compare every delta against the starting version, including changes that
-            // are reversed later in the same batch.
-            for (table_id, info) in &delta.state_table_info_delta {
-                let previous_group = self
-                    .version
-                    .state_table_info
-                    .info()
-                    .get(table_id)
-                    .map(|previous| previous.compaction_group_id);
-                if previous_group != Some(info.compaction_group_id) {
-                    return true;
-                }
-            }
-            for group_delta in delta
-                .group_deltas
-                .values()
-                .flat_map(|deltas| &deltas.group_deltas)
-            {
-                if !matches!(
-                    group_delta,
-                    GroupDelta::IntraLevel(_) | GroupDelta::NewL0SubLevel(_)
-                ) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     pub(crate) fn changes_between_versions(
         &self,
         before: &HummockVersion,
@@ -177,22 +126,6 @@ impl PinCacheRefillController {
             Self::pinned_objects(before, &self.pinned_table_ids),
             Self::pinned_objects(after, &self.pinned_table_ids),
         )
-    }
-
-    fn pinned_objects(
-        version: &HummockVersion,
-        tables: &HashSet<TableId>,
-    ) -> HashMap<HummockSstableObjectId, u64> {
-        let mut objects = HashMap::new();
-        for sst in Self::pinned_ssts(version, tables) {
-            if let Some(size) = objects.insert(sst.object_id, sst.file_size) {
-                assert_eq!(
-                    size, sst.file_size,
-                    "one object must have one physical size"
-                );
-            }
-        }
-        objects
     }
 
     /// Enumerates pinned logical SST references from a version without reading object storage.
@@ -221,24 +154,69 @@ impl PinCacheRefillController {
             .filter(move |sst| Self::is_pinned(sst, pinned_table_ids))
     }
 
+    fn pinned_objects(
+        version: &HummockVersion,
+        tables: &HashSet<TableId>,
+    ) -> HashSet<HummockSstableObjectId> {
+        Self::pinned_ssts(version, tables)
+            .map(|sst| sst.object_id)
+            .collect()
+    }
+
     fn rebuild_object_ref_counts(&mut self) {
         self.object_ref_counts.clear();
-        for sst in Self::pinned_ssts(&self.version, &self.pinned_table_ids) {
+        for sst in Self::pinned_ssts(&self.planning_version, &self.pinned_table_ids) {
             *self.object_ref_counts.entry(sst.object_id).or_insert(0) += 1;
         }
     }
 
-    fn apply_desired_object_delta(
-        &mut self,
-        deltas: &[SstDeltaInfo],
-    ) -> Option<PinCacheObjectChanges> {
+    /// Detects membership changes that SST insertion/deletion alone cannot describe.
+    fn requires_membership_rebuild(&self, version_deltas: Option<&[HummockVersionDelta]>) -> bool {
+        let Some(version_deltas) = version_deltas else {
+            return true;
+        };
+        for delta in version_deltas {
+            if !delta.removed_table_ids.is_empty() {
+                return true;
+            }
+            // Compare every delta against the starting version, including changes that
+            // are reversed later in the same batch.
+            for (table_id, info) in &delta.state_table_info_delta {
+                let previous_group = self
+                    .planning_version
+                    .state_table_info
+                    .info()
+                    .get(table_id)
+                    .map(|previous| previous.compaction_group_id);
+                if previous_group != Some(info.compaction_group_id) {
+                    return true;
+                }
+            }
+            for group_delta in delta
+                .group_deltas
+                .values()
+                .flat_map(|deltas| &deltas.group_deltas)
+            {
+                if !matches!(
+                    group_delta,
+                    GroupDelta::IntraLevel(_) | GroupDelta::NewL0SubLevel(_)
+                ) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Applies SST deltas to reference counts and returns the net membership change.
+    /// On `None`, counts may be partially updated and must be rebuilt from `planning_version`.
+    fn try_apply_sst_deltas(&mut self, deltas: &[SstDeltaInfo]) -> Option<PinCacheObjectChanges> {
         let pinned_table_ids = &self.pinned_table_ids;
         if pinned_table_ids.is_empty() {
             return Some(PinCacheObjectChanges::default());
         }
 
         let mut initial_counts = HashMap::new();
-        let mut inserted_sizes = HashMap::new();
         for delta in deltas {
             for sst in delta
                 .delete_sst_infos
@@ -260,27 +238,18 @@ impl PinCacheRefillController {
                 let count = self.object_ref_counts.entry(sst.object_id).or_insert(0);
                 initial_counts.entry(sst.object_id).or_insert(*count);
                 *count = count.checked_add(1)?;
-                inserted_sizes
-                    .entry(sst.object_id)
-                    .and_modify(|size| {
-                        assert_eq!(
-                            *size, sst.file_size,
-                            "one object must have one physical size"
-                        )
-                    })
-                    .or_insert(sst.file_size);
             }
         }
 
         let mut removed = HashSet::new();
-        let mut inserted = HashMap::new();
+        let mut inserted = HashSet::new();
         for (object_id, initial_count) in initial_counts {
             let final_count = self.object_ref_counts.get(&object_id).copied().unwrap_or(0);
             if initial_count > 0 && final_count == 0 {
                 removed.insert(object_id);
             }
             if initial_count == 0 && final_count > 0 {
-                inserted.insert(object_id, inserted_sizes[&object_id]);
+                inserted.insert(object_id);
             }
         }
         Some(PinCacheObjectChanges { inserted, removed })
@@ -290,5 +259,17 @@ impl PinCacheRefillController {
         sst.table_ids
             .iter()
             .any(|table_id| pinned_table_ids.contains(table_id))
+    }
+}
+
+impl PinCacheObjectChanges {
+    fn between(
+        before: HashSet<HummockSstableObjectId>,
+        after: HashSet<HummockSstableObjectId>,
+    ) -> Self {
+        Self {
+            removed: before.difference(&after).copied().collect(),
+            inserted: after.difference(&before).copied().collect(),
+        }
     }
 }

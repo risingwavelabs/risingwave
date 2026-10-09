@@ -90,7 +90,6 @@ fn test_membership_tracks_physical_references() {
         SstableInfo::from(SstableInfoInner {
             object_id: 1001.into(),
             sst_id: (table.as_raw_id() as u64).into(),
-            file_size: 8,
             table_ids: vec![table],
             ..Default::default()
         })
@@ -120,7 +119,7 @@ fn test_membership_tracks_physical_references() {
         Some(&[intra_level_delta(&[], &branches[1..])]),
     );
     assert_eq!(candidates, [1001.into()].into());
-    assert_eq!(changes.inserted, [(1001.into(), 8)].into());
+    assert_eq!(changes.inserted, [1001.into()].into());
     // A new logical reference can require refill without adding physical membership.
     let (candidates, changes) = controller.apply_version_update(
         &[SstDeltaInfo {
@@ -158,12 +157,12 @@ fn test_membership_tracks_physical_references() {
     let changes = controller.replace_pinned_tables(HashSet::new(), std::slice::from_ref(&both));
     assert_eq!(changes.removed, [1001.into()].into());
     let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&both));
-    assert_eq!(changes.inserted, [(1001.into(), 8)].into());
+    assert_eq!(changes.inserted, [1001.into()].into());
 
     // A full snapshot restores membership without scheduling a backfill.
     let (candidates, changes) = controller.apply_version_update(&[], both.clone(), None);
     assert!(candidates.is_empty());
-    assert_eq!(changes.inserted, [(1001.into(), 8)].into());
+    assert_eq!(changes.inserted, [1001.into()].into());
     assert!(changes.removed.is_empty());
     let (candidates, changes) = controller.apply_version_update(&[], both.clone(), Some(&[]));
     assert!(candidates.is_empty() && changes.inserted.is_empty() && changes.removed.is_empty());
@@ -200,7 +199,7 @@ fn test_membership_tracks_physical_references() {
         let (candidates, changes) = controller.apply_version_update(&[], target, Some(&raw_deltas));
         assert!(candidates.is_empty());
         if present {
-            assert_eq!(changes.inserted, [(1001.into(), 8)].into());
+            assert_eq!(changes.inserted, [1001.into()].into());
             assert!(changes.removed.is_empty());
         } else {
             assert_eq!(changes.removed, [1001.into()].into());
