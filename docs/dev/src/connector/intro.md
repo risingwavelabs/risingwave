@@ -167,6 +167,19 @@ Run the ClickHouse sink test in the same way:
 ./risedev k
 ```
 
+For the Cassandra sink test, Start your Docker daemon and enable `ENABLE_MINIO=true` and
+`ENABLE_BUILD_RW_CONNECTOR=true` in `risedev-components.user.env` (or use `./risedev configure`).
+The Cassandra sink requires the Java connector libraries even though Cassandra itself runs in Docker.
+Ensure JDK 21 is available to the build and runtime, and rebuild with `./risedev b` after enabling the connector.
+
+From the repository root, run:
+
+```sh
+./risedev d local-cassandra-sink-test
+./risedev slt './e2e_test/sink/cassandra_sink.slt'
+./risedev k
+```
+
 ### Tips for writing `system` commands
 
 Refer to
