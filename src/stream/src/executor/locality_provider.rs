@@ -157,10 +157,11 @@ impl LocalityBackfillState {
             .map(|(&vnode, progress)| (vnode, progress))
     }
 
+    /// Like `BackfillState::has_progress` of arrangement backfill.
     fn has_progress(&self) -> bool {
         self.per_vnode
             .values()
-            .any(|progress| matches!(progress, LocalityBackfillProgress::InProgress { .. }))
+            .any(|progress| !matches!(progress, LocalityBackfillProgress::NotStarted))
     }
 
     fn update_progress(&mut self, vnode: VirtualNode, new_pos: OwnedRow, row_count_delta: u64) {
