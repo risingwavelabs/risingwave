@@ -268,6 +268,7 @@ message ConnectionParams {
     CONNECTION_TYPE_ICEBERG = 2;
     CONNECTION_TYPE_SCHEMA_REGISTRY = 3;
     CONNECTION_TYPE_ELASTICSEARCH = 4;
+    CONNECTION_TYPE_OPENSEARCH = 5;
   }
 
   ConnectionType connection_type = 1;

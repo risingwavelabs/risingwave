@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use anyhow::anyhow;
@@ -25,12 +24,12 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
-use url::Url;
+use url::{Host, Url};
 use with_options::WithOptions;
 
 use super::super::SinkError;
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchClient;
-use crate::connector_common::{AwsAuthProps, ElasticsearchConnection};
+use crate::connector_common::{AwsAuthProps, ElasticsearchConnection, OpenSearchConnection};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorError;
 use crate::sink::Result;
@@ -57,7 +56,7 @@ pub struct OpenSearchConfig {
     pub inner: ElasticSearchOpenSearchConfig,
 
     /// Authentication method for `OpenSearch`. Supported values: `basic`, `aws_sigv4`.
-    /// `OpenSearch` `SigV4` options must be set in sink `WITH` options; `CREATE CONNECTION` does not support them.
+    /// `OpenSearch` `SigV4` options can be set in sink `WITH` options or an `opensearch` `CREATE CONNECTION`.
     #[serde(rename = "auth.method")]
     pub auth_method: Option<String>,
 
@@ -261,6 +260,29 @@ impl OpenSearchConfig {
         Ok(config)
     }
 
+    pub fn from_connection(connection: &OpenSearchConnection) -> Self {
+        Self {
+            inner: ElasticSearchOpenSearchConfig {
+                url: connection.url.clone(),
+                index: None,
+                delimiter: None,
+                username: connection.username.clone(),
+                password: connection.password.clone(),
+                index_column: None,
+                routing_column: None,
+                retry_on_conflict: default_retry_on_conflict(),
+                batch_num_messages: default_batch_num_messages(),
+                batch_size_kb: default_batch_size_kb(),
+                concurrent_requests: default_concurrent_requests(),
+                r#type: default_type(),
+            },
+            auth_method: connection.auth_method.clone(),
+            aws_sigv4_service_name: connection.aws_sigv4_service_name.clone(),
+            aws_auth_props: connection.aws_auth_props.clone(),
+            unknown_fields: HashMap::new(),
+        }
+    }
+
     pub async fn build_client(&self) -> Result<ElasticSearchOpenSearchClient> {
         let url = self.inner.url()?;
         let mut transport_builder = opensearch::http::transport::TransportBuilder::new(
@@ -392,9 +414,11 @@ fn is_https_or_loopback(url: &Url) -> bool {
     if url.scheme() == "https" {
         return true;
     }
-    match url.host_str() {
-        Some(host) if host.eq_ignore_ascii_case("localhost") => true,
-        Some(host) => host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback()),
+    match url.host() {
+        Some(Host::Domain(host)) if host.eq_ignore_ascii_case("localhost") => true,
+        Some(Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(Host::Domain(_)) => false,
         None => false,
     }
 }
@@ -492,18 +516,52 @@ mod tests {
 
     #[test]
     fn test_allow_sigv4_http_url_for_loopback() {
-        let mut props = BTreeMap::from([
-            ("url".to_owned(), "http://127.0.0.1:19200".to_owned()),
-            ("index".to_owned(), "rw_test".to_owned()),
-        ]);
-        props.insert("auth.method".to_owned(), "aws_sigv4".to_owned());
-        props.insert("aws.region".to_owned(), "us-east-1".to_owned());
+        for url in ["http://127.0.0.1:19200", "http://[::1]:19200"] {
+            let mut props = BTreeMap::from([
+                ("url".to_owned(), url.to_owned()),
+                ("index".to_owned(), "rw_test".to_owned()),
+            ]);
+            props.insert("auth.method".to_owned(), "aws_sigv4".to_owned());
+            props.insert("aws.region".to_owned(), "us-east-1".to_owned());
 
-        let config = OpenSearchConfig::from_btreemap(props).unwrap();
+            let config = OpenSearchConfig::from_btreemap(props).unwrap();
+            assert!(matches!(
+                config.validate_auth_config().unwrap(),
+                OpenSearchAuthMethod::AwsSigV4
+            ));
+        }
+    }
+
+    #[test]
+    fn test_parse_opensearch_connection_sigv4_config() {
+        let connection = OpenSearchConnection {
+            url: "https://example.us-east-1.es.amazonaws.com".to_owned(),
+            username: None,
+            password: None,
+            auth_method: Some("aws_sigv4".to_owned()),
+            aws_sigv4_service_name: Some("aoss".to_owned()),
+            aws_auth_props: AwsAuthProps {
+                region: Some("us-east-1".to_owned()),
+                endpoint: None,
+                access_key: Some("test-access-key".to_owned()),
+                secret_key: Some("test-secret-key".to_owned()),
+                session_token: None,
+                arn: None,
+                external_id: None,
+                profile: None,
+                msk_signer_timeout_sec: None,
+            },
+        };
+
+        let config = OpenSearchConfig::from_connection(&connection);
         assert!(matches!(
-            config.validate_auth_config().unwrap(),
+            config.auth_method().unwrap(),
             OpenSearchAuthMethod::AwsSigV4
         ));
+        assert_eq!(config.inner.url, connection.url);
+        assert!(config.inner.index.is_none());
+        assert_eq!(config.aws_sigv4_service_name.as_deref(), Some("aoss"));
+        assert_eq!(config.aws_auth_props.region.as_deref(), Some("us-east-1"));
     }
 
     #[test]
