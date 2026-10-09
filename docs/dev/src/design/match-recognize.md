@@ -625,9 +625,12 @@ not on Flink, whose window is exclusive.
   monotone in the order key) or by resuming a budget-truncated scan; the emission gate's
   structural verdicts and the structural prune depend only on the buffer. The executor files each
   partition under its first row's deadline (`Deadline::Never` is never filed) and marks it
-  *pending* when an arrival, a spent budget or a refresh request touched it; a watermark visits
-  the expired buckets plus the pending set, each partition at most once per pass. Skipping the
-  rest is exact: their visit would have been a no-op. An emptied partition the chunk arm keeps
+  *pending* when an arrival, a spent budget or a refresh request touched it, or when its own
+  visit's deadline prune evicted rows (the gate runs before the prune and its gap check is
+  structural, so an evicted window-closed gap row may have been what held the first match; the
+  full pass re-asked at the next watermark); a watermark visits the expired buckets plus the
+  pending set, each partition at most once per pass. Skipping the rest is exact: their visit
+  would have been a no-op. An emptied partition the chunk arm keeps
   for its capacity is marked pending too, so the sweep of empty entries the full pass performed
   is preserved — the `retained_partitions` gauge is where a missed sweep would show, since such
   an entry holds no rows. The index holds at most one entry per retained partition (a key is

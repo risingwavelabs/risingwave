@@ -1,0 +1,80 @@
+# A match freed by the deadline prune is emitted at the next watermark, not at its own deadline.
+#
+# The emission gate runs before the deadline prune and its gap check is structural (it ignores the
+# watermark). So a gap row whose WITHIN window has closed but which is still structurally alive
+# holds back an otherwise final match for one visit; the prune then evicts the gap row in the same
+# visit. The full pass re-asked the gate at the next watermark and emitted the match there. The
+# wakeup index must owe that visit too: re-filed under the surviving row's deadline and not
+# pending, the partition would otherwise emit only when THAT deadline passes (watermark 20 below)
+# or a row arrives. This asserts the output after each watermark, which the within_prune gap test
+# does not (it releases everything before checking).
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+drop materialized view if exists mv_gate_prune;
+
+statement ok
+drop table if exists t_gate;
+
+statement ok
+create table t_gate (id int, ts int, v int, watermark for ts as ts - 1) append only;
+
+statement ok
+create materialized view mv_gate_prune as
+select * from t_gate match_recognize (
+  partition by id
+  order by ts
+  measures count(*) as len, min(n.ts) as t0
+  one row per match
+  after match skip past last row
+  pattern (x n n | n)
+  within 10
+  define x as x.v = 0, n as n.v = 1
+);
+
+# Partition 1: `x`@0 and `n`@9. The start at `x` wants two more `n`s and is structurally alive, so
+# the gate holds the boundary match `n`@9 behind it. Deadlines: `x` 10, `n` 19.
+statement ok
+insert into t_gate values (1, 0, 0), (1, 9, 1);
+
+# A sentinel in partition 9 (v = 5 matches no variable; it is dead on arrival) advances the
+# watermark to 11: the sort releases both partition-1 rows, then the watermark visits the
+# partition. `x`'s window (10) has closed. The gate still holds `n`@9 (it ran first, over the
+# buffer with `x` in it); the prune then evicts `x`. Nothing is emitted yet, as on the full pass.
+statement ok
+insert into t_gate values (9, 12, 5);
+
+query III rowsort
+select * from mv_gate_prune;
+----
+
+# Watermark 12. `x` is gone, nothing holds `n`@9, and its own alternative (`n`) cannot extend: the
+# match is final. The full pass emitted it here, and so must the wakeup index — the visit at 11
+# evicted a row, so it owes this one. Before the fix this returned nothing until watermark 20.
+statement ok
+insert into t_gate values (9, 13, 5);
+
+query III rowsort
+select * from mv_gate_prune;
+----
+1 1 9
+
+# Past `n`'s own deadline: still exactly one match.
+statement ok
+insert into t_gate values (9, 21, 5);
+
+query III rowsort
+select * from mv_gate_prune;
+----
+1 1 9
+
+statement ok
+drop materialized view mv_gate_prune;
+
+statement ok
+drop table t_gate;
