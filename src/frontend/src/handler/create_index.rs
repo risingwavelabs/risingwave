@@ -29,6 +29,7 @@ use risingwave_pb::catalog::{
     PbStreamJobStatus, PbVectorIndexInfo,
 };
 use risingwave_pb::common::PbDistanceType;
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use thiserror_ext::AsReport;
@@ -155,6 +156,16 @@ pub(crate) fn gen_create_index_plan(
         return Err(
             ErrorCode::InvalidInputSyntax(format!("\"{}\" is an index", table.name)).into(),
         );
+    }
+
+    // A relation without primary key holds at most one row, e.g. a materialized view of a global
+    // aggregation. The index is still created for compatibility, but the planner will never
+    // prefer it over the primary table.
+    if table.pk().is_empty() {
+        session.notice_to_user(format!(
+            "index \"{}\" will never be used by the planner: \"{}\" has no primary key and holds at most one row",
+            index_table_name, table.name
+        ));
     }
 
     if !session.is_super_user() && session.user_id() != table.owner {
@@ -448,6 +459,35 @@ pub(crate) fn gen_create_index_plan(
         &table,
         index_columns_ordered_expr,
     );
+
+    // The index stores the stream key of the primary table, but the primary key can be wider, e.g.
+    // `[order_key..., stream_key...]` for an `ORDER BY` materialized view. Unless the remaining
+    // primary key columns are indexed or included, the index cannot locate rows of the primary
+    // table and only serves queries it fully covers.
+    let stored_primary_columns: HashSet<usize> = index_item
+        .iter()
+        // The first item of a vector index is the vector, not an info column.
+        .skip(if is_vector_index { 1 } else { 0 })
+        .filter_map(|item| match item.rex_node {
+            Some(RexNode::InputRef(column_index)) => Some(column_index as usize),
+            _ => None,
+        })
+        .collect();
+    let missing_pk_columns = table
+        .pk()
+        .iter()
+        .filter(|order| !stored_primary_columns.contains(&order.column_index))
+        .map(|order| format!("\"{}\"", table.columns()[order.column_index].name()))
+        .collect_vec();
+    if !missing_pk_columns.is_empty() {
+        session.notice_to_user(format!(
+            "index \"{}\" does not store primary key column(s) {} of \"{}\", so the planner can use it only for queries it fully covers; include these columns to let it look up rows of \"{}\"",
+            index_table_name,
+            missing_pk_columns.join(", "),
+            table.name,
+            table.name,
+        ));
+    }
 
     let create_type =
         if context.session_ctx().config().background_ddl() && plan_can_use_background_ddl(&plan) {

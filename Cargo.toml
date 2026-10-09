@@ -159,7 +159,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
 deltalake = { version = "0.32.0", features = ["s3", "gcs"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
-foyer = { version = "0.22.3", default-features = false, features = [
+foyer = { version = "0.22.6", default-features = false, features = [
     "runtime-madsim-tokio",
     "serde",
     "tracing",
@@ -176,10 +176,10 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260807
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e645680f1ed886c62600c2a491fe88be6606cc8a" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e645680f1ed886c62600c2a491fe88be6606cc8a" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e645680f1ed886c62600c2a491fe88be6606cc8a" }
-iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e645680f1ed886c62600c2a491fe88be6606cc8a", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61", features = [
     "opendal-azblob",
     "opendal-azdls",
     "opendal-fs",
@@ -201,7 +201,7 @@ lance-table = { version = "6.0", default-features = false }
 lancedb = { version = "0.29", default-features = false }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.18"
-madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = [
     "native-tls-tls",
@@ -234,7 +234,7 @@ prost-derive = { version = "=0.14.3" }
 prost-reflect = { version = "0.16.3", features = ["serde"] }
 prost-types = { version = "=0.14.3" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646", features = [
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d", features = [
     "cmake-build",
 ] }
 redis = { version = "1.0" }
@@ -318,7 +318,7 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
-tokio = { package = "madsim-tokio", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646", features = [
+tokio = { package = "madsim-tokio", git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -332,10 +332,10 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
 ] }
 tokio-util = "0.7"
 toml = "1.0"
-tonic = { package = "madsim-tonic", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646", features = [
+tonic = { package = "madsim-tonic", git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d", features = [
     "zstd",
 ] }
-tonic-build = { package = "madsim-tonic-build", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+tonic-build = { package = "madsim-tonic-build", git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
 tracing-opentelemetry = "=0.32.0"
 
 [workspace.lints.rust]
@@ -459,15 +459,17 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
+# Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
+foyer = { git = "https://github.com/Li0k/foyer.git", rev = "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Keep transitive madsim-family resolution aligned to the same upstream rev.
-madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
-madsim-aws-sdk-s3 = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
-madsim-macros = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
-madsim-rdkafka = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
-madsim-tokio = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
-madsim-tonic = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
-madsim-tonic-build = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
+madsim-aws-sdk-s3 = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
+madsim-macros = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
+madsim-rdkafka = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
+madsim-tokio = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
+madsim-tonic = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
+madsim-tonic-build = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
