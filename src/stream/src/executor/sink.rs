@@ -1735,6 +1735,7 @@ mod test {
             vec![DataType::Int64; num_columns],
             None,
         )
+        .await
         .unwrap()
         .boxed()
         .execute();
