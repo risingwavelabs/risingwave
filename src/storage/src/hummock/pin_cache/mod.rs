@@ -32,13 +32,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectStoreRef};
+use risingwave_object_store::object::{ObjectResult, ObjectStoreRef};
 
 mod gc;
 mod membership;
+mod read;
 mod recovery;
 mod refill;
 mod storage;
@@ -48,6 +48,7 @@ pub(super) mod test_utils;
 mod tests;
 
 use self::storage::PinCacheStorageState;
+use crate::hummock::SstableBlockIndex;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
 fn metric_bytes(bytes: u64) -> i64 {
@@ -91,15 +92,24 @@ impl PinCacheObject {
     }
 }
 
-/// One shard's object index and refill generation allocator.
+/// One shard's object state and read flights, each protected by its own lock.
+/// Hold at most one shard lock at a time. Release it before I/O, spawning tasks,
+/// invoking callbacks, or acquiring the cache's storage lock.
 #[derive(Default)]
 struct PinCacheShard {
+    state: RwLock<PinCacheShardState>,
+    read_requests: Mutex<HashMap<SstableBlockIndex, read::ReadRequest>>,
+}
+
+/// One shard's object index and refill generation allocator.
+#[derive(Default)]
+struct PinCacheShardState {
     objects: HashMap<HummockSstableObjectId, PinCacheObject>,
     // Never reset on removal: an old token must not match a reintroduced object.
     next_generation: u64,
 }
 
-impl PinCacheShard {
+impl PinCacheShardState {
     fn register_object(&mut self, id: HummockSstableObjectId) {
         self.objects.entry(id).or_insert_with(|| {
             self.next_generation += 1;
@@ -132,9 +142,7 @@ impl PinCacheShard {
 /// may run concurrently; batch membership updates are not atomic across objects.
 pub(crate) struct PinCache {
     store: ObjectStoreRef,
-    // Hold only one shard lock at a time. Release it before I/O or taking the storage lock.
-    // Construction finishes before this cache is shared.
-    shards: Box<[RwLock<PinCacheShard>]>,
+    shards: Box<[PinCacheShard]>,
     capacity: u64,
     // Leaf lock: never acquire a shard lock or perform I/O while holding it.
     // Upload protection and capacity accounting change together under this lock.
@@ -168,37 +176,6 @@ pub(crate) struct PinCacheReadHandle {
     file: Arc<PinCacheFile>,
 }
 
-impl PinCacheReadHandle {
-    /// Withdraws this specific publication, preserving registration and refill tokens.
-    /// Use after its file fails to read or decode, or is no longer eligible for local reads.
-    /// A shared cache fetch can fail on another request's route; such an error alone must not
-    /// invalidate this handle's publication.
-    pub(crate) fn invalidate(&self) {
-        let mut state = self.pin_cache.shard(self.object_id).write();
-        // A late failure must not invalidate a newer publication of the same object.
-        if let Some(object) = state.objects.get_mut(&self.object_id)
-            && object
-                .published
-                .as_ref()
-                .is_some_and(|file| Arc::ptr_eq(file, &self.file))
-        {
-            let file = object.unpublish().unwrap();
-            drop(state);
-            self.pin_cache.enqueue_delete(file);
-        }
-    }
-
-    /// Reads the selected publication through the local object store. On failure, invalidates only
-    /// this publication and returns the error so the caller can fall back to its normal read path.
-    pub(crate) async fn read(&self, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        self.pin_cache
-            .store
-            .read(&self.file.path, range)
-            .await
-            .inspect_err(|_| self.invalidate())
-    }
-}
-
 impl PinCache {
     /// Recovers local files selected by the initial pin-policy/version membership before sharing.
     /// An incomplete inventory fails initialization; no partially recovered cache is returned.
@@ -220,13 +197,13 @@ impl PinCache {
             store,
             capacity,
             storage: Mutex::default(),
-            shards: (0..shard_num)
-                .map(|_| RwLock::new(PinCacheShard::default()))
-                .collect(),
+            shards: (0..shard_num).map(|_| PinCacheShard::default()).collect(),
             next_path_id: AtomicU64::new(rand::random()),
         };
         for id in objects {
-            let state = pin_cache.shards[Self::shard_index(id, shard_num)].get_mut();
+            let state = pin_cache.shards[Self::shard_index(id, shard_num)]
+                .state
+                .get_mut();
             state.register_object(id);
         }
         let metrics = &*GLOBAL_PIN_CACHE_METRICS;
@@ -249,7 +226,7 @@ impl PinCache {
         self: &Arc<Self>,
         object_id: HummockSstableObjectId,
     ) -> Option<PinCacheReadHandle> {
-        let state = self.shard(object_id).read();
+        let state = self.shard(object_id).state.read();
         let file = Arc::clone(state.objects.get(&object_id)?.published.as_ref()?);
         Some(PinCacheReadHandle {
             pin_cache: Arc::clone(self),
@@ -262,7 +239,7 @@ impl PinCache {
         xxhash_rust::xxh64::xxh64(&object_id.as_raw_id().to_le_bytes(), 0) as usize % shard_num
     }
 
-    fn shard(&self, object_id: HummockSstableObjectId) -> &RwLock<PinCacheShard> {
+    fn shard(&self, object_id: HummockSstableObjectId) -> &PinCacheShard {
         &self.shards[Self::shard_index(object_id, self.shards.len())]
     }
 }
