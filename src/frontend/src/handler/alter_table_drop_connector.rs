@@ -81,6 +81,7 @@ fn rewrite_table_definition(
         wildcard_idx,
         constraints,
         mut with_options,
+        source_watermarks,
         append_only,
         on_conflict,
         with_version_columns,
@@ -139,7 +140,9 @@ fn rewrite_table_definition(
             with_options
         },
         format_encode: None,
-        source_watermarks: vec![], // no source, no watermark
+        // The watermark belongs to the table: it also filters DML and sink-into-table rows, and
+        // downstream jobs rely on it.
+        source_watermarks,
         append_only,
         on_conflict,
         with_version_columns,
