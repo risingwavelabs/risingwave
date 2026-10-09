@@ -528,22 +528,22 @@ impl HashKeyDe for F64 {
     }
 }
 
+/// Equal decimals must have equal keys, so the key is the normalized representation.
 impl HashKeySer<'_> for Decimal {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = Decimal::unordered_serialize(&self.normalize());
-        buf.put_slice(b.as_ref());
+        buf.put_slice(&self.normalize().to_fixed_bytes());
     }
 
     fn exact_size() -> Option<usize> {
-        Some(16)
+        Some(20)
     }
 }
 
 impl HashKeyDe for Decimal {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
-        let mut value = [0; 16];
+        let mut value = [0; 20];
         buf.copy_to_slice(&mut value);
-        Self::unordered_deserialize(value)
+        Self::from_fixed_bytes(value)
     }
 }
 
@@ -799,13 +799,14 @@ mod tests {
     #[test]
     fn test_128_bits_hash_key() {
         do_test::<Key128, _>(vec![3, 5], generate_random_data_chunk);
-        do_test::<Key128, _>(vec![6], generate_random_data_chunk);
+        do_test::<Key128, _>(vec![10], generate_random_data_chunk);
     }
 
     #[test]
     fn test_256_bits_hash_key() {
-        do_test::<Key256, _>(vec![3, 5, 6], generate_random_data_chunk);
-        do_test::<Key256, _>(vec![3, 6], generate_random_data_chunk);
+        // A decimal key takes 20 bytes.
+        do_test::<Key256, _>(vec![2, 5, 6], generate_random_data_chunk);
+        do_test::<Key256, _>(vec![6], generate_random_data_chunk);
     }
 
     #[test]
@@ -821,17 +822,24 @@ mod tests {
                 Some(Decimal::from_str("1.200").unwrap()),
                 Some(Decimal::from_str("0.00").unwrap()),
                 Some(Decimal::from_str("0.0").unwrap()),
+                Some(Decimal::from_str("-0.000").unwrap()),
+                // A value beyond the legacy range, and an equal one with trailing zeros.
+                Some(Decimal::from_str("1.000000000000000000000000000000000001").unwrap()),
+                Some(
+                    Decimal::from_str("1.000000000000000000000000000000000001").unwrap()
+                        * Decimal::from_str("1.0").unwrap(),
+                ),
             ])
             .into(),
         )];
         let types = vec![DataType::Decimal];
 
-        (DataChunk::new(columns, 5), types)
+        (DataChunk::new(columns, 8), types)
     }
 
     #[test]
     fn test_decimal_hash_key_serialization() {
-        do_test::<Key128, _>(vec![0], generate_decimal_test_data);
+        do_test::<Key256, _>(vec![0], generate_decimal_test_data);
     }
 
     // Simple test to ensure a row <None, Some(2)> will be serialized and restored

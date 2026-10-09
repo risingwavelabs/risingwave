@@ -1109,9 +1109,7 @@ impl ScalarImpl {
             DataType::Serial => Self::Serial(Serial::from(i64::from_sql(&Type::INT8, bytes)?)),
             DataType::Float32 => Self::Float32(f32::from_sql(&Type::FLOAT4, bytes)?.into()),
             DataType::Float64 => Self::Float64(f64::from_sql(&Type::FLOAT8, bytes)?.into()),
-            DataType::Decimal => {
-                Self::Decimal(rust_decimal::Decimal::from_sql(&Type::NUMERIC, bytes)?.into())
-            }
+            DataType::Decimal => Self::Decimal(Decimal::from_sql(&Type::NUMERIC, bytes)?),
             DataType::Date => Self::Date(chrono::NaiveDate::from_sql(&Type::DATE, bytes)?.into()),
             DataType::Time => Self::Time(chrono::NaiveTime::from_sql(&Type::TIME, bytes)?.into()),
             DataType::Timestamp => {
@@ -1256,7 +1254,7 @@ impl ScalarRefImpl<'_> {
             Self::Utf8(v) => v.serialize(ser)?,
             Self::Bytea(v) => ser.serialize_bytes(v)?,
             Self::Bool(v) => v.serialize(ser)?,
-            Self::Decimal(v) => ser.serialize_decimal((*v).into())?,
+            Self::Decimal(v) => v.memcmp_serialize(ser)?,
             Self::Interval(v) => v.serialize(ser)?,
             Self::Date(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::Timestamp(v) => {
@@ -1306,7 +1304,7 @@ impl ScalarImpl {
             Ty::Varchar => Self::Utf8(Box::<str>::deserialize(de)?),
             Ty::Bytea => Self::Bytea(serde_bytes::ByteBuf::deserialize(de)?.into_vec().into()),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
-            Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
+            Ty::Decimal => Self::Decimal(Decimal::memcmp_deserialize(de)?),
             Ty::Interval => Self::Interval(Interval::deserialize(de)?),
             Ty::Time => Self::Time({
                 let secs = u32::deserialize(&mut *de)?;

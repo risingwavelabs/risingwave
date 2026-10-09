@@ -23,8 +23,8 @@ use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::{ArrayImpl, DataChunk, VectorItemType};
 use crate::row::{OwnedRow, Row};
 use crate::types::{
-    DataType, Date, Datum, F32, F64, Int256, ScalarImpl, Serial, Time, Timestamp, Timestamptz,
-    ToDatumRef,
+    DataType, Date, Datum, Decimal, F32, F64, Int256, ScalarImpl, Serial, Time, Timestamp,
+    Timestamptz, ToDatumRef,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
@@ -148,7 +148,7 @@ fn calculate_encoded_size_inner(
             // Interval is serialized as (i32, i32, i64)
             DataType::Interval => size_of::<(i32, i32, i64)>(),
             DataType::Decimal => {
-                deserializer.deserialize_decimal()?;
+                Decimal::memcmp_deserialize(deserializer)?;
                 0 // the len is not used since decimal is not a fixed length type
             }
             // these types are var-length and should only be determine at runtime.
