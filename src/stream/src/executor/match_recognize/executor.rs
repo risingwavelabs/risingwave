@@ -1530,6 +1530,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         for c in filled {
                             yield Message::Chunk(c);
                         }
+                        // The gate above read the gap rows as the buffer held them, and its gap
+                        // check is structural — it ignores the watermark. So a gap row whose
+                        // window has closed but which is still structurally alive holds back a
+                        // match the prune below is about to free, by evicting that row. The full
+                        // pass re-asked the gate at the next watermark; the index must owe that
+                        // visit too, or the partition sits under its new first deadline (not
+                        // pending) and the match waits for that deadline or an arrival.
+                        let rows_before_prune = run.rows.len();
                         Self::prune_dead_prefix(
                             run,
                             &nfa,
@@ -1541,6 +1549,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             memoizable,
                         )
                         .await?;
+                        let pruned = run.rows.len() < rows_before_prune;
                         let evicted = (rows_before - run.rows.len()) as u64;
                         metrics.match_recognize_evicted_rows_count.inc_by(evicted);
                         retained_rows -= evicted as i64;
@@ -1553,9 +1562,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             emptied.push(pk);
                         } else {
                             // Re-file under the (possibly new) first deadline. A visit that ended on
-                            // a spent budget or with a refresh outstanding decided nothing final and
-                            // is owed the next visit too.
-                            let revisit = budget.hit || run.matcher.needs_refresh();
+                            // a spent budget or with a refresh outstanding decided nothing final,
+                            // and one whose prune evicted rows ran its gate over a buffer the
+                            // prune has since shortened; each is owed the next visit too.
+                            let revisit = budget.hit || run.matcher.needs_refresh() || pruned;
                             wakeups.sync(&pk, run, revisit);
                         }
                     }
@@ -1667,13 +1677,16 @@ fn debug_check_accounting(
 /// bound` is monotone in it (an overflow is `Deadline::Never`, which sorts last), so the first two
 /// happen no earlier than `rows[0].deadline`, and the third is not watermark-dependent at all.
 /// Everything else a visit does — the emission gate's gap and extension verdicts, the structural
-/// liveness prune — is a pure function of the buffer and cannot change without an arrival.
+/// liveness prune — is a pure function of the buffer and cannot change without the buffer
+/// changing. An arrival changes it; so does the visit's own deadline prune, which runs AFTER the
+/// gate: a gap row the prune evicts may have been what held the gate's first match.
 ///
 /// Hence a partition needs the visit at `w` iff `rows[0].deadline < w` **or** it is *pending*:
 /// touched since its last watermark visit. Pending covers the structural prune of rows that
 /// arrived since (that prune runs only on watermark visits), a gate that held on a spent budget
-/// rather than a verdict, and a matcher asking for a refresh. A partition that is neither has
-/// nothing a watermark could change, and skipping it yields exactly the output the full pass did.
+/// rather than a verdict, a matcher asking for a refresh, and a visit whose deadline prune evicted
+/// rows (its gate ran over the buffer before them). A partition that is neither has nothing a
+/// watermark could change, and skipping it yields exactly the output the full pass did.
 ///
 /// `due` buckets partitions by deadline so a whole expired bucket pops at once and a re-key is
 /// two `O(log n)` map operations; `Deadline::Never` partitions are never filed and wake only via
@@ -2887,6 +2900,212 @@ mod tests {
                 0,
                 "an emptied partition nothing files must still be reachable by the sweep"
             );
+        }
+    }
+
+    /// The emission gate runs before the deadline prune and its gap check is structural, so a
+    /// gap row whose `WITHIN` window has closed but which is still structurally alive holds back
+    /// an otherwise final match for one more visit: the prune evicts the row in the same visit,
+    /// and the full pass emitted the match at the next watermark. The wakeup index must owe that
+    /// visit — re-filed under the surviving row's deadline and not pending, the partition would
+    /// otherwise emit only when that deadline passes or a row arrives.
+    mod gate_before_prune {
+        use futures::StreamExt;
+        use risingwave_common::array::{Op, StreamChunk};
+        use risingwave_common::bitmap::Bitmap;
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+        use risingwave_common::hash::VirtualNode;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_common::util::sort_util::OrderType;
+        use risingwave_expr::expr::test_utils::make_i32_literal;
+        use risingwave_expr::expr::{LiteralExpression, build_from_pretty};
+        use risingwave_storage::memory::MemoryStateStore;
+
+        use super::*;
+        use crate::common::table::state_table::StateTable;
+        use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+        use crate::executor::test_utils::{MessageSender, MockSource};
+        use crate::executor::{ActorContext, BoxedMessageStream, Execute, Message};
+        use crate::task::ActorEvalErrorReport;
+
+        /// Distinct from every other test's table id: the metrics registry is process-global.
+        const TABLE_ID: u32 = 27210;
+        const WITHIN: i64 = 10;
+
+        /// Input: `(partition int8, ts int8, v int4)`; `v` tells `x` (0) from `n` (1).
+        fn input_types() -> Vec<DataType> {
+            vec![DataType::Int64, DataType::Int64, DataType::Int32]
+        }
+
+        /// `DEFINE <symbol> AS <symbol>.v = <v>`.
+        fn v_equals(symbol: &str, v: i32) -> CompiledDefine {
+            let condition = ExprNode {
+                function_type: PbExprType::Equal as i32,
+                return_type: Some(DataType::Boolean.to_protobuf()),
+                rex_node: Some(RexNode::FuncCall(PbFunctionCall {
+                    children: vec![input_ref(0), make_i32_literal(v)],
+                })),
+            };
+            let pb = PbMatchRecognizeDefine {
+                symbol: symbol.to_owned(),
+                condition: Some(condition),
+                slots: vec![PbDefineSlot {
+                    kind: KIND_SELF,
+                    vars: vec![],
+                    col_idx: 2,
+                    offset: 0,
+                }],
+            };
+            CompiledDefine::from_protobuf(&pb, LogReport).unwrap()
+        }
+
+        /// `PARTITION BY $0 ORDER BY $1 ... PATTERN (x n n | n) WITHIN 10`, `DEFINE x AS x.v = 0,
+        /// n AS n.v = 1`. `within` is a placeholder literal: the matcher never evaluates it, its
+        /// presence only turns on the span check, which reads the cached deadline (`ts + 10`) —
+        /// the same expression under test here. No candidate spans more than the bound.
+        async fn build() -> (MessageSender, BoxedMessageStream, MatchRecognizeMetrics) {
+            let input_schema = Schema::new(input_types().into_iter().map(Field::unnamed).collect());
+            let output_schema = Schema::new(vec![
+                Field::with_name(DataType::Int64, "partition_0"),
+                Field::with_name(DataType::Int64, "_match_id"),
+            ]);
+            // State table: `seq` then the input columns; key = partition, ts, seq.
+            let table_columns = [
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int32,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(i, t)| ColumnDesc::unnamed(ColumnId::new(i as i32), t))
+            .collect();
+            let state_table = StateTable::from_table_catalog(
+                &gen_pbtable_with_dist_key(
+                    TableId::new(TABLE_ID),
+                    table_columns,
+                    vec![OrderType::ascending(); 3],
+                    vec![1, 2, 0],
+                    0,
+                    vec![1],
+                ),
+                MemoryStateStore::new(),
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+            )
+            .await;
+            let ctx = ActorContext::for_test(1);
+            let metrics = ctx.streaming_metrics.new_match_recognize_metrics(
+                TableId::new(TABLE_ID),
+                ctx.id,
+                ctx.fragment_id,
+            );
+            let report = ActorEvalErrorReport {
+                actor_context: ctx.clone(),
+                identity: Arc::from("test MatchRecognize"),
+            };
+            let var = |s: &str| Pattern::Var(s.to_owned());
+            let nfa = Nfa::compile(&Pattern::Alt(vec![
+                Pattern::Concat(vec![var("x"), var("n"), var("n")]),
+                var("n"),
+            ]));
+            let within = NonStrictExpression::for_test(LiteralExpression::new(
+                DataType::Boolean,
+                Some(ScalarImpl::Bool(true)),
+            ));
+            let within_deadline = NonStrictExpression::new_topmost(
+                build_from_pretty(format!("(add:int8 $0:int8 {WITHIN}:int8)")),
+                DeadlineErrorReport::new(LogReport),
+            );
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(input_schema, vec![0, 1]);
+            let executor = MatchRecognizeExecutor::new(MatchRecognizeExecutorArgs {
+                ctx,
+                input: source,
+                schema: output_schema,
+                chunk_size: 1024,
+                partition_key_indices: vec![0],
+                order_key_indices: vec![1],
+                measures: vec![],
+                defines: vec![v_equals("x", 0), v_equals("n", 1)],
+                within: Some(within),
+                within_deadline: Some(within_deadline),
+                nfa,
+                skip: SkipMode::PastLastRow,
+                eval_error_report: report,
+                state_table,
+            });
+            let mut stream = executor.boxed().execute();
+            tx.push_barrier(test_epoch(1), false);
+            drain_until_barrier(&mut stream, test_epoch(1)).await;
+            (tx, stream, metrics)
+        }
+
+        async fn drain_until_barrier(stream: &mut BoxedMessageStream, epoch: u64) -> usize {
+            let mut emitted = 0;
+            while let Some(msg) = stream.next().await {
+                match msg.unwrap() {
+                    Message::Barrier(b) if b.epoch.curr == epoch => return emitted,
+                    Message::Chunk(c) => emitted += c.cardinality(),
+                    _ => {}
+                }
+            }
+            panic!("stream ended before barrier {epoch}");
+        }
+
+        fn rows(rows: &[(i64, i32)]) -> StreamChunk {
+            let rows: Vec<(Op, OwnedRow)> = rows
+                .iter()
+                .map(|&(ts, v)| {
+                    (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int64(0)),
+                            Some(ScalarImpl::Int64(ts)),
+                            Some(ScalarImpl::Int32(v)),
+                        ]),
+                    )
+                })
+                .collect();
+            StreamChunk::from_rows(&rows, &input_types())
+        }
+
+        /// `x@0 n@9`: the start at `x` has bound `x n` and wants one more `n`, so it is
+        /// structurally alive at the boundary and the gate holds the boundary match `n@9` behind
+        /// it. Watermark 11 closes `x`'s window (deadline 10): the gate still holds (it ran first),
+        /// then the prune evicts `x`. Watermark 12 must emit the match, as the full pass did — not
+        /// watermark 20, when `n`'s own window closes.
+        #[tokio::test]
+        async fn a_match_freed_by_the_prune_is_emitted_at_the_next_watermark() {
+            let (mut tx, mut stream, metrics) = build().await;
+            tx.push_chunk(rows(&[(0, 0), (9, 1)]));
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(2)).await;
+            assert_eq!(emitted, 0, "`n@9` is held behind the alive start at `x@0`");
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 2);
+
+            tx.push_int64_watermark(1, 11);
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(3)).await;
+            assert_eq!(emitted, 0, "the gate ran before the prune evicted `x`");
+            assert_eq!(
+                metrics.match_recognize_retained_rows.get(),
+                1,
+                "`x`'s window closed at 11; the prune must have evicted it"
+            );
+
+            tx.push_int64_watermark(1, 12);
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(4), test_epoch(3), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(4)).await;
+            assert_eq!(
+                emitted, 1,
+                "the visit that evicted the gap row owes the next one; nothing holds `n@9` now"
+            );
+            assert_eq!(metrics.match_recognize_retained_rows.get(), 0);
+
+            tx.push_int64_watermark(1, 20);
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(5), test_epoch(4), false);
+            let emitted = drain_until_barrier(&mut stream, test_epoch(5)).await;
+            assert_eq!(emitted, 0, "emitted once");
         }
     }
 }
