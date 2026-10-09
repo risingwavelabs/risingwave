@@ -427,11 +427,20 @@ message Table {
   }
 
   enum CdcTableType {
+    // `SQL_SERVER` and `MONGODB` were renamed to match the names in
+    // `connector_service.SourceType`. The old names are kept as aliases of the
+    // same numbers so the rename is not a breaking change; code generators only
+    // emit the first name for each number.
+    // buf:lint:ignore ENUM_NO_ALLOW_ALIAS
+    option allow_alias = true;
+
     CDC_TABLE_TYPE_UNSPECIFIED = 0;
     CDC_TABLE_TYPE_POSTGRES = 1;
     CDC_TABLE_TYPE_MYSQL = 2;
     CDC_TABLE_TYPE_SQL_SERVER = 3;
+    CDC_TABLE_TYPE_SQLSERVER = 3 [deprecated = true];
     CDC_TABLE_TYPE_MONGODB = 4;
+    CDC_TABLE_TYPE_MONGO = 4 [deprecated = true];
     CDC_TABLE_TYPE_CITUS = 5;
   }
 
