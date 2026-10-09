@@ -39,7 +39,7 @@ use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::CdcSourceType;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
-    MySqlExternalTable, MySqlExternalTableReader, MySqlOffset,
+    MysqlExternalTable, MysqlExternalTableReader, MysqlOffset,
 };
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 use crate::source::cdc::external::sql_server::{
@@ -48,46 +48,48 @@ use crate::source::cdc::external::sql_server::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExternalCdcTableType {
-    Undefined,
+    Unspecified,
     Mock,
-    MySql,
+    Mysql,
     Postgres,
     SqlServer,
     Citus,
-    Mongo,
+    Mongodb,
 }
 
 impl ExternalCdcTableType {
     pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
         let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
-            "mysql-cdc" => Self::MySql,
+            "mysql-cdc" => Self::Mysql,
             "postgres-cdc" => Self::Postgres,
             "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
-            "mongodb-cdc" => Self::Mongo,
-            _ => Self::Undefined,
+            "mongodb-cdc" => Self::Mongodb,
+            _ => Self::Unspecified,
         }
     }
 
     pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::MySql | Self::Postgres | Self::SqlServer)
+        matches!(self, Self::Mysql | Self::Postgres | Self::SqlServer)
     }
 
     pub fn enable_transaction_metadata(&self) -> bool {
         // In Debezium, transactional metadata cause delay of the newest events, as the `END` message is never sent unless a new transaction starts.
         // So we only allow transactional metadata for MySQL and Postgres.
         // See more in https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
-        matches!(self, Self::MySql | Self::Postgres)
+        matches!(self, Self::Mysql | Self::Postgres)
     }
 
     pub fn get_cdc_offset_parser(&self) -> ConnectorResult<CdcOffsetParseFunc> {
         match self {
-            Self::MySql => Ok(MySqlExternalTableReader::get_cdc_offset_parser()),
+            Self::Mysql => Ok(MysqlExternalTableReader::get_cdc_offset_parser()),
             Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
             Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
             Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
-            _ => bail!("invalid external table type: {:?}", *self),
+            Self::Unspecified | Self::Citus | Self::Mongodb => {
+                bail!("invalid external table type: {:?}", *self)
+            }
         }
     }
 
@@ -100,8 +102,8 @@ impl ExternalCdcTableType {
         table_id: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
-            Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(config, schema, pk_indices).await?,
+            Self::Mysql => Ok(ExternalTableReaderImpl::Mysql(
+                MysqlExternalTableReader::new(config, schema, pk_indices).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(
@@ -118,7 +120,9 @@ impl ExternalCdcTableType {
             )),
             // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
-            _ => bail!("invalid external table type: {:?}", *self),
+            Self::Unspecified | Self::Citus | Self::Mongodb => {
+                bail!("invalid external table type: {:?}", *self)
+            }
         }
     }
 }
@@ -127,12 +131,12 @@ impl From<ExternalCdcTableType> for PbCdcTableType {
     fn from(cdc_table_type: ExternalCdcTableType) -> Self {
         match cdc_table_type {
             ExternalCdcTableType::Postgres => Self::Postgres,
-            ExternalCdcTableType::MySql => Self::Mysql,
-            ExternalCdcTableType::SqlServer => Self::Sqlserver,
+            ExternalCdcTableType::Mysql => Self::Mysql,
+            ExternalCdcTableType::SqlServer => Self::SqlServer,
 
             ExternalCdcTableType::Citus => Self::Citus,
-            ExternalCdcTableType::Mongo => Self::Mongo,
-            ExternalCdcTableType::Undefined | ExternalCdcTableType::Mock => Self::Unspecified,
+            ExternalCdcTableType::Mongodb => Self::Mongodb,
+            ExternalCdcTableType::Unspecified | ExternalCdcTableType::Mock => Self::Unspecified,
         }
     }
 }
@@ -141,11 +145,11 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
     fn from(cdc_table_type: PbCdcTableType) -> Self {
         match cdc_table_type {
             PbCdcTableType::Postgres => Self::Postgres,
-            PbCdcTableType::Mysql => Self::MySql,
-            PbCdcTableType::Sqlserver => Self::SqlServer,
-            PbCdcTableType::Mongo => Self::Mongo,
+            PbCdcTableType::Mysql => Self::Mysql,
+            PbCdcTableType::SqlServer => Self::SqlServer,
+            PbCdcTableType::Mongodb => Self::Mongodb,
             PbCdcTableType::Citus => Self::Citus,
-            PbCdcTableType::Unspecified => Self::Undefined,
+            PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
 }
@@ -167,7 +171,7 @@ impl SchemaTableName {
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
         let schema_name = match table_type {
-            ExternalCdcTableType::MySql => properties
+            ExternalCdcTableType::Mysql => properties
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
@@ -177,7 +181,9 @@ impl SchemaTableName {
             ExternalCdcTableType::SqlServer => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
-            _ => {
+            ExternalCdcTableType::Unspecified
+            | ExternalCdcTableType::Mock
+            | ExternalCdcTableType::Mongodb => {
                 unreachable!("invalid external table type: {:?}", table_type);
             }
         };
@@ -191,7 +197,10 @@ impl SchemaTableName {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum CdcOffset {
-    MySql(MySqlOffset),
+    // The variant name is the JSON tag persisted in the CDC backfill state table,
+    // so keep the historical spelling for serde.
+    #[serde(rename = "MySql")]
+    Mysql(MysqlOffset),
     Postgres(PostgresOffset),
     SqlServer(SqlServerOffset),
 }
@@ -285,7 +294,7 @@ pub struct CdcTableSnapshotSplitOption {
 }
 
 pub enum ExternalTableReaderImpl {
-    MySql(MySqlExternalTableReader),
+    Mysql(MysqlExternalTableReader),
     Postgres(PostgresExternalTableReader),
     SqlServer(SqlServerExternalTableReader),
     Mock(MockExternalTableReader),
@@ -363,7 +372,7 @@ impl ExternalTableConfig {
 impl ExternalTableReader for ExternalTableReaderImpl {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
+            ExternalTableReaderImpl::Mysql(mysql) => mysql.current_cdc_offset().await,
             ExternalTableReaderImpl::Postgres(postgres) => postgres.current_cdc_offset().await,
             ExternalTableReaderImpl::SqlServer(sql_server) => sql_server.current_cdc_offset().await,
             ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
@@ -405,14 +414,14 @@ impl ExternalTableReaderImpl {
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.pk_column_comparisons(pk_names),
+            ExternalTableReaderImpl::Mysql(mysql) => mysql.pk_column_comparisons(pk_names),
             _ => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
         }
     }
 
     pub fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
         match self {
-            ExternalTableReaderImpl::MySql(_) => MySqlExternalTableReader::get_cdc_offset_parser(),
+            ExternalTableReaderImpl::Mysql(_) => MysqlExternalTableReader::get_cdc_offset_parser(),
             ExternalTableReaderImpl::Postgres(_) => {
                 PostgresExternalTableReader::get_cdc_offset_parser()
             }
@@ -432,7 +441,7 @@ impl ExternalTableReaderImpl {
         limit: u32,
     ) {
         let stream = match self {
-            ExternalTableReaderImpl::MySql(mysql) => {
+            ExternalTableReaderImpl::Mysql(mysql) => {
                 mysql.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Postgres(postgres) => {
@@ -457,7 +466,7 @@ impl ExternalTableReaderImpl {
     #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
     async fn get_parallel_cdc_splits_inner(&self, options: CdcTableSnapshotSplitOption) {
         let stream = match self {
-            ExternalTableReaderImpl::MySql(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Mysql(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Postgres(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::SqlServer(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Mock(e) => e.get_parallel_cdc_splits(options),
@@ -479,7 +488,7 @@ impl ExternalTableReaderImpl {
         split_columns: Vec<Field>,
     ) {
         let stream = match self {
-            ExternalTableReaderImpl::MySql(mysql) => {
+            ExternalTableReaderImpl::Mysql(mysql) => {
                 mysql.split_snapshot_read(table_name, left, right, split_columns)
             }
             ExternalTableReaderImpl::Postgres(postgres) => {
@@ -503,7 +512,7 @@ impl ExternalTableReaderImpl {
 }
 
 pub enum ExternalTableImpl {
-    MySql(MySqlExternalTable),
+    Mysql(MysqlExternalTable),
     Postgres(PostgresExternalTable),
     SqlServer(SqlServerExternalTable),
 }
@@ -512,8 +521,8 @@ impl ExternalTableImpl {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         let cdc_source_type = CdcSourceType::from(config.connector.as_str());
         match cdc_source_type {
-            CdcSourceType::Mysql => Ok(ExternalTableImpl::MySql(
-                MySqlExternalTable::connect(config).await?,
+            CdcSourceType::Mysql => Ok(ExternalTableImpl::Mysql(
+                MysqlExternalTable::connect(config).await?,
             )),
             CdcSourceType::Postgres => {
                 let pg_conn = config.pg_connection_config()?;
@@ -537,7 +546,7 @@ impl ExternalTableImpl {
 
     pub fn column_descs(&self) -> &Vec<ColumnDesc> {
         match self {
-            ExternalTableImpl::MySql(mysql) => mysql.column_descs(),
+            ExternalTableImpl::Mysql(mysql) => mysql.column_descs(),
             ExternalTableImpl::Postgres(postgres) => postgres.column_descs(),
             ExternalTableImpl::SqlServer(sql_server) => sql_server.column_descs(),
         }
@@ -545,7 +554,7 @@ impl ExternalTableImpl {
 
     pub fn pk_names(&self) -> &Vec<String> {
         match self {
-            ExternalTableImpl::MySql(mysql) => mysql.pk_names(),
+            ExternalTableImpl::Mysql(mysql) => mysql.pk_names(),
             ExternalTableImpl::Postgres(postgres) => postgres.pk_names(),
             ExternalTableImpl::SqlServer(sql_server) => sql_server.pk_names(),
         }
@@ -563,7 +572,7 @@ impl ExternalTableImpl {
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match self {
-            ExternalTableImpl::MySql(mysql) => mysql.pk_column_comparisons(pk_names),
+            ExternalTableImpl::Mysql(mysql) => mysql.pk_column_comparisons(pk_names),
             ExternalTableImpl::Postgres(_) | ExternalTableImpl::SqlServer(_) => {
                 Ok(vec![CdcKeyComparison::Native; pk_names.len()])
             }
@@ -584,7 +593,7 @@ impl ExternalTableImpl {
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match CdcSourceType::from(config.connector.as_str()) {
             CdcSourceType::Mysql => {
-                MySqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
+                MysqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
             }
             _ => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
         }

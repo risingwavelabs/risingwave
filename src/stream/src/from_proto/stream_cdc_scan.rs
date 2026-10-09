@@ -72,7 +72,7 @@ fn decode_table_pk(
         // Int64 are indistinguishable until the reader checks upstream. Only Int64 PK columns
         // can need unsigned reinterpretation; other types (including Decimal) use native ordering.
         let mut needs_reader_comparisons = false;
-        if *table_type == ExternalCdcTableType::MySql {
+        if *table_type == ExternalCdcTableType::Mysql {
             for &idx in &indices {
                 if table_desc.columns[idx].get_column_type()?.get_type_name()? == TypeName::Int64 {
                     needs_reader_comparisons = true;
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn test_decode_legacy_mysql_int64_pk_comparisons_as_unknown() {
         let (order_types, comparisons, indices) =
-            decode_table_pk(&legacy_desc(DataType::Int64), &ExternalCdcTableType::MySql).unwrap();
+            decode_table_pk(&legacy_desc(DataType::Int64), &ExternalCdcTableType::Mysql).unwrap();
 
         assert_eq!(
             order_types,
@@ -254,7 +254,7 @@ mod tests {
             DataType::Varchar,
         ] {
             let (order_types, comparisons, indices) =
-                decode_table_pk(&legacy_desc(pk_type), &ExternalCdcTableType::MySql).unwrap();
+                decode_table_pk(&legacy_desc(pk_type), &ExternalCdcTableType::Mysql).unwrap();
             assert_eq!(
                 order_types,
                 vec![OrderType::descending(), OrderType::ascending()]
@@ -302,7 +302,7 @@ mod tests {
         };
 
         let (order_types, comparisons, indices) =
-            decode_table_pk(&desc, &ExternalCdcTableType::MySql).unwrap();
+            decode_table_pk(&desc, &ExternalCdcTableType::Mysql).unwrap();
         assert_eq!(
             order_types,
             vec![OrderType::ascending(), OrderType::ascending()]
