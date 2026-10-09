@@ -614,6 +614,9 @@ impl CheckpointControl {
                     IndependentCheckpointJob::CreatingStreamingJob(_) => {
                         unreachable!("creating streaming job should not initialize when running")
                     }
+                    IndependentCheckpointJob::IcebergV3(_) => {
+                        unreachable!("Iceberg V3 jobs do not wait for graph initialization")
+                    }
                 }
             }
             DatabaseCheckpointControlStatus::Recovering(state) => {
@@ -1029,6 +1032,22 @@ impl DatabaseCheckpointControl {
                         independent_jobs_task.push((*job_id, epoch, resps, info));
                     }
                 }
+                IndependentCheckpointJob::IcebergV3(iceberg_job) => {
+                    if let Some((epoch, resps, info, tracking_job)) = iceberg_job
+                        .start_completing(partial_graph_manager, min_upstream_inflight_barrier)
+                    {
+                        if let Some(tracking_job) = tracking_job {
+                            let task = task.get_or_insert_default();
+                            task.finished_jobs.push(tracking_job);
+                        }
+                        independent_jobs_task.push((
+                            *job_id,
+                            epoch,
+                            resps.into_values().collect_vec(),
+                            info,
+                        ));
+                    }
+                }
             }
         }
         if !finished_jobs.is_empty() {
@@ -1284,11 +1303,11 @@ impl DatabaseCheckpointControl {
 
         if !matches!(&command, Some(Command::CreateStreamingJob { .. }))
             && self.database_info.is_empty()
+            && self
+                .independent_checkpoint_job_controls
+                .values()
+                .all(|job| job.running().is_none())
         {
-            assert!(
-                self.independent_checkpoint_job_controls.is_empty(),
-                "should not have snapshot backfill job when there is no normal job in database"
-            );
             // Drop the guard to remove the metric series of this database.
             self.last_committed_barrier_time = None;
             // skip the command when there is nothing to do with the barrier
