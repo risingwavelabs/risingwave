@@ -34,20 +34,19 @@ const ORPHAN_FILE_LOG_SAMPLE_SIZE: usize = 10;
 async fn remove_orphan_files_from_table(
     table: Table,
     min_age: std::time::Duration,
-) -> iceberg::Result<Vec<String>> {
+) -> risingwave_connector::sink::Result<Vec<String>> {
     // The pinned iceberg-rust action does not enforce this table-level protection.
     // Check before discovering or deleting files, which may be shared with other tables.
     if !table.metadata().table_properties()?.gc_enabled {
-        return Err(iceberg::Error::new(
-            iceberg::ErrorKind::DataInvalid,
-            "Cannot remove orphan files when gc.enabled=false: files may be shared with other tables",
-        ));
+        return Err(SinkError::Config(anyhow!(
+            "Cannot remove orphan files when gc.enabled=false: files may be shared with other tables"
+        )));
     }
 
-    RemoveOrphanFilesAction::new(table)
+    Ok(RemoveOrphanFilesAction::new(table)
         .older_than(min_age)
         .execute()
-        .await
+        .await?)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -472,8 +471,7 @@ impl IcebergCompactionManager {
 
         let orphan_files =
             remove_orphan_files_from_table(table, std::time::Duration::from_millis(min_age_millis))
-                .await
-                .map_err(|e| SinkError::Iceberg(e.into()))?;
+                .await?;
 
         let orphan_file_sample = orphan_files
             .iter()
@@ -805,7 +803,8 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+// Iceberg's runtime and file IO need a real Tokio runtime, which madsim does not provide.
+#[cfg(all(test, not(madsim)))]
 mod orphan_file_tests {
     use std::collections::HashMap;
     use std::time::{Duration, SystemTime};
