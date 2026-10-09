@@ -415,7 +415,11 @@ impl ExternalTableReaderImpl {
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match self {
             ExternalTableReaderImpl::Mysql(mysql) => mysql.pk_column_comparisons(pk_names),
-            _ => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
+            ExternalTableReaderImpl::Postgres(_)
+            | ExternalTableReaderImpl::SqlServer(_)
+            | ExternalTableReaderImpl::Mock(_) => {
+                Ok(vec![CdcKeyComparison::Native; pk_names.len()])
+            }
         }
     }
 
@@ -540,7 +544,12 @@ impl ExternalTableImpl {
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,
             )),
-            _ => Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into()),
+            CdcSourceType::Citus
+            | CdcSourceType::Mongodb
+            | CdcSourceType::Oracle
+            | CdcSourceType::Unspecified => {
+                Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into())
+            }
         }
     }
 
@@ -595,7 +604,12 @@ impl ExternalTableImpl {
             CdcSourceType::Mysql => {
                 MysqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
             }
-            _ => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
+            CdcSourceType::Postgres
+            | CdcSourceType::Citus
+            | CdcSourceType::Mongodb
+            | CdcSourceType::SqlServer
+            | CdcSourceType::Oracle
+            | CdcSourceType::Unspecified => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
         }
     }
 }
