@@ -1228,7 +1228,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_connector::source::cdc::CdcScanOptions;
     use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
-    use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
+    use risingwave_connector::source::cdc::external::mysql::MysqlOffset;
     use risingwave_connector::source::cdc::external::{
         CdcOffset, ExternalCdcTableType, ExternalTableConfig, ExternalTableReaderImpl,
         SchemaTableName,
@@ -1442,7 +1442,7 @@ mod tests {
             },
             "db".to_owned(),
             ExternalTableConfig::default(),
-            ExternalCdcTableType::Undefined,
+            ExternalCdcTableType::Unspecified,
             Schema::new(vec![Field::with_name(DataType::Int64, "id")]),
             vec![OrderType::ascending()],
             Some(vec![CdcKeyComparison::Native]),
@@ -1613,7 +1613,7 @@ mod tests {
         state_writer
             .mutate_state(
                 Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
-                Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 2))),
                 5,
                 false,
             )
@@ -1686,7 +1686,7 @@ mod tests {
         let state = restored_state.restore_state().await.unwrap();
         assert_eq!(
             state.last_cdc_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new(
+            Some(CdcOffset::Mysql(MysqlOffset::new(
                 "1.binlog".to_owned(),
                 expected_position,
             )))
@@ -1750,7 +1750,7 @@ mod tests {
                     order: &[OrderType::ascending()],
                     needs_unsigned_i64_compare: &[false],
                 },
-                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
             .unwrap();
@@ -1762,7 +1762,7 @@ mod tests {
         );
         assert_eq!(
             consumed_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 4)))
+            Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 4)))
         );
         assert!(matches!(
             build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut reader_future)
@@ -1969,7 +1969,7 @@ mod tests {
                     order: &[OrderType::ascending()],
                     needs_unsigned_i64_compare: &[false],
                 },
-                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
             .unwrap();
@@ -1977,7 +1977,7 @@ mod tests {
         assert_eq!(drained_row_count, 1);
         assert_eq!(
             drained_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
+            Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 3)))
         );
         assert_eq!(emitted_chunks.len(), 1);
         assert_eq!(emitted_chunks[0].rows().count(), 1);
@@ -2050,7 +2050,7 @@ mod tests {
                     order: &[OrderType::ascending()],
                     needs_unsigned_i64_compare: &[true],
                 },
-                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
             .unwrap();
@@ -2058,7 +2058,7 @@ mod tests {
         assert_eq!(drained_row_count, 1);
         assert_eq!(
             drained_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
+            Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 3)))
         );
         assert_eq!(emitted_chunks.len(), 1);
         assert_eq!(
@@ -2139,7 +2139,7 @@ mod tests {
                     order: &[OrderType::ascending()],
                     needs_unsigned_i64_compare: &[false],
                 },
-                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
             .unwrap();
@@ -2147,7 +2147,7 @@ mod tests {
         assert_eq!(drained_row_count, 2);
         assert_eq!(
             drained_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
+            Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 3)))
         );
         assert_eq!(emitted_chunks.len(), 1);
         assert_eq!(emitted_chunks[0].rows().count(), 2);
@@ -2244,7 +2244,7 @@ mod tests {
                     order: &[OrderType::ascending()],
                     needs_unsigned_i64_compare: &[false],
                 },
-                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
             .unwrap();
@@ -2252,7 +2252,7 @@ mod tests {
         assert_eq!(drained_row_count, 2);
         assert_eq!(
             drained_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
+            Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 3)))
         );
         assert_eq!(emitted_chunks.len(), 2);
         assert_eq!(emitted_chunks[0].rows().count(), 1);
@@ -2324,7 +2324,7 @@ mod tests {
                     order: &[OrderType::ascending()],
                     needs_unsigned_i64_compare: &[false],
                 },
-                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3))),
+                &Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 3))),
                 &[0, 1],
             )
             .unwrap();
@@ -2332,7 +2332,7 @@ mod tests {
         assert_eq!(drained_row_count, 2);
         assert_eq!(
             drained_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 5)))
+            Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 5)))
         );
         assert!(upstream_chunk_buffer.is_empty());
     }
@@ -2442,7 +2442,7 @@ mod tests {
         let state = restored_state.restore_state().await.unwrap();
         assert_eq!(
             state.last_cdc_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 4)))
+            Some(CdcOffset::Mysql(MysqlOffset::new("1.binlog".to_owned(), 4)))
         );
     }
 }

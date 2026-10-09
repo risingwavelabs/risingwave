@@ -96,18 +96,18 @@ pub fn build_mysql_connection_pool(
 }
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct MySqlOffset {
+pub struct MysqlOffset {
     pub filename: String,
     pub position: u64,
 }
 
-impl MySqlOffset {
+impl MysqlOffset {
     pub fn new(filename: String, position: u64) -> Self {
         Self { filename, position }
     }
 }
 
-impl MySqlOffset {
+impl MysqlOffset {
     pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
         let dbz_offset: DebeziumOffset = serde_json::from_str(offset)
             .with_context(|| format!("invalid upstream offset: {}", offset))?;
@@ -125,13 +125,13 @@ impl MySqlOffset {
     }
 }
 
-pub struct MySqlExternalTable {
+pub struct MysqlExternalTable {
     column_descs: Vec<ColumnDesc>,
     pk_names: Vec<String>,
     pk_comparisons: Vec<CdcKeyComparison>,
 }
 
-impl MySqlExternalTable {
+impl MysqlExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         tracing::debug!("connect to mysql");
         let options = MySqlConnectOptions::new()
@@ -256,7 +256,7 @@ impl MySqlExternalTable {
             &config.database,
             config.ssl_mode.clone(),
         );
-        let pk_infos = MySqlExternalTableReader::query_upstream_pk_infos(
+        let pk_infos = MysqlExternalTableReader::query_upstream_pk_infos(
             &pool,
             &config.database,
             &config.table,
@@ -540,7 +540,7 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
     Ok(dtype)
 }
 
-pub struct MySqlExternalTableReader {
+pub struct MysqlExternalTableReader {
     rw_schema: Schema,
     pk_indices: Vec<usize>,
     field_names: String,
@@ -550,7 +550,7 @@ pub struct MySqlExternalTableReader {
     is_mariadb: bool,
 }
 
-impl ExternalTableReader for MySqlExternalTableReader {
+impl ExternalTableReader for MysqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut conn = self.pool.get_conn().await?;
 
@@ -573,7 +573,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
             .ok()
             .context("expect exactly one row when reading binlog offset")?;
         drop(conn);
-        Ok(CdcOffset::MySql(MySqlOffset {
+        Ok(CdcOffset::Mysql(MysqlOffset {
             filename: row.take("File").unwrap(),
             position: row.take("Position").unwrap(),
         }))
@@ -612,7 +612,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
     }
 }
 
-impl MySqlExternalTableReader {
+impl MysqlExternalTableReader {
     /// Get MySQL version from the connection
     async fn get_mysql_version(pool: &mysql_async::Pool) -> ConnectorResult<(u8, u8, bool)> {
         let mut conn = pool.get_conn().await?;
@@ -694,7 +694,7 @@ impl MySqlExternalTableReader {
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
         Box::new(move |offset| {
-            Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
+            Ok(CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(
                 offset,
             )?))
         })
@@ -947,9 +947,9 @@ mod tests {
         mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, pk_column_comparisons_from_infos,
         primary_key_names, type_name_to_mysql_type,
     };
-    use crate::source::cdc::external::mysql::MySqlExternalTable;
+    use crate::source::cdc::external::mysql::MysqlExternalTable;
     use crate::source::cdc::external::{
-        CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
+        CdcOffset, ExternalTableConfig, ExternalTableReader, MysqlExternalTableReader, MysqlOffset,
         SchemaTableName,
     };
 
@@ -988,7 +988,7 @@ mod tests {
 
     #[test]
     fn test_pk_column_comparisons_follow_requested_order() {
-        let table = MySqlExternalTable {
+        let table = MysqlExternalTable {
             column_descs: vec![],
             pk_names: vec!["signed_id".to_owned(), "unsigned_id".to_owned()],
             pk_comparisons: vec![CdcKeyComparison::Native, CdcKeyComparison::UnsignedInt64],
@@ -1137,7 +1137,7 @@ mod tests {
             encrypt: "false".to_owned(),
         };
 
-        let table = MySqlExternalTable::connect(config).await.unwrap();
+        let table = MysqlExternalTable::connect(config).await.unwrap();
         println!("columns: {:?}", table.column_descs);
         println!("primary keys: {:?}", table.pk_names);
     }
@@ -1145,11 +1145,11 @@ mod tests {
     #[test]
     fn test_mysql_filter_expr() {
         let cols = vec!["id".to_owned()];
-        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        let expr = MysqlExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(`id` > :id)");
 
         let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
-        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        let expr = MysqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
             "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
@@ -1164,11 +1164,11 @@ mod tests {
         let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
         let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
 
-        let off0 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off0_str).unwrap());
-        let off1 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off1_str).unwrap());
-        let off2 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off2_str).unwrap());
-        let off3 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off3_str).unwrap());
-        let off4 = CdcOffset::MySql(MySqlOffset::parse_debezium_offset(off4_str).unwrap());
+        let off0 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off0_str).unwrap());
+        let off1 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off1_str).unwrap());
+        let off2 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off2_str).unwrap());
+        let off3 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off3_str).unwrap());
+        let off4 = CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(off4_str).unwrap());
 
         assert!(off0 <= off1);
         assert!(off1 > off2);
@@ -1200,14 +1200,14 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema, vec![0])
+        let reader = MysqlExternalTableReader::new(config, rw_schema, vec![0])
             .await
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 
         let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
-        let parser = MySqlExternalTableReader::get_cdc_offset_parser();
+        let parser = MysqlExternalTableReader::get_cdc_offset_parser();
         println!("parsed offset: {:?}", parser(off0_str).unwrap());
         let table_name = SchemaTableName {
             schema_name: "mytest".to_owned(),
