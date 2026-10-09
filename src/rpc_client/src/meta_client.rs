@@ -1677,6 +1677,20 @@ impl MetaClient {
         Ok(resp.params.map(SystemParamsReader::from))
     }
 
+    pub async fn clear_file_cache(
+        &self,
+        clear_meta_cache: bool,
+        clear_data_cache: bool,
+    ) -> Result<()> {
+        self.inner
+            .clear_file_cache(ClearFileCacheRequest {
+                clear_meta_cache,
+                clear_data_cache,
+            })
+            .await?;
+        Ok(())
+    }
+
     pub async fn get_session_params(&self) -> Result<String> {
         let req = GetSessionParamsRequest {};
         let resp = self.inner.get_session_params(req).await?;
@@ -1745,6 +1759,21 @@ impl MetaClient {
             })
             .collect();
         Ok(mappings)
+    }
+
+    pub async fn warm_up_table_cache(
+        &self,
+        table_id: TableId,
+        concurrency: u32,
+    ) -> Result<(u64, u32)> {
+        let response = self
+            .inner
+            .warm_up_table_cache(WarmUpTableCacheRequest {
+                table_id,
+                concurrency,
+            })
+            .await?;
+        Ok((response.key_count, response.worker_count))
     }
 
     pub async fn risectl_list_compaction_status(
@@ -2820,9 +2849,11 @@ macro_rules! for_all_meta_rpc {
             ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
+            ,{ system_params_client, clear_file_cache, ClearFileCacheRequest, ClearFileCacheResponse }
             ,{ session_params_client, get_session_params, GetSessionParamsRequest, GetSessionParamsResponse }
             ,{ session_params_client, set_session_param, SetSessionParamRequest, SetSessionParamResponse }
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
+            ,{ serving_client, warm_up_table_cache, WarmUpTableCacheRequest, WarmUpTableCacheResponse }
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }

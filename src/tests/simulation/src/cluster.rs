@@ -31,7 +31,7 @@ use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 #[cfg(madsim)]
 use madsim::runtime::{Handle, NodeHandle};
-use rand::Rng;
+use rand::RngExt as _;
 use rand::seq::IteratorRandom;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
@@ -691,10 +691,7 @@ impl Cluster {
         if worker_nodes.len() < n {
             return Err(anyhow!("cannot remove more nodes than present"));
         }
-        let rand_nodes = worker_nodes
-            .iter()
-            .choose_multiple(&mut rand::rng(), n)
-            .clone();
+        let rand_nodes = worker_nodes.iter().sample(&mut rand::rng(), n).clone();
         Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
 

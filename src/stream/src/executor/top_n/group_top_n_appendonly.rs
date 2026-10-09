@@ -19,7 +19,7 @@ use risingwave_common::hash::HashKey;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, topn_watermark_forwardable_order_key};
 
 use super::group_top_n::GroupTopNCache;
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
@@ -83,6 +83,9 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
     /// which column we used to group the data.
     group_by: Vec<usize>,
 
+    /// The `ORDER BY` column whose watermarks can be forwarded, if any.
+    watermark_order_key: Option<usize>,
+
     /// group key -> cache for this group
     caches: GroupTopNCache<K, WITH_TIES>,
 
@@ -130,6 +133,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             limit: offset_and_limit.1,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
+            watermark_order_key: topn_watermark_forwardable_order_key(&order_by),
             group_by,
             caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
@@ -235,10 +239,16 @@ where
 
     async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
         if watermark.col_idx == self.group_by[0] {
+            // The state table is ordered by the first group key column, so the watermark on it can
+            // also be used to clean up the states of the groups below it.
             self.managed_state.update_watermark(watermark.val.clone());
-            Some(watermark)
-        } else {
-            None
         }
+        // A row can only change the output of its own group, so watermarks on group key columns
+        // can always be forwarded. Watermarks on the first `ORDER BY` column can be forwarded if
+        // it's ordered `ASC NULLS LAST`. See `topn_watermark_forwardable_order_key` for the
+        // reasoning.
+        (self.group_by.contains(&watermark.col_idx)
+            || Some(watermark.col_idx) == self.watermark_order_key)
+            .then_some(watermark)
     }
 }

@@ -29,7 +29,7 @@ use futures::stream::{BoxStream, empty, select_all};
 use futures::{FutureExt, StreamExt, TryFuture, stream};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
-use rand::{Rng, rng as thread_rng};
+use rand::{RngExt as _, rng as thread_rng};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row;

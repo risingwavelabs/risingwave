@@ -1,0 +1,284 @@
+# CDC table sources: fragment layout, rescaling, mixed jobs and recovery.
+#
+# Every downstream job of a CDC table source embeds its own singleton CdcFilter +
+# StreamCdcScan pair. These must stay singleton while the rest of the job is rescaled,
+# and the CDC fragments must not be tracked as MV backfill during creation/recovery.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+DROP SOURCE IF EXISTS ts_scale CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS s_scale CASCADE;
+
+statement ok
+DROP TABLE IF EXISTS rw_side CASCADE;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS t_scale;
+    CREATE TABLE t_scale (id INT NOT NULL PRIMARY KEY, v INT NOT NULL, s VARCHAR(40) NOT NULL) ENGINE=InnoDB;
+    DROP USER IF EXISTS 'scale-cdc'@'%';
+    CREATE USER 'scale-cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'scale-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+CREATE SOURCE s_scale WITH (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'scale-cdc',
+    password = 'abcdef',
+    database.name = 'risedev',
+    server.id = '5401'
+);
+
+sleep 2s
+
+statement ok
+CREATE SOURCE ts_scale (*)
+WITH (snapshot = 'false')
+FROM s_scale TABLE 'risedev.t_scale';
+
+# Four consumers with different shapes above the same table source.
+statement ok
+CREATE MATERIALIZED VIEW mv_plain AS SELECT id, v, s FROM ts_scale;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_filtered AS SELECT id, v FROM ts_scale WHERE v % 2 = 0;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_projected AS SELECT s FROM ts_scale;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_changelog AS
+WITH sub AS CHANGELOG FROM ts_scale
+SELECT id, v, changelog_op FROM sub;
+
+# Each consumer owns one singleton CDC scan fragment and one singleton CdcFilter fragment.
+query TI
+SELECT f.distribution_type, count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name IN ('mv_plain', 'mv_filtered', 'mv_projected', 'mv_changelog')
+  AND ('STREAM_CDC_SCAN' = ANY(f.flags) OR 'CDC_FILTER' = ANY(f.flags))
+GROUP BY f.distribution_type;
+----
+SINGLE 8
+
+query I
+SELECT count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name IN ('mv_plain', 'mv_filtered', 'mv_projected', 'mv_changelog')
+  AND ('STREAM_CDC_SCAN' = ANY(f.flags) OR 'CDC_FILTER' = ANY(f.flags))
+  AND f.parallelism <> 1;
+----
+0
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO t_scale VALUES (1, 2, 'a'), (2, 3, 'b'), (3, 4, 'c');
+    UPDATE t_scale SET v = 5 WHERE id = 2;
+    DELETE FROM t_scale WHERE id = 3;
+"
+
+query III rowsort retry 15 backoff 1s
+SELECT id, v, s FROM mv_plain;
+----
+1 2 a
+2 5 b
+
+# The predicate flips for id = 2 (3 -> 5 is odd), so the row must be removed again.
+query II rowsort retry 15 backoff 1s
+SELECT id, v FROM mv_filtered;
+----
+1 2
+
+# Rescale every consumer while the upstream keeps changing.
+statement ok
+ALTER MATERIALIZED VIEW mv_plain SET PARALLELISM = 2;
+
+statement ok
+ALTER MATERIALIZED VIEW mv_filtered SET PARALLELISM = 3;
+
+statement ok
+ALTER MATERIALIZED VIEW mv_projected SET PARALLELISM = 1;
+
+statement ok
+ALTER MATERIALIZED VIEW mv_changelog SET PARALLELISM = 4;
+
+# Rescaling must not touch the CDC fragments.
+query I
+SELECT count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name IN ('mv_plain', 'mv_filtered', 'mv_projected', 'mv_changelog')
+  AND ('STREAM_CDC_SCAN' = ANY(f.flags) OR 'CDC_FILTER' = ANY(f.flags))
+  AND (f.parallelism <> 1 OR f.distribution_type <> 'SINGLE');
+----
+0
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO t_scale VALUES (4, 6, 'd'), (5, 7, 'e');
+    UPDATE t_scale SET v = 8, s = 'a2' WHERE id = 1;
+    DELETE FROM t_scale WHERE id = 5;
+"
+
+query III rowsort retry 15 backoff 1s
+SELECT id, v, s FROM mv_plain;
+----
+1 8 a2
+2 5 b
+4 6 d
+
+query II rowsort retry 15 backoff 1s
+SELECT id, v FROM mv_filtered;
+----
+1 8
+4 6
+
+query T rowsort retry 15 backoff 1s
+SELECT s FROM mv_projected;
+----
+a2
+b
+d
+
+# An upsert changelog reports updates as inserts; deletes carry the upstream before image.
+query III rowsort retry 15 backoff 1s
+SELECT id, v, changelog_op FROM mv_changelog;
+----
+1 2 1
+1 8 1
+2 3 1
+2 5 1
+3 4 1
+3 4 2
+4 6 1
+5 7 1
+5 7 2
+
+statement ok
+ALTER MATERIALIZED VIEW mv_plain SET PARALLELISM = ADAPTIVE;
+
+query I
+SELECT count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name = 'mv_plain'
+  AND ('STREAM_CDC_SCAN' = ANY(f.flags) OR 'CDC_FILTER' = ANY(f.flags))
+  AND f.parallelism <> 1;
+----
+0
+
+# A job that mixes a CDC scan with an ordinary MV backfill: the backfill must still be
+# tracked while the CDC fragments are skipped, both on creation and after rescaling.
+statement ok
+CREATE TABLE rw_side (id INT PRIMARY KEY, v INT);
+
+statement ok
+INSERT INTO rw_side SELECT i, i FROM generate_series(1, 5000) t(i);
+
+statement ok
+SET streaming_use_snapshot_backfill = false;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_mixed AS
+SELECT id, v FROM ts_scale
+UNION ALL
+SELECT id, v FROM rw_side;
+
+statement ok
+SET streaming_use_snapshot_backfill = true;
+
+query I
+SELECT count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name = 'mv_mixed' AND 'STREAM_SCAN' = ANY(f.flags) AND 'STREAM_CDC_SCAN' != ALL(f.flags);
+----
+1
+
+query I retry 15 backoff 1s
+SELECT count(*) FROM mv_mixed;
+----
+5000
+
+statement ok
+ALTER MATERIALIZED VIEW mv_mixed SET PARALLELISM = 2;
+
+system ok
+mysql -e "USE risedev; INSERT INTO t_scale VALUES (6, 10, 'f');"
+
+query I retry 15 backoff 1s
+SELECT count(*) FROM mv_mixed;
+----
+5001
+
+# Recovery must not lose or duplicate CDC rows.
+onlyif can-use-recover
+statement ok
+recover;
+
+onlyif can-use-recover
+sleep 10s
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO t_scale VALUES (7, 12, 'g');
+    UPDATE t_scale SET v = 14 WHERE id = 4;
+"
+
+query III rowsort retry 30 backoff 1s
+SELECT id, v, s FROM mv_plain;
+----
+1 8 a2
+2 5 b
+4 14 d
+6 10 f
+7 12 g
+
+query II rowsort retry 30 backoff 1s
+SELECT id, v FROM mv_filtered;
+----
+1 8
+4 14
+6 10
+7 12
+
+statement ok
+DROP MATERIALIZED VIEW mv_mixed;
+
+statement ok
+DROP TABLE rw_side;
+
+statement ok
+DROP MATERIALIZED VIEW mv_changelog;
+
+statement ok
+DROP MATERIALIZED VIEW mv_projected;
+
+statement ok
+DROP MATERIALIZED VIEW mv_filtered;
+
+statement ok
+DROP MATERIALIZED VIEW mv_plain;
+
+statement ok
+DROP SOURCE ts_scale;
+
+statement ok
+DROP SOURCE s_scale;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE t_scale;
+    DROP USER IF EXISTS 'scale-cdc'@'%';
+"

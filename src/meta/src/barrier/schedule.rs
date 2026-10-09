@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -33,10 +34,10 @@ use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::{info, warn};
 
-use super::notifier::{Notifier, wait_collection};
 use super::{Command, Scheduled};
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
+use crate::notification::{Notifier, wait_collection};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
@@ -221,35 +222,27 @@ impl BarrierScheduler {
     /// Run multiple commands and return when they're all completely finished (i.e., collected). It's ensured that
     /// multiple commands are executed continuously.
     ///
-    /// Returns the barrier info of each command.
-    ///
-    /// TODO: atomicity of multiple commands is not guaranteed.
-    #[await_tree::instrument("run_commands({})", commands.iter().join(", "))]
-    async fn run_multiple_commands(
+    /// Run a command and return when it's completely finished (i.e., collected).
+    #[await_tree::instrument("run_command({})", command)]
+    pub async fn run_command(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {
+        self.schedule_command(database_id, command)?.await
+    }
+
+    /// Schedule a command and return a future that resolves once it is collected.
+    pub fn schedule_command(
         &self,
         database_id: DatabaseId,
-        commands: Vec<Command>,
-    ) -> MetaResult<()> {
-        let mut contexts = Vec::with_capacity(commands.len());
-        let mut scheduleds = Vec::with_capacity(commands.len());
-
-        for command in commands {
-            let (notifier, started_rx) = Notifier::new();
-            contexts.push(started_rx);
-            scheduleds.push((command, notifier));
-        }
-
-        self.push(database_id, scheduleds)?;
-
-        for injected_rx in contexts {
-            // Wait for this command to be injected, and record the result.
-            tracing::trace!("waiting for injected_rx");
-            let collect_rxs = injected_rx
+        command: Command,
+    ) -> MetaResult<impl Future<Output = MetaResult<()>> + use<>> {
+        tracing::trace!("schedule_command: {:?}", command);
+        let (notifier, started_rx) = Notifier::new();
+        self.push(database_id, vec![(command, notifier)])?;
+        Ok(async move {
+            let collect_rxs = started_rx
                 .instrument_await("wait_injected")
                 .await
                 .ok()
                 .context("failed to inject barrier")??;
-
             tracing::trace!(
                 collection_count = collect_rxs.len(),
                 "waiting for collect_rx"
@@ -257,20 +250,8 @@ impl BarrierScheduler {
             // Wait for every part before returning the first collection error.
             wait_collection(collect_rxs)
                 .instrument_await("wait_collected")
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    /// Run a command and return when it's completely finished (i.e., collected).
-    ///
-    /// Returns the barrier info of the actual command.
-    pub async fn run_command(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {
-        tracing::trace!("run_command: {:?}", command);
-        let ret = self.run_multiple_commands(database_id, vec![command]).await;
-        tracing::trace!("run_command finished");
-        ret
+                .await
+        })
     }
 
     /// Schedule a command without waiting for it to be executed.
@@ -285,8 +266,7 @@ impl BarrierScheduler {
         let start = Instant::now();
 
         tracing::debug!("start barrier flush");
-        self.run_multiple_commands(database_id, vec![Command::Flush])
-            .await?;
+        self.run_command(database_id, Command::Flush).await?;
 
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
@@ -572,7 +552,7 @@ impl ScheduledBarriers {
 pub(super) enum MarkReadyOptions {
     Database(DatabaseId),
     Global {
-        blocked_databases: HashSet<DatabaseId>,
+        failed_databases: HashMap<DatabaseId, HashSet<JobId>>,
     },
 }
 
@@ -676,7 +656,7 @@ impl ScheduledBarriers {
                     self.inner.changed_tx.send(()).ok();
                 }
             }
-            MarkReadyOptions::Global { blocked_databases } => {
+            MarkReadyOptions::Global { failed_databases } => {
                 if !queue.status.is_blocked() {
                     if cfg!(debug_assertions) {
                         panic!("cluster marked as ready twice");
@@ -684,9 +664,12 @@ impl ScheduledBarriers {
                         warn!("cluster marked as ready twice");
                     }
                 }
-                info!(?blocked_databases, "cluster marked as ready");
+                info!(
+                    failed_database_ids = ?failed_databases.keys().collect_vec(),
+                    "cluster marked as ready"
+                );
                 let prev_blocked = queue.mark_ready();
-                for database_id in &blocked_databases {
+                for database_id in failed_databases.keys() {
                     queue.queue.entry(*database_id).or_insert_with(|| {
                         DatabaseScheduledQueue::new(QueueStatus::Blocked(format!(
                             "database {} failed to recover in global recovery",
@@ -695,7 +678,7 @@ impl ScheduledBarriers {
                     });
                 }
                 for (database_id, queue) in &mut queue.queue {
-                    if !blocked_databases.contains(database_id) {
+                    if !failed_databases.contains_key(database_id) {
                         queue.mark_ready();
                     }
                 }
@@ -816,15 +799,15 @@ mod tests {
             unimplemented!()
         }
 
-        fn abort_and_mark_blocked(
+        async fn abort_and_mark_blocked(
             &self,
-            _database_id: Option<DatabaseId>,
+            _recovery: crate::manager::sink_coordination::RecoveryStart,
             _recovery_reason: crate::barrier::RecoveryReason,
-        ) {
+        ) -> MetaResult<()> {
             unimplemented!()
         }
 
-        fn mark_ready(&self, _options: MarkReadyOptions) {
+        async fn mark_ready(&self, _options: MarkReadyOptions) -> MetaResult<()> {
             unimplemented!()
         }
 
@@ -857,7 +840,6 @@ mod tests {
         async fn new_control_stream(
             &self,
             _node: &risingwave_pb::common::WorkerNode,
-            _init_request: &risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest,
         ) -> MetaResult<risingwave_rpc_client::StreamingControlHandle> {
             unimplemented!()
         }
@@ -897,9 +879,11 @@ mod tests {
             unimplemented!()
         }
 
-        async fn handle_refresh_finished_table_ids(
+        async fn handle_refresh_finished_actors(
             &self,
-            _refresh_finished_table_ids: Vec<JobId>,
+            _refresh_finished_actors: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedActor,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }
@@ -916,9 +900,7 @@ mod tests {
 
         async fn pre_commit_iceberg_pk_index_sink_metadata(
             &self,
-            _reports: Vec<
-                risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
-            >,
+            _metadata: Vec<crate::manager::iceberg_pk_index_sink::IcebergPkIndexPreCommitMetadata>,
         ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
             unimplemented!()
         }

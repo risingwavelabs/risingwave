@@ -1147,7 +1147,7 @@ impl LogicalJoin {
         if let Some(logical_scan) = self.core.right.as_logical_scan() {
             matches!(
                 logical_scan.as_of(),
-                Some(AsOf::ProcessTime | AsOf::EventTime(_))
+                Some(AsOf::ProcessTime | AsOf::ProcessTimeBroadcast | AsOf::EventTime(_))
             )
             .then_some(TemporalJoinScan(logical_scan))
         } else {
@@ -1160,6 +1160,12 @@ impl LogicalJoin {
         ctx: &ToStreamContext,
     ) -> Result<Option<TemporalJoinScan<'a>>> {
         Ok(if let Some(scan) = self.temporal_join_on() {
+            if !matches!(self.join_type(), JoinType::Inner | JoinType::LeftOuter) {
+                return Err(RwError::from(ErrorCode::NotSupported(
+                    format!("temporal join with {:?} join type", self.join_type()),
+                    "Temporal join only supports inner join and left outer join".into(),
+                )));
+            }
             if ctx.backfill_type().is_snapshot_backfill()
                 && !matches!(scan.as_of(), Some(AsOf::EventTime(_)))
             {
@@ -1344,6 +1350,8 @@ impl LogicalJoin {
             _ => None,
         };
 
+        let is_broadcast = matches!(logical_scan.as_of(), Some(AsOf::ProcessTimeBroadcast));
+
         let table = logical_scan.table();
         let output_column_ids = logical_scan.output_column_ids();
 
@@ -1424,8 +1432,24 @@ impl LogicalJoin {
                 )));
             }
         }
-        // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
-        let left = required_dist.stream_enforce(left);
+        let left = if is_broadcast {
+            // Always shuffle the LHS by its stream key. The point of a broadcast temporal join is
+            // to make the join fragment independent: without an exchange here, the join would be
+            // fused into the upstream fragment whenever the LHS already declares a concrete
+            // distribution (e.g. a source with `HashShard(_row_id)` or a table scan with
+            // `UpstreamHashShard`), which ties the join parallelism to the upstream and inherits
+            // its key skew. One extra hash exchange buys an independently scalable join fragment
+            // and evenly spread rows. A singleton LHS cannot be sharded, so keep it as is.
+            match left.distribution() {
+                Distribution::Single => left,
+                _ => RequiredDist::shard_by_key(left.schema().len(), left.expect_stream_key())
+                    .stream_enforce(left),
+            }
+        } else {
+            // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule
+            // the join fragment together with the RHS with a `no_shuffle` exchange.
+            required_dist.stream_enforce(left)
+        };
 
         let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
             Self::temporal_join_scan_predicate_pull_up(
@@ -1444,6 +1468,9 @@ impl LogicalJoin {
         let right = if is_event_time {
             RequiredDist::hash_shard(&new_predicate.right_eq_indexes())
                 .stream_enforce(new_stream_table_scan.into())
+        } else if is_broadcast {
+            RequiredDist::PhysicalDist(Distribution::Broadcast)
+                .streaming_enforce_if_not_satisfies(new_stream_table_scan.into())?
         } else {
             RequiredDist::no_shuffle(new_stream_table_scan.into())
         };
@@ -1473,6 +1500,13 @@ impl LogicalJoin {
     ) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
         assert!(!predicate.has_eq());
+
+        if matches!(logical_scan.as_of(), Some(AsOf::ProcessTimeBroadcast)) {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Broadcast temporal join requires an equality condition".into(),
+                "Please add an equality condition over a lookup-table key".into(),
+            )));
+        }
 
         let left = self.left().to_stream_with_dist_required(
             &RequiredDist::PhysicalDist(Distribution::Broadcast),

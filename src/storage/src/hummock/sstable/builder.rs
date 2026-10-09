@@ -148,8 +148,9 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// `table_id` of added keys.
     table_ids: BTreeSet<TableId>,
     last_full_key: Vec<u8>,
-    /// Buffer for encoded key and value to avoid allocation.
-    raw_key: BytesMut,
+    /// Encoded key buffer, swapped with `last_full_key` after each entry.
+    raw_key: Vec<u8>,
+    /// Reusable buffer for the encoded value.
     raw_value: BytesMut,
     last_table_id: Option<TableId>,
     sst_object_id: HummockSstableObjectId,
@@ -229,7 +230,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
             last_table_id: None,
-            raw_key: BytesMut::new(),
+            raw_key: Vec::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
             sst_object_id,
@@ -255,15 +256,16 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_builder.approximate_len()
     }
 
-    /// Add raw data of block to sstable. return false means fallback
+    /// Append a block, compressing uncompressed input with the output codec.
+    /// Returns its written length, or `None` if merged into a small pending block.
     pub async fn add_raw_block(
         &mut self,
-        buf: Bytes,
+        mut buf: Bytes,
         filter_data: Vec<u8>,
         smallest_key: FullKey<Vec<u8>>,
         largest_key: Vec<u8>,
         mut meta: BlockMeta,
-    ) -> HummockResult<bool> {
+    ) -> HummockResult<Option<usize>> {
         let table_id = smallest_key.user_key.table_id;
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             if !self.block_builder.is_empty() {
@@ -298,12 +300,21 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                         .await?;
                     iter.next();
                 }
-                return Ok(false);
+                return Ok(None);
             }
 
             self.build_block()
                 .instrument_await("sstable_build_block_before_raw_block".verbose())
                 .await?;
+        }
+        // Decide whether to coalesce first, avoiding compression followed by immediate
+        // decompression. Already compressed blocks retain their original codec.
+        let algorithm = Block::get_algorithm(&buf)?;
+        if algorithm == CompressionAlgorithm::None
+            && algorithm != self.options.compression_algorithm
+        {
+            buf = BlockBuilder::compress_block(buf, self.options.compression_algorithm)?;
+            meta.len = buf.len() as u32;
         }
         self.last_full_key = largest_key;
         assert_eq!(
@@ -315,6 +326,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.last_table_id
         );
         meta.offset = self.writer.data_len() as u32;
+        let block_len = buf.len();
         self.block_metas.push(meta);
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
@@ -323,7 +335,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .instrument_await("sstable_write_raw_block_bytes".verbose())
             .await?;
 
-        Ok(true)
+        Ok(Some(block_len))
     }
 
     /// Add kv pair to sstable.
@@ -470,8 +482,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             );
         }
 
-        self.last_full_key.clear();
-        self.last_full_key.extend_from_slice(&self.raw_key);
+        mem::swap(&mut self.last_full_key, &mut self.raw_key);
 
         self.raw_key.clear();
         self.raw_value.clear();
@@ -1238,6 +1249,99 @@ pub(super) mod tests {
             collector.finish(&key3).is_none(),
             "Only 1 vnode collected, should return None"
         );
+    }
+
+    #[tokio::test]
+    async fn test_add_raw_block_compression_and_fallback() {
+        let new_builder = |compression_algorithm| {
+            let options = SstableBuilderOptions {
+                block_capacity: 2048,
+                compression_algorithm,
+                ..Default::default()
+            };
+            SstableBuilder::<_, BlockedXor16FilterBuilder>::new(
+                1,
+                mock_sst_writer(&options),
+                BlockedXor16FilterBuilder::create(options.filter_builder_options()),
+                options,
+                CompactionCatalogAgent::for_test(vec![0]),
+                None,
+            )
+        };
+        let value = vec![7; 600];
+        let mut source = new_builder(CompressionAlgorithm::None);
+        for index in [2, 3] {
+            source
+                .add(test_key_of(index).to_ref(), HummockValue::put(&value))
+                .await
+                .unwrap();
+        }
+        let (data, meta) = source.finish().await.unwrap().writer_output;
+        let source = Sstable::new(1.into(), meta, false);
+        assert_eq!(source.meta.block_metas.len(), 1);
+        let source_meta = &source.meta.block_metas[0];
+        let raw = data.slice(..source_meta.len as usize);
+
+        for compression in [CompressionAlgorithm::Lz4, CompressionAlgorithm::Zstd] {
+            for prefix_size in [16, 600] {
+                let mut builder = new_builder(compression);
+                let prefix_value = vec![1; prefix_size];
+                builder
+                    .add(test_key_of(1).to_ref(), HummockValue::put(&prefix_value))
+                    .await
+                    .unwrap();
+                let written = builder
+                    .add_raw_block(
+                        raw.clone(),
+                        source.filter_reader.get_block_raw_filter(0),
+                        test_key_of(2),
+                        test_key_of(3).encode(),
+                        source_meta.clone(),
+                    )
+                    .await
+                    .unwrap();
+                let (data, meta) = builder.finish().await.unwrap().writer_output;
+                if prefix_size == 16 {
+                    // The pending block is below 2048 / 4, so it absorbs the raw input.
+                    assert_eq!(written, None);
+                    assert_eq!(meta.block_metas.len(), 1);
+                } else {
+                    assert_eq!(meta.block_metas.len(), 2);
+                    let copied = &meta.block_metas[1];
+                    assert_eq!(written, Some(copied.len as usize));
+                    assert!(copied.len < source_meta.len);
+                    assert_eq!(copied.uncompressed_size, source_meta.uncompressed_size);
+                }
+                let mut expected_index = 1;
+                let mut offset = 0;
+                for block_meta in &meta.block_metas {
+                    assert_eq!(block_meta.offset, offset);
+                    offset += block_meta.len;
+                    let block = data.slice(block_meta.offset as usize..offset as usize);
+                    assert_eq!(Block::get_algorithm(&block).unwrap(), compression);
+                    let block =
+                        Block::decode(block, block_meta.uncompressed_size as usize).unwrap();
+                    let mut iter =
+                        BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
+                    iter.seek_to_first();
+                    while iter.is_valid() {
+                        assert_eq!(iter.key(), test_key_of(expected_index).to_ref());
+                        let expected_value = if expected_index == 1 {
+                            &prefix_value
+                        } else {
+                            &value
+                        };
+                        assert_eq!(
+                            HummockValue::from_slice(iter.value()).unwrap(),
+                            HummockValue::put(expected_value.as_slice())
+                        );
+                        expected_index += 1;
+                        iter.next();
+                    }
+                }
+                assert_eq!(expected_index, 4);
+            }
+        }
     }
 
     #[tokio::test]

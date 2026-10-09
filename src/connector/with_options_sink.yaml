@@ -427,8 +427,10 @@ GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
     field_type: String
-    comments: The Google Pub/Sub Project ID
-    required: true
+    comments: |-
+      The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+      the credentials or Application Default Credentials.
+    required: false
   - name: pubsub.topic
     field_type: String
     comments: Specifies the Pub/Sub topic to publish messages
@@ -446,7 +448,9 @@ GooglePubSubConfig:
   - name: pubsub.credentials
     field_type: String
     comments: |-
-      A JSON string containing the service account credentials for authorization,
+      A JSON string containing the service account credentials for authorization. If omitted,
+      the connector uses Google Application Default Credentials (ADC) when allowed by the
+      deployment environment.
       see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
       The provided account credential must have the
       `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
@@ -455,7 +459,11 @@ HttpConfig:
   fields:
   - name: url
     field_type: String
-    comments: The endpoint URL to POST data to.
+    comments: The endpoint URL to send data to.
+    required: false
+  - name: method
+    field_type: String
+    comments: HTTP request method. Supported values are `POST` and `PUT`. Defaults to `POST`.
     required: false
   - name: content_type
     field_type: String
@@ -696,6 +704,15 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
+  - name: default_table_location_from_namespace
+    field_type: bool
+    comments: |-
+      For REST catalogs such as AWS Glue, derive a missing table location from the
+      namespace's `location` property. Defaults to false. An existing location
+      derived from `warehouse.path` takes precedence; a missing or empty namespace
+      location leaves server-side location assignment unchanged.
+    required: false
+    default: Default::default
   - name: is_exactly_once
     field_type: bool
     comments: Whether it is `exactly_once`, the default is true.
@@ -825,7 +842,7 @@ IcebergConfig:
     field_type: CompactionType
     comments: |-
       Compaction type: `auto`, `full`, `small-files`, or `files-with-delete`
-      If not set, will default to `full`
+      If not set, defaults to `auto` when Iceberg compaction is licensed, otherwise `full`
     required: false
     default: Default::default
     allow_alter_on_fly: true
@@ -932,7 +949,7 @@ KafkaConfig:
     allow_alter_on_fly: true
   - name: properties.sasl.mechanism
     field_type: String
-    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
+    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, OAUTHBEARER, and `AWS_MSK_IAM`.
     required: false
     allow_alter_on_fly: true
   - name: properties.sasl.username
@@ -949,26 +966,62 @@ KafkaConfig:
     field_type: String
     comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.keytab
     field_type: String
     comments: Path to client's Kerberos keytab file under SASL/GSSAPI.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.principal
     field_type: String
     comments: Client's Kerberos principal name under SASL/GSSAPI.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.kinit.cmd
     field_type: String
     comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.min.time.before.relogin
     field_type: String
     comments: Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.oauthbearer.config
     field_type: String
     comments: Configurations for SASL/OAUTHBEARER.
     required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.method
+    field_type: String
+    comments: SASL/OAUTHBEARER token acquisition method. Set to "oidc" to use the OIDC client credentials flow.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.client.id
+    field_type: String
+    comments: Client ID for SASL/OAUTHBEARER OIDC provider.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.client.secret
+    field_type: String
+    comments: Client secret for SASL/OAUTHBEARER OIDC provider.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.token.endpoint.url
+    field_type: String
+    comments: OIDC token endpoint URL for SASL/OAUTHBEARER.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.scope
+    field_type: String
+    comments: OIDC scope for SASL/OAUTHBEARER.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.extensions
+    field_type: String
+    comments: SASL/OAUTHBEARER extensions for broker-facing claims (e.g. Confluent Cloud logicalCluster, identityPoolId).
+    required: false
+    allow_alter_on_fly: true
   - name: properties.retry.max
     field_type: u32
     required: false
@@ -1254,6 +1307,31 @@ KinesisSinkConfig:
     field_type: u64
     required: false
     default: '20000'
+LanceDbConfig:
+  fields:
+  - name: lancedb.uri
+    field_type: String
+    comments: URI of the `LanceDB` database (e.g., `/tmp/lancedb`, `<s3://bucket/path/db>`)
+    required: true
+  - name: lancedb.table
+    field_type: String
+    comments: Table name in the `LanceDB` database
+    required: true
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Commit every n(>0) checkpoints, default is 10.
+    required: false
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
+  - name: r#type
+    field_type: String
+    required: true
+  - name: is_exactly_once
+    field_type: bool
+    comments: |-
+      Whether to use RisingWave's two-phase commit framework for exactly-once commits.
+      Defaults to true. Set to false to use single-phase commits.
+    required: false
 MongodbConfig:
   fields:
   - name: mongodb.url
