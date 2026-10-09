@@ -19,8 +19,7 @@ use std::sync::Arc;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
-    InMemObjectStore, ObjectResult, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
-    build_remote_object_store,
+    InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef, build_remote_object_store,
 };
 
 use super::PinCache;
@@ -41,7 +40,7 @@ pub(in crate::hummock) async fn download_and_publish_for_test(
     remote_path: String,
     object_id: HummockSstableObjectId,
     object_size: u64,
-) -> ObjectResult<()> {
+) -> Result<(), super::refill::PinCacheDownloadError> {
     let token = pin_cache
         .prepare_refill(object_id)
         .expect("test object must be registered");
