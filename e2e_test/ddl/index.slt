@@ -1,3 +1,6 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 # Create a table.
 statement ok
 create table ddl_t (v1 int);

@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table non_append_only_table (id int primary key, name string, embedding vector(3));
 
 statement error Invalid input syntax: "non_append_only_table" is not append-only but vector index must be append-only
