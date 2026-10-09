@@ -9,7 +9,7 @@ create materialized view mv as select sum(coalesce(pg_sleep(1), v)) from t;
 
 # The bomb will be triggered after 1 seconds of sleep, so the insertion should return successfully.
 statement ok
-insert into t values (4e28), (4e28);
+insert into t values (6e37), (6e37);
 
 # Wait for recovery to complete.
 
