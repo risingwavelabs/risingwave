@@ -31,10 +31,9 @@ use risingwave_common::metrics::{
     LabelGuardedUintGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::operator::unique_operator_id;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node_source_backfill, visit_stream_node_stream_scan,
-};
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
@@ -46,7 +45,9 @@ use risingwave_object_store::object::object_metrics::{
     GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::id::GlobalOperatorId;
 use risingwave_pb::meta::FragmentDistribution;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -63,6 +64,8 @@ use crate::rpc::ElectionClientRef;
 struct BackfillFragmentInfo {
     job_id: u32,
     fragment_id: u32,
+    /// The `unique_operator_id` of the scan in the fragment.
+    operator_id: GlobalOperatorId,
     backfill_state_table_id: u32,
     backfill_target_relation_id: u32,
     backfill_type: &'static str,
@@ -1500,12 +1503,14 @@ fn extract_backfill_fragment_info(
 
     let stream_node = distribution.node.as_ref()?;
     let mut info = None;
-    match backfill_type {
-        "SOURCE" => {
-            visit_stream_node_source_backfill(stream_node, |node| {
+    visit_stream_node_cont(stream_node, |node| {
+        let operator_id = unique_operator_id(distribution.fragment_id, node.operator_id);
+        match (backfill_type, node.node_body.as_ref()) {
+            ("SOURCE", Some(NodeBody::SourceBackfill(node))) => {
                 info = Some(BackfillFragmentInfo {
                     job_id: distribution.table_id.as_raw_id(),
                     fragment_id: distribution.fragment_id.as_raw_id(),
+                    operator_id,
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()
@@ -1515,13 +1520,15 @@ fn extract_backfill_fragment_info(
                     backfill_type,
                     backfill_epoch: 0,
                 });
-            });
-        }
-        "SNAPSHOT_BACKFILL" | "ARRANGEMENT_OR_NO_SHUFFLE" => {
-            visit_stream_node_stream_scan(stream_node, |node| {
+            }
+            (
+                "SNAPSHOT_BACKFILL" | "ARRANGEMENT_OR_NO_SHUFFLE",
+                Some(NodeBody::StreamScan(node)),
+            ) => {
                 info = Some(BackfillFragmentInfo {
                     job_id: distribution.table_id.as_raw_id(),
                     fragment_id: distribution.fragment_id.as_raw_id(),
+                    operator_id,
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()
@@ -1531,10 +1538,11 @@ fn extract_backfill_fragment_info(
                     backfill_type,
                     backfill_epoch: node.snapshot_backfill_epoch.unwrap_or_default(),
                 });
-            });
+            }
+            _ => {}
         }
-        _ => {}
-    }
+        true
+    });
 
     info
 }
@@ -1553,10 +1561,10 @@ pub async fn refresh_backfill_progress_metrics(
         }
     };
 
-    let backfill_infos: HashMap<(u32, u32), BackfillFragmentInfo> = fragment_descs
+    let backfill_infos: HashMap<(u32, GlobalOperatorId), BackfillFragmentInfo> = fragment_descs
         .iter()
         .filter_map(|(distribution, _)| extract_backfill_fragment_info(distribution))
-        .map(|info| ((info.job_id, info.fragment_id), info))
+        .map(|info| ((info.job_id, info.operator_id), info))
         .collect();
 
     let fragment_progresses = match barrier_manager.get_fragment_backfill_progress().await {
@@ -1567,14 +1575,11 @@ pub async fn refresh_backfill_progress_metrics(
         }
     };
 
-    let progress_by_fragment: HashMap<(u32, u32), _> = fragment_progresses
+    let progress_by_node: HashMap<(u32, GlobalOperatorId), _> = fragment_progresses
         .into_iter()
         .map(|progress| {
             (
-                (
-                    progress.job_id.as_raw_id(),
-                    progress.fragment_id.as_raw_id(),
-                ),
+                (progress.job_id.as_raw_id(), progress.operator_id),
                 progress,
             )
         })
@@ -1605,7 +1610,7 @@ pub async fn refresh_backfill_progress_metrics(
     meta_metrics.backfill_fragment_progress.reset();
 
     for info in backfill_infos.values() {
-        let progress = progress_by_fragment.get(&(info.job_id, info.fragment_id));
+        let progress = progress_by_node.get(&(info.job_id, info.operator_id));
         let (db, schema, name, rel_type) = relation_info
             .get(&info.backfill_target_relation_id)
             .cloned()

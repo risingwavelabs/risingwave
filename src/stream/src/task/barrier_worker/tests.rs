@@ -19,6 +19,7 @@ use std::task::Poll;
 
 use futures::FutureExt;
 use futures::future::join_all;
+use risingwave_common::operator::unique_operator_id;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, ResetPartialGraphsRequest,
@@ -28,8 +29,8 @@ use risingwave_pb::stream_service::{
 };
 
 use super::*;
-use crate::task::TEST_PARTIAL_GRAPH_ID;
 use crate::task::barrier_test_utils::LocalBarrierTestEnv;
+use crate::task::{CreateMviewProgressReporter, TEST_PARTIAL_GRAPH_ID};
 
 #[tokio::test]
 async fn test_reject_exchange_request_with_stale_partial_graph_term() -> StreamResult<()> {
@@ -180,6 +181,65 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
             poll_fn(|cx| Poll::Ready(await_epoch_future.as_mut().poll(cx).is_ready())).await;
         assert_eq!(notified, i == count - 1);
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_create_mview_progress_per_backfill_executor() -> StreamResult<()> {
+    let mut test_env = LocalBarrierTestEnv::for_test().await;
+
+    let actor_id = 233.into();
+    let barrier = Barrier::new_test_barrier(test_epoch(2));
+    test_env.inject_barrier(&barrier, [actor_id]);
+    test_env.flush_all_events().await;
+    let mut barrier_rx = test_env.local_barrier_manager.subscribe_barrier(actor_id);
+    let barrier = barrier_rx.recv().await.unwrap();
+
+    // Two backfill executors in one actor, e.g. a locality provider above a stream scan.
+    let fragment_id = 1.into();
+    let scan = unique_operator_id(fragment_id, 1);
+    let provider = unique_operator_id(fragment_id, 2);
+    let reporter = |operator_id| {
+        CreateMviewProgressReporter::new(
+            test_env.local_barrier_manager.clone(),
+            fragment_id,
+            actor_id,
+            operator_id,
+        )
+    };
+    reporter(scan).finish(barrier.epoch, 10);
+    reporter(provider).update(barrier.epoch, barrier.epoch.prev, 3);
+    test_env.local_barrier_manager.collect(actor_id, &barrier);
+    test_env.flush_all_events().await;
+
+    let response = test_env.response_rx.recv().await.unwrap().unwrap();
+    let Some(streaming_control_stream_response::Response::CompleteBarrier(complete_barrier)) =
+        response.response
+    else {
+        unreachable!()
+    };
+    let progress: HashMap<_, _> = complete_barrier
+        .create_mview_progress
+        .iter()
+        .map(|progress| {
+            (
+                progress.backfill_operator_id,
+                (
+                    progress.backfill_actor_id,
+                    progress.done,
+                    progress.consumed_rows,
+                ),
+            )
+        })
+        .collect();
+    assert_eq!(
+        progress,
+        HashMap::from([
+            (scan, (actor_id, true, 10)),
+            (provider, (actor_id, false, 3)),
+        ])
+    );
 
     Ok(())
 }

@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::id::JobId;
+use risingwave_common::operator::{unique_operator_id, unique_operator_id_into_parts};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::{
     self, visit_stream_node_cont, visit_stream_node_cont_mut,
@@ -35,7 +36,7 @@ use risingwave_connector::sink::catalog::SinkType;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::expr::{ExprNode as PbExprNode, expr_node};
-use risingwave_pb::id::{RelationId, StreamNodeLocalOperatorId};
+use risingwave_pb::id::{GlobalOperatorId, RelationId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
@@ -51,7 +52,9 @@ use risingwave_pb::stream_plan::{
 use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::id::IdGeneratorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
-use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId};
+use crate::model::{
+    BackfillUpstreamType, Fragment, FragmentDownstreamRelation, FragmentId, visit_backfill_nodes,
+};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::{MetaError, MetaResult};
@@ -863,16 +866,16 @@ pub fn rewrite_refresh_schema_sink_fragment(
     Ok((new_sink_fragment, new_sink_columns, new_log_store_table))
 }
 
-/// Adjacency list (G) of backfill orders.
+/// Adjacency list (G) of the user-defined backfill orders, as persisted.
 /// `G[10] -> [1, 2, 11]`
-/// means for the backfill node in `fragment 10`
-/// should be backfilled before the backfill nodes in `fragment 1, 2 and 11`.
+/// means the scans in `fragment 10`
+/// should be backfilled before the scans in `fragment 1, 2 and 11`.
 #[derive(Clone, Debug, Default)]
-pub struct FragmentBackfillOrder<const EXTENDED: bool> {
+pub struct UserDefinedFragmentBackfillOrder {
     inner: HashMap<FragmentId, Vec<FragmentId>>,
 }
 
-impl<const EXTENDED: bool> Deref for FragmentBackfillOrder<EXTENDED> {
+impl Deref for UserDefinedFragmentBackfillOrder {
     type Target = HashMap<FragmentId, Vec<FragmentId>>;
 
     fn deref(&self) -> &Self::Target {
@@ -896,8 +899,21 @@ impl UserDefinedFragmentBackfillOrder {
     }
 }
 
-pub type UserDefinedFragmentBackfillOrder = FragmentBackfillOrder<false>;
-pub type ExtendedFragmentBackfillOrder = FragmentBackfillOrder<true>;
+/// Adjacency list (G) of the backfill orders between backfill nodes, identified by their
+/// `unique_operator_id`.
+/// `G[a] -> [b, c]` means node `a` should be backfilled before nodes `b` and `c`.
+#[derive(Clone, Debug, Default)]
+pub struct ExtendedBackfillOrder {
+    inner: HashMap<GlobalOperatorId, Vec<GlobalOperatorId>>,
+}
+
+impl Deref for ExtendedBackfillOrder {
+    type Target = HashMap<GlobalOperatorId, Vec<GlobalOperatorId>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
 
 /// In-memory representation of a **Fragment** Graph, built from the [`StreamFragmentGraphProto`]
 /// from the frontend.
@@ -1342,8 +1358,7 @@ impl StreamFragmentGraph {
     }
 
     /// Initially the mapping that comes from frontend is between `table_ids`.
-    /// We should remap it to fragment level, since we track progress by actor, and we can get
-    /// a fragment <-> actor mapping
+    /// We remap it to the fragments that scan them, which is how the order is persisted.
     pub fn create_fragment_backfill_ordering(&self) -> UserDefinedFragmentBackfillOrder {
         let mapping =
             Self::collect_backfill_mapping(self.fragments.iter().map(|(fragment_id, fragment)| {
@@ -1374,220 +1389,172 @@ impl StreamFragmentGraph {
         }
     }
 
-    pub fn extend_fragment_backfill_ordering_with_locality_backfill<
+    /// Builds the order between the backfill nodes of the fragments.
+    pub fn extend_backfill_order_with_locality_backfill<
         'a,
-        FI: Iterator<Item = (FragmentId, FragmentTypeMask, &'a PbStreamNode)> + 'a,
+        FI: Iterator<Item = (FragmentId, &'a PbStreamNode)> + 'a,
     >(
         fragment_ordering: UserDefinedFragmentBackfillOrder,
         fragment_downstreams: &FragmentDownstreamRelation,
         get_fragments: impl Fn() -> FI,
-    ) -> ExtendedFragmentBackfillOrder {
-        let mut fragment_ordering = fragment_ordering.inner;
-        let mapping = Self::collect_backfill_mapping(get_fragments());
-        // If no backfill order is specified, we still need to ensure that all backfill fragments
-        // run before LocalityProvider fragments.
-        if fragment_ordering.is_empty() {
-            for value in mapping.values() {
-                for &fragment_id in value {
-                    fragment_ordering.entry(fragment_id).or_default();
+    ) -> ExtendedBackfillOrder {
+        let mut scan_nodes: HashMap<FragmentId, Vec<GlobalOperatorId>> = HashMap::new();
+        for (fragment_id, node) in get_fragments() {
+            visit_backfill_nodes(fragment_id, node, |operator_id, upstream_type, _| {
+                if matches!(
+                    upstream_type,
+                    BackfillUpstreamType::MView | BackfillUpstreamType::Source
+                ) {
+                    scan_nodes.entry(fragment_id).or_default().push(operator_id);
                 }
+            });
+        }
+        let mut order: HashMap<GlobalOperatorId, Vec<GlobalOperatorId>> = HashMap::new();
+
+        // 1. The user-defined orders between the scans of the fragments.
+        for (fragment_id, downstream_fragment_ids) in fragment_ordering.iter() {
+            let downstream_nodes = downstream_fragment_ids
+                .iter()
+                .filter_map(|fragment_id| scan_nodes.get(fragment_id))
+                .flatten()
+                .copied()
+                .collect_vec();
+            for operator_id in scan_nodes.get(fragment_id).into_iter().flatten() {
+                order
+                    .entry(*operator_id)
+                    .or_default()
+                    .extend(downstream_nodes.iter().copied());
             }
         }
 
-        // 2. Add dependencies: all backfill fragments should run before LocalityProvider fragments
-        let locality_provider_dependencies = Self::find_locality_provider_dependencies(
-            get_fragments().map(|(fragment_id, _, node)| (fragment_id, node)),
-            fragment_downstreams,
-        );
-
-        let backfill_fragments: HashSet<FragmentId> = mapping.values().flatten().copied().collect();
-
-        // Calculate LocalityProvider root fragments (zero indegree)
-        // Root fragments are those that appear as keys but never appear as downstream dependencies
-        let all_locality_provider_fragments: HashSet<FragmentId> =
-            locality_provider_dependencies.keys().copied().collect();
-        let downstream_locality_provider_fragments: HashSet<FragmentId> =
+        // 2. All scans run before the root locality providers.
+        let locality_provider_dependencies =
+            Self::find_locality_provider_dependencies(get_fragments(), fragment_downstreams);
+        let downstream_locality_providers: HashSet<GlobalOperatorId> =
             locality_provider_dependencies
                 .values()
                 .flatten()
                 .copied()
                 .collect();
-        let locality_provider_root_fragments: Vec<FragmentId> = all_locality_provider_fragments
-            .difference(&downstream_locality_provider_fragments)
+        let root_locality_providers = locality_provider_dependencies
+            .keys()
+            .filter(|operator_id| !downstream_locality_providers.contains(*operator_id))
             .copied()
-            .collect();
-
-        // For each backfill fragment, add only the root LocalityProvider fragments as dependents
-        // This ensures backfill completes before any LocalityProvider starts, while minimizing dependencies
-        for &backfill_fragment_id in &backfill_fragments {
-            fragment_ordering
-                .entry(backfill_fragment_id)
+            .collect_vec();
+        for operator_id in scan_nodes.values().flatten() {
+            order
+                .entry(*operator_id)
                 .or_default()
-                .extend(locality_provider_root_fragments.iter().copied());
+                .extend(root_locality_providers.iter().copied());
         }
 
-        // 3. Add LocalityProvider internal dependencies
-        for (fragment_id, downstream_fragments) in locality_provider_dependencies {
-            fragment_ordering
-                .entry(fragment_id)
+        // 3. Each locality provider runs before the locality providers downstream of it.
+        for (operator_id, downstream_nodes) in locality_provider_dependencies {
+            order
+                .entry(operator_id)
                 .or_default()
-                .extend(downstream_fragments);
+                .extend(downstream_nodes);
         }
 
-        // Deduplicate downstream entries per fragment; overlaps are common when the same fragment
+        // Deduplicate downstream entries per node; overlaps are common when the same node
         // is reached via multiple paths (e.g., with StreamShare) and would otherwise appear
         // multiple times.
-        for downstream in fragment_ordering.values_mut() {
+        for downstream in order.values_mut() {
             let mut seen = HashSet::new();
             downstream.retain(|id| seen.insert(*id));
         }
 
-        ExtendedFragmentBackfillOrder {
-            inner: fragment_ordering,
-        }
+        ExtendedBackfillOrder { inner: order }
     }
 
-    pub fn find_locality_provider_fragment_state_table_mapping(
-        &self,
-    ) -> HashMap<FragmentId, Vec<TableId>> {
-        let mut mapping: HashMap<FragmentId, Vec<TableId>> = HashMap::new();
-
-        for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id();
-
-            // Check if this fragment contains a LocalityProvider node
-            if let Some(node) = fragment.node.as_ref() {
-                let mut state_table_ids = Vec::new();
-
-                visit_stream_node_cont(node, |stream_node| {
-                    if let Some(NodeBody::LocalityProvider(locality_provider)) =
-                        stream_node.node_body.as_ref()
-                    {
-                        // Collect state table ID (except the progress table)
-                        let state_table_id = locality_provider
-                            .state_table
-                            .as_ref()
-                            .expect("must have state table")
-                            .id;
-                        state_table_ids.push(state_table_id);
-                        false // Stop visiting once we find a LocalityProvider
-                    } else {
-                        true // Continue visiting
-                    }
-                });
-
-                if !state_table_ids.is_empty() {
-                    mapping.insert(fragment_id, state_table_ids);
-                }
-            }
-        }
-
-        mapping
-    }
-
-    /// Find dependency relationships among fragments containing `LocalityProvider` nodes.
-    /// Returns a mapping where each fragment ID maps to a list of fragment IDs that should be processed after it.
-    /// Following the same semantics as `FragmentBackfillOrder`:
-    /// `G[10] -> [1, 2, 11]` means `LocalityProvider` in fragment 10 should be processed
-    /// before `LocalityProviders` in fragments 1, 2, and 11.
-    ///
-    /// This method assumes each fragment contains at most one `LocalityProvider` node.
+    /// Finds the locality providers downstream of each locality provider, which should be
+    /// processed after it. The rows of a provider flow up to the root of its fragment, and enter
+    /// each downstream fragment at the merge from its fragment.
     pub fn find_locality_provider_dependencies<'a>(
         fragments_nodes: impl Iterator<Item = (FragmentId, &'a PbStreamNode)>,
         fragment_downstreams: &FragmentDownstreamRelation,
-    ) -> HashMap<FragmentId, Vec<FragmentId>> {
-        let mut locality_provider_fragments = HashSet::new();
-        let mut dependencies: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
-
-        // First, identify all fragments that contain LocalityProvider nodes
+    ) -> HashMap<GlobalOperatorId, Vec<GlobalOperatorId>> {
+        let mut providers_above_provider = HashMap::new();
+        let mut providers_above_merge = HashMap::new();
         for (fragment_id, node) in fragments_nodes {
-            let has_locality_provider = Self::fragment_has_locality_provider(node);
-
-            if has_locality_provider {
-                locality_provider_fragments.insert(fragment_id);
-                dependencies.entry(fragment_id).or_default();
-            }
-        }
-
-        // Build dependency relationships between LocalityProvider fragments
-        // For each LocalityProvider fragment, find all downstream LocalityProvider fragments
-        // The upstream fragment should be processed before the downstream fragments
-        for &provider_fragment_id in &locality_provider_fragments {
-            // Find all fragments downstream from this LocalityProvider fragment
-            let mut visited = HashSet::new();
-            let mut downstream_locality_providers = Vec::new();
-
-            Self::collect_downstream_locality_providers(
-                provider_fragment_id,
-                &locality_provider_fragments,
-                fragment_downstreams,
-                &mut visited,
-                &mut downstream_locality_providers,
+            Self::collect_locality_providers_above(
+                fragment_id,
+                node,
+                &mut vec![],
+                &mut providers_above_provider,
+                &mut providers_above_merge,
             );
-
-            // This fragment should be processed before all its downstream LocalityProvider fragments
-            dependencies
-                .entry(provider_fragment_id)
-                .or_default()
-                .extend(downstream_locality_providers);
         }
 
-        dependencies
-    }
-
-    fn fragment_has_locality_provider(node: &PbStreamNode) -> bool {
-        let mut has_locality_provider = false;
-
-        {
-            visit_stream_node_cont(node, |stream_node| {
-                if let Some(NodeBody::LocalityProvider(_)) = stream_node.node_body.as_ref() {
-                    has_locality_provider = true;
-                    false // Stop visiting once we find a LocalityProvider
-                } else {
-                    true // Continue visiting
+        providers_above_provider
+            .iter()
+            .map(|(&provider, providers_above)| {
+                let mut downstream_providers = providers_above.clone();
+                let (provider_fragment_id, _) = unique_operator_id_into_parts(provider);
+                let mut visited_edges = HashSet::new();
+                let mut visited_fragments = HashSet::from([provider_fragment_id]);
+                let mut fragments_to_visit = vec![provider_fragment_id];
+                while let Some(fragment_id) = fragments_to_visit.pop() {
+                    for downstream_fragment_id in fragment_downstreams
+                        .get(&fragment_id)
+                        .into_iter()
+                        .flatten()
+                        .map(|downstream| downstream.downstream_fragment_id)
+                    {
+                        if !visited_edges.insert((fragment_id, downstream_fragment_id)) {
+                            continue;
+                        }
+                        if let Some(providers) =
+                            providers_above_merge.get(&(downstream_fragment_id, fragment_id))
+                        {
+                            downstream_providers.extend_from_slice(providers);
+                        }
+                        if visited_fragments.insert(downstream_fragment_id) {
+                            fragments_to_visit.push(downstream_fragment_id);
+                        }
+                    }
                 }
-            });
-        }
-
-        has_locality_provider
+                (provider, downstream_providers)
+            })
+            .collect()
     }
 
-    /// Recursively collect downstream `LocalityProvider` fragments
-    fn collect_downstream_locality_providers(
-        current_fragment_id: FragmentId,
-        locality_provider_fragments: &HashSet<FragmentId>,
-        fragment_downstreams: &FragmentDownstreamRelation,
-        visited: &mut HashSet<FragmentId>,
-        downstream_providers: &mut Vec<FragmentId>,
+    /// Collects the locality providers on the path from each locality provider, and from each
+    /// merge, up to the root of the fragment. `ancestors` holds the providers above `node`.
+    fn collect_locality_providers_above(
+        fragment_id: FragmentId,
+        node: &PbStreamNode,
+        ancestors: &mut Vec<GlobalOperatorId>,
+        providers_above_provider: &mut HashMap<GlobalOperatorId, Vec<GlobalOperatorId>>,
+        providers_above_merge: &mut HashMap<(FragmentId, FragmentId), Vec<GlobalOperatorId>>,
     ) {
-        if visited.contains(&current_fragment_id) {
-            return;
-        }
-        visited.insert(current_fragment_id);
-
-        // Check all downstream fragments
-        for downstream_fragment_id in fragment_downstreams
-            .get(&current_fragment_id)
-            .into_iter()
-            .flat_map(|downstreams| {
-                downstreams
-                    .iter()
-                    .map(|downstream| downstream.downstream_fragment_id)
-            })
-        {
-            // If the downstream fragment is a LocalityProvider, add it to results
-            if locality_provider_fragments.contains(&downstream_fragment_id) {
-                downstream_providers.push(downstream_fragment_id);
+        let provider = match node.node_body.as_ref() {
+            Some(NodeBody::LocalityProvider(_)) => {
+                let provider = unique_operator_id(fragment_id, node.operator_id);
+                providers_above_provider.insert(provider, ancestors.clone());
+                Some(provider)
             }
-
-            // Recursively check further downstream
-            Self::collect_downstream_locality_providers(
-                downstream_fragment_id,
-                locality_provider_fragments,
-                fragment_downstreams,
-                visited,
-                downstream_providers,
+            Some(NodeBody::Merge(merge)) => {
+                providers_above_merge
+                    .entry((fragment_id, merge.upstream_fragment_id))
+                    .or_default()
+                    .extend(ancestors.iter().copied());
+                None
+            }
+            _ => None,
+        };
+        ancestors.extend(provider);
+        for input in &node.input {
+            Self::collect_locality_providers_above(
+                fragment_id,
+                input,
+                ancestors,
+                providers_above_provider,
+                providers_above_merge,
             );
+        }
+        if provider.is_some() {
+            ancestors.pop();
         }
     }
 }

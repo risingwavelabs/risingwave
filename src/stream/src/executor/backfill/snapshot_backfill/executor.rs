@@ -204,7 +204,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         };
         let first_recv_barrier_epoch = first_recv_barrier.epoch;
         let initial_backfill_paused =
-            first_recv_barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
+            first_recv_barrier.is_backfill_pause_on_startup(self.progress.backfill_operator_id());
         yield Message::Barrier(first_recv_barrier);
         let mut backfill_state = BackfillState::new(
             self.progress_state_table,
@@ -1075,7 +1075,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 if barrier_epoch.curr >= snapshot_epoch {
                     return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
                 }
-                if barrier.should_start_fragment_backfill(actor_ctx.fragment_id) {
+                if barrier.should_start_backfill(progress.backfill_operator_id()) {
                     backfill_paused = false;
                 }
                 if let Some(chunk) = snapshot_stream.consume_builder() {

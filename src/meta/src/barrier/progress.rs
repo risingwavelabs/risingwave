@@ -15,10 +15,11 @@
 use std::collections::HashMap;
 use std::mem::take;
 
-use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::GlobalOperatorId;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
@@ -28,15 +29,17 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{CreateStreamingJobCommandInfo, FragmentBackfillProgress};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetadataManager;
-use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
+use crate::model::{
+    BackfillExecutor, BackfillUpstreamType, FragmentId, StreamJobFragments, visit_backfill_nodes,
+};
 use crate::stream::{SourceChange, SourceManagerRef};
 
 type ConsumedRows = u64;
 type BufferedRows = u64;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ActorBackfillProgress {
-    pub(crate) actor_id: ActorId,
+pub(crate) struct BackfillExecutorProgress {
+    pub(crate) executor: BackfillExecutor,
     pub(crate) upstream_type: BackfillUpstreamType,
     pub(crate) consumed_rows: u64,
     pub(crate) done: bool,
@@ -51,24 +54,24 @@ enum BackfillState {
 
 /// Represents the backfill nodes that need to be scheduled or cleaned up.
 #[derive(Debug, Default)]
-pub(super) struct PendingBackfillFragments {
-    /// Fragment IDs that should start backfilling in the next checkpoint
-    pub next_backfill_nodes: Vec<FragmentId>,
-    /// State tables of locality provider fragments that should be truncated
+pub(super) struct PendingBackfillNodes {
+    /// Backfill nodes that should start backfilling in the next checkpoint
+    pub next_backfill_nodes: Vec<GlobalOperatorId>,
+    /// State tables of locality providers that should be truncated
     pub truncate_locality_provider_state_tables: Vec<TableId>,
 }
 
-/// Progress of all actors containing backfill executors while creating mview.
+/// Progress of all backfill executors while creating mview.
 #[derive(Debug)]
 pub(super) struct Progress {
     job_id: JobId,
     // `states` and `done_count` decides whether the progress is done. See `is_done`.
-    states: HashMap<ActorId, BackfillState>,
+    states: HashMap<BackfillExecutor, BackfillState>,
     backfill_order_state: BackfillOrderState,
     done_count: usize,
 
     /// Tells whether the backfill is from source or mv.
-    backfill_upstream_types: HashMap<ActorId, BackfillUpstreamType>,
+    backfill_upstream_types: HashMap<BackfillExecutor, BackfillUpstreamType>,
 
     // The following row counts are used to calculate the progress. See `calculate_progress`.
     /// Upstream mv count.
@@ -85,19 +88,19 @@ pub(super) struct Progress {
 }
 
 impl Progress {
-    /// Create a [`Progress`] for some creating mview, with all `actors` containing the backfill executors.
+    /// Create a [`Progress`] for some creating mview, with all its backfill `executors`.
     fn new(
         job_id: JobId,
-        actors: impl IntoIterator<Item = (ActorId, BackfillUpstreamType)>,
+        executors: impl IntoIterator<Item = (BackfillExecutor, BackfillUpstreamType)>,
         upstream_mv_count: HashMap<TableId, usize>,
         upstream_total_key_count: u64,
         backfill_order_state: BackfillOrderState,
     ) -> Self {
         let mut states = HashMap::new();
         let mut backfill_upstream_types = HashMap::new();
-        for (actor, backfill_upstream_type) in actors {
-            states.insert(actor, BackfillState::Init);
-            backfill_upstream_types.insert(actor, backfill_upstream_type);
+        for (executor, backfill_upstream_type) in executors {
+            states.insert(executor, BackfillState::Init);
+            backfill_upstream_types.insert(executor, backfill_upstream_type);
         }
         assert!(!states.is_empty());
 
@@ -115,19 +118,22 @@ impl Progress {
         }
     }
 
-    /// Update the progress of `actor`.
-    /// Returns the backfill fragments that need to be scheduled or cleaned up.
+    /// Update the progress of `executor`.
+    /// Returns the backfill nodes that need to be scheduled or cleaned up.
     fn update(
         &mut self,
-        actor: ActorId,
+        executor: BackfillExecutor,
         new_state: BackfillState,
         upstream_total_key_count: u64,
-    ) -> PendingBackfillFragments {
-        let mut result = PendingBackfillFragments::default();
+    ) -> PendingBackfillNodes {
+        let mut result = PendingBackfillNodes::default();
         self.upstream_mvs_total_key_count = upstream_total_key_count;
-        let total_actors = self.states.len();
-        let Some(backfill_upstream_type) = self.backfill_upstream_types.get(&actor) else {
-            tracing::warn!(%actor, "receive progress from unknown actor, likely removed after reschedule");
+        let total_executors = self.states.len();
+        let Some(backfill_upstream_type) = self.backfill_upstream_types.get(&executor) else {
+            tracing::warn!(
+                ?executor,
+                "receive progress from unknown executor, likely removed after reschedule"
+            );
             return result;
         };
 
@@ -135,8 +141,8 @@ impl Progress {
         let mut new_consumed_row = 0;
         let mut old_buffered_row = 0;
         let mut new_buffered_row = 0;
-        let Some(prev_state) = self.states.remove(&actor) else {
-            tracing::warn!(%actor, "receive progress for actor not in state map");
+        let Some(prev_state) = self.states.remove(&executor) else {
+            tracing::warn!(?executor, "receive progress for executor not in state map");
             return result;
         };
         match prev_state {
@@ -154,34 +160,31 @@ impl Progress {
                 new_buffered_row = *buffered_rows;
             }
             BackfillState::Done(consumed_rows, buffered_rows) => {
-                tracing::debug!("actor {} done", actor);
+                tracing::debug!(?executor, "executor done");
                 new_consumed_row = *consumed_rows;
                 new_buffered_row = *buffered_rows;
                 self.done_count += 1;
-                let before_backfill_nodes = self
-                    .backfill_order_state
-                    .current_backfill_node_fragment_ids();
-                result.next_backfill_nodes = self.backfill_order_state.finish_actor(actor);
-                let after_backfill_nodes = self
-                    .backfill_order_state
-                    .current_backfill_node_fragment_ids();
+                let before_backfill_nodes =
+                    self.backfill_order_state.current_backfill_operator_ids();
+                result.next_backfill_nodes = self.backfill_order_state.finish_executor(executor);
+                let after_backfill_nodes =
+                    self.backfill_order_state.current_backfill_operator_ids();
                 // last_backfill_nodes = before_backfill_nodes - after_backfill_nodes
                 let last_backfill_nodes_iter = before_backfill_nodes
                     .into_iter()
                     .filter(|x| !after_backfill_nodes.contains(x));
                 result.truncate_locality_provider_state_tables = last_backfill_nodes_iter
-                    .filter_map(|fragment_id| {
+                    .filter_map(|operator_id| {
                         self.backfill_order_state
-                            .get_locality_fragment_state_table_mapping()
-                            .get(&fragment_id)
+                            .get_locality_provider_state_tables()
+                            .get(&operator_id)
                     })
-                    .flatten()
                     .copied()
                     .collect();
                 tracing::debug!(
-                    "{} actors out of {} complete",
+                    "{} executors out of {} complete",
                     self.done_count,
-                    total_actors,
+                    total_executors,
                 );
             }
         };
@@ -210,20 +213,20 @@ impl Progress {
                 self.mv_backfill_buffered_rows += new_buffered_row - old_buffered_row;
             }
         }
-        self.states.insert(actor, new_state);
+        self.states.insert(executor, new_state);
         result
     }
 
-    fn iter_actor_progress(&self) -> impl Iterator<Item = ActorBackfillProgress> + '_ {
-        self.states.iter().filter_map(|(actor_id, state)| {
-            let upstream_type = *self.backfill_upstream_types.get(actor_id)?;
+    fn iter_executor_progress(&self) -> impl Iterator<Item = BackfillExecutorProgress> + '_ {
+        self.states.iter().filter_map(|(executor, state)| {
+            let upstream_type = *self.backfill_upstream_types.get(executor)?;
             let (consumed_rows, done) = match *state {
                 BackfillState::Init => (0, false),
                 BackfillState::ConsumingUpstream(_, consumed_rows, _) => (consumed_rows, false),
                 BackfillState::Done(consumed_rows, _) => (consumed_rows, true),
             };
-            Some(ActorBackfillProgress {
-                actor_id: *actor_id,
+            Some(BackfillExecutorProgress {
+                executor: *executor,
                 upstream_type,
                 consumed_rows,
                 done,
@@ -420,7 +423,7 @@ pub(super) enum UpdateProgressResult {
         truncate_locality_provider_state_tables: Vec<TableId>,
     },
     /// Backfill nodes have finished and new ones need to be scheduled.
-    BackfillNodeFinished(PendingBackfillFragments),
+    BackfillNodeFinished(PendingBackfillNodes),
 }
 
 #[derive(Debug)]
@@ -436,7 +439,7 @@ enum CreateMviewStatus {
         progress: Progress,
 
         /// Stash of pending backfill nodes. They will start backfilling on checkpoint.
-        pending_backfill_nodes: Vec<FragmentId>,
+        pending_backfill_nodes: Vec<GlobalOperatorId>,
 
         /// Table IDs whose locality provider state tables need to be truncated
         table_ids_to_truncate: Vec<TableId>,
@@ -455,8 +458,8 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Self {
         let tracking_job = TrackingJob::recovered(creating_job_id, fragment_infos);
-        let actors = InflightStreamingJobInfo::tracking_progress_actor_ids(fragment_infos);
-        let status = if actors.is_empty() {
+        let executors = InflightStreamingJobInfo::tracking_backfill_executors(fragment_infos);
+        let status = if executors.is_empty() {
             CreateMviewStatus::Finished {
                 table_ids_to_truncate: vec![],
             }
@@ -464,9 +467,9 @@ impl CreateMviewProgressTracker {
             let mut states = HashMap::new();
             let mut backfill_upstream_types = HashMap::new();
 
-            for (actor, backfill_upstream_type) in actors {
-                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
-                backfill_upstream_types.insert(actor, backfill_upstream_type);
+            for (executor, backfill_upstream_type) in executors {
+                states.insert(executor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
+                backfill_upstream_types.insert(executor, backfill_upstream_type);
             }
 
             let progress = Self::recover_progress(
@@ -481,7 +484,7 @@ impl CreateMviewProgressTracker {
             );
             let pending_backfill_nodes = progress
                 .backfill_order_state
-                .current_backfill_node_fragment_ids();
+                .current_backfill_operator_ids();
             CreateMviewStatus::Backfilling {
                 progress,
                 pending_backfill_nodes,
@@ -501,8 +504,8 @@ impl CreateMviewProgressTracker {
     /// and then it will just report progress like newly created executors.
     fn recover_progress(
         job_id: JobId,
-        states: HashMap<ActorId, BackfillState>,
-        backfill_upstream_types: HashMap<ActorId, BackfillUpstreamType>,
+        states: HashMap<BackfillExecutor, BackfillState>,
+        backfill_upstream_types: HashMap<BackfillExecutor, BackfillUpstreamType>,
         upstream_mv_count: HashMap<TableId, usize>,
         version_stats: &HummockVersionStats,
         backfill_order_state: BackfillOrderState,
@@ -531,10 +534,10 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub(crate) fn actor_progresses(&self) -> Vec<ActorBackfillProgress> {
+    pub(crate) fn executor_progresses(&self) -> Vec<BackfillExecutorProgress> {
         match &self.status {
             CreateMviewStatus::Backfilling { progress, .. } => {
-                progress.iter_actor_progress().collect()
+                progress.iter_executor_progress().collect()
             }
             CreateMviewStatus::CdcSourceInit | CreateMviewStatus::Finished { .. } => vec![],
         }
@@ -606,23 +609,20 @@ impl CreateMviewProgressTracker {
             return;
         };
 
-        let new_tracking_actors = StreamJobFragments::tracking_progress_actor_ids_impl(
-            fragment_infos.values().map(|fragment| {
-                (
-                    fragment.fragment_type_mask,
-                    &fragment.nodes,
-                    fragment.actors.keys().copied(),
-                )
-            }),
-        );
+        let new_tracking_executors =
+            InflightStreamingJobInfo::tracking_backfill_executors(fragment_infos);
 
         #[cfg(debug_assertions)]
         {
             use std::collections::HashSet;
-            let old_actor_ids: HashSet<_> = progress.states.keys().copied().collect();
-            let new_actor_ids: HashSet<_> = new_tracking_actors
+            let old_actor_ids: HashSet<_> = progress
+                .states
+                .keys()
+                .map(|executor| executor.actor_id)
+                .collect();
+            let new_actor_ids: HashSet<_> = new_tracking_executors
                 .iter()
-                .map(|(actor_id, _)| *actor_id)
+                .map(|(executor, _)| executor.actor_id)
                 .collect();
             debug_assert!(
                 old_actor_ids.is_disjoint(&new_actor_ids),
@@ -632,9 +632,9 @@ impl CreateMviewProgressTracker {
 
         let mut new_states = HashMap::new();
         let mut new_backfill_types = HashMap::new();
-        for (actor_id, upstream_type) in new_tracking_actors {
-            new_states.insert(actor_id, BackfillState::Init);
-            new_backfill_types.insert(actor_id, upstream_type);
+        for (executor, upstream_type) in new_tracking_executors {
+            new_states.insert(executor, BackfillState::Init);
+            new_backfill_types.insert(executor, upstream_type);
         }
 
         let fragment_actors: HashMap<_, _> = fragment_infos
@@ -662,14 +662,16 @@ impl CreateMviewProgressTracker {
 
         let mut pending = progress
             .backfill_order_state
-            .current_backfill_node_fragment_ids();
+            .current_backfill_operator_ids();
         pending.extend(newly_scheduled);
         pending.sort_unstable();
         pending.dedup();
         *pending_backfill_nodes = pending;
     }
 
-    pub(super) fn take_pending_backfill_nodes(&mut self) -> impl Iterator<Item = FragmentId> + '_ {
+    pub(super) fn take_pending_backfill_nodes(
+        &mut self,
+    ) -> impl Iterator<Item = GlobalOperatorId> + '_ {
         match &mut self.status {
             CreateMviewStatus::Backfilling {
                 pending_backfill_nodes,
@@ -727,14 +729,14 @@ impl CreateMviewProgressTracker {
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
         mark_done_when_empty: bool,
     ) -> Vec<FragmentBackfillProgress> {
-        let actor_progresses = self.actor_progresses();
-        if actor_progresses.is_empty() {
+        let executor_progresses = self.executor_progresses();
+        if executor_progresses.is_empty() {
             if mark_done_when_empty && self.is_finished() {
                 return collect_done_fragments(self.job_id(), fragment_infos);
             }
             return vec![];
         }
-        collect_fragment_progress_from_actors(self.job_id(), fragment_infos, &actor_progresses)
+        collect_node_progress_from_executors(self.job_id(), &executor_progresses)
     }
 
     /// Add a new create-mview DDL command to track.
@@ -750,14 +752,13 @@ impl CreateMviewProgressTracker {
         let CreateStreamingJobCommandInfo {
             stream_job_fragments,
             fragment_backfill_ordering,
-            locality_fragment_state_table_mapping,
             streaming_job,
             ..
         } = info;
         let job_id = stream_job_fragments.stream_job_id();
-        let actors = InflightStreamingJobInfo::tracking_progress_actor_ids(fragment_infos);
+        let executors = InflightStreamingJobInfo::tracking_backfill_executors(fragment_infos);
         let tracking_job = TrackingJob::new(&info.stream_job_fragments);
-        if actors.is_empty() {
+        if executors.is_empty() {
             // NOTE: This CDC source detection uses hardcoded property checks and should be replaced
             // with a more reliable identification method in the future.
             let is_cdc_source = matches!(
@@ -789,21 +790,18 @@ impl CreateMviewProgressTracker {
         let upstream_total_key_count: u64 =
             calculate_total_key_count(&upstream_mv_count, version_stats);
 
-        let backfill_order_state = BackfillOrderState::new(
-            fragment_backfill_ordering,
-            fragment_infos,
-            locality_fragment_state_table_mapping.clone(),
-        );
+        let backfill_order_state =
+            BackfillOrderState::new(fragment_backfill_ordering, fragment_infos);
         let progress = Progress::new(
             job_id,
-            actors,
+            executors,
             upstream_mv_count,
             upstream_total_key_count,
             backfill_order_state,
         );
         let pending_backfill_nodes = progress
             .backfill_order_state
-            .current_backfill_node_fragment_ids();
+            .current_backfill_operator_ids();
         Self {
             tracking_job,
             status: CreateMviewStatus::Backfilling {
@@ -816,16 +814,19 @@ impl CreateMviewProgressTracker {
 }
 
 impl Progress {
-    /// Update the progress of `actor` according to the Pb struct.
+    /// Update the progress of the backfill executor according to the Pb struct.
     ///
-    /// If all actors in this MV have finished, return the command.
+    /// If all backfill executors in this MV have finished, return the command.
     fn apply(
         &mut self,
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
     ) -> UpdateProgressResult {
         tracing::trace!(?progress, "update progress");
-        let actor = progress.backfill_actor_id;
+        let executor = BackfillExecutor {
+            actor_id: progress.backfill_actor_id,
+            operator_id: progress.backfill_operator_id,
+        };
         let job_id = self.job_id;
 
         let new_state = if progress.done {
@@ -846,15 +847,15 @@ impl Progress {
                     calculate_total_key_count(&progress_state.upstream_mv_count, version_stats);
 
                 tracing::trace!(%job_id, "updating progress for table");
-                let pending = progress_state.update(actor, new_state, upstream_total_key_count);
+                let pending = progress_state.update(executor, new_state, upstream_total_key_count);
 
                 if progress_state.is_done() {
                     tracing::debug!(
                         %job_id,
-                        "all actors done for creating mview!",
+                        "all backfill executors done for creating mview!",
                     );
 
-                    let PendingBackfillFragments {
+                    let PendingBackfillNodes {
                         next_backfill_nodes,
                         truncate_locality_provider_state_tables,
                     } = pending;
@@ -892,39 +893,31 @@ fn calculate_total_key_count(
         .sum()
 }
 
-pub(crate) fn collect_fragment_progress_from_actors(
+pub(crate) fn collect_node_progress_from_executors(
     job_id: JobId,
-    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-    actor_progresses: &[ActorBackfillProgress],
+    executor_progresses: &[BackfillExecutorProgress],
 ) -> Vec<FragmentBackfillProgress> {
-    let mut actor_to_fragment = HashMap::new();
-    for (fragment_id, info) in fragment_infos {
-        for actor_id in info.actors.keys() {
-            actor_to_fragment.insert(*actor_id, *fragment_id);
-        }
-    }
-
-    let mut per_fragment: HashMap<FragmentId, (u64, usize, usize, BackfillUpstreamType)> =
+    let mut per_node: HashMap<GlobalOperatorId, (u64, usize, usize, BackfillUpstreamType)> =
         HashMap::new();
-    for progress in actor_progresses {
-        let Some(fragment_id) = actor_to_fragment.get(&progress.actor_id) else {
-            continue;
-        };
-        let entry = per_fragment
-            .entry(*fragment_id)
-            .or_insert((0, 0, 0, progress.upstream_type));
+    for progress in executor_progresses {
+        let entry = per_node.entry(progress.executor.operator_id).or_insert((
+            0,
+            0,
+            0,
+            progress.upstream_type,
+        ));
         entry.0 = entry.0.saturating_add(progress.consumed_rows);
         entry.1 += progress.done as usize;
         entry.2 += 1;
     }
 
-    per_fragment
+    per_node
         .into_iter()
         .map(
-            |(fragment_id, (consumed_rows, done_cnt, total_cnt, upstream_type))| {
+            |(operator_id, (consumed_rows, done_cnt, total_cnt, upstream_type))| {
                 FragmentBackfillProgress {
                     job_id,
-                    fragment_id,
+                    operator_id,
                     consumed_rows,
                     done: total_cnt > 0 && done_cnt == total_cnt,
                     upstream_type,
@@ -938,39 +931,70 @@ pub(crate) fn collect_done_fragments(
     job_id: JobId,
     fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
 ) -> Vec<FragmentBackfillProgress> {
-    fragment_infos
-        .iter()
-        .filter(|(_, fragment)| {
-            fragment.fragment_type_mask.contains_any([
-                FragmentTypeFlag::StreamScan,
-                FragmentTypeFlag::SourceScan,
-                FragmentTypeFlag::LocalityProvider,
-            ])
-        })
-        .map(|(fragment_id, fragment)| FragmentBackfillProgress {
-            job_id,
-            fragment_id: *fragment_id,
-            consumed_rows: 0,
-            done: true,
-            upstream_type: BackfillUpstreamType::from_fragment_type_mask(
-                fragment.fragment_type_mask,
-            ),
-        })
-        .collect()
+    let mut done = vec![];
+    for (fragment_id, fragment) in fragment_infos {
+        visit_backfill_nodes(
+            *fragment_id,
+            &fragment.nodes,
+            |operator_id, upstream_type, _| {
+                if upstream_type != BackfillUpstreamType::Values {
+                    done.push(FragmentBackfillProgress {
+                        job_id,
+                        operator_id,
+                        consumed_rows: 0,
+                        done: true,
+                        upstream_type,
+                    });
+                }
+            },
+        );
+    }
+    done
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
+    use itertools::Itertools;
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::id::WorkerId;
+    use risingwave_common::operator::unique_operator_id_into_parts;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
 
     use super::*;
     use crate::controller::fragment::InflightActorInfo;
+    use crate::model::ActorId;
+    use crate::stream::{
+        ExtendedBackfillOrder, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
+    };
 
+    /// The operator id of the backfill node in `sample_inflight_fragment`.
+    const BACKFILL_OPERATOR_ID: u32 = 1;
+
+    fn backfill_node(fragment_id: FragmentId) -> GlobalOperatorId {
+        risingwave_common::operator::unique_operator_id(fragment_id, BACKFILL_OPERATOR_ID)
+    }
+
+    fn executor(actor_id: ActorId, fragment_id: FragmentId) -> BackfillExecutor {
+        BackfillExecutor {
+            actor_id,
+            operator_id: backfill_node(fragment_id),
+        }
+    }
+
+    fn stream_node(operator_id: u32, body: NodeBody, input: Vec<PbStreamNode>) -> PbStreamNode {
+        PbStreamNode {
+            operator_id: (operator_id as u64).into(),
+            node_body: Some(body),
+            input,
+            ..Default::default()
+        }
+    }
+
+    /// A fragment with one backfill node of the type given by `flag`.
     fn sample_inflight_fragment(
         fragment_id: FragmentId,
         actor_ids: &[ActorId],
@@ -978,12 +1002,29 @@ mod tests {
     ) -> InflightFragmentInfo {
         let mut fragment_type_mask = FragmentTypeMask::empty();
         fragment_type_mask.add(flag);
+        let nodes = match flag {
+            FragmentTypeFlag::StreamScan => stream_node(
+                BACKFILL_OPERATOR_ID,
+                NodeBody::StreamScan(Default::default()),
+                vec![],
+            ),
+            FragmentTypeFlag::SourceScan => stream_node(
+                BACKFILL_OPERATOR_ID,
+                NodeBody::SourceBackfill(Default::default()),
+                vec![stream_node(
+                    BACKFILL_OPERATOR_ID + 1,
+                    NodeBody::Merge(Default::default()),
+                    vec![],
+                )],
+            ),
+            _ => PbStreamNode::default(),
+        };
         InflightFragmentInfo {
             fragment_id,
             distribution_type: DistributionType::Single,
             fragment_type_mask,
             vnode_count: 0,
-            nodes: PbStreamNode::default(),
+            nodes,
             actors: actor_ids
                 .iter()
                 .map(|actor_id| {
@@ -1003,8 +1044,6 @@ mod tests {
 
     #[test]
     fn test_recover_legacy_cdc_progress_in_mixed_job() {
-        use risingwave_pb::stream_plan::stream_node::NodeBody;
-
         for modern_mask in [false, true] {
             let mut cdc = sample_inflight_fragment(
                 FragmentId::new(10),
@@ -1058,13 +1097,18 @@ mod tests {
                 panic!("ordinary backfill fragments must remain tracked");
             };
             assert_eq!(progress.states.len(), 2);
-            assert!(!progress.states.contains_key(&ActorId::new(1)));
+            assert!(
+                progress
+                    .states
+                    .keys()
+                    .all(|executor| executor.actor_id != ActorId::new(1))
+            );
             assert_eq!(
-                progress.backfill_upstream_types[&ActorId::new(2)],
+                progress.backfill_upstream_types[&executor(ActorId::new(2), FragmentId::new(20))],
                 BackfillUpstreamType::MView
             );
             assert_eq!(
-                progress.backfill_upstream_types[&ActorId::new(3)],
+                progress.backfill_upstream_types[&executor(ActorId::new(3), FragmentId::new(30))],
                 BackfillUpstreamType::Source
             );
 
@@ -1086,18 +1130,21 @@ mod tests {
             };
             assert_eq!(
                 progress.states.keys().copied().collect::<HashSet<_>>(),
-                HashSet::from([ActorId::new(4), ActorId::new(5)])
+                HashSet::from([
+                    executor(ActorId::new(4), FragmentId::new(20)),
+                    executor(ActorId::new(5), FragmentId::new(30)),
+                ])
             );
         }
     }
 
-    fn sample_progress(actor_id: ActorId) -> Progress {
+    fn sample_progress(executor: BackfillExecutor) -> Progress {
         Progress {
             job_id: JobId::new(1),
-            states: HashMap::from([(actor_id, BackfillState::Init)]),
+            states: HashMap::from([(executor, BackfillState::Init)]),
             backfill_order_state: BackfillOrderState::default(),
             done_count: 0,
-            backfill_upstream_types: HashMap::from([(actor_id, BackfillUpstreamType::MView)]),
+            backfill_upstream_types: HashMap::from([(executor, BackfillUpstreamType::MView)]),
             upstream_mv_count: HashMap::new(),
             upstream_mvs_total_key_count: 0,
             mv_backfill_consumed_rows: 0,
@@ -1107,33 +1154,33 @@ mod tests {
     }
 
     #[test]
-    fn update_ignores_unknown_actor() {
-        let actor_known = ActorId::new(1);
-        let actor_unknown = ActorId::new(2);
-        let mut progress = sample_progress(actor_known);
+    fn update_ignores_unknown_executor() {
+        let executor_known = executor(ActorId::new(1), FragmentId::new(10));
+        let executor_unknown = executor(ActorId::new(2), FragmentId::new(10));
+        let mut progress = sample_progress(executor_known);
 
         let pending = progress.update(
-            actor_unknown,
+            executor_unknown,
             BackfillState::Done(0, 0),
             progress.upstream_mvs_total_key_count,
         );
 
         assert!(pending.next_backfill_nodes.is_empty());
         assert_eq!(progress.states.len(), 1);
-        assert!(progress.states.contains_key(&actor_known));
+        assert!(progress.states.contains_key(&executor_known));
     }
 
     #[test]
     fn refresh_rebuilds_tracking_after_reschedule() {
-        let actor_old = ActorId::new(1);
-        let actor_new = ActorId::new(2);
+        let executor_old = executor(ActorId::new(1), FragmentId::new(10));
+        let executor_new = executor(ActorId::new(2), FragmentId::new(10));
 
         let progress = Progress {
             job_id: JobId::new(1),
-            states: HashMap::from([(actor_old, BackfillState::Done(5, 0))]),
+            states: HashMap::from([(executor_old, BackfillState::Done(5, 0))]),
             backfill_order_state: BackfillOrderState::default(),
             done_count: 1,
-            backfill_upstream_types: HashMap::from([(actor_old, BackfillUpstreamType::MView)]),
+            backfill_upstream_types: HashMap::from([(executor_old, BackfillUpstreamType::MView)]),
             upstream_mv_count: HashMap::new(),
             upstream_mvs_total_key_count: 0,
             mv_backfill_consumed_rows: 5,
@@ -1158,7 +1205,7 @@ mod tests {
             FragmentId::new(10),
             sample_inflight_fragment(
                 FragmentId::new(10),
-                &[actor_new],
+                &[executor_new.actor_id],
                 FragmentTypeFlag::StreamScan,
             ),
         )]);
@@ -1168,11 +1215,251 @@ mod tests {
         let CreateMviewStatus::Backfilling { progress, .. } = tracker.status else {
             panic!("expected backfilling status");
         };
-        assert!(progress.states.contains_key(&actor_new));
-        assert!(!progress.states.contains_key(&actor_old));
+        assert!(progress.states.contains_key(&executor_new));
+        assert!(!progress.states.contains_key(&executor_old));
         assert_eq!(progress.done_count, 0);
         assert_eq!(progress.mv_backfill_consumed_rows, 0);
         assert_eq!(progress.source_backfill_consumed_rows, 0);
+    }
+
+    fn done(executor: BackfillExecutor) -> CreateMviewProgress {
+        CreateMviewProgress {
+            backfill_actor_id: executor.actor_id,
+            backfill_operator_id: executor.operator_id,
+            fragment_id: unique_operator_id_into_parts(executor.operator_id).0,
+            done: true,
+            ..Default::default()
+        }
+    }
+
+    fn provider(operator_id: u32, input: PbStreamNode) -> PbStreamNode {
+        stream_node(
+            operator_id,
+            NodeBody::LocalityProvider(Box::new(
+                risingwave_pb::stream_plan::LocalityProviderNode {
+                    state_table: Some(risingwave_pb::catalog::Table {
+                        id: TableId::new(operator_id + 100),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )),
+            vec![input],
+        )
+    }
+
+    fn tracker_for(
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+    ) -> CreateMviewProgressTracker {
+        let order = StreamFragmentGraph::extend_backfill_order_with_locality_backfill(
+            UserDefinedFragmentBackfillOrder::default(),
+            &Default::default(),
+            || {
+                fragment_infos
+                    .iter()
+                    .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes))
+            },
+        );
+        CreateMviewProgressTracker::recover(
+            JobId::new(1),
+            fragment_infos,
+            BackfillOrderState::new(&order, fragment_infos),
+            &HummockVersionStats::default(),
+        )
+    }
+
+    fn pending_backfill_nodes(
+        tracker: &mut CreateMviewProgressTracker,
+    ) -> HashSet<GlobalOperatorId> {
+        tracker.take_pending_backfill_nodes().collect()
+    }
+
+    /// A locality provider above a stream scan in the same actor: both are tracked, the
+    /// provider starts after the scan, and the job finishes after the provider.
+    #[test]
+    fn provider_over_scan_in_one_actor() {
+        let fragment_id = FragmentId::new(10);
+        let actor_id = ActorId::new(1);
+        let mut fragment =
+            sample_inflight_fragment(fragment_id, &[actor_id], FragmentTypeFlag::StreamScan);
+        fragment
+            .fragment_type_mask
+            .add(FragmentTypeFlag::LocalityProvider);
+        fragment.nodes = provider(
+            2,
+            stream_node(3, NodeBody::StreamScan(Default::default()), vec![]),
+        );
+        let fragment_infos = HashMap::from([(fragment_id, fragment)]);
+        let scan = BackfillExecutor {
+            actor_id,
+            operator_id: risingwave_common::operator::unique_operator_id(fragment_id, 3u32),
+        };
+        let locality_provider = BackfillExecutor {
+            actor_id,
+            operator_id: risingwave_common::operator::unique_operator_id(fragment_id, 2u32),
+        };
+
+        let mut tracker = tracker_for(&fragment_infos);
+        assert_eq!(
+            pending_backfill_nodes(&mut tracker),
+            HashSet::from([scan.operator_id])
+        );
+
+        tracker.apply_progress(&done(scan), &HummockVersionStats::default());
+        assert!(!tracker.is_finished());
+        assert_eq!(
+            pending_backfill_nodes(&mut tracker),
+            HashSet::from([locality_provider.operator_id])
+        );
+
+        tracker.apply_progress(&done(locality_provider), &HummockVersionStats::default());
+        assert!(tracker.is_finished());
+        let (_, truncated) = tracker.collect_staging_commit_info();
+        assert_eq!(truncated.collect_vec(), vec![TableId::new(102)]);
+    }
+
+    /// Two chained locality providers in one actor: the upper one starts after the lower one.
+    #[test]
+    fn chained_providers_in_one_actor() {
+        let scan_fragment_id = FragmentId::new(10);
+        let fragment_id = FragmentId::new(20);
+        let actor_id = ActorId::new(2);
+        let scan_fragment = sample_inflight_fragment(
+            scan_fragment_id,
+            &[ActorId::new(1)],
+            FragmentTypeFlag::StreamScan,
+        );
+        let mut fragment =
+            sample_inflight_fragment(fragment_id, &[actor_id], FragmentTypeFlag::LocalityProvider);
+        fragment.nodes = provider(
+            3,
+            provider(
+                2,
+                stream_node(
+                    4,
+                    NodeBody::Merge(Box::new(risingwave_pb::stream_plan::MergeNode {
+                        upstream_fragment_id: scan_fragment_id,
+                        ..Default::default()
+                    })),
+                    vec![],
+                ),
+            ),
+        );
+        let fragment_infos =
+            HashMap::from([(scan_fragment_id, scan_fragment), (fragment_id, fragment)]);
+        let scan = executor(ActorId::new(1), scan_fragment_id);
+        let lower = BackfillExecutor {
+            actor_id,
+            operator_id: risingwave_common::operator::unique_operator_id(fragment_id, 2u32),
+        };
+        let upper = BackfillExecutor {
+            actor_id,
+            operator_id: risingwave_common::operator::unique_operator_id(fragment_id, 3u32),
+        };
+
+        let mut tracker = tracker_for(&fragment_infos);
+        assert_eq!(
+            pending_backfill_nodes(&mut tracker),
+            HashSet::from([scan.operator_id])
+        );
+        tracker.apply_progress(&done(scan), &HummockVersionStats::default());
+        assert_eq!(
+            pending_backfill_nodes(&mut tracker),
+            HashSet::from([lower.operator_id])
+        );
+        tracker.apply_progress(&done(lower), &HummockVersionStats::default());
+        assert_eq!(
+            pending_backfill_nodes(&mut tracker),
+            HashSet::from([upper.operator_id])
+        );
+        tracker.apply_progress(&done(upper), &HummockVersionStats::default());
+        assert!(tracker.is_finished());
+    }
+
+    #[test]
+    fn extended_order_has_no_self_dependency() {
+        let fragment_id = FragmentId::new(10);
+        let nodes = provider(
+            2,
+            stream_node(3, NodeBody::StreamScan(Default::default()), vec![]),
+        );
+        let order: ExtendedBackfillOrder =
+            StreamFragmentGraph::extend_backfill_order_with_locality_backfill(
+                UserDefinedFragmentBackfillOrder::default(),
+                &Default::default(),
+                || std::iter::once((fragment_id, &nodes)),
+            );
+        let scan = risingwave_common::operator::unique_operator_id(fragment_id, 3u32);
+        let locality_provider = risingwave_common::operator::unique_operator_id(fragment_id, 2u32);
+        assert_eq!(order[&scan], vec![locality_provider]);
+        assert!(
+            order
+                .get(&locality_provider)
+                .is_none_or(|children| children.is_empty())
+        );
+    }
+
+    /// A locality provider only precedes the providers its rows flow into: below a join with a
+    /// provider on each input, each upstream provider precedes the provider of its own input.
+    #[test]
+    fn provider_dependencies_follow_merges() {
+        use risingwave_meta_model::DispatcherType;
+        use risingwave_pb::stream_plan::MergeNode;
+
+        use crate::model::{DownstreamFragmentRelation, FragmentDownstreamRelation};
+
+        let (left, right, join) = (
+            FragmentId::new(10),
+            FragmentId::new(20),
+            FragmentId::new(30),
+        );
+        let merge = |operator_id, upstream_fragment_id| {
+            stream_node(
+                operator_id,
+                NodeBody::Merge(Box::new(MergeNode {
+                    upstream_fragment_id,
+                    ..Default::default()
+                })),
+                vec![],
+            )
+        };
+        let provider_over_scan = provider(
+            2,
+            stream_node(3, NodeBody::StreamScan(Default::default()), vec![]),
+        );
+        let join_nodes = stream_node(
+            1,
+            NodeBody::HashJoin(Default::default()),
+            vec![provider(4, merge(6, left)), provider(5, merge(7, right))],
+        );
+        let to_join = || {
+            vec![DownstreamFragmentRelation {
+                downstream_fragment_id: join,
+                dispatcher_type: DispatcherType::Hash,
+                dist_key_indices: vec![],
+                output_mapping: Default::default(),
+            }]
+        };
+        let downstreams: FragmentDownstreamRelation =
+            HashMap::from([(left, to_join()), (right, to_join())]);
+        let fragments = [
+            (left, &provider_over_scan),
+            (right, &provider_over_scan),
+            (join, &join_nodes),
+        ];
+
+        let dependencies = StreamFragmentGraph::find_locality_provider_dependencies(
+            fragments.into_iter(),
+            &downstreams,
+        );
+        let node = |fragment_id, operator_id: u32| {
+            risingwave_common::operator::unique_operator_id(fragment_id, operator_id)
+        };
+        assert_eq!(dependencies.len(), 4);
+        assert_eq!(dependencies[&node(left, 2)], vec![node(join, 4)]);
+        assert_eq!(dependencies[&node(right, 2)], vec![node(join, 5)]);
+        assert!(dependencies[&node(join, 4)].is_empty());
+        assert!(dependencies[&node(join, 5)].is_empty());
     }
 
     // CDC sources should be initialized as CdcSourceInit
@@ -1219,7 +1506,6 @@ mod tests {
                 .to_owned(),
             fragment_backfill_ordering: Default::default(),
             cdc_table_snapshot_splits: None,
-            locality_fragment_state_table_mapping: Default::default(),
             is_serverless: false,
             replace_sink: None,
             refresh_interval_sec: None,

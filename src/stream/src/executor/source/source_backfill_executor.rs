@@ -382,6 +382,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(mut self, input: Executor) {
         let mut input = input.execute();
+        let backfill_operator_id = self.progress.backfill_operator_id();
 
         // Poll the upstream to get the first barrier.
         let barrier = expect_first_barrier(&mut input).await?;
@@ -392,7 +393,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .to_vec();
 
         let mut pause_control = PauseControl::new();
-        if barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id) {
+        if barrier.is_backfill_pause_on_startup(backfill_operator_id) {
             pause_control.backfill_pause();
         }
         if barrier.is_pause_on_startup() {
@@ -592,8 +593,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 resume_reader!();
                                             }
                                         }
-                                        Mutation::StartFragmentBackfill { fragment_ids } => {
-                                            if fragment_ids.contains(&self.actor_ctx.fragment_id)
+                                        Mutation::StartFragmentBackfill {
+                                            backfill_operator_ids,
+                                        } => {
+                                            if backfill_operator_ids.contains(&backfill_operator_id)
                                                 && pause_control.backfill_resume()
                                             {
                                                 resume_reader!();

@@ -204,7 +204,7 @@ use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
 };
-use risingwave_pb::id::{ExecutorId, SubscriberId};
+use risingwave_pb::id::{ExecutorId, GlobalOperatorId, SubscriberId};
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
@@ -343,8 +343,8 @@ pub struct AddMutation {
     pub pause: bool,
     /// (`upstream_mv_table_id`,  `subscriber_id`)
     pub subscriptions_to_add: Vec<(TableId, SubscriberId)>,
-    /// nodes which should start backfill
-    pub backfill_nodes_to_pause: HashSet<FragmentId>,
+    /// Backfill nodes (`unique_operator_id`) that start paused.
+    pub backfill_operator_ids_to_pause: HashSet<GlobalOperatorId>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
     pub sink_log_store_flush: HashSet<SinkId>,
@@ -373,7 +373,7 @@ pub enum Mutation {
         subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
     },
     StartFragmentBackfill {
-        fragment_ids: HashSet<FragmentId>,
+        backfill_operator_ids: HashSet<GlobalOperatorId>,
     },
     RefreshStart {
         table_id: TableId,
@@ -540,9 +540,12 @@ impl Barrier {
         }
     }
 
-    pub fn should_start_fragment_backfill(&self, fragment_id: FragmentId) -> bool {
-        if let Some(Mutation::StartFragmentBackfill { fragment_ids }) = self.mutation.as_deref() {
-            fragment_ids.contains(&fragment_id)
+    pub fn should_start_backfill(&self, backfill_operator_id: GlobalOperatorId) -> bool {
+        if let Some(Mutation::StartFragmentBackfill {
+            backfill_operator_ids,
+        }) = self.mutation.as_deref()
+        {
+            backfill_operator_ids.contains(&backfill_operator_id)
         } else {
             false
         }
@@ -597,12 +600,12 @@ impl Barrier {
         }
     }
 
-    pub fn is_backfill_pause_on_startup(&self, backfill_fragment_id: FragmentId) -> bool {
+    pub fn is_backfill_pause_on_startup(&self, backfill_operator_id: GlobalOperatorId) -> bool {
         match self.mutation.as_deref() {
             Some(Mutation::Add(AddMutation {
-                backfill_nodes_to_pause,
+                backfill_operator_ids_to_pause,
                 ..
-            })) => backfill_nodes_to_pause.contains(&backfill_fragment_id),
+            })) => backfill_operator_ids_to_pause.contains(&backfill_operator_id),
             Some(Mutation::Update(_)) => false,
             _ => {
                 tracing::warn!(
@@ -883,7 +886,7 @@ impl Mutation {
                 splits,
                 pause,
                 subscriptions_to_add,
-                backfill_nodes_to_pause,
+                backfill_operator_ids_to_pause,
                 actor_cdc_table_snapshot_splits,
                 new_upstream_sinks,
                 sink_log_store_flush,
@@ -909,7 +912,10 @@ impl Mutation {
                         upstream_mv_table_id: *table_id,
                     })
                     .collect(),
-                backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
+                backfill_operator_ids_to_pause: backfill_operator_ids_to_pause
+                    .iter()
+                    .copied()
+                    .collect(),
                 actor_cdc_table_snapshot_splits:
                 Some(PbCdcTableSnapshotSplitsWithGeneration {
                     splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
@@ -973,9 +979,9 @@ impl Mutation {
                         .collect(),
                 })
             }
-            Mutation::StartFragmentBackfill { fragment_ids } => {
+            Mutation::StartFragmentBackfill { backfill_operator_ids } => {
                 PbMutation::StartFragmentBackfill(PbStartFragmentBackfillMutation {
-                    fragment_ids: fragment_ids.iter().copied().collect(),
+                    backfill_operator_ids: backfill_operator_ids.iter().copied().collect(),
                 })
             }
             Mutation::RefreshStart {
@@ -1106,7 +1112,11 @@ impl Mutation {
                          }| { (*upstream_mv_table_id, *subscriber_id) },
                     )
                     .collect(),
-                backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
+                backfill_operator_ids_to_pause: add
+                    .backfill_operator_ids_to_pause
+                    .iter()
+                    .copied()
+                    .collect(),
                 actor_cdc_table_snapshot_splits:
                     build_actor_cdc_table_snapshot_splits_with_generation(
                         add.actor_cdc_table_snapshot_splits
@@ -1164,8 +1174,8 @@ impl Mutation {
             }
             PbMutation::StartFragmentBackfill(start_fragment_backfill) => {
                 Mutation::StartFragmentBackfill {
-                    fragment_ids: start_fragment_backfill
-                        .fragment_ids
+                    backfill_operator_ids: start_fragment_backfill
+                        .backfill_operator_ids
                         .iter()
                         .copied()
                         .collect(),

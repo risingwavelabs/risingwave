@@ -1994,9 +1994,6 @@ impl DdlController {
             cross_db_snapshot_backfill_info
         );
 
-        let locality_fragment_state_table_mapping =
-            fragment_graph.find_locality_provider_fragment_state_table_mapping();
-
         // check if log store exists for all cross-db upstreams
         self.metadata_manager
             .catalog_controller
@@ -2133,7 +2130,6 @@ impl DdlController {
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
-            locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
             resource_type,

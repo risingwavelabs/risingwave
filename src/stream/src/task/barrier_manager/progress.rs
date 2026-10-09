@@ -16,7 +16,7 @@ use std::assert_matches;
 use std::fmt::{Display, Formatter};
 
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{FragmentId, GlobalOperatorId};
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use crate::executor::ActorContext;
@@ -38,7 +38,12 @@ pub(crate) enum BackfillState {
 }
 
 impl BackfillState {
-    pub fn to_pb(self, fragment_id: FragmentId, actor_id: ActorId) -> PbCreateMviewProgress {
+    pub fn to_pb(
+        self,
+        fragment_id: FragmentId,
+        actor_id: ActorId,
+        backfill_operator_id: GlobalOperatorId,
+    ) -> PbCreateMviewProgress {
         let (done, consumed_epoch, consumed_rows, pending_epoch_lag, buffered_rows) = match self {
             BackfillState::ConsumingUpstreamTableOrSource(
                 consumed_epoch,
@@ -61,6 +66,7 @@ impl BackfillState {
             pending_epoch_lag,
             buffered_rows,
             fragment_id,
+            backfill_operator_id,
         }
     }
 }
@@ -101,17 +107,14 @@ impl PartialGraphState {
         epoch: EpochPair,
         fragment_id: FragmentId,
         actor: ActorId,
+        backfill_operator_id: GlobalOperatorId,
         state: BackfillState,
     ) {
-        if let Some((prev_fragment_id, _)) = self
-            .graph_state
+        self.graph_state
             .create_mview_progress
             .entry(epoch.curr)
             .or_default()
-            .insert(actor, (fragment_id, state))
-        {
-            assert_eq!(prev_fragment_id, fragment_id)
-        }
+            .insert((actor, backfill_operator_id), (fragment_id, state));
     }
 
     pub(crate) fn update_cdc_table_backfill_progress(
@@ -140,12 +143,14 @@ impl LocalBarrierManager {
         epoch: EpochPair,
         fragment_id: FragmentId,
         actor: ActorId,
+        backfill_operator_id: GlobalOperatorId,
         state: BackfillState,
     ) {
         self.send_event(ReportCreateProgress {
             epoch,
             fragment_id,
             actor,
+            backfill_operator_id,
             state,
         })
     }
@@ -186,8 +191,11 @@ pub struct CreateMviewProgressReporter {
 
     fragment_id: FragmentId,
 
-    /// The id of the actor containing the backfill executors.
+    /// The id of the actor containing the backfill executor.
     backfill_actor_id: ActorId,
+
+    /// The `unique_operator_id` of the backfill executor.
+    backfill_operator_id: GlobalOperatorId,
 
     state: Option<BackfillState>,
 }
@@ -197,22 +205,28 @@ impl CreateMviewProgressReporter {
         barrier_manager: LocalBarrierManager,
         fragment_id: FragmentId,
         backfill_actor_id: ActorId,
+        backfill_operator_id: GlobalOperatorId,
     ) -> Self {
         Self {
             barrier_manager,
             fragment_id,
             backfill_actor_id,
+            backfill_operator_id,
             state: None,
         }
     }
 
     #[cfg(test)]
     pub fn for_test(barrier_manager: LocalBarrierManager) -> Self {
-        Self::new(barrier_manager, 0.into(), 0.into())
+        Self::new(barrier_manager, 0.into(), 0.into(), 0.into())
     }
 
     pub fn actor_id(&self) -> ActorId {
         self.backfill_actor_id
+    }
+
+    pub fn backfill_operator_id(&self) -> GlobalOperatorId {
+        self.backfill_operator_id
     }
 
     fn update_inner(&mut self, epoch: EpochPair, state: BackfillState) {
@@ -221,6 +235,7 @@ impl CreateMviewProgressReporter {
             epoch,
             self.fragment_id,
             self.backfill_actor_id,
+            self.backfill_operator_id,
             state,
         );
     }
@@ -387,10 +402,21 @@ impl LocalBarrierManager {
     pub(crate) fn register_create_mview_progress(
         &self,
         actor_ctx: &ActorContext,
+        backfill_operator_id: GlobalOperatorId,
     ) -> CreateMviewProgressReporter {
         let fragment_id = actor_ctx.fragment_id;
         let backfill_actor_id = actor_ctx.id;
-        trace!(%fragment_id, %backfill_actor_id, "register create mview progress");
-        CreateMviewProgressReporter::new(self.clone(), fragment_id, backfill_actor_id)
+        trace!(
+            %fragment_id,
+            %backfill_actor_id,
+            %backfill_operator_id,
+            "register create mview progress"
+        );
+        CreateMviewProgressReporter::new(
+            self.clone(),
+            fragment_id,
+            backfill_actor_id,
+            backfill_operator_id,
+        )
     }
 }

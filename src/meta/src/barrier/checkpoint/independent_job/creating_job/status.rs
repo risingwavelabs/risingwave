@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem::replace;
 use std::time::Duration;
 
-use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::id::{FragmentId, PartialGraphId};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -33,61 +32,71 @@ use crate::barrier::command::{ThrottleConfigMap, extract_throttle_config};
 use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::progress::TrackingJob;
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::model::BackfillExecutor;
 
 #[derive(Debug)]
 pub(super) struct CreateMviewLogStoreProgressTracker {
-    /// `actor_id` -> `pending_epoch_lag`
-    ongoing_actors: HashMap<ActorId, u64>,
-    finished_actors: HashSet<ActorId>,
+    /// snapshot backfill executor -> `pending_epoch_lag`
+    ongoing_executors: HashMap<BackfillExecutor, u64>,
+    finished_executors: HashSet<BackfillExecutor>,
 }
 
 impl CreateMviewLogStoreProgressTracker {
-    pub(super) fn new(actors: impl Iterator<Item = ActorId>, pending_barrier_lag: u64) -> Self {
+    pub(super) fn new(
+        snapshot_backfill_executors: impl Iterator<Item = BackfillExecutor>,
+        pending_barrier_lag: u64,
+    ) -> Self {
         Self {
-            ongoing_actors: HashMap::from_iter(actors.map(|actor| (actor, pending_barrier_lag))),
-            finished_actors: HashSet::new(),
+            ongoing_executors: HashMap::from_iter(
+                snapshot_backfill_executors.map(|executor| (executor, pending_barrier_lag)),
+            ),
+            finished_executors: HashSet::new(),
         }
     }
 
     pub(super) fn gen_backfill_progress(&self) -> String {
-        let sum = self.ongoing_actors.values().sum::<u64>() as f64;
-        let count = if self.ongoing_actors.is_empty() {
+        let sum = self.ongoing_executors.values().sum::<u64>() as f64;
+        let count = if self.ongoing_executors.is_empty() {
             1
         } else {
-            self.ongoing_actors.len()
+            self.ongoing_executors.len()
         } as f64;
         let avg = sum / count;
         let avg_lag_time = Duration::from_millis(Epoch(avg as _).physical_time());
         format!(
             "actor: {}/{}, avg lag {:?}",
-            self.finished_actors.len(),
-            self.ongoing_actors.len() + self.finished_actors.len(),
+            self.finished_executors.len(),
+            self.ongoing_executors.len() + self.finished_executors.len(),
             avg_lag_time
         )
     }
 
     fn update(&mut self, progress: impl IntoIterator<Item = &PbCreateMviewProgress>) {
         for progress in progress {
-            match self.ongoing_actors.entry(progress.backfill_actor_id) {
+            let executor = BackfillExecutor {
+                actor_id: progress.backfill_actor_id,
+                operator_id: progress.backfill_operator_id,
+            };
+            match self.ongoing_executors.entry(executor) {
                 Entry::Occupied(mut entry) => {
                     if progress.done {
                         entry.remove_entry();
-                        assert!(
-                            self.finished_actors.insert(progress.backfill_actor_id),
-                            "non-duplicate"
-                        );
+                        assert!(self.finished_executors.insert(executor), "non-duplicate");
                     } else {
                         *entry.get_mut() = progress.pending_epoch_lag as _;
                     }
                 }
+                // The other backfill executors of the job, e.g. locality providers, finished in
+                // the snapshot phase, and report again after recovery.
+                Entry::Vacant(_) if !self.finished_executors.contains(&executor) => {}
                 Entry::Vacant(_) => {
                     if cfg!(debug_assertions) {
                         panic!(
-                            "reporting progress on non-inflight actor: {:?} {:?}",
+                            "reporting progress on non-inflight executor: {:?} {:?}",
                             progress, self
                         );
                     } else {
-                        warn!(?progress, progress_tracker = ?self, "reporting progress on non-inflight actor");
+                        warn!(?progress, progress_tracker = ?self, "reporting progress on non-inflight executor");
                     }
                 }
             }
@@ -95,7 +104,7 @@ impl CreateMviewLogStoreProgressTracker {
     }
 
     pub(super) fn is_finished(&self) -> bool {
-        self.ongoing_actors.is_empty()
+        self.ongoing_executors.is_empty()
     }
 }
 
@@ -107,7 +116,7 @@ pub(super) enum CreatingStreamingJobStatus {
     ConsumingSnapshot {
         snapshot: SnapshotPhaseControl,
         pending_upstream_barriers: Vec<BarrierInfo>,
-        snapshot_backfill_actors: HashSet<ActorId>,
+        snapshot_backfill_executors: HashSet<BackfillExecutor>,
         info: CreatingJobInfo,
     },
     /// The creating job is consuming log store.
@@ -146,7 +155,7 @@ impl CreatingStreamingJobStatus {
                     let CreatingStreamingJobStatus::ConsumingSnapshot {
                         snapshot,
                         info,
-                        snapshot_backfill_actors,
+                        snapshot_backfill_executors,
                         ..
                     } = replace(self, CreatingStreamingJobStatus::PlaceHolder)
                     else {
@@ -159,7 +168,7 @@ impl CreatingStreamingJobStatus {
                         tracking_job,
                         info,
                         log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                            snapshot_backfill_actors.iter().cloned(),
+                            snapshot_backfill_executors.iter().cloned(),
                             pending_barriers
                                 .back()
                                 .map(|barrier_info| {

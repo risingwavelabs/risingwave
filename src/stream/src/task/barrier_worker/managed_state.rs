@@ -92,7 +92,7 @@ struct BarrierState {
 }
 
 use risingwave_common::must_match;
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{FragmentId, GlobalOperatorId};
 use risingwave_pb::stream_service::{InjectBarrierRequest, PbIcebergPkIndexSinkRole};
 
 use crate::executor::exchange::permit;
@@ -173,8 +173,12 @@ impl Display for &'_ PartialGraphManagedBarrierState {
             writeln!(f, "Create MView Progress:")?;
             for (epoch, progress) in &self.create_mview_progress {
                 write!(f, "> Epoch {}:", epoch)?;
-                for (actor_id, (_, state)) in progress {
-                    write!(f, ">> Actor {}: {}, ", actor_id, state)?;
+                for ((actor_id, backfill_operator_id), (_, state)) in progress {
+                    write!(
+                        f,
+                        ">> Actor {} Operator {}: {}, ",
+                        actor_id, backfill_operator_id, state
+                    )?;
                 }
             }
         }
@@ -289,6 +293,8 @@ impl InflightActorState {
     }
 }
 
+type BackfillExecutorKey = (ActorId, GlobalOperatorId);
+
 /// Part of [`PartialGraphState`]
 pub(crate) struct PartialGraphManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
@@ -305,7 +311,8 @@ pub(crate) struct PartialGraphManagedBarrierState {
     /// 2. converted to [`ManagedBarrierStateInner`] in [`Self::may_have_collected_all`]
     /// 3. handled by [`Self::pop_barrier_to_complete`]
     /// 4. put in [`crate::task::barrier_worker::BarrierCompleteResult`] and reported to meta.
-    pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, (FragmentId, BackfillState)>>,
+    pub(crate) create_mview_progress:
+        HashMap<u64, HashMap<BackfillExecutorKey, (FragmentId, BackfillState)>>,
 
     /// Record the source list finished reports for each epoch of concurrent checkpoints.
     /// Used for refreshable batch source. The map key is epoch and the value is
@@ -914,9 +921,16 @@ impl PartialGraphState {
                     epoch,
                     fragment_id,
                     actor,
+                    backfill_operator_id,
                     state,
                 } => {
-                    self.update_create_mview_progress(epoch, fragment_id, actor, state);
+                    self.update_create_mview_progress(
+                        epoch,
+                        fragment_id,
+                        actor,
+                        backfill_operator_id,
+                        state,
+                    );
                 }
                 LocalBarrierEvent::ReportSourceListFinished {
                     epoch,
@@ -1233,7 +1247,9 @@ impl PartialGraphManagedBarrierState {
                 .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(actor, (fragment_id, state))| state.to_pb(fragment_id, actor))
+                .map(|((actor, backfill_operator_id), (fragment_id, state))| {
+                    state.to_pb(fragment_id, actor, backfill_operator_id)
+                })
                 .collect();
 
             let list_finished_source_ids = self

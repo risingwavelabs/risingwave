@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_pb::catalog::Database;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::GlobalOperatorId;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::oneshot::Sender;
 
@@ -112,10 +113,11 @@ pub(crate) struct BackfillProgress {
     pub(crate) backfill_type: PbBackfillType,
 }
 
+/// The backfill progress of a backfill node in a fragment.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FragmentBackfillProgress {
     pub(crate) job_id: JobId,
-    pub(crate) fragment_id: FragmentId,
+    pub(crate) operator_id: GlobalOperatorId,
     pub(crate) consumed_rows: u64,
     pub(crate) done: bool,
     pub(crate) upstream_type: BackfillUpstreamType,

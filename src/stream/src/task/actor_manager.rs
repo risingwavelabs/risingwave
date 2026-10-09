@@ -159,7 +159,10 @@ impl StreamActorManager {
             .map(ColumnId::from)
             .collect_vec();
 
-        let progress = local_barrier_manager.register_create_mview_progress(actor_context);
+        let backfill_operator_id =
+            unique_operator_id(actor_context.fragment_id, stream_node.operator_id);
+        let progress = local_barrier_manager
+            .register_create_mview_progress(actor_context, backfill_operator_id);
 
         let vnodes = vnode_bitmap.map(Arc::new);
         let barrier_rx = local_barrier_manager.subscribe_barrier(actor_context.id);

@@ -22,10 +22,13 @@ use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::{IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
+pub use risingwave_common::util::stream_graph_visitor::{
+    BackfillUpstreamType, visit_backfill_nodes,
+};
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId, fragment};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::id::SubscriberId;
+use risingwave_pb::id::{GlobalOperatorId, SubscriberId};
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -41,7 +44,6 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, PbDispatchOutputMapping, PbDispatcher, PbStreamActor,
     PbStreamContext, StreamNode,
 };
-use strum::Display;
 
 use super::{ActorId, FragmentId};
 
@@ -367,6 +369,8 @@ impl StreamJobFragments {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::operator::unique_operator_id;
+
     use super::*;
 
     #[test]
@@ -407,49 +411,71 @@ mod tests {
         assert_eq!(&*context.config_override, "{\"parallelism\":2}");
     }
 
-    fn fragment_type_mask(flags: impl IntoIterator<Item = FragmentTypeFlag>) -> FragmentTypeMask {
-        let mut mask = FragmentTypeMask::empty();
-        for flag in flags {
-            mask.add(flag);
+    fn stream_node(operator_id: u64, body: NodeBody, input: Vec<StreamNode>) -> StreamNode {
+        StreamNode {
+            operator_id: operator_id.into(),
+            node_body: Some(body),
+            input,
+            ..Default::default()
         }
-        mask
     }
 
     #[test]
-    fn test_tracking_progress_skips_only_cdc_fragments() {
-        let nodes = StreamNode::default();
+    fn test_tracking_backfill_executors() {
+        let scan = || NodeBody::StreamScan(Default::default());
+        let cdc_filter = stream_node(
+            1,
+            NodeBody::CdcFilter(Default::default()),
+            vec![stream_node(2, NodeBody::Merge(Default::default()), vec![])],
+        );
+        let cdc_scan = stream_node(1, NodeBody::StreamCdcScan(Default::default()), vec![]);
+        let mv_scan = stream_node(7, scan(), vec![]);
+        let source_backfill = stream_node(8, NodeBody::SourceBackfill(Default::default()), vec![]);
+        let provider_over_scan = stream_node(
+            2,
+            NodeBody::LocalityProvider(Default::default()),
+            vec![stream_node(3, scan(), vec![])],
+        );
         let fragments = [
             (
-                fragment_type_mask([FragmentTypeFlag::CdcFilter]),
-                &nodes,
+                FragmentId::new(1),
+                &cdc_filter,
                 vec![ActorId::new(1)].into_iter(),
             ),
             (
-                fragment_type_mask([
-                    FragmentTypeFlag::StreamCdcScan,
-                    FragmentTypeFlag::StreamScan,
-                ]),
-                &nodes,
+                FragmentId::new(2),
+                &cdc_scan,
                 vec![ActorId::new(2)].into_iter(),
             ),
             (
-                fragment_type_mask([FragmentTypeFlag::StreamScan]),
-                &nodes,
-                vec![ActorId::new(3), ActorId::new(4)].into_iter(),
+                FragmentId::new(4),
+                &mv_scan,
+                vec![ActorId::new(4), ActorId::new(5)].into_iter(),
             ),
             (
-                fragment_type_mask([FragmentTypeFlag::SourceScan]),
-                &nodes,
-                vec![ActorId::new(5)].into_iter(),
+                FragmentId::new(5),
+                &source_backfill,
+                vec![ActorId::new(6)].into_iter(),
+            ),
+            (
+                FragmentId::new(6),
+                &provider_over_scan,
+                vec![ActorId::new(7)].into_iter(),
             ),
         ];
 
+        let executor = |actor_id: u32, fragment_id: u32, operator_id: u32| BackfillExecutor {
+            actor_id: ActorId::new(actor_id),
+            operator_id: unique_operator_id(FragmentId::new(fragment_id), operator_id),
+        };
         assert_eq!(
-            StreamJobFragments::tracking_progress_actor_ids_impl(fragments),
+            StreamJobFragments::tracking_backfill_executors_impl(fragments),
             vec![
-                (ActorId::new(3), BackfillUpstreamType::MView),
-                (ActorId::new(4), BackfillUpstreamType::MView),
-                (ActorId::new(5), BackfillUpstreamType::Source),
+                (executor(4, 4, 7), BackfillUpstreamType::MView),
+                (executor(5, 4, 7), BackfillUpstreamType::MView),
+                (executor(6, 5, 8), BackfillUpstreamType::Source),
+                (executor(7, 6, 2), BackfillUpstreamType::LocalityProvider),
+                (executor(7, 6, 3), BackfillUpstreamType::MView),
             ]
         );
     }
@@ -531,53 +557,31 @@ impl StreamJobFragments {
             .collect()
     }
 
-    /// Returns actor ids that need to be tracked when creating MV.
-    pub fn tracking_progress_actor_ids_impl<'a>(
+    /// Returns the backfill executors whose progress is tracked when creating MV.
+    pub fn tracking_backfill_executors_impl<'a>(
         fragments: impl IntoIterator<
             Item = (
-                FragmentTypeMask,
+                FragmentId,
                 &'a StreamNode,
-                impl Iterator<Item = ActorId>,
+                impl Iterator<Item = ActorId> + Clone,
             ),
         >,
-    ) -> Vec<(ActorId, BackfillUpstreamType)> {
-        let mut actor_ids = vec![];
-        for (fragment_type_mask, nodes, actors) in fragments {
-            if fragment_type_mask
-                .contains_any([FragmentTypeFlag::CdcFilter, FragmentTypeFlag::StreamCdcScan])
-            {
-                // CDC progress is tracked by its upstream shared source. Skip only the CDC
-                // fragments so unrelated backfill fragments in a mixed job remain tracked.
-                continue;
-            }
-            // Before STREAM_CDC_SCAN was added to non-parallel CDC fragments, persisted
-            // plans only carried STREAM_SCAN. Inspect their node tree as well, otherwise
-            // recovery waits for MV progress that the CDC executor never reports.
-            let mut has_cdc_scan = false;
-            if fragment_type_mask.contains(FragmentTypeFlag::StreamScan) {
-                stream_graph_visitor::visit_stream_node(nodes, |node| {
-                    has_cdc_scan |=
-                        matches!(node.node_body.as_ref(), Some(NodeBody::StreamCdcScan(_)));
-                });
-            }
-            if has_cdc_scan {
-                continue;
-            }
-            if fragment_type_mask.contains_any([
-                FragmentTypeFlag::Values,
-                FragmentTypeFlag::StreamScan,
-                FragmentTypeFlag::SourceScan,
-                FragmentTypeFlag::LocalityProvider,
-            ]) {
-                actor_ids.extend(actors.map(|actor_id| {
+    ) -> Vec<(BackfillExecutor, BackfillUpstreamType)> {
+        let mut executors = vec![];
+        for (fragment_id, nodes, actors) in fragments {
+            visit_backfill_nodes(fragment_id, nodes, |operator_id, upstream_type, _| {
+                executors.extend(actors.clone().map(|actor_id| {
                     (
-                        actor_id,
-                        BackfillUpstreamType::from_fragment_type_mask(fragment_type_mask),
+                        BackfillExecutor {
+                            actor_id,
+                            operator_id,
+                        },
+                        upstream_type,
                     )
                 }));
-            }
+            });
         }
-        actor_ids
+        executors
     }
 
     pub fn root_fragment(&self) -> Option<Fragment> {
@@ -775,39 +779,10 @@ impl StreamJobFragments {
     }
 }
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
-pub enum BackfillUpstreamType {
-    MView,
-    Values,
-    Source,
-    LocalityProvider,
-}
-
-impl BackfillUpstreamType {
-    pub fn from_fragment_type_mask(mask: FragmentTypeMask) -> Self {
-        let is_mview = mask.contains(FragmentTypeFlag::StreamScan);
-        let is_values = mask.contains(FragmentTypeFlag::Values);
-        let is_source = mask.contains(FragmentTypeFlag::SourceScan);
-        let is_locality_provider = mask.contains(FragmentTypeFlag::LocalityProvider);
-
-        // Note: in theory we can have multiple backfill executors in one fragment, but currently it's not possible.
-        // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
-        debug_assert!(
-            is_mview as u8 + is_values as u8 + is_source as u8 + is_locality_provider as u8 == 1,
-            "a backfill fragment should either be mview, value, source, or locality provider, found {:?}",
-            mask
-        );
-
-        if is_mview {
-            BackfillUpstreamType::MView
-        } else if is_values {
-            BackfillUpstreamType::Values
-        } else if is_source {
-            BackfillUpstreamType::Source
-        } else if is_locality_provider {
-            BackfillUpstreamType::LocalityProvider
-        } else {
-            unreachable!("invalid fragment type mask: {:?}", mask);
-        }
-    }
+/// A backfill node, identified by its `unique_operator_id`, running on an actor. A fragment may
+/// contain several backfill nodes, e.g. a locality provider above a stream scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BackfillExecutor {
+    pub actor_id: ActorId,
+    pub operator_id: GlobalOperatorId,
 }

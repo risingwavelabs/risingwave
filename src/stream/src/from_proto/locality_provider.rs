@@ -84,7 +84,7 @@ impl ExecutorBuilder for LocalityProviderBuilder {
 
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(&params.actor_context);
+            .register_create_mview_progress(&params.actor_context, params.operator_id);
 
         let sort_buffer_settings = SortBufferSettings {
             enabled: params.config.developer.enable_locality_sort_buffer,
