@@ -103,7 +103,7 @@ async fn test_snapshot_backfill_recovers_embedded_source_splits() -> Result<()> 
     wait_for_reader_builds(&reader_splits, 1).await?;
     let reader_builds_before_recovery = reader_splits.lock().unwrap().len();
 
-    kill_cn_and_meta_and_wait_recover(&mut cluster).await;
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
 
     wait_for_reader_builds(&reader_splits, reader_builds_before_recovery + 1).await?;
     let reader_splits = reader_splits.lock().unwrap();
