@@ -74,6 +74,25 @@ struct IcebergV3BarrierStats {
     snapshot_epoch: u64,
 }
 
+fn synthetic_compaction_epoch(prev_epoch: Epoch, curr_epoch: Epoch) -> MetaResult<Epoch> {
+    let synthetic_physical_time = prev_epoch.physical_time().checked_add(1).ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot advance synthetic compaction epoch after {}",
+            prev_epoch.0
+        )
+    })?;
+    let synthetic = Epoch::from_physical_time(synthetic_physical_time);
+    if synthetic <= prev_epoch || synthetic >= curr_epoch {
+        return Err(anyhow::anyhow!(
+            "cannot allocate synthetic compaction epoch between {} and {}",
+            prev_epoch.0,
+            curr_epoch.0
+        )
+        .into());
+    }
+    Ok(synthetic)
+}
+
 impl IcebergV3BarrierStats {
     fn new(job_id: JobId, snapshot_epoch: u64) -> Self {
         let table_id_str = format!("{}", job_id);
@@ -834,15 +853,7 @@ impl IcebergV3JobCheckpointControl {
                         };
                         let prev_epoch = upstream_barrier.prev_epoch.value();
                         let curr_epoch = upstream_barrier.curr_epoch.value();
-                        let synthetic = Epoch(prev_epoch.0 + 1);
-                        if synthetic >= curr_epoch {
-                            return Err(anyhow::anyhow!(
-                                "cannot allocate synthetic compaction epoch between {} and {}",
-                                prev_epoch.0,
-                                curr_epoch.0
-                            )
-                            .into());
-                        }
+                        let synthetic = synthetic_compaction_epoch(prev_epoch, curr_epoch)?;
                         Ok((
                             BarrierInfo {
                                 prev_epoch: TracedEpoch::new(prev_epoch),
@@ -1151,4 +1162,32 @@ pub(crate) fn is_iceberg_v3_fragment_nodes<'a>(
         });
         found
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
+
+    use super::*;
+
+    #[test]
+    fn test_synthetic_compaction_epoch() {
+        let prev_epoch = Epoch::from_physical_time(10);
+        let curr_epoch = Epoch::from_physical_time(12);
+
+        let synthetic = synthetic_compaction_epoch(prev_epoch, curr_epoch).unwrap();
+
+        assert_eq!(synthetic, Epoch::from_physical_time(11));
+        assert_eq!(synthetic.0 & EPOCH_SPILL_TIME_MASK, 0);
+        assert!(prev_epoch < synthetic);
+        assert!(synthetic < curr_epoch);
+    }
+
+    #[test]
+    fn test_synthetic_compaction_epoch_rejects_tight_gap() {
+        let prev_epoch = Epoch::from_physical_time(10);
+        let curr_epoch = Epoch::from_physical_time(11);
+
+        assert!(synthetic_compaction_epoch(prev_epoch, curr_epoch).is_err());
+    }
 }
