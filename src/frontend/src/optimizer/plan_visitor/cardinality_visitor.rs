@@ -88,7 +88,7 @@ impl LogicalPlanVisitor for CardinalityVisitor {
         let input = self.visit(plan.input());
 
         if plan.group_key().is_empty() {
-            input.min(1)
+            1.into()
         } else {
             input.min(1..)
         }
