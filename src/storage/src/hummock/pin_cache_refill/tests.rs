@@ -151,6 +151,15 @@ fn test_membership_tracks_physical_references() {
     );
     assert_eq!(changes.removed, [1001.into()].into());
 
+    // The planning version is now empty, but the resident snapshot still contains both SSTs.
+    // Policy diffs must use the resident snapshot, while reference counts follow planning.
+    let changes = controller.replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&both));
+    assert!(changes.inserted.is_empty() && changes.removed.is_empty());
+    let changes = controller.replace_pinned_tables(HashSet::new(), std::slice::from_ref(&both));
+    assert_eq!(changes.removed, [1001.into()].into());
+    let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&both));
+    assert_eq!(changes.inserted, [(1001.into(), 8)].into());
+
     // A full snapshot restores membership without scheduling a backfill.
     let (candidates, changes) = controller.apply_version_update(&[], both.clone(), None);
     assert!(candidates.is_empty());
@@ -158,14 +167,6 @@ fn test_membership_tracks_physical_references() {
     assert!(changes.removed.is_empty());
     let (candidates, changes) = controller.apply_version_update(&[], both.clone(), Some(&[]));
     assert!(candidates.is_empty() && changes.inserted.is_empty() && changes.removed.is_empty());
-
-    // Policy diffs use the resident snapshot and leave physical application to the gate.
-    let changes = controller.replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&both));
-    assert!(changes.inserted.is_empty() && changes.removed.is_empty());
-    let changes = controller.replace_pinned_tables(HashSet::new(), std::slice::from_ref(&both));
-    assert_eq!(changes.removed, [1001.into()].into());
-    let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&both));
-    assert_eq!(changes.inserted, [(1001.into(), 8)].into());
 
     // Table removal, registration, and SST pruning change membership without SST deltas.
     let mut removed = HummockVersionDelta::default();
