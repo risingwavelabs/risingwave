@@ -816,6 +816,7 @@ mod orphan_file_tests {
     };
     use iceberg::table::Table;
     use iceberg::{Runtime, TableIdent};
+    use thiserror_ext::AsReport;
 
     use super::remove_orphan_files_from_table;
 
@@ -869,7 +870,12 @@ mod orphan_file_tests {
         if should_delete {
             assert_eq!(result.unwrap(), vec![format!("{location}/old.parquet")]);
         } else {
-            assert!(result.unwrap_err().to_string().contains("gc.enabled"));
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_report_string()
+                    .contains("gc.enabled")
+            );
         }
         assert_eq!(old_path.exists(), !should_delete);
         assert!(recent_path.exists());
