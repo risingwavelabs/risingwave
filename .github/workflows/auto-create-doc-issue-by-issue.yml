@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Check if issue is done and labeled 'user-facing-changes'
         uses: dacbd/create-issue-action@main
         if: ${{ github.event.action == 'closed' && contains(github.event.issue.labels.*.name, 'user-facing-changes') }}

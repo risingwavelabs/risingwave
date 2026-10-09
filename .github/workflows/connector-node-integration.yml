@@ -23,7 +23,7 @@ jobs:
       # External test dependency only; do not bundle Oracle into RisingWave images.
       ORACLE_TEST_IMAGE: container-registry.oracle.com/database/free:23.9.0.0
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v3
         id: filter
         with:
