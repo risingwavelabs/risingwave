@@ -24,25 +24,30 @@
 //! invalidates all object tokens.
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
 //! Reads use `get` and never create refill work. Recovery completes before sharing the cache.
-//! Capacity accounting and physical reclamation are added before production activation.
+//! GC reclaims withdrawn files after their last reader releases them.
+//! `storage` owns file registration and capacity; `gc` selects and deletes files using that state.
+//! They share one storage lock, separate from the shard locks used by the read index.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use bytes::Bytes;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectRangeBounds, ObjectResult, ObjectStoreRef};
 
+mod gc;
 mod membership;
 mod recovery;
 mod refill;
+mod storage;
 #[cfg(test)]
 pub(super) mod test_utils;
 #[cfg(test)]
 mod tests;
 
+use self::storage::PinCacheStorageState;
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
 fn metric_bytes(bytes: u64) -> i64 {
@@ -64,9 +69,9 @@ struct PinCacheObject {
 }
 
 impl PinCacheObject {
-    /// Withdraws the read route and returns the detached file.
+    /// Withdraws the read route and returns the exact file to enqueue for deletion.
     /// Membership and refill admission remain valid.
-    /// The caller must release the returned reference outside the shard lock.
+    /// The caller must hand the returned reference to GC outside the shard lock.
     fn unpublish(&mut self) -> Option<Arc<PinCacheFile>> {
         let file = self.published.take()?;
         GLOBAL_PIN_CACHE_METRICS.published_objects.dec();
@@ -127,9 +132,13 @@ impl PinCacheShard {
 /// may run concurrently; batch membership updates are not atomic across objects.
 pub(crate) struct PinCache {
     store: ObjectStoreRef,
-    // Hold only one shard lock at a time. Never perform I/O or call back into the controller
-    // or refill executor while locked. Construction finishes before this cache is shared.
+    // Hold only one shard lock at a time. Release it before I/O or taking the storage lock.
+    // Construction finishes before this cache is shared.
     shards: Box<[RwLock<PinCacheShard>]>,
+    capacity: u64,
+    // Leaf lock: never acquire a shard lock or perform I/O while holding it.
+    // Upload protection and capacity accounting change together under this lock.
+    storage: Mutex<PinCacheStorageState>,
     next_path_id: AtomicU64,
 }
 
@@ -150,7 +159,7 @@ impl PinCacheRefillToken {
 }
 
 /// A reference to one published file, retained even after its object leaves the index.
-/// Reads never look up the object a second time.
+/// The file stays on disk until the last handle releases it. Reads never look up the object again.
 /// Callers must support fallback if the selected local file becomes unavailable.
 #[derive(Clone)]
 pub(crate) struct PinCacheReadHandle {
@@ -175,7 +184,7 @@ impl PinCacheReadHandle {
         {
             let file = object.unpublish().unwrap();
             drop(state);
-            drop(file);
+            self.pin_cache.enqueue_delete(file);
         }
     }
 
@@ -195,6 +204,7 @@ impl PinCache {
     /// An incomplete inventory fails initialization; no partially recovered cache is returned.
     pub(crate) async fn new(
         store: ObjectStoreRef,
+        capacity: u64,
         shard_num: usize,
         objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) -> ObjectResult<Arc<Self>> {
@@ -202,8 +212,14 @@ impl PinCache {
             shard_num > 0,
             "pin cache shard count must be greater than zero"
         );
+        GLOBAL_PIN_CACHE_METRICS
+            .capacity_bytes
+            .set(metric_bytes(capacity));
+        GLOBAL_PIN_CACHE_METRICS.accounted_bytes.set(0);
         let mut pin_cache = Self {
             store,
+            capacity,
+            storage: Mutex::default(),
             shards: (0..shard_num)
                 .map(|_| RwLock::new(PinCacheShard::default()))
                 .collect(),
