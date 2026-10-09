@@ -17,6 +17,7 @@ use itertools::{Either, Itertools};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
+use risingwave_pb::plan_common::JoinType;
 
 use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
@@ -69,12 +70,8 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         };
         let top_filter_input = top_filter.input();
         let apply = top_filter_input.as_logical_apply()?;
-        let (apply_left, apply_right, apply_on, join_type, correlated_id, _, max_one_row) =
+        let (apply_left, apply_right, apply_on, join_type, correlated_id, _, _) =
             apply.clone().decompose();
-
-        if max_one_row {
-            return None;
-        }
 
         let top_project = if let Some(project) = apply_right.as_logical_project() {
             project.clone()
@@ -94,6 +91,8 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         if !group_key.is_empty() {
             return None;
         }
+        // An aggregate without grouping returns exactly one row, so a scalar Apply's
+        // max-one-row check is also satisfied after joining on the correlated group keys.
         assert!(grouping_sets.is_empty());
         let bottom_project = if let Some(project) = input.as_logical_project() {
             project.clone()
@@ -156,7 +155,7 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         // We can apply this rule only if:
         // 1. The `group by + proj` returns null for empty input
         // 2. OR the top filter is null for empty input
-        {
+        let top_filter_rejects_null = {
             // When group input is empty, if the agg is not `count`, it would return null.
             let null_agg_pos = agg_calls
                 .iter()
@@ -199,7 +198,8 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
             if !can_apply {
                 return None;
             }
-        }
+            top_filter_any_null
+        };
 
         // New agg with group key extracted from the cor_eq_exprs.
         let new_agg = Agg::new(
@@ -262,10 +262,25 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
             return None;
         }
 
-        // Merge these expressions with LogicalApply into LogicalJoin.
-        let on = apply_on.and(Condition {
+        let correlated_predicate = Condition {
             conjunctions: cor_eq_exprs,
-        });
+        };
+        let (join_type, on, filter) = if join_type == JoinType::Inner && !top_filter_rejects_null {
+            // A scalar aggregate returns one row even for empty input. Grouping by the
+            // correlated columns removes that row, so preserve it with a left outer join.
+            // The original Apply's ON condition must still filter the resulting row.
+            (
+                JoinType::LeftOuter,
+                correlated_predicate,
+                top_filter.predicate().clone().and(apply_on),
+            )
+        } else {
+            (
+                join_type,
+                apply_on.and(correlated_predicate),
+                top_filter.predicate().clone(),
+            )
+        };
 
         let new_join = LogicalJoin::with_output_indices(
             apply_left,
@@ -276,11 +291,7 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         )
         .into();
 
-        if top_filter.predicate().always_true() {
-            Some(new_join)
-        } else {
-            Some(top_filter.clone_with_input(new_join).into())
-        }
+        Some(LogicalFilter::create(new_join, filter))
     }
 }
 

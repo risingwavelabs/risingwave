@@ -70,6 +70,7 @@ table_stat_high_write_throughput_ratio_for_split = 0.5
 table_stat_low_write_throughput_ratio_for_merge = 0.7
 table_stat_throuput_window_seconds_for_split = 60
 table_stat_throuput_window_seconds_for_merge = 240
+table_write_throughput_retention_seconds = 300
 compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
@@ -269,6 +270,8 @@ sync_log_store_buffer_size = 2048
 disable_sync_log_store_dispatcher = false
 over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
+enable_locality_sort_buffer = true
+locality_sort_buffer_activate_threshold = 65536
 cache_refill_policy = "enabled"
 enable_vnode_key_stats_for_materialize = false
 max_concurrent_kv_log_store_historical_read = 0
@@ -333,6 +336,7 @@ iceberg_compaction_max_concurrent_closes = 8
 iceberg_compaction_enable_dynamic_size_estimation = true
 iceberg_compaction_size_estimation_smoothing_factor = 0.3
 iceberg_compaction_pending_parallelism_budget_multiplier = 4.0
+iceberg_compaction_max_pull_task_count = 1
 iceberg_compaction_pull_interval_ms = 5000
 iceberg_compaction_enable_prefetch = false
 iceberg_compaction_target_binpack_group_size_mb = 102400
@@ -363,6 +367,7 @@ algorithm = "Lru"
 
 [storage.data_file_cache]
 dir = ""
+direct_io = false
 capacity_mb = 1024
 file_capacity_mb = 64
 flushers = 4
@@ -392,6 +397,7 @@ max_blocking_threads = 0
 
 [storage.meta_file_cache]
 dir = ""
+direct_io = false
 capacity_mb = 1024
 file_capacity_mb = 64
 flushers = 4

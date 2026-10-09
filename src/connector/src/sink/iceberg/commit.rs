@@ -684,6 +684,7 @@ impl IcebergSinkCommitter {
             self.table.identifier(),
             expect_schema_id,
             expect_partition_spec_id,
+            None,
         )
         .await
         .map_err(SinkError::Iceberg)?;
@@ -729,6 +730,7 @@ impl IcebergSinkCommitter {
             table_ident.clone(),
             expect_schema_id,
             expect_partition_spec_id,
+            None,
             self.commit_retry_num as usize,
             retry_log_context,
             |table| {

@@ -62,7 +62,7 @@ async fn nexmark_chaos_common_inner(
         .assert_result_ne(&final_result);
 
     let (parallelism_1, parallelism_2) = {
-        use rand::{Rng, rng as thread_rng};
+        use rand::{RngExt as _, rng as thread_rng};
         let rng = &mut thread_rng();
 
         let parallelism_1 = rng.random_range(1..=total_cores);

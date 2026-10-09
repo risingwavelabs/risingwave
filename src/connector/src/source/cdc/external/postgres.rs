@@ -236,6 +236,7 @@ impl PostgresExternalTableReader {
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         schema_table_name: SchemaTableName,
+        table_id: u32,
     ) -> ConnectorResult<Self> {
         tracing::info!(
             ?rw_schema,
@@ -243,7 +244,16 @@ impl PostgresExternalTableReader {
             "create postgres external table reader"
         );
         // No TCP keepalive for CDC source
-        let client = create_pg_client(&config.pg_connection_config()?, None).await?;
+        let application_name = format!(
+            "risingwave-postgres-source-reader-{}-{}.{}",
+            table_id, schema_table_name.schema_name, schema_table_name.table_name
+        );
+        let client = create_pg_client(
+            &config.pg_connection_config()?,
+            None,
+            Some(&application_name),
+        )
+        .await?;
 
         // Discover user-defined composite columns and arrays of composites.
         // tokio-postgres cannot decode composite values natively, so for these
@@ -612,6 +622,20 @@ impl PostgresExternalTableReader {
         right: OwnedRow,
         split_columns: Vec<Field>,
     ) {
+        // Conceptually, the query is:
+        //
+        // SELECT <selected_columns>
+        // FROM <upstream_table>
+        // WHERE <split_filter>
+        //
+        // `<split_filter>` is exactly one of:
+        // - `1 = 1` when both bounds contain the unbounded `NULL` sentinel;
+        // - `(<split_columns>) < (<right_bound_params>)` for the first split;
+        // - `(<split_columns>) >= (<left_bound_params>)` for the last split;
+        // - `(<split_columns>) >= (<left_bound_params>) AND
+        //    (<split_columns>) < (<right_bound_params>)` for a middle split.
+        //
+        // Bound values are bound in placeholder order: left, then right.
         assert_eq!(
             split_columns.len(),
             1,
@@ -1241,6 +1265,7 @@ mod tests {
             rw_schema,
             vec![0, 1],
             schema_table_name.clone(),
+            233,
         )
         .await
         .unwrap();

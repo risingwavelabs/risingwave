@@ -141,6 +141,19 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    map.try_insert(
+        std::any::type_name::<OracleCdcProperties>().to_owned(),
+        [
+            "cdc.source.wait.streaming.start.timeout".to_owned(),
+            "debezium.max.queue.size".to_owned(),
+            "debezium.queue.memory.ratio".to_owned(),
+            "debezium.heartbeat.interval.ms".to_owned(),
+            "heartbeat.table.name".to_owned(),
+            "hostname".to_owned(),
+            "port".to_owned(),
+            "password".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
 
     map.try_insert(
         std::any::type_name::<MongodbCdcProperties>().to_owned(),
@@ -168,6 +181,18 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
+            "properties.sasl.kerberos.service.name".to_owned(),
+            "properties.sasl.kerberos.keytab".to_owned(),
+            "properties.sasl.kerberos.principal".to_owned(),
+            "properties.sasl.kerberos.kinit.cmd".to_owned(),
+            "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
+            "properties.sasl.oauthbearer.config".to_owned(),
+            "properties.sasl.oauthbearer.method".to_owned(),
+            "properties.sasl.oauthbearer.client.id".to_owned(),
+            "properties.sasl.oauthbearer.client.secret".to_owned(),
+            "properties.sasl.oauthbearer.token.endpoint.url".to_owned(),
+            "properties.sasl.oauthbearer.scope".to_owned(),
+            "properties.sasl.oauthbearer.extensions".to_owned(),
             "properties.message.max.bytes".to_owned(),
             "properties.receive.message.max.bytes".to_owned(),
             "properties.statistics.interval.ms".to_owned(),
@@ -286,6 +311,18 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
+            "properties.sasl.kerberos.service.name".to_owned(),
+            "properties.sasl.kerberos.keytab".to_owned(),
+            "properties.sasl.kerberos.principal".to_owned(),
+            "properties.sasl.kerberos.kinit.cmd".to_owned(),
+            "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
+            "properties.sasl.oauthbearer.config".to_owned(),
+            "properties.sasl.oauthbearer.method".to_owned(),
+            "properties.sasl.oauthbearer.client.id".to_owned(),
+            "properties.sasl.oauthbearer.client.secret".to_owned(),
+            "properties.sasl.oauthbearer.token.endpoint.url".to_owned(),
+            "properties.sasl.oauthbearer.scope".to_owned(),
+            "properties.sasl.oauthbearer.extensions".to_owned(),
             "properties.message.max.bytes".to_owned(),
             "properties.receive.message.max.bytes".to_owned(),
             "properties.statistics.interval.ms".to_owned(),
@@ -307,6 +344,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.message.timeout.ms".to_owned(),
             "properties.max.in.flight.requests.per.connection".to_owned(),
             "properties.request.required.acks".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // LanceDbConfig
+    map.try_insert(
+        std::any::type_name::<LanceDbConfig>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // OpenSearchConfig
@@ -387,6 +431,18 @@ pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSe
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
+            "properties.sasl.kerberos.service.name".to_owned(),
+            "properties.sasl.kerberos.keytab".to_owned(),
+            "properties.sasl.kerberos.principal".to_owned(),
+            "properties.sasl.kerberos.kinit.cmd".to_owned(),
+            "properties.sasl.kerberos.min.time.before.relogin".to_owned(),
+            "properties.sasl.oauthbearer.config".to_owned(),
+            "properties.sasl.oauthbearer.method".to_owned(),
+            "properties.sasl.oauthbearer.client.id".to_owned(),
+            "properties.sasl.oauthbearer.client.secret".to_owned(),
+            "properties.sasl.oauthbearer.token.endpoint.url".to_owned(),
+            "properties.sasl.oauthbearer.scope".to_owned(),
+            "properties.sasl.oauthbearer.extensions".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // Jdbc

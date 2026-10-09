@@ -834,9 +834,6 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
-        user-managed: true
-        address: localhost
-        port: 8900
         persist-data: true
       - use: kafka
         persist-data: true
@@ -1313,6 +1310,21 @@ profile:
       - use: frontend
       - use: compactor
       - use: redis
+
+  local-clickhouse-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-clickhouse-sink-test
+      - use: sqlite
+        id: sqlite-local-clickhouse-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: clickhouse
 
   local-nats-test:
     config-path: src/config/ci-recovery.toml
@@ -1808,6 +1820,8 @@ template:
 
     user-managed: false
 
+    image: "gcr.io/google.com/cloudsdktool/google-cloud-cli:583.0.0-emulators"
+
     address: "127.0.0.1"
 
     port: 5980
@@ -1840,6 +1854,25 @@ template:
 
     # Only effective when NOT user managed
     image: "redis:7.2.14"
+
+    persist-data: false
+
+  # ClickHouse service backed by Docker.
+  clickhouse:
+    id: clickhouse
+
+    address: "127.0.0.1"
+    http-port: 8123
+    native-port: 9000
+
+    user: default
+    password: default
+    database: default
+
+    user-managed: false
+
+    # Only effective when NOT user managed
+    image: "clickhouse/clickhouse-server:25.5"
 
     persist-data: false
 

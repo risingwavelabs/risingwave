@@ -399,6 +399,19 @@ impl StreamChunk {
             data: self.data.with_visibility(vis),
         }
     }
+
+    /// Keeps visible rows whose operation is in `ops`
+    pub fn retain_ops(self, ops: &[Op]) -> Self {
+        let mut chunk: StreamChunkMut = self.into();
+
+        for (_, mut row) in chunk.to_rows_mut() {
+            if !ops.contains(&row.op()) {
+                row.set_vis(false);
+            }
+        }
+
+        chunk.into()
+    }
 }
 
 impl Deref for StreamChunk {

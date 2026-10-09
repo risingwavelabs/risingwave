@@ -32,7 +32,8 @@ pub enum BlockEntry {
 
 pub struct BlockHolder {
     _handle: BlockEntry,
-    pub block: *const Block,
+    // Keep private so safe callers cannot invalidate the pointer used by Deref.
+    block: *const Block,
 }
 
 impl BlockHolder {
@@ -69,6 +70,8 @@ impl Deref for BlockHolder {
     type Target = Block;
 
     fn deref(&self) -> &Self::Target {
+        // SAFETY: Each constructor points into the heap allocation kept alive by _handle.
+        // Moving the holder does not move the Block, and both fields remain unchanged.
         unsafe { &(*self.block) }
     }
 }
