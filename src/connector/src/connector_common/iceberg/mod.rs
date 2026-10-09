@@ -363,6 +363,68 @@ impl IcebergCommon {
         self.enable_config_load.unwrap_or(false)
     }
 
+    fn adls_file_io_props(&self) -> ConnectorResult<HashMap<String, String>> {
+        let mut props = HashMap::new();
+        if let Some(endpoint) = &self.adlsgen2_endpoint {
+            props.insert(iceberg::io::ADLS_ENDPOINT.to_owned(), endpoint.clone());
+        }
+        let nonempty =
+            |value: &Option<String>| value.as_ref().filter(|s| !s.trim().is_empty()).cloned();
+        let tenant = nonempty(&self.adlsgen2_tenant_id);
+        let client = nonempty(&self.adlsgen2_client_id);
+        let secret = nonempty(&self.adlsgen2_client_secret);
+        let authority = nonempty(&self.adlsgen2_authority_host);
+        let account = nonempty(&self.adlsgen2_account_name);
+        let key = nonempty(&self.adlsgen2_account_key);
+        let any_sp =
+            tenant.is_some() || client.is_some() || secret.is_some() || authority.is_some();
+        if key.is_some() && any_sp {
+            bail!(
+                "adlsgen2: cannot configure both shared-key auth and service-principal auth simultaneously. Specify exactly one auth mode."
+            );
+        }
+        if any_sp && !(tenant.is_some() && client.is_some() && secret.is_some()) {
+            bail!(
+                "adlsgen2: service-principal auth requires all three of adlsgen2.tenant_id, adlsgen2.client_id, and adlsgen2.client_secret to be set"
+            );
+        }
+        if let Some(host) = &authority {
+            // The OAuth client sends its secret to this host. Only allow a bare HTTPS origin.
+            let parsed = Url::parse(host)
+                .map_err(|_| anyhow!("adlsgen2.authority_host does not parse as a URL"))?;
+            if parsed.scheme() != "https" {
+                bail!("adlsgen2.authority_host must use the https scheme");
+            }
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                bail!("adlsgen2.authority_host must not contain userinfo");
+            }
+            if parsed.query().is_some() || parsed.fragment().is_some() {
+                bail!("adlsgen2.authority_host must not contain a query or fragment");
+            }
+            if !matches!(parsed.path(), "" | "/") {
+                bail!("adlsgen2.authority_host must not contain a path component");
+            }
+        }
+        if let (Some(account), Some(key)) = (account, key) {
+            props.insert(ADLS_ACCOUNT_NAME.to_owned(), account);
+            props.insert(ADLS_ACCOUNT_KEY.to_owned(), key);
+        }
+        if let (Some(tenant), Some(client), Some(secret)) = (tenant, client, secret) {
+            props.insert(ADLS_TENANT_ID.to_owned(), tenant);
+            props.insert(ADLS_CLIENT_ID.to_owned(), client);
+            props.insert(ADLS_CLIENT_SECRET.to_owned(), secret);
+            props.insert(
+                ADLS_AUTHORITY_HOST.to_owned(),
+                authority
+                    .as_deref()
+                    .unwrap_or(ADLS_DEFAULT_AUTHORITY_HOST)
+                    .trim_end_matches('/')
+                    .to_owned(),
+            );
+        }
+        Ok(props)
+    }
+
     /// For both V1 and V2.
     fn build_jni_catalog_configs(
         &self,
@@ -424,88 +486,10 @@ impl IcebergCommon {
                 require_rest("azblob")?;
             }
 
-            // Validate adlsgen2 auth configuration before populating iceberg_configs.
-            // Treat empty and whitespace-only strings as unset — serde surfaces
-            // `adlsgen2.tenant_id = ''` (or a value with trailing `\n` from a copy-paste)
-            // as `Some("...")` which would pass `is_some()` but break downstream auth.
-            fn nonempty(v: &Option<String>) -> Option<&str> {
-                v.as_deref().filter(|s| !s.trim().is_empty())
-            }
-            let sp_tenant = nonempty(&self.adlsgen2_tenant_id);
-            let sp_client = nonempty(&self.adlsgen2_client_id);
-            let sp_secret = nonempty(&self.adlsgen2_client_secret);
-            let sp_authority = nonempty(&self.adlsgen2_authority_host);
-            let sk_account_name = nonempty(&self.adlsgen2_account_name);
-            let sk_account_key = nonempty(&self.adlsgen2_account_key);
-            let any_sp_field = sp_tenant.is_some()
-                || sp_client.is_some()
-                || sp_secret.is_some()
-                || sp_authority.is_some();
-            let all_sp_required = sp_tenant.is_some() && sp_client.is_some() && sp_secret.is_some();
-
-            if sk_account_key.is_some() && any_sp_field {
-                bail!(
-                    "adlsgen2: cannot configure both shared-key auth \
-                     (adlsgen2.account_key) and service-principal auth \
-                     (adlsgen2.tenant_id / adlsgen2.client_id / adlsgen2.client_secret / \
-                     adlsgen2.authority_host) simultaneously. Specify exactly one auth mode."
-                );
-            }
-            if any_sp_field && !all_sp_required {
-                bail!(
-                    "adlsgen2: service-principal auth requires all three of \
-                     adlsgen2.tenant_id, adlsgen2.client_id, and adlsgen2.client_secret \
-                     to be set. (adlsgen2.authority_host is optional and defaults to the \
-                     public Azure AAD endpoint.)"
-                );
-            }
-            // Defense in depth: reqsign POSTs the OAuth token request — carrying the
-            // client_secret to this host. Require a bare https origin: no userinfo,
-            // no query, no fragment, and no path beyond "/". The value itself is not
-            // echoed into error messages in case a user pasted a secret by mistake.
-            if let Some(host) = sp_authority {
-                let parsed = Url::parse(host).map_err(|_| {
-                    anyhow!(
-                        "adlsgen2.authority_host does not parse as a URL ({} chars)",
-                        host.len()
-                    )
-                })?;
-                if parsed.scheme() != "https" {
-                    bail!(
-                        "adlsgen2.authority_host must use the https scheme, got {}",
-                        parsed.scheme()
-                    );
-                }
-                if !parsed.username().is_empty() || parsed.password().is_some() {
-                    bail!("adlsgen2.authority_host must not contain userinfo");
-                }
-                if parsed.query().is_some() || parsed.fragment().is_some() {
-                    bail!("adlsgen2.authority_host must not contain a query or fragment");
-                }
-                if !matches!(parsed.path(), "" | "/") {
-                    bail!("adlsgen2.authority_host must not contain a path component");
-                }
-            }
-
-            if let (Some(account_name), Some(account_key)) = (sk_account_name, sk_account_key) {
-                iceberg_configs.insert(ADLS_ACCOUNT_NAME.to_owned(), account_name.to_owned());
-                iceberg_configs.insert(ADLS_ACCOUNT_KEY.to_owned(), account_key.to_owned());
+            let adls_props = self.adls_file_io_props()?;
+            if !adls_props.is_empty() {
                 require_rest("adlsgen2")?;
-            }
-
-            if let (Some(tenant_id), Some(client_id), Some(client_secret)) =
-                (sp_tenant, sp_client, sp_secret)
-            {
-                iceberg_configs.insert(ADLS_TENANT_ID.to_owned(), tenant_id.to_owned());
-                iceberg_configs.insert(ADLS_CLIENT_ID.to_owned(), client_id.to_owned());
-                iceberg_configs.insert(ADLS_CLIENT_SECRET.to_owned(), client_secret.to_owned());
-                // Strip trailing slash to prevent double slash
-                let authority_host = sp_authority
-                    .unwrap_or(ADLS_DEFAULT_AUTHORITY_HOST)
-                    .trim_end_matches('/')
-                    .to_owned();
-                iceberg_configs.insert(ADLS_AUTHORITY_HOST.to_owned(), authority_host);
-                require_rest("adlsgen2")?;
+                iceberg_configs.extend(adls_props);
             }
 
             match &self.warehouse_path {
@@ -862,6 +846,7 @@ impl IcebergCommon {
             }
             "rest_rust" => {
                 let mut iceberg_configs = HashMap::new();
+                iceberg_configs.extend(self.adls_file_io_props()?);
 
                 // check gcs credential or s3 access key and secret key
                 if let Some(gcs_credential) = &self.gcs_credential {
@@ -1154,6 +1139,33 @@ mod tests {
             warehouse_path: Some("abfss://wh@acct.dfs.core.windows.net/wh".to_owned()),
             ..test_common("rest")
         }
+    }
+
+    #[test]
+    fn test_adlsgen2_endpoint_without_static_credentials() {
+        let endpoint = "https://acct.dfs.core.windows.net";
+        let common = IcebergCommon {
+            adlsgen2_endpoint: Some(endpoint.to_owned()),
+            ..test_common("rest")
+        };
+
+        assert_eq!(
+            common.adls_file_io_props().unwrap(),
+            HashMap::from([(iceberg::io::ADLS_ENDPOINT.to_owned(), endpoint.to_owned())])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_native_rest_rejects_partial_adls_auth_before_catalog_requests() {
+        let common = IcebergCommon {
+            vended_credentials: Some(true),
+            adlsgen2_client_secret: None,
+            ..test_adlsgen2_service_principal_common(None)
+        };
+
+        assert_eq!(common.catalog_type(), "rest_rust");
+        let error = common.create_catalog(&HashMap::new()).await.unwrap_err();
+        assert!(format!("{error:#}").contains("requires all three"));
     }
 
     #[test]
