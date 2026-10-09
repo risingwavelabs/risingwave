@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table non_append_only_table (id int primary key, name string, embedding vector(3));
 
 statement error Invalid input syntax: "non_append_only_table" is not append-only but vector index must be append-only
@@ -60,3 +63,39 @@ drop index i;
 
 statement ok
 drop table items;
+
+# issue 27125: a vector index on an ORDER BY mv whose INCLUDE list leaves out the order key
+statement ok
+create table vi_27125 (id int, tag varchar, v vector(3)) append only;
+
+statement ok
+insert into vi_27125 values (1, 'b', '[1,2,3]'), (2, 'a', '[4,5,6]'), (3, 'c', '[7,8,9]');
+
+statement ok
+create materialized view vi_27125_mv as select * from vi_27125 order by tag;
+
+statement ok
+create index vi_27125_idx on vi_27125_mv using hnsw (v) include (id) with (distance_type = 'l2');
+
+# covered by the index
+query I
+select id from vi_27125_mv order by v <-> '[1,2,3]' limit 2;
+----
+1
+2
+
+# `tag` is not in the index, and the index can not look up rows of the mv, so the mv is scanned
+query IT
+select id, tag from vi_27125_mv order by v <-> '[1,2,3]' limit 2;
+----
+1 b
+2 a
+
+statement ok
+drop index vi_27125_idx;
+
+statement ok
+drop materialized view vi_27125_mv;
+
+statement ok
+drop table vi_27125;
