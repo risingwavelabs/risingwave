@@ -353,9 +353,10 @@ retained set, each failed visit makes the next one likelier to fail. That state 
 does not recover on its own, and the practical remedy is to drop and recreate the view.
 
 So the two remedies the runtime report names are not interchangeable. Simplifying nested
-optional/alternation quantifiers addresses the cause. Adding or tightening `WITHIN` is what makes the
-degradation bounded rather than absorbing, and is the one that matters if a partition is already
-stuck. `scan_budget_exhausted_count` alone cannot tell the two apart — it rises in both — so the
+optional/alternation quantifiers addresses the cause. Adding or tightening `WITHIN` is what can make
+the degradation bounded rather than absorbing — only for a scan that reaches matches, since window
+closure drains those and nothing else (next paragraph) — and within that limit it is the one that
+matters if a partition is already stuck. `scan_budget_exhausted_count` alone cannot tell the two apart — it rises in both — so the
 executor also counts the visits that spent the budget and moved nothing (`stuck_visit_count`: no
 scan or freeze cursor advanced, no match emitted, no row evicted, no gate verdict newly cached,
 the matcher's whole resumable state equal before and after). A visit like that repeats the same
