@@ -51,7 +51,9 @@ use crate::{
 pub struct SstDeltaInfo {
     pub insert_sst_level: u32,
     pub insert_sst_infos: Vec<SstableInfo>,
+    // Kept for the existing Foyer refiller until the sequencer stack layer.
     pub delete_sst_object_ids: Vec<HummockSstableObjectId>,
+    pub delete_sst_infos: Vec<SstableInfo>,
 }
 
 pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
@@ -459,6 +461,7 @@ impl HummockVersionCommon<SstableInfo> {
                     for sst_info in &l0_sub_level.table_infos {
                         if removed_l0_ssts.remove(&sst_info.sst_id) {
                             info.delete_sst_object_ids.push(sst_info.object_id);
+                            info.delete_sst_infos.push(sst_info.clone());
                         }
                     }
                 }
@@ -468,6 +471,7 @@ impl HummockVersionCommon<SstableInfo> {
                     for sst_info in &level.table_infos {
                         if removed_level_ssts.remove(&sst_info.sst_id) {
                             info.delete_sst_object_ids.push(sst_info.object_id);
+                            info.delete_sst_infos.push(sst_info.clone());
                         }
                     }
                     if !removed_level_ssts.is_empty() {
@@ -3271,9 +3275,9 @@ mod tests {
                     levels: vec![Level {
                         level_idx: 1,
                         level_type: LevelType::Nonoverlapping,
-                        table_infos: vec![],
-                        total_file_size: 0,
-                        uncompressed_file_size: 0,
+                        table_infos: vec![make_sst(4, vec![4], 400)],
+                        total_file_size: 400,
+                        uncompressed_file_size: 800,
                         ..Default::default()
                     }],
                     group_id: 1.into(),
@@ -3303,8 +3307,8 @@ mod tests {
                         GroupDelta::IntraLevel(IntraLevelDelta::new(
                             1, // L1
                             0,
-                            HashSet::new(),
-                            vec![make_sst(10, vec![1, 2, 3], 500)],
+                            HashSet::from([4.into()]),
+                            vec![make_sst(10, vec![1, 2, 3, 4], 500)],
                             0,
                             0,
                         )),
@@ -3313,6 +3317,18 @@ mod tests {
             )]),
             ..Default::default()
         };
+
+        let infos = version.build_sst_delta_infos(&version_delta);
+        assert_eq!(infos.len(), 1);
+        assert_eq!(
+            infos[0].delete_sst_infos,
+            vec![
+                make_sst(1, vec![1], 100),
+                make_sst(2, vec![2], 200),
+                make_sst(3, vec![3], 300),
+                make_sst(4, vec![4], 400),
+            ]
+        );
 
         version.apply_version_delta(&version_delta);
 
