@@ -32,7 +32,7 @@ use crate::array::ArrayResult;
 use crate::types::Decimal::Normalized;
 use crate::types::ordered_float::OrderedFloat;
 
-#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
@@ -45,35 +45,6 @@ pub enum Decimal {
 }
 
 impl ZeroHeapSize for Decimal {}
-
-/// The hash decides the vnode of rows distributed by a decimal column and is folded into
-/// persisted aggregation states, so it must stay byte-for-byte stable across versions,
-/// independent of the internal representation and of the `rust_decimal` version.
-///
-/// It feeds the hasher exactly what the former `#[derive(Hash)]` did: the variant index as
-/// `isize`; for finite values, also the low, middle and high 32-bit words of the normalized
-/// coefficient, then a flags word with the sign at bit 31 and the scale at bits 16..24.
-/// Normalization strips trailing zeros and turns negative zero into zero, so equal values hash
-/// equally.
-impl std::hash::Hash for Decimal {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Self::NegativeInf => state.write_isize(0),
-            Self::Normalized(d) => {
-                state.write_isize(1);
-                let d = d.normalize();
-                let coefficient = d.mantissa().unsigned_abs();
-                state.write_u32(coefficient as u32);
-                state.write_u32((coefficient >> 32) as u32);
-                state.write_u32((coefficient >> 64) as u32);
-                let sign = if d.is_sign_negative() { 1 << 31 } else { 0 };
-                state.write_u32(sign | (d.scale() << 16));
-            }
-            Self::PositiveInf => state.write_isize(2),
-            Self::NaN => state.write_isize(3),
-        }
-    }
-}
 
 impl ToText for Decimal {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
