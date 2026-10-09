@@ -1,0 +1,62 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# With a single sink actor, the old and new rows of an update always reach the same actor.
+statement ok
+SET STREAMING_PARALLELISM TO 1;
+
+statement ok
+create table pk_change_src (k int, s int, d int, v int, primary key (k, s));
+
+statement ok
+create table pk_change_t (k int, d int, v int, primary key (k, d));
+
+statement ok
+create table pk_change_t_if_not_null (k int, d int, v int, primary key (k, d)) on conflict do update if not null;
+
+# The stream key `(k, s)` of the sinks does not cover the target table pk `(k, d)`.
+statement ok
+create sink pk_change_sink into pk_change_t as select k, d, v from pk_change_src;
+
+statement ok
+create sink pk_change_sink_if_not_null into pk_change_t_if_not_null as select k, d, v from pk_change_src;
+
+statement ok
+insert into pk_change_src values (1, 1, 6, 10), (2, 2, 6, 10);
+
+# The update moves the row to another target table pk, whose old one must be deleted.
+statement ok
+update pk_change_src set d = 8 where k = 1;
+
+statement ok
+update pk_change_src set v = 20 where k = 2;
+
+query III
+select k, d, v from pk_change_t order by k, d;
+----
+1 8 10
+2 6 20
+
+query III
+select k, d, v from pk_change_t_if_not_null order by k, d;
+----
+1 8 10
+2 6 20
+
+statement ok
+drop sink pk_change_sink;
+
+statement ok
+drop sink pk_change_sink_if_not_null;
+
+statement ok
+drop table pk_change_t;
+
+statement ok
+drop table pk_change_t_if_not_null;
+
+statement ok
+drop table pk_change_src;
+
+statement ok
+SET STREAMING_PARALLELISM TO default;
