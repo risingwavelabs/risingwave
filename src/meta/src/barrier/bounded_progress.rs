@@ -19,7 +19,6 @@ use risingwave_common::bail;
 use risingwave_common::id::{ActorId, DatabaseId, FragmentId, JobId, SourceId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_meta_model::{bounded_job, object};
-use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{BoundedLoadAttempt, StreamNode};
 use risingwave_pb::stream_service::barrier_complete_response::BoundedLoadProgress;
@@ -118,13 +117,10 @@ impl BoundedLoadTracker {
             visit_stream_node_body(&fragment.nodes, |body| {
                 if let NodeBody::Source(source) = body
                     && let Some(source) = &source.source_inner
-                    && matches!(
-                        source
-                            .refresh_mode
-                            .as_ref()
-                            .and_then(|mode| mode.refresh_mode.as_ref()),
-                        Some(RefreshMode::Bounded(_))
-                    )
+                    && source
+                        .refresh_mode
+                        .as_ref()
+                        .is_some_and(|mode| mode.is_bounded())
                 {
                     source_id = Some(source.source_id);
                 }

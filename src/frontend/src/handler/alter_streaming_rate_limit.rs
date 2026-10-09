@@ -85,6 +85,15 @@ pub async fn handle_alter_streaming_rate_limit(
                 )
                 .into());
             }
+
+            if rate_limit >= 0 && source.is_bounded() {
+                return Err(ErrorCode::NotSupported(
+                    "SOURCE_RATE_LIMIT is not supported for tables with BOUNDED refresh mode"
+                        .to_owned(),
+                    "Bounded loads read a pinned snapshot once and cannot be throttled".to_owned(),
+                )
+                .into());
+            }
             (StatementType::ALTER_SOURCE, source.id.as_raw_id())
         }
         (PbThrottleTarget::Table, PbThrottleType::Dml) => {
@@ -98,10 +107,23 @@ pub async fn handle_alter_streaming_rate_limit(
             let table =
                 check_table_mismatch(&reader, &session, db_name, schema_path, &real_table_name)?;
             let source_id = if let Some(id) = table.associated_source_id {
-                id.as_raw_id()
+                id
             } else {
                 bail!("ALTER SOURCE_RATE_LIMIT is not for table without source")
             };
+            if rate_limit >= 0
+                && reader
+                    .get_source_by_id_with_db(db_name, source_id)?
+                    .is_bounded()
+            {
+                return Err(ErrorCode::NotSupported(
+                    "SOURCE_RATE_LIMIT is not supported for tables with BOUNDED refresh mode"
+                        .to_owned(),
+                    "Bounded loads read a pinned snapshot once and cannot be throttled".to_owned(),
+                )
+                .into());
+            }
+            let source_id = source_id.as_raw_id();
             (StatementType::ALTER_TABLE, source_id)
         }
         (PbThrottleTarget::Table, PbThrottleType::Backfill) => {

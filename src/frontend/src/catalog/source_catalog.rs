@@ -117,6 +117,13 @@ impl SourceCatalog {
         self.info.external_table.is_some()
     }
 
+    /// Whether this source loads a bounded input once instead of streaming continuously.
+    pub fn is_bounded(&self) -> bool {
+        self.refresh_mode
+            .as_ref()
+            .is_some_and(|mode| mode.is_bounded())
+    }
+
     /// If this source is an iceberg source, returns the corresponding iceberg table name.
     pub fn iceberg_table_name(&self) -> Option<String> {
         if self.name.starts_with(ICEBERG_SOURCE_PREFIX) {

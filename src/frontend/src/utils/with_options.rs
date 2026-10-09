@@ -26,10 +26,12 @@ use risingwave_connector::source::kafka::private_link::{
 use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::plan_common::SourceRefreshMode;
+use risingwave_pb::plan_common::iceberg_bounded_scan::{Scan, Snapshot};
+use risingwave_pb::plan_common::source_refresh_mode::source_refresh_mode_bounded::Input;
 use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
+    RefreshMode, SourceRefreshModeBounded, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
 };
+use risingwave_pb::plan_common::{IcebergBoundedScan, SourceRefreshMode};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
@@ -54,6 +56,8 @@ pub mod options {
 pub const MV_REFRESH_INTERVAL_SEC_KEY: &str = "refresh.interval.sec";
 pub const SOURCE_REFRESH_MODE_KEY: &str = "refresh_mode";
 pub const SOURCE_REFRESH_INTERVAL_SEC_KEY: &str = "refresh_interval_sec";
+/// Iceberg snapshot to load when `refresh_mode` is 'BOUNDED'.
+pub const SOURCE_SNAPSHOT_ID_KEY: &str = "snapshot_id";
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
@@ -455,7 +459,22 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             }
         };
 
+    let snapshot_id = with_options
+        .remove(SOURCE_SNAPSHOT_ID_KEY)
+        .map(|snapshot_id| {
+            snapshot_id.parse::<i64>().map_err(|e| {
+                RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "`{}` must be an integer, but got: {} (error: {})",
+                    SOURCE_SNAPSHOT_ID_KEY,
+                    snapshot_id,
+                    e.as_report()
+                )))
+            })
+        })
+        .transpose()?;
+
     let mut is_full_reload = false;
+    let mut is_bounded = false;
     let source_refresh_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
     let source_refresh_mode = if let Some(source_refresh_mode_str) = &source_refresh_mode_str {
         Some(match source_refresh_mode_str.to_uppercase().as_str() {
@@ -478,9 +497,37 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
                     })),
                 }
             }
+            "BOUNDED" => {
+                is_bounded = true;
+
+                if source_refresh_interval_sec.is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` is not allowed when `{}` is 'BOUNDED'",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                    ))));
+                }
+
+                let Some(snapshot_id) = snapshot_id else {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` is required when `{}` is 'BOUNDED'. Snapshot ids of an Iceberg table \
+                         can be found in `rw_catalog.rw_iceberg_snapshots` through an Iceberg source",
+                        SOURCE_SNAPSHOT_ID_KEY, SOURCE_REFRESH_MODE_KEY
+                    ))));
+                };
+
+                let input = Input::Iceberg(IcebergBoundedScan {
+                    scan: Some(Scan::Snapshot(Snapshot { snapshot_id })),
+                });
+
+                SourceRefreshMode {
+                    refresh_mode: Some(RefreshMode::Bounded(SourceRefreshModeBounded {
+                        input: Some(input),
+                    })),
+                }
+            }
             _ => {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
+                    "Invalid key `{}`: {}, accepted values are 'STREAMING', 'FULL_RELOAD' and 'BOUNDED'",
                     SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
                 ))));
             }
@@ -495,6 +542,22 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
         }
         None
     };
+
+    if snapshot_id.is_some() && !is_bounded {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+            "`{}` is only allowed when `{}` is 'BOUNDED'",
+            SOURCE_SNAPSHOT_ID_KEY, SOURCE_REFRESH_MODE_KEY
+        ))));
+    }
+
+    if is_bounded && !with_options.is_iceberg_connector() {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+            "BOUNDED refresh mode is only supported for the iceberg connector, but got: {}",
+            with_options
+                .get_connector()
+                .unwrap_or_else(|| "<missing>".to_owned()),
+        ))));
+    }
 
     // Batch connectors require FULL_RELOAD mode.
     if with_options.is_batch_connector() && !is_full_reload {

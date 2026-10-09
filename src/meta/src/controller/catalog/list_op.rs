@@ -20,9 +20,6 @@ use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
 use risingwave_pb::meta::list_bounded_jobs_response::BoundedJob as PbBoundedJob;
 use risingwave_pb::meta::list_bounded_jobs_response::bounded_job::{IcebergSnapshot, PinnedInput};
-use risingwave_pb::plan_common::iceberg_bounded_scan::Scan;
-use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
-use risingwave_pb::plan_common::source_refresh_mode::source_refresh_mode_bounded::Input;
 use sea_orm::prelude::DateTime;
 
 use super::*;
@@ -55,17 +52,12 @@ impl CatalogController {
 
                 let mode = source.refresh_mode.as_ref().map(|mode| mode.to_protobuf());
 
-                let Some(RefreshMode::Bounded(bounded)) = mode.and_then(|mode| mode.refresh_mode)
+                let Some(snapshot_id) = mode
+                    .as_ref()
+                    .and_then(|mode| mode.bounded())
+                    .and_then(|bounded| bounded.iceberg_snapshot_id())
                 else {
-                    bail!("bounded source {} has no bounded input", job.source_id);
-                };
-
-                let Some(Input::Iceberg(scan)) = bounded.input else {
-                    bail!("bounded source {} has no Iceberg scan", job.source_id);
-                };
-
-                let Some(Scan::Snapshot(snapshot)) = scan.scan else {
-                    bail!("bounded source {} has no snapshot", job.source_id);
+                    bail!("bounded source {} has no pinned snapshot", job.source_id);
                 };
 
                 Ok(PbBoundedJob {
@@ -78,7 +70,7 @@ impl CatalogController {
                     }
                     .to_owned(),
                     pinned_input: Some(PinnedInput::IcebergSnapshot(IcebergSnapshot {
-                        snapshot_id: snapshot.snapshot_id,
+                        snapshot_id,
                     })),
                     completed_at: job.completed_at,
                 })

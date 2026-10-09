@@ -76,7 +76,9 @@ use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
+use risingwave_pb::plan_common::source_refresh_mode::{
+    RefreshMode, SourceRefreshModeBounded, SourceRefreshModeStreaming,
+};
 use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
@@ -1108,6 +1110,27 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     let (mut columns, pk_col_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
+    if let Some(bounded) = refresh_mode.bounded() {
+        // A bounded load restarts from scratch on recovery, so rows must be deduplicated by key.
+        if row_id_index.is_some() {
+            return Err(ErrorCode::BindError(
+                "Tables with BOUNDED refresh mode must have a PRIMARY KEY. Please define a primary key for the table."
+                    .to_owned(),
+            )
+            .into());
+        }
+
+        if source_rate_limit.is_some() {
+            return Err(ErrorCode::NotSupported(
+                "source rate limit is not supported for BOUNDED refresh mode".to_owned(),
+                "Remove `source_rate_limit` from the WITH clause".to_owned(),
+            )
+            .into());
+        }
+
+        check_bounded_snapshot(&with_properties, bounded).await?;
+    }
+
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
@@ -1172,6 +1195,35 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         refresh_mode: Some(refresh_mode),
     };
     Ok(source)
+}
+
+/// Checks that the snapshot pinned by a bounded load exists in the Iceberg table.
+async fn check_bounded_snapshot(
+    with_properties: &WithOptionsSecResolved,
+    bounded: &SourceRefreshModeBounded,
+) -> Result<()> {
+    let ConnectorProperties::Iceberg(properties) =
+        ConnectorProperties::extract(with_properties.clone(), true)?
+    else {
+        return Err(ErrorCode::BindError(
+            "BOUNDED refresh mode is only supported for the iceberg connector".to_owned(),
+        )
+        .into());
+    };
+
+    let table = properties.load_table().await?;
+
+    let snapshot_id = bounded
+        .iceberg_snapshot_id()
+        .expect("bounded snapshot is required when binding WITH options");
+
+    if table.metadata().snapshot_by_id(snapshot_id).is_none() {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "snapshot {snapshot_id} does not exist in the Iceberg table"
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 pub async fn handle_create_source(

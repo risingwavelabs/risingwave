@@ -46,10 +46,7 @@ fn is_full_reload_refresh(refresh_mode: &Option<SourceRefreshMode>) -> bool {
 fn iceberg_bounded_scan(
     refresh_mode: &Option<SourceRefreshMode>,
 ) -> StreamResult<Option<IcebergBoundedScan>> {
-    let Some(RefreshMode::Bounded(bounded)) = refresh_mode
-        .as_ref()
-        .and_then(|mode| mode.refresh_mode.as_ref())
-    else {
+    let Some(bounded) = refresh_mode.as_ref().and_then(|mode| mode.bounded()) else {
         return Ok(None);
     };
 

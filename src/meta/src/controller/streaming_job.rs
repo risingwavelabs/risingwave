@@ -700,14 +700,14 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
 
                 if let Some(source) = src.as_ref()
-                    && matches!(
-                        source
-                            .refresh_mode
-                            .as_ref()
-                            .and_then(|mode| mode.refresh_mode.as_ref()),
-                        Some(RefreshMode::Bounded(_))
-                    )
+                    && let Some(bounded) =
+                        source.refresh_mode.as_ref().and_then(|mode| mode.bounded())
                 {
+                    assert!(
+                        bounded.iceberg_snapshot_id().is_some(),
+                        "bounded source {} has no pinned snapshot",
+                        source.id
+                    );
                     BoundedJob::insert(bounded_job::ActiveModel {
                         job_id: Set(job_id),
                         source_id: Set(source.id),

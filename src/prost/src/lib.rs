@@ -553,6 +553,34 @@ impl catalog::StreamSourceInfo {
     }
 }
 
+impl plan_common::SourceRefreshMode {
+    pub fn bounded(&self) -> Option<&plan_common::source_refresh_mode::SourceRefreshModeBounded> {
+        match &self.refresh_mode {
+            Some(plan_common::source_refresh_mode::RefreshMode::Bounded(bounded)) => Some(bounded),
+            _ => None,
+        }
+    }
+
+    pub fn is_bounded(&self) -> bool {
+        self.bounded().is_some()
+    }
+}
+
+impl plan_common::source_refresh_mode::SourceRefreshModeBounded {
+    /// Returns the pinned snapshot if the input is an Iceberg snapshot.
+    pub fn iceberg_snapshot_id(&self) -> Option<i64> {
+        use plan_common::iceberg_bounded_scan::Scan;
+        use plan_common::source_refresh_mode::source_refresh_mode_bounded::Input;
+
+        match &self.input {
+            Some(Input::Iceberg(plan_common::IcebergBoundedScan {
+                scan: Some(Scan::Snapshot(snapshot)),
+            })) => Some(snapshot.snapshot_id),
+            _ => None,
+        }
+    }
+}
+
 impl stream_plan::PbStreamScanType {
     pub fn is_reschedulable(&self, is_online: bool) -> bool {
         match self {
