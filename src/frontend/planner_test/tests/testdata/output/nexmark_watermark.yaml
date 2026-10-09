@@ -2611,9 +2611,9 @@
                 └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
                   └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [auction, bidder, date_time, price, avg_price_10, max_price_10, _row_id(hidden)], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr2, $expr3, $expr1, $expr4, Case((count = 0:Int32), null:Decimal, (sum / count::Decimal)) as $expr5, max, _row_id] }
-      └─StreamOverWindow { window_functions: [sum($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), max($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+    StreamMaterialize { columns: [auction, bidder, date_time, price, avg_price_10, max_price_10, _row_id(hidden)], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck, watermark_columns: [date_time] }
+    └─StreamProject { exprs: [$expr2, $expr3, $expr1, $expr4, Case((count = 0:Int32), null:Decimal, (sum / count::Decimal)) as $expr5, max, _row_id], output_watermarks: [[$expr1]] }
+      └─StreamOverWindow { window_functions: [sum($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), max($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)], output_watermarks: [[$expr1]] }
         └─StreamExchange { dist: HashShard($expr2) }
           └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, $expr1, _row_id], output_watermarks: [[$expr1]] }
             └─StreamFilter { predicate: ((Field(bid, 0:Int32) % 100:Int32) = 0:Int32) AND (event_type = 2:Int32) }
@@ -2623,9 +2623,9 @@
                     └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, bidder, date_time, price, avg_price_10, max_price_10, _row_id(hidden)], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [$expr2, $expr3, $expr1, $expr4, Case((count = 0:Int32), null:Decimal, (sum / count::Decimal)) as $expr5, max, _row_id] }
-        └── StreamOverWindow { window_functions: [sum($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), max($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+    StreamMaterialize { columns: [auction, bidder, date_time, price, avg_price_10, max_price_10, _row_id(hidden)], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck, watermark_columns: [date_time] }
+    └── StreamProject { exprs: [$expr2, $expr3, $expr1, $expr4, Case((count = 0:Int32), null:Decimal, (sum / count::Decimal)) as $expr5, max, _row_id], output_watermarks: [[$expr1]] }
+        └── StreamOverWindow { window_functions: [sum($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), max($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)], output_watermarks: [[$expr1]] }
             ├── tables: [ OverWindow: 0 ]
             └── StreamExchange Hash([0]) from 1
 

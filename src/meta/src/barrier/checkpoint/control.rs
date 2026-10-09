@@ -49,7 +49,6 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
-use crate::barrier::notifier::Notifier;
 use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, PartialGraphStat};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
@@ -61,6 +60,7 @@ use crate::barrier::{
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::{build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs};
 use crate::manager::MetaSrvEnv;
+use crate::notification::Notifier;
 
 fn fragment_has_online_unreschedulable_scan(fragment: &InflightFragmentInfo) -> bool {
     let mut has_unreschedulable_scan = false;
@@ -333,6 +333,7 @@ impl CheckpointControl {
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
+                    | Command::FinishRefresh { .. }
                     | Command::ResetSource { .. }
                     | Command::ResumeBackfill { .. }
                     | Command::InjectSourceOffsets { .. } => {
@@ -612,6 +613,9 @@ impl CheckpointControl {
                     }
                     IndependentCheckpointJob::CreatingStreamingJob(_) => {
                         unreachable!("creating streaming job should not initialize when running")
+                    }
+                    IndependentCheckpointJob::IcebergV3(_) => {
+                        unreachable!("Iceberg V3 jobs do not wait for graph initialization")
                     }
                 }
             }
@@ -1028,6 +1032,22 @@ impl DatabaseCheckpointControl {
                         independent_jobs_task.push((*job_id, epoch, resps, info));
                     }
                 }
+                IndependentCheckpointJob::IcebergV3(iceberg_job) => {
+                    if let Some((epoch, resps, info, tracking_job)) = iceberg_job
+                        .start_completing(partial_graph_manager, min_upstream_inflight_barrier)
+                    {
+                        if let Some(tracking_job) = tracking_job {
+                            let task = task.get_or_insert_default();
+                            task.finished_jobs.push(tracking_job);
+                        }
+                        independent_jobs_task.push((
+                            *job_id,
+                            epoch,
+                            resps.into_values().collect_vec(),
+                            info,
+                        ));
+                    }
+                }
             }
         }
         if !finished_jobs.is_empty() {
@@ -1190,18 +1210,13 @@ impl DatabaseCheckpointControl {
             task.load_finished_source_ids.extend(load_finished_info);
         }
 
-        let refresh_finished_table_ids: Vec<JobId> = resps
+        let refresh_finished_actors = resps
             .values()
-            .flat_map(|resp| {
-                resp.refresh_finished_tables
-                    .iter()
-                    .map(|table_id| table_id.as_job_id())
-            })
+            .flat_map(|resp| resp.refresh_finished_actors.clone())
             .collect::<Vec<_>>();
-        if !refresh_finished_table_ids.is_empty() {
+        if !refresh_finished_actors.is_empty() {
             let task = task.get_or_insert_default();
-            task.refresh_finished_table_job_ids
-                .extend(refresh_finished_table_ids);
+            task.refresh_finished_actors.extend(refresh_finished_actors);
         }
     }
 }
@@ -1288,11 +1303,11 @@ impl DatabaseCheckpointControl {
 
         if !matches!(&command, Some(Command::CreateStreamingJob { .. }))
             && self.database_info.is_empty()
+            && self
+                .independent_checkpoint_job_controls
+                .values()
+                .all(|job| job.running().is_none())
         {
-            assert!(
-                self.independent_checkpoint_job_controls.is_empty(),
-                "should not have snapshot backfill job when there is no normal job in database"
-            );
             // Drop the guard to remove the metric series of this database.
             self.last_committed_barrier_time = None;
             // skip the command when there is nothing to do with the barrier
@@ -1303,9 +1318,7 @@ impl DatabaseCheckpointControl {
         };
 
         if let Some(Command::CreateStreamingJob {
-            job_type:
-                CreateStreamingJobType::SnapshotBackfill { .. }
-                | CreateStreamingJobType::BatchRefresh(_),
+            job_type: CreateStreamingJobType::Independent { .. },
             ..
         }) = &command
             && self.state.is_paused()

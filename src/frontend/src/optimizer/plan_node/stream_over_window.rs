@@ -14,19 +14,20 @@
 
 use std::collections::HashSet;
 
+use pretty_xmlish::XmlNode;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::window_function::FrameBounds;
+use risingwave_expr::window_function::{FrameBounds, can_forward_watermark_on_order_key};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{GenericPlanNode, PlanWindowFunction};
+use super::generic::{DistillUnit, GenericPlanNode, PlanWindowFunction};
 use super::stream::prelude::*;
-use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
+use super::utils::{Distill, TableCatalogBuilder, watermark_pretty};
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
 };
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -41,7 +42,22 @@ impl StreamOverWindow {
         reject_upsert_input!(core.input);
 
         let input = &core.input;
-        let watermark_columns = WatermarkColumns::new();
+        let watermark_columns = {
+            // Watermarks on partition key columns can always be forwarded, since a row can only
+            // affect rows in the same partition. Watermarks on the first order key column can be
+            // forwarded only if the window frames guarantee that a row can only affect rows not
+            // below itself in that column. All other watermarks are dropped by the executor.
+            let mut cols = core.partition_key_indices();
+            if let Some(first_order_key) = core.order_key().first()
+                && can_forward_watermark_on_order_key(
+                    core.window_functions().iter().map(|func| &func.frame),
+                    first_order_key.order_type,
+                )
+            {
+                cols.push(first_order_key.column_index);
+            }
+            input.watermark_columns().retain_clone(&cols)
+        };
 
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -116,7 +132,15 @@ impl StreamOverWindow {
     }
 }
 
-impl_distill_by_unit!(StreamOverWindow, core, "StreamOverWindow");
+impl Distill for StreamOverWindow {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let mut node = self.core.distill_with_name("StreamOverWindow");
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
+            node.fields.push(("output_watermarks".into(), ow));
+        }
+        node
+    }
+}
 
 impl PlanTreeNodeUnary<Stream> for StreamOverWindow {
     fn input(&self) -> PlanRef {

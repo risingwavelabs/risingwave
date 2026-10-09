@@ -19,6 +19,7 @@ use std::task::{Context, Poll};
 use futures::FutureExt;
 use prometheus::{HistogramTimer, IntCounter};
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
@@ -245,6 +246,24 @@ impl CheckpointControl {
 pub(crate) struct EnterReset;
 
 impl DatabaseStatusAction<'_, EnterReset> {
+    pub(crate) fn job_ids(&self) -> HashSet<JobId> {
+        let database_status = self
+            .control
+            .databases
+            .get(&self.database_id)
+            .expect("should exist");
+        match database_status {
+            DatabaseCheckpointControlStatus::Running(database) => database
+                .database_info
+                .job_ids()
+                .chain(database.independent_checkpoint_job_controls.keys().copied())
+                .collect(),
+            DatabaseCheckpointControlStatus::Recovering(_) => {
+                unreachable!("should only enter reset from a running database")
+            }
+        }
+    }
+
     pub(crate) fn enter(
         self,
         barrier_complete_output: Option<BarrierCompleteOutput>,
@@ -402,6 +421,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             stream_actors,
             mut source_splits,
             batch_refresh,
+            iceberg_v3,
         } = rendered_info;
         let mut recoverer = partial_graph_manager.start_recover();
         let result: MetaResult<_> = try {
@@ -420,6 +440,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_splits,
                 batch_refresh,
+                iceberg_v3,
             )?
         };
         match result {

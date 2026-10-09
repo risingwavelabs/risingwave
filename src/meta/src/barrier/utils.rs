@@ -48,7 +48,6 @@ pub(super) fn collect_resp_info(
     HashMap<TableId, TableWatermarks>,
     Vec<SstableInfo>,
     HashMap<TableId, Vec<VectorIndexAdd>>,
-    HashSet<TableId>,
     Vec<IcebergPkIndexSinkMetadata>,
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, _> = HashMap::new();
@@ -56,7 +55,6 @@ pub(super) fn collect_resp_info(
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
     let mut vector_index_adds = HashMap::new();
-    let mut truncate_tables: HashSet<TableId> = HashSet::new();
     let mut iceberg_pk_index_sink_metadata = Vec::new();
 
     for resp in resps {
@@ -84,7 +82,6 @@ pub(super) fn collect_resp_info(
                 )
                 .expect("non-duplicate");
         }
-        truncate_tables.extend(resp.truncate_tables);
         iceberg_pk_index_sink_metadata.extend(resp.iceberg_pk_index_sink_metadata);
     }
 
@@ -106,7 +103,6 @@ pub(super) fn collect_resp_info(
         ),
         old_value_ssts,
         vector_index_adds,
-        truncate_tables,
         iceberg_pk_index_sink_metadata,
     )
 }
@@ -145,7 +141,6 @@ pub(super) fn collect_independent_job_commit_epoch_info(
         new_table_watermarks,
         old_value_sst,
         vector_index_adds,
-        truncate_tables,
         iceberg_pk_index_sink_metadata,
     ) = collect_resp_info(resps);
     assert!(old_value_sst.is_empty());
@@ -161,7 +156,6 @@ pub(super) fn collect_independent_job_commit_epoch_info(
             .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
             .expect("non-duplicate");
     }
-    commit_info.truncate_tables.extend(truncate_tables);
     barrier_info
         .table_ids_to_commit
         .iter()

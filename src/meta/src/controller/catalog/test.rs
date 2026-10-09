@@ -14,6 +14,8 @@
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
@@ -24,6 +26,7 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+    use risingwave_pb::plan_common::ExternalTableDesc;
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{PbStreamNode, StreamScanNode, StreamScanType};
     use tokio::sync::{mpsc, oneshot};
@@ -2039,6 +2042,77 @@ mod tests {
                 .await?
                 .is_none()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_create_cdc_table_source_dependency() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let (shared_source_id, _) = mgr
+            .create_source(
+                PbSource {
+                    schema_id: TEST_SCHEMA_ID,
+                    database_id: TEST_DATABASE_ID,
+                    name: "shared_cdc".to_owned(),
+                    owner: TEST_OWNER_ID,
+                    info: Some(StreamSourceInfo {
+                        cdc_source_job: true,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+
+        let (table_source_id, _) = mgr
+            .create_source(
+                PbSource {
+                    schema_id: TEST_SCHEMA_ID,
+                    database_id: TEST_DATABASE_ID,
+                    name: "orders_cdc".to_owned(),
+                    owner: TEST_OWNER_ID,
+                    info: Some(StreamSourceInfo {
+                        external_table: Some(ExternalTableDesc {
+                            source_id: shared_source_id,
+                            table_name: "mydb.orders".to_owned(),
+                            connect_properties: BTreeMap::from([(
+                                "hostname".to_owned(),
+                                "mysql-host".to_owned(),
+                            )]),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+
+        let table_source = Source::find_by_id(table_source_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        let external_table = table_source
+            .source_info
+            .unwrap()
+            .to_protobuf()
+            .external_table
+            .unwrap();
+        assert_eq!(external_table.source_id, shared_source_id);
+        assert_eq!(external_table.table_id, table_source_id.as_cdc_table_id());
+        // Connect properties are only used to validate the descriptor, never persisted.
+        assert!(external_table.connect_properties.is_empty());
+        assert!(external_table.secret_refs.is_empty());
+
+        let dependency_count = ObjectDependency::find()
+            .filter(object_dependency::Column::Oid.eq(shared_source_id.as_object_id()))
+            .filter(object_dependency::Column::UsedBy.eq(table_source_id.as_object_id()))
+            .count(&mgr.inner.read().await.db)
+            .await?;
+        assert_eq!(dependency_count, 1);
 
         Ok(())
     }

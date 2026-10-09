@@ -1,0 +1,139 @@
+# Watermark forwarding of the general `OverWindow` executor: watermarks on partition key columns
+# are always forwarded, and watermarks on the first `ORDER BY` column are forwarded when no window
+# frame extends to following rows. Here the forwarded watermark drives the state cleaning of a
+# downstream hash join on the watermark column, which requires watermarks from both join sides.
+# The cleaning is observed through the committed watermarks of the join state tables in
+# `rw_catalog.rw_hummock_table_watermark`, since rows below them are only reclaimed by compaction.
+
+# `let` and `${...}` references below require substitution to be enabled.
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# With parallel upstream actors, idle actors can delay the merged watermark.
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE t1 (k INT, ts INT, v INT, WATERMARK FOR ts AS ts - 5) APPEND ONLY;
+
+statement ok
+CREATE TABLE t2 (ts INT, x INT, WATERMARK FOR ts AS ts - 5) APPEND ONLY;
+
+# The `lag` frame has no following rows, so the watermark on `ts` is forwarded through the over
+# window to the join.
+statement ok
+CREATE MATERIALIZED VIEW mv AS
+SELECT w.k, w.ts, w.v, w.lag_v, t2.x
+FROM (
+    SELECT k, ts, v, lag(v) OVER (PARTITION BY k ORDER BY ts) AS lag_v FROM t1
+) w
+JOIN t2 ON w.ts = t2.ts;
+
+let left_state_table_id
+SELECT id FROM rw_catalog.rw_internal_table_info WHERE job_name = 'mv' AND name LIKE '%hashjoinleft%';
+
+let right_state_table_id
+SELECT id FROM rw_catalog.rw_internal_table_info WHERE job_name = 'mv' AND name LIKE '%hashjoinright%';
+
+# The join has not received any watermark yet.
+query I
+SELECT count(*) FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id IN (${left_state_table_id}, ${right_state_table_id});
+----
+0
+
+statement ok
+INSERT INTO t1 VALUES (1, 10, 1), (1, 12, 2), (2, 12, 3);
+
+statement ok
+INSERT INTO t2 VALUES (10, 100), (12, 200);
+
+query IIIII
+SELECT * FROM mv ORDER BY k, ts;
+----
+1 10 1 NULL 100
+1 12 2 1 200
+2 12 3 NULL 200
+
+# Both sides have delivered watermark 7 to the join, so both join state tables have a committed
+# watermark on the join key `ts` now.
+query I retry 30 backoff 1s
+SELECT count(DISTINCT table_id) FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id IN (${left_state_table_id}, ${right_state_table_id});
+----
+2
+
+let left_wm_before
+SELECT max(encode(watermark::bytea, 'hex')) FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${left_state_table_id};
+
+let right_wm_before
+SELECT max(encode(watermark::bytea, 'hex')) FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${right_state_table_id};
+
+# Advance the watermark of the over window side only. The join key watermark is the minimum of both
+# sides, so the committed watermarks stay unchanged.
+statement ok
+INSERT INTO t1 VALUES (1, 30, 4);
+
+query I
+SELECT count(*) FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id IN (${left_state_table_id}, ${right_state_table_id})
+  AND encode(watermark::bytea, 'hex') NOT IN ('${left_wm_before}', '${right_wm_before}');
+----
+0
+
+# Advance the watermark of `t2` as well, so that both sides deliver watermark 25 to the join and the
+# committed watermarks of both join state tables advance.
+statement ok
+INSERT INTO t2 VALUES (30, 300);
+
+query IIIII
+SELECT * FROM mv ORDER BY k, ts;
+----
+1 10 1 NULL 100
+1 12 2 1 200
+1 30 4 2 300
+2 12 3 NULL 200
+
+query I retry 30 backoff 1s
+SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${left_state_table_id} AND encode(watermark::bytea, 'hex') > '${left_wm_before}';
+----
+1
+
+query I retry 30 backoff 1s
+SELECT CASE WHEN count(*) > 0 THEN 1 ELSE 0 END FROM rw_catalog.rw_hummock_table_watermark
+WHERE table_id = ${right_state_table_id} AND encode(watermark::bytea, 'hex') > '${right_wm_before}';
+----
+1
+
+# Rows arriving afterwards are still computed and joined correctly.
+statement ok
+INSERT INTO t1 VALUES (1, 31, 5);
+
+statement ok
+INSERT INTO t2 VALUES (31, 310);
+
+query IIIII
+SELECT * FROM mv ORDER BY k, ts;
+----
+1 10 1 NULL 100
+1 12 2 1 200
+1 30 4 2 300
+1 31 5 4 310
+2 12 3 NULL 200
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP TABLE t1;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+SET streaming_parallelism = DEFAULT;

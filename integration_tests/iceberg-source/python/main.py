@@ -5,6 +5,8 @@ import configparser
 import psycopg2
 import time
 
+from rest_table_location import test_rest_table_location
+
 
 def read_config(filename):
     config = configparser.ConfigParser()
@@ -112,6 +114,12 @@ def run_case(case):
         print("Let risingwave to run")
         time.sleep(5)
         check_risingwave_iceberg_source(docker)
+        if case == "rest":
+            config = read_config(f"{docker.case_dir()}/config.ini")
+            rest_ip = docker.get_ip(f"{docker.case_name}-rest-1")
+            test_rest_table_location(
+                config["risingwave"], config["source"], f"http://{rest_ip}:8181"
+            )
 
 
 if __name__ == "__main__":

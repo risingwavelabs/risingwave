@@ -16,7 +16,6 @@ use std::future::Future;
 
 use futures::{Stream, pin_mut};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::OwnedRow;
@@ -176,15 +175,7 @@ fn with_additional_columns(
 impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, batch_size: u32) {
-        let primary_keys = self
-            .table
-            .pk_indices()
-            .iter()
-            .map(|idx| {
-                let f = &self.table.schema().fields[*idx];
-                f.name.clone()
-            })
-            .collect_vec();
+        let primary_keys = self.table.pk_names();
 
         // prepare rate limiter
         if args.rate_limit_rps == Some(0) {

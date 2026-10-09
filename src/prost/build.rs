@@ -740,6 +740,9 @@ for_all_wrapped_id_fields! (
             state_table_ids: TableId,
             table_id: JobId,
         }
+        WarmUpTableCacheRequest {
+            table_id: TableId,
+        }
         WorkerReschedule {
             worker_actor_diff: WorkerId,
         }
@@ -935,8 +938,6 @@ for_all_wrapped_id_fields! (
     }
     stream_service {
         BarrierCompleteResponse {
-            truncate_tables: TableId,
-            refresh_finished_tables: TableId,
             table_watermarks: TableId,
             vector_index_adds: TableId,
             worker_id: WorkerId,
@@ -973,6 +974,10 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
         }
+        BarrierCompleteResponse.RefreshFinishedActor {
+            reporter_actor_id: ActorId,
+            table_id: TableId,
+        }
         GetMinUncommittedObjectIdResponse {
             min_uncommitted_object_id: HummockRawObjectId,
         }
@@ -1003,6 +1008,9 @@ for_all_wrapped_id_fields! (
         }
         StreamingControlStreamResponse.ResetPartialGraphResponse {
             partial_graph_id: PartialGraphId,
+        }
+        WarmUpTableCacheRequest {
+            table_id: TableId,
         }
     }
     task_service {
@@ -1251,6 +1259,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.CdcKeyOrdering", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.ColumnDesc.generated_or_default_column",

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use futures::StreamExt;
 use itertools::Itertools;
@@ -31,7 +30,10 @@ use risingwave_connector::source::{
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{apply_rate_limit_to_source_reader_event, get_split_offset_col_idx};
+use super::{
+    apply_rate_limit_to_source_reader_event, get_infinite_backoff_strategy,
+    get_split_offset_col_idx,
+};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 
@@ -250,6 +252,8 @@ impl StreamReaderBuilder {
             unreachable!("Partition and offset columns must be set.");
         };
 
+        let mut backoff = get_infinite_backoff_strategy();
+
         'build_consume_loop: loop {
             let bootstrap_state = if latest_splits_info.is_empty() {
                 None
@@ -278,12 +282,13 @@ impl StreamReaderBuilder {
                 if is_initial_build {
                     return Err(StreamExecutorError::connector_error(e));
                 } else {
+                    let delay = backoff.next().unwrap();
                     tracing::error!(
                         error = %e.as_report(),
                         source_name = self.source_name,
                         source_id = %self.source_id,
                         actor_id = %self.actor_ctx.id,
-                        "build stream source reader error, retry in 1s"
+                        "build stream source reader error, retry in {delay:?}"
                     );
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         e.variant_name().to_owned(),
@@ -291,7 +296,7 @@ impl StreamReaderBuilder {
                         self.source_name.clone(),
                         self.actor_ctx.fragment_id.to_string(),
                     ]);
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    tokio::time::sleep(delay).await;
                     continue 'build_consume_loop;
                 }
             }
@@ -299,10 +304,14 @@ impl StreamReaderBuilder {
             let (stream, _) = build_stream_result.unwrap();
             let stream = apply_rate_limit_to_source_reader_event(stream, self.rate_limit).boxed();
             let mut is_error = false;
+            let mut has_progress = false;
             #[for_await]
             'consume: for event in stream {
                 let event = match event {
-                    Ok(event) => event,
+                    Ok(event) => {
+                        has_progress = true;
+                        event
+                    }
                     Err(e) => {
                         tracing::error!(
                             error = %e.as_report(),
@@ -359,8 +368,12 @@ impl StreamReaderBuilder {
                 ));
                 break 'build_consume_loop;
             }
-            tracing::info!("stream source reader error, retry in 1s");
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            if has_progress {
+                backoff = get_infinite_backoff_strategy();
+            }
+            let delay = backoff.next().unwrap();
+            tracing::info!("stream source reader error, retry in {delay:?}");
+            tokio::time::sleep(delay).await;
         }
     }
 }

@@ -45,8 +45,8 @@ use super::{
     StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
-    BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, ReplaceStreamJobPlan, SinceEpochInfo, SnapshotBackfillInfo,
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    IndependentStreamingJobType, ReplaceStreamJobPlan, SinceEpochInfo, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -61,6 +61,7 @@ use crate::model::{
     FragmentReplaceUpstream, StreamActor, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate, SubscriptionId,
 };
+use crate::stream::cdc::is_parallelized_backfill_enabled_cdc_scan_fragment;
 use crate::stream::{ReplaceJobSplitPlan, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -666,7 +667,36 @@ impl GlobalStreamManager {
             refresh_interval_sec,
         };
 
-        let job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+        let create_job_type = if matches!(
+            &streaming_job,
+            StreamingJob::Sink(sink, _)
+                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(
+                    &sink.properties
+                )
+        ) {
+            if refresh_interval_sec.is_some() || since_timestamp_epoch.is_some() {
+                bail!("Iceberg V3 sinks do not support batch refresh or since_timestamp");
+            }
+            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
+                anyhow::anyhow!("Iceberg V3 sinks must be planned with snapshot backfill")
+            })?;
+            for fragment in info.stream_job_fragments.inner.fragments.values() {
+                let mask = fragment.fragment_type_mask;
+                if mask.contains(FragmentTypeFlag::Source)
+                    || mask.contains(FragmentTypeFlag::SourceScan)
+                {
+                    bail!(
+                        "Iceberg V3 sinks must not contain source or source-backfill fragments; \
+                         fragment {} has source/source-backfill nodes",
+                        fragment.fragment_id
+                    );
+                }
+            }
+            CreateStreamingJobType::Independent {
+                snapshot_backfill_info,
+                kind: IndependentStreamingJobType::IcebergV3,
+            }
+        } else if let Some(refresh_interval_sec) = refresh_interval_sec {
             if since_timestamp_epoch.is_some() {
                 bail!("since_timestamp should not be specified when no snapshot backfill");
             }
@@ -694,21 +724,25 @@ impl GlobalStreamManager {
                 refresh_interval_sec,
                 "sending Command::CreateBatchRefreshStreamingJob"
             );
-            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+            CreateStreamingJobType::Independent {
                 snapshot_backfill_info,
-                refresh_interval_sec,
-            })
+                kind: IndependentStreamingJobType::BatchRefresh {
+                    refresh_interval_sec,
+                },
+            }
         } else if let Some(snapshot_backfill_info) = snapshot_backfill_info {
             tracing::debug!(
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
             );
-            CreateStreamingJobType::SnapshotBackfill {
+            CreateStreamingJobType::Independent {
                 snapshot_backfill_info,
-                since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
-                    provided_since_epoch,
-                    resolved: None,
-                }),
+                kind: IndependentStreamingJobType::SnapshotBackfill {
+                    since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
+                        provided_since_epoch,
+                        resolved: None,
+                    }),
+                },
             }
         } else {
             if since_timestamp_epoch.is_some() {
@@ -724,7 +758,7 @@ impl GlobalStreamManager {
 
         let command = Command::CreateStreamingJob {
             info,
-            job_type,
+            job_type: create_job_type,
             cross_db_snapshot_backfill_info,
         };
 
@@ -1022,11 +1056,16 @@ impl GlobalStreamManager {
 
         let cdc_fragment_id = {
             let inner = self.metadata_manager.catalog_controller.inner.read().await;
-            let fragments: Vec<(risingwave_meta_model::FragmentId, i32)> = FragmentModel::find()
+            let fragments: Vec<(
+                risingwave_meta_model::FragmentId,
+                i32,
+                risingwave_meta_model::StreamNode,
+            )> = FragmentModel::find()
                 .select_only()
                 .columns([
                     fragment::Column::FragmentId,
                     fragment::Column::FragmentTypeMask,
+                    fragment::Column::StreamNode,
                 ])
                 .filter(fragment::Column::JobId.eq(job_id))
                 .into_tuple()
@@ -1035,10 +1074,13 @@ impl GlobalStreamManager {
 
             let cdc_fragments = fragments
                 .into_iter()
-                .filter_map(|(fragment_id, mask)| {
-                    FragmentTypeMask::from(mask)
-                        .contains(FragmentTypeFlag::StreamCdcScan)
-                        .then_some(fragment_id)
+                .filter_map(|(fragment_id, mask, stream_node)| {
+                    is_parallelized_backfill_enabled_cdc_scan_fragment(
+                        FragmentTypeMask::from(mask),
+                        &stream_node.to_protobuf(),
+                    )
+                    .is_some()
+                    .then_some(fragment_id)
                 })
                 .collect_vec();
 

@@ -47,7 +47,10 @@ impl StreamCdcTableScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            StreamKind::Retract,
+            // Debezium table scans emit upsert semantics: updates contain only the new value,
+            // and deletes may contain only primary-key columns. Declaring this correctly lets
+            // downstream materialization add conflict handling before stateful consumption.
+            StreamKind::Upsert,
             false,
             core.watermark_columns(),
             core.columns_monotonicity(),
@@ -70,7 +73,7 @@ impl StreamCdcTableScan {
     /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
     ///
     /// For parallelized cdc backfill:
-    /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
+    /// schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,

@@ -196,7 +196,6 @@ impl GlobalBarrierManager {
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
-        barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
@@ -214,7 +213,6 @@ impl GlobalBarrierManager {
             iceberg_compaction_manager,
             scale_controller,
             request_rx,
-            barrier_scheduler,
             refresh_manager,
         )
         .await;
