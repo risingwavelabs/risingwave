@@ -22,11 +22,11 @@ impl PinCache {
     /// an invalidated file. A registered object is readable only after publication.
     pub(crate) fn register_objects(
         &self,
-        objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
+        objects: impl IntoIterator<Item = HummockSstableObjectId>,
     ) {
         // Release the shard between objects so a large update does not hold up lookups.
-        for (id, size) in objects {
-            self.shard(id).write().register_object(id, size);
+        for id in objects {
+            self.shard(id).write().register_object(id);
         }
     }
 

@@ -30,15 +30,7 @@ use crate::opts::StorageOpts;
 #[tokio::test]
 #[should_panic(expected = "pin cache shard count must be greater than zero")]
 async fn test_zero_shards_rejected() {
-    PinCache::new(in_memory_object_store(), 0, 2, [])
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-#[should_panic(expected = "pin cache recovery concurrency must be greater than zero")]
-async fn test_zero_recovery_concurrency_is_rejected() {
-    PinCache::new(in_memory_object_store(), 1, 0, [])
+    PinCache::new(in_memory_object_store(), 0, [])
         .await
         .unwrap();
 }
@@ -47,7 +39,7 @@ async fn test_zero_recovery_concurrency_is_rejected() {
 async fn test_read_and_unregister_lifecycle() {
     let remote_store = in_memory_object_store();
     let (_dir, local_store) = local_object_store().await;
-    let pin_cache = PinCache::new(local_store, 1, 2, []).await.unwrap();
+    let pin_cache = PinCache::new(local_store, 1, []).await.unwrap();
     let object_id = HummockSstableObjectId::from(1001);
     let remote_path = "remote.sst";
     let original = Bytes::from_static(b"complete sst");
@@ -56,12 +48,13 @@ async fn test_read_and_unregister_lifecycle() {
         .await
         .unwrap();
 
-    pin_cache.register_objects([(object_id, original.len() as u64)]);
+    pin_cache.register_objects([object_id]);
     download_and_publish_for_test(
         &pin_cache,
         remote_store.clone(),
         remote_path.to_owned(),
         object_id,
+        original.len() as u64,
     )
     .await
     .unwrap();
@@ -77,12 +70,13 @@ async fn test_read_and_unregister_lifecycle() {
     assert!(pin_cache.get(object_id).is_none());
     assert_eq!(old_read.read(..).await.unwrap(), original);
 
-    pin_cache.register_objects([(object_id, original.len() as u64)]);
+    pin_cache.register_objects([object_id]);
     download_and_publish_for_test(
         &pin_cache,
         remote_store.clone(),
         remote_path.to_owned(),
         object_id,
+        original.len() as u64,
     )
     .await
     .unwrap();
@@ -100,11 +94,11 @@ async fn test_read_and_unregister_lifecycle() {
 #[tokio::test]
 async fn test_failed_download_can_be_retried() {
     let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, 2, [])
+    let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
         .await
         .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.register_objects([(object_id, 8)]);
+    pin_cache.register_objects([object_id]);
     let token = pin_cache.prepare_refill(object_id).unwrap();
     assert!(
         pin_cache
@@ -133,16 +127,16 @@ async fn test_failed_download_can_be_retried() {
 #[tokio::test]
 async fn test_completed_invalid_fs_upload_cannot_publish() {
     let (_dir, local_store) = local_object_store().await;
-    let pin_cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
+    let pin_cache = PinCache::new(local_store.clone(), 1, []).await.unwrap();
     let remote_store = in_memory_object_store();
     remote_store
         .upload("sst", Bytes::from_static(b"half"))
         .await
         .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.register_objects([(object_id, 8)]);
+    pin_cache.register_objects([object_id]);
     assert!(
-        download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id)
+        download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id, 8)
             .await
             .is_err()
     );
@@ -152,16 +146,16 @@ async fn test_completed_invalid_fs_upload_cannot_publish() {
 #[tokio::test]
 async fn test_read_failure_only_invalidates_selected_publication() {
     let remote_store = in_memory_object_store();
-    let pin_cache = PinCache::new(in_memory_object_store(), 1, 2, [])
+    let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
         .await
         .unwrap();
     let object_id = HummockSstableObjectId::from(1001);
-    pin_cache.register_objects([(object_id, 8)]);
+    pin_cache.register_objects([object_id]);
     remote_store
         .upload("sst", Bytes::from_static(b"complete"))
         .await
         .unwrap();
-    download_and_publish_for_test(&pin_cache, remote_store.clone(), "sst".into(), object_id)
+    download_and_publish_for_test(&pin_cache, remote_store.clone(), "sst".into(), object_id, 8)
         .await
         .unwrap();
     let old = pin_cache.get(object_id).unwrap();
@@ -169,7 +163,7 @@ async fn test_read_failure_only_invalidates_selected_publication() {
     assert!(old.read(..).await.is_err());
     assert!(pin_cache.get(object_id).is_none());
 
-    download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id)
+    download_and_publish_for_test(&pin_cache, remote_store, "sst".into(), object_id, 8)
         .await
         .unwrap();
     // This handle stays on the old path and must not remove the new route.
@@ -184,23 +178,17 @@ async fn test_read_failure_only_invalidates_selected_publication() {
 async fn test_other_shard_does_not_block_object_operations() {
     let mut config = RwConfig::default();
     config.storage.cache.pin_cache_shard_num = 3;
-    config.storage.cache.pin_cache_recover_concurrency = 2;
     let system_params = system_params_for_test().into();
     let memory = extract_storage_memory_config(&config);
     let opts = StorageOpts::from((&config, &system_params, &memory));
-    let cache = PinCache::new(
-        in_memory_object_store(),
-        opts.pin_cache_shard_num,
-        opts.pin_cache_recover_concurrency,
-        [],
-    )
-    .await
-    .unwrap();
+    let cache = PinCache::new(in_memory_object_store(), opts.pin_cache_shard_num, [])
+        .await
+        .unwrap();
     assert_eq!(cache.shards.len(), 3);
 
     let blocked = object_in_shard(0, 3);
     let available = object_in_shard(2, 3);
-    cache.register_objects([(blocked, 8), (available, 8)]);
+    cache.register_objects([blocked, available]);
     let remote = in_memory_object_store();
     remote
         .upload("sst", Bytes::from_static(b"complete"))
@@ -229,7 +217,7 @@ async fn test_other_shard_does_not_block_object_operations() {
             assert!(cache.get(available).is_none());
             cache.unregister_objects([available]);
             assert!(!cache.is_registered(available));
-            cache.register_objects([(available, 8)]);
+            cache.register_objects([available]);
             assert!(cache.prepare_refill(available).is_some());
             tx.send(()).unwrap();
         });
@@ -242,11 +230,11 @@ async fn test_other_shard_does_not_block_object_operations() {
 
 #[tokio::test]
 async fn test_object_membership_across_shards() {
-    let cache = PinCache::new(in_memory_object_store(), 3, 2, [])
+    let cache = PinCache::new(in_memory_object_store(), 3, [])
         .await
         .unwrap();
     let objects = [object_in_shard(0, 3), object_in_shard(2, 3)];
-    cache.register_objects(objects.into_iter().map(|id| (id, 8)));
+    cache.register_objects(objects);
     let tokens = objects.map(|id| cache.prepare_refill(id).unwrap());
     let remote = in_memory_object_store();
     remote
@@ -254,7 +242,7 @@ async fn test_object_membership_across_shards() {
         .await
         .unwrap();
     for id in objects {
-        download_and_publish_for_test(&cache, remote.clone(), "sst".into(), id)
+        download_and_publish_for_test(&cache, remote.clone(), "sst".into(), id, 8)
             .await
             .unwrap();
     }
@@ -262,7 +250,7 @@ async fn test_object_membership_across_shards() {
     // Repeated registration, including duplicates in one batch, preserves the publication
     // and refill identity.
     let first = cache.get(objects[0]).unwrap();
-    cache.register_objects([(objects[0], 8), (objects[0], 8)]);
+    cache.register_objects([objects[0], objects[0]]);
     assert_eq!(cache.prepare_refill(objects[0]), Some(tokens[0]));
     assert!(Arc::ptr_eq(
         &first.file,
@@ -281,7 +269,7 @@ async fn test_object_membership_across_shards() {
     assert_eq!(cache.prepare_refill(objects[1]), Some(tokens[1]));
     assert!(cache.get(objects[1]).is_some());
 
-    cache.register_objects([(objects[0], 8)]);
+    cache.register_objects([objects[0]]);
     assert_ne!(cache.prepare_refill(objects[0]), Some(tokens[0]));
     assert!(cache.get(objects[0]).is_none());
     cache.unregister_objects(objects);
@@ -304,14 +292,14 @@ fn test_parse_finalized_object_path() {
 #[tokio::test]
 async fn test_recovery_rejects_inventory_initialization_error() {
     let local_store = in_memory_object_store();
-    let mut cache = PinCache::new(local_store.clone(), 1, 2, []).await.unwrap();
+    let mut cache = PinCache::new(local_store.clone(), 1, []).await.unwrap();
     local_store
         .upload("1001-42.sst", Bytes::from_static(b"complete"))
         .await
         .unwrap();
     let error = Arc::get_mut(&mut cache)
         .unwrap()
-        .recover_local_files(Err(ObjectError::internal("injected inventory failure")), 2)
+        .recover_local_files(Err(ObjectError::internal("injected inventory failure")))
         .await
         .unwrap_err();
     assert!(error.to_string().contains("injected inventory failure"));
@@ -332,9 +320,7 @@ async fn test_recovery_returns_ready_routes_across_shards() {
             .await
             .unwrap();
     }
-    let cache = PinCache::new(local.clone(), 3, 2, objects.into_iter().map(|id| (id, 8)))
-        .await
-        .unwrap();
+    let cache = PinCache::new(local.clone(), 3, objects).await.unwrap();
 
     for id in objects {
         assert!(cache.is_registered(id));
