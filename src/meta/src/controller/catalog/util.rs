@@ -641,13 +641,17 @@ impl CatalogController {
         type JobKey = (DatabaseId, SchemaId, String);
 
         // Index table is already included if we still assign the same name for index table as the index.
+        // Tables and sinks also match in `Initial` status, which covers jobs that are still waiting
+        // for a creating streaming job permit.
         let creating_tables: Vec<(ObjectId, String, DatabaseId, SchemaId)> = Table::find()
             .select_only()
             .columns([table::Column::TableId, table::Column::Name])
             .columns([object::Column::DatabaseId, object::Column::SchemaId])
             .join(JoinType::InnerJoin, table::Relation::Object1.def())
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+            .filter(
+                streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating]),
+            )
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -657,7 +661,9 @@ impl CatalogController {
             .columns([object::Column::DatabaseId, object::Column::SchemaId])
             .join(JoinType::InnerJoin, sink::Relation::Object.def())
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+            .filter(
+                streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating]),
+            )
             .into_tuple()
             .all(&inner.db)
             .await?;

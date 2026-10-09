@@ -1226,17 +1226,6 @@ impl DdlController {
                 "starting streaming job",
             );
         }
-        // TODO: acquire permits for recovered background DDLs.
-        let permit = self
-            .creating_streaming_job_permits
-            .semaphore
-            .clone()
-            .acquire_owned()
-            .instrument_await("acquire_creating_streaming_job_permit")
-            .await
-            .unwrap();
-        let reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-
         let name = streaming_job.name();
         let definition = streaming_job.definition();
         let database_id = streaming_job.database_id();
@@ -1244,25 +1233,61 @@ impl DdlController {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
         };
-        let create_result = match self
-            .generate_streaming_job(
-                ctx,
-                streaming_job,
-                fragment_graph,
-                resource_type.clone(),
-                streaming_job_model,
-                replace_sink_info,
-                since_timestamp_epoch,
-            )
-            .await
-        {
-            Ok((stream_job_fragments, ctx)) => {
-                self.stream_manager
-                    .create_streaming_job(stream_job_fragments, ctx, permit, reschedule_job_lock)
-                    .await
-            }
-            Err(err) => Err((err, false, None)),
+
+        // Register the job before waiting for a permit, so that `KILL`, `CANCEL JOBS` and
+        // session cancellation can cancel a job that is still queued behind other creating jobs.
+        let mut cancel_rx = self.stream_manager.register_creating_job(job_id).await;
+        // TODO: acquire permits for recovered background DDLs.
+        let permit = tokio::select! {
+            biased;
+
+            notifier = &mut cancel_rx => Err(notifier.expect("sender should not be dropped")),
+            permit = self
+                .creating_streaming_job_permits
+                .semaphore
+                .clone()
+                .acquire_owned()
+                .instrument_await("acquire_creating_streaming_job_permit") => Ok(permit.unwrap()),
         };
+
+        let create_result = match permit {
+            // Nothing has been scheduled yet, so aborting the initial catalog is enough.
+            Err(notifier) => {
+                tracing::debug!(id = %job_id, "cancelling streaming job waiting for a permit");
+                Err((MetaError::cancelled("create"), false, Some(notifier)))
+            }
+            Ok(permit) => {
+                let reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+                match self
+                    .generate_streaming_job(
+                        ctx,
+                        streaming_job,
+                        fragment_graph,
+                        resource_type.clone(),
+                        streaming_job_model,
+                        replace_sink_info,
+                        since_timestamp_epoch,
+                    )
+                    .await
+                {
+                    Ok((stream_job_fragments, ctx)) => {
+                        self.stream_manager
+                            .create_streaming_job(
+                                stream_job_fragments,
+                                ctx,
+                                permit,
+                                cancel_rx,
+                                reschedule_job_lock,
+                            )
+                            .await
+                    }
+                    Err(err) => Err((err, false, None)),
+                }
+            }
+        };
+        // The stream manager unregisters jobs it has started. This covers jobs that failed or were
+        // cancelled before that.
+        self.stream_manager.unregister_creating_job(job_id).await;
 
         match create_result {
             Ok(version) => Ok(version),
