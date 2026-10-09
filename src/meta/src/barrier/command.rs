@@ -68,6 +68,7 @@ use crate::model::{
     FragmentReplaceUpstream, StreamActor, StreamActorWithDispatchers, StreamJobActorsToCreate,
     StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
+use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
     RefreshCycleActors, ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState,
@@ -1151,6 +1152,7 @@ impl Command {
     pub(super) fn replace_stream_job_to_mutation(
         ReplaceStreamJobPlan {
             old_fragments,
+            new_fragments,
             auto_refresh_schema_sinks,
             ..
         }: &ReplaceStreamJobPlan,
@@ -1160,8 +1162,15 @@ impl Command {
     ) -> MetaResult<Mutation> {
         {
             {
-                let actor_cdc_table_snapshot_splits = database_info
-                    .assign_cdc_backfill_splits(old_fragments.stream_job_id)?
+                let actor_cdc_table_snapshot_splits =
+                    match parallel_cdc_table_backfill_fragment(new_fragments.fragments()) {
+                        Some((fragment, _)) => database_info
+                            .assign_cdc_backfill_splits_on_replace(
+                                old_fragments.stream_job_id,
+                                fragment.fragment_id,
+                            )?,
+                        None => None,
+                    }
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
                 let old_fragments = old_fragments.fragments.keys().copied();
                 let auto_refresh_sink_fragment_ids = auto_refresh_schema_sinks

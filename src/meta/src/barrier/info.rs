@@ -622,6 +622,21 @@ impl InflightDatabaseInfo {
         }
     }
 
+    /// Assigns the CDC table snapshot splits of a job being replaced to the actors of
+    /// `cdc_scan_fragment_id`, the CDC scan fragment of its new plan. The replacement drops the
+    /// old fragment's actors, so the tracker must move to the new fragment first.
+    pub(super) fn assign_cdc_backfill_splits_on_replace(
+        &mut self,
+        job_id: JobId,
+        cdc_scan_fragment_id: FragmentId,
+    ) -> MetaResult<Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>> {
+        let job = self.jobs.get_mut(&job_id).expect("should exist");
+        if let Some(tracker) = &mut job.cdc_table_backfill_tracker {
+            tracker.set_cdc_scan_fragment_id(cdc_scan_fragment_id);
+        }
+        self.assign_cdc_backfill_splits(job_id)
+    }
+
     pub(super) fn apply_collected_command(
         &mut self,
         command: &PostCollectCommand,
@@ -1449,5 +1464,81 @@ impl InflightDatabaseInfo {
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_connector::source::CdcTableSnapshotSplitRaw;
+    use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
+
+    use super::*;
+    use crate::manager::MetaSrvEnv;
+
+    fn cdc_scan_fragment(fragment_id: FragmentId, actor_ids: &[ActorId]) -> InflightFragmentInfo {
+        let mut fragment_type_mask = FragmentTypeMask::empty();
+        fragment_type_mask.add(FragmentTypeFlag::StreamCdcScan);
+        InflightFragmentInfo {
+            fragment_id,
+            distribution_type: DistributionType::Hash,
+            fragment_type_mask,
+            vnode_count: actor_ids.len(),
+            nodes: PbStreamNode::default(),
+            actors: actor_ids
+                .iter()
+                .enumerate()
+                .map(|(vnode, &actor_id)| {
+                    (
+                        actor_id,
+                        InflightActorInfo {
+                            worker_id: 1.into(),
+                            vnode_bitmap: Some(Bitmap::from_indices(actor_ids.len(), [vnode])),
+                            splits: vec![],
+                        },
+                    )
+                })
+                .collect(),
+            state_table_ids: HashSet::new(),
+        }
+    }
+
+    /// Replacing a CDC table (e.g. by an auto schema change) creates a new CDC scan fragment and
+    /// drops the old one along with its actors, so the snapshot splits must go to the new actors.
+    #[tokio::test]
+    async fn test_replace_assigns_cdc_backfill_splits_to_new_fragment() {
+        let env = MetaSrvEnv::for_test().await;
+        let mut info = InflightDatabaseInfo::empty(1.into(), env.shared_actor_infos().clone());
+        let job_id: JobId = 1.into();
+        let (old_fragment_id, new_fragment_id): (FragmentId, FragmentId) = (1.into(), 2.into());
+        let splits = (0..4)
+            .map(|split_id| CdcTableSnapshotSplitRaw {
+                split_id,
+                left_bound_inclusive: vec![],
+                right_bound_exclusive: vec![],
+            })
+            .collect();
+        info.pre_apply_new_job(
+            job_id,
+            Some(CdcTableBackfillTracker::new(old_fragment_id, splits)),
+        );
+        info.pre_apply_new_fragments([
+            (
+                old_fragment_id,
+                job_id,
+                cdc_scan_fragment(old_fragment_id, &[1.into(), 2.into()]),
+            ),
+            (
+                new_fragment_id,
+                job_id,
+                cdc_scan_fragment(new_fragment_id, &[3.into(), 4.into()]),
+            ),
+        ]);
+
+        let assignment = info
+            .assign_cdc_backfill_splits_on_replace(job_id, new_fragment_id)
+            .unwrap()
+            .unwrap();
+        let assigned_actors: HashSet<ActorId> = assignment.keys().copied().collect();
+        assert_eq!(assigned_actors, HashSet::from([3.into(), 4.into()]));
     }
 }
