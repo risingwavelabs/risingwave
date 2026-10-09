@@ -283,7 +283,7 @@ impl StreamChunk {
         }
 
         let mut table = Table::new();
-        table.load_preset(DataChunk::PRETTY_TABLE_PRESET);
+        table.load_style(DataChunk::PRETTY_TABLE_STYLE);
 
         if let Some(schema) = schema {
             assert_eq!(self.dimension(), schema.len());

@@ -54,13 +54,13 @@ pub struct BackfillState {
 }
 
 impl BackfillState {
+    /// Whether any vnode has started backfilling, i.e. whether any upstream row may be forwarded.
+    /// After a reschedule, an actor may hold finished vnodes and vnodes that have not started, with
+    /// none in progress.
     pub(crate) fn has_progress(&self) -> bool {
-        self.inner.values().any(|p| {
-            matches!(
-                p.current_state(),
-                &BackfillProgressPerVnode::InProgress { .. }
-            )
-        })
+        self.inner
+            .values()
+            .any(|p| !matches!(p.current_state(), &BackfillProgressPerVnode::NotStarted))
     }
 
     pub(crate) fn get_current_state(

@@ -121,9 +121,10 @@ impl Rule<Logical> for IndexSelectionRule {
                     min_cost = index_cost;
                     final_plan = index_scan.into();
                 }
-            } else {
+            } else if let Some((index_lookup, lookup_cost)) =
+                self.gen_index_lookup(logical_scan, index)
+            {
                 // non-covering index selection
-                let (index_lookup, lookup_cost) = self.gen_index_lookup(logical_scan, index);
                 if lookup_cost.le(&min_cost) {
                     min_cost = lookup_cost;
                     final_plan = index_lookup;
@@ -202,11 +203,15 @@ impl ExprRewriter for IndexPredicateRewriter<'_> {
 }
 
 impl IndexSelectionRule {
+    /// Returns `None` if the index does not cover the primary key of the primary table, in which
+    /// case it cannot be used to look up the primary table.
     fn gen_index_lookup(
         &self,
         logical_scan: &LogicalScan,
         index: &TableIndex,
-    ) -> (PlanRef, IndexCost) {
+    ) -> Option<(PlanRef, IndexCost)> {
+        let primary_table_pk_ref = index.primary_table_pk_ref_to_index_table()?;
+
         // 1. logical_scan ->  logical_join
         //                      /        \
         //                index_scan   primary_table_scan
@@ -233,8 +238,7 @@ impl IndexSelectionRule {
         );
         let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
-        let conjunctions = index
-            .primary_table_pk_ref_to_index_table()
+        let conjunctions = primary_table_pk_ref
             .iter()
             .zip_eq_fast(index.primary_table.pk.iter())
             .map(|(x, y)| {
@@ -291,7 +295,7 @@ impl IndexSelectionRule {
             &mut ColumnPruningContext::new(join_ref.clone()),
         );
 
-        (lookup_join, lookup_cost)
+        Some((lookup_join, lookup_cost))
     }
 
     /// Index Merge Selection
@@ -631,10 +635,12 @@ impl IndexSelectionRule {
             return None;
         }
 
+        // The index access must output the primary key of the primary table for the lookup.
+        let primary_table_pk_ref = index.primary_table_pk_ref_to_index_table()?;
+
         Some(
             generic::TableScan::new(
-                index
-                    .primary_table_pk_ref_to_index_table()
+                primary_table_pk_ref
                     .iter()
                     .map(|x| x.column_index)
                     .collect_vec(),
@@ -835,7 +841,9 @@ impl<'a> TableScanIoEstimator<'a> {
             }
         }
 
-        let index_cost = match_item_vec
+        // The product of an empty iterator is 1: a table without any order column holds at most
+        // one row, so scanning it is as cheap as a primary lookup.
+        let index_cost: usize = match_item_vec
             .iter()
             .enumerate()
             .take(INDEX_MAX_LEN)
@@ -846,8 +854,7 @@ impl<'a> TableScanIoEstimator<'a> {
                 MatchItem::RangeOneSideBound => INDEX_COST_MATRIX[3][i],
                 MatchItem::All => INDEX_COST_MATRIX[4][i],
             })
-            .reduce(|x, y| x * y)
-            .unwrap();
+            .product();
 
         // If `index_cost` equals 1, it is a primary lookup
         let primary_lookup = index_cost == 1;

@@ -3103,7 +3103,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+        validate_sink_props(&sink, &props, &props.keys().cloned().collect_vec())?;
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
             .map_err(|e| SinkError::Config(anyhow!(e)))?
@@ -3173,7 +3173,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+        validate_sink_props(&sink, &props, &props.keys().cloned().collect_vec())?;
 
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
@@ -3592,37 +3592,7 @@ impl CatalogController {
             for (sink, _obj) in sinks_with_objs {
                 let sink_id = sink.sink_id;
 
-                // Validate that sink props can be altered
-                match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-                    Some(connector) => {
-                        let connector_type = connector.to_lowercase();
-                        check_sink_allow_alter_on_fly_fields(&connector_type, &prop_keys)
-                            .map_err(|e| SinkError::Config(anyhow!(e)))?;
-
-                        match_sink_name_str!(
-                            connector_type.as_str(),
-                            SinkType,
-                            {
-                                let mut new_sink_props = sink.properties.0.clone();
-                                new_sink_props.extend(alter_props.clone());
-                                SinkType::validate_alter_config_change(
-                                    &new_sink_props,
-                                    &alter_props,
-                                )
-                            },
-                            |sink: &str| Err(SinkError::Config(anyhow!(
-                                "unsupported sink type {}",
-                                sink
-                            )))
-                        )?
-                    }
-                    None => {
-                        return Err(SinkError::Config(anyhow!(
-                            "connector not specified when alter sink"
-                        ))
-                        .into());
-                    }
-                };
+                validate_sink_props(&sink, &alter_props, &prop_keys)?;
 
                 let mut new_sink_props = sink.properties.0.clone();
                 new_sink_props.extend(alter_props.clone());
@@ -3921,32 +3891,39 @@ impl CatalogController {
     }
 }
 
-fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> MetaResult<()> {
-    // Validate that props can be altered
-    match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-        Some(connector) => {
-            let connector_type = connector.to_lowercase();
-            let field_names: Vec<String> = props.keys().cloned().collect();
-            check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-
-            match_sink_name_str!(
-                connector_type.as_str(),
-                SinkType,
-                {
-                    let mut new_props = sink.properties.0.clone();
-                    new_props.extend(props.clone());
-                    SinkType::validate_alter_config_change(&new_props, props)
-                },
-                |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
-            )?
-        }
-        None => {
-            return Err(
-                SinkError::Config(anyhow!("connector not specified when alter sink")).into(),
-            );
-        }
+/// Validates altering `alter_props` of a sink. `altered_field_names` are all the keys being
+/// altered, including secret-backed ones that are not part of `alter_props`.
+fn validate_sink_props(
+    sink: &sink::Model,
+    alter_props: &BTreeMap<String, String>,
+    altered_field_names: &[String],
+) -> MetaResult<()> {
+    let Some(connector) = sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) else {
+        return Err(SinkError::Config(anyhow!("connector not specified when alter sink")).into());
     };
+    let connector_type = connector.to_lowercase();
+    check_sink_allow_alter_on_fly_fields(&connector_type, altered_field_names)
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+    // Validate against the config the sink actually runs with: properties stored as secrets
+    // live in `secret_ref` rather than `properties`, and some of them are required fields.
+    let mut new_props = LocalSecretManager::global()
+        .fill_secrets(
+            sink.properties.0.clone(),
+            sink.secret_ref
+                .as_ref()
+                .map(|secret_ref| secret_ref.to_protobuf())
+                .unwrap_or_default(),
+        )
+        .map_err(MetaError::from)?;
+    new_props.extend(alter_props.clone());
+
+    match_sink_name_str!(
+        connector_type.as_str(),
+        SinkType,
+        SinkType::validate_alter_config_change(&new_props, alter_props),
+        |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+    )?;
     Ok(())
 }
 
