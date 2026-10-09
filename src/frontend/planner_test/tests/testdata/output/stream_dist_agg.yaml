@@ -60,20 +60,20 @@
       └─BatchScan { table: s, columns: [s.v], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum(s.v)] }
-      └─StreamSimpleAgg { aggs: [sum(s.v), count] }
+    └─StreamProject { exprs: [Case((count(s.v) = 0:Int64), null:Int64, sum(s.v)) as $expr1] }
+      └─StreamSimpleAgg { aggs: [sum(s.v), count(s.v), count] }
         └─StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s.t._row_id, s.o], pk: [o, t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [sum(s.v)] }
-        └── StreamSimpleAgg { aggs: [sum(s.v), count] } { tables: [ SimpleAggState: 0 ] }
+    └── StreamProject { exprs: [Case((count(s.v) = 0:Int64), null:Int64, sum(s.v)) as $expr1] }
+        └── StreamSimpleAgg { aggs: [sum(s.v), count(s.v), count] } { tables: [ SimpleAggState: 0 ] }
             └── StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s.t._row_id, s.o], pk: [o, t._row_id], dist: Single }
                 ├── tables: [ StreamScan: 1 ]
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ sum(s_v), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum(s_v), count(s_v), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
@@ -282,27 +282,32 @@
         └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum(sum(t.v))] }
-      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v)), count] }
+    └─StreamProject { exprs: [Case((sum0(count(t.v)) = 0:Int64), null:Int64, sum(sum(t.v))) as $expr1] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v)), sum0(count(t.v)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum(t.v)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum(t.v), count(t.v)] }
             └─StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [sum(sum(t.v))] }
-        └── StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v)), count] }
+    └── StreamProject { exprs: [Case((sum0(count(t.v)) = 0:Int64), null:Int64, sum(sum(t.v))) as $expr1] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v)), sum0(count(t.v)), count] }
             ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamStatelessSimpleAgg { aggs: [sum(t.v)] }
+    StreamStatelessSimpleAgg { aggs: [sum(t.v), count(t.v)] }
     └── StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         ├── tables: [ StreamScan: 1 ]
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ sum(sum(t_v)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0
+    ├── columns: [ sum(sum(t_v)), sum0(count(t_v)), count, _rw_timestamp ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
@@ -1041,20 +1046,20 @@
           └─BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum(tk.v), tk.k] }
-      └─StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count] }
+    └─StreamProject { exprs: [Case((count(tk.v) = 0:Int64), null:Int64, sum(tk.v)) as $expr1, tk.k] }
+      └─StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count(tk.v), count] }
         └─StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [tk.k, tk.t._row_id], pk: [k, t._row_id], dist: UpstreamHashShard(tk.k) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [sum(tk.v), tk.k] }
-        └── StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count] } { tables: [ HashAggState: 0 ] }
+    └── StreamProject { exprs: [Case((count(tk.v) = 0:Int64), null:Int64, sum(tk.v)) as $expr1, tk.k] }
+        └── StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count(tk.v), count] } { tables: [ HashAggState: 0 ] }
             └── StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [tk.k, tk.t._row_id], pk: [k, t._row_id], dist: UpstreamHashShard(tk.k) }
                 ├── tables: [ StreamScan: 1 ]
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ tk_k, sum(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ tk_k, sum(tk_v), count(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
@@ -1078,20 +1083,20 @@
         └─BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |-
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum(tk.v), tk.k] }
-      └─StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count] }
+    └─StreamProject { exprs: [Case((count(tk.v) = 0:Int64), null:Int64, sum(tk.v)) as $expr1, tk.k] }
+      └─StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count(tk.v), count] }
         └─StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [tk.k, tk.t._row_id], pk: [k, t._row_id], dist: UpstreamHashShard(tk.k) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [sum(tk.v), tk.k] }
-        └── StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count] } { tables: [ HashAggState: 0 ] }
+    └── StreamProject { exprs: [Case((count(tk.v) = 0:Int64), null:Int64, sum(tk.v)) as $expr1, tk.k] }
+        └── StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count(tk.v), count] } { tables: [ HashAggState: 0 ] }
             └── StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [tk.k, tk.t._row_id], pk: [k, t._row_id], dist: UpstreamHashShard(tk.k) }
                 ├── tables: [ StreamScan: 1 ]
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ tk_k, sum(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ tk_k, sum(tk_v), count(tk_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, k, t__row_id, _rw_timestamp ]
@@ -1116,15 +1121,16 @@
           └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [sum(s.v), s.k] }
-      └─StreamHashAgg { group_key: [s.k], aggs: [sum(s.v), count] }
+    └─StreamProject { exprs: [Case((count(s.v) = 0:Int64), null:Int64, sum(s.v)) as $expr1, s.k] }
+      └─StreamHashAgg { group_key: [s.k], aggs: [sum(s.v), count(s.v), count] }
         └─StreamExchange { dist: HashShard(s.k) }
           └─StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [s.t._row_id, s.o], pk: [o, t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [sum(s.v), s.k] }
-        └── StreamHashAgg { group_key: [s.k], aggs: [sum(s.v), count] } { tables: [ HashAggState: 0 ] }
+    └── StreamProject { exprs: [Case((count(s.v) = 0:Int64), null:Int64, sum(s.v)) as $expr1, s.k] }
+        └── StreamHashAgg { group_key: [s.k], aggs: [sum(s.v), count(s.v), count] }
+            ├── tables: [ HashAggState: 0 ]
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -1133,7 +1139,12 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ s_k, sum(s_v), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0
+    ├── columns: [ s_k, sum(s_v), count(s_v), count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, o, t__row_id, _rw_timestamp ]
