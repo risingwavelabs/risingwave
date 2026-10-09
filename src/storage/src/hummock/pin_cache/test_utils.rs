@@ -40,13 +40,13 @@ pub(in crate::hummock) async fn download_and_publish_for_test(
     remote_store: ObjectStoreRef,
     remote_path: String,
     object_id: HummockSstableObjectId,
+    object_size: u64,
 ) -> ObjectResult<()> {
     let token = pin_cache
         .prepare_refill(object_id)
         .expect("test object must be registered");
-    let size = pin_cache.shard(object_id).read().objects[&object_id].size();
     let download = pin_cache
-        .download(object_id, size, remote_store, remote_path)
+        .download(object_id, object_size, remote_store, remote_path)
         .await?;
     assert!(pin_cache.publish(token, download));
     Ok(())

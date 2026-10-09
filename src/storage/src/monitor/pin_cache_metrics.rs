@@ -43,13 +43,13 @@ impl PinCacheMetrics {
         .unwrap();
         let published_objects = register_int_gauge_with_registry!(
             "pin_cache_published_objects",
-            "Complete SST objects currently routed to the local Pin Cache",
+            "SST objects currently routed to the local Pin Cache",
             registry
         )
         .unwrap();
         let published_bytes = register_int_gauge_with_registry!(
             "pin_cache_published_bytes",
-            "Complete SST bytes currently routed to the local Pin Cache",
+            "Bytes in files currently routed to the local Pin Cache",
             registry
         )
         .unwrap();
