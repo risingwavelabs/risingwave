@@ -107,8 +107,37 @@ impl Planner {
         Ok(LogicalIcebergMetadataScan::new(core).into())
     }
 
+    /// Rejects time travel in a streaming job. A streaming job keeps following its upstream, so it
+    /// can't read a fixed snapshot, and its plan would silently read the latest data instead.
+    /// `FOR SYSTEM_TIME AS OF PROCTIME()` stays allowed: it marks the lookup side of a temporal join.
+    fn check_no_time_travel_in_stream(&self, as_of: Option<&AsOf>) -> Result<()> {
+        let is_stream = matches!(
+            self.plan_for(),
+            PlanFor::Stream | PlanFor::StreamIcebergEngineInternal
+        );
+        let is_time_travel = matches!(
+            as_of,
+            Some(
+                AsOf::ProcessTimeWithInterval(_)
+                    | AsOf::TimestampNum(_)
+                    | AsOf::TimestampString(_)
+                    | AsOf::VersionNum(_)
+                    | AsOf::VersionString(_)
+            )
+        );
+        if is_stream && is_time_travel {
+            return Err(ErrorCode::NotSupported(
+                "time travel in a streaming job".to_owned(),
+                "`FOR SYSTEM_TIME AS OF` and `FOR SYSTEM_VERSION AS OF` are only supported in batch queries. Remove the clause, or use `FOR SYSTEM_TIME AS OF PROCTIME()` for a temporal join.".to_owned(),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
+        self.check_no_time_travel_in_stream(as_of.as_ref())?;
         let scan = LogicalScan::from_base_table(base_table, self.ctx(), as_of.clone());
 
         match base_table.table_catalog.engine {
@@ -396,6 +425,7 @@ impl Planner {
             .into())
         } else {
             let as_of = source.as_of.clone();
+            self.check_no_time_travel_in_stream(as_of.as_ref())?;
             match as_of {
                 None
                 | Some(AsOf::VersionNum(_))
