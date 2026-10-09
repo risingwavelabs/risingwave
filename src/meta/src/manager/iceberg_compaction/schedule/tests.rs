@@ -1498,7 +1498,7 @@ async fn test_compaction_status_reports_failures_until_success() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: 1.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
         pk_index_result: None,
@@ -1531,7 +1531,7 @@ async fn test_compaction_status_reports_failures_until_success() {
     }
     manager.handle_report_task(IcebergReportTask {
         task_id: 3.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
