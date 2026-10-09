@@ -97,7 +97,6 @@ static SINK_ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
             PbConnectionType::Kafka,
             PbConnectionType::Iceberg,
             PbConnectionType::Elasticsearch,
-            PbConnectionType::Opensearch,
         }
     });
 

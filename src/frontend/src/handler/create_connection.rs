@@ -18,7 +18,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::connector_common::SCHEMA_REGISTRY_CONNECTION_TYPE;
 use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
-use risingwave_connector::sink::elasticsearch_opensearch::opensearch::OPENSEARCH_SINK;
 use risingwave_connector::source::enforce_secret_connection;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
@@ -79,7 +78,6 @@ fn resolve_create_connection_payload(
         ICEBERG_CONNECTOR => ConnectionType::Iceberg,
         SCHEMA_REGISTRY_CONNECTION_TYPE => ConnectionType::SchemaRegistry,
         ES_SINK => ConnectionType::Elasticsearch,
-        OPENSEARCH_SINK => ConnectionType::Opensearch,
         _ => {
             return Err(RwError::from(ProtocolError(format!(
                 "Connection type \"{connection_type}\" is not supported"

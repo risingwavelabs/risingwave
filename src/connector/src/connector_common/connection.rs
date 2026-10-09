@@ -40,9 +40,7 @@ use crate::connector_common::{
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
-use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::{
-    ElasticSearchOpenSearchConfig, OpenSearchConfig,
-};
+use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
 use crate::source::build_connection;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 
@@ -365,47 +363,4 @@ impl EnforceSecret for ElasticsearchConnection {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "elasticsearch.password",
     };
-}
-
-#[serde_as]
-#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct OpenSearchConnection {
-    #[serde(rename = "url")]
-    pub url: String,
-
-    #[serde(rename = "username")]
-    pub username: Option<String>,
-
-    #[serde(rename = "password")]
-    pub password: Option<String>,
-
-    #[serde(rename = "auth.method")]
-    pub auth_method: Option<String>,
-
-    #[serde(rename = "aws.sigv4.service_name")]
-    pub aws_sigv4_service_name: Option<String>,
-
-    #[serde(flatten)]
-    pub aws_auth_props: AwsAuthProps,
-}
-
-#[async_trait]
-impl Connection for OpenSearchConnection {
-    async fn validate_connection(&self) -> ConnectorResult<()> {
-        let config = OpenSearchConfig::from_connection(self);
-        config.validate_auth_config()?;
-        let client = config.build_client().await?;
-        client.ping().await?;
-        Ok(())
-    }
-}
-
-impl EnforceSecret for OpenSearchConnection {
-    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
-        for prop in prop_iter {
-            OpenSearchConfig::enforce_one(prop)?;
-        }
-        Ok(())
-    }
 }

@@ -37,7 +37,6 @@ use risingwave_common::types::{
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
-use risingwave_connector::sink::elasticsearch_opensearch::opensearch::OPENSEARCH_SINK;
 use risingwave_connector::sink::file_sink::fs::FS_SINK;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::{BATCH_POSIX_FS_CONNECTOR, KAFKA_CONNECTOR, POSIX_FS_CONNECTOR};
@@ -306,7 +305,6 @@ fn connection_type_to_connector(connection_type: &PbConnectionType) -> &str {
         PbConnectionType::Kafka => KAFKA_CONNECTOR,
         PbConnectionType::Iceberg => ICEBERG_CONNECTOR,
         PbConnectionType::Elasticsearch => ES_SINK,
-        PbConnectionType::Opensearch => OPENSEARCH_SINK,
         _ => unreachable!(),
     }
 }

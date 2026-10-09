@@ -31,8 +31,7 @@ pub use common::{
 mod connection;
 pub use connection::{
     ConfluentSchemaRegistryConnection, Connection, ElasticsearchConnection, IcebergConnection,
-    KafkaConnection, OpenSearchConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level,
-    validate_connection,
+    KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level, validate_connection,
 };
 pub use iceberg::compaction::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
 
