@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
@@ -51,7 +51,7 @@ use risingwave_pb::stream_plan::{
 use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::id::IdGeneratorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
-use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId};
+use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId, StreamJobFragments};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::{MetaError, MetaResult};
@@ -1107,6 +1107,47 @@ impl StreamFragmentGraph {
         }
 
         Ok(())
+    }
+
+    /// Match the internal tables of the new graph for `ALTER TABLE .. DROP CONNECTOR`: each new
+    /// internal table takes over the old one of the same kind. Returns the old ones left unmatched,
+    /// which belong to the dropped connector.
+    pub fn fit_internal_tables_for_drop_connector(
+        &mut self,
+        old_fragments: &StreamJobFragments,
+        old_internal_tables: Vec<Table>,
+    ) -> MetaResult<Vec<TableId>> {
+        let mut old_kinds = Vec::new();
+        for fragment in old_fragments.fragments.values() {
+            stream_graph_visitor::visit_stream_node_internal_tables(
+                &mut fragment.nodes.clone(),
+                |table, kind| old_kinds.push((kind.to_owned(), table.id)),
+            );
+        }
+        let mut new_kinds = Vec::new();
+        for (_, fragment) in self.fragments.iter().sorted_by_key(|(id, _)| **id) {
+            stream_graph_visitor::visit_internal_tables(
+                &mut fragment.inner.clone(),
+                |table, kind| new_kinds.push((kind.to_owned(), table.id)),
+            );
+        }
+        let (matches, unmatched) = match_internal_tables_by_kind(new_kinds, old_kinds)?;
+
+        let mut old_internal_tables: HashMap<_, _> =
+            old_internal_tables.into_iter().map(|t| (t.id, t)).collect();
+        for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_internal_tables(
+                &mut fragment.inner,
+                |table, _table_type_name| {
+                    // Like `fit_internal_tables_trivial`, this replaces the entire table.
+                    *table = old_internal_tables
+                        .remove(&matches[&table.id])
+                        .expect("internal table of the original job should have a catalog");
+                },
+            );
+        }
+
+        Ok(unmatched)
     }
 
     /// Fit the internal tables' `table_id`s according to the given mapping.
@@ -2261,6 +2302,29 @@ impl CompleteStreamFragmentGraph {
     }
 }
 
+/// Pairs new and old internal tables of the same kind in visit order. Returns the pairs from new to
+/// old, and the old tables left unmatched.
+fn match_internal_tables_by_kind(
+    new_tables: Vec<(String, TableId)>,
+    old_tables: Vec<(String, TableId)>,
+) -> MetaResult<(HashMap<TableId, TableId>, Vec<TableId>)> {
+    let mut old_by_kind: HashMap<String, VecDeque<TableId>> = HashMap::new();
+    for (kind, table_id) in old_tables {
+        old_by_kind.entry(kind).or_default().push_back(table_id);
+    }
+
+    let mut matches = HashMap::new();
+    for (kind, table_id) in new_tables {
+        let Some(old_table_id) = old_by_kind.get_mut(&kind).and_then(VecDeque::pop_front) else {
+            bail!("no internal table of {kind} in the original job to take over");
+        };
+        matches.insert(table_id, old_table_id);
+    }
+
+    let unmatched = old_by_kind.into_values().flatten().sorted().collect();
+    Ok((matches, unmatched))
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
@@ -2631,5 +2695,28 @@ mod tests {
             new_log_store_table.value_indices,
             (0..new_log_store_table.columns.len() as i32).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn test_match_internal_tables_by_kind() {
+        let table = |kind: &str, id: u32| (kind.to_owned(), TableId::new(id));
+
+        let (matches, unmatched) = match_internal_tables_by_kind(
+            vec![table("WatermarkFilter", 100)],
+            vec![table("Source", 1), table("WatermarkFilter", 2)],
+        )
+        .unwrap();
+        assert_eq!(
+            matches,
+            HashMap::from([(TableId::new(100), TableId::new(2))])
+        );
+        assert_eq!(unmatched, vec![TableId::new(1)]);
+
+        // No old table of the same kind to take over.
+        match_internal_tables_by_kind(
+            vec![table("WatermarkFilter", 100)],
+            vec![table("Source", 1)],
+        )
+        .unwrap_err();
     }
 }

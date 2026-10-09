@@ -2192,14 +2192,18 @@ impl DdlController {
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
         if let Some(to_remove_source_id) = drop_table_associated_source_id {
-            // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
-            debug_assert!(old_internal_table_ids.len() == 1);
+            let old_internal_tables = self
+                .metadata_manager
+                .get_table_catalog_by_ids(&old_internal_table_ids)
+                .await?;
+            let to_remove_state_table_ids = fragment_graph
+                .fit_internal_tables_for_drop_connector(&old_fragments, old_internal_tables)?;
 
             drop_table_connector_ctx = Some(DropTableConnectorContext {
                 // we do not remove the original table catalog as it's still needed for the streaming job
-                // just need to remove the ref to the state table
+                // just need to remove the refs to the state tables of the connector
                 to_change_streaming_job_id: id,
-                to_remove_state_table_id: old_internal_table_ids[0], // asserted before
+                to_remove_state_table_ids,
                 to_remove_source_id,
             });
         } else if stream_job.is_materialized_view() {

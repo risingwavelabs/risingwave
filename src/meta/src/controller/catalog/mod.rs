@@ -125,7 +125,7 @@ pub struct CatalogController {
 pub struct DropTableConnectorContext {
     // we only apply one drop connector action for one table each time, so no need to vector here
     pub(crate) to_change_streaming_job_id: JobId,
-    pub(crate) to_remove_state_table_id: TableId,
+    pub(crate) to_remove_state_table_ids: Vec<TableId>,
     pub(crate) to_remove_source_id: SourceId,
 }
 
