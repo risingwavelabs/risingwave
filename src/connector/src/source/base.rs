@@ -326,6 +326,13 @@ pub struct SourceEnumeratorInfo {
     pub source_id: SourceId,
 }
 
+/// Acknowledges the result of applying a CDC schema change.
+///
+/// The source parser waits on this before parsing the records that follow the change,
+/// so a failure must be reported rather than silently acknowledged.
+pub type SchemaChangeAck =
+    tokio::sync::oneshot::Sender<std::result::Result<(), crate::error::ConnectorError>>;
+
 #[derive(Clone, Debug)]
 pub struct SourceContext {
     pub actor_id: ActorId,
@@ -336,8 +343,7 @@ pub struct SourceContext {
     pub source_ctrl_opts: SourceCtrlOpts,
     pub connector_props: ConnectorProperties,
     // source parser put schema change event into this channel
-    pub schema_change_tx:
-        Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    pub schema_change_tx: Option<mpsc::Sender<(SchemaChangeEnvelope, SchemaChangeAck)>>,
     // callback function to report CDC auto schema change fail events
     pub on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
 }
@@ -351,9 +357,7 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
-        schema_change_channel: Option<
-            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
-        >,
+        schema_change_channel: Option<mpsc::Sender<(SchemaChangeEnvelope, SchemaChangeAck)>>,
     ) -> Self {
         Self::new_with_auto_schema_change_callback(
             actor_id,
@@ -376,9 +380,7 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
-        schema_change_channel: Option<
-            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
-        >,
+        schema_change_channel: Option<mpsc::Sender<(SchemaChangeEnvelope, SchemaChangeAck)>>,
         on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
     ) -> Self {
         Self {
