@@ -72,6 +72,9 @@ pub struct BoundUpdate {
     /// Expression used to evaluate the new values for the columns.
     pub exprs: Vec<ExprImpl>,
 
+    /// Checks evaluated against the new ordinary DML row.
+    pub constraint_checks: Vec<ExprImpl>,
+
     /// Mapping from the index of the column to be updated, to the index of the expression in `exprs`.
     ///
     /// By constructing two `Project` nodes with `exprs` and `projects`, we can get the new values.
@@ -95,6 +98,10 @@ impl RewriteExprsRecursive for BoundUpdate {
             .map(|expr| rewriter.rewrite_expr(expr))
             .collect::<Vec<_>>();
         self.exprs = new_exprs;
+        self.constraint_checks = std::mem::take(&mut self.constraint_checks)
+            .into_iter()
+            .map(|e| rewriter.rewrite_expr(e))
+            .collect();
 
         let new_returning_list = std::mem::take(&mut self.returning_list)
             .into_iter()
@@ -134,6 +141,7 @@ impl Binder {
 
         let table_catalog = &table.table_catalog;
         Self::check_for_dml(table_catalog, false)?;
+        let constraint_checks = Self::generated_column_constraint_checks(table_catalog, false)?;
         self.check_privilege(
             ObjectCheckItem::new(
                 table_catalog.owner,
@@ -283,6 +291,7 @@ impl Binder {
             selection,
             projects,
             exprs,
+            constraint_checks,
             returning_list,
             returning_schema: if returning {
                 Some(Schema { fields })

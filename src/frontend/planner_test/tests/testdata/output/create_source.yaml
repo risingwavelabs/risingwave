@@ -93,16 +93,17 @@
     ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
   explain_output: |
     StreamMaterialize { columns: [id, name], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
-    └─StreamUnion { all: true }
-      ├─StreamExchange { dist: HashShard(id) }
-      │ └─StreamFsFetch { columns: [id, name] }
-      │   └─StreamAppendOnlyDedup { dedup_cols: [filename] }
-      │     └─StreamExchange { dist: HashShard(filename) }
-      │       └─StreamSource { source: s3_streaming_t, columns: [filename, last_edit_time, file_size] }
-      ├─StreamExchange { dist: HashShard(id) }
-      │ └─StreamDml { columns: [id, name] }
-      │   └─StreamSource
-      └─StreamUpstreamSinkUnion
+    └─StreamFilter [upsert] { predicate: IsNotNull(id) }
+      └─StreamUnion { all: true }
+        ├─StreamExchange { dist: HashShard(id) }
+        │ └─StreamFsFetch { columns: [id, name] }
+        │   └─StreamAppendOnlyDedup { dedup_cols: [filename] }
+        │     └─StreamExchange { dist: HashShard(filename) }
+        │       └─StreamSource { source: s3_streaming_t, columns: [filename, last_edit_time, file_size] }
+        ├─StreamExchange { dist: HashShard(id) }
+        │ └─StreamDml { columns: [id, name] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
 - id: s3_full_reload_skips_file_list_dedup
   sql: |
     explain create table s3_full_reload_t (id int primary key, name varchar) with (
@@ -117,15 +118,16 @@
     ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
   explain_output: |
     StreamMaterialize { columns: [id, name], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
-    └─StreamUnion { all: true }
-      ├─StreamExchange { dist: HashShard(id) }
-      │ └─StreamFsFetch { columns: [id, name] }
-      │   └─StreamExchange { dist: HashShard(filename) }
-      │     └─StreamSource { source: s3_full_reload_t, columns: [filename, last_edit_time, file_size] }
-      ├─StreamExchange { dist: HashShard(id) }
-      │ └─StreamDml { columns: [id, name] }
-      │   └─StreamSource
-      └─StreamUpstreamSinkUnion
+    └─StreamFilter [upsert] { predicate: IsNotNull(id) }
+      └─StreamUnion { all: true }
+        ├─StreamExchange { dist: HashShard(id) }
+        │ └─StreamFsFetch { columns: [id, name] }
+        │   └─StreamExchange { dist: HashShard(filename) }
+        │     └─StreamSource { source: s3_full_reload_t, columns: [filename, last_edit_time, file_size] }
+        ├─StreamExchange { dist: HashShard(id) }
+        │ └─StreamDml { columns: [id, name] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
 - id: gcs_full_reload_skips_file_list_dedup
   sql: |
     explain create table gcs_full_reload_t (id int primary key, name varchar) with (
@@ -136,12 +138,13 @@
     ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
   explain_output: |
     StreamMaterialize { columns: [id, name], stream_key: [id], pk_columns: [id], pk_conflict: Overwrite }
-    └─StreamUnion { all: true }
-      ├─StreamExchange { dist: HashShard(id) }
-      │ └─StreamFsFetch { columns: [id, name] }
-      │   └─StreamExchange { dist: HashShard(filename) }
-      │     └─StreamSource { source: gcs_full_reload_t, columns: [filename, last_edit_time, file_size] }
-      ├─StreamExchange { dist: HashShard(id) }
-      │ └─StreamDml { columns: [id, name] }
-      │   └─StreamSource
-      └─StreamUpstreamSinkUnion
+    └─StreamFilter [upsert] { predicate: IsNotNull(id) }
+      └─StreamUnion { all: true }
+        ├─StreamExchange { dist: HashShard(id) }
+        │ └─StreamFsFetch { columns: [id, name] }
+        │   └─StreamExchange { dist: HashShard(filename) }
+        │     └─StreamSource { source: gcs_full_reload_t, columns: [filename, last_edit_time, file_size] }
+        ├─StreamExchange { dist: HashShard(id) }
+        │ └─StreamDml { columns: [id, name] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion

@@ -1107,6 +1107,9 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
 
     let (mut columns, pk_col_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+    if !is_create_source {
+        super::create_table::bind_table_pk_nullability(&mut columns, &pk_col_ids);
+    }
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;

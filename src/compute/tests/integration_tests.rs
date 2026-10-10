@@ -241,6 +241,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         false,
         0,
         false,
+        vec![],
     ));
 
     let value_indices = (0..column_descs.len()).collect_vec();

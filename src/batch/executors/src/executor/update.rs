@@ -51,6 +51,7 @@ pub struct UpdateExecutor {
     session_id: u32,
     upsert: bool,
     wait_for_persistence: bool,
+    constraint_checks: Vec<BoxedExpression>,
 }
 
 impl UpdateExecutor {
@@ -68,6 +69,7 @@ impl UpdateExecutor {
         session_id: u32,
         upsert: bool,
         wait_for_persistence: bool,
+        constraint_checks: Vec<BoxedExpression>,
     ) -> Self {
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
@@ -94,6 +96,7 @@ impl UpdateExecutor {
             session_id,
             upsert,
             wait_for_persistence,
+            constraint_checks,
         }
     }
 }
@@ -175,6 +178,10 @@ impl UpdateExecutor {
 
                 DataChunk::new(columns, input.visibility().clone())
             };
+
+            for check in &self.constraint_checks {
+                check.eval(&updated_data_chunk).await?;
+            }
 
             if self.returning {
                 yield updated_data_chunk.clone();
@@ -269,6 +276,11 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             update_node.session_id,
             update_node.upsert,
             update_node.wait_for_persistence,
+            update_node
+                .constraint_checks
+                .iter()
+                .map(build_from_prost)
+                .try_collect()?,
         )))
     }
 }
@@ -396,6 +408,87 @@ mod tests {
 
         handle.await.unwrap();
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod constraint_tests {
+    use std::sync::Arc;
+
+    use futures::StreamExt;
+    use risingwave_common::catalog::{
+        ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID, schema_test_utils,
+    };
+    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::transaction::transaction_message::TxnMsg;
+    use risingwave_dml::dml_manager::DmlManager;
+    use risingwave_expr::expr::build_from_pretty;
+
+    use super::*;
+    use crate::executor::test_utils::MockExecutor;
+
+    #[tokio::test]
+    async fn test_generated_constraint_before_update_and_returning() -> Result<()> {
+        for (input, valid) in [("i i\n 1 7\n 2 . D", true), ("i i\n 1 .", false)] {
+            let dml_manager = Arc::new(DmlManager::for_test());
+            let mut child = MockExecutor::new(schema_test_utils::ii());
+            child.add(DataChunk::from_pretty(input));
+            let table_id = TableId::new(0);
+            let columns = (0..2)
+                .map(|i| ColumnDesc::unnamed(ColumnId::new(i + 1), DataType::Int32))
+                .collect_vec();
+            let reader = dml_manager
+                .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &columns)
+                .unwrap();
+            let mut messages = reader.stream_reader().into_stream();
+            let read_task = tokio::spawn(async move {
+                let mut chunks = Vec::new();
+                while let Some(message) = messages.next().await {
+                    match message.unwrap() {
+                        TxnMsg::Data(_, chunk) => chunks.push(chunk),
+                        TxnMsg::End(..) => return (true, chunks),
+                        TxnMsg::Rollback(_) => return (false, chunks),
+                        TxnMsg::Begin(_) => {}
+                    }
+                }
+                panic!("transaction did not finish");
+            });
+            let executor = Box::new(UpdateExecutor::new(
+                table_id,
+                INITIAL_TABLE_VERSION_ID,
+                dml_manager,
+                Box::new(child),
+                vec![build_from_pretty("$0:int4"), build_from_pretty("10:int4")],
+                vec![build_from_pretty("$0:int4"), build_from_pretty("$1:int4")],
+                1024,
+                "UpdateExecutor".to_owned(),
+                true,
+                0,
+                false,
+                false,
+                vec![build_from_pretty(
+                    "(check_not_null:int4 $1:int4 g:varchar t:varchar)",
+                )],
+            ));
+            let mut output = executor.execute();
+            let first = output.next().await.unwrap();
+            if valid {
+                assert_eq!(first?, DataChunk::from_pretty(input));
+                assert!(output.next().await.is_none());
+            } else {
+                assert!(
+                    first
+                        .unwrap_err()
+                        .to_string()
+                        .contains("not-null constraint")
+                );
+            }
+            drop(output);
+            let (committed, chunks) = read_task.await.unwrap();
+            assert_eq!(committed, valid);
+            assert_eq!(chunks.len(), usize::from(valid));
+        }
         Ok(())
     }
 }

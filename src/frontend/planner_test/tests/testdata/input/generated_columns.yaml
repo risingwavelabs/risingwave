@@ -29,3 +29,57 @@
     explain create table t (v int, w int as v+1, watermark for w as w) append only
   expected_outputs:
   - explain_output
+- name: generated not null is filtered after evaluation
+  sql: |
+    explain create table t (a int, g int not null as a + 1);
+  expected_outputs:
+  - explain_output
+- name: generated primary key implies not null
+  sql: |
+    explain create table t (a int, g int primary key as a + 1);
+  expected_outputs:
+  - explain_output
+- name: composite key includes generated column
+  sql: |
+    explain create table t (a int, b int, g int as b + 1, primary key(a, g));
+  expected_outputs:
+  - explain_output
+- name: nullable constant null before ordinary not null
+  sql: |
+    explain create table t (a int, g int as null::int, b int not null);
+  expected_outputs:
+  - explain_output
+- name: nullable constant before ordinary not null
+  sql: |
+    explain create table t (a int, g int as 1, b int not null);
+  expected_outputs:
+  - explain_output
+- name: impure generated not null is rejected
+  sql: |
+    explain create table t (g timestamptz not null as proctime());
+  expected_outputs:
+  - planner_error
+- name: generated insert checks assembled row
+  sql: |
+    create table t (g int not null as b, a int, b int default 7);
+    insert into t (a) select 1;
+  expected_outputs:
+  - batch_plan
+- name: generated insert checks reordered row
+  sql: |
+    create table t (g int not null as b, a int, b int);
+    insert into t (b,a) select 7,1;
+  expected_outputs:
+  - batch_plan
+- name: generated update checks new row
+  sql: |
+    create table t (g int not null as b, a int, b int);
+    update t set b = a;
+  expected_outputs:
+  - batch_plan
+- name: generated assignment cast is checked
+  sql: |
+    create table t (g bigint not null as a, a int);
+    insert into t (a) select 1;
+  expected_outputs:
+  - batch_plan

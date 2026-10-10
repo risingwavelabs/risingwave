@@ -51,6 +51,7 @@ pub struct InsertExecutor {
     txn_id: TxnId,
     session_id: u32,
     wait_for_persistence: bool,
+    constraint_checks: Vec<BoxedExpression>,
 }
 
 impl InsertExecutor {
@@ -68,6 +69,7 @@ impl InsertExecutor {
         returning: bool,
         session_id: u32,
         wait_for_persistence: bool,
+        constraint_checks: Vec<BoxedExpression>,
     ) -> Self {
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -86,6 +88,7 @@ impl InsertExecutor {
             txn_id,
             session_id,
             wait_for_persistence,
+            constraint_checks,
         }
     }
 }
@@ -123,7 +126,7 @@ impl InsertExecutor {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
-            let dummy_chunk = DataChunk::new_dummy(cap);
+            let dummy_chunk = DataChunk::new(vec![], vis.clone());
 
             let mut ordered_columns = self
                 .column_indices
@@ -147,6 +150,10 @@ impl InsertExecutor {
 
             // Construct the returning chunk, without the `row_id` column.
             let returning_chunk = DataChunk::new(columns.clone(), vis.clone());
+
+            for check in &self.constraint_checks {
+                check.eval(&returning_chunk).await?;
+            }
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
@@ -256,6 +263,11 @@ impl BoxedExecutorBuilder for InsertExecutor {
             insert_node.returning,
             insert_node.session_id,
             insert_node.wait_for_persistence,
+            insert_node
+                .constraint_checks
+                .iter()
+                .map(build_from_prost)
+                .try_collect()?,
         )))
     }
 }
@@ -282,6 +294,110 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
     use crate::*;
+
+    #[derive(Debug)]
+    struct CountedDefault {
+        expr: BoxedExpression,
+        evaluations: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl risingwave_expr::expr::ExpressionInfo for CountedDefault {
+        fn return_type(&self) -> DataType {
+            self.expr.return_type()
+        }
+    }
+
+    impl risingwave_expr::expr::AsyncExpression for CountedDefault {
+        async fn eval(
+            &self,
+            input: &DataChunk,
+        ) -> risingwave_expr::Result<risingwave_common::array::ArrayRef> {
+            self.evaluations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.expr.eval(input).await
+        }
+
+        async fn eval_row(
+            &self,
+            input: &risingwave_common::row::OwnedRow,
+        ) -> risingwave_expr::Result<risingwave_common::types::Datum> {
+            self.expr.eval_row(input).await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_generated_constraint_after_defaults_and_reordering() -> Result<()> {
+        use risingwave_expr::expr::build_from_pretty;
+
+        for (default, valid) in [("7:int4", true), ("null:int4", false)] {
+            let dml_manager = Arc::new(DmlManager::for_test());
+            let mut child = MockExecutor::new(schema_test_utils::ii());
+            // The invisible row must not cause a constraint error.
+            child.add(DataChunk::from_pretty("i i\n 3 1\n . . D"));
+            let table_id = TableId::new(0);
+            let columns = (0..3)
+                .map(|i| ColumnDesc::unnamed(ColumnId::new(i + 1), DataType::Int32))
+                .collect_vec();
+            let reader = dml_manager
+                .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &columns)
+                .unwrap();
+            let mut messages = reader.stream_reader().into_stream();
+            let read_task = tokio::spawn(async move {
+                let mut chunks = Vec::new();
+                while let Some(message) = messages.next().await {
+                    match message.unwrap() {
+                        TxnMsg::Data(_, chunk) => chunks.push(chunk),
+                        TxnMsg::End(..) => return (true, chunks),
+                        TxnMsg::Rollback(_) => return (false, chunks),
+                        TxnMsg::Begin(_) => {}
+                    }
+                }
+                panic!("transaction did not finish");
+            });
+            let evaluations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let default_expr = BoxedExpression::Async(Arc::new(CountedDefault {
+                expr: build_from_pretty(default),
+                evaluations: evaluations.clone(),
+            }));
+            let executor = Box::new(InsertExecutor::new(
+                table_id,
+                INITIAL_TABLE_VERSION_ID,
+                dml_manager,
+                Box::new(child),
+                1024,
+                "InsertExecutor".to_owned(),
+                vec![2, 0],
+                vec![(1, default_expr)],
+                None,
+                true,
+                0,
+                false,
+                vec![build_from_pretty(
+                    "(check_not_null:int4 $1:int4 g:varchar t:varchar)",
+                )],
+            ));
+            let mut output = executor.execute();
+            let first = output.next().await.unwrap();
+            if valid {
+                let chunk = first?;
+                assert_eq!(chunk, DataChunk::from_pretty("i i i\n 1 7 3"));
+                assert!(output.next().await.is_none());
+            } else {
+                assert!(
+                    first
+                        .unwrap_err()
+                        .to_string()
+                        .contains("not-null constraint")
+                );
+            }
+            drop(output);
+            let (committed, chunks) = read_task.await.unwrap();
+            assert_eq!(committed, valid);
+            assert_eq!(chunks.len(), usize::from(valid));
+            assert_eq!(evaluations.load(std::sync::atomic::Ordering::Relaxed), 1);
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
@@ -351,6 +467,7 @@ mod tests {
             false,
             0,
             false,
+            vec![],
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
@@ -446,6 +563,7 @@ mod tests {
             false,
             0,
             true,
+            vec![],
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();

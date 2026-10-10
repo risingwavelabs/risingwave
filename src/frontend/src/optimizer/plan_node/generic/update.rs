@@ -37,6 +37,8 @@ pub struct Update<PlanRef: Eq + Hash> {
     pub input: PlanRef,
     pub old_exprs: Vec<ExprImpl>,
     pub new_exprs: Vec<ExprImpl>,
+    /// Checks refer to the new ordinary row produced by `new_exprs`.
+    pub constraint_checks: Vec<ExprImpl>,
     pub returning: bool,
 }
 
@@ -77,6 +79,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Update<PlanRef> {
 }
 
 impl<PlanRef: Eq + Hash> Update<PlanRef> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: PlanRef,
         table_name: String,
@@ -84,6 +87,7 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
         table_version_id: TableVersionId,
         old_exprs: Vec<ExprImpl>,
         new_exprs: Vec<ExprImpl>,
+        constraint_checks: Vec<ExprImpl>,
         returning: bool,
     ) -> Self {
         Self {
@@ -93,18 +97,23 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
             input,
             old_exprs,
             new_exprs,
+            constraint_checks,
             returning,
         }
     }
 
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
-        for exprs in [&mut self.old_exprs, &mut self.new_exprs] {
+        for exprs in [
+            &mut self.old_exprs,
+            &mut self.new_exprs,
+            &mut self.constraint_checks,
+        ] {
             *exprs = exprs.iter().map(|e| r.rewrite_expr(e.clone())).collect();
         }
     }
 
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        for exprs in [&self.old_exprs, &self.new_exprs] {
+        for exprs in [&self.old_exprs, &self.new_exprs, &self.constraint_checks] {
             exprs.iter().for_each(|e| v.visit_expr(e));
         }
     }
@@ -115,6 +124,9 @@ impl<PlanRef: Eq + Hash> DistillUnit for Update<PlanRef> {
         let mut vec = Vec::with_capacity(if self.returning { 3 } else { 2 });
         vec.push(("table", Pretty::from(self.table_name.clone())));
         vec.push(("exprs", Pretty::debug(&self.new_exprs)));
+        if !self.constraint_checks.is_empty() {
+            vec.push(("constraint_checks", Pretty::debug(&self.constraint_checks)));
+        }
         if self.returning {
             vec.push(("returning", Pretty::display(&true)));
         }

@@ -236,6 +236,18 @@ fn check_generated_column_constraints(
         .into());
     }
 
+    if expr.is_impure()
+        && column_catalogs
+            .iter()
+            .any(|c| c.column_id() == column_id && !c.nullable())
+    {
+        return Err(ErrorCode::BindError(format!(
+            "Generated column \"{}\" with an impure expression cannot have a NOT NULL constraint.",
+            column_name
+        ))
+        .into());
+    }
+
     Ok(())
 }
 
@@ -456,6 +468,16 @@ pub fn bind_pk_and_row_id_on_relation(
     Ok((columns, pk_column_ids, row_id_index))
 }
 
+/// Primary keys imply NOT NULL for table columns. The internal row ID is populated
+/// later by the stream and must retain its nullable DML placeholder.
+pub(super) fn bind_table_pk_nullability(columns: &mut [ColumnCatalog], pk_ids: &[ColumnId]) {
+    for column in columns {
+        if pk_ids.contains(&column.column_id()) && !column.is_row_id_column() {
+            column.column_desc.nullable = false;
+        }
+    }
+}
+
 /// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
 /// stream source.
 #[allow(clippy::too_many_arguments)]
@@ -490,15 +512,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
-    } else if column_defs.iter().any(|col| {
-        col.options
-            .iter()
-            .any(|def| matches!(def.option, ColumnOption::NotNull))
-    }) {
-        // if non-cdc source
-        notice_to_user(
-            "The table contains columns with NOT NULL constraints. Any rows from upstream violating the constraints will be ignored silently.",
-        );
     }
 
     let db_name: &str = &session.database();
@@ -534,6 +547,12 @@ pub(crate) async fn gen_create_table_plan_with_source(
         refresh_mode,
     )
     .await?;
+
+    if source.columns.iter().any(|c| !c.nullable()) {
+        notice_to_user(
+            "The table contains NOT NULL constraints (including primary keys). Any rows from upstream violating the constraints will be ignored silently.",
+        );
+    }
 
     let context = OptimizerContext::new(handler_args, explain_options);
 
@@ -598,6 +617,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+    bind_table_pk_nullability(&mut columns, &pk_column_ids);
 
     let watermark_descs = bind_source_watermark(
         context.session_ctx(),
@@ -866,6 +886,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let (mut columns, pk_column_ids, _row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+    bind_table_pk_nullability(&mut columns, &pk_column_ids);
 
     let watermark_descs = bind_source_watermark(
         context.session_ctx(),
@@ -2580,6 +2601,29 @@ mod tests {
                 .contains("only NULL column option is supported for webhook tables"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn test_table_pk_nullability_preserves_row_id_and_sources() {
+        let columns = vec![
+            ColumnCatalog::visible(ColumnDesc::named("a", ColumnId::new(1), DataType::Int32)),
+            ColumnCatalog::visible(ColumnDesc::named("b", ColumnId::new(2), DataType::Int32)),
+        ];
+        let (mut source_columns, pk_ids, _) = bind_pk_and_row_id_on_relation(
+            columns.clone(),
+            vec!["a".to_owned(), "b".to_owned()],
+            true,
+        )
+        .unwrap();
+        assert!(source_columns.iter().all(|c| c.nullable()));
+        bind_table_pk_nullability(&mut source_columns, &pk_ids);
+        assert!(source_columns.iter().all(|c| !c.nullable()));
+
+        let (mut columns, pk_ids, row_id) =
+            bind_pk_and_row_id_on_relation(columns, vec![], true).unwrap();
+        bind_table_pk_nullability(&mut columns, &pk_ids);
+        assert!(columns[row_id.unwrap()].nullable());
+        assert!(columns.iter().all(|c| c.nullable()));
     }
 
     #[test]

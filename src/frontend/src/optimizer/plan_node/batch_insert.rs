@@ -24,7 +24,7 @@ use super::{
     generic,
 };
 use crate::error::Result;
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch, utils};
 use crate::optimizer::plan_visitor::DistributedDmlVisitor;
@@ -120,6 +120,12 @@ impl ToBatchPb for BatchInsert {
             returning: self.core.returning,
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
             wait_for_persistence,
+            constraint_checks: self
+                .core
+                .constraint_checks
+                .iter()
+                .map(|e| e.to_expr_proto())
+                .collect(),
         })
     }
 }
@@ -132,6 +138,36 @@ impl ToLocalBatch for BatchInsert {
     }
 }
 
-impl ExprRewritable<Batch> for BatchInsert {}
+impl ExprRewritable<Batch> for BatchInsert {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
 
-impl ExprVisitable for BatchInsert {}
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.default_columns = core
+            .default_columns
+            .into_iter()
+            .map(|(i, e)| (i, r.rewrite_expr(e)))
+            .collect();
+        core.constraint_checks = core
+            .constraint_checks
+            .into_iter()
+            .map(|e| r.rewrite_expr(e))
+            .collect();
+        Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for BatchInsert {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core
+            .default_columns
+            .iter()
+            .for_each(|(_, e)| v.visit_expr(e));
+        self.core
+            .constraint_checks
+            .iter()
+            .for_each(|e| v.visit_expr(e));
+    }
+}

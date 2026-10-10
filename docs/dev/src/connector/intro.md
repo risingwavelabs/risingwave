@@ -228,6 +228,18 @@ Tips for debugging:
 - Use `risedev show-risedev-env` to see the environment variables available for `risedev slt`, after you starting the
   cluster with `risedev d`.
 
+## Table nullability constraints
+
+Table primary keys imply `NOT NULL`, including generated primary keys. The shared streaming
+plan checks constraints after generated-column evaluation for connector and `CREATE SINK INTO`
+inputs, discarding rows with null constrained values. SQL `INSERT` and `UPDATE` instead return
+constraint errors. Generated columns with impure expressions cannot have `NOT NULL` or primary-key
+constraints; nullable impure generated columns remain supported.
+
+These streaming checks apply to newly created or rebuilt plans. Upgrading does not migrate
+catalog nullability, replace existing persisted streaming jobs, or remove previously stored invalid
+rows. Recreate existing tables to receive the corrected streaming plan and catalog metadata.
+
 ## Adding a new connector to the development framework
 
 Refer to [#16449](https://github.com/risingwavelabs/risingwave/pull/16449) ( `user-managed` only MySQL),

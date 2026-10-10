@@ -64,3 +64,104 @@
           │   └─StreamDml { columns: [v, _row_id] }
           │     └─StreamSource
           └─StreamUpstreamSinkUnion
+- name: generated not null is filtered after evaluation
+  sql: |
+    explain create table t (a int, g int not null as a + 1);
+  explain_output: |
+    StreamMaterialize { columns: [a, g, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamFilter [upsert] { predicate: IsNotNull($expr1) }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamUnion { all: true }
+          ├─StreamExchange { dist: HashShard(_row_id) }
+          │ └─StreamProject { exprs: [a, (a + 1:Int32) as $expr1, _row_id] }
+          │   └─StreamDml { columns: [a, _row_id] }
+          │     └─StreamSource
+          └─StreamUpstreamSinkUnion
+- name: generated primary key implies not null
+  sql: |
+    explain create table t (a int, g int primary key as a + 1);
+  explain_output: |
+    StreamMaterialize { columns: [a, g], stream_key: [g], pk_columns: [g], pk_conflict: Overwrite }
+    └─StreamFilter [upsert] { predicate: IsNotNull($expr1) }
+      └─StreamUnion { all: true }
+        ├─StreamExchange { dist: HashShard($expr1) }
+        │ └─StreamProject { exprs: [a, (a + 1:Int32) as $expr1] }
+        │   └─StreamDml { columns: [a] }
+        │     └─StreamSource
+        └─StreamUpstreamSinkUnion
+- name: composite key includes generated column
+  sql: |
+    explain create table t (a int, b int, g int as b + 1, primary key(a, g));
+  explain_output: |
+    StreamMaterialize { columns: [a, b, g], stream_key: [a, g], pk_columns: [a, g], pk_conflict: Overwrite }
+    └─StreamFilter [upsert] { predicate: IsNotNull(a) AND IsNotNull($expr1) }
+      └─StreamUnion { all: true }
+        ├─StreamExchange { dist: HashShard(a, $expr1) }
+        │ └─StreamProject { exprs: [a, b, (b + 1:Int32) as $expr1] }
+        │   └─StreamDml { columns: [a, b] }
+        │     └─StreamSource
+        └─StreamUpstreamSinkUnion
+- name: nullable constant null before ordinary not null
+  sql: |
+    explain create table t (a int, g int as null::int, b int not null);
+  explain_output: |
+    StreamMaterialize { columns: [a, g, b, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamFilter [upsert] { predicate: IsNotNull(b) }
+      └─StreamRowIdGen { row_id_index: 3 }
+        └─StreamUnion { all: true }
+          ├─StreamExchange { dist: HashShard(_row_id) }
+          │ └─StreamProject { exprs: [a, null:Int32, b, _row_id] }
+          │   └─StreamDml { columns: [a, b, _row_id] }
+          │     └─StreamSource
+          └─StreamUpstreamSinkUnion
+- name: nullable constant before ordinary not null
+  sql: |
+    explain create table t (a int, g int as 1, b int not null);
+  explain_output: |
+    StreamMaterialize { columns: [a, g, b, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamFilter [upsert] { predicate: IsNotNull(b) }
+      └─StreamRowIdGen { row_id_index: 3 }
+        └─StreamUnion { all: true }
+          ├─StreamExchange { dist: HashShard(_row_id) }
+          │ └─StreamProject { exprs: [a, 1:Int32, b, _row_id] }
+          │   └─StreamDml { columns: [a, b, _row_id] }
+          │     └─StreamSource
+          └─StreamUpstreamSinkUnion
+- name: impure generated not null is rejected
+  sql: |
+    explain create table t (g timestamptz not null as proctime());
+  planner_error: 'Bind error: Generated column "g" with an impure expression cannot have a NOT NULL constraint.'
+- name: generated insert checks assembled row
+  sql: |
+    create table t (g int not null as b, a int, b int default 7);
+    insert into t (a) select 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t, constraint_checks: [CheckNotNull($1, 'g':Varchar, 't':Varchar)], mapping: [0:0], default: [1<-7:Int32] }
+      └─BatchValues { rows: [[1:Int32]] }
+- name: generated insert checks reordered row
+  sql: |
+    create table t (g int not null as b, a int, b int);
+    insert into t (b,a) select 7,1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t, constraint_checks: [CheckNotNull($1, 'g':Varchar, 't':Varchar)], mapping: [0:1, 1:0] }
+      └─BatchValues { rows: [[7:Int32, 1:Int32]] }
+- name: generated update checks new row
+  sql: |
+    create table t (g int not null as b, a int, b int);
+    update t set b = a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchUpdate { table: t, exprs: [$1, $5, $3], constraint_checks: [CheckNotNull($1, 'g':Varchar, 't':Varchar)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.g, t.a, t.b, t._row_id, t._rw_timestamp, t.a] }
+          └─BatchScan { table: t, columns: [t.g, t.a, t.b, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
+- name: generated assignment cast is checked
+  sql: |
+    create table t (g bigint not null as a, a int);
+    insert into t (a) select 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t, constraint_checks: [CheckNotNull($0::Int64, 'g':Varchar, 't':Varchar)], mapping: [0:0] }
+      └─BatchValues { rows: [[1:Int32]] }

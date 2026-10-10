@@ -218,6 +218,9 @@ message InsertNode {
 
   // If enabled, wait until this DML transaction is included in a successful checkpoint.
   bool wait_for_persistence = 8;
+
+  // Checks evaluated against the assembled ordinary row, after defaults and reordering.
+  repeated expr.ExprNode constraint_checks = 9;
 }
 
 message DeleteNode {
@@ -256,6 +259,9 @@ message UpdateNode {
 
   // If enabled, wait until this DML transaction is included in a successful checkpoint.
   bool wait_for_persistence = 8;
+
+  // Checks applied to the new ordinary row after evaluating assignments.
+  repeated expr.ExprNode constraint_checks = 9;
 }
 
 message ValuesNode {

@@ -103,6 +103,12 @@ impl ToBatchPb for BatchUpdate {
             upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
             wait_for_persistence,
+            constraint_checks: self
+                .core
+                .constraint_checks
+                .iter()
+                .map(|e| e.to_expr_proto())
+                .collect(),
         })
     }
 }

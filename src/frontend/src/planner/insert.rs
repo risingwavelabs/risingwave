@@ -38,6 +38,7 @@ impl Planner {
             insert.table_visible_columns,
             insert.column_indices,
             insert.default_columns,
+            insert.constraint_checks,
             insert.row_id_index,
             returning,
         ))

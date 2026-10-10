@@ -30,10 +30,10 @@ use super::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr, ExprImpl, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
-use crate::utils::ordinal;
+use crate::utils::{ColIndexMapping, IndexRewriter, ordinal};
 
 #[derive(Debug, Clone)]
 pub struct BoundInsert {
@@ -74,6 +74,9 @@ pub struct BoundInsert {
     /// details.
     pub cast_exprs: Vec<ExprImpl>,
 
+    /// Checks evaluated against the assembled row, after defaults and reordering.
+    pub constraint_checks: Vec<ExprImpl>,
+
     // used for the 'RETURNING" keyword to indicate the returning items and schema
     // if the list is empty and the schema is None, the output schema will be a INT64 as the
     // affected row cnt
@@ -85,6 +88,10 @@ pub struct BoundInsert {
 impl RewriteExprsRecursive for BoundInsert {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         self.source.rewrite_exprs_recursive(rewriter);
+        self.constraint_checks = std::mem::take(&mut self.constraint_checks)
+            .into_iter()
+            .map(|e| rewriter.rewrite_expr(e))
+            .collect();
 
         let new_cast_exprs = std::mem::take(&mut self.cast_exprs)
             .into_iter()
@@ -114,6 +121,7 @@ impl Binder {
         let bound_table = self.bind_table(schema_name.as_deref(), &table_name)?;
         let table_catalog = &bound_table.table_catalog;
         Self::check_for_dml(table_catalog, true)?;
+        let constraint_checks = Self::generated_column_constraint_checks(table_catalog, true)?;
         self.check_privilege(
             ObjectCheckItem::new(
                 table_catalog.owner,
@@ -136,7 +144,13 @@ impl Binder {
             .collect_vec();
         let (cols_to_insert_in_table, row_id_index) = table_catalog.columns_to_insert();
         let cols_to_insert_in_table = cols_to_insert_in_table
-            .map(|(column, _)| column.clone())
+            .map(|(column, is_pk)| {
+                let mut column = column.clone();
+                if is_pk {
+                    column.column_desc.nullable = false;
+                }
+                column
+            })
             .collect_vec();
         // Reorder default columns based on `cols_to_insert_in_table`.
         let default_columns_from_catalog = cols_to_insert_in_table
@@ -382,6 +396,7 @@ impl Binder {
             default_columns,
             source: bound_query,
             cast_exprs,
+            constraint_checks,
             returning_list,
             returning_schema: if is_returning {
                 Some(Schema { fields })
@@ -390,6 +405,65 @@ impl Binder {
             },
         };
         Ok(insert)
+    }
+
+    /// Generated expressions use catalog positions. Checks instead read the ordinary
+    /// columns assembled by the executor, whose schema differs for INSERT and UPDATE.
+    pub(super) fn generated_column_constraint_checks(
+        table: &crate::TableCatalog,
+        for_insert: bool,
+    ) -> Result<Vec<ExprImpl>> {
+        let mut mapping = vec![None; table.columns().len()];
+        let mut input_len = 0;
+        for (idx, column) in table.columns().iter().enumerate() {
+            let is_input = if for_insert {
+                !column.is_hidden() && !column.is_generated()
+            } else {
+                column.can_dml()
+            };
+            if is_input {
+                mapping[idx] = Some(input_len);
+                input_len += 1;
+            }
+        }
+        let pk_ids = table.pk_column_ids();
+        let mut checks = Vec::new();
+        for column in table.columns() {
+            if column.nullable() && !pk_ids.contains(&column.column_id()) {
+                continue;
+            }
+            let Some(expr) = column.generated_expr() else {
+                continue;
+            };
+            let expr = ExprImpl::from_expr_proto(expr)?;
+            if expr.is_impure()
+                || expr
+                    .collect_input_refs(mapping.len())
+                    .ones()
+                    .any(|i| mapping[i].is_none())
+            {
+                return Err(ErrorCode::BindError(format!(
+                    "DML cannot validate constrained generated column \"{}\": its expression must be pure and reference ordinary DML columns",
+                    column.name()
+                )).into());
+            }
+            let expr = IndexRewriter::new(ColIndexMapping::new(mapping.clone(), input_len))
+                .rewrite_expr(expr)
+                .cast_assign(column.data_type())?;
+            checks.push(
+                FunctionCall::new_unchecked(
+                    ExprType::CheckNotNull,
+                    vec![
+                        expr,
+                        ExprImpl::literal_varchar(column.name().to_owned()),
+                        ExprImpl::literal_varchar(table.name.clone()),
+                    ],
+                    column.data_type().clone(),
+                )
+                .into(),
+            );
+        }
+        Ok(checks)
     }
 
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
@@ -532,4 +606,72 @@ fn get_col_indices_to_insert(
     };
 
     Ok((col_indices_to_insert, default_column_indices))
+}
+
+#[cfg(test)]
+mod constraint_tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_pb::plan_common::GeneratedColumnDesc;
+
+    use super::*;
+    use crate::TableCatalog;
+
+    #[test]
+    fn test_generated_constraint_mapping_and_legacy_pk() {
+        let mut generated =
+            ColumnCatalog::visible(ColumnDesc::named("g", ColumnId::new(1), DataType::Int64));
+        generated.column_desc.generated_or_default_column = Some(
+            GeneratedOrDefaultColumn::GeneratedColumn(GeneratedColumnDesc {
+                expr: Some(InputRef::new(2, DataType::Int32).to_expr_proto()),
+            }),
+        );
+        let mut table = TableCatalog {
+            name: "t".to_owned(),
+            columns: vec![
+                generated,
+                ColumnCatalog::row_id_column(),
+                ColumnCatalog::visible(ColumnDesc::named("v", ColumnId::new(2), DataType::Int32)),
+            ],
+            // Simulate older metadata: the generated key still claims to be nullable.
+            pk: vec![ColumnOrder::new(0, OrderType::ascending())],
+            ..Default::default()
+        };
+        assert!(table.columns[0].nullable());
+        for (for_insert, expected_ref) in [(true, 0), (false, 1)] {
+            let checks = Binder::generated_column_constraint_checks(&table, for_insert).unwrap();
+            assert_eq!(checks.len(), 1);
+            assert_eq!(checks[0].return_type(), DataType::Int64);
+            assert_eq!(
+                checks[0].collect_input_refs(2).ones().collect_vec(),
+                vec![expected_ref]
+            );
+        }
+        // Nullable generated columns do not require checks.
+        table.pk.clear();
+        assert!(
+            Binder::generated_column_constraint_checks(&table, true)
+                .unwrap()
+                .is_empty()
+        );
+
+        table.columns[0].column_desc.nullable = false;
+        table.columns[0].column_desc.generated_or_default_column = Some(
+            GeneratedOrDefaultColumn::GeneratedColumn(GeneratedColumnDesc {
+                expr: Some(
+                    FunctionCall::new(ExprType::Proctime, vec![])
+                        .unwrap()
+                        .to_expr_proto(),
+                ),
+            }),
+        );
+        for for_insert in [true, false] {
+            let error = Binder::generated_column_constraint_checks(&table, for_insert).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("DML cannot validate constrained generated column")
+            );
+        }
+    }
 }
