@@ -1,0 +1,47 @@
+control substitution on
+
+statement ok
+set sink_decouple = false;
+
+statement ok
+CREATE TABLE sigv4_t (
+  id int primary key,
+  v varchar
+);
+
+statement ok
+CREATE SINK sigv4_s FROM sigv4_t WITH (
+  type = 'upsert',
+  connector = 'opensearch',
+  url = '${MOCK_OPENSEARCH_SIGV4_URL}',
+  index = 'rw_sigv4_e2e',
+  auth.method = 'aws_sigv4',
+  aws.region = 'us-east-1',
+  aws.credentials.access_key_id = 'AKIDEXAMPLE',
+  aws.credentials.secret_access_key = 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY',
+  aws.sigv4.service_name = 'es'
+);
+
+statement ok
+INSERT INTO sigv4_t VALUES (1, 'one'), (2, 'two'), (3, 'three');
+
+statement ok
+FLUSH;
+
+statement ok
+UPDATE sigv4_t SET v = 'two-updated' WHERE id = 2;
+
+statement ok
+DELETE FROM sigv4_t WHERE id = 3;
+
+statement ok
+FLUSH;
+
+system ok retry 10 backoff 1s
+curl -fsS "${MOCK_OPENSEARCH_SIGV4_URL}/__stats" | python3 -c "import json,sys; s=json.load(sys.stdin); docs=s['docs']['rw_sigv4_e2e']; assert set(docs) == {'1','2'}, docs; assert docs['2']['v'] == 'two-updated', docs; assert any(r['path'] == '/_bulk' and r['service'] == 'es' and r['region'] == 'us-east-1' for r in s['signed_requests']), s"
+
+statement ok
+DROP SINK sigv4_s;
+
+statement ok
+DROP TABLE sigv4_t;
