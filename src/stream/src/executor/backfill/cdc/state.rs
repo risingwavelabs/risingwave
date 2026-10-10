@@ -138,6 +138,20 @@ impl<S: StateStore> CdcBackfillState<S> {
         Ok(())
     }
 
+    /// Modify the backfill state and persist it at `new_epoch`.
+    pub async fn mutate_and_commit_state(
+        &mut self,
+        current_pk_pos: Option<OwnedRow>,
+        last_cdc_offset: Option<CdcOffset>,
+        row_count: u64,
+        is_finished: bool,
+        new_epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        self.mutate_state(current_pk_pos, last_cdc_offset, row_count, is_finished)
+            .await?;
+        self.commit_state(new_epoch).await
+    }
+
     /// Persist the state to storage
     pub async fn commit_state(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table

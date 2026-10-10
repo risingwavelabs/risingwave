@@ -226,7 +226,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             }
         }
 
-        // check whether PK constraint match source table definition
+        // Check column names and types against the source table definition.
         try (var stmt =
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table_schema"))) {
             stmt.setString(1, dbName);
@@ -251,12 +251,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
             // field name (lowercase) -> ColumnInfo
             var upstreamSchema = new HashMap<String, ColumnInfo>();
-            var pkFields = new HashSet<String>();
             var res = stmt.executeQuery();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
-                var key = res.getString(3);
                 long charMaxLength = res.getLong(4);
                 var columnType = res.getString(5); // Get full column type (e.g., "bigint unsigned")
                 // In MySQL, some types (such as text/blob) will return 4294967295 for
@@ -266,9 +264,6 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
                 upstreamSchema.put(
                         field.toLowerCase(), new ColumnInfo(dataType, charMaxLength, columnType));
-                if (key.equalsIgnoreCase("PRI")) {
-                    pkFields.add(field.toLowerCase());
-                }
             }
 
             // All columns defined must exist in upstream database
@@ -296,8 +291,20 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                                     + e.getValue());
                 }
             }
+        }
 
-            primaryKeyCheck(tableSchema, pkFields);
+        try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.pk"))) {
+            stmt.setString(1, dbName);
+            stmt.setString(2, tableName);
+            var pkFields = new ArrayList<String>();
+
+            try (var res = stmt.executeQuery()) {
+                while (res.next()) {
+                    pkFields.add(res.getString(1));
+                }
+            }
+
+            primaryKeyCheck(tableSchema.getPrimaryKeys(), pkFields);
         }
     }
 
@@ -308,22 +315,31 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         }
     }
 
-    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)
+    static void primaryKeyCheck(List<String> expectedPkFields, List<String> pkFields)
             throws RuntimeException {
-        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+        if (pkFields.isEmpty()) {
+            throw ValidatorUtils.invalidArgument(
+                    "Upstream MySQL primary key metadata is empty; expected columns "
+                            + expectedPkFields);
+        }
+
+        if (expectedPkFields.size() != pkFields.size()) {
             throw ValidatorUtils.invalidArgument(
                     "Primary key mismatch: the SQL schema defines "
-                            + sourceSchema.getPrimaryKeys().size()
+                            + expectedPkFields.size()
                             + " primary key columns, but the source table in MySQL has "
                             + pkFields.size()
                             + " columns.");
         }
-        for (var colName : sourceSchema.getPrimaryKeys()) {
-            if (!pkFields.contains(colName.toLowerCase())) {
+
+        for (int i = 0; i < expectedPkFields.size(); i++) {
+            if (!pkFields.get(i).equalsIgnoreCase(expectedPkFields.get(i))) {
                 throw ValidatorUtils.invalidArgument(
-                        "Primary key mismatch: The primary key list of the source table in MySQL does not contain '"
-                                + colName
-                                + "'.");
+                        "Primary key mismatch: upstream MySQL primary key columns "
+                                + pkFields
+                                + " do not match expected columns "
+                                + expectedPkFields
+                                + " in order.");
             }
         }
     }
