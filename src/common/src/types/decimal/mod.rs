@@ -155,7 +155,7 @@ impl Decimal {
     }
 
     fn to_legacy(self) -> LegacyDecimal {
-        debug_assert!(self.is_legacy(), "{self} is out of the legacy range");
+        debug_assert!(self.is_legacy(), "the decimal is out of the legacy range");
         match self.kind() {
             KIND_FINITE => {
                 let [lo, mid, hi, _] = self.coefficient;
@@ -215,21 +215,25 @@ impl Decimal {
 
     /// Parses with the given legacy result. The result only differs from the legacy one when it
     /// keeps more precision, or when the legacy parser fails because the value is too large.
-    fn parse_with<E>(s: &str, legacy: Result<LegacyDecimal, E>) -> Result<Self, E> {
-        let wide = || ParsedNumber::parse(s).and_then(|parsed| parsed.to_finite());
+    fn parse_with(s: &str, legacy: Result<LegacyDecimal, Error>) -> Result<Self, Error> {
+        let has_exponent = s.bytes().any(|b| b == b'e' || b == b'E');
+        let wide = || ParsedNumber::parse(s).and_then(|parsed| parsed.to_finite_strict());
         match legacy {
             Ok(legacy) => {
                 let legacy = Self::from_legacy(legacy);
                 // Inputs without an exponent and up to 29 bytes have at most 28 digits after the
                 // decimal point and at most 29 digits, which the legacy parser either keeps
                 // exactly or rejects.
-                if s.len() <= 29 && !s.bytes().any(|b| b == b'e' || b == b'E') {
+                if s.len() <= 29 && !has_exponent {
                     return Ok(legacy);
                 }
                 match (legacy.finite(), wide()) {
                     (Some(old), Some(new)) if old.cmp_value(&new).is_ne() => {
                         Ok(Self::from_finite(new))
                     }
+                    // After more digits than it can keep, `rust_decimal` ignores the rest of the
+                    // input, so its result misses an exponent that puts the value out of range.
+                    (Some(_), None) if has_exponent => Err(Error::from("Failed to parse")),
                     _ => Ok(legacy),
                 }
             }
@@ -360,7 +364,9 @@ impl Decimal {
     }
 
     pub fn from_scientific(value: &str) -> Option<Self> {
-        Self::parse_with(value, LegacyDecimal::from_scientific(value).ok_or(())).ok()
+        let legacy =
+            LegacyDecimal::from_scientific(value).ok_or_else(|| Error::from("Failed to parse"));
+        Self::parse_with(value, legacy).ok()
     }
 
     pub fn from_str_radix(s: &str, radix: u32) -> rust_decimal::Result<Self> {
@@ -1626,14 +1632,27 @@ mod tests {
                 "1.0000000000000000000000000000000000000",
                 "1.0000000000000000000000000000",
             ),
-            // The legacy parser rejects these.
-            ("1e-50", "0.00000000000000000000000000000000000000"),
+            // The legacy parser rejects exponents and scales beyond 28.
+            ("1e-30", "0.000000000000000000000000000001"),
+            ("1.5e-37", "0.00000000000000000000000000000000000015"),
+            // The legacy parser ignores the exponent after its 29th fractional digit.
             (
-                "1.00000000000000000000000000001e-28",
-                "0.00000000000000000000000000010000000000",
+                "1.00000000000000000000000000001e-5",
+                "0.0000100000000000000000000000000001",
             ),
         ] {
             assert_eq!(dec(input).to_string(), output, "{input}");
+        }
+        // Scientific notation whose scale exceeds 38 is rejected, not rounded to zero.
+        for input in [
+            "1e-39",
+            "1.5e-38",
+            "1e-1000",
+            "1.00000000000000000000000000001e-28",
+        ] {
+            assert!(Decimal::from_str(input).is_err(), "{input}");
+            assert!(Decimal::from_scientific(input).is_none(), "{input}");
+            assert!(Decimal::from_str_radix(input, 10).is_err(), "{input}");
         }
         assert!(Decimal::from_str("1e38").is_err());
         assert!(Decimal::from_str("123456789012345678901234567890123456789").is_err());
