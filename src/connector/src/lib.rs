@@ -58,7 +58,9 @@ pub use paste::paste;
 pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};
 
 mod with_options;
-pub use with_options::{Get, GetKeyIter, WithOptionsSecResolved, WithPropertiesExt};
+pub use with_options::{
+    Get, GetKeyIter, WithOptionsSecResolved, WithPropertiesExt, aliases_of_altered_keys,
+};
 
 #[cfg(test)]
 mod with_options_test;

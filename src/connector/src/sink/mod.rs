@@ -885,6 +885,18 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         Ok(())
     }
 
+    /// Checks that the external system is reachable with the merged sink properties `config`
+    /// when `alter_props` changes the connection target (e.g. the broker address).
+    ///
+    /// `ALTER SINK` calls this before the catalog is updated, so an unreachable target fails the
+    /// statement instead of breaking the running sink.
+    async fn validate_alter_config_connectivity(
+        _config: &BTreeMap<String, String>,
+        _alter_props: &BTreeMap<String, String>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     fn validate_unknown_fields(&self) -> Result<()> {
         Ok(())
     }

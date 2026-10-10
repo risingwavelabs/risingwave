@@ -407,7 +407,10 @@ message AlterConnectorPropsRequest {
   }
 }
 
-message AlterConnectorPropsResponse {}
+message AlterConnectorPropsResponse {
+  // Notices for the user, e.g. warnings about the consequences of the change.
+  repeated string notices = 1;
+}
 
 // Options for controlling the safe property update workflow
 message PropertyUpdateOptions {

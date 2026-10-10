@@ -46,6 +46,7 @@ use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use crate::sink::{Result, SinkWriterParam};
+use crate::source::kafka::alter::{alters_kafka_brokers, ensure_kafka_brokers_alterable};
 use crate::source::kafka::{
     KafkaContextCommon, KafkaProperties, KafkaSplitEnumerator, RwProducerContext,
 };
@@ -393,30 +394,51 @@ impl Sink for KafkaSink {
         )
         .await?;
 
-        // Try Kafka connection.
-        // There is no such interface for kafka producer to validate a connection
-        // use enumerator to validate broker reachability and existence of topic
-        let check = KafkaSplitEnumerator::new(
-            KafkaProperties::from(self.config.clone()),
-            Arc::new(SourceEnumeratorContext::dummy()),
-        )
-        .await?;
-        if let Err(e) = check.check_reachability().await {
-            return Err(SinkError::Config(
-                anyhow!(
-                    "cannot connect to kafka broker ({})",
-                    self.config.connection.brokers,
-                )
-                .context(e),
-            ));
-        }
+        check_broker_reachability(&self.config).await
+    }
+
+    fn validate_alter_config_change(
+        config: &BTreeMap<String, String>,
+        alter_props: &BTreeMap<String, String>,
+    ) -> Result<()> {
+        KafkaConfig::from_btreemap(config.clone())?;
+        ensure_kafka_brokers_alterable(config, alter_props.keys().map(String::as_str))
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(())
     }
 
-    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        KafkaConfig::from_btreemap(config.clone())?;
-        Ok(())
+    async fn validate_alter_config_connectivity(
+        config: &BTreeMap<String, String>,
+        alter_props: &BTreeMap<String, String>,
+    ) -> Result<()> {
+        if !alters_kafka_brokers(alter_props.keys().map(String::as_str)) {
+            return Ok(());
+        }
+        let config = KafkaConfig::from_btreemap(config.clone())?;
+        check_broker_reachability(&config).await
     }
+}
+
+/// Checks that the brokers in `config` are reachable.
+///
+/// There is no such interface for kafka producer to validate a connection, so use an enumerator to
+/// validate broker reachability and existence of topic.
+async fn check_broker_reachability(config: &KafkaConfig) -> Result<()> {
+    let check = KafkaSplitEnumerator::new(
+        KafkaProperties::from(config.clone()),
+        Arc::new(SourceEnumeratorContext::dummy()),
+    )
+    .await?;
+    if let Err(e) = check.check_reachability().await {
+        return Err(SinkError::Config(
+            anyhow!(
+                "cannot connect to kafka broker ({})",
+                config.connection.brokers,
+            )
+            .context(e),
+        ));
+    }
+    Ok(())
 }
 
 /// When the `DeliveryFuture` the current `future_delivery_buffer`

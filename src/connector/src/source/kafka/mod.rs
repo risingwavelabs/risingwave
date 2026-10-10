@@ -21,6 +21,7 @@ use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLi
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
+pub mod alter;
 mod client_context;
 pub mod enumerator;
 pub mod private_link;
