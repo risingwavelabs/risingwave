@@ -13,6 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
+use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment};
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta_model::compaction_config::CompactionConfig;
 use risingwave_meta_model::compaction_status::LevelHandlers;
@@ -25,7 +28,7 @@ use risingwave_meta_model::{
     hummock_version_stats,
 };
 use risingwave_pb::hummock::{
-    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, PbSstableInfo,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::EntityTrait;
@@ -36,6 +39,15 @@ use crate::hummock::model::CompactionGroup;
 use crate::model::{MetadataModelError, MetadataModelResult, Transactional};
 
 pub type Transaction = sea_orm::DatabaseTransaction;
+
+pub(crate) fn compaction_task_model_to_assignment(
+    model: compaction_task::Model,
+) -> CompactTaskAssignment {
+    CompactTaskAssignment {
+        compact_task: CompactTask::from(model.task.to_protobuf()),
+        context_id: model.context_id,
+    }
+}
 
 impl From<sea_orm::DbErr> for MetadataModelError {
     fn from(err: sea_orm::DbErr) -> Self {
@@ -107,9 +119,9 @@ impl Transactional<Transaction> for CompactStatus {
 #[async_trait::async_trait]
 impl Transactional<Transaction> for CompactTaskAssignment {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        let task = self.compact_task.clone().unwrap();
+        let task: risingwave_pb::hummock::CompactTask = (&self.compact_task).into();
         let m = compaction_task::ActiveModel {
-            id: Set(task.task_id.try_into().unwrap()),
+            id: Set(self.compact_task.task_id.try_into().unwrap()),
             context_id: Set(self.context_id),
             task: Set(CompactionTask::from(&task)),
         };
@@ -129,7 +141,7 @@ impl Transactional<Transaction> for CompactTaskAssignment {
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         compaction_task::Entity::delete_by_id(
-            CompactionTaskId::try_from(self.compact_task.as_ref().unwrap().task_id).unwrap(),
+            CompactionTaskId::try_from(self.compact_task.task_id).unwrap(),
         )
         .exec(trx)
         .await?;

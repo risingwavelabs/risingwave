@@ -20,7 +20,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
-    LevelType, PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats,
+    CompactTaskAssignment as PbCompactTaskAssignment, LevelType, PbCompactTask, PbKeyRange,
+    PbSstableFilterLayout, PbSstableFilterType, PbTableOption, PbTableSchema, PbTableStats,
     PbValidationTask,
 };
 
@@ -29,7 +30,7 @@ use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
-use crate::{CompactionGroupId, HummockSstableObjectId};
+use crate::{CompactionGroupId, HummockContextId, HummockSstableObjectId};
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
@@ -86,6 +87,12 @@ pub struct CompactTask {
     pub max_sub_compaction: u32,
 
     pub max_kv_count_for_xor16: Option<u64>,
+}
+
+#[derive(Clone, PartialEq, Default, Debug)]
+pub struct CompactTaskAssignment {
+    pub compact_task: CompactTask,
+    pub context_id: HummockContextId,
 }
 
 impl CompactTask {
@@ -522,6 +529,42 @@ impl From<&CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+        }
+    }
+}
+
+impl From<PbCompactTaskAssignment> for CompactTaskAssignment {
+    fn from(assignment: PbCompactTaskAssignment) -> Self {
+        Self {
+            compact_task: CompactTask::from(assignment.compact_task.unwrap()),
+            context_id: assignment.context_id,
+        }
+    }
+}
+
+impl From<&PbCompactTaskAssignment> for CompactTaskAssignment {
+    fn from(assignment: &PbCompactTaskAssignment) -> Self {
+        Self {
+            compact_task: CompactTask::from(assignment.compact_task.as_ref().unwrap()),
+            context_id: assignment.context_id,
+        }
+    }
+}
+
+impl From<CompactTaskAssignment> for PbCompactTaskAssignment {
+    fn from(assignment: CompactTaskAssignment) -> Self {
+        Self {
+            compact_task: Some(assignment.compact_task.into()),
+            context_id: assignment.context_id,
+        }
+    }
+}
+
+impl From<&CompactTaskAssignment> for PbCompactTaskAssignment {
+    fn from(assignment: &CompactTaskAssignment) -> Self {
+        Self {
+            compact_task: Some((&assignment.compact_task).into()),
+            context_id: assignment.context_id,
         }
     }
 }

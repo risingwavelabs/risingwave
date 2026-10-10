@@ -34,8 +34,7 @@ use risingwave_meta_model::{
     hummock_version_stats,
 };
 use risingwave_pb::hummock::{
-    HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
-    SubscribeCompactionEventRequest,
+    HummockVersionStats, PbCompactionGroupInfo, SubscribeCompactionEventRequest,
 };
 use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -49,6 +48,8 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
+use crate::hummock::manager::sequence::PrefetchedSequence;
+use crate::hummock::model::ext::{compaction_task_model_to_assignment, to_table_change_log};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
@@ -408,7 +409,7 @@ impl HummockManager {
             .map(|m| {
                 (
                     m.id as HummockCompactionTaskId,
-                    PbCompactTaskAssignment::from(m),
+                    compaction_task_model_to_assignment(m),
                 )
             })
             .collect();
