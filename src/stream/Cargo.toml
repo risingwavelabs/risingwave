@@ -112,5 +112,9 @@ harness = false
 name = "stream_hash_join_mem"
 harness = false
 
+[[bench]]
+name = "stream_match_recognize_define"
+harness = false
+
 [lints]
 workspace = true
