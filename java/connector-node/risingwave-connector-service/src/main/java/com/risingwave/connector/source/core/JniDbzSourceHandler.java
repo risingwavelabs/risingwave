@@ -122,11 +122,15 @@ public class JniDbzSourceHandler {
             JniDbzSourceRegistry.register(this);
 
             // Start the engine
-            var startOk = runner.start();
-            if (!sendHandshakeMessage(runner, channel, startOk)) {
+            // A null send only probes receiver liveness; it does not enqueue a message.
+            var startOk = runner.start(() -> channel.send(null));
+            if (!sendHandshakeMessage(channel, startOk)) {
                 LOG.error(
                         "Failed to send handshake message to channel. sourceId={}",
                         config.getSourceId());
+                return;
+            }
+            if (!startOk) {
                 return;
             }
 
@@ -156,7 +160,6 @@ public class JniDbzSourceHandler {
                     LOG.info(
                             "Engine#{}: JNI receiver closed, stop the engine",
                             config.getSourceId());
-                    runner.stop();
                     return;
                 }
             }
@@ -167,19 +170,19 @@ public class JniDbzSourceHandler {
             // correct error propagation.
             channel.sendError(t.getMessage());
 
+        } finally {
             try {
                 runner.stop();
             } catch (Exception e) {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
+            } finally {
+                // remove the handler from registry
+                JniDbzSourceRegistry.unregister(this);
             }
-        } finally {
-            // remove the handler from registry
-            JniDbzSourceRegistry.unregister(this);
         }
     }
 
-    private boolean sendHandshakeMessage(
-            DbzCdcEngineRunner runner, CdcSourceChannel channel, boolean startOk) throws Exception {
+    private boolean sendHandshakeMessage(CdcSourceChannel channel, boolean startOk) {
         // send a handshake message to notify the Source executor
         // if the handshake is not ok, the split reader will return error to source
         // actor
@@ -191,12 +194,6 @@ public class JniDbzSourceHandler {
                         .setSourceId(config.getSourceId())
                         .setControl(controlInfo)
                         .build();
-        var success = channel.send(handshakeMsg.toByteArray());
-        if (!success) {
-            LOG.info(
-                    "Engine#{}: JNI sender broken detected, stop the engine", config.getSourceId());
-            runner.stop();
-        }
-        return success;
+        return channel.send(handshakeMsg.toByteArray());
     }
 }
