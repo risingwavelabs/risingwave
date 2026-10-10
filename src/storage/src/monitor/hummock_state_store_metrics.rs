@@ -95,6 +95,11 @@ pub struct HummockStateStoreMetrics {
 
     pub safe_version_hit: GenericCounter<AtomicU64>,
     pub safe_version_miss: GenericCounter<AtomicU64>,
+
+    /// Duration spent waiting for the local Hummock version to cover a read epoch.
+    /// This is intentionally outside `state_store_get_duration`: batch point lookups
+    /// can wait here before the actual table get starts.
+    pub try_wait_epoch_duration: RelabeledGuardedHistogramVec,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -578,6 +583,23 @@ impl HummockStateStoreMetrics {
             .register(Box::new(safe_version_miss.clone()))
             .unwrap();
 
+        let opts = histogram_opts!(
+            "state_store_try_wait_epoch_duration",
+            "Duration spent waiting for the local Hummock version to cover a read epoch",
+            exponential_buckets(0.000001, 4.0, 12).unwrap(), // 1us - 4s
+        );
+        let try_wait_epoch_duration = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "epoch_type", "path"],
+            registry
+        )
+        .unwrap();
+        let try_wait_epoch_duration = RelabeledGuardedHistogramVec::with_metric_level(
+            MetricLevel::Info,
+            try_wait_epoch_duration,
+            metric_level,
+        );
+
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
@@ -620,6 +642,7 @@ impl HummockStateStoreMetrics {
             event_handler_latency,
             safe_version_hit,
             safe_version_miss,
+            try_wait_epoch_duration,
         }
     }
 
