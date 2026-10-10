@@ -403,8 +403,9 @@ impl Decimal {
             coefficient: num.unsigned_abs(),
             scale,
         };
+        let legacy = LegacyDecimal::truncated_i128_and_scale(num, scale).map(Self::from_legacy);
         if Self::fits_legacy(&value) {
-            return LegacyDecimal::truncated_i128_and_scale(num, scale).map(Self::from_legacy);
+            return legacy;
         }
         // Drop digits beyond the limits toward zero.
         let digits = value.coefficient.checked_ilog10().map_or(0, |d| d + 1);
@@ -414,9 +415,13 @@ impl Decimal {
         if drop > scale {
             return None;
         }
-        Some(Self::from_finite(
-            value.round_dp(scale - drop, Rounding::Down),
-        ))
+        let wide = value.round_dp(scale - drop, Rounding::Down);
+        // The legacy implementation drops digits to fit, which only loses trailing zeros for
+        // values such as `Decimal128(38, 10)` integers. Keep its result then, as for parsing.
+        match legacy.and_then(|legacy| legacy.finite()) {
+            Some(old) if old.cmp_value(&wide).is_eq() => legacy,
+            _ => Some(Self::from_finite(wide)),
+        }
     }
 
     pub fn scale(&self) -> Option<i32> {
@@ -1764,6 +1769,19 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "1701411834604692317316873037158841057.2"
+        );
+        // The legacy result is kept when only trailing zeros are dropped.
+        assert_eq!(
+            Decimal::truncated_i128_and_scale(9999999999999999999999999990000000000, 10)
+                .unwrap()
+                .to_string(),
+            "999999999999999999999999999.0"
+        );
+        assert_eq!(
+            Decimal::truncated_i128_and_scale(9999999999999999999999999990000000001, 10)
+                .unwrap()
+                .to_string(),
+            "999999999999999999999999999.0000000001"
         );
 
         // Rounding.
