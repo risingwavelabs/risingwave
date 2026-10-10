@@ -434,7 +434,7 @@ impl FrontendObserverNode {
             _ => unreachable!(),
         }
         assert!(
-            resp.version >= self.version,
+            resp.version > self.version,
             "resp version={:?}, current version={:?}",
             resp.version,
             self.version
@@ -459,7 +459,7 @@ impl FrontendObserverNode {
             _ => unreachable!(),
         }
         assert!(
-            resp.version >= self.version,
+            resp.version > self.version,
             "resp version={:?}, current version={:?}",
             resp.version,
             self.version

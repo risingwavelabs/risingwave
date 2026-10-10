@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -44,9 +45,9 @@ pub const IGNORED_NOTIFICATION_VERSION: u64 = 0;
 
 /// A batch of frontend notifications that belong to the same catalog update.
 ///
-/// Publishing the batch increments the catalog notification version exactly once, on the final
-/// notification. Therefore, waiting for the returned version also waits for every earlier
-/// notification in the batch to be processed.
+/// Publishing the batch assigns consecutive catalog notification versions to its notifications.
+/// Therefore, waiting for the returned final version also waits for every earlier notification in
+/// the batch to be processed.
 pub struct FrontendNotificationBatch<'a> {
     notification_manager: &'a NotificationManager,
     pending: Vec<(Operation, Info)>,
@@ -65,17 +66,10 @@ impl<'a> FrontendNotificationBatch<'a> {
     }
 
     #[must_use]
-    pub async fn publish(mut self) -> Option<NotificationVersion> {
-        let (last_operation, last_info) = self.pending.pop()?;
-        for (operation, info) in self.pending {
-            self.notification_manager
-                .notify_frontend_without_version(operation, info);
-        }
-        Some(
-            self.notification_manager
-                .notify_frontend(last_operation, last_info)
-                .await,
-        )
+    pub async fn publish(self) -> Option<NotificationVersion> {
+        self.notification_manager
+            .notify_frontend_batch(self.pending)
+            .await
     }
 }
 
@@ -194,6 +188,37 @@ impl NotificationManager {
         let version = version_guard.current_version();
         self.notify(target, operation, info, Some(version));
         version
+    }
+
+    /// Assign consecutive versions to a frontend notification batch and enqueue the complete batch
+    /// while holding the version generator lock.
+    async fn notify_frontend_batch(
+        &self,
+        notifications: Vec<(Operation, Info)>,
+    ) -> Option<NotificationVersion> {
+        let batch_len: NotificationVersion = notifications.len().try_into().unwrap();
+        if batch_len == 0 {
+            return None;
+        }
+
+        let mut version_guard = self.version_generator.lock().await;
+        let first_version = version_guard.current_version() + 1;
+        version_guard.increase_version_by(batch_len).await;
+        let final_version = version_guard.current_version();
+
+        for ((operation, info), version) in notifications
+            .into_iter()
+            .zip_eq_debug(first_version..=final_version)
+        {
+            self.notify(
+                SubscribeType::Frontend.into(),
+                operation,
+                info,
+                Some(version),
+            );
+        }
+
+        Some(final_version)
     }
 
     /// Add a notification using the latest version published to the queue without incrementing it.
@@ -480,7 +505,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_frontend_notification_batch_increases_version_once() {
+    async fn test_frontend_notification_batch_assigns_consecutive_versions() {
         let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
         let worker_key = WorkerKey(HostAddress {
             host: "a".to_owned(),
@@ -498,9 +523,12 @@ mod tests {
             .await
             .expect("the test notification batch contains two notifications");
 
-        assert_eq!(published_version, initial_version + 1);
+        assert_eq!(published_version, initial_version + 2);
         assert_eq!(mgr.current_version().await, published_version);
-        assert_eq!(rx.recv().await.unwrap().unwrap().version, initial_version);
+        assert_eq!(
+            rx.recv().await.unwrap().unwrap().version,
+            initial_version + 1
+        );
         assert_eq!(rx.recv().await.unwrap().unwrap().version, published_version);
     }
 
