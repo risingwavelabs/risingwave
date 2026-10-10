@@ -46,6 +46,13 @@ impl Row {
         &self.0
     }
 
+    /// Estimated retained heap bytes. Shared value buffers are charged per row, using their
+    /// exposed lengths; allocator overhead and spare capacity inside `Bytes` are not observable.
+    pub fn estimated_heap_size(&self) -> i64 {
+        (self.0.capacity() * size_of::<Option<Bytes>>()
+            + self.0.iter().flatten().map(Bytes::len).sum::<usize>()) as i64
+    }
+
     pub fn take(self) -> Vec<Option<Bytes>> {
         self.0
     }
