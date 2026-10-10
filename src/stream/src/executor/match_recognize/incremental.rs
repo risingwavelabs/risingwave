@@ -61,7 +61,7 @@ use risingwave_common::row::OwnedRow;
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::match_recognize::nfa::{
-    CandidateMatcher, LabeledMatch, MatchScan, Nfa, ScanBudget, SkipMode,
+    CandidateMatcher, LabeledMatch, MatchScan, Nfa, ScanBudget, SkipMode, VarId,
 };
 
 /// A row's stable sequence number: the buffer-table PK tiebreaker minted at ingest, unique for the
@@ -287,9 +287,9 @@ struct OffsetMatcher<'a, M> {
 impl<M: CandidateMatcher + Sync> CandidateMatcher for OffsetMatcher<'_, M> {
     fn matches(
         &self,
-        var: &str,
+        var: VarId,
         pos: usize,
-        labels: &[String],
+        labels: &[VarId],
     ) -> impl std::future::Future<Output = StreamExecutorResult<bool>> + Send {
         self.inner.matches(var, pos + self.offset, labels)
     }
@@ -845,7 +845,7 @@ mod tests {
     };
     use crate::executor::error::StreamExecutorResult;
     use crate::executor::match_recognize::nfa::{
-        CandidateMatcher, Nfa, Pattern, Quantifier, ScanBudget, SetMatcher, SkipMode,
+        CandidateMatcher, Nfa, Pattern, Quantifier, ScanBudget, SetMatcher, SkipMode, VarId,
     };
 
     /// A `SeqMatch` with the given extent and labels (identity is `start`).
@@ -939,7 +939,7 @@ mod tests {
         // Pre-crash: rows 0:a 1:b 2:a 3:b arrive across two visits; the first `a b` = (0,2)
         // freezes once the `a` at position 2 breaks the greedy `b+`.
         let pre = from_str("abab");
-        let m_pre = SetMatcher::new(pre.clone());
+        let m_pre = SetMatcher::new(&nfa, pre.clone());
         let mut pre_inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         pre_inc
             .advance(&ss(&[0, 1]), &m_pre, &mut ScanBudget::unlimited(), false)
@@ -956,7 +956,7 @@ mod tests {
         // One more row arrives; the last pre-crash barrier emitted this provisional set, so the
         // MV's provisional portion == this base. Surviving buffer: seqs 2,3,4 = {a},{b},{b}.
         let tail = from_str("abb");
-        let m_tail = SetMatcher::new(tail.clone());
+        let m_tail = SetMatcher::new(&nfa, tail.clone());
         pre_inc
             .advance(&ss(&[4]), &m_tail, &mut ScanBudget::unlimited(), false)
             .await
@@ -1110,7 +1110,7 @@ mod tests {
         rows: &[BTreeSet<String>],
         split_at: &[usize],
     ) {
-        let matcher = SetMatcher::new(rows.to_vec());
+        let matcher = SetMatcher::new(nfa, rows.to_vec());
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         let mut fed = 0usize;
         for &cut in split_at.iter().chain(std::iter::once(&rows.len())) {
@@ -1175,7 +1175,7 @@ mod tests {
         skip: &SkipMode,
         rows: &[BTreeSet<String>],
     ) -> Vec<(usize, usize, Vec<String>)> {
-        let matcher = SetMatcher::new(rows.to_vec());
+        let matcher = SetMatcher::new(nfa, rows.to_vec());
         nfa.find_matches_dynamic(rows.len(), &matcher, skip)
             .await
             .unwrap()
@@ -1388,7 +1388,7 @@ mod tests {
         ]);
         let nfa = Nfa::compile(&pat);
         let rows = from_str("abbb");
-        let matcher = SetMatcher::new(rows.clone());
+        let matcher = SetMatcher::new(&nfa, rows.clone());
         let mut inc =
             IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), SkipMode::PastLastRow);
 
@@ -1441,7 +1441,7 @@ mod tests {
 
         // Buffer before the late arrival (sorted positions 0..4).
         let pre_rows = vec![sets(&["a"]), sets(&["a", "b"]), sets(&["x"]), sets(&["x"])];
-        let pre_matcher = SetMatcher::new(pre_rows.clone());
+        let pre_matcher = SetMatcher::new(&nfa, pre_rows.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -1473,7 +1473,7 @@ mod tests {
             sets(&["x"]),
             sets(&["x"]),
         ];
-        let final_matcher = SetMatcher::new(final_rows.clone());
+        let final_matcher = SetMatcher::new(&nfa, final_rows.clone());
         inc.advance(
             &ss(&[2, 3, 4]),
             &final_matcher,
@@ -1512,7 +1512,7 @@ mod tests {
             sets(&["b"]),
             sets(&["x"]),
         ];
-        let pre_matcher = SetMatcher::new(pre_rows.clone());
+        let pre_matcher = SetMatcher::new(&nfa, pre_rows.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -1548,7 +1548,7 @@ mod tests {
             sets(&["b"]),
             sets(&["x"]),
         ];
-        let final_matcher = SetMatcher::new(final_rows.clone());
+        let final_matcher = SetMatcher::new(&nfa, final_rows.clone());
         inc.advance(
             &ss(&[3, 4, 5, 6]),
             &final_matcher,
@@ -1578,7 +1578,7 @@ mod tests {
         let skip = SkipMode::PastLastRow;
 
         let pre_rows = vec![sets(&["a"]), sets(&["b"]), sets(&["x"])];
-        let pre_matcher = SetMatcher::new(pre_rows.clone());
+        let pre_matcher = SetMatcher::new(&nfa, pre_rows.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -1600,7 +1600,7 @@ mod tests {
         assert_eq!(inc.frozen(), 0);
 
         let final_rows = vec![sets(&["a"]), sets(&["a"]), sets(&["b"]), sets(&["x"])];
-        let final_matcher = SetMatcher::new(final_rows.clone());
+        let final_matcher = SetMatcher::new(&nfa, final_rows.clone());
         inc.advance(
             &ss(&[0, 1, 2, 3]),
             &final_matcher,
@@ -1644,7 +1644,7 @@ mod tests {
         let skip = SkipMode::PastLastRow;
 
         let pre_rows = vec![sets(&["a"]), sets(&["b"]), sets(&["c"]), sets(&["x"])];
-        let pre_matcher = SetMatcher::new(pre_rows.clone());
+        let pre_matcher = SetMatcher::new(&nfa, pre_rows.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -1678,7 +1678,7 @@ mod tests {
             sets(&["d"]),
             sets(&["x"]),
         ];
-        let final_matcher = SetMatcher::new(final_rows.clone());
+        let final_matcher = SetMatcher::new(&nfa, final_rows.clone());
         inc.advance(
             &ss(&[3, 4]),
             &final_matcher,
@@ -1710,7 +1710,7 @@ mod tests {
         let skip = SkipMode::PastLastRow;
 
         let rows = from_str("abbc");
-        let matcher = SetMatcher::new(rows.clone());
+        let matcher = SetMatcher::new(&nfa, rows.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -1801,6 +1801,7 @@ mod tests {
     /// `DefineMatcher` needs the executor's expression/row machinery, so we model the prune here.)
     struct WithinSetMatcher {
         rows: Vec<BTreeSet<String>>,
+        names: Vec<String>,
         /// Max span in order-key units. Seqs equal positions here, so the span of a candidate at
         /// `pos` is `pos - match_start == labels.len()`.
         max_span: usize,
@@ -1809,11 +1810,14 @@ mod tests {
     impl CandidateMatcher for WithinSetMatcher {
         async fn matches(
             &self,
-            var: &str,
+            var: VarId,
             pos: usize,
-            labels: &[String],
+            labels: &[VarId],
         ) -> StreamExecutorResult<bool> {
-            if !self.rows[pos].contains(var) {
+            let Some(name) = self.names.get(var as usize) else {
+                return Ok(false);
+            };
+            if !self.rows[pos].contains(name) {
                 return Ok(false);
             }
             let match_start = pos - labels.len();
@@ -1833,7 +1837,7 @@ mod tests {
 
         // 0:a 1:b 2:x 3:a 4:b 5:x 6:a 7:b 8:x  -> batch matches (0,2),(3,5),(6,8).
         let full = from_str("abxabxabx");
-        let m_full = SetMatcher::new(full.clone());
+        let m_full = SetMatcher::new(&nfa, full.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -1859,7 +1863,7 @@ mod tests {
 
         // Keep feeding rows 6,7,8. Their buffer positions are now rebased (row 3 sits at position 0),
         // so the matcher indexes the surviving buffer `full[3..]`.
-        let m_tail = SetMatcher::new(full[3..].to_vec());
+        let m_tail = SetMatcher::new(&nfa, full[3..].to_vec());
         inc.advance(
             &ss(&[6, 7, 8]),
             &m_tail,
@@ -1893,7 +1897,7 @@ mod tests {
 
         // 0:a 1:b 2:x 3:a 4:b 5:x 6:a 7:b 8:x
         let pre = from_str("abxabxabx");
-        let m_pre = SetMatcher::new(pre.clone());
+        let m_pre = SetMatcher::new(&nfa, pre.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -1925,7 +1929,7 @@ mod tests {
         // A late {a} sorts at global position 6 (before old row 6): old row 6 (seq 6) is the first
         // buffered row whose sorted position changes, so the caller truncates at seq 6. The matcher
         // indexes the rebased surviving buffer `pre[3..]`.
-        let m_pre_tail = SetMatcher::new(pre[3..].to_vec());
+        let m_pre_tail = SetMatcher::new(&nfa, pre[3..].to_vec());
         inc.truncate_from_seq(Seq(6), &m_pre_tail, &mut ScanBudget::unlimited(), false)
             .await
             .unwrap();
@@ -1938,7 +1942,7 @@ mod tests {
         let corrected = from_str("abxabxaabx");
         // Re-feed the sorted suffix from global position 6 (seqs 6..=9), matcher over the rebased
         // surviving buffer `corrected[3..]`.
-        let m_corr_tail = SetMatcher::new(corrected[3..].to_vec());
+        let m_corr_tail = SetMatcher::new(&nfa, corrected[3..].to_vec());
         inc.advance(
             &ss(&[6, 7, 8, 9]),
             &m_corr_tail,
@@ -1964,7 +1968,7 @@ mod tests {
         let skip = SkipMode::PastLastRow;
 
         let rows = from_str("abxab");
-        let matcher = SetMatcher::new(rows.clone());
+        let matcher = SetMatcher::new(&nfa, rows.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -2013,6 +2017,7 @@ mod tests {
         let rows = from_str("abbabb");
         let matcher = WithinSetMatcher {
             rows: rows.clone(),
+            names: nfa.var_names().to_vec(),
             max_span: 1,
         };
         for split in [
@@ -2039,7 +2044,7 @@ mod tests {
         ]);
         let nfa = Nfa::compile(&pat);
         let rows = from_str("abb");
-        let matcher = SetMatcher::new(rows.clone());
+        let matcher = SetMatcher::new(&nfa, rows.clone());
 
         let mut inc =
             IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), SkipMode::PastLastRow);
@@ -2088,7 +2093,7 @@ mod tests {
         // once the second match's `a` at position 2 breaks the greedy `b+`); the trailing (2,4)
         // stays open at the boundary and does not freeze.
         let pre = from_str("abab");
-        let m_pre = SetMatcher::new(pre.clone());
+        let m_pre = SetMatcher::new(&nfa, pre.clone());
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
             &ss(&[0, 1, 2, 3]),
@@ -2125,7 +2130,7 @@ mod tests {
         // (seq 2) grows to `a b b` = (2,5). The matcher indexes the rebased surviving buffer: old
         // positions 2,3 sit at 0,1 (rows {a},{b}) and seq 4 lands at position 2.
         let tail = from_str("abb");
-        let m_tail = SetMatcher::new(tail.clone());
+        let m_tail = SetMatcher::new(&nfa, tail.clone());
         inc.advance(&ss(&[4]), &m_tail, &mut ScanBudget::unlimited(), false)
             .await
             .unwrap();
@@ -2166,7 +2171,7 @@ mod tests {
         let nfa = Nfa::compile(&pat);
         let skip = SkipMode::ToNextRow;
         let rows = from_str("aaa");
-        let matcher = SetMatcher::new(rows.clone());
+        let matcher = SetMatcher::new(&nfa, rows.clone());
 
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
@@ -2216,7 +2221,7 @@ mod tests {
 
         // Matches (0,2) frozen, (1,3) boundary-held.
         let full = from_str("aaa");
-        let m_full = SetMatcher::new(full.clone());
+        let m_full = SetMatcher::new(&nfa, full.clone());
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
             &ss(&[0, 1, 2]),
@@ -2239,7 +2244,7 @@ mod tests {
 
         // Rebuild: a fresh matcher fed the surviving rows (seqs 1, 2), with the matcher indexing
         // the rebased surviving buffer `full[1..]` — exactly what the executor's next visit does.
-        let m_tail = SetMatcher::new(full[1..].to_vec());
+        let m_tail = SetMatcher::new(&nfa, full[1..].to_vec());
         let mut rebuilt = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         rebuilt
             .advance(&ss(&[1, 2]), &m_tail, &mut ScanBudget::unlimited(), false)
@@ -2285,7 +2290,7 @@ mod tests {
         // 0:a 1:b 2:a 3:b 4:b — whole-buffer matches (0,2) (frozen: the `a` at 2 breaks the greedy
         // `b+`) and (2,5) (trailing, provisional).
         let full = from_str("ababb");
-        let m_full = SetMatcher::new(full.clone());
+        let m_full = SetMatcher::new(&nfa, full.clone());
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
         inc.advance(
             &ss(&[0, 1, 2, 3, 4]),
@@ -2307,7 +2312,7 @@ mod tests {
         // Roll back to the safe prefix [0, 4): truncate at the first over-fed row's seq. This drops
         // the provisional (2,5) even though rows 2 and 3 stay fed — the reason a rescan (and not a
         // re-feed, which would double-enter the retained rows in `seq_index`) must follow.
-        let m_safe = SetMatcher::new(full[..4].to_vec());
+        let m_safe = SetMatcher::new(&nfa, full[..4].to_vec());
         inc.truncate_from_seq(Seq(4), &m_safe, &mut ScanBudget::unlimited(), false)
             .await
             .unwrap();
@@ -2473,7 +2478,7 @@ mod tests {
             let evicted = 0usize;
 
             for op in 0..OPS {
-                let matcher = SetMatcher::new(full_rows[evicted..].to_vec());
+                let matcher = SetMatcher::new(&nfa, full_rows[evicted..].to_vec());
                 let ctx = format!("seed {seed} op {op} (starved)");
                 // 0 is included deliberately: a scan that dies on entry, having decided nothing.
                 let mut budget = ScanBudget::new(rng.random_range(0..=8));
@@ -2567,7 +2572,7 @@ mod tests {
             None,
             "the test needs a cyclic automaton"
         );
-        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); ROWS]);
+        let matcher = SetMatcher::new(&nfa, vec![BTreeSet::from(["a".to_owned()]); ROWS]);
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa), SkipMode::PastLastRow);
 
         let seqs: Vec<Seq> = (0..ROWS as i64).map(Seq).collect();
@@ -2641,7 +2646,7 @@ mod tests {
             .chain(std::iter::repeat_n(a, N))
             .collect();
         let n_rows = rows.len();
-        let matcher = SetMatcher::new(rows);
+        let matcher = SetMatcher::new(&nfa, rows);
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa), SkipMode::PastLastRow);
 
         let seqs: Vec<Seq> = (0..n_rows as i64).map(Seq).collect();
@@ -2706,7 +2711,7 @@ mod tests {
             std::iter::repeat_n(BTreeSet::from(["a".to_owned()]), RUN)
                 .chain(std::iter::once(BTreeSet::from(["x".to_owned()])))
                 .collect();
-        let matcher = SetMatcher::new(rows);
+        let matcher = SetMatcher::new(&nfa, rows);
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa), SkipMode::ToNextRow);
         let seqs: Vec<Seq> = (0..=RUN as i64).map(Seq).collect();
 
@@ -2768,7 +2773,7 @@ mod tests {
             for op in 0..OPS {
                 // The candidate matcher over the currently-live rows (positions are 0-based from the
                 // evicted boundary, exactly as the executor's post-eviction buffer is).
-                let matcher = SetMatcher::new(full_rows[evicted..].to_vec());
+                let matcher = SetMatcher::new(&nfa, full_rows[evicted..].to_vec());
                 let n_live = fed - evicted;
                 let ctx = format!("seed {seed} op {op}");
 
@@ -2844,7 +2849,8 @@ mod tests {
                                             std::sync::Arc::new(nfa.clone()),
                                             skip.clone(),
                                         );
-                                        let surv = SetMatcher::new(full_rows[evicted..].to_vec());
+                                        let surv =
+                                            SetMatcher::new(&nfa, full_rows[evicted..].to_vec());
                                         let seqs: Vec<Seq> =
                                             (evicted..fed).map(|i| Seq(i as i64)).collect();
                                         inc.advance(
@@ -2913,7 +2919,7 @@ mod tests {
         let h_start = rows.len();
         rows.extend(std::iter::repeat_n(a(), n));
         let skip = SkipMode::PastLastRow;
-        let matcher = SetMatcher::new(rows.clone());
+        let matcher = SetMatcher::new(&nfa, rows.clone());
         let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip);
 
         // Visit 1: feed the two blocks; let the freeze of (0,n) converge across as many
@@ -2987,7 +2993,7 @@ mod tests {
     async fn assert_incomplete_survives_rebase(n: usize, k: usize, budget_per_visit: usize) {
         let (mut inc, nfa, surviving) =
             truncated_tail_then_consume_frozen(n, k, budget_per_visit).await;
-        let matcher = SetMatcher::new(surviving.clone());
+        let matcher = SetMatcher::new(&nfa, surviving.clone());
 
         // A from-scratch scan over exactly the rows the executor still holds: the ground truth
         // the deadline prune assumes `provisional()` to equal.
@@ -3057,9 +3063,9 @@ mod tests {
     #[tokio::test]
     async fn zero_boundary_rebase_is_a_no_op_while_incomplete() {
         let (n, k, budget_per_visit) = (8usize, 24usize, 400usize);
-        let (mut inc, _nfa, surviving) =
+        let (mut inc, nfa, surviving) =
             truncated_tail_then_consume_frozen(n, k, budget_per_visit).await;
-        let matcher = SetMatcher::new(surviving);
+        let matcher = SetMatcher::new(&nfa, surviving);
         // One resumed visit: re-finds a prefix of the surviving suffix and is cut short again.
         let mut budget = ScanBudget::new(budget_per_visit);
         inc.refresh(&matcher, &mut budget, true).await.unwrap();
@@ -3091,7 +3097,7 @@ mod tests {
     /// small shape above does not.
     #[tokio::test]
     async fn incomplete_scan_survives_eviction_under_production_budget() {
-        let (mut inc, _nfa, surviving) = truncated_tail_then_consume_frozen(834, 6, 1 << 20).await;
+        let (mut inc, nfa, surviving) = truncated_tail_then_consume_frozen(834, 6, 1 << 20).await;
         assert!(
             inc.needs_refresh() && inc.is_incomplete(),
             "an eviction must not clear a truncated scan"
@@ -3102,7 +3108,7 @@ mod tests {
             "the found prefix survives the rebase with its cursor"
         );
         // One fresh-budget refresh resumes past the kept prefix: it neither re-finds nor drops it.
-        let matcher = SetMatcher::new(surviving);
+        let matcher = SetMatcher::new(&nfa, surviving);
         let mut budget = ScanBudget::new(1 << 20);
         inc.refresh(&matcher, &mut budget, true).await.unwrap();
         assert_eq!(&inc.provisional()[..kept.len()], kept.as_slice());
