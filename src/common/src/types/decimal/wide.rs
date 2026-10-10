@@ -371,6 +371,8 @@ pub struct ParsedNumber {
     /// Decimal digits without leading zeros. Trailing zeros are kept because they set the scale.
     digits: Vec<u8>,
     exponent: i64,
+    /// The exponent written in scientific notation, such as `-3` in `1.5e-3`.
+    explicit_exponent: Option<i64>,
 }
 
 impl ParsedNumber {
@@ -417,6 +419,7 @@ impl ParsedNumber {
         }
 
         let mut exponent: i64 = 0;
+        let mut explicit_exponent = None;
         if let Some(b'e' | b'E') = bytes.get(pos) {
             pos += 1;
             let exponent_negative = match bytes.get(pos) {
@@ -441,6 +444,7 @@ impl ParsedNumber {
             if exponent_negative {
                 exponent = -exponent;
             }
+            explicit_exponent = Some(exponent);
         }
         if pos != bytes.len() {
             return None;
@@ -450,23 +454,63 @@ impl ParsedNumber {
             negative,
             digits,
             exponent: exponent.checked_sub(fraction_digits)?,
+            explicit_exponent,
         })
     }
 
     /// Rounds half away from zero to at most [`MAX_DIGITS`] significant digits and a scale of at
     /// most [`MAX_SCALE`]. Returns `None` if the integer part has more than [`MAX_DIGITS`] digits.
     pub fn to_finite(&self) -> Option<Finite> {
+        self.round_to_finite(self.exponent)
+    }
+
+    /// Converts text input. Scientific notation follows `rust_decimal::Decimal::from_scientific`
+    /// with the limits raised to [`MAX_SCALE`]: the mantissa is rounded like other input, and the
+    /// value is rejected instead of rounded if the exponent makes its scale exceed [`MAX_SCALE`].
+    /// So `1e-38` is accepted, while `1.5e-38` and `1e-1000` are rejected rather than rounded to
+    /// zero. Input without an exponent is converted as by [`Self::to_finite`].
+    pub fn to_finite_strict(&self) -> Option<Finite> {
+        let Some(explicit) = self.explicit_exponent else {
+            return self.to_finite();
+        };
+        let mantissa = self.round_to_finite(self.exponent - explicit)?;
+        let scale = (mantissa.scale as i64).checked_sub(explicit)?;
+        if scale > MAX_SCALE as i64 {
+            return None;
+        }
+        if scale >= 0 {
+            return Some(Finite {
+                scale: scale as u32,
+                ..mantissa
+            });
+        }
+        // The exponent exceeds the scale of the mantissa, so the value is an integer.
+        if explicit > MAX_SCALE as i64 {
+            return None;
+        }
+        let coefficient = U256::new(mantissa.coefficient) * pow10((-scale) as u32);
+        if coefficient >= pow10(MAX_DIGITS) {
+            return None;
+        }
+        Some(Finite {
+            coefficient: coefficient.as_u128(),
+            scale: 0,
+            ..mantissa
+        })
+    }
+
+    /// Like [`Self::to_finite`], for the value `digits * 10^exponent`.
+    fn round_to_finite(&self, exponent: i64) -> Option<Finite> {
         let len = self.digits.len() as i64;
-        if self.exponent >= 0 {
+        if exponent >= 0 {
             // An integer: the digits followed by `exponent` zeros.
             if len == 0 {
                 return Some(Finite::ZERO);
             }
-            if len + self.exponent > MAX_DIGITS as i64 {
+            if len + exponent > MAX_DIGITS as i64 {
                 return None;
             }
-            let coefficient =
-                self.digits_value(self.digits.len()) * 10u128.pow(self.exponent as u32);
+            let coefficient = self.digits_value(self.digits.len()) * 10u128.pow(exponent as u32);
             return Some(Finite {
                 negative: self.negative,
                 coefficient,
@@ -474,7 +518,7 @@ impl ParsedNumber {
             });
         }
 
-        let scale = -self.exponent;
+        let scale = -exponent;
         if len - scale > MAX_DIGITS as i64 {
             return None;
         }
@@ -569,6 +613,7 @@ impl Finite {
             negative: numeric.negative,
             digits,
             exponent: 4 * (numeric.weight as i64 - numeric.digits.len() as i64 + 1),
+            explicit_exponent: None,
         };
         let value = parsed.to_finite()?;
         let dscale = (numeric.dscale as u32).min(MAX_SCALE);
@@ -648,6 +693,50 @@ mod tests {
                 None,
                 "{input}"
             );
+        }
+    }
+
+    #[test]
+    fn test_scientific_limits() {
+        let strict = |s: &str| {
+            ParsedNumber::parse(s)
+                .unwrap()
+                .to_finite_strict()
+                .map(|value| value.to_string())
+        };
+        for (input, output) in [
+            ("1e-38", "0.00000000000000000000000000000000000001"),
+            ("1.5e-37", "0.00000000000000000000000000000000000015"),
+            ("-2.50e-3", "-0.00250"),
+            ("1.20e1", "12.0"),
+            ("1.5e30", "1500000000000000000000000000000"),
+            ("9.9e37", "99000000000000000000000000000000000000"),
+            ("0.000e5", "0"),
+            // The mantissa is rounded to 38 digits before the exponent applies.
+            (
+                "1.234567890123456789012345678901234567850e1",
+                "12.345678901234567890123456789012345679",
+            ),
+            // Input without an exponent is still rounded to a scale of 38.
+            (
+                "0.000000000000000000000000000000000000005",
+                "0.00000000000000000000000000000000000001",
+            ),
+        ] {
+            assert_eq!(strict(input).as_deref(), Some(output), "{input}");
+        }
+        for input in [
+            "1e-39",
+            "1.5e-38",
+            "1e-1000",
+            "0e-39",
+            "1e38",
+            "1e39",
+            "0e39",
+            "1e1000",
+            "1e-9223372036854775807",
+        ] {
+            assert_eq!(strict(input), None, "{input}");
         }
     }
 

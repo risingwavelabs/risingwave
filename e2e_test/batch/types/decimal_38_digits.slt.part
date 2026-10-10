@@ -29,6 +29,18 @@ select 123456789012345678901234567890123456789::decimal;
 statement error
 select '1e38'::decimal;
 
+# Scientific notation is rejected rather than rounded if the exponent makes the scale exceed 38.
+query RR
+select 1e-30, '1e-38'::decimal;
+----
+0.000000000000000000000000000001 0.00000000000000000000000000000000000001
+
+statement error overflows
+select 1.5e-38;
+
+statement error
+select '1e-1000'::decimal;
+
 # Values in the former 28-digit range behave exactly as before, including the precision of results.
 query RRR
 select 1::decimal / 3, 2::decimal / 3, 1.000::decimal * 1.00;
