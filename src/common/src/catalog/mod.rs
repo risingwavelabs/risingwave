@@ -137,6 +137,17 @@ pub const ICEBERG_FILE_PATH_COLUMN_NAME: &str = "_iceberg_file_path";
 pub const ICEBERG_FILE_POS_COLUMN_NAME: &str = "_iceberg_file_pos";
 
 pub const CDC_OFFSET_COLUMN_NAME: &str = "_rw_offset";
+
+/// RisingWave data type used for PostgreSQL `point` columns.
+pub fn postgres_point_type() -> crate::types::DataType {
+    use crate::types::{DataType, StructType};
+
+    DataType::Struct(StructType::new([
+        ("x", DataType::Float64),
+        ("y", DataType::Float64),
+    ]))
+}
+
 /// The number of columns output by the cdc source job
 /// see [`ColumnCatalog::debezium_cdc_source_cols()`] for details
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;

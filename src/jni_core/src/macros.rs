@@ -410,10 +410,12 @@ macro_rules! for_all_plain_native_methods {
                 public static native boolean validateCdcSourceColumnType(
                     int cdcTableType,
                     String upstreamTypeName,
-                    int rwTypeName,
+                    byte[] rwDataType,
                     long charMaxLength,
                     boolean isUnsigned,
-                    String postgresUdtName);
+                    String postgresUdtName,
+                    String postgresArrayElementTypeName,
+                    String postgresArrayElementUdtName);
 
                 static native long iteratorNewStreamChunk(long pointer);
 
@@ -885,7 +887,7 @@ mod tests {
                 tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)V,
                 tracingSlf4jEventEnabled                 (I)Z,
                 defaultVnodeCount                        ()I,
-                validateCdcSourceColumnType              (ILjava/lang/String;IJZLjava/lang/String;)Z,
+                validateCdcSourceColumnType              (ILjava/lang/String;[BJZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z,
                 iteratorNewStreamChunk                   (J)J,
                 iteratorNext                             (J)Z,
                 initObjectStoreForTest                   (Ljava/lang/String;Ljava/lang/String;)V,
