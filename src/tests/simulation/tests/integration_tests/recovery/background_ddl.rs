@@ -861,6 +861,90 @@ async fn test_foreground_index_cancel() -> Result<()> {
     Ok(())
 }
 
+async fn streaming_job_status(session: &mut Session, name: &str) -> Result<String> {
+    session
+        .run(format!(
+            "SELECT status FROM rw_catalog.rw_streaming_jobs WHERE name = '{name}';"
+        ))
+        .await
+}
+
+async fn wait_streaming_job_status(session: &mut Session, name: &str, status: &str) -> Result<()> {
+    for _ in 0..60 {
+        if streaming_job_status(session, name).await? == status {
+            return Ok(());
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+    Err(anyhow!(
+        "streaming job {name} did not reach status {status}"
+    ))
+}
+
+/// A foreground job queued behind `max_concurrent_creating_streaming_jobs` stays `INITIAL` until
+/// it gets a permit. Killing its session must cancel it then, instead of letting it start once
+/// the permit is released.
+#[tokio::test]
+async fn test_kill_foreground_ddl_waiting_for_permit() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+    session
+        .run("ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;")
+        .await?;
+    session.run(CREATE_TABLE).await?;
+    session.run(SEED_TABLE_500).await?;
+    session.flush().await?;
+
+    // Hold the only permit with a slow foreground job.
+    let mut running_session = cluster.start_session();
+    let running = tokio::spawn(async move {
+        running_session.run(SET_RATE_LIMIT_1).await?;
+        running_session
+            .run("CREATE MATERIALIZED VIEW mv_running AS SELECT * FROM t;")
+            .await
+    });
+    wait_streaming_job_status(&mut session, "mv_running", "CREATING").await?;
+
+    let mut queued_session = cluster.start_session();
+    let queued = tokio::spawn(async move {
+        queued_session
+            .run("CREATE MATERIALIZED VIEW mv_queued AS SELECT * FROM t;")
+            .await
+    });
+    wait_streaming_job_status(&mut session, "mv_queued", "INITIAL").await?;
+    // Still `INITIAL` after several barriers: the job is waiting for the permit.
+    sleep(Duration::from_secs(5)).await;
+    assert_eq!(
+        streaming_job_status(&mut session, "mv_queued").await?,
+        "INITIAL"
+    );
+
+    let processlist = session.run("SHOW PROCESSLIST;").await?;
+    let process_id = processlist
+        .lines()
+        .find(|line| line.contains("mv_queued"))
+        .and_then(|line| line.split_whitespace().nth(1))
+        .ok_or_else(|| anyhow!("mv_queued not found in process list:\n{processlist}"))?
+        .to_owned();
+    session.run(format!("KILL '{process_id}';")).await?;
+
+    let queued_result = tokio::time::timeout(Duration::from_secs(30), queued).await??;
+    assert!(queued_result.is_err(), "mv_queued should be cancelled");
+    assert_eq!(streaming_job_status(&mut session, "mv_queued").await?, "");
+
+    // Only `mv_running` is left to cancel. Releasing its permit must not start `mv_queued`.
+    let ids = cancel_stream_jobs(&mut session).await?;
+    assert_eq!(ids.len(), 1);
+    let running_result = tokio::time::timeout(Duration::from_secs(30), running).await??;
+    assert!(running_result.is_err(), "mv_running should be cancelled");
+    sleep(Duration::from_secs(5)).await;
+    assert_eq!(streaming_job_status(&mut session, "mv_queued").await?, "");
+
+    session.run(DROP_TABLE).await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_background_sink_create() -> Result<()> {
     init_logger();
