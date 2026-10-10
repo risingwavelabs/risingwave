@@ -497,6 +497,10 @@ pub async fn start_service_as_election_leader(
         iceberg_compaction_mgr.clone(),
         env.opts.iceberg_gc_interval_sec,
     ));
+    sub_tasks.push(IcebergCompactionManager::orphan_file_cleanup_loop(
+        iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_orphan_file_cleanup_interval_sec,
+    ));
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
