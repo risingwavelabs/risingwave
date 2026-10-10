@@ -20,3 +20,4 @@ We currently cover the following:
 6. Kafka Source
 7. AsOf join
 8. Hummock stale SST table ids after dropping one table from a mixed-table SST (2.8.0 <= old version < 2.8.4)
+9. Decimal keys: vnode placement, point lookups, upserts, deletes and aggregation states
