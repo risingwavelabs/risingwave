@@ -39,6 +39,8 @@ use crate::executor::error::StreamExecutorResult;
 #[derive(Debug, Default)]
 pub struct MatchScan {
     next_start: usize,
+    /// The walk buffers, reused across every start this scan visits (see [`WalkScratch`]).
+    scratch: WalkScratch,
     /// End of the contiguous run of starts, from where this scan began, proven MATCHLESS FOREVER:
     /// their walks found no accept and never reached the boundary, so every path from them died
     /// on a row below it — and those rows are immutable, so no arrival can revive them. The
@@ -56,6 +58,7 @@ impl MatchScan {
         Self {
             next_start: start,
             matchless_upto: start,
+            scratch: WalkScratch::default(),
         }
     }
 
@@ -145,21 +148,25 @@ impl ScanBudget {
 /// re-entry via different consumption prefixes is exactly the exponential blowup; memoizing it
 /// makes a start's scan polynomial. ε-level failures are NOT recorded: they can be artifacts of
 /// the cycle-cutting visited-set and are not context-free.
-struct Memo {
+struct Memo<'a> {
     /// Failure sets indexed by position offset from the memo's start; one [`Visited`] per position
-    /// (bitmask for small automata, set fallback beyond).
-    failed: Vec<Visited>,
+    /// (bitmask for small automata, set fallback beyond). Borrowed from a [`WalkScratch`], so the
+    /// capacity the deepest walk needed serves every later walk of the same scan or loop.
+    failed: &'a mut Vec<Visited>,
     n_states: usize,
     base: usize,
 }
 
-impl Memo {
-    fn new(base: usize, _n_rows: usize, n_states: usize) -> Self {
+impl<'a> Memo<'a> {
+    fn new(base: usize, n_states: usize, failed: &'a mut Vec<Visited>) -> Self {
+        // `slot()` grows on demand; an eager reservation over the whole suffix would write
+        // O(suffix) per walk INSTANCE — quadratic traffic per rescan — for walks that mostly die
+        // within a few positions. Clearing keeps the capacity of the vector; for an automaton over
+        // 64 states it drops the boxed sets, so those are re-made per position touched — bounded by
+        // the walk's own work, and rare.
+        failed.clear();
         Self {
-            // `slot()` grows on demand; an eager reservation over the whole suffix would malloc
-            // O(suffix) per walk INSTANCE — quadratic traffic per rescan — for walks that mostly
-            // die within a few positions.
-            failed: Vec::new(),
+            failed,
             n_states,
             base,
         }
@@ -645,6 +652,43 @@ pub struct LabeledMatch {
     pub labels: Vec<String>,
 }
 
+/// Buffers one [`Nfa::walk`] after another reuses: the frame stack, the per-consumption visited
+/// scopes, the label path and the failure memo's storage.
+///
+/// A rescan walks from every pending start in turn, and a start at `p` grows the stack to about
+/// `2 (n - p)` frames and the scopes and memo to `n - p` sets before it dies. Allocating those
+/// fresh per start made the growth — a dozen reallocations copying the buffers so far — a quarter
+/// of the walk's per-position cost. The scratch lives with the [`MatchScan`] of one rescan, or
+/// with one prune or freeze loop, so the capacity the deepest walk needed serves the rest, and
+/// is released with the scan. Nothing about a previous walk survives in the contents: every
+/// walk starts from cleared buffers.
+#[derive(Default)]
+pub struct WalkScratch {
+    bufs: WalkBuffers,
+    memo: Vec<Visited>,
+}
+
+impl std::fmt::Debug for WalkScratch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WalkScratch")
+            .field("stack_capacity", &self.bufs.stack.capacity())
+            .field("scopes", &self.bufs.scopes.len())
+            .field("memo_capacity", &self.memo.capacity())
+            .finish()
+    }
+}
+
+/// The walk-local part of [`WalkScratch`]; separate so a [`Memo`] can borrow the memo storage
+/// while the walk borrows these.
+#[derive(Default)]
+struct WalkBuffers {
+    stack: Vec<Frame>,
+    /// One visited scope per consumption level, kept (not truncated) between walks so a `Large`
+    /// scope's hash set is allocated once per level rather than once per walk.
+    scopes: Vec<Visited>,
+    path: Vec<String>,
+}
+
 /// Visited-state guard for one traversal position of the dynamic matcher. ε-transitions keep the
 /// position, so each consumed row starts a fresh set (see [`Nfa::walk`]); these sets are opened
 /// O(rows × branches) times per partition visit, so their allocation cost matters. The
@@ -652,7 +696,12 @@ pub struct LabeledMatch {
 /// membership is a bit test); larger automata (deep `PERMUTE` expansions) fall back to a `HashSet`.
 enum Visited {
     Small(u64),
-    Large(HashSet<StateId>),
+    /// Boxed on purpose (the lint prefers the bare set): the enum is stored per consumption level
+    /// in the scopes and per position in the memo, and an inline `HashSet` would make every one of
+    /// those slots 48 bytes for the automata that never use it. The set's own heap allocation is
+    /// made once per level and reused (see `WalkBuffers::scopes`).
+    #[allow(clippy::box_collection)]
+    Large(Box<HashSet<StateId>>),
 }
 
 impl Visited {
@@ -660,11 +709,19 @@ impl Visited {
         if n_states <= 64 {
             Visited::Small(0)
         } else {
-            Visited::Large(HashSet::new())
+            Visited::Large(Box::default())
         }
     }
 
     /// Marks `s` visited; returns whether it was newly inserted (mirrors `HashSet::insert`).
+    /// Whether this variant can hold states of an automaton with `n_states` states.
+    fn fits(&self, n_states: usize) -> bool {
+        matches!(
+            (self, n_states <= 64),
+            (Visited::Small(_), true) | (Visited::Large(_), false)
+        )
+    }
+
     fn insert(&mut self, s: StateId) -> bool {
         match self {
             Visited::Small(bits) => {
@@ -842,7 +899,8 @@ impl Nfa {
             // The memo is per START: within one start a verdict depends only on `(var, pos)`
             // (given path-independence), so it must not leak across starts, where `labels.len()`
             // differs for the same position.
-            let mut memo = memoize.then(|| Memo::new(i, n_rows, self.states.len()));
+            let scratch = &mut scan.scratch;
+            let mut memo = memoize.then(|| Memo::new(i, self.states.len(), &mut scratch.memo));
             let mut reached_boundary = false;
             let found = self
                 .walk(
@@ -854,6 +912,7 @@ impl Nfa {
                     matcher,
                     budget,
                     memo.as_mut(),
+                    &mut scratch.bufs,
                 )
                 .await?;
             let found_empty = match found {
@@ -908,6 +967,9 @@ impl Nfa {
     /// `x` matches neither, the `a` *can* begin the pattern, but every path dies on `x` before the
     /// boundary, so the start is dead and must be evictable. A lone `[a]` (boundary right after `a`),
     /// in contrast, is kept because a future `b` may still complete it.
+    ///
+    /// [`Nfa::reaches_boundary_alive_with`] with fresh walk buffers; a loop asking about one
+    /// position after another should hold a [`WalkScratch`] and call the `_with` form.
     pub async fn reaches_boundary_alive(
         &self,
         pos: usize,
@@ -915,6 +977,26 @@ impl Nfa {
         matcher: &(impl CandidateMatcher + Sync),
         budget: &mut ScanBudget,
         memoize: bool,
+    ) -> StreamExecutorResult<bool> {
+        self.reaches_boundary_alive_with(
+            pos,
+            n_rows,
+            matcher,
+            budget,
+            memoize,
+            &mut WalkScratch::default(),
+        )
+        .await
+    }
+
+    pub async fn reaches_boundary_alive_with(
+        &self,
+        pos: usize,
+        n_rows: usize,
+        matcher: &(impl CandidateMatcher + Sync),
+        budget: &mut ScanBudget,
+        memoize: bool,
+        scratch: &mut WalkScratch,
     ) -> StreamExecutorResult<bool> {
         // Acyclic automaton: no path consumes more than `max_match_rows` rows, so with more rows
         // than that before the boundary no path can reach it — dead, without a walk. This is what
@@ -926,7 +1008,7 @@ impl Nfa {
         {
             return Ok(false);
         }
-        let mut memo = memoize.then(|| Memo::new(pos, n_rows, self.states.len()));
+        let mut memo = memoize.then(|| Memo::new(pos, self.states.len(), &mut scratch.memo));
         Ok(self
             .walk(
                 Goal::Boundary { n_rows },
@@ -934,6 +1016,7 @@ impl Nfa {
                 matcher,
                 budget,
                 memo.as_mut(),
+                &mut scratch.bufs,
             )
             .await?
             .is_some())
@@ -970,6 +1053,8 @@ impl Nfa {
     /// final and must be emitted — holding it would starve an idle partition forever (the frontier
     /// recompute finds neither a future row nor, without `WITHIN`, a deadline, and drops the
     /// partition). `true` means the standard maximality wait applies.
+    ///
+    /// [`Nfa::may_extend_with`] with fresh walk buffers.
     pub async fn may_extend(
         &self,
         start: usize,
@@ -978,8 +1063,28 @@ impl Nfa {
         budget: &mut ScanBudget,
         memoize: bool,
     ) -> StreamExecutorResult<bool> {
+        self.may_extend_with(
+            start,
+            end,
+            matcher,
+            budget,
+            memoize,
+            &mut WalkScratch::default(),
+        )
+        .await
+    }
+
+    pub async fn may_extend_with(
+        &self,
+        start: usize,
+        end: usize,
+        matcher: &(impl CandidateMatcher + Sync),
+        budget: &mut ScanBudget,
+        memoize: bool,
+        scratch: &mut WalkScratch,
+    ) -> StreamExecutorResult<bool> {
         let mut blocked = false;
-        let mut memo = memoize.then(|| Memo::new(start, end, self.states.len()));
+        let mut memo = memoize.then(|| Memo::new(start, self.states.len(), &mut scratch.memo));
         let accepted = self
             .walk(
                 Goal::AcceptOrBlocked {
@@ -990,6 +1095,7 @@ impl Nfa {
                 matcher,
                 budget,
                 memo.as_mut(),
+                &mut scratch.bufs,
             )
             .await?
             .is_some();
@@ -1040,15 +1146,33 @@ impl Nfa {
         start_pos: usize,
         matcher: &(impl CandidateMatcher + Sync),
         budget: &mut ScanBudget,
-        mut memo: Option<&mut Memo>,
+        mut memo: Option<&mut Memo<'_>>,
+        bufs: &mut WalkBuffers,
     ) -> StreamExecutorResult<Option<(usize, Vec<String>)>> {
         let n_states = self.states.len();
-        let mut path: Vec<String> = Vec::new();
-        // One visited scope per consumption level; `scopes[depth]` is the live one. A walk opens a
-        // scope per consumed row, so they are cleared and reused rather than reallocated.
-        let mut scopes: Vec<Visited> = vec![Visited::new(n_states)];
+        // The buffers come from a `WalkScratch` and keep their capacity between walks; only their
+        // contents are reset here. One visited scope per consumption level; `scopes[depth]` is
+        // the live one, cleared when re-entered so its allocation (a hash set beyond 64 states)
+        // is made once per level, not once per walk.
+        let WalkBuffers {
+            stack,
+            scopes,
+            path,
+        } = bufs;
+        stack.clear();
+        path.clear();
+        // The scopes keep the variant the first walk chose; a scratch handed to an automaton on
+        // the other side of the 64-state line would index a bitmask out of range, so rebuild them
+        // rather than trust the caller. (No caller shares a scratch across automata today.)
+        match scopes.first() {
+            Some(first) if first.fits(n_states) => scopes[0].clear(),
+            _ => {
+                scopes.clear();
+                scopes.push(Visited::new(n_states));
+            }
+        }
         let mut depth = 0usize;
-        let mut stack = vec![Frame::new(self.start, start_pos, false)];
+        stack.push(Frame::new(self.start, start_pos, false));
 
         loop {
             let Some(top) = stack.last_mut() else {
@@ -1066,13 +1190,13 @@ impl Nfa {
                 }
                 let (state, pos) = (top.state, top.pos);
                 match goal.enter(self, state, pos) {
-                    Enter::Verdict => return Ok(Some((pos, path))),
+                    Enter::Verdict => return Ok(Some((pos, std::mem::take(path)))),
                     Enter::Dead => {
                         Self::pop_failed(
-                            &mut stack,
-                            &mut scopes,
+                            stack,
+                            scopes,
                             &mut depth,
-                            &mut path,
+                            path,
                             memo.as_deref_mut(),
                             budget,
                         );
@@ -1083,28 +1207,14 @@ impl Nfa {
                 if scopes[depth].insert(state) {
                     top.inserted = true;
                 } else {
-                    Self::pop_failed(
-                        &mut stack,
-                        &mut scopes,
-                        &mut depth,
-                        &mut path,
-                        memo.as_deref_mut(),
-                        budget,
-                    );
+                    Self::pop_failed(stack, scopes, &mut depth, path, memo.as_deref_mut(), budget);
                     continue;
                 }
             }
             let (state, pos) = (top.state, top.pos);
             let Some(t) = self.states[state].get(top.next_edge) else {
                 // Every transition tried and none met the goal: this frame fails.
-                Self::pop_failed(
-                    &mut stack,
-                    &mut scopes,
-                    &mut depth,
-                    &mut path,
-                    memo.as_deref_mut(),
-                    budget,
-                );
+                Self::pop_failed(stack, scopes, &mut depth, path, memo.as_deref_mut(), budget);
                 continue;
             };
             top.next_edge += 1;
@@ -1122,7 +1232,7 @@ impl Nfa {
                     if !budget.charge() {
                         return Ok(None);
                     }
-                    if !matcher.matches(var, pos, &path).await? {
+                    if !matcher.matches(var, pos, path).await? {
                         continue;
                     }
                     // Consumption boundary: the frame pushed below starts with a fresh visited
@@ -1161,7 +1271,7 @@ impl Nfa {
         scopes: &mut [Visited],
         depth: &mut usize,
         path: &mut Vec<String>,
-        memo: Option<&mut Memo>,
+        memo: Option<&mut Memo<'_>>,
         budget: &ScanBudget,
     ) {
         debug_assert!(
@@ -2774,5 +2884,107 @@ mod tests {
             vec![(0, 600), (600, 1200)],
             "two exact matches; the 100-row tail cannot complete a third"
         );
+    }
+
+    /// Reused walk buffers must not change a verdict: one scratch shared across the starts of a
+    /// scan and across the positions of a liveness loop agrees with fresh buffers per call — for a
+    /// small automaton (bitmask scopes) and for one over 64 states (hash-set scopes, whose
+    /// allocations are kept per level between walks).
+    #[tokio::test]
+    async fn reused_walk_buffers_agree_with_fresh_ones() {
+        let a = || BTreeSet::from(["a".to_owned()]);
+        let b = || BTreeSet::from(["b".to_owned()]);
+        let cases: Vec<(Pattern, Vec<BTreeSet<String>>)> = vec![
+            // `(a+ b)` over runs of `a` broken by a `b` every seventh row: starts that match,
+            // starts that die on a `b`, starts alive at the boundary.
+            (
+                Pattern::Concat(vec![plus(vars("a"), false), vars("b")]),
+                (0..40)
+                    .map(|i| if i % 7 == 6 { b() } else { a() })
+                    .collect(),
+            ),
+            // `a{70}` (over 64 states) over 150 `a` rows: two matches, then a start alive at the
+            // boundary and starts too close to it.
+            (
+                Pattern::Quantified(
+                    Box::new(vars("a")),
+                    Quantifier::Range {
+                        min: 70,
+                        max: Some(70),
+                    },
+                    false,
+                ),
+                vec![a(); 150],
+            ),
+        ];
+        for (pat, rows) in cases {
+            let nfa = Nfa::compile(&pat);
+            let n_rows = rows.len();
+            let m = SetMatcher::new(rows);
+
+            // (a) One scan for every pull versus a fresh scan resumed per pull.
+            let mut shared_scan = MatchScan::new();
+            let mut shared = Vec::new();
+            while let Some(mm) = nfa
+                .next_match(
+                    &mut shared_scan,
+                    n_rows,
+                    &m,
+                    &SkipMode::PastLastRow,
+                    &mut ScanBudget::unlimited(),
+                    true,
+                )
+                .await
+                .unwrap()
+            {
+                shared.push(mm);
+            }
+            let mut fresh = Vec::new();
+            let mut next = 0;
+            loop {
+                let mut scan = MatchScan::starting_at(next);
+                match nfa
+                    .next_match(
+                        &mut scan,
+                        n_rows,
+                        &m,
+                        &SkipMode::PastLastRow,
+                        &mut ScanBudget::unlimited(),
+                        true,
+                    )
+                    .await
+                    .unwrap()
+                {
+                    Some(mm) => {
+                        fresh.push(mm);
+                        next = scan.next_start();
+                    }
+                    None => break,
+                }
+            }
+            assert!(!shared.is_empty(), "the shape must produce matches");
+            assert_eq!(shared, fresh);
+
+            // (b) One scratch across a liveness loop versus fresh buffers per position.
+            let mut scratch = WalkScratch::default();
+            for p in 0..n_rows {
+                let with = nfa
+                    .reaches_boundary_alive_with(
+                        p,
+                        n_rows,
+                        &m,
+                        &mut ScanBudget::unlimited(),
+                        true,
+                        &mut scratch,
+                    )
+                    .await
+                    .unwrap();
+                let plain = nfa
+                    .reaches_boundary_alive(p, n_rows, &m, &mut ScanBudget::unlimited(), true)
+                    .await
+                    .unwrap();
+                assert_eq!(with, plain, "position {p}");
+            }
+        }
     }
 }
