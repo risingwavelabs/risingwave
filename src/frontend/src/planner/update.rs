@@ -63,6 +63,7 @@ impl Planner {
 
         let mut olds = Vec::new();
         let mut news = Vec::new();
+        let pk_column_ids = update.table.table_catalog.pk_column_ids();
 
         for (i, col) in update.table.table_catalog.columns().iter().enumerate() {
             // Skip generated columns and system columns.
@@ -88,7 +89,9 @@ impl Planner {
 
                 None => old.clone(),
             };
-            if !col.nullable() {
+            if !col.nullable()
+                || (!col.is_row_id_column() && pk_column_ids.contains(&col.column_id()))
+            {
                 new = FunctionCall::new_unchecked(
                     ExprType::CheckNotNull,
                     vec![
@@ -112,6 +115,7 @@ impl Planner {
             update.table_version_id,
             olds,
             news,
+            update.constraint_checks,
             returning,
         ))
         .into();

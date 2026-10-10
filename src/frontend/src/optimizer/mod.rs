@@ -961,12 +961,16 @@ impl LogicalPlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
-        let mut not_null_idxs = vec![];
-        for (idx, column) in column_descs.iter().enumerate() {
-            if !column.nullable {
-                not_null_idxs.push(idx);
-            }
-        }
+        // The filter runs after generated columns are evaluated, so its indices
+        // refer to the complete output schema, not the reduced DML schema.
+        let not_null_idxs = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, column)| {
+                (!column.nullable() || (row_id_index.is_none() && pk_column_indices.contains(&idx)))
+                    .then_some(idx)
+            })
+            .collect_vec();
 
         let version_column_indices = if !with_version_columns.is_empty() {
             find_version_column_indices(&columns, with_version_columns)?

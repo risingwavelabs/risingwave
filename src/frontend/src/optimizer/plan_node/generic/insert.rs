@@ -37,6 +37,8 @@ pub struct Insert<PlanRef: Eq + Hash> {
     pub input: PlanRef,
     pub column_indices: Vec<usize>, // columns in which to insert
     pub default_columns: Vec<(usize, ExprImpl)>, // columns to be set to default
+    /// Checks refer to the assembled row, after defaults and column reordering.
+    pub constraint_checks: Vec<ExprImpl>,
     pub row_id_index: Option<usize>,
     pub returning: bool,
 }
@@ -83,6 +85,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
             input,
             column_indices: self.column_indices.clone(),
             default_columns: self.default_columns.clone(),
+            constraint_checks: self.constraint_checks.clone(),
             row_id_index: self.row_id_index,
             returning: self.returning,
         }
@@ -111,6 +114,9 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
         vec.push(("table", Pretty::from(self.table_name.clone())));
         if self.returning {
             vec.push(("returning", Pretty::debug(&true)));
+        }
+        if !self.constraint_checks.is_empty() {
+            vec.push(("constraint_checks", Pretty::debug(&self.constraint_checks)));
         }
         if verbose {
             let collect = (self.column_indices.iter().enumerate())
@@ -141,6 +147,7 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
         table_visible_columns: Vec<ColumnCatalog>,
         column_indices: Vec<usize>,
         default_columns: Vec<(usize, ExprImpl)>,
+        constraint_checks: Vec<ExprImpl>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
@@ -152,6 +159,7 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
             input,
             column_indices,
             default_columns,
+            constraint_checks,
             row_id_index,
             returning,
         }

@@ -1,0 +1,257 @@
+# SQL DML must report constraint errors before emitting the invalid row.
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE generated_nn (id int primary key, g bigint not null as b, a int default 5, b int default 7);
+
+statement ok
+INSERT INTO generated_nn (id, b, a) VALUES (1, 11, 10);
+
+statement ok
+INSERT INTO generated_nn (a, id, b) SELECT 20, 2, 22;
+
+statement ok
+INSERT INTO generated_nn (id) VALUES (3);
+
+statement ok
+INSERT INTO generated_nn VALUES (5);
+
+statement error null value in column "g" of relation "generated_nn" violates not-null constraint
+INSERT INTO generated_nn (id, b) VALUES (4, NULL);
+
+statement error null value in column "g" of relation "generated_nn" violates not-null constraint
+INSERT INTO generated_nn (b, id) SELECT NULL::int, 4;
+
+statement ok
+UPDATE generated_nn SET b = a WHERE id = 1;
+
+statement error null value in column "g" of relation "generated_nn" violates not-null constraint
+UPDATE generated_nn SET b = NULL WHERE id = 1;
+
+# Failed update preserves the original row.
+query IIII
+SELECT * FROM generated_nn ORDER BY id;
+----
+1 10 10 10
+2 22 20 22
+3 7 5 7
+5 7 5 7
+
+statement ok
+DROP TABLE generated_nn;
+
+# A default that produces NULL must fail generated-column validation too.
+statement ok
+CREATE TABLE generated_default_nn (g int not null as b, a int, b int default NULL);
+
+statement error null value in column "g" of relation "generated_default_nn" violates not-null constraint
+INSERT INTO generated_default_nn (a) VALUES (1);
+
+statement error null value in column "g" of relation "generated_default_nn" violates not-null constraint
+INSERT INTO generated_default_nn (a) SELECT 1;
+
+statement ok
+INSERT INTO generated_default_nn (b, a) VALUES (3, 1);
+
+statement error null value in column "g" of relation "generated_default_nn" violates not-null constraint
+UPDATE generated_default_nn SET b = DEFAULT;
+
+query III
+SELECT * FROM generated_default_nn;
+----
+3 1 3
+
+statement ok
+DROP TABLE generated_default_nn;
+
+# Generated primary keys imply NOT NULL, with or without an explicit declaration.
+statement ok
+CREATE TABLE generated_pk (a int, g int primary key as a);
+
+statement ok
+CREATE TABLE generated_pk_nn (a int, g int primary key not null as a);
+
+statement error null value in column "g" of relation "generated_pk" violates not-null constraint
+INSERT INTO generated_pk (a) VALUES (NULL);
+
+statement error null value in column "g" of relation "generated_pk_nn" violates not-null constraint
+INSERT INTO generated_pk_nn (a) SELECT NULL::int;
+
+statement ok
+INSERT INTO generated_pk (a) VALUES (1);
+
+statement ok
+INSERT INTO generated_pk_nn (a) VALUES (1);
+
+statement error update modifying the column referenced by generated columns that are part of the primary key is not allowed
+UPDATE generated_pk SET a = NULL;
+
+statement ok
+CREATE TABLE ordinary_pk (a int primary key);
+
+statement ok
+CREATE TABLE ordinary_pk_nn (a int primary key not null);
+
+statement error null value in column "a" of relation "ordinary_pk" violates not-null constraint
+INSERT INTO ordinary_pk VALUES (NULL);
+
+statement error null value in column "a" of relation "ordinary_pk_nn" violates not-null constraint
+INSERT INTO ordinary_pk_nn SELECT NULL::int;
+
+statement ok
+CREATE TABLE composite_pk (a int, b int, g int as b, primary key (a, g));
+
+statement error null value in column "a" of relation "composite_pk" violates not-null constraint
+INSERT INTO composite_pk (a, b) VALUES (NULL, 1);
+
+statement error null value in column "g" of relation "composite_pk" violates not-null constraint
+INSERT INTO composite_pk (a, b) VALUES (1, NULL);
+
+statement ok
+INSERT INTO composite_pk (a, b) VALUES (1, 2);
+
+query TTT
+SELECT table_name, column_name, is_nullable FROM information_schema.columns
+WHERE table_name IN ('generated_pk', 'generated_pk_nn', 'ordinary_pk', 'ordinary_pk_nn', 'composite_pk')
+ORDER BY table_name, ordinal_position;
+----
+composite_pk a NO
+composite_pk b YES
+composite_pk g NO
+generated_pk a YES
+generated_pk g NO
+generated_pk_nn a YES
+generated_pk_nn g NO
+ordinary_pk a NO
+ordinary_pk_nn a NO
+
+statement ok
+DROP TABLE generated_pk;
+
+statement ok
+DROP TABLE generated_pk_nn;
+
+statement ok
+DROP TABLE ordinary_pk;
+
+statement ok
+DROP TABLE ordinary_pk_nn;
+
+statement ok
+DROP TABLE composite_pk;
+
+statement error impure expression cannot have a NOT NULL constraint
+CREATE TABLE impure_nn (g timestamptz not null as proctime());
+
+statement error impure expressions should not be part of the primary key
+CREATE TABLE impure_pk (g timestamptz primary key as proctime());
+
+statement ok
+CREATE TABLE nullable_impure (a int, g timestamptz as proctime());
+
+statement ok
+INSERT INTO nullable_impure (a) VALUES (1);
+
+statement ok
+DROP TABLE nullable_impure;
+
+# Sink inputs share the streaming filter with connector and SQL inputs.
+statement ok
+CREATE TABLE nn_input (id int, v int) APPEND ONLY;
+
+statement ok
+INSERT INTO nn_input VALUES (1, 10), (2, NULL), (3, 30);
+
+statement ok
+CREATE TABLE nn_sink_generated (id int, g int not null as v, v int);
+
+statement ok
+CREATE TABLE nn_sink_null_first (id int, g int as NULL::int, v int not null);
+
+statement ok
+CREATE TABLE nn_sink_one_first (id int, g int as 1, v int not null);
+
+statement ok
+CREATE TABLE nn_sink_pk (id int, v int primary key);
+
+statement ok
+CREATE TABLE nn_sink_generated_pk (id int, g int primary key as v, v int);
+
+statement ok
+CREATE SINK nn_s1 INTO nn_sink_generated (id, v) AS SELECT id, v FROM nn_input WITH (type = 'append-only');
+
+statement ok
+CREATE SINK nn_s2 INTO nn_sink_null_first (id, v) AS SELECT id, v FROM nn_input WITH (type = 'append-only');
+
+statement ok
+CREATE SINK nn_s3 INTO nn_sink_one_first (id, v) AS SELECT id, v FROM nn_input WITH (type = 'append-only');
+
+statement ok
+CREATE SINK nn_s4 INTO nn_sink_pk AS SELECT id, v FROM nn_input WITH (type = 'append-only');
+
+statement ok
+CREATE SINK nn_s5 INTO nn_sink_generated_pk (id, v) AS SELECT id, v FROM nn_input WITH (type = 'append-only');
+
+query III retry 30 backoff 1s
+SELECT * FROM nn_sink_generated ORDER BY id;
+----
+1 10 10
+3 30 30
+
+query III retry 30 backoff 1s
+SELECT * FROM nn_sink_null_first ORDER BY id;
+----
+1 NULL 10
+3 NULL 30
+
+query III retry 30 backoff 1s
+SELECT * FROM nn_sink_one_first ORDER BY id;
+----
+1 1 10
+3 1 30
+
+query II retry 30 backoff 1s
+SELECT * FROM nn_sink_pk ORDER BY id;
+----
+1 10
+3 30
+
+query III retry 30 backoff 1s
+SELECT * FROM nn_sink_generated_pk ORDER BY id;
+----
+1 10 10
+3 30 30
+
+statement ok
+DROP SINK nn_s1;
+
+statement ok
+DROP SINK nn_s2;
+
+statement ok
+DROP SINK nn_s3;
+
+statement ok
+DROP SINK nn_s4;
+
+statement ok
+DROP SINK nn_s5;
+
+statement ok
+DROP TABLE nn_sink_generated;
+
+statement ok
+DROP TABLE nn_sink_null_first;
+
+statement ok
+DROP TABLE nn_sink_one_first;
+
+statement ok
+DROP TABLE nn_sink_pk;
+
+statement ok
+DROP TABLE nn_sink_generated_pk;
+
+statement ok
+DROP TABLE nn_input;

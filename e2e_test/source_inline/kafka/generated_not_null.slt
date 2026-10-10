@@ -1,0 +1,206 @@
+# A single partition and a final valid sentinel establish ingestion completion.
+control substitution on
+
+system ok
+rpk topic delete generated_nullability_27400 >/dev/null 2>&1 || true
+
+system ok
+rpk topic create generated_nullability_27400 -p 1
+
+statement ok
+CREATE TABLE kafka_nn_ordinary_nn (id int, v int not null)
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_nn_generated_nn (id int, v int, g int not null as v)
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_nn_ordinary_pk (id int, v int primary key)
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_nn_ordinary_pk_nn (id int, v int primary key not null)
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_nn_generated_pk (id int, v int, g int primary key as v)
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_nn_generated_pk_nn (id int, v int, g int primary key not null as v)
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_nn_null_first (id int, g int as NULL::int, v int not null)
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_nn_one_first (id int, g int as 1, v int not null)
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_nn_header_nn (id int, v int, g varchar not null as h)
+INCLUDE HEADER 'required' varchar AS h
+WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'generated_nullability_27400',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+system ok
+printf '%s\n' '{"id":1,"v":10}' | rpk topic produce generated_nullability_27400 -p 0 -H 'required=ok'
+
+# Missing payload field, explicit null, and missing header are distinct cases.
+system ok
+printf '%s\n' '{"id":2}' '{"id":3,"v":null}' '{"id":4,"v":40}' | rpk topic produce generated_nullability_27400 -p 0
+
+system ok
+printf '%s\n' '{"id":99,"v":99}' | rpk topic produce generated_nullability_27400 -p 0 -H 'required=sentinel'
+
+query I retry 60 backoff 1s
+SELECT count(*) FROM (
+SELECT id FROM kafka_nn_ordinary_nn WHERE id = 99
+UNION ALL
+SELECT id FROM kafka_nn_generated_nn WHERE id = 99
+UNION ALL
+SELECT id FROM kafka_nn_ordinary_pk WHERE id = 99
+UNION ALL
+SELECT id FROM kafka_nn_ordinary_pk_nn WHERE id = 99
+UNION ALL
+SELECT id FROM kafka_nn_generated_pk WHERE id = 99
+UNION ALL
+SELECT id FROM kafka_nn_generated_pk_nn WHERE id = 99
+UNION ALL
+SELECT id FROM kafka_nn_null_first WHERE id = 99
+UNION ALL
+SELECT id FROM kafka_nn_one_first WHERE id = 99
+UNION ALL
+SELECT id FROM kafka_nn_header_nn WHERE id = 99
+) sentinels;
+----
+9
+
+query II
+SELECT * FROM kafka_nn_ordinary_nn ORDER BY id;
+----
+1 10
+4 40
+99 99
+
+query III
+SELECT * FROM kafka_nn_generated_nn ORDER BY id;
+----
+1 10 10
+4 40 40
+99 99 99
+
+query II
+SELECT * FROM kafka_nn_ordinary_pk ORDER BY id;
+----
+1 10
+4 40
+99 99
+
+query II
+SELECT * FROM kafka_nn_ordinary_pk_nn ORDER BY id;
+----
+1 10
+4 40
+99 99
+
+query III
+SELECT * FROM kafka_nn_generated_pk ORDER BY id;
+----
+1 10 10
+4 40 40
+99 99 99
+
+query III
+SELECT * FROM kafka_nn_generated_pk_nn ORDER BY id;
+----
+1 10 10
+4 40 40
+99 99 99
+
+query III
+SELECT * FROM kafka_nn_null_first ORDER BY id;
+----
+1 NULL 10
+4 NULL 40
+99 NULL 99
+
+query III
+SELECT * FROM kafka_nn_one_first ORDER BY id;
+----
+1 1 10
+4 1 40
+99 1 99
+
+query IIT
+SELECT id, v, g FROM kafka_nn_header_nn ORDER BY id;
+----
+1 10 ok
+99 99 sentinel
+
+statement ok
+DROP TABLE kafka_nn_ordinary_nn;
+
+statement ok
+DROP TABLE kafka_nn_generated_nn;
+
+statement ok
+DROP TABLE kafka_nn_ordinary_pk;
+
+statement ok
+DROP TABLE kafka_nn_ordinary_pk_nn;
+
+statement ok
+DROP TABLE kafka_nn_generated_pk;
+
+statement ok
+DROP TABLE kafka_nn_generated_pk_nn;
+
+statement ok
+DROP TABLE kafka_nn_null_first;
+
+statement ok
+DROP TABLE kafka_nn_one_first;
+
+statement ok
+DROP TABLE kafka_nn_header_nn;
+
+system ok
+rpk topic delete generated_nullability_27400

@@ -130,12 +130,22 @@ impl ExprRewritable<Logical> for LogicalInsert {
             .into_iter()
             .map(|(c, e)| (c, r.rewrite_expr(e)))
             .collect();
+        new.core.constraint_checks = new
+            .core
+            .constraint_checks
+            .into_iter()
+            .map(|e| r.rewrite_expr(e))
+            .collect();
         new.into()
     }
 }
 
 impl ExprVisitable for LogicalInsert {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core
+            .constraint_checks
+            .iter()
+            .for_each(|e| v.visit_expr(e));
         self.core
             .default_columns
             .iter()
