@@ -472,7 +472,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         match self.completing_task.wait_completing_task().await {
             Ok(Some(output)) => self
                 .checkpoint_control
-                .ack_completed(&mut self.partial_graph_manager, output),
+                .ack_completed(&mut self.partial_graph_manager, output)?,
             Ok(None) => {}
             Err(err) => {
                 error!(
@@ -626,7 +626,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 ) => {
                     match complete_result {
                         Ok(output) => {
-                            self.checkpoint_control.ack_completed(&mut self.partial_graph_manager, output);
+                            if let Err(e) = self.checkpoint_control.ack_completed(
+                                &mut self.partial_graph_manager,
+                                output,
+                            ) {
+                                self.failure_recovery(e).await;
+                            }
                         }
                         Err(e) => {
                             self.failure_recovery(e).await;
@@ -760,7 +765,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                             self.context.notify_creating_job_failed(Some(database_id), format!("database {} reset due to node {} failure: {}", database_id, worker_id, err.as_report())).await;
                                             // TODO: add log on blocking time
                                             let output = self.completing_task.wait_completing_task().await?;
-                                            entering_recovery.enter(output, &mut self.partial_graph_manager);
+                                            entering_recovery.enter(output, &mut self.partial_graph_manager)?;
                                         }
                                     }
                                 }  else {
@@ -791,7 +796,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                             .await?;
                                             // TODO: add log on blocking time
                                             let output = self.completing_task.wait_completing_task().await?;
-                                            entering_recovery.enter(output, &mut self.partial_graph_manager);
+                                            entering_recovery.enter(output, &mut self.partial_graph_manager)?;
                                         }
                                     }
                                     PartialGraphEvent::Reset(reset_resps) => {
@@ -879,7 +884,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 .await?;
                                 // TODO: add log on blocking time
                                 let output = self.completing_task.wait_completing_task().await?;
-                                entering_recovery.enter(output, &mut self.partial_graph_manager);
+                                entering_recovery.enter(output, &mut self.partial_graph_manager)?;
                             }
                         };
                         if let Err(e) = result {
@@ -915,13 +920,21 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         );
                     }
                     Ok(Ok(hummock_version_stats)) => {
-                        self.checkpoint_control.ack_completed(
+                        if let Err(e) = self.checkpoint_control.ack_completed(
                             &mut self.partial_graph_manager,
                             BarrierCompleteOutput {
                                 epochs_to_ack,
                                 hummock_version_stats,
                             },
-                        );
+                        ) {
+                            // `clear_on_err` is already running inside recovery. Starting failure
+                            // recovery recursively would skip the remaining cleanup; report this
+                            // secondary error and continue to `notify_all_err` below.
+                            warn!(
+                                err = %e.as_report(),
+                                "failed to acknowledge completed barrier during clear"
+                            );
+                        }
                     }
                 }
             }

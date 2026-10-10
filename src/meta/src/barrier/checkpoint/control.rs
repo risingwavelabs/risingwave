@@ -152,7 +152,7 @@ impl CheckpointControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         output: BarrierCompleteOutput,
-    ) {
+    ) -> MetaResult<()> {
         self.hummock_version_stats = output.hummock_version_stats;
         for (database_id, (command_prev_epoch, independent_job_epochs)) in output.epochs_to_ack {
             self.databases
@@ -163,8 +163,9 @@ impl CheckpointControl {
                     partial_graph_manager,
                     command_prev_epoch,
                     independent_job_epochs,
-                );
+                )?;
         }
+        Ok(())
     }
 
     pub(crate) fn next_complete_barrier_task(
@@ -336,7 +337,8 @@ impl CheckpointControl {
                     | Command::FinishRefresh { .. }
                     | Command::ResetSource { .. }
                     | Command::ResumeBackfill { .. }
-                    | Command::InjectSourceOffsets { .. } => {
+                    | Command::InjectSourceOffsets { .. }
+                    | Command::ApplyIcebergPkIndexCompaction { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -1017,7 +1019,7 @@ impl DatabaseCheckpointControl {
                             finished_jobs.push((*job_id, epoch, resps));
                             continue;
                         };
-                        independent_jobs_task.push((*job_id, epoch, resps, info));
+                        independent_jobs_task.push((*job_id, epoch, resps, info, None));
                     }
                 }
                 IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
@@ -1029,11 +1031,11 @@ impl DatabaseCheckpointControl {
                             let task = task.get_or_insert_default();
                             task.finished_jobs.push(tracking_job);
                         }
-                        independent_jobs_task.push((*job_id, epoch, resps, info));
+                        independent_jobs_task.push((*job_id, epoch, resps, info, None));
                     }
                 }
                 IndependentCheckpointJob::IcebergV3(iceberg_job) => {
-                    if let Some((epoch, resps, info, tracking_job)) = iceberg_job
+                    if let Some((epoch, resps, info, tracking_job, compaction)) = iceberg_job
                         .start_completing(partial_graph_manager, min_upstream_inflight_barrier)
                     {
                         if let Some(tracking_job) = tracking_job {
@@ -1045,6 +1047,7 @@ impl DatabaseCheckpointControl {
                             epoch,
                             resps.into_values().collect_vec(),
                             info,
+                            compaction,
                         ));
                     }
                 }
@@ -1144,8 +1147,12 @@ impl DatabaseCheckpointControl {
         }
         if !independent_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
-            for (job_id, epoch, resps, info) in independent_jobs_task {
+            for (job_id, epoch, resps, info, compaction) in independent_jobs_task {
                 collect_independent_job_commit_epoch_info(task, epoch, resps, &info);
+                if let Some(compaction) = compaction {
+                    task.iceberg_pk_index_pre_commit_metadata
+                        .push(compaction.into());
+                }
                 task.epoch_infos
                     .try_insert(to_partial_graph_id(self.database_id, Some(job_id)), info)
                     .expect("non duplicate");
@@ -1158,7 +1165,7 @@ impl DatabaseCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         command_prev_epoch: Option<u64>,
         independent_job_epochs: Vec<(JobId, u64)>,
-    ) {
+    ) -> MetaResult<()> {
         {
             if let Some(epoch) = self.completing_barrier.take() {
                 assert_eq!(command_prev_epoch, Some(epoch.prev));
@@ -1179,12 +1186,13 @@ impl DatabaseCheckpointControl {
             };
             for (job_id, epoch) in independent_job_epochs {
                 if let Some(job) = self.independent_checkpoint_job_controls.get_mut(&job_id) {
-                    job.ack_completed(partial_graph_manager, epoch);
+                    job.ack_completed(partial_graph_manager, epoch)?;
                 }
                 // If the job is not found, it was dropped and already removed
                 // by `on_partial_graph_reset` while the completing task was running.
             }
         }
+        Ok(())
     }
 
     fn handle_refresh_table_info(
@@ -1232,7 +1240,8 @@ impl DatabaseCheckpointControl {
         hummock_version_stats: &HummockVersionStats,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
-        let curr_epoch = self.state.in_flight_prev_epoch().next();
+        let prev_epoch = self.state.in_flight_prev_epoch();
+        let curr_epoch = prev_epoch.next();
 
         let (mut command, notifier) = if let Some((command, notifier)) = command {
             (Some(command), Some(notifier))

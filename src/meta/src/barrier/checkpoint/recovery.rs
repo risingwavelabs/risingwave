@@ -268,10 +268,10 @@ impl DatabaseStatusAction<'_, EnterReset> {
         self,
         barrier_complete_output: Option<BarrierCompleteOutput>,
         partial_graph_manager: &mut PartialGraphManager,
-    ) {
+    ) -> MetaResult<()> {
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
-            self.control.ack_completed(partial_graph_manager, output);
+            self.control.ack_completed(partial_graph_manager, output)?;
         }
         let database_status = self
             .control
@@ -342,6 +342,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                 }
             },
         }
+        Ok(())
     }
 }
 
