@@ -54,6 +54,7 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::table::PbEngine;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -2265,7 +2266,7 @@ impl CatalogController {
     async fn mutate_fragment_by_fragment_id(
         &self,
         fragment_id: FragmentId,
-        mut fragment_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
+        mut fragment_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> MetaResult<bool>,
         err_msg: &'static str,
     ) -> MetaResult<()> {
         let inner = self.inner.read().await;
@@ -2285,7 +2286,7 @@ impl CatalogController {
         let mut pb_stream_node = stream_node.to_protobuf();
         let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
 
-        if !fragment_mutation_fn(fragment_type_mask, &mut pb_stream_node) {
+        if !fragment_mutation_fn(fragment_type_mask, &mut pb_stream_node)? {
             return Err(MetaError::invalid_parameter(format!(
                 "fragment id {fragment_id}: {}",
                 err_msg
@@ -2294,7 +2295,7 @@ impl CatalogController {
 
         Fragment::update(fragment::ActiveModel {
             fragment_id: Set(fragment_id),
-            stream_node: Set(stream_node),
+            stream_node: Set(StreamNode::from(&pb_stream_node)),
             ..Default::default()
         })
         .exec(&txn)
@@ -3422,9 +3423,30 @@ impl CatalogController {
         &self,
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<()> {
+        requested_throttle_type: ThrottleType,
+    ) -> MetaResult<ThrottleType> {
+        let mut throttle_type = requested_throttle_type;
         let update_rate_limit = |fragment_type_mask: FragmentTypeMask,
                                  stream_node: &mut PbStreamNode| {
+            // Existing sync log store fragments have no dedicated fragment flag.
+            let mut has_sync_log_store = false;
+            visit_stream_node_body(stream_node, |node| {
+                has_sync_log_store |= matches!(node, PbNodeBody::SyncLogStore(_));
+            });
+            if has_sync_log_store {
+                if rate_limit == Some(0) {
+                    return Err(MetaError::invalid_parameter(
+                        "sync log store read rate limit must be greater than 0",
+                    ));
+                }
+                visit_stream_node_mut(stream_node, |node| {
+                    if let PbNodeBody::SyncLogStore(node) = node {
+                        node.read_rate_limit = rate_limit;
+                    }
+                });
+                throttle_type = ThrottleType::SyncLogStoreRead;
+                return Ok(true);
+            }
             let mut found = false;
             if fragment_type_mask.contains_any(
                 FragmentTypeFlag::dml_rate_limit_fragments()
@@ -3455,10 +3477,11 @@ impl CatalogController {
                     }
                 });
             }
-            found
+            Ok(found)
         };
         self.mutate_fragment_by_fragment_id(fragment_id, update_rate_limit, "fragment not found")
-            .await
+            .await?;
+        Ok(throttle_type)
     }
 
     /// Note: `FsFetch` created in old versions are not included.
@@ -3475,9 +3498,6 @@ impl CatalogController {
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
-            .filter(FragmentTypeMask::intersects_any(
-                FragmentTypeFlag::rate_limit_fragments(),
-            ))
             .into_tuple()
             .all(&txn)
             .await?;
@@ -3486,10 +3506,20 @@ impl CatalogController {
         for (fragment_id, job_id, fragment_type_mask, stream_node) in fragments {
             let stream_node = stream_node.to_protobuf();
             visit_stream_node_body(&stream_node, |node| {
+                if !matches!(node, PbNodeBody::SyncLogStore(_))
+                    && !FragmentTypeMask::from(fragment_type_mask)
+                        .contains_any(FragmentTypeFlag::rate_limit_fragments())
+                {
+                    return;
+                }
                 let mut rate_limit = None;
                 let mut node_name = None;
 
                 match node {
+                    PbNodeBody::SyncLogStore(node) => {
+                        rate_limit = node.read_rate_limit;
+                        node_name = Some("SYNC_LOG_STORE_READ");
+                    }
                     // source rate limit
                     PbNodeBody::Source(node) => {
                         if let Some(node_inner) = &node.source_inner {

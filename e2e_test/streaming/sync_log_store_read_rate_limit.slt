@@ -1,0 +1,149 @@
+# Apply ALTER FRAGMENT to sync log stores discovered from the stored plan.
+# The psql commands use the serial test database.
+onlyif serial
+statement ok
+set streaming_enable_unaligned_join = true;
+
+onlyif serial
+statement ok
+set streaming_parallelism = 1;
+
+onlyif serial
+statement ok
+create table sync_rate_left (id int primary key, v int);
+
+onlyif serial
+statement ok
+create table sync_rate_right (id int primary key);
+
+onlyif serial
+statement ok
+create materialized view sync_rate_mv as
+select l.id, l.v from sync_rate_left l join sync_rate_right r on l.id = r.id;
+
+onlyif serial
+query T
+select count(*) > 0 from rw_fragment_infos f join rw_streaming_jobs j on f.table_id = j.id
+where j.name = 'sync_rate_mv' and f.node::varchar like '%syncLogStore%';
+----
+t
+
+control substitution on
+
+onlyif serial
+system ok
+PGUSER=root psql -X -v ON_ERROR_STOP=1 -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} -p ${RISEDEV_RW_FRONTEND_PORT} -d dev <<'SQL'
+SELECT 'ALTER FRAGMENT ' || f.fragment_id || ' SET RATE_LIMIT = 100;'
+FROM rw_fragment_infos f JOIN rw_streaming_jobs j ON f.table_id = j.id
+WHERE j.name = 'sync_rate_mv' AND f.node::varchar LIKE '%syncLogStore%'
+\gexec
+SQL
+
+onlyif serial
+query TT
+select count(*) > 0, bool_and(rate_limit = 100) from rw_rate_limit r
+join rw_streaming_jobs j on r.table_id = j.id
+where j.name = 'sync_rate_mv' and r.node_name = 'SYNC_LOG_STORE_READ';
+----
+t t
+
+onlyif serial
+system ok
+if output=$(PGUSER=root psql -X -v ON_ERROR_STOP=1 -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} -p ${RISEDEV_RW_FRONTEND_PORT} -d dev 2>&1 <<'SQL'
+SELECT 'ALTER FRAGMENT ' || r.fragment_id || ' SET RATE_LIMIT = 0;'
+FROM rw_rate_limit r JOIN rw_streaming_jobs j ON r.table_id = j.id
+WHERE j.name = 'sync_rate_mv' AND r.node_name = 'SYNC_LOG_STORE_READ'
+LIMIT 1
+\gexec
+SQL
+); then
+  echo "zero read rate limit unexpectedly succeeded"
+  exit 1
+fi
+case "$output" in
+  *"sync log store read rate limit must be greater than 0"*) ;;
+  *) echo "$output"; exit 1 ;;
+esac
+
+onlyif serial
+query T
+select bool_and(rate_limit = 100) from rw_rate_limit r
+join rw_streaming_jobs j on r.table_id = j.id
+where j.name = 'sync_rate_mv' and r.node_name = 'SYNC_LOG_STORE_READ';
+----
+t
+
+onlyif serial
+statement ok
+insert into sync_rate_left select x, x from generate_series(1, 20) as t(x);
+
+onlyif serial
+statement ok
+insert into sync_rate_right select x from generate_series(1, 20) as t(x);
+
+onlyif serial
+statement ok
+flush;
+
+# New actors must inherit the updated inflight plan.
+onlyif serial
+statement ok
+alter materialized view sync_rate_mv set parallelism = 2;
+
+onlyif serial
+query T
+select bool_and(rate_limit = 100) from rw_rate_limit r
+join rw_streaming_jobs j on r.table_id = j.id
+where j.name = 'sync_rate_mv' and r.node_name = 'SYNC_LOG_STORE_READ';
+----
+t
+
+onlyif serial
+statement ok
+update sync_rate_left set v = v + 1;
+
+onlyif serial
+system ok
+PGUSER=root psql -X -v ON_ERROR_STOP=1 -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} -p ${RISEDEV_RW_FRONTEND_PORT} -d dev <<'SQL'
+SELECT 'ALTER FRAGMENT ' || r.fragment_id || ' SET RATE_LIMIT = DEFAULT;'
+FROM rw_rate_limit r JOIN rw_streaming_jobs j ON r.table_id = j.id
+WHERE j.name = 'sync_rate_mv' AND r.node_name = 'SYNC_LOG_STORE_READ'
+\gexec
+SQL
+
+onlyif serial
+query I
+select count(*) from rw_rate_limit r join rw_streaming_jobs j on r.table_id = j.id
+where j.name = 'sync_rate_mv' and r.node_name = 'SYNC_LOG_STORE_READ';
+----
+0
+
+onlyif serial
+statement ok
+flush;
+
+onlyif serial
+query II retry 30 backoff 1s
+select count(*), sum(v) from sync_rate_mv;
+----
+20 230
+
+onlyif serial
+statement ok
+drop materialized view sync_rate_mv;
+
+onlyif serial
+statement ok
+drop table sync_rate_left;
+
+onlyif serial
+statement ok
+drop table sync_rate_right;
+
+onlyif serial
+statement ok
+set streaming_enable_unaligned_join = default;
+
+onlyif serial
+statement ok
+set streaming_parallelism = default;

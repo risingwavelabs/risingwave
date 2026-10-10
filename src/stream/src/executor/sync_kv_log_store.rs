@@ -75,7 +75,9 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::FragmentId;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::timeout_auto_rebuild::TimeoutAutoRebuildIter;
@@ -339,6 +341,47 @@ pub mod metrics {
 pub(crate) type ReadFlushedChunkFuture =
     BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
 
+/// Shared by all three read paths. Wait before removing buffered data or advancing
+/// truncation progress, so checkpoints cannot discard a chunk awaiting quota.
+pub(crate) struct SyncLogStoreReadLimiter {
+    fragment_id: FragmentId,
+    inner: RateLimiter,
+}
+
+impl SyncLogStoreReadLimiter {
+    pub(crate) fn new(fragment_id: FragmentId, rate: Option<u32>) -> StreamExecutorResult<Self> {
+        Self::validate(rate)?;
+        Ok(Self {
+            fragment_id,
+            inner: RateLimiter::new(rate.into()),
+        })
+    }
+
+    fn validate(rate: Option<u32>) -> StreamExecutorResult<()> {
+        if rate == Some(0) {
+            return Err(anyhow!("sync log store read rate limit must be greater than 0").into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_barrier(&self, barrier: &Barrier) -> StreamExecutorResult<()> {
+        if let Some(Mutation::Throttle(entries)) = barrier.mutation.as_deref()
+            && let Some(config) = entries.get(&self.fragment_id)
+            && config.throttle_type() == ThrottleType::SyncLogStoreRead
+        {
+            Self::validate(config.rate_limit)?;
+            self.inner.update(config.rate_limit.into());
+        }
+        Ok(())
+    }
+
+    async fn wait(&self, rows: usize) {
+        if rows != 0 {
+            self.inner.wait(rows as u64).await;
+        }
+    }
+}
+
 pub struct SyncKvLogStoreContext<S: StateStore> {
     pub table_id: TableId,
     pub fragment_id: FragmentId,
@@ -349,6 +392,7 @@ pub struct SyncKvLogStoreContext<S: StateStore> {
     pub chunk_size: usize,
     pub pause_duration_ms: Duration,
     pub aligned: bool,
+    pub read_rate_limit: Option<u32>,
 }
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
@@ -371,6 +415,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         upstream: Executor,
         pause_duration_ms: Duration,
         aligned: bool,
+        read_rate_limit: Option<u32>,
     ) -> Self {
         let logstore_context = SyncKvLogStoreContext {
             table_id,
@@ -382,6 +427,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             chunk_size,
             pause_duration_ms,
             aligned,
+            read_rate_limit,
         };
         Self {
             actor_context,
@@ -588,6 +634,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         mut initial_write_state: LocalLogStoreWriteState<S>,
         metrics: SyncedKvLogStoreMetrics,
         initial_write_epoch: EpochPair,
+        read_limiter: SyncLogStoreReadLimiter,
     ) {
         tracing::info!("aligned mode");
         // We want to realign the buffer and the stream.
@@ -610,6 +657,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                     continue;
                 }
                 KvLogStoreItem::StreamChunk { chunk, .. } => {
+                    read_limiter.wait(chunk.cardinality()).await;
                     yield Message::Chunk(chunk);
                 }
             }
@@ -621,6 +669,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         for message in input {
             match message? {
                 Message::Barrier(barrier) => {
+                    read_limiter.apply_barrier(&barrier)?;
                     let is_checkpoint = barrier.is_checkpoint();
                     let mut progress = LogStoreVnodeProgress::None;
                     progress.apply_aligned(read_state.vnodes().clone(), barrier.epoch.prev, None);
@@ -636,6 +685,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                     }
                 }
                 Message::Chunk(chunk) => {
+                    read_limiter.wait(chunk.cardinality()).await;
                     yield Message::Chunk(chunk);
                 }
                 Message::Watermark(watermark) => {
@@ -743,9 +793,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let mut input = self.upstream.execute();
+        let read_limiter = SyncLogStoreReadLimiter::new(
+            self.logstore_context.fragment_id,
+            self.logstore_context.read_rate_limit,
+        )?;
 
         // init first epoch + local state store
         let first_barrier = expect_first_barrier(&mut input).await?;
+        read_limiter.apply_barrier(&first_barrier)?;
         let first_write_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier.clone());
 
@@ -763,6 +818,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 initial_write_state,
                 self.logstore_context.metrics.clone(),
                 initial_write_epoch,
+                read_limiter,
             );
             #[for_await]
             for message in aligned_stream {
@@ -811,6 +867,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 &read_state,
                                 &mut buffer,
                                 &self.logstore_context.metrics,
+                                &read_limiter,
                             )
                             .await
                     }
@@ -829,6 +886,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                     match either {
                         WriteFutureEvent::UpstreamMessageReceived(msg) => match msg {
                             Message::Barrier(barrier) => {
+                                read_limiter.apply_barrier(&barrier)?;
                                 if clean_state && barrier.kind.is_checkpoint() && !buffer.is_empty()
                                 {
                                     write_future_state = WriteFuture::paused(
@@ -954,10 +1012,16 @@ impl<S: StateStoreRead> ReadFuture<S> {
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &SyncedKvLogStoreMetrics,
+        read_limiter: &SyncLogStoreReadLimiter,
     ) -> StreamExecutorResult<StreamChunk> {
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
-                while let Some((epoch, item)) = stream.try_next().await? {
+                while let Some(item) = stream.peek().await {
+                    if let Ok((_, KvLogStoreItem::StreamChunk { chunk, .. })) = item {
+                        read_limiter.wait(chunk.cardinality()).await;
+                    }
+                    // peek retained this item across any cancelled quota wait.
+                    let (epoch, item) = stream.try_next().await?.expect("peeked log store item");
                     match item {
                         KvLogStoreItem::Barrier { vnodes, .. } => {
                             tracing::trace!(epoch, "read logstore barrier");
@@ -985,6 +1049,18 @@ impl<S: StateStoreRead> ReadFuture<S> {
             }
             ReadFuture::ReadingFlushedChunk { .. } => {}
             ReadFuture::Idle => loop {
+                if let Some((_, item)) = buffer.buffer.front() {
+                    let rows = match item {
+                        LogStoreBufferItem::StreamChunk { chunk, .. } => chunk.cardinality(),
+                        LogStoreBufferItem::Flushed {
+                            start_seq_id,
+                            end_seq_id,
+                            ..
+                        } => (end_seq_id - start_seq_id + 1) as usize,
+                        LogStoreBufferItem::Barrier { .. } => 0,
+                    };
+                    read_limiter.wait(rows).await;
+                }
                 let Some((item_epoch, item)) = buffer.pop_front() else {
                     return pending().await;
                 };
@@ -1349,6 +1425,351 @@ mod tests {
     use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
     use crate::executor::test_utils::MockSource;
 
+    fn read_throttle_barrier(epoch: u64, fragment_id: FragmentId, rate: Option<u32>) -> Barrier {
+        Barrier::new_test_barrier(test_epoch(epoch)).with_mutation(Mutation::Throttle(
+            [(
+                fragment_id,
+                risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig {
+                    rate_limit: rate,
+                    throttle_type: ThrottleType::SyncLogStoreRead.into(),
+                },
+            )]
+            .into(),
+        ))
+    }
+
+    fn test_context(max_buffer_size: usize) -> SyncKvLogStoreContext<MemoryStateStore> {
+        let table = gen_test_log_store_table(&KV_LOG_STORE_V2_INFO);
+        SyncKvLogStoreContext {
+            table_id: table.id,
+            fragment_id: 0.into(),
+            metrics: SyncedKvLogStoreMetrics::for_test(),
+            serde: LogStoreRowSerde::new(
+                &table,
+                Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+                &KV_LOG_STORE_V2_INFO,
+            ),
+            state_store: MemoryStateStore::new(),
+            max_buffer_size,
+            chunk_size: 256,
+            pause_duration_ms: Duration::from_millis(10),
+            aligned: false,
+            read_rate_limit: Some(10),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_rate_limit_all_paths() {
+        for path in ["buffer", "flushed", "persisted"] {
+            let context = test_context(1024);
+            let (mut read_state, mut writer) =
+                SyncedKvLogStoreExecutor::init_local_log_store_state(
+                    &context,
+                    EpochPair::new_test_epoch(test_epoch(1)),
+                )
+                .await
+                .unwrap();
+            let chunk = StreamChunk::from_pretty("I T\n U- 1 10\n U+ 1 20\n + 2 30\n + 3 40 D");
+            let mut buffer = SyncedLogStoreBuffer::new(1024, 256, &context.metrics);
+            let mut reader = ReadFuture::Idle;
+            if path == "buffer" {
+                buffer.add_chunk_to_buffer(
+                    chunk.clone(),
+                    FIRST_SEQ_ID,
+                    FIRST_SEQ_ID + 2,
+                    test_epoch(1),
+                );
+            } else {
+                let mut batch = writer.start_writer(true);
+                batch
+                    .write_chunk(&chunk, test_epoch(1), FIRST_SEQ_ID, FIRST_SEQ_ID + 2)
+                    .unwrap();
+                batch.write_barrier(test_epoch(1), true).unwrap();
+                let (_, vnodes) = batch.finish().await.unwrap();
+                if path == "flushed" {
+                    buffer.add_flushed_item_to_buffer(
+                        FIRST_SEQ_ID,
+                        FIRST_SEQ_ID + 2,
+                        vnodes.unwrap(),
+                        test_epoch(1),
+                    );
+                } else {
+                    writer
+                        .seal_current_epoch(test_epoch(2), LogStoreVnodeProgress::None)
+                        .post_yield_barrier(None)
+                        .await
+                        .unwrap();
+                    (read_state, _) = SyncedKvLogStoreExecutor::init_local_log_store_state(
+                        &context,
+                        EpochPair::new_test_epoch(test_epoch(2)),
+                    )
+                    .await
+                    .unwrap();
+                    let persisted = read_state
+                        .read_persisted_log_store(
+                            context.metrics.persistent_log_read_metrics.clone(),
+                            test_epoch(2),
+                            LogStoreReadStateStreamRangeStart::Unbounded,
+                        )
+                        .await
+                        .unwrap();
+                    reader = ReadFuture::ReadingPersistedStream(tokio_stream::StreamExt::peekable(
+                        persisted,
+                    ));
+                }
+            }
+            let limiter = SyncLogStoreReadLimiter::new(0.into(), Some(10)).unwrap();
+            let mut progress = LogStoreVnodeProgress::None;
+            let start = Instant::now();
+            // Repeated cancellation must neither consume quota nor remove pending data.
+            for _ in 0..5 {
+                assert!(
+                    reader
+                        .next_chunk(
+                            &mut progress,
+                            &read_state,
+                            &mut buffer,
+                            &context.metrics,
+                            &limiter
+                        )
+                        .now_or_never()
+                        .is_none(),
+                    "{path}"
+                );
+                assert!(matches!(progress, LogStoreVnodeProgress::None), "{path}");
+            }
+            if path != "persisted" {
+                assert_eq!(buffer.buffer.len(), 1);
+            }
+            let actual = tokio::time::timeout(
+                Duration::from_secs(2),
+                reader.next_chunk(
+                    &mut progress,
+                    &read_state,
+                    &mut buffer,
+                    &context.metrics,
+                    &limiter,
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(start.elapsed() >= Duration::from_millis(290), "{path}");
+            assert_eq!(actual.cardinality(), 3);
+            assert_stream_chunk_eq!(actual, chunk);
+            assert!(!matches!(progress, LogStoreVnodeProgress::None), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_rate_limit_barriers_and_recovery() {
+        for max_buffer_size in [0, 1024] {
+            let mut context = test_context(max_buffer_size);
+            context.read_rate_limit = Some(1);
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(
+                Schema {
+                    fields: test_payload_schema(&KV_LOG_STORE_V2_INFO)
+                        .into_iter()
+                        .map(|c| Field::new(c.name, c.data_type))
+                        .collect(),
+                },
+                vec![0],
+            );
+            let metrics = context.metrics.clone();
+            let store = context.state_store.clone();
+            let serde = context.serde.clone();
+            let table_id = context.table_id;
+            let executor = SyncedKvLogStoreExecutor {
+                actor_context: ActorContext::for_test(123),
+                upstream: source,
+                logstore_context: context,
+            };
+            let chunk = StreamChunk::from_pretty("I T\n + 1 10\n + 2 20\n + 3 30");
+            tx.push_barrier(test_epoch(1), false);
+            tx.push_chunk(chunk.clone());
+            let mut output = executor.boxed().execute();
+            assert!(output.next().await.unwrap().unwrap().is_barrier());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), output.next())
+                    .await
+                    .is_err()
+            );
+            // A checkpoint passes while its preceding data remains throttled. The pending
+            // in-memory chunk must still be flushed for recovery, with no truncation.
+            tx.send_barrier(Barrier::new_test_barrier(test_epoch(2)));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(500), output.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap()
+                    .is_barrier()
+            );
+            assert!(metrics.storage_write_count.get() > 0);
+            // Finish post-yield sealing before simulating recovery.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), output.next())
+                    .await
+                    .is_err()
+            );
+            drop(output);
+
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(
+                Schema {
+                    fields: test_payload_schema(&KV_LOG_STORE_V2_INFO)
+                        .into_iter()
+                        .map(|c| Field::new(c.name, c.data_type))
+                        .collect(),
+                },
+                vec![0],
+            );
+            let executor = SyncedKvLogStoreExecutor::new(
+                ActorContext::for_test(123),
+                table_id,
+                SyncedKvLogStoreMetrics::for_test(),
+                serde,
+                store,
+                max_buffer_size,
+                256,
+                source,
+                Duration::from_millis(10),
+                false,
+                Some(1),
+            );
+            tx.push_barrier(test_epoch(2), false);
+            let mut output = executor.boxed().execute();
+            assert!(output.next().await.unwrap().unwrap().is_barrier());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), output.next())
+                    .await
+                    .is_err()
+            );
+            // The mutation barrier bypasses the replay wait and releases its pending chunk.
+            tx.send_barrier(read_throttle_barrier(3, 0.into(), None));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(500), output.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap()
+                    .is_barrier()
+            );
+            let replay = tokio::time::timeout(Duration::from_millis(500), output.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+                .into_chunk()
+                .unwrap();
+            assert_stream_chunk_eq!(replay, chunk);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_rate_limit_aligned_replay() {
+        let mut context = test_context(1024);
+        context.aligned = true;
+        context.read_rate_limit = Some(1);
+        let (_, mut writer) = SyncedKvLogStoreExecutor::init_local_log_store_state(
+            &context,
+            EpochPair::new_test_epoch(test_epoch(1)),
+        )
+        .await
+        .unwrap();
+        let chunk = StreamChunk::from_pretty("I T\n + 1 10\n + 2 20");
+        let mut batch = writer.start_writer(false);
+        batch
+            .write_chunk(&chunk, test_epoch(1), FIRST_SEQ_ID, FIRST_SEQ_ID + 1)
+            .unwrap();
+        batch.write_barrier(test_epoch(1), true).unwrap();
+        batch.finish().await.unwrap();
+        writer
+            .seal_current_epoch(test_epoch(2), LogStoreVnodeProgress::None)
+            .post_yield_barrier(None)
+            .await
+            .unwrap();
+        drop(writer);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(
+            Schema {
+                fields: test_payload_schema(&KV_LOG_STORE_V2_INFO)
+                    .into_iter()
+                    .map(|c| Field::new(c.name, c.data_type))
+                    .collect(),
+            },
+            vec![0],
+        );
+        let executor = SyncedKvLogStoreExecutor {
+            actor_context: ActorContext::for_test(123),
+            upstream: source,
+            logstore_context: context,
+        };
+        // The initial mutation overrides the limit restored from the plan.
+        tx.send_barrier(read_throttle_barrier(2, 0.into(), Some(10)));
+        let mut output = executor.boxed().execute();
+        assert!(output.next().await.unwrap().unwrap().is_barrier());
+        let start = Instant::now();
+        assert!(output.next().now_or_never().is_none());
+        let actual = tokio::time::timeout(Duration::from_secs(1), output.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .into_chunk()
+            .unwrap();
+        assert_stream_chunk_eq!(actual, chunk);
+        assert!(start.elapsed() >= Duration::from_millis(190));
+        tx.send_barrier(read_throttle_barrier(3, 0.into(), None));
+        tx.push_chunk(chunk.clone());
+        assert!(output.next().await.unwrap().unwrap().is_barrier());
+        let actual = tokio::time::timeout(Duration::from_millis(100), output.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .into_chunk()
+            .unwrap();
+        assert_stream_chunk_eq!(actual, chunk);
+    }
+
+    #[tokio::test]
+    async fn test_read_rate_limit_mutation_matching() {
+        let limiter = SyncLogStoreReadLimiter::new(1.into(), Some(1)).unwrap();
+        limiter
+            .apply_barrier(&read_throttle_barrier(1, 2.into(), None))
+            .unwrap();
+        let unrelated = Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Throttle(
+            [(
+                1.into(),
+                risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig {
+                    rate_limit: None,
+                    throttle_type: ThrottleType::Backfill.into(),
+                },
+            )]
+            .into(),
+        ));
+        limiter.apply_barrier(&unrelated).unwrap();
+        assert!(limiter.wait(1).now_or_never().is_none());
+        limiter
+            .apply_barrier(&read_throttle_barrier(3, 1.into(), Some(20)))
+            .unwrap();
+        assert_eq!(limiter.inner.rate_limit(), Some(20).into());
+        assert!(
+            limiter
+                .apply_barrier(&read_throttle_barrier(4, 1.into(), Some(0)))
+                .is_err()
+        );
+        assert_eq!(limiter.inner.rate_limit(), Some(20).into());
+        limiter
+            .apply_barrier(&read_throttle_barrier(5, 1.into(), None))
+            .unwrap();
+        assert!(limiter.wait(1000).now_or_never().is_some());
+        assert!(limiter.wait(0).now_or_never().is_some());
+        assert!(SyncLogStoreReadLimiter::new(1.into(), Some(0)).is_err());
+    }
+
     fn init_logger() {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -1387,6 +1808,7 @@ mod tests {
             source,
             Duration::from_millis(256),
             false,
+            None,
         )
         .boxed();
 
@@ -1482,6 +1904,7 @@ mod tests {
             source,
             Duration::from_millis(256),
             false,
+            None,
         )
         .boxed();
 
@@ -1574,6 +1997,7 @@ mod tests {
             source,
             Duration::from_millis(256),
             false,
+            None,
         )
         .boxed();
 
