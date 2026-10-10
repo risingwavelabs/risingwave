@@ -345,7 +345,7 @@ mod tests {
 
         test!(general_to_text(Decimal::try_from(1.222).unwrap()), "1.222");
 
-        test!(general_to_text(Decimal::NaN), "NaN");
+        test!(general_to_text(Decimal::NAN), "NaN");
     }
 
     #[test]

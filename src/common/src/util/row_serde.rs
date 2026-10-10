@@ -181,15 +181,15 @@ mod tests {
             let serde = OrderedRowSerde::new(schema, order_types);
             let row1 = OwnedRow::new(vec![
                 Some(S::Utf8("abc".into())),
-                Some(S::Decimal(Decimal::NaN)),
+                Some(S::Decimal(Decimal::NAN)),
             ]);
             let row2 = OwnedRow::new(vec![
                 Some(S::Utf8("abd".into())),
-                Some(S::Decimal(Decimal::PositiveInf)),
+                Some(S::Decimal(Decimal::POSITIVE_INF)),
             ]);
             let row3 = OwnedRow::new(vec![
                 Some(S::Utf8("abc".into())),
-                Some(S::Decimal(Decimal::NegativeInf)),
+                Some(S::Decimal(Decimal::NEGATIVE_INF)),
             ]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
             let mut array = vec![];

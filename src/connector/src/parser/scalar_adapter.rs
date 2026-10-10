@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use bytes::{Buf, BufMut, BytesMut};
 use pg_bigdecimal::PgNumeric;
 use risingwave_common::types::{
-    DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRefImpl, StructValue,
+    DataType, Decimal, DecimalParts, Int256, ListValue, ScalarImpl, ScalarRefImpl, StructValue,
 };
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type, to_sql_checked};
@@ -436,7 +436,7 @@ fn pg_numeric_to_rw_int256(val: &PgNumeric) -> Option<ScalarImpl> {
 
 fn pg_numeric_to_rw_numeric(val: &PgNumeric) -> Option<ScalarImpl> {
     match val {
-        PgNumeric::NegativeInf => Some(ScalarImpl::from(Decimal::NegativeInf)),
+        PgNumeric::NegativeInf => Some(ScalarImpl::from(Decimal::NEGATIVE_INF)),
         PgNumeric::Normalized(big_decimal) => {
             match Decimal::from_str(big_decimal.to_string().as_str()) {
                 Ok(num) => Some(ScalarImpl::from(num)),
@@ -446,8 +446,8 @@ fn pg_numeric_to_rw_numeric(val: &PgNumeric) -> Option<ScalarImpl> {
                 }
             }
         }
-        PgNumeric::PositiveInf => Some(ScalarImpl::from(Decimal::PositiveInf)),
-        PgNumeric::NaN => Some(ScalarImpl::from(Decimal::NaN)),
+        PgNumeric::PositiveInf => Some(ScalarImpl::from(Decimal::POSITIVE_INF)),
+        PgNumeric::NaN => Some(ScalarImpl::from(Decimal::NAN)),
     }
 }
 
@@ -472,11 +472,11 @@ fn string_to_pg_numeric(s: &str) -> PgNumeric {
 }
 
 fn rw_numeric_to_pg_numeric(val: Decimal) -> PgNumeric {
-    match val {
-        Decimal::NegativeInf => PgNumeric::NegativeInf,
-        Decimal::Normalized(inner) => PgNumeric::Normalized(inner.to_string().parse().unwrap()),
-        Decimal::PositiveInf => PgNumeric::PositiveInf,
-        Decimal::NaN => PgNumeric::NaN,
+    match val.to_parts() {
+        DecimalParts::NegativeInf => PgNumeric::NegativeInf,
+        DecimalParts::Finite { .. } => PgNumeric::Normalized(val.to_string().parse().unwrap()),
+        DecimalParts::PositiveInf => PgNumeric::PositiveInf,
+        DecimalParts::NaN => PgNumeric::NaN,
     }
 }
 

@@ -22,7 +22,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Datum, Decimal, DecimalParts, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
@@ -213,11 +213,13 @@ impl_chrono_tiberius_wrapper!(TimestampTiberiusWrapper, Timestamp, NaiveDateTime
 
 impl<'a> tiberius::IntoSql<'a> for DecimalTiberiusWrapper {
     fn into_sql(self) -> tiberius::ColumnData<'a> {
-        match self.0 {
-            Decimal::Normalized(d) => d.into_sql(),
-            Decimal::NaN => tiberius::ColumnData::Numeric(None),
-            Decimal::PositiveInf => tiberius::ColumnData::Numeric(None),
-            Decimal::NegativeInf => tiberius::ColumnData::Numeric(None),
+        match self.0.to_parts() {
+            DecimalParts::Finite { mantissa, scale } => {
+                tiberius::numeric::Numeric::new_with_scale(mantissa, scale as u8).into_sql()
+            }
+            DecimalParts::NaN | DecimalParts::PositiveInf | DecimalParts::NegativeInf => {
+                tiberius::ColumnData::Numeric(None)
+            }
         }
     }
 }
@@ -227,7 +229,7 @@ impl<'a> tiberius::FromSql<'a> for DecimalTiberiusWrapper {
     fn from_sql(value: &'a tiberius::ColumnData<'static>) -> tiberius::Result<Option<Self>> {
         tiberius::Result::Ok(
             RustDecimal::from_sql(value)?
-                .map(Decimal::Normalized)
+                .map(Decimal::from)
                 .map(DecimalTiberiusWrapper::from),
         )
     }

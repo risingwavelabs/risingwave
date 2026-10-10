@@ -20,7 +20,7 @@ use phf::{Set, phf_set};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Decimal};
+use risingwave_common::types::{DataType, DecimalParts};
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
@@ -785,11 +785,11 @@ fn bind_params(
                 ScalarRefImpl::Float64(v) => query.bind(v.into_inner()),
                 ScalarRefImpl::Utf8(v) => query.bind(v.to_owned()),
                 ScalarRefImpl::Bool(v) => query.bind(v),
-                ScalarRefImpl::Decimal(v) => match v {
-                    Decimal::Normalized(d) => {
-                        query.bind(decimal_to_sql(&d));
+                ScalarRefImpl::Decimal(v) => match v.to_parts() {
+                    DecimalParts::Finite { mantissa, scale } => {
+                        query.bind(Numeric::new_with_scale(mantissa, scale as u8));
                     }
-                    Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf => {
+                    DecimalParts::NaN | DecimalParts::PositiveInf | DecimalParts::NegativeInf => {
                         tracing::warn!(
                             "Inf, -Inf, Nan in RisingWave decimal is converted into SQL Server null!"
                         );
@@ -1003,21 +1003,6 @@ fn sql_server_data_type_is_compatible(rw_data_type: &DataType, sql_server_data_t
         | DataType::Map(_)
         | DataType::Vector(_) => false,
     }
-}
-
-/// The implementation is copied from tiberius crate.
-fn decimal_to_sql(decimal: &rust_decimal::Decimal) -> Numeric {
-    let unpacked = decimal.unpack();
-
-    let mut value = (((unpacked.hi as u128) << 64)
-        + ((unpacked.mid as u128) << 32)
-        + unpacked.lo as u128) as i128;
-
-    if decimal.is_sign_negative() {
-        value = -value;
-    }
-
-    Numeric::new_with_scale(value, decimal.scale() as u8)
 }
 
 #[cfg(test)]

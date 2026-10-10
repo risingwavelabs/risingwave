@@ -83,7 +83,7 @@ use risingwave_pb::id::TypedId;
 
 pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
-pub use self::decimal::{Decimal, PowError as DecimalPowError};
+pub use self::decimal::{Decimal, DecimalParts, PowError as DecimalPowError};
 pub use self::interval::{DateTimeField, Interval, IntervalDisplay, test_utils};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::list_type::ListType;
