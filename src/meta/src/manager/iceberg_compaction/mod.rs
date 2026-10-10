@@ -14,6 +14,7 @@
 
 mod gc;
 mod manual;
+mod recovery;
 mod schedule;
 mod stream;
 
@@ -70,6 +71,9 @@ struct IcebergCompactionManagerInner {
     snapshot_expiration_sink_ids: HashSet<SinkId>,
     manifest_rewrite_sink_ids: HashSet<SinkId>,
     manual_compaction_waiters: HashMap<SinkId, ManualCompactionWaiter>,
+    /// Sinks whose maintenance state is being rebuilt after meta starts. Clearing a sink's
+    /// maintenance removes it, so a dropped sink is not rebuilt by a stale recovery.
+    recovering_sink_ids: HashSet<SinkId>,
 }
 
 impl IcebergCompactionManager {
@@ -97,6 +101,7 @@ impl IcebergCompactionManager {
                     snapshot_expiration_sink_ids: HashSet::default(),
                     manifest_rewrite_sink_ids: HashSet::default(),
                     manual_compaction_waiters: HashMap::default(),
+                    recovering_sink_ids: HashSet::default(),
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,

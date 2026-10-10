@@ -138,6 +138,7 @@ fn empty_inner() -> IcebergCompactionManagerInner {
         snapshot_expiration_sink_ids: HashSet::new(),
         manifest_rewrite_sink_ids: HashSet::new(),
         manual_compaction_waiters: HashMap::new(),
+        recovering_sink_ids: HashSet::new(),
     }
 }
 
@@ -1974,4 +1975,53 @@ async fn test_pre_dispatch_failure_requeues_track_behind_overdue_candidates() {
     let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
     assert_eq!(handles.len(), 1);
     assert_eq!(handles[0].sink_id, healthy);
+}
+
+#[tokio::test]
+async fn test_recovered_maintenance_only_fills_missing_tracks_of_live_sinks() {
+    use crate::manager::iceberg_compaction::recovery::RecoveredBacklog;
+
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(43);
+    let now = Instant::now();
+    let config = new_test_iceberg_config(60, 10, CompactionType::Full);
+    let backlog = |pending_commit_count| RecoveredBacklog {
+        pending_commit_count,
+        observed_snapshot: Some(committed_snapshot(7, 7)),
+    };
+    let recover = |pending_commit_count| {
+        manager.inner.write().recovering_sink_ids.insert(sink_id);
+        manager.apply_recovered_maintenance(sink_id, &config, backlog(pending_commit_count), now);
+    };
+
+    // The recovered backlog is scheduled by the configured interval.
+    recover(2);
+    {
+        let guard = manager.inner.read();
+        let track = &guard.sink_schedules[&sink_id];
+        assert_eq!(track.pending_commit_count, 2);
+        assert_eq!(
+            track
+                .latest_observed_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.snapshot_id),
+            Some(7)
+        );
+        assert!(!track.should_trigger(now));
+        assert!(track.should_trigger(now + Duration::from_secs(60)));
+        assert!(guard.recovering_sink_ids.is_empty());
+    }
+
+    // A track created by a commit after the restart is kept.
+    recover(5);
+    assert_eq!(
+        manager.inner.read().sink_schedules[&sink_id].pending_commit_count,
+        2
+    );
+
+    // A sink dropped while its table was loading is not rebuilt.
+    manager.inner.write().recovering_sink_ids.insert(sink_id);
+    manager.clear_iceberg_maintenance_by_sink_id(sink_id);
+    manager.apply_recovered_maintenance(sink_id, &config, backlog(2), now);
+    assert!(!manager.inner.read().sink_schedules.contains_key(&sink_id));
 }

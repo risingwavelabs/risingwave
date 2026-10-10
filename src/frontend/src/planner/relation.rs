@@ -16,12 +16,11 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use iceberg::spec::{Operation, TableMetadata};
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH,
-    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
+    CdcTableDesc, ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    Schema,
 };
 use risingwave_common::constants::log_store::{
     EPOCH_COLUMN_NAME, INSERT_OP_CODE, ROW_OP_COLUMN_NAME, encode_epoch,
@@ -30,6 +29,7 @@ use risingwave_common::session_config::IcebergQueryStorageMode;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::WithOptionsSecResolved;
+use risingwave_connector::connector_common::risingwave_iceberg_commit_epoch;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
@@ -1031,27 +1031,6 @@ source: {:?}",
     }
 }
 
-/// Find the latest known RisingWave commit boundary. Iceberg compaction produces `replace`
-/// snapshots without changing table contents, so the marker is inherited across a chain of those
-/// snapshots. We deliberately stop at any other unmarked operation: an external or legacy append
-/// cannot be assigned a safe log-store boundary.
-fn risingwave_iceberg_commit_epoch(metadata: &TableMetadata, snapshot_id: i64) -> Option<u64> {
-    let mut snapshot = metadata.snapshot_by_id(snapshot_id)?;
-    loop {
-        if let Some(epoch) = snapshot
-            .summary()
-            .additional_properties
-            .get(RISINGWAVE_ICEBERG_COMMIT_EPOCH)
-        {
-            return epoch.parse().ok();
-        }
-        if snapshot.summary().operation != Operation::Replace {
-            return None;
-        }
-        snapshot = metadata.snapshot_by_id(snapshot.parent_snapshot_id()?)?;
-    }
-}
-
 fn resolve_current_cdc_table_desc(
     mut desc: CdcTableDesc,
     upstream_properties: &WithOptionsSecResolved,
@@ -1069,85 +1048,7 @@ fn resolve_current_cdc_table_desc(
 mod tests {
     use std::collections::BTreeMap;
 
-    use iceberg::spec::{
-        FormatVersion, MAIN_BRANCH, NestedField, PrimitiveType, Schema as IcebergSchema, Snapshot,
-        SortOrder, Summary, TableMetadataBuilder, Type, UnboundPartitionSpec,
-    };
-
     use super::*;
-
-    #[test]
-    fn test_risingwave_commit_epoch_inherits_only_across_replace_snapshots() {
-        let append = snapshot(
-            1,
-            None,
-            Operation::Append,
-            HashMap::from([(RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "42".to_owned())]),
-        );
-        let replace = snapshot(2, Some(1), Operation::Replace, HashMap::new());
-        let metadata = metadata_with_current(vec![append, replace]);
-        assert_eq!(risingwave_iceberg_commit_epoch(&metadata, 2), Some(42));
-
-        let external_append = snapshot(3, Some(2), Operation::Append, HashMap::new());
-        let metadata = metadata_with_current(vec![
-            snapshot(
-                1,
-                None,
-                Operation::Append,
-                HashMap::from([(RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "42".to_owned())]),
-            ),
-            snapshot(2, Some(1), Operation::Replace, HashMap::new()),
-            external_append,
-        ]);
-        assert_eq!(risingwave_iceberg_commit_epoch(&metadata, 3), None);
-    }
-
-    fn metadata_with_current(mut snapshots: Vec<Snapshot>) -> TableMetadata {
-        let current = snapshots.pop().unwrap();
-        let mut builder = TableMetadataBuilder::new(
-            IcebergSchema::builder()
-                .with_fields(vec![
-                    NestedField::new(1, "id", Type::Primitive(PrimitiveType::Long), false).into(),
-                ])
-                .build()
-                .unwrap(),
-            UnboundPartitionSpec::builder().build(),
-            SortOrder::unsorted_order(),
-            "s3://warehouse/db/table".to_owned(),
-            FormatVersion::V2,
-            HashMap::new(),
-        )
-        .unwrap();
-        for snapshot in snapshots {
-            builder = builder.add_snapshot(snapshot).unwrap();
-        }
-        builder
-            .set_branch_snapshot(current, MAIN_BRANCH)
-            .unwrap()
-            .build()
-            .unwrap()
-            .metadata
-    }
-
-    fn snapshot(
-        snapshot_id: i64,
-        parent_snapshot_id: Option<i64>,
-        operation: Operation,
-        additional_properties: HashMap<String, String>,
-    ) -> Snapshot {
-        Snapshot::builder()
-            .with_snapshot_id(snapshot_id)
-            .with_parent_snapshot_id(parent_snapshot_id)
-            .with_sequence_number(snapshot_id)
-            .with_timestamp_ms(snapshot_id)
-            .with_manifest_list(format!("/snap-{snapshot_id}.avro"))
-            .with_summary(Summary {
-                operation,
-                additional_properties,
-            })
-            .with_schema_id(0)
-            .build()
-    }
 
     #[test]
     fn test_resolve_current_cdc_table_desc_replaces_stale_properties() {

@@ -20,7 +20,7 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use iceberg::Catalog;
 use iceberg::arrow::schema_to_arrow_schema;
-use iceberg::spec::{DataFile, FormatVersion, Operation, SerializedDataFile, TableMetadata};
+use iceberg::spec::{DataFile, SerializedDataFile};
 use iceberg::table::Table;
 use iceberg::transaction::{AddColumn, ApplyTransactionAction, FastAppendAction, Transaction};
 use itertools::Itertools;
@@ -43,7 +43,9 @@ use tracing::warn;
 
 use super::commit_retry::{self, CommitError, CommitRetryLogContext};
 use super::{GLOBAL_SINK_METRICS, IcebergConfig, SinkError, commit_branch, resolve_partition_type};
-use crate::connector_common::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
+use crate::connector_common::{
+    IcebergCommittedSnapshot, IcebergSinkCompactionUpdate, count_snapshots_since_rewrite,
+};
 use crate::sink::catalog::SinkId;
 use crate::sink::{Result, SinglePhaseCommitCoordinator, SinkParam, TwoPhaseCommitCoordinator};
 
@@ -253,16 +255,7 @@ pub struct IcebergSinkCommitter {
 impl IcebergSinkCommitter {
     fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
         let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
-        let metadata = self.table.metadata();
-        metadata
-            .snapshot_for_ref(&branch)
-            .map(|snapshot| IcebergCommittedSnapshot {
-                branch,
-                snapshot_id: snapshot.snapshot_id(),
-                timestamp_ms: snapshot.timestamp_ms(),
-                max_file_sequence_number: (metadata.format_version() >= FormatVersion::V2)
-                    .then_some(snapshot.sequence_number()),
-            })
+        IcebergCommittedSnapshot::from_branch_head(self.table.metadata(), &branch)
     }
 
     fn notify_iceberg_compaction_scheduler(&self, force_compaction: bool) {
@@ -1009,39 +1002,10 @@ impl IcebergSinkCommitter {
         Ok(())
     }
 
-    /// Check the number of snapshots on the given branch lineage since the last rewrite operation.
-    /// Returns the number of snapshots since the last rewrite.
-    fn count_snapshots_since_rewrite_in_metadata(metadata: &TableMetadata, branch: &str) -> usize {
-        // Start from the latest snapshot of the commit branch.
-        let mut snapshot_id = metadata
-            .snapshot_for_ref(branch)
-            .map(|snapshot| snapshot.snapshot_id());
-        let mut count = 0;
-
-        // Iterate through snapshots by parent lineage to find the last rewrite.
-        while let Some(current_snapshot_id) = snapshot_id {
-            let Some(snapshot) = metadata.snapshot_by_id(current_snapshot_id) else {
-                break;
-            };
-
-            // Check if this snapshot represents a rewrite operation.
-            if snapshot.summary().operation == Operation::Replace {
-                // Found a rewrite operation, stop counting.
-                break;
-            }
-
-            // Increment count for each snapshot that is not a rewrite.
-            count += 1;
-            snapshot_id = snapshot.parent_snapshot_id();
-        }
-
-        count
-    }
-
     /// Returns the number of snapshots in the current commit branch since the last rewrite.
     fn count_snapshots_since_rewrite(&self) -> usize {
         let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
-        Self::count_snapshots_since_rewrite_in_metadata(self.table.metadata(), branch.as_str())
+        count_snapshots_since_rewrite(self.table.metadata(), branch.as_str())
     }
 
     /// Wait until snapshot count since last rewrite is below the limit
@@ -1094,7 +1058,7 @@ mod tests {
     use std::collections::HashMap;
 
     use iceberg::spec::{
-        FormatVersion, MAIN_BRANCH, NestedField, PrimitiveType, Schema, Snapshot,
+        FormatVersion, MAIN_BRANCH, NestedField, Operation, PrimitiveType, Schema, Snapshot,
         SnapshotReference, SnapshotRetention, SortOrder, Summary, TableMetadataBuilder, Type,
         UnboundPartitionSpec,
     };
@@ -1295,7 +1259,7 @@ mod tests {
     }
 
     #[test]
-    fn test_count_snapshots_since_rewrite_in_metadata_ignores_other_branches() {
+    fn test_count_snapshots_since_rewrite_ignores_other_branches() {
         let mut builder = TableMetadataBuilder::new(
             Schema::builder()
                 .with_fields(vec![
@@ -1334,10 +1298,7 @@ mod tests {
             .unwrap()
             .metadata;
 
-        let count = IcebergSinkCommitter::count_snapshots_since_rewrite_in_metadata(
-            &metadata,
-            super::super::ICEBERG_COW_BRANCH,
-        );
+        let count = count_snapshots_since_rewrite(&metadata, super::super::ICEBERG_COW_BRANCH);
 
         assert_eq!(count, 1);
     }
