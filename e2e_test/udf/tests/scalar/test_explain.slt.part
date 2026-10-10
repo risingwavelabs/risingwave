@@ -62,8 +62,8 @@ from (
 group by a;
 ----
 StreamMaterialize { columns: [a, foo_sum, foo_sum_2], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
-└─StreamProject { exprs: [t.a, sum($expr1), wrap_scalar($expr1)] }
-  └─StreamHashAgg { group_key: [t.a], aggs: [sum($expr1), wrap_scalar($expr1), count] }
+└─StreamProject { exprs: [t.a, Case((count($expr1) = 0:Int64), null:Int64, sum($expr1)) as $expr2, wrap_scalar($expr1)] }
+  └─StreamHashAgg { group_key: [t.a], aggs: [sum($expr1), wrap_scalar($expr1), count($expr1), count] }
     └─StreamExchange { dist: HashShard(t.a) }
       └─StreamProject { exprs: [t.a, $expr1, t._row_id] }
         └─StreamMaterializedExprs { exprs: [decimal_add(int_42::Decimal, gcd(t.a, jsonb_access(t.e, 1:Int32)::Int32)::Decimal)::Int32 as $expr1] }

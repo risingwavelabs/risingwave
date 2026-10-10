@@ -19,12 +19,12 @@
   stream_plan: |-
     StreamMaterialize { columns: [x, y, sum, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.y, t._row_id) }
-      └─StreamHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, sum(t.x), t._row_id, t.y] }
+      └─StreamHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, $expr1, t._row_id, t.y] }
         ├─StreamExchange { dist: HashShard(t.y) }
         │ └─StreamShare { id: 1 }
         │   └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamProject { exprs: [t.y, sum(t.x)] }
-          └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), count] }
+        └─StreamProject { exprs: [t.y, Case((count(t.x) = 0:Int64), null:Int64, sum(t.x)) as $expr1] }
+          └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), count(t.x), count] }
             └─StreamExchange { dist: HashShard(t.y) }
               └─StreamShare { id: 1 }
                 └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -392,9 +392,9 @@
         ├─StreamExchange { dist: HashShard(t.y) }
         │ └─StreamShare { id: 1 }
         │   └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamFilter { predicate: (sum(t.x) > 10:Int32) }
-          └─StreamProject { exprs: [t.y, sum(t.x)] }
-            └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), count] }
+        └─StreamFilter { predicate: ($expr1 > 10:Int32) }
+          └─StreamProject { exprs: [t.y, Case((count(t.x) = 0:Int64), null:Int64, sum(t.x)) as $expr1] }
+            └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), count(t.x), count] }
               └─StreamExchange { dist: HashShard(t.y) }
                 └─StreamShare { id: 1 }
                   └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

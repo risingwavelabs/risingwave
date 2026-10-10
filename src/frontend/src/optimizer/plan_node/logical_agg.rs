@@ -1431,27 +1431,94 @@ fn new_stream_hash_agg(
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }
 
-impl ToStream for LogicalAgg {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
+impl LogicalAgg {
+    /// Aggregates like `sum` should output NULL once no non-NULL input is left in the group. Their
+    /// retractable value state can't tell that apart from inputs cancelling out (e.g. `sum` goes
+    /// back to `0`), and the group's row count can't either because it also counts NULL inputs.
+    ///
+    /// For retractable input, pair each such call with a `count` of the same input and filter
+    /// (reusing an existing one if any), and output NULL when the count is `0`.
+    ///
+    /// Returns the agg with the extra `count` calls and the exprs projecting it back to the original
+    /// output, or `None` if there's no such call.
+    fn guard_empty_input_with_count(&self) -> Option<(LogicalAgg, Vec<ExprImpl>)> {
+        let needs_guard = |call: &PlanAggCall| {
+            matches!(
+                call.agg_type,
+                AggType::Builtin(
+                    PbAggKind::Sum
+                        | PbAggKind::BitAnd
+                        | PbAggKind::BitOr
+                        | PbAggKind::BitXor
+                        | PbAggKind::BoolAnd
+                        | PbAggKind::BoolOr
+                )
+            )
+        };
+        if !self.agg_calls().iter().any(needs_guard) {
+            return None;
+        }
+
+        let offset = self.group_key().len();
+        let mut exprs = self
+            .schema()
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, field)| InputRef::new(i, field.data_type()).into())
+            .collect_vec();
+        let mut core = self.core.clone();
+        for (i, call) in self.agg_calls().iter().enumerate() {
+            if !needs_guard(call) {
+                continue;
+            }
+            let count = PlanAggCall {
+                agg_type: PbAggKind::Count.into(),
+                return_type: DataType::Int64,
+                inputs: call.inputs.clone(),
+                distinct: call.distinct,
+                order_by: vec![],
+                filter: call.filter.clone(),
+                direct_args: vec![],
+            };
+            let count_idx = match core.agg_calls.iter().position(|c| c == &count) {
+                Some(idx) => idx,
+                None => {
+                    core.agg_calls.push(count);
+                    core.agg_calls.len() - 1
+                }
+            };
+            let is_empty = FunctionCall::new_unchecked(
+                ExprType::Equal,
+                vec![
+                    InputRef::new(offset + count_idx, DataType::Int64).into(),
+                    ExprImpl::literal_bigint(0),
+                ],
+                DataType::Boolean,
+            );
+            exprs[offset + i] = FunctionCall::new_unchecked(
+                ExprType::Case,
+                vec![
+                    is_empty.into(),
+                    ExprImpl::literal_null(call.return_type.clone()),
+                    InputRef::new(offset + i, call.return_type.clone()).into(),
+                ],
+                call.return_type.clone(),
+            )
+            .into();
+        }
+        Some((core.into(), exprs))
+    }
+
+    /// Converts to a stream plan on top of the already converted `stream_input`.
+    fn to_stream_with_stream_input(
+        &self,
+        stream_input: StreamPlanRef,
+        ctx: &ToStreamContext,
+    ) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
         let eowc = ctx.emit_on_window_close();
-        let input = self.input();
-
-        let stream_input = input.to_stream(ctx)?;
-
-        // Use Dedup operator, if possible.
-        if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
-        {
-            let group_key = self.group_key().to_vec();
-            let input_schema_len = input.schema().len();
-            let dedup: PlanRef = LogicalDedup::new(input, group_key.clone()).into();
-            let project = LogicalProject::with_mapping(
-                dedup,
-                ColIndexMapping::with_remaining_columns(&group_key, input_schema_len),
-            );
-            return project.to_stream(ctx);
-        }
 
         if self.agg_calls().iter().any(|call| {
             matches!(
@@ -1534,6 +1601,38 @@ impl ToStream for LogicalAgg {
             }
             Ok(project.into())
         }
+    }
+}
+
+impl ToStream for LogicalAgg {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
+        use super::stream::prelude::*;
+
+        let input = self.input();
+
+        let stream_input = input.to_stream(ctx)?;
+
+        // Use Dedup operator, if possible.
+        if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
+        {
+            let group_key = self.group_key().to_vec();
+            let input_schema_len = input.schema().len();
+            let dedup: PlanRef = LogicalDedup::new(input, group_key.clone()).into();
+            let project = LogicalProject::with_mapping(
+                dedup,
+                ColIndexMapping::with_remaining_columns(&group_key, input_schema_len),
+            );
+            return project.to_stream(ctx);
+        }
+
+        if !stream_input.append_only()
+            && let Some((agg, exprs)) = self.guard_empty_input_with_count()
+        {
+            let plan = agg.to_stream_with_stream_input(stream_input, ctx)?;
+            return Ok(StreamProject::new(generic::Project::new(exprs, plan)).into());
+        }
+
+        self.to_stream_with_stream_input(stream_input, ctx)
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {

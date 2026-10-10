@@ -1,0 +1,86 @@
+# Aggregates over retractable input should return NULL once only NULL inputs (or inputs not
+# passing the filter) are left in the group, instead of the value their state reset to.
+# See https://github.com/risingwavelabs/risingwave/issues/27329 and
+# https://github.com/risingwavelabs/risingwave/issues/7412.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (g int, v int, b boolean);
+
+statement ok
+insert into t values (1, null, null), (1, 1, true), (2, 2, false), (2, 3, true);
+
+statement ok
+create materialized view mv_group as
+select
+    g,
+    sum(v) as s,
+    sum(v) filter (where v > 1) as s_filter,
+    sum(distinct v) as s_distinct,
+    avg(v) as a,
+    bit_and(v) as band,
+    bit_or(v) as bor,
+    bit_xor(v) as bxor,
+    bool_and(b) as land,
+    bool_or(b) as lor,
+    count(v) as c
+from t group by g;
+
+statement ok
+create materialized view mv_simple as
+select sum(v) as s, bit_xor(v) as bxor, bool_or(b) as lor, count(*) as c from t where g = 1;
+
+query IIIIRIIIBBI
+select * from mv_group order by g;
+----
+1 1 NULL 1 1    1 1 1 t t 1
+2 5 5    5 2.50 2 3 1 f t 2
+
+query IIBI
+select * from mv_simple;
+----
+1 1 t 2
+
+# Only NULL is left in group 1; group 2 has no row passing the filter.
+statement ok
+delete from t where (g = 1 and v = 1) or (g = 2 and v = 3);
+
+statement ok
+update t set v = 1 where g = 2;
+
+query IIIIRIIIBBI
+select * from mv_group order by g;
+----
+1 NULL NULL NULL NULL NULL NULL NULL NULL NULL 0
+2 1    NULL 1    1    1    1    1    f    f    1
+
+query IIBI
+select * from mv_simple;
+----
+NULL NULL NULL 1
+
+# Non-NULL input comes back.
+statement ok
+insert into t values (1, 4, true);
+
+query IIIIRIIIBBI
+select * from mv_group order by g;
+----
+1 4 4    4 4 4 4 4 t t 1
+2 1 NULL 1 1 1 1 1 f f 1
+
+query IIBI
+select * from mv_simple;
+----
+4 4 t 2
+
+statement ok
+drop materialized view mv_simple;
+
+statement ok
+drop materialized view mv_group;
+
+statement ok
+drop table t;
