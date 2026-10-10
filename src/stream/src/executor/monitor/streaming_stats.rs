@@ -231,6 +231,8 @@ pub struct StreamingMetrics {
     // MySQL CDC binlog monitoring
     pub mysql_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
     pub mysql_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
+    pub mariadb_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
+    pub mariadb_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
 
     // SQL Server CDC LSN monitoring
     pub sqlserver_cdc_state_change_lsn: LabelGuardedIntGaugeVec,
@@ -368,6 +370,22 @@ impl StreamingMetrics {
         let mysql_cdc_state_binlog_position = register_guarded_int_gauge_vec_with_registry!(
             "stream_mysql_cdc_state_binlog_position",
             "Current binlog position stored in MySQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let mariadb_cdc_state_binlog_file_seq = register_guarded_int_gauge_vec_with_registry!(
+            "stream_mariadb_cdc_state_binlog_file_seq",
+            "Current binlog file sequence number stored in MariaDB CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let mariadb_cdc_state_binlog_position = register_guarded_int_gauge_vec_with_registry!(
+            "stream_mariadb_cdc_state_binlog_position",
+            "Current binlog position stored in MariaDB CDC state table",
             &["source_id"],
             registry,
         )
@@ -1533,6 +1551,8 @@ impl StreamingMetrics {
             pg_cdc_jni_commit_offset_lsn,
             mysql_cdc_state_binlog_file_seq,
             mysql_cdc_state_binlog_position,
+            mariadb_cdc_state_binlog_file_seq,
+            mariadb_cdc_state_binlog_position,
             sqlserver_cdc_state_change_lsn,
             sqlserver_cdc_state_commit_lsn,
             sqlserver_cdc_jni_commit_offset_lsn,

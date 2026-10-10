@@ -59,6 +59,7 @@ pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
+pub const MARIADB_CDC_CONNECTOR: &str = Mariadb::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
 pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
 pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
@@ -97,6 +98,7 @@ impl<'a> From<&'a str> for CdcSourceType {
     fn from(name: &'a str) -> Self {
         match name {
             MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
+            MARIADB_CDC_CONNECTOR => CdcSourceType::Mariadb,
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
             CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
             MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
@@ -111,6 +113,7 @@ impl CdcSourceType {
     pub fn as_str_name(&self) -> &str {
         match self {
             CdcSourceType::Mysql => "MySQL",
+            CdcSourceType::Mariadb => "MariaDB",
             CdcSourceType::Postgres => "Postgres",
             CdcSourceType::Citus => "Citus",
             CdcSourceType::Mongodb => "MongoDB",

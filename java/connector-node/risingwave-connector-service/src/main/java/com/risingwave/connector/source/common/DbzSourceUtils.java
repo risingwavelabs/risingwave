@@ -145,6 +145,8 @@ public class DbzSourceUtils {
         LOG.info("Waiting for streaming source of {} to start", dbServerName);
         if (sourceType == SourceTypeE.MYSQL) {
             return waitForStreamingRunningInner("mysql", dbServerName, waitStreamingStartTimeout);
+        } else if (sourceType == SourceTypeE.MARIADB) {
+            return waitForStreamingRunningInner("mariadb", dbServerName, waitStreamingStartTimeout);
         } else if (sourceType == SourceTypeE.POSTGRES) {
             return waitForStreamingRunningInner(
                     "postgres", dbServerName, waitStreamingStartTimeout);

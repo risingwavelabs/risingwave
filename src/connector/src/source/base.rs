@@ -50,7 +50,7 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::SplitImpl::{
-    CitusCdc, MongodbCdc, MysqlCdc, OracleCdc, PostgresCdc, SqlServerCdc,
+    CitusCdc, MariadbCdc, MongodbCdc, MysqlCdc, OracleCdc, PostgresCdc, SqlServerCdc,
 };
 use crate::source::batch::BatchSourceSplitImpl;
 use crate::source::monitor::EnumeratorMetrics;
@@ -822,6 +822,7 @@ impl SplitImpl {
         matches!(
             self,
             MysqlCdc(_)
+                | MariadbCdc(_)
                 | PostgresCdc(_)
                 | MongodbCdc(_)
                 | CitusCdc(_)
@@ -834,6 +835,7 @@ impl SplitImpl {
     pub fn get_cdc_split_offset(&self) -> String {
         match self {
             MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            MariadbCdc(split) => split.start_offset().clone().unwrap_or_default(),
             PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
             MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
             CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),

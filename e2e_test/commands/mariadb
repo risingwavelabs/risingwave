@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+# Use the MariaDB image's matching client for local risedev containers. CI uses
+# the system MariaDB/MySQL-compatible client with the user-managed service.
+if [[ -n "${RISEDEV_MARIADB_CONTAINER:-}" ]]; then
+  exec docker exec -i "${RISEDEV_MARIADB_CONTAINER}" mariadb \
+    --user "${RISEDEV_MARIADB_USER}" \
+    --password="${MARIADB_PWD}" \
+    "$@"
+fi
+
+REAL_PATH=$(echo "$PATH" | sed "s,$(dirname "$0"):,,g")
+
+PATH=${REAL_PATH} mysql \
+  --host "${MARIADB_HOST}" \
+  --port "${MARIADB_TCP_PORT}" \
+  --user "${RISEDEV_MARIADB_USER}" \
+  --password="${MARIADB_PWD}" \
+  "$@"

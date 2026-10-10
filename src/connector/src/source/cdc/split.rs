@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConnectorResult;
 use crate::source::cdc::external::DebeziumOffset;
 use crate::source::cdc::external::postgres::PostgresOffset;
-use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait, Mysql, Postgres, SqlServer};
+use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait, Mariadb, Mysql, Postgres, SqlServer};
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.
@@ -78,6 +78,11 @@ trait CdcSplitTrait: Send + Sync {
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct MySqlCdcSplit {
+    pub inner: CdcSplitBase,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
+pub struct MariaDbCdcSplit {
     pub inner: CdcSplitBase,
 }
 
@@ -141,6 +146,38 @@ impl MySqlCdcSplit {
         let file_seq = extract_binlog_file_seq(file)?;
 
         Some((file_seq, pos))
+    }
+}
+
+impl MariaDbCdcSplit {
+    pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
+        Self {
+            inner: CdcSplitBase::new(split_id, start_offset),
+        }
+    }
+
+    pub fn mariadb_binlog_offset(&self) -> Option<(u64, u64)> {
+        binlog_offset(&self.inner)
+    }
+}
+
+impl CdcSplitTrait for MariaDbCdcSplit {
+    fn split_id(&self) -> u32 {
+        self.inner.split_id
+    }
+
+    fn start_offset(&self) -> &Option<String> {
+        &self.inner.start_offset
+    }
+
+    fn is_snapshot_done(&self) -> bool {
+        self.inner.snapshot_done
+    }
+
+    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
+        self.inner.snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
+        self.inner.start_offset = Some(last_seen_offset);
+        Ok(())
     }
 }
 
@@ -409,6 +446,7 @@ impl CdcSplitTrait for OracleCdcSplit {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
     pub mysql_split: Option<MySqlCdcSplit>,
+    pub mariadb_split: Option<MariaDbCdcSplit>,
 
     #[serde(rename = "pg_split")] // backward compatibility
     pub postgres_split: Option<PostgresCdcSplit>,
@@ -446,6 +484,7 @@ macro_rules! dispatch_cdc_split {
     ($dbz_split:expr, $as_type:tt, $body:expr) => {
         dispatch_cdc_split_inner!($dbz_split, $as_type, {
             {Mysql, mysql_split},
+            {Mariadb, mariadb_split},
             {Postgres, postgres_split},
             {Citus, citus_split},
             {Mongodb, mongodb_split},
@@ -477,6 +516,7 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
     pub fn new(split_id: u32, start_offset: Option<String>, server_addr: Option<String>) -> Self {
         let mut ret = Self {
             mysql_split: None,
+            mariadb_split: None,
             postgres_split: None,
             citus_split: None,
             mongodb_split: None,
@@ -488,6 +528,10 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
             CdcSourceType::Mysql => {
                 let split = MySqlCdcSplit::new(split_id, start_offset);
                 ret.mysql_split = Some(split);
+            }
+            CdcSourceType::Mariadb => {
+                let split = MariaDbCdcSplit::new(split_id, start_offset);
+                ret.mariadb_split = Some(split);
             }
             CdcSourceType::Postgres => {
                 let split = PostgresCdcSplit::new(split_id, start_offset, None);
@@ -552,6 +596,21 @@ impl DebeziumCdcSplit<Mysql> {
     pub fn mysql_binlog_offset(&self) -> Option<(u64, u64)> {
         self.mysql_split.as_ref()?.mysql_binlog_offset()
     }
+}
+
+impl DebeziumCdcSplit<Mariadb> {
+    pub fn mariadb_binlog_offset(&self) -> Option<(u64, u64)> {
+        self.mariadb_split.as_ref()?.mariadb_binlog_offset()
+    }
+}
+
+fn binlog_offset(split: &CdcSplitBase) -> Option<(u64, u64)> {
+    let offset_str = split.start_offset.as_ref()?;
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let file = source_offset.get("file")?.as_str()?;
+    let pos = source_offset.get("pos")?.as_u64()?;
+    Some((extract_binlog_file_seq(file)?, pos))
 }
 
 impl DebeziumCdcSplit<SqlServer> {
@@ -652,6 +711,17 @@ pub fn extract_sql_server_commit_lsn_from_offset_str(offset_str: &str) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mariadb_split_round_trip_and_binlog_offset() {
+        let offset = r#"{"sourcePartition":{"server":"RW_CDC_1"},"sourceOffset":{"file":"mariadb-bin.000123","pos":456},"isHeartbeat":false}"#;
+        let split = DebeziumCdcSplit::<Mariadb>::new(1, Some(offset.to_owned()), None);
+        assert_eq!(split.mariadb_binlog_offset(), Some((123, 456)));
+
+        let json = split.encode_to_json();
+        let restored = DebeziumCdcSplit::<Mariadb>::restore_from_json(json).unwrap();
+        assert_eq!(restored, split);
+    }
 
     #[test]
     fn test_parse_sql_server_lsn_str() {

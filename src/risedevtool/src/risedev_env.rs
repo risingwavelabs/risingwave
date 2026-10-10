@@ -157,6 +157,24 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 // It's expected to create another dedicated user for the source.
                 writeln!(env, r#"RISEDEV_MYSQL_WITH_OPTIONS_COMMON="connector='mysql-cdc',hostname='{host}',port='{port}'""#,).unwrap();
             }
+            ServiceConfig::MariaDb(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                writeln!(env, r#"MARIADB_HOST="{host}""#).unwrap();
+                writeln!(env, r#"MARIADB_TCP_PORT="{port}""#).unwrap();
+                writeln!(env, r#"RISEDEV_MARIADB_USER="{user}""#).unwrap();
+                writeln!(env, r#"MARIADB_PWD="{password}""#).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"RISEDEV_MARIADB_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_MARIADB_WITH_OPTIONS_COMMON="connector='mariadb-cdc',hostname='{host}',port='{port}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::Pubsub(c) => {
                 let address = &c.address;
                 let port = &c.port;

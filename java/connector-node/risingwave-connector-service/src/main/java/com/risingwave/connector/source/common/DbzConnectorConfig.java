@@ -83,6 +83,7 @@ public class DbzConnectorConfig {
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
+    private static final String MARIADB_CONFIG_FILE = "risingwave-mariadb.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
     private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
     private static final String SQL_SERVER_CONFIG_FILE = "sql_server.properties";
@@ -153,6 +154,14 @@ public class DbzConnectorConfig {
         return waitStreamingStartTimeout;
     }
 
+    public static String normalizeMariaDbSslMode(String sslMode) {
+        return switch (sslMode) {
+            case "disabled", "preferred" -> "disable";
+            case "required" -> "trust";
+            default -> sslMode;
+        };
+    }
+
     public DbzConnectorConfig(
             SourceTypeE source,
             long sourceId,
@@ -183,8 +192,17 @@ public class DbzConnectorConfig {
                 isCdcSourceJob,
                 waitStreamingStartTimeout);
 
-        if (source == SourceTypeE.MYSQL) {
-            var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
+        if (source == SourceTypeE.MYSQL || source == SourceTypeE.MARIADB) {
+            var mysqlProps =
+                    initiateDbConfig(
+                            source == SourceTypeE.MARIADB ? MARIADB_CONFIG_FILE : MYSQL_CONFIG_FILE,
+                            substitutor);
+
+            if (source == SourceTypeE.MARIADB) {
+                var sslMode =
+                        normalizeMariaDbSslMode(userProps.getOrDefault(MYSQL_SSL_MODE, "disabled"));
+                mysqlProps.setProperty("database.ssl.mode", sslMode);
+            }
 
             // Enable schema history for all MySQL CDC modes to handle schema changes properly
             mysqlProps.setProperty(OpendalSchemaHistory.SOURCE_ID, String.valueOf(sourceId));
