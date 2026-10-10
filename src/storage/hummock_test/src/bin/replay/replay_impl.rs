@@ -328,9 +328,11 @@ impl NotificationClient for ReplayNotificationClient {
         let op = self.first_resp.0.operation();
         let info = self.first_resp.0.info.clone();
 
-        self.notification_manager
-            .notify_hummock(op, info.unwrap())
-            .await;
+        self.notification_manager.notify_hummock_with_version(
+            op,
+            info.unwrap(),
+            Some(self.first_resp.0.version),
+        );
 
         Ok(ReplayChannel(rx))
     }

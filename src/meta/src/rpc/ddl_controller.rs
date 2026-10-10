@@ -750,11 +750,11 @@ impl DdlController {
             .run_command(database_id, Command::ResetSource { source_id })
             .await?;
 
-        // RESET SOURCE doesn't modify catalog, so return the current catalog version
+        // RESET SOURCE doesn't modify catalog, so return the current catalog version.
         let version = self
             .metadata_manager
             .catalog_controller
-            .notify_frontend_trivial()
+            .current_notification_version()
             .await;
         Ok(version)
     }
@@ -2489,7 +2489,7 @@ impl DdlController {
                 let catalog_version = self
                     .metadata_manager
                     .catalog_controller
-                    .notify_frontend_trivial()
+                    .current_notification_version()
                     .await;
                 let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
                 return Ok(WaitVersion {
