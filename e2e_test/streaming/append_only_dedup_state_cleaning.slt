@@ -1,0 +1,91 @@
+# Watermark-driven state cleaning of the append-only dedup executor, which serves `DISTINCT ON`
+# without `ORDER BY`, and `DISTINCT` / `GROUP BY` without aggregates on append-only input.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# With parallel upstream actors, idle actors can delay the merged watermark.
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE t (k INT, ts INT, WATERMARK FOR ts AS ts - 10) APPEND ONLY;
+
+# The watermark column is the first dedup column.
+statement ok
+CREATE MATERIALIZED VIEW mv_first AS SELECT DISTINCT ON (ts, k) ts, k FROM t;
+
+# The watermark column is the second dedup column, and the state table puts it first in the pk.
+statement ok
+CREATE MATERIALIZED VIEW mv_second AS SELECT DISTINCT ON (k, ts) k, ts FROM t;
+
+let first_tname
+SELECT name FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'mv_first' AND name LIKE '%appendonlydedup%';
+
+let second_tname
+SELECT name FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'mv_second' AND name LIKE '%appendonlydedup%';
+
+statement ok
+INSERT INTO t VALUES (1, 1), (2, 2), (1, 1);
+
+query II rowsort
+SELECT t_ts, t_k FROM ${first_tname};
+----
+1 1
+2 2
+
+query II rowsort
+SELECT t_k, t_ts FROM ${second_tname};
+----
+1 1
+2 2
+
+# Advance the watermark to 20. Rows below it are cleaned and no longer visible in the state.
+statement ok
+INSERT INTO t VALUES (3, 30);
+
+query II rowsort retry 30 backoff 1s
+SELECT t_ts, t_k FROM ${first_tname};
+----
+30 3
+
+query II rowsort retry 30 backoff 1s
+SELECT t_k, t_ts FROM ${second_tname};
+----
+3 30
+
+# The duplicate is dropped, and the row below the watermark is dropped by the watermark filter.
+statement ok
+INSERT INTO t VALUES (3, 30), (4, 25), (5, 5);
+
+query II rowsort
+SELECT * FROM mv_first;
+----
+1 1
+2 2
+25 4
+30 3
+
+query II rowsort
+SELECT * FROM mv_second;
+----
+1 1
+2 2
+3 30
+4 25
+
+statement ok
+DROP MATERIALIZED VIEW mv_first;
+
+statement ok
+DROP MATERIALIZED VIEW mv_second;
+
+statement ok
+DROP TABLE t;
+
+statement ok
+SET streaming_parallelism = default;
