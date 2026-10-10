@@ -15484,6 +15484,7 @@ dependencies = [
  "reqwest 0.13.4",
  "risingwave_common",
  "spin 0.12.3",
+ "tempfile",
  "thiserror 2.0.17",
  "thiserror-ext",
  "tokio-retry",
