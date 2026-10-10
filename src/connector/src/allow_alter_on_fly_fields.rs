@@ -373,6 +373,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "pulsar.properties.routing_mode".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // QdrantConfig
+    map.try_insert(
+        std::any::type_name::<QdrantConfig>().to_owned(),
+        [
+            "write_batch_size".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // SnowflakeV2Config
     map.try_insert(
         std::any::type_name::<SnowflakeV2Config>().to_owned(),

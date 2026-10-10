@@ -1699,6 +1699,36 @@ PulsarConfig:
     - pulsar.properties.routing.mode
     - pulsar.properties.routing_mode
     allow_alter_on_fly: true
+QdrantConfig:
+  fields:
+  - name: url
+    field_type: String
+    comments: gRPC endpoint of Qdrant, e.g. `http://localhost:6334`.
+    required: true
+  - name: collection_name
+    field_type: String
+    comments: Name of the collection to write points to. It is created if it does not exist.
+    required: true
+  - name: api_key
+    field_type: String
+    required: false
+  - name: distance
+    field_type: String
+    comments: |-
+      Distance of the vectors: `cosine`, `dot`, `euclid` or `manhattan`. Used to create the
+      collection, `cosine` by default. If set, an existing collection must use it.
+    required: false
+  - name: write_batch_size
+    field_type: usize
+    comments: |-
+      Maximum number of points buffered before they are written. Buffered points are also
+      written at every barrier.
+    required: false
+    default: DEFAULT_WRITE_BATCH_SIZE
+    allow_alter_on_fly: true
+  - name: r#type
+    field_type: String
+    required: true
 RedShiftConfig:
   fields:
   - name: jdbc.url
