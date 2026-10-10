@@ -94,26 +94,56 @@ impl Binder {
             }
         }
 
-        // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
+        // Try to find a correlated column in the enclosing scopes, starting from the innermost one.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name));
 
-        for (context, depth) in self.correlation_contexts() {
-            if matches!(context.clause, Some(Clause::Insert)) {
-                continue;
+        for scope in self.correlation_scopes() {
+            let mut found = None;
+            for (context, depth) in scope {
+                if matches!(context.clause, Some(Clause::Insert)) {
+                    continue;
+                }
+                match context.get_column_binding_indices(&schema_name, &table_name, &column_name) {
+                    Ok(indices) => {
+                        // All `FROM` items of a query level share one namespace, even when the
+                        // binder keeps the left inputs of a lateral factor in separate contexts.
+                        if found.is_some() {
+                            return Err(match &table_name {
+                                Some(table_name) => ErrorCode::InvalidReference(format!(
+                                    "table reference \"{}\" is ambiguous",
+                                    table_name
+                                )),
+                                None => ErrorCode::InvalidReference(format!(
+                                    "column reference \"{}\" is ambiguous",
+                                    column_name
+                                )),
+                            }
+                            .into());
+                        }
+                        found = Some((context, indices, depth));
+                    }
+                    Err(e @ ErrorCode::ItemNotFound(_)) => err = e,
+                    // An ambiguous name must not fall through to an outer scope.
+                    Err(e) => return Err(e.into()),
+                }
             }
-            match context.get_column_binding_index(&schema_name, &table_name, &column_name) {
-                Ok(index) => {
-                    let column = &context.columns[index];
-                    return Ok(CorrelatedInputRef::new(
-                        column.index,
-                        column.field.data_type.clone(),
-                        depth,
-                    )
-                    .into());
-                }
-                Err(e) => {
-                    err = e;
-                }
+
+            if let Some((context, mut indices, depth)) = found {
+                indices.sort(); // make sure we have a consistent result
+                let mut inputs = indices
+                    .iter()
+                    .map(|index| {
+                        let column = &context.columns[*index];
+                        CorrelatedInputRef::new(column.index, column.field.data_type.clone(), depth)
+                            .into()
+                    })
+                    .collect::<Vec<ExprImpl>>();
+                return if inputs.len() == 1 {
+                    Ok(inputs.pop().unwrap())
+                } else {
+                    // An unqualified reference to a column merged by `NATURAL`/`USING` join.
+                    Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
+                };
             }
         }
 
@@ -141,36 +171,42 @@ impl Binder {
         Err(err.into())
     }
 
-    /// Return visible outer column contexts in name-resolution order, paired with the semantic
-    /// correlation depth at which each context is owned.
+    /// Return visible outer column contexts grouped by name-resolution scope, innermost first.
+    /// Each context is paired with the semantic correlation depth at which it is owned.
+    ///
+    /// An upper query context and its visible lateral contexts are the `FROM` items of one query
+    /// level, so they form one scope: a name found in more than one of them is ambiguous rather
+    /// than resolved to whichever context comes first.
     ///
     /// A non-empty lateral context represents the left input of a potential `Apply`, so it adds a
     /// depth boundary. Empty contexts are parser/binder isolation frames and do not. An upper
     /// query or table-function context always contributes at least one boundary, even if its local
     /// `FROM` context is empty.
-    fn correlation_contexts(&self) -> Vec<(&crate::binder::BindContext, usize)> {
-        let mut contexts = vec![];
+    fn correlation_scopes(&self) -> Vec<Vec<(&crate::binder::BindContext, usize)>> {
+        let mut scopes = vec![];
         let mut depth = 1;
 
+        let mut scope = vec![];
         for lateral_context in self.lateral_contexts.iter().rev() {
             if lateral_context.is_visible {
-                contexts.push((&lateral_context.context, depth));
+                scope.push((&lateral_context.context, depth));
             }
             if !lateral_context.context.columns.is_empty() {
                 depth += 1;
             }
         }
+        scopes.push(scope);
 
         for (context, lateral_contexts) in self.visible_upper_subquery_contexts_rev() {
             let entry_depth = depth;
-            contexts.push((context, depth));
+            let mut scope = vec![(context, depth)];
             if !context.columns.is_empty() {
                 depth += 1;
             }
 
             for lateral_context in lateral_contexts.iter().rev() {
                 if lateral_context.is_visible {
-                    contexts.push((&lateral_context.context, depth));
+                    scope.push((&lateral_context.context, depth));
                 }
                 if !lateral_context.context.columns.is_empty() {
                     depth += 1;
@@ -178,8 +214,9 @@ impl Binder {
             }
 
             depth = depth.max(entry_depth + 1);
+            scopes.push(scope);
         }
 
-        contexts
+        scopes
     }
 }

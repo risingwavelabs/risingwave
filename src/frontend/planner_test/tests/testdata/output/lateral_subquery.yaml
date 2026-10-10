@@ -312,6 +312,25 @@
     select * from a right join
       (b cross join lateral (select a1, b1) z) on true;
   binder_error: 'Invalid input syntax: The combining JOIN type must be INNER or LEFT for a LATERAL reference.'
+- name: a lateral reference matching an earlier FROM item and a join input is ambiguous
+  sql: |
+    create table a (a1 int);
+    select * from a, (select 100 as a1) t cross join lateral (select a1 as y) z;
+  binder_error: |
+    Failed to bind expression: a1
+
+    Caused by:
+      Invalid reference: column reference "a1" is ambiguous
+- name: an ambiguous lateral reference does not resolve to an outer query column
+  sql: |
+    create table a (a1 int);
+    select (select y from (select 100 as a1) t1, (select 200 as a1) t2, lateral (select a1 as y) z) from a;
+  binder_error: |
+    Failed to bind expression: (SELECT y FROM (SELECT 100 AS a1) AS t1, (SELECT 200 AS a1) AS t2, LATERAL (SELECT a1 AS y) AS z)
+
+    Caused by these errors (recent errors listed first):
+      1: Failed to bind expression: a1
+      2: Invalid reference: column reference "a1" is ambiguous
 - name: https://github.com/risingwavelabs/risingwave/issues/12298
   sql: |
     create table t1(c varchar, n varchar, id varchar, d varchar);
