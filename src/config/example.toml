@@ -347,6 +347,7 @@ block_cache_capacity_mb = ""
 block_cache_shard_num = ""
 meta_cache_capacity_mb = ""
 meta_cache_shard_num = ""
+pin_cache_shard_num = 64
 vector_block_cache_capacity_mb = 16
 vector_block_cache_shard_num = 16
 vector_meta_cache_capacity_mb = 16
