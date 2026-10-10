@@ -30,6 +30,7 @@ pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use tokio_postgres::types::Type as TokioPgType;
 
 use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
+use crate::binder::bind_struct_type;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::error::ErrorCode::BindError;
 use crate::expr::reject_impure;
@@ -259,9 +260,9 @@ impl TableFunction {
                             ));
                         }
 
-                        Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
-                            StructType::new(rw_types),
-                        ))
+                        Ok::<risingwave_common::types::DataType, anyhow::Error>(
+                            bind_struct_type(rw_types)?.into(),
+                        )
                     })
                 })?;
 
@@ -364,9 +365,9 @@ impl TableFunction {
                         };
                         rw_types.push((name, data_type));
                     }
-                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
-                        StructType::new(rw_types),
-                    ))
+                    Ok::<risingwave_common::types::DataType, anyhow::Error>(
+                        bind_struct_type(rw_types)?.into(),
+                    )
                 })
             })?;
 
@@ -498,9 +499,9 @@ impl TableFunction {
                         };
                         rw_types.push((name, data_type));
                     }
-                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
-                        StructType::new(rw_types),
-                    ))
+                    Ok::<risingwave_common::types::DataType, anyhow::Error>(
+                        bind_struct_type(rw_types)?.into(),
+                    )
                 })
             })?;
 

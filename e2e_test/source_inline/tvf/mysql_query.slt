@@ -90,6 +90,9 @@ create source mysql_cdc_source with (
   database.name = 'tvf',
 );
 
+statement error struct field "duplicate_column" specified more than once
+select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select 1 as duplicate_column, 2 as duplicate_column;');
+
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
