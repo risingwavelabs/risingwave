@@ -1329,7 +1329,7 @@ pub async fn refresh_relation_info_metrics(
             return;
         }
     };
-    let subscriptions = match catalog_controller.list_subscriptions().await {
+    let subscriptions = match catalog_controller.list_user_created_subscriptions().await {
         Ok(subscriptions) => subscriptions,
         Err(err) => {
             tracing::warn!(error=%err.as_report(), "fail to get subscription objects");
@@ -1408,12 +1408,15 @@ pub async fn refresh_relation_info_metrics(
 
     let mut max_retention_by_table = HashMap::new();
     for subscription in subscriptions {
+        let Some(retention_seconds) = subscription.retention_seconds else {
+            continue;
+        };
         max_retention_by_table
             .entry(subscription.dependent_table_id)
             .and_modify(|retention: &mut u64| {
-                *retention = (*retention).max(subscription.retention_seconds);
+                *retention = (*retention).max(retention_seconds);
             })
-            .or_insert(subscription.retention_seconds);
+            .or_insert(retention_seconds);
     }
     for (table_id, retention_seconds) in max_retention_by_table {
         meta_metrics

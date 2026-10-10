@@ -17,12 +17,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
-    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::hash::{VirtualNode, VnodeCount};
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::subscription::SubscriptionState;
-    use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
+    use risingwave_pb::catalog::{PbSinkType, PbTable, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
@@ -1902,7 +1902,7 @@ mod tests {
         let mut subscription = PbSubscription {
             name: "subscription_in_original_schema".to_owned(),
             definition: "CREATE SUBSCRIPTION subscription_in_original_schema FROM mv_with_index_and_subscription".to_owned(),
-            retention_seconds: 86400,
+            retention_seconds: Some(86400),
             database_id: TEST_DATABASE_ID,
             schema_id: TEST_SCHEMA_ID,
             dependent_table_id: table_id,
@@ -2644,7 +2644,7 @@ mod tests {
             name: "subscription_to_abort".to_owned(),
             definition: "CREATE SUBSCRIPTION subscription_to_abort FROM subscription_dep_view"
                 .to_owned(),
-            retention_seconds: 86400,
+            retention_seconds: Some(86400),
             database_id: TEST_DATABASE_ID,
             schema_id: TEST_SCHEMA_ID,
             dependent_table_id: view_id.as_object_id().as_table_id(),
@@ -2699,7 +2699,7 @@ mod tests {
             definition:
                 "CREATE SUBSCRIPTION subscription_to_drop_with_table FROM subscription_dep_table"
                     .to_owned(),
-            retention_seconds: 86400,
+            retention_seconds: Some(86400),
             database_id: TEST_DATABASE_ID,
             schema_id: TEST_SCHEMA_ID,
             dependent_table_id: table_id,
@@ -2763,7 +2763,7 @@ mod tests {
             name: "change_log_subscription".to_owned(),
             definition: "CREATE SUBSCRIPTION change_log_subscription FROM change_log_upstream"
                 .to_owned(),
-            retention_seconds: 123,
+            retention_seconds: Some(123),
             database_id: TEST_DATABASE_ID,
             schema_id: TEST_SCHEMA_ID,
             dependent_table_id: upstream_table_id,
@@ -2823,6 +2823,154 @@ mod tests {
         assert_eq!(
             independent_job.upstream_table_snapshot_epochs,
             HashMap::from([(upstream_table_id, None)])
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cross_db_subscription_lifecycle_and_recovery_lookup() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let (_, upstream_database) = mgr
+            .create_database(PbDatabase {
+                name: "cross_db_upstream_database".to_owned(),
+                owner: TEST_OWNER_ID,
+                ..Default::default()
+            })
+            .await?;
+        let upstream_schema_id: SchemaId = Schema::find()
+            .inner_join(Object)
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(object::Column::DatabaseId.eq(upstream_database.database_id))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let upstream_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(upstream_schema_id.as_object_id()),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        insert_test_table(
+            &txn,
+            upstream_job_id.as_mv_table_id(),
+            "cross_db_upstream_mv",
+            TableType::MaterializedView,
+            None,
+            "",
+        )
+        .await?;
+        insert_test_streaming_job_model(&txn, upstream_job_id, None).await?;
+        let (downstream_job_id, Some(downstream_table_id), progress_table_id) =
+            insert_test_streaming_job(&txn, "cross_db_downstream_mv", true, None).await?
+        else {
+            unreachable!()
+        };
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(101)),
+            job_id: Set(downstream_job_id),
+            fragment_type_mask: Set(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as i32),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode {
+                node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
+                    table_id: upstream_job_id.as_mv_table_id(),
+                    stream_scan_type: StreamScanType::CrossDbSnapshotBackfill as i32,
+                    state_table: Some(PbTable {
+                        id: progress_table_id,
+                        maybe_vnode_count: VnodeCount::set(1).to_protobuf(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            })),
+            state_table_ids: Set(vec![progress_table_id].into()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let truncate_info_without_subscription = mgr.get_table_change_log_truncate_info().await?;
+        assert_eq!(
+            truncate_info_without_subscription.cross_db_backfills[0]
+                .progress_table
+                .id,
+            progress_table_id
+        );
+
+        let subscriptions = mgr
+            .create_cross_db_subscriptions(downstream_job_id, [upstream_job_id.as_mv_table_id()])
+            .await?;
+        assert_eq!(subscriptions.len(), 1);
+        let subscription = &subscriptions[0];
+        assert_eq!(
+            subscription.upstream_database_id,
+            upstream_database.database_id
+        );
+        assert_eq!(
+            subscription.upstream_table_id,
+            upstream_job_id.as_mv_table_id()
+        );
+        let subscription_model = Subscription::find_by_id(subscription.subscription_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(subscription_model.retention_seconds, None);
+        assert_eq!(
+            subscription_model.cross_db_downstream_job_id,
+            Some(downstream_job_id)
+        );
+        let subscription_object = Object::find_by_id(subscription.subscription_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(
+            subscription_object.belong_to_oid,
+            Some(downstream_job_id.as_object_id())
+        );
+
+        let upstream_subscriptions = mgr
+            .get_mv_depended_subscriptions(Some(upstream_database.database_id))
+            .await?;
+        assert!(
+            upstream_subscriptions[&upstream_job_id.as_mv_table_id()]
+                .contains(&subscription.subscription_id)
+        );
+        assert!(
+            mgr.get_mv_depended_subscriptions(Some(TEST_DATABASE_ID))
+                .await?
+                .is_empty()
+        );
+
+        let truncate_info = mgr.get_table_change_log_truncate_info().await?;
+        assert!(truncate_info.subscription_retention_seconds.is_empty());
+        assert_eq!(truncate_info.cross_db_backfills.len(), 1);
+        assert_eq!(
+            truncate_info.cross_db_backfills[0].progress_table.id,
+            progress_table_id
+        );
+
+        let (release_context, _) = mgr
+            .drop_object(ObjectType::Table, downstream_table_id, DropMode::Restrict)
+            .await?;
+        assert_eq!(release_context.removed_cross_db_subscriptions.len(), 1);
+        assert!(
+            Subscription::find_by_id(subscription.subscription_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
         );
 
         Ok(())
