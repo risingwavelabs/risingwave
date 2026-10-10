@@ -21,7 +21,6 @@ use anyhow::Context;
 use futures::executor::block_on;
 use petgraph::Graph;
 use petgraph::dot::{Config, Dot};
-use pgwire::pg_server::SessionId;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as PbTaskId, TaskOutputId as PbTaskOutputId};
@@ -70,8 +69,6 @@ pub struct QueryExecution {
     query: Arc<Query>,
     state: RwLock<QueryState>,
     shutdown_tx: Sender<QueryMessage>,
-    /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
-    pub session_id: SessionId,
     /// Permit to execute the query. Once query finishes execution, this is dropped.
     #[expect(dead_code)]
     pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
@@ -95,12 +92,7 @@ struct QueryRunner {
 }
 
 impl QueryExecution {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        query: Query,
-        session_id: SessionId,
-        permit: Option<tokio::sync::OwnedSemaphorePermit>,
-    ) -> Self {
+    pub fn new(query: Query, permit: Option<tokio::sync::OwnedSemaphorePermit>) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
         let state = QueryState::Pending {
@@ -111,7 +103,6 @@ impl QueryExecution {
             query,
             state: RwLock::new(state),
             shutdown_tx: sender,
-            session_id,
             permit,
         }
     }
@@ -478,7 +469,9 @@ pub(crate) mod tests {
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
+    use tokio::sync::mpsc::{Receiver, channel};
 
+    use super::{QueryMessage, QueryState};
     use crate::TableCatalog;
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
@@ -496,6 +489,19 @@ pub(crate) mod tests {
     use crate::session::SessionImpl;
     use crate::utils::Condition;
 
+    pub(crate) fn running_query_execution_with_query_message_receiver(
+        query: Query,
+    ) -> (Arc<QueryExecution>, Receiver<QueryMessage>) {
+        let (shutdown_tx, shutdown_rx) = channel(100);
+        let query_execution = Arc::new(QueryExecution {
+            query: Arc::new(query),
+            state: tokio::sync::RwLock::new(QueryState::Running),
+            shutdown_tx,
+            permit: None,
+        });
+        (query_execution, shutdown_rx)
+    }
+
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
@@ -505,7 +511,7 @@ pub(crate) mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
-        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None));
+        let query_execution = Arc::new(QueryExecution::new(query, None));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));
