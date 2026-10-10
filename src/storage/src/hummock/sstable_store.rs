@@ -525,7 +525,12 @@ impl SstableStore {
                     return Err(HummockError::from(e));
                 }
             };
-            let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+            // copy to avoid holding the (possibly much larger) read buffer in memory.
+            let block = Box::new(Block::decode_with_copy(
+                block_data,
+                uncompressed_capacity,
+                true,
+            )?);
             Ok(block)
         };
 
@@ -859,6 +864,7 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
+    use foyer::Hint;
     use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
@@ -1191,6 +1197,33 @@ mod tests {
                 .is_err()
         );
         assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_fetched_block_does_not_alias_object_read_buffer() {
+        let sstable_store = mock_sstable_store().await;
+        let (sstable, info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
+        sstable_store.clear_block_cache().await.unwrap();
+
+        let mut stats = StoreLocalStatistic::default();
+        let block = sstable_store
+            .get(&sstable, 0, CachePolicy::Fill(Hint::Normal), &mut stats)
+            .await
+            .unwrap();
+
+        // The in-memory object store returns zero-copy slices of the stored object, like a
+        // pooled read buffer. A cached block must not keep pointing into it.
+        let object = sstable_store
+            .store()
+            .read(&sstable_store.get_sst_data_path(info.object_id), ..)
+            .await
+            .unwrap();
+        assert!(
+            !object.as_ptr_range().contains(&block.raw().as_ptr()),
+            "cached block aliases the object store read buffer"
+        );
     }
 
     #[tokio::test]
