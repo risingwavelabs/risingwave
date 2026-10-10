@@ -146,6 +146,7 @@ impl Planner {
                     None
                     | Some(AsOf::ProcessTime)
                     | Some(AsOf::ProcessTimeBroadcast)
+                    | Some(AsOf::EventTime(_))
                     | Some(AsOf::TimestampNum(_))
                     | Some(AsOf::TimestampString(_))
                     | Some(AsOf::ProcessTimeWithInterval(_)) => {}
@@ -207,6 +208,7 @@ impl Planner {
             | Some(AsOf::TimestampNum(_)) => {}
             Some(AsOf::ProcessTime)
             | Some(AsOf::ProcessTimeBroadcast)
+            | Some(AsOf::EventTime(_))
             | Some(AsOf::ProcessTimeWithInterval(_)) => {
                 bail_not_implemented!("As Of ProcessTime() is not supported yet.")
             }
@@ -433,6 +435,7 @@ impl Planner {
                 | Some(AsOf::TimestampNum(_)) => {}
                 Some(AsOf::ProcessTime)
                 | Some(AsOf::ProcessTimeBroadcast)
+                | Some(AsOf::EventTime(_))
                 | Some(AsOf::ProcessTimeWithInterval(_)) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }
@@ -499,7 +502,14 @@ source: {:?}",
         if on_clause.has_subquery() {
             bail_not_implemented!("Subquery in join on condition");
         } else {
-            Ok(LogicalJoin::create(left, right, join_type, on_clause))
+            let mut core = crate::optimizer::plan_node::generic::Join::with_full_output(
+                left,
+                right,
+                join_type,
+                Condition::with_expr(on_clause),
+            );
+            core.temporal_event_time_as_of = join.temporal_event_time_as_of;
+            Ok(LogicalJoin::with_core(core).into())
         }
     }
 
