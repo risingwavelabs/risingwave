@@ -1,0 +1,124 @@
+# Streaming jobs keep, group, join and retract decimals with up to 38 significant digits.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table decimal_38_t (k decimal primary key, v decimal);
+
+statement ok
+create table decimal_38_dim (k decimal primary key, name varchar);
+
+statement ok
+create materialized view decimal_38_total as
+select sum(v) as s, count(*) as c, min(k) as min_k, max(k) as max_k from decimal_38_t;
+
+statement ok
+create materialized view decimal_38_by_value as
+select v, count(*) as c from decimal_38_t group by v;
+
+statement ok
+create materialized view decimal_38_join as
+select t.k, t.v, d.name from decimal_38_t t join decimal_38_dim d on t.k = d.k;
+
+statement ok
+create materialized view decimal_38_top as
+select k, v from decimal_38_t order by v desc, k limit 2;
+
+statement ok
+insert into decimal_38_t values
+    (12345678901234567890123456789012345678, 1),
+    (1.0000000000000000000000000000000000001, 50000000000000000000000000000),
+    (79228162514264337593543950335, 50000000000000000000000000000),
+    (79228162514264337593543950336, 0.00000000000000000000000000000000000001);
+
+# Keys with trailing zeros match the same values.
+statement ok
+insert into decimal_38_dim values
+    (12345678901234567890123456789012345678.000, 'wide integer'),
+    (1.00000000000000000000000000000000000010, 'wide fraction'),
+    (79228162514264337593543950335.0, 'legacy maximum');
+
+# The sum leaves the former 28-digit range.
+query RIRR
+select * from decimal_38_total;
+----
+100000000000000000000000000001.00000000 4 1.0000000000000000000000000000000000001 12345678901234567890123456789012345678
+
+query RI rowsort
+select * from decimal_38_by_value;
+----
+0.00000000000000000000000000000000000001 1
+1 1
+50000000000000000000000000000 2
+
+query RRT rowsort
+select * from decimal_38_join;
+----
+1.0000000000000000000000000000000000001 50000000000000000000000000000 wide fraction
+12345678901234567890123456789012345678 1 wide integer
+79228162514264337593543950335 50000000000000000000000000000 legacy maximum
+
+query RR
+select * from decimal_38_top order by v desc, k;
+----
+1.0000000000000000000000000000000000001 50000000000000000000000000000
+79228162514264337593543950335 50000000000000000000000000000
+
+# Updates and deletes retract the exact rows, including through keys written with another scale.
+statement ok
+update decimal_38_t set v = v * 1e8 where k = 79228162514264337593543950336.000;
+
+statement ok
+delete from decimal_38_t where k = 1.00000000000000000000000000000000000010;
+
+# Like any decimal sum, the state keeps 38 significant digits, so the tiny value is absorbed.
+query RIRR
+select * from decimal_38_total;
+----
+50000000000000000000000000001.00000000 3 79228162514264337593543950335 12345678901234567890123456789012345678
+
+query RI rowsort
+select * from decimal_38_by_value;
+----
+0.000000000000000000000000000001 1
+1 1
+50000000000000000000000000000 1
+
+query RRT rowsort
+select * from decimal_38_join;
+----
+12345678901234567890123456789012345678 1 wide integer
+79228162514264337593543950335 50000000000000000000000000000 legacy maximum
+
+query RR
+select * from decimal_38_top order by v desc, k;
+----
+79228162514264337593543950335 50000000000000000000000000000
+12345678901234567890123456789012345678 1
+
+statement ok
+delete from decimal_38_t;
+
+query RIRR
+select * from decimal_38_total;
+----
+NULL 0 NULL NULL
+
+statement ok
+drop materialized view decimal_38_top;
+
+statement ok
+drop materialized view decimal_38_join;
+
+statement ok
+drop materialized view decimal_38_by_value;
+
+statement ok
+drop materialized view decimal_38_total;
+
+statement ok
+drop table decimal_38_dim;
+
+statement ok
+drop table decimal_38_t;
