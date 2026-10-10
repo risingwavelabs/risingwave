@@ -128,6 +128,23 @@ pub struct SourceManagerRunningInfo {
 }
 
 impl SourceManagerCore {
+    /// Ids of the fragments reading from `source_id`: its source fragments, and its backfill
+    /// fragments together with their upstream fragments.
+    fn fragment_ids_of_source(&self, source_id: SourceId) -> Vec<FragmentId> {
+        let mut ids = Vec::new();
+        if let Some(src_frags) = self.source_fragments.get(&source_id) {
+            ids.extend(src_frags.iter().copied());
+        }
+        if let Some(backfill_frags) = self.backfill_fragments.get(&source_id) {
+            ids.extend(
+                backfill_frags
+                    .iter()
+                    .flat_map(|(id, upstream)| [*id, *upstream]),
+            );
+        }
+        ids
+    }
+
     fn new(
         metadata_manager: MetadataManager,
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -385,23 +402,60 @@ impl SourceManager {
         })
     }
 
+    /// Validates `new_source_props` against the external system by creating a split enumerator
+    /// and listing the splits once. Returns the ids of the discovered splits.
     pub async fn validate_source_once(
         &self,
         source_id: SourceId,
         new_source_props: WithOptionsSecResolved,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<Vec<SplitId>> {
         let props = ConnectorProperties::extract(new_source_props, false).unwrap();
 
-        {
-            let mut enumerator = props
-                .create_split_enumerator(Arc::new(SourceEnumeratorContext {
-                    metrics: self.metrics.source_enumerator_metrics.clone(),
-                    info: SourceEnumeratorInfo { source_id },
-                }))
-                .await
-                .context("failed to create SplitEnumerator")?;
+        let mut enumerator = props
+            .create_split_enumerator(Arc::new(SourceEnumeratorContext {
+                metrics: self.metrics.source_enumerator_metrics.clone(),
+                info: SourceEnumeratorInfo { source_id },
+            }))
+            .await
+            .context("failed to create SplitEnumerator")?;
 
-            validate_enumerator_once(&mut *enumerator).await?;
+        validate_enumerator_once(&mut *enumerator).await
+    }
+
+    /// Ensures that every split currently assigned to the actors of `source_id` is contained in
+    /// `discovered_splits`, the splits the external system reports with new properties.
+    ///
+    /// Splits are never removed from running actors unless the connector supports dropping
+    /// splits, so an upstream that lacks some of them (e.g. a Kafka cluster with fewer partitions)
+    /// would leave actors reading splits that do not exist.
+    pub async fn ensure_assigned_splits_discovered(
+        &self,
+        source_id: SourceId,
+        discovered_splits: &[SplitId],
+    ) -> MetaResult<()> {
+        let (fragment_ids, env) = {
+            let core = self.core.lock().await;
+            let Some(handle) = core.managed_sources.get(&source_id) else {
+                return Ok(());
+            };
+            if handle.enable_drop_split {
+                return Ok(());
+            }
+            (core.fragment_ids_of_source(source_id), core.env.clone())
+        };
+
+        let discovered: HashSet<&str> = discovered_splits.iter().map(|id| id.as_ref()).collect();
+        let mut missing: Vec<_> = assigned_split_ids(&env, fragment_ids)
+            .into_iter()
+            .filter(|id| !discovered.contains(id.as_str()))
+            .collect();
+        missing.sort();
+        if !missing.is_empty() {
+            return Err(MetaError::invalid_parameter(format!(
+                "splits {missing:?} are assigned to source {source_id} but are not found with the \
+                 new properties (found: {discovered_splits:?}). Assigned splits cannot be \
+                 removed, so the new upstream must still provide all of them."
+            )));
         }
         Ok(())
     }
@@ -631,18 +685,7 @@ impl SourceManager {
                 ))
             })?;
 
-            let mut ids = Vec::new();
-            if let Some(src_frags) = core.source_fragments.get(&source_id) {
-                ids.extend(src_frags.iter().copied());
-            }
-            if let Some(backfill_frags) = core.backfill_fragments.get(&source_id) {
-                ids.extend(
-                    backfill_frags
-                        .iter()
-                        .flat_map(|(id, upstream)| [*id, *upstream]),
-                );
-            }
-            (ids, core.env.clone())
+            (core.fragment_ids_of_source(source_id), core.env.clone())
         };
 
         if fragment_ids.is_empty() {
@@ -652,17 +695,7 @@ impl SourceManager {
             )));
         }
 
-        let guard = env.shared_actor_infos().read_guard();
-        let mut assigned_split_ids = HashSet::new();
-        for fragment_id in fragment_ids {
-            if let Some(fragment) = guard.get_fragment(fragment_id) {
-                for actor in fragment.actors.values() {
-                    for split in &actor.splits {
-                        assigned_split_ids.insert(split.id().to_string());
-                    }
-                }
-            }
-        }
+        let assigned_split_ids = assigned_split_ids(&env, fragment_ids);
 
         // Validate all requested split IDs exist
         let mut invalid_splits = Vec::new();
@@ -691,11 +724,32 @@ impl SourceManager {
     }
 }
 
-async fn validate_enumerator_once(enumerator: &mut dyn AnySplitEnumerator) -> MetaResult<()> {
-    let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
+async fn validate_enumerator_once(
+    enumerator: &mut dyn AnySplitEnumerator,
+) -> MetaResult<Vec<SplitId>> {
+    let splits = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
         .await
         .context("failed to list splits")??;
-    Ok(())
+    Ok(splits.iter().map(|split| split.id()).collect())
+}
+
+/// Ids of the splits currently assigned to the actors of `fragment_ids`.
+fn assigned_split_ids(
+    env: &MetaSrvEnv,
+    fragment_ids: impl IntoIterator<Item = FragmentId>,
+) -> HashSet<String> {
+    let guard = env.shared_actor_infos().read_guard();
+    let mut assigned_split_ids = HashSet::new();
+    for fragment_id in fragment_ids {
+        if let Some(fragment) = guard.get_fragment(fragment_id) {
+            for actor in fragment.actors.values() {
+                for split in &actor.splits {
+                    assigned_split_ids.insert(split.id().to_string());
+                }
+            }
+        }
+    }
+    assigned_split_ids
 }
 
 #[derive(strum::Display, Debug)]

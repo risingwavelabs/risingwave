@@ -1543,13 +1543,14 @@ impl MetaClient {
         Ok(resp.meta_store_endpoint)
     }
 
+    /// Returns notices for the user.
     pub async fn alter_sink_props(
         &self,
         sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         let req = AlterConnectorPropsRequest {
             object_id: sink_id.as_raw_id(),
             changed_props: changed_props.into_iter().collect(),
@@ -1558,8 +1559,8 @@ impl MetaClient {
             object_type: AlterConnectorPropsObject::Sink as i32,
             extra_options: None,
         };
-        let _resp = self.inner.alter_connector_props(req).await?;
-        Ok(())
+        let resp = self.inner.alter_connector_props(req).await?;
+        Ok(resp.notices)
     }
 
     pub async fn alter_iceberg_table_props(
@@ -1586,13 +1587,14 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Returns notices for the user.
     pub async fn alter_source_connector_props(
         &self,
         source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         let req = AlterConnectorPropsRequest {
             object_id: source_id.as_raw_id(),
             changed_props: changed_props.into_iter().collect(),
@@ -1601,8 +1603,8 @@ impl MetaClient {
             object_type: AlterConnectorPropsObject::Source as i32,
             extra_options: None,
         };
-        let _resp = self.inner.alter_connector_props(req).await?;
-        Ok(())
+        let resp = self.inner.alter_connector_props(req).await?;
+        Ok(resp.notices)
     }
 
     pub async fn alter_connection_connector_props(

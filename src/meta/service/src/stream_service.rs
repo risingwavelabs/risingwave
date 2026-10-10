@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::DateTime;
@@ -21,13 +21,17 @@ use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::SplitMetaData;
+use risingwave_connector::source::kafka::alter::{
+    kafka_broker_change_notices, kafka_properties_from_plaintext,
+};
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
-use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
-use risingwave_meta::{MetaError, model};
+use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManager, SourceManagerRunningInfo};
+use risingwave_meta::{MetaError, MetaResult, model};
 use risingwave_meta_model::{ConnectionId, FragmentId, JobStatus, SourceId, StreamingParallelism};
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
@@ -734,6 +738,7 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
         let secret_manager = LocalSecretManager::global();
+        let mut notices = Vec::new();
         let (new_props_plaintext, object_id) = match AlterConnectorPropsObject::try_from(
             request.object_type,
         ) {
@@ -742,6 +747,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_sink_props_by_sink_id(
                         request.object_id.into(),
                         request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
                     )
                     .await?,
                 request.object_id.into(),
@@ -765,20 +771,44 @@ impl StreamManagerService for StreamServiceImpl {
                         "alter connector_conn_ref is not supported",
                     ));
                 }
+                let source_id = SourceId::from(request.object_id);
+                let changed_props: BTreeMap<_, _> =
+                    request.changed_props.clone().into_iter().collect();
+                let changed_secret_refs: BTreeMap<_, _> =
+                    request.changed_secret_refs.clone().into_iter().collect();
+
+                // Derive and validate the new properties before touching the catalog, so that a
+                // failed validation leaves the source unchanged.
+                let (current_props, new_props) = self
+                    .metadata_manager
+                    .catalog_controller
+                    .prepare_source_props_update(
+                        source_id,
+                        changed_props.clone(),
+                        changed_secret_refs.clone(),
+                        false, // SQL ALTER SOURCE enforces alter-on-fly check
+                    )
+                    .await?;
+                notices.extend(
+                    Box::pin(validate_source_props_update(
+                        &self.stream_manager.source_manager,
+                        source_id,
+                        &current_props,
+                        &new_props,
+                    ))
+                    .await?,
+                );
+
                 let options_with_secret = self
                     .metadata_manager
                     .catalog_controller
                     .update_source_props_by_source_id(
-                        request.object_id.into(),
-                        request.changed_props.clone().into_iter().collect(),
-                        request.changed_secret_refs.clone().into_iter().collect(),
+                        source_id,
+                        changed_props,
+                        changed_secret_refs,
                         false, // SQL ALTER SOURCE enforces alter-on-fly check
+                        Some(&new_props),
                     )
-                    .await?;
-
-                self.stream_manager
-                    .source_manager
-                    .validate_source_once(request.object_id.into(), options_with_secret.clone())
                     .await?;
 
                 let (options, secret_refs) = options_with_secret.into_parts();
@@ -877,7 +907,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .await?;
         }
 
-        Ok(Response::new(AlterConnectorPropsResponse {}))
+        Ok(Response::new(AlterConnectorPropsResponse { notices }))
     }
 
     async fn set_sync_log_store_aligned(
@@ -983,24 +1013,45 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
 
         // Step 2: Update catalog and get the new properties
-        let result = async {
+        let result = Box::pin(async {
             let secret_manager = LocalSecretManager::global();
+
+            let changed_props: BTreeMap<_, _> = request.changed_props.clone().into_iter().collect();
+            let changed_secret_refs: BTreeMap<_, _> =
+                request.changed_secret_refs.clone().into_iter().collect();
+
+            // Derive and validate the new properties before touching the catalog.
+            let (current_props, new_props) = self
+                .metadata_manager
+                .catalog_controller
+                .prepare_source_props_update(
+                    source_id.into(),
+                    changed_props.clone(),
+                    changed_secret_refs.clone(),
+                    true, // risectl admin operation skips alter-on-fly check
+                )
+                .await?;
+            for notice in Box::pin(validate_source_props_update(
+                &self.stream_manager.source_manager,
+                source_id.into(),
+                &current_props,
+                &new_props,
+            ))
+            .await?
+            {
+                tracing::warn!(source_id, %notice, "altering source properties");
+            }
 
             let options_with_secret = self
                 .metadata_manager
                 .catalog_controller
                 .update_source_props_by_source_id(
                     source_id.into(),
-                    request.changed_props.clone().into_iter().collect(),
-                    request.changed_secret_refs.clone().into_iter().collect(),
+                    changed_props,
+                    changed_secret_refs,
                     true, // risectl admin operation skips alter-on-fly check
+                    Some(&new_props),
                 )
-                .await?;
-
-            // Validate the source
-            self.stream_manager
-                .source_manager
-                .validate_source_once(source_id.into(), options_with_secret.clone())
                 .await?;
 
             let (props, secret_refs) = options_with_secret.into_parts();
@@ -1031,7 +1082,7 @@ impl StreamManagerService for StreamServiceImpl {
             }
 
             Ok::<_, MetaError>(())
-        }
+        })
         .await;
 
         // Step 5: Resume the stream (even if previous steps failed)
@@ -1187,4 +1238,38 @@ mod tests {
         assert_eq!(parallelism, StreamingParallelism::Fixed(4));
         assert_eq!(strategy, None);
     }
+}
+
+/// Validates the new properties of a source against the external system before they are committed
+/// to the catalog. Returns notices for the user.
+async fn validate_source_props_update(
+    source_manager: &SourceManager,
+    source_id: SourceId,
+    current_props: &WithOptionsSecResolved,
+    new_props: &WithOptionsSecResolved,
+) -> MetaResult<Vec<String>> {
+    let discovered_splits = source_manager
+        .validate_source_once(source_id, new_props.clone())
+        .await?;
+
+    let mut notices = Vec::new();
+    if new_props.is_kafka_connector() {
+        let fill_secrets = |props: &WithOptionsSecResolved| {
+            let (options, secret_refs) = props.clone().into_parts();
+            LocalSecretManager::global()
+                .fill_secrets(options, secret_refs)
+                .map_err(MetaError::from)
+        };
+        let previous = kafka_properties_from_plaintext(fill_secrets(current_props)?)?;
+        let new = kafka_properties_from_plaintext(fill_secrets(new_props)?)?;
+        if previous.connection.brokers != new.connection.brokers {
+            // Kafka partitions assigned to running actors are never dropped, so the new brokers
+            // must serve at least the partitions currently assigned.
+            source_manager
+                .ensure_assigned_splits_discovered(source_id, &discovered_splits)
+                .await?;
+            notices.extend(Box::pin(kafka_broker_change_notices(&previous, &new)).await);
+        }
+    }
+    Ok(notices)
 }

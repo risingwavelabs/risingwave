@@ -70,16 +70,25 @@ pub async fn handle_alter_table_connector_props(
         associate_source_id
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id).await?;
+    let notices = handle_alter_source_props_inner(&session, alter_props, source_id).await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
+    Ok(response_with_notices(StatementType::ALTER_TABLE, notices))
 }
 
+fn response_with_notices(stmt_type: StatementType, notices: Vec<String>) -> RwPgResponse {
+    let mut builder = RwPgResponse::builder(stmt_type);
+    for notice in notices {
+        builder = builder.notice(notice);
+    }
+    builder.into()
+}
+
+/// Returns notices for the user.
 async fn handle_alter_source_props_inner(
     session: &SessionImpl,
     alter_props: Vec<SqlOption>,
     source_id: SourceId,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let meta_client = session.env().meta_client();
     let (resolved_with_options, _, connector_conn_ref) = resolve_connection_ref_and_secret_ref(
         WithOptions::try_from(alter_props.as_ref() as &[SqlOption])?,
@@ -118,7 +127,7 @@ async fn handle_alter_source_props_inner(
 
     validate_heartbeat_interval(&changed_props)?;
 
-    meta_client
+    let notices = meta_client
         .alter_source_connector_props(
             source_id,
             changed_props,
@@ -126,7 +135,7 @@ async fn handle_alter_source_props_inner(
             connector_conn_ref, // always None, keep the interface for future extension
         )
         .await?;
-    Ok(())
+    Ok(notices)
 }
 
 pub async fn handle_alter_source_connector_props(
@@ -174,9 +183,9 @@ pub async fn handle_alter_source_connector_props(
         source.id
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id).await?;
+    let notices = handle_alter_source_props_inner(&session, alter_props, source_id).await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
+    Ok(response_with_notices(StatementType::ALTER_SOURCE, notices))
 }
 
 /// Validates that the properties being altered don't conflict with properties set by a CONNECTION.

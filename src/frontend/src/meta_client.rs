@@ -178,13 +178,14 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
+    /// Returns notices for the user.
     async fn alter_sink_props(
         &self,
         sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
-    ) -> Result<()>;
+    ) -> Result<Vec<String>>;
 
     async fn alter_iceberg_table_props(
         &self,
@@ -196,13 +197,14 @@ pub trait FrontendMetaClient: Send + Sync {
         connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()>;
 
+    /// Returns notices for the user.
     async fn alter_source_connector_props(
         &self,
         source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
-    ) -> Result<()>;
+    ) -> Result<Vec<String>>;
 
     async fn alter_connection_connector_props(
         &self,
@@ -496,7 +498,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         self.0
             .alter_sink_props(
                 sink_id,
@@ -534,7 +536,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         self.0
             .alter_source_connector_props(
                 source_id,

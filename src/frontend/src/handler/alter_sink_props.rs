@@ -72,7 +72,7 @@ pub async fn handle_alter_sink_props(
         .into());
     }
 
-    meta_client
+    let notices = meta_client
         .alter_sink_props(
             sink_id,
             changed_props,
@@ -81,5 +81,9 @@ pub async fn handle_alter_sink_props(
         )
         .await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_SINK))
+    let mut builder = RwPgResponse::builder(StatementType::ALTER_SINK);
+    for notice in notices {
+        builder = builder.notice(notice);
+    }
+    Ok(builder.into())
 }

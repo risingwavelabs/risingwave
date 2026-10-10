@@ -33,15 +33,21 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut, visit_stream_node_stream_scan,
 };
 use risingwave_common::{bail, current_cluster_version};
-use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
+use risingwave_connector::allow_alter_on_fly_fields::{
+    check_sink_allow_alter_on_fly_fields, check_source_allow_alter_on_fly_fields,
+};
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::kafka::alter::ensure_kafka_brokers_alterable;
 use risingwave_connector::source::{
-    ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
+    ConnectorProperties, KAFKA_CONNECTOR, UPSTREAM_SOURCE_KEY,
+    pb_connection_type_to_connection_type,
 };
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::{
+    WithOptionsSecResolved, WithPropertiesExt, aliases_of_altered_keys, match_sink_name_str,
+};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::refresh_job::RefreshState;
@@ -52,6 +58,7 @@ use risingwave_pb::catalog::table::PbEngine;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::ddl_service::streaming_job_resource_type;
+use risingwave_pb::id::SecretId;
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -73,8 +80,9 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    JoinType, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseTransaction, EntityTrait,
+    IntoActiveModel, JoinType, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+    TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -2854,12 +2862,53 @@ impl CatalogController {
             .await
     }
 
+    /// Derives the properties a source would run with after `ALTER SOURCE ... CONNECTOR WITH`,
+    /// running the catalog-level checks (connection ownership, connector type, alter-on-fly
+    /// allowlist, deserialization) without writing anything.
+    ///
+    /// Returns the current and the new properties. Callers validate the new properties against
+    /// the external system and then pass them as `expected_props` to
+    /// [`Self::update_source_props_by_source_id`], which re-derives them inside the transaction
+    /// and fails if the source was altered concurrently in between.
+    pub async fn prepare_source_props_update(
+        &self,
+        source_id: SourceId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
+        skip_alter_on_fly_check: bool,
+    ) -> MetaResult<(WithOptionsSecResolved, WithOptionsSecResolved)> {
+        let inner = self.inner.read().await;
+        let source = Source::find_by_id(source_id)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+        let current_props = source_options_with_secret(&source);
+        let merged = merge_source_props(
+            &inner.db,
+            &source,
+            alter_props,
+            alter_secret_refs,
+            skip_alter_on_fly_check,
+        )
+        .await?;
+        Ok((current_props, merged.options_with_secret))
+    }
+
+    /// Applies `ALTER SOURCE ... CONNECTOR WITH` to the catalog and the fragments of the source
+    /// and of the jobs holding a copy of it.
+    ///
+    /// `expected_props` are the new properties as validated by the caller (see
+    /// [`Self::prepare_source_props_update`]); the update fails if the properties derived inside
+    /// the transaction differ from them.
     pub async fn update_source_props_by_source_id(
         &self,
         source_id: SourceId,
         alter_props: BTreeMap<String, String>,
         alter_secret_refs: BTreeMap<String, PbSecretRef>,
         skip_alter_on_fly_check: bool,
+        expected_props: Option<&WithOptionsSecResolved>,
     ) -> MetaResult<WithOptionsSecResolved> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -2871,9 +2920,6 @@ impl CatalogController {
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
-        ensure_source_props_not_set_by_connection(&txn, &source, &alter_props, &alter_secret_refs)
-            .await?;
-        let connector = source.with_properties.0.get_connector().unwrap();
         let is_shared_source = source.is_shared();
 
         let mut dep_source_job_ids: Vec<JobId> = Vec::new();
@@ -2888,48 +2934,33 @@ impl CatalogController {
                 .await?;
         }
 
-        // Validate that connector type is not being changed
-        if let Some(new_connector) = alter_props.get(UPSTREAM_SOURCE_KEY)
-            && new_connector != &connector
-        {
-            return Err(MetaError::invalid_parameter(format!(
-                "Cannot change connector type from '{}' to '{}'. Drop and recreate the source instead.",
-                connector, new_connector
-            )));
-        }
-
-        // Only check alter-on-fly restrictions for SQL ALTER SOURCE, not for admin risectl operations
-        if !skip_alter_on_fly_check {
-            let prop_keys: Vec<String> = alter_props
-                .keys()
-                .chain(alter_secret_refs.keys())
-                .cloned()
-                .collect();
-            risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
-                &connector, &prop_keys,
-            )?;
-        }
-
-        let mut options_with_secret = WithOptionsSecResolved::new(
-            source.with_properties.0.clone(),
-            source
-                .secret_ref
-                .map(|secret_ref| secret_ref.to_protobuf())
-                .unwrap_or_default(),
-        );
         let altered_options_with_secret =
             WithOptionsSecResolved::new(alter_props.clone(), alter_secret_refs.clone());
-        let (to_add_secret_dep, to_remove_secret_dep) =
-            options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+        let MergedSourceProps {
+            options_with_secret,
+            to_add_secret_dep,
+            to_remove_secret_dep,
+        } = merge_source_props(
+            &txn,
+            &source,
+            alter_props,
+            alter_secret_refs,
+            skip_alter_on_fly_check,
+        )
+        .await?;
+        if let Some(expected_props) = expected_props
+            && expected_props != &options_with_secret
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "the properties of source {source_id} were altered concurrently, please retry"
+            )));
+        }
 
         tracing::info!(
             "applying new properties to source: source_id={}, options_with_secret={:?}",
             source_id,
             options_with_secret
         );
-        // check if the alter-ed props are valid for each Connector
-        let _ = ConnectorProperties::extract(options_with_secret.clone(), true)?;
-        // todo: validate via source manager
 
         let mut associate_table_id = None;
 
@@ -3094,16 +3125,39 @@ impl CatalogController {
         &self,
         sink_id: SinkId,
         props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> MetaResult<HashMap<String, String>> {
+        // TODO(#22181): support altering sink properties to secrets. Until then, reject instead
+        // of silently ignoring the secret references.
+        if let Some(key) = alter_secret_refs.keys().next() {
+            return Err(MetaError::invalid_parameter(format!(
+                "altering sink property `{key}` to a SECRET is not supported yet"
+            )));
+        }
         let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
 
+        // Validate before opening the transaction: the validation may reach out to the external
+        // system, and a failure must leave the catalog untouched.
+        let sink = Sink::find_by_id(sink_id)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        let altered_field_names = props.keys().cloned().collect_vec();
+        validate_sink_props(&sink, &props, &altered_field_names)?;
+        validate_sink_props_connectivity(&sink, &props).await?;
+        let validated_props = sink.properties;
+
+        let txn = inner.db.begin().await?;
         let (sink, _obj) = Sink::find_by_id(sink_id)
             .find_also_related(Object)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props, &props.keys().cloned().collect_vec())?;
+        if sink.properties.inner_ref() != validated_props.inner_ref() {
+            return Err(MetaError::invalid_parameter(format!(
+                "the properties of sink {sink_id} were altered concurrently, please retry"
+            )));
+        }
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
             .map_err(|e| SinkError::Config(anyhow!(e)))?
@@ -3114,7 +3168,11 @@ impl CatalogController {
         } else {
             panic!("definition is not a create sink statement")
         }
+        let removed_keys = aliases_of_altered_keys(altered_field_names.iter().map(String::as_str));
         let mut new_config = sink.properties.clone().into_inner();
+        for key in &removed_keys {
+            new_config.remove(*key);
+        }
         new_config.extend(props.clone());
 
         let definition = stmt.to_string();
@@ -3126,7 +3184,7 @@ impl CatalogController {
         };
         Sink::update(active_sink).exec(&txn).await?;
 
-        update_sink_fragment_props(&txn, sink_id, new_config).await?;
+        update_sink_fragment_props(&txn, sink_id, new_config, &removed_keys).await?;
         let (sink, obj) = Sink::find_by_id(sink_id)
             .find_also_related(Object)
             .one(&txn)
@@ -3220,7 +3278,7 @@ impl CatalogController {
         Source::update(active_source).exec(&txn).await?;
         Table::update(active_table).exec(&txn).await?;
 
-        update_sink_fragment_props(&txn, sink_id, new_config).await?;
+        update_sink_fragment_props(&txn, sink_id, new_config, &[]).await?;
 
         let (sink, sink_obj) = Sink::find_by_id(sink_id)
             .find_also_related(Object)
@@ -3905,8 +3963,57 @@ fn validate_sink_props(
     check_sink_allow_alter_on_fly_fields(&connector_type, altered_field_names)
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-    // Validate against the config the sink actually runs with: properties stored as secrets
-    // live in `secret_ref` rather than `properties`, and some of them are required fields.
+    // Properties stored as secrets must be altered through `ALTER SECRET`: `ALTER SINK` does
+    // not update secret references yet, so a plaintext value would be overwritten by the secret
+    // again when the sink is recovered.
+    if let Some(secret_ref) = &sink.secret_ref {
+        let secret_ref = secret_ref.to_protobuf();
+        if let Some(key) = altered_field_names
+            .iter()
+            .find(|key| secret_ref.contains_key(*key))
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "sink property `{key}` is set as a SECRET, use `ALTER SECRET` to change it"
+            )));
+        }
+    }
+
+    let new_props = merged_sink_props(sink, alter_props)?;
+    match_sink_name_str!(
+        connector_type.as_str(),
+        SinkType,
+        SinkType::validate_alter_config_change(&new_props, alter_props),
+        |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+    )?;
+    Ok(())
+}
+
+/// Checks that the external system is reachable with the sink properties after applying
+/// `alter_props`. Call [`validate_sink_props`] first.
+async fn validate_sink_props_connectivity(
+    sink: &sink::Model,
+    alter_props: &BTreeMap<String, String>,
+) -> MetaResult<()> {
+    let Some(connector) = sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) else {
+        return Err(SinkError::Config(anyhow!("connector not specified when alter sink")).into());
+    };
+    let connector_type = connector.to_lowercase();
+    let new_props = merged_sink_props(sink, alter_props)?;
+    match_sink_name_str!(
+        connector_type.as_str(),
+        SinkType,
+        SinkType::validate_alter_config_connectivity(&new_props, alter_props).await,
+        |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+    )?;
+    Ok(())
+}
+
+/// The properties the sink actually runs with after applying `alter_props`: properties stored as
+/// secrets live in `secret_ref` rather than `properties`, and some of them are required fields.
+fn merged_sink_props(
+    sink: &sink::Model,
+    alter_props: &BTreeMap<String, String>,
+) -> MetaResult<BTreeMap<String, String>> {
     let mut new_props = LocalSecretManager::global()
         .fill_secrets(
             sink.properties.0.clone(),
@@ -3916,15 +4023,11 @@ fn validate_sink_props(
                 .unwrap_or_default(),
         )
         .map_err(MetaError::from)?;
+    for key in aliases_of_altered_keys(alter_props.keys().map(String::as_str)) {
+        new_props.remove(key);
+    }
     new_props.extend(alter_props.clone());
-
-    match_sink_name_str!(
-        connector_type.as_str(),
-        SinkType,
-        SinkType::validate_alter_config_change(&new_props, alter_props),
-        |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
-    )?;
-    Ok(())
+    Ok(new_props)
 }
 
 fn update_stmt_with_props(
@@ -3946,10 +4049,15 @@ fn update_stmt_with_props(
             .map(|sql_option| (&sql_option.name, sql_option)),
     );
     *with_properties = new_sql_options.into_values().cloned().collect();
+    remove_aliases_of_altered_options(with_properties, props.keys().map(String::as_str));
     Ok(())
 }
 
 fn merge_with_options(with_properties: &mut Vec<SqlOption>, altered_options: Vec<SqlOption>) {
+    let altered_names = altered_options
+        .iter()
+        .map(|option| option.name.real_value())
+        .collect_vec();
     for altered_option in altered_options {
         if let Some(existing_option) = with_properties
             .iter_mut()
@@ -3960,10 +4068,96 @@ fn merge_with_options(with_properties: &mut Vec<SqlOption>, altered_options: Vec
             with_properties.push(altered_option);
         }
     }
+    remove_aliases_of_altered_options(with_properties, altered_names.iter().map(String::as_str));
+}
+
+/// Removes the options that are aliases of the altered options from a WITH clause, mirroring
+/// [`WithOptionsSecResolved::handle_update`] on the SQL definition.
+fn remove_aliases_of_altered_options<'a>(
+    with_properties: &mut Vec<SqlOption>,
+    altered_names: impl IntoIterator<Item = &'a str>,
+) {
+    let aliases = aliases_of_altered_keys(altered_names);
+    if aliases.is_empty() {
+        return;
+    }
+    with_properties.retain(|option| !aliases.contains(&option.name.real_value().as_str()));
+}
+
+/// The properties of a source after applying an `ALTER SOURCE ... CONNECTOR WITH` statement.
+struct MergedSourceProps {
+    options_with_secret: WithOptionsSecResolved,
+    /// Secrets newly referenced by the source.
+    to_add_secret_dep: Vec<SecretId>,
+    /// Secrets no longer referenced by the source.
+    to_remove_secret_dep: Vec<SecretId>,
+}
+
+fn source_options_with_secret(source: &source::Model) -> WithOptionsSecResolved {
+    WithOptionsSecResolved::new(
+        source.with_properties.0.clone(),
+        source
+            .secret_ref
+            .as_ref()
+            .map(|secret_ref| secret_ref.to_protobuf())
+            .unwrap_or_default(),
+    )
+}
+
+/// Validates `alter_props` and `alter_secret_refs` against `source` and merges them into its
+/// current properties. Does not write anything.
+async fn merge_source_props(
+    db: &impl ConnectionTrait,
+    source: &source::Model,
+    alter_props: BTreeMap<String, String>,
+    alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    skip_alter_on_fly_check: bool,
+) -> MetaResult<MergedSourceProps> {
+    ensure_source_props_not_set_by_connection(db, source, &alter_props, &alter_secret_refs).await?;
+    let connector = source.with_properties.0.get_connector().unwrap();
+
+    // Validate that connector type is not being changed
+    if let Some(new_connector) = alter_props.get(UPSTREAM_SOURCE_KEY)
+        && new_connector != &connector
+    {
+        return Err(MetaError::invalid_parameter(format!(
+            "Cannot change connector type from '{}' to '{}'. Drop and recreate the source instead.",
+            connector, new_connector
+        )));
+    }
+
+    let prop_keys: Vec<String> = alter_props
+        .keys()
+        .chain(alter_secret_refs.keys())
+        .cloned()
+        .collect();
+    // Only check alter-on-fly restrictions for SQL ALTER SOURCE, not for admin risectl operations
+    if !skip_alter_on_fly_check {
+        check_source_allow_alter_on_fly_fields(&connector, &prop_keys)?;
+    }
+    if connector == KAFKA_CONNECTOR {
+        ensure_kafka_brokers_alterable(
+            &source.with_properties.0,
+            prop_keys.iter().map(String::as_str),
+        )?;
+    }
+
+    let mut options_with_secret = source_options_with_secret(source);
+    let (to_add_secret_dep, to_remove_secret_dep) =
+        options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+
+    // check if the alter-ed props are valid for each Connector
+    let _ = ConnectorProperties::extract(options_with_secret.clone(), true)?;
+
+    Ok(MergedSourceProps {
+        options_with_secret,
+        to_add_secret_dep,
+        to_remove_secret_dep,
+    })
 }
 
 async fn ensure_source_props_not_set_by_connection(
-    txn: &DatabaseTransaction,
+    db: &impl ConnectionTrait,
     source: &source::Model,
     alter_props: &BTreeMap<String, String>,
     alter_secret_refs: &BTreeMap<String, PbSecretRef>,
@@ -3973,7 +4167,7 @@ async fn ensure_source_props_not_set_by_connection(
     };
 
     let connection = Connection::find_by_id(connection_id)
-        .one(txn)
+        .one(db)
         .await?
         .ok_or_else(|| {
             MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
@@ -3997,10 +4191,13 @@ async fn ensure_source_props_not_set_by_connection(
     Ok(())
 }
 
+/// Applies `props` to the sink descriptors of the fragments of `sink_id`, removing `removed_keys`
+/// (aliases of altered properties) first.
 async fn update_sink_fragment_props(
     txn: &DatabaseTransaction,
     sink_id: SinkId,
     props: BTreeMap<String, String>,
+    removed_keys: &[&str],
 ) -> MetaResult<()> {
     let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
         .select_only()
@@ -4026,6 +4223,9 @@ async fn update_sink_fragment_props(
                     && let Some(sink_desc) = &mut node.sink_desc
                     && sink_desc.id == sink_id
                 {
+                    for key in removed_keys {
+                        sink_desc.properties.remove(*key);
+                    }
                     sink_desc.properties.extend(props.clone());
                     found = true;
                 }
@@ -4121,9 +4321,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use risingwave_sqlparser::ast::{SqlOption, Statement};
 
-    use super::{Parser, merge_with_options};
+    use super::{Parser, merge_with_options, update_stmt_with_props};
 
     #[test]
     fn test_merge_with_options_normalizes_altered_option_name() {
@@ -4150,5 +4352,67 @@ mod tests {
             "properties.receive.\"message\".\"max\".bytes = 'new'"
         );
         assert_eq!(with_properties[1].to_string(), "connection = kafka_conn");
+    }
+
+    fn parse_with_properties(sql: &str) -> Vec<SqlOption> {
+        let mut statements = Parser::parse_sql(sql).unwrap();
+        match statements.remove(0) {
+            Statement::CreateSource { stmt } => stmt.with_properties.0,
+            Statement::CreateSink { stmt } => stmt.with_properties.0,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_merge_with_options_removes_aliases_of_altered_option() {
+        let mut with_properties = parse_with_properties(
+            "CREATE SOURCE s WITH (connector = 'kafka', kafka.brokers = 'old:9092', \
+             topic = 't') FORMAT PLAIN ENCODE JSON",
+        );
+        let altered_name = "properties.bootstrap.server".to_owned();
+        let altered_value = "new:9092".to_owned();
+
+        merge_with_options(
+            &mut with_properties,
+            vec![SqlOption::try_from((&altered_name, &altered_value)).unwrap()],
+        );
+
+        assert_eq!(
+            with_properties
+                .iter()
+                .map(|option| option.to_string())
+                .collect::<Vec<_>>(),
+            vec![
+                "connector = 'kafka'",
+                "topic = 't'",
+                "properties.bootstrap.server = 'new:9092'",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_update_stmt_with_props_removes_aliases_of_altered_option() {
+        let mut with_properties = parse_with_properties(
+            "CREATE SINK s FROM t WITH (connector = 'kafka', \
+             properties.bootstrap.server = 'old:9092', topic = 't')",
+        );
+
+        update_stmt_with_props(
+            &mut with_properties,
+            &BTreeMap::from([("kafka.brokers".to_owned(), "new:9092".to_owned())]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            with_properties
+                .iter()
+                .map(|option| option.to_string())
+                .collect::<Vec<_>>(),
+            vec![
+                "connector = 'kafka'",
+                "topic = 't'",
+                "kafka.brokers = 'new:9092'",
+            ]
+        );
     }
 }
