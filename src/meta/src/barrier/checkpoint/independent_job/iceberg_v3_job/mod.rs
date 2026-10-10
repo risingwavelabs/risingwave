@@ -74,23 +74,21 @@ struct IcebergV3BarrierStats {
     snapshot_epoch: u64,
 }
 
-fn synthetic_compaction_epoch(prev_epoch: Epoch, curr_epoch: Epoch) -> MetaResult<Epoch> {
-    let synthetic_physical_time = prev_epoch.physical_time().checked_add(1).ok_or_else(|| {
-        anyhow::anyhow!(
-            "cannot advance synthetic compaction epoch after {}",
-            prev_epoch.0
-        )
-    })?;
+fn synthetic_compaction_epoch(prev_epoch: Epoch, curr_epoch: Epoch) -> Epoch {
+    let synthetic_physical_time = prev_epoch
+        .physical_time()
+        .checked_add(1)
+        .expect("synthetic compaction epoch should not overflow");
     let synthetic = Epoch::from_physical_time(synthetic_physical_time);
-    if synthetic <= prev_epoch || synthetic >= curr_epoch {
-        return Err(anyhow::anyhow!(
-            "cannot allocate synthetic compaction epoch between {} and {}",
-            prev_epoch.0,
-            curr_epoch.0
-        )
-        .into());
-    }
-    Ok(synthetic)
+    // Normally generated upstream barriers use `Epoch::next()`, which reserves at least one
+    // physical epoch between `prev_epoch` and `curr_epoch` for a synthetic boundary.
+    assert!(
+        synthetic > prev_epoch && synthetic < curr_epoch,
+        "synthetic compaction epoch must be between {} and {}",
+        prev_epoch.0,
+        curr_epoch.0
+    );
+    synthetic
 }
 
 impl IcebergV3BarrierStats {
@@ -147,6 +145,80 @@ enum IcebergV3JobStatus {
         input: IcebergV3Input,
         apply: CompactionApply,
     },
+}
+
+impl IcebergV3JobStatus {
+    fn next_compaction_barriers(
+        &mut self,
+        job_id: JobId,
+        upstream_barrier: &BarrierInfo,
+    ) -> MetaResult<(Vec<BarrierInfo>, BarrierInfo, BarrierInfo)> {
+        match self {
+            IcebergV3JobStatus::Running(input) => {
+                let IcebergV3Input {
+                    phase,
+                    pending_upstream_barriers,
+                } = input;
+                match phase {
+                    IcebergV3InputPhase::Snapshot(snapshot) => {
+                        pending_upstream_barriers.push_back(upstream_barrier.clone());
+                        let begin = snapshot.next_fake_barrier(&BarrierKind::Checkpoint(vec![]));
+                        let end = snapshot.next_fake_barrier(&BarrierKind::Checkpoint(vec![]));
+                        Ok((vec![], begin, end))
+                    }
+                    IcebergV3InputPhase::LogStore { .. } => {
+                        if !upstream_barrier.kind.is_checkpoint() {
+                            return Err(anyhow::anyhow!(
+                                "Iceberg pk-index compaction requires a checkpoint command barrier"
+                            )
+                            .into());
+                        }
+                        pending_upstream_barriers.push_back(upstream_barrier.clone());
+
+                        let checkpoint_index = pending_upstream_barriers
+                            .iter()
+                            .position(|barrier| barrier.kind.is_checkpoint())
+                            .expect("new upstream barrier should be a checkpoint");
+
+                        let barriers_before_compaction = pending_upstream_barriers
+                            .drain(..checkpoint_index)
+                            .collect();
+                        let BarrierInfo {
+                            prev_epoch,
+                            curr_epoch,
+                            kind: BarrierKind::Checkpoint(checkpoint_epochs),
+                        } = pending_upstream_barriers
+                            .pop_front()
+                            .expect("selected checkpoint should exist")
+                        else {
+                            unreachable!("selected barrier should be a checkpoint")
+                        };
+                        let synthetic_epoch = TracedEpoch::new(synthetic_compaction_epoch(
+                            prev_epoch.value(),
+                            curr_epoch.value(),
+                        ));
+                        let begin_barrier = BarrierInfo {
+                            prev_epoch,
+                            curr_epoch: synthetic_epoch.clone(),
+                            kind: BarrierKind::Checkpoint(checkpoint_epochs),
+                        };
+                        let end_barrier = BarrierInfo {
+                            prev_epoch: synthetic_epoch.clone(),
+                            curr_epoch,
+                            kind: BarrierKind::Checkpoint(vec![synthetic_epoch.value().0]),
+                        };
+
+                        Ok((barriers_before_compaction, begin_barrier, end_barrier))
+                    }
+                }
+            }
+            IcebergV3JobStatus::Compacting { .. } => Err(anyhow::anyhow!(
+                "Iceberg V3 job {} is already applying compaction",
+                job_id
+            )
+            .into()),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -748,7 +820,6 @@ impl IcebergV3JobCheckpointControl {
         notifier: &mut NotifierStarter,
     ) -> MetaResult<()> {
         let output_data_file_paths = output_file_paths(&overwrite.output_result.data_files)?;
-        let (begin_barrier, end_barrier) = self.next_compaction_barriers(upstream_barrier)?;
         let transitions = build_compaction_transitions(
             &self.fragment_infos,
             &self.active_stream_actors,
@@ -758,6 +829,24 @@ impl IcebergV3JobCheckpointControl {
             self.control.info.partial_graph_id,
             partial_graph_manager.control_stream_manager(),
         )?;
+        let (barriers_before_compaction, begin_barrier, end_barrier) =
+            self.next_compaction_barriers(upstream_barrier)?;
+        for barrier in barriers_before_compaction {
+            partial_graph_manager.inject_barrier(
+                self.control.info.partial_graph_id,
+                None, // no mutation
+                &self.node_actors,
+                self.control.info.state_table_ids.iter().copied(),
+                self.node_actors.keys().copied(),
+                None, // no actors to create
+                PartialGraphBarrierInfo::new(
+                    PostCollectCommand::barrier(),
+                    barrier,
+                    None, // no command notifier
+                    self.control.info.state_table_ids.clone(),
+                ),
+            )?;
+        }
         let sink_id = SinkId::new(self.control.info.job_id.as_raw_id());
         let resolver_task_input = ResolverTaskInput {
             output_data_file_paths,
@@ -829,52 +918,9 @@ impl IcebergV3JobCheckpointControl {
     fn next_compaction_barriers(
         &mut self,
         upstream_barrier: &BarrierInfo,
-    ) -> MetaResult<(BarrierInfo, BarrierInfo)> {
-        match &mut self.status {
-            IcebergV3JobStatus::Running(input) => {
-                let IcebergV3Input {
-                    phase,
-                    pending_upstream_barriers,
-                } = input;
-                match phase {
-                    IcebergV3InputPhase::Snapshot(snapshot) => {
-                        pending_upstream_barriers.push_back(upstream_barrier.clone());
-                        let begin = snapshot.next_fake_barrier(&BarrierKind::Checkpoint(vec![]));
-                        let end = snapshot.next_fake_barrier(&BarrierKind::Checkpoint(vec![]));
-                        Ok((begin, end))
-                    }
-                    IcebergV3InputPhase::LogStore { .. } => {
-                        let BarrierKind::Checkpoint(checkpoint_epochs) = &upstream_barrier.kind
-                        else {
-                            return Err(anyhow::anyhow!(
-                                "Iceberg pk-index compaction requires a checkpoint command barrier"
-                            )
-                            .into());
-                        };
-                        let prev_epoch = upstream_barrier.prev_epoch.value();
-                        let curr_epoch = upstream_barrier.curr_epoch.value();
-                        let synthetic = synthetic_compaction_epoch(prev_epoch, curr_epoch)?;
-                        Ok((
-                            BarrierInfo {
-                                prev_epoch: TracedEpoch::new(prev_epoch),
-                                curr_epoch: TracedEpoch::new(synthetic),
-                                kind: BarrierKind::Checkpoint(checkpoint_epochs.clone()),
-                            },
-                            BarrierInfo {
-                                prev_epoch: TracedEpoch::new(synthetic),
-                                curr_epoch: TracedEpoch::new(curr_epoch),
-                                kind: BarrierKind::Checkpoint(vec![synthetic.0]),
-                            },
-                        ))
-                    }
-                }
-            }
-            IcebergV3JobStatus::Compacting { .. } => Err(anyhow::anyhow!(
-                "Iceberg V3 job {} is already applying compaction",
-                self.control.info.job_id
-            )
-            .into()),
-        }
+    ) -> MetaResult<(Vec<BarrierInfo>, BarrierInfo, BarrierInfo)> {
+        self.status
+            .next_compaction_barriers(self.control.info.job_id, upstream_barrier)
     }
 
     #[expect(clippy::type_complexity)]
@@ -1170,12 +1216,30 @@ mod tests {
 
     use super::*;
 
+    fn barrier_info(prev_physical: u64, curr_physical: u64, kind: BarrierKind) -> BarrierInfo {
+        BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch::from_physical_time(prev_physical)),
+            curr_epoch: TracedEpoch::new(Epoch::from_physical_time(curr_physical)),
+            kind,
+        }
+    }
+
+    fn assert_epoch(barrier: &BarrierInfo, prev_physical: u64, curr_physical: u64) {
+        assert_eq!(
+            barrier.epoch(),
+            EpochPair::new(
+                Epoch::from_physical_time(curr_physical).0,
+                Epoch::from_physical_time(prev_physical).0,
+            )
+        );
+    }
+
     #[test]
     fn test_synthetic_compaction_epoch() {
         let prev_epoch = Epoch::from_physical_time(10);
         let curr_epoch = Epoch::from_physical_time(12);
 
-        let synthetic = synthetic_compaction_epoch(prev_epoch, curr_epoch).unwrap();
+        let synthetic = synthetic_compaction_epoch(prev_epoch, curr_epoch);
 
         assert_eq!(synthetic, Epoch::from_physical_time(11));
         assert_eq!(synthetic.0 & EPOCH_SPILL_TIME_MASK, 0);
@@ -1184,10 +1248,48 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "synthetic compaction epoch must be between")]
     fn test_synthetic_compaction_epoch_rejects_tight_gap() {
         let prev_epoch = Epoch::from_physical_time(10);
         let curr_epoch = Epoch::from_physical_time(11);
 
-        assert!(synthetic_compaction_epoch(prev_epoch, curr_epoch).is_err());
+        synthetic_compaction_epoch(prev_epoch, curr_epoch);
+    }
+
+    #[test]
+    fn test_log_store_compaction_uses_first_pending_checkpoint() {
+        let mut status = IcebergV3JobStatus::Running(IcebergV3Input {
+            phase: IcebergV3InputPhase::LogStore { tracking_job: None },
+            pending_upstream_barriers: VecDeque::from([
+                barrier_info(10, 12, BarrierKind::Barrier),
+                barrier_info(12, 14, BarrierKind::Checkpoint(vec![10])),
+                barrier_info(14, 16, BarrierKind::Barrier),
+            ]),
+        });
+        let upstream = barrier_info(16, 18, BarrierKind::Checkpoint(vec![14]));
+
+        let (before, begin, end) = status
+            .next_compaction_barriers(JobId::new(1), &upstream)
+            .unwrap();
+
+        assert_eq!(before.len(), 1);
+        assert_epoch(&before[0], 10, 12);
+        assert_epoch(&begin, 12, 13);
+        assert_eq!(begin.kind, BarrierKind::Checkpoint(vec![10]));
+        assert_epoch(&end, 13, 14);
+        assert_eq!(
+            end.kind,
+            BarrierKind::Checkpoint(vec![Epoch::from_physical_time(13).0])
+        );
+        let IcebergV3JobStatus::Running(IcebergV3Input {
+            pending_upstream_barriers: pending,
+            ..
+        }) = status
+        else {
+            unreachable!()
+        };
+        assert_eq!(pending.len(), 2);
+        assert_epoch(&pending[0], 14, 16);
+        assert_epoch(&pending[1], 16, 18);
     }
 }

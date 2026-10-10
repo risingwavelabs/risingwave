@@ -1241,17 +1241,7 @@ impl DatabaseCheckpointControl {
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let prev_epoch = self.state.in_flight_prev_epoch();
-        let curr_epoch = if matches!(
-            &command,
-            Some((Command::ApplyIcebergPkIndexCompaction { .. }, _))
-        ) {
-            // Applying a compaction splits this barrier into Begin and End barriers for the
-            // independent Iceberg job. Reserve a complete physical epoch for the synthetic
-            // boundary between them; the low epoch bits are reserved for state-store spills.
-            prev_epoch.next().next()
-        } else {
-            prev_epoch.next()
-        };
+        let curr_epoch = prev_epoch.next();
 
         let (mut command, notifier) = if let Some((command, notifier)) = command {
             (Some(command), Some(notifier))

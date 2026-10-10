@@ -35,6 +35,13 @@ pub const INVALID_EPOCH: u64 = 0;
 
 const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
 
+/// Minimum physical-time delta between normally generated epochs.
+///
+/// A delta of 2 leaves one complete physical epoch for state machines that need to split an
+/// existing epoch interval later. With the default 1-second barrier interval, normally generated
+/// epochs are about 1000 physical ticks apart and therefore leave about 999 intermediate epochs.
+const MIN_EPOCH_PHYSICAL_TIME_DELTA: u64 = 2;
+
 impl Epoch {
     pub fn now() -> Self {
         Self(Self::physical_now() << EPOCH_PHYSICAL_SHIFT_BITS)
@@ -44,9 +51,12 @@ impl Epoch {
     pub fn next(self) -> Self {
         let mut physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
+        let min_physical_time = prev_physical_time
+            .checked_add(MIN_EPOCH_PHYSICAL_TIME_DELTA)
+            .expect("next epoch physical time should not overflow");
 
         loop {
-            if physical_now > prev_physical_time {
+            if physical_now >= min_physical_time {
                 break;
             }
             physical_now = Epoch::physical_now();
@@ -269,6 +279,9 @@ mod tests {
         for _ in 0..1000 {
             let epoch = prev_epoch.next();
             assert!(epoch > prev_epoch);
+            assert!(
+                epoch.physical_time() >= prev_epoch.physical_time() + MIN_EPOCH_PHYSICAL_TIME_DELTA
+            );
             prev_epoch = epoch;
         }
     }
