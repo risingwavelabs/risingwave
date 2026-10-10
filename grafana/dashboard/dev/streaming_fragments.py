@@ -26,11 +26,7 @@ def _fragment_peak_rate_per_actor_with_id_at_step(per_actor_expr: str) -> str:
     )
 
 def _kv_log_store_buffer_usage_by_fragment_expr() -> str:
-    return (
-        f"sum({metric('kv_log_store_buffer_memory_bytes')}"
-        f"  * on(actor_id) group_left(fragment_id) {metric('actor_info')})"
-        f" by (fragment_id)"
-    )
+    return f"sum({metric('kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
 
 def _sync_kv_log_store_buffer_usage_by_fragment_expr() -> str:
     return f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
