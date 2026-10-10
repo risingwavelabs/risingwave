@@ -110,7 +110,9 @@ impl SqlServerExternalTable {
                     INFORMATION_SCHEMA.COLUMNS
                 WHERE
                     TABLE_SCHEMA = '{}'
-                    AND TABLE_NAME = '{}'",
+                    AND TABLE_NAME = '{}'
+                ORDER BY
+                    ORDINAL_POSITION",
                 config.schema.clone(),
                 config.table.clone(),
             ));
@@ -143,7 +145,9 @@ impl SqlServerExternalTable {
                     tc.TABLE_NAME = kcu.TABLE_NAME
                 WHERE
                     tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND
-                    tc.TABLE_SCHEMA = '{}' AND tc.TABLE_NAME = '{}'",
+                    tc.TABLE_SCHEMA = '{}' AND tc.TABLE_NAME = '{}'
+                ORDER BY
+                    kcu.ORDINAL_POSITION",
                 config.schema, config.table,
             ));
 
