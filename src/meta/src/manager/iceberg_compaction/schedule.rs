@@ -215,6 +215,16 @@ impl CompactionTrack {
         self.latest_observed_snapshot = Some(observed_snapshot);
     }
 
+    /// Restores the backlog of a track rebuilt from Iceberg metadata after meta restarts.
+    pub(super) fn restore_backlog(
+        &mut self,
+        pending_commit_count: usize,
+        observed_snapshot: Option<IcebergCommittedSnapshot>,
+    ) {
+        self.pending_commit_count = pending_commit_count;
+        self.latest_observed_snapshot = observed_snapshot;
+    }
+
     fn record_commit(&mut self) {
         self.pending_commit_count = self.pending_commit_count.saturating_add(1);
     }
@@ -1129,6 +1139,7 @@ impl IcebergCompactionManager {
             let task_to_cancel = Self::remove_sink_schedule(&mut guard, sink_id);
             guard.snapshot_expiration_sink_ids.remove(&sink_id);
             guard.manifest_rewrite_sink_ids.remove(&sink_id);
+            guard.recovering_sink_ids.remove(&sink_id);
             let waiter = guard.manual_compaction_waiters.remove(&sink_id);
             (task_to_cancel, waiter)
         };
