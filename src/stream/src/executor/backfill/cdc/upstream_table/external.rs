@@ -114,7 +114,7 @@ impl ExternalStorageTable {
             schema_name: "for_test_schema_name".into(),
             database_name: "for_test_database_name".into(),
             config: ExternalTableConfig::default(),
-            table_type: ExternalCdcTableType::Undefined,
+            table_type: ExternalCdcTableType::Unspecified,
             schema: Schema::empty().to_owned(),
             pk_order_types: vec![],
             pk_comparisons: Some(vec![]),
