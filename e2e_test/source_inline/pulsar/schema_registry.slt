@@ -56,16 +56,6 @@ python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-ty
 {"id":1,"name":"Alice"}
 EOF
 
-system ok
-python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-type json --schema-version 1 --topic 'persistent://public/default/rw-schema-json' <<EOF
-{"id":2,"name":"Bob","category":"premium"}
-EOF
-
-system ok
-python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-type json --topic 'persistent://public/default/rw-schema-json' <<EOF
-{"id":3,"name":"Carol"}
-EOF
-
 statement error expected Pulsar AVRO schema, got JSON
 create source pulsar_avro_schema_mismatch
 with (
@@ -149,6 +139,32 @@ with (
 format plain encode json (
   schema.pulsar.url = '${PULSAR_HTTP_URL}'
 );
+
+query T
+select substring(definition, 1, position(' WITH' in definition) - 1) from rw_sources where name = 'pulsar_json_schema';
+----
+CREATE SOURCE pulsar_json_schema (id INT, name CHARACTER VARYING)
+
+statement error alter source with schema registry
+alter source pulsar_json_schema add column category varchar;
+
+system ok
+python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-type json --schema-version 1 --topic 'persistent://public/default/rw-schema-json' <<EOF
+{"id":2,"name":"Bob","category":"premium"}
+EOF
+
+system ok
+python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-type json --topic 'persistent://public/default/rw-schema-json' <<EOF
+{"id":3,"name":"Carol"}
+EOF
+
+statement ok
+alter source pulsar_json_schema refresh schema;
+
+query T
+select substring(definition, 1, position(' WITH' in definition) - 1) from rw_sources where name = 'pulsar_json_schema';
+----
+CREATE SOURCE pulsar_json_schema (id INT, name CHARACTER VARYING, category CHARACTER VARYING)
 
 statement ok
 create materialized view pulsar_json_schema_mv as
