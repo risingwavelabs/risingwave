@@ -43,7 +43,9 @@ impl PulsarSchemaCache {
         })
     }
 
-    fn parse_schema(raw_schema: PulsarSchemaInfo) -> ConnectorResult<Arc<Schema>> {
+    /// Only `AVRO` schemas can be used, as payloads are decoded as Avro binary. A `JSON` schema
+    /// carries the same Avro definition, but its payloads are JSON text.
+    fn parse_avro_schema(raw_schema: PulsarSchemaInfo) -> ConnectorResult<Arc<Schema>> {
         match raw_schema.parse()? {
             PulsarSchema::Avro(schema) => Ok(Arc::new(schema)),
             PulsarSchema::Json(_) => bail!("expected Pulsar AVRO schema, got JSON"),
@@ -54,7 +56,7 @@ impl PulsarSchemaCache {
     pub async fn get_latest(&self) -> ConnectorResult<Arc<Schema>> {
         let raw_schema = self.pulsar_client.get_schema(&self.topic, None).await?;
         let version = raw_schema.version;
-        let schema = Self::parse_schema(raw_schema)?;
+        let schema = Self::parse_avro_schema(raw_schema)?;
         self.writer_schemas
             .insert(version, Arc::clone(&schema))
             .await;
@@ -76,7 +78,7 @@ impl PulsarSchemaCache {
                         raw_schema.version
                     );
                 }
-                Self::parse_schema(raw_schema)
+                Self::parse_avro_schema(raw_schema)
             })
             .await
             .map_err(Into::into)
