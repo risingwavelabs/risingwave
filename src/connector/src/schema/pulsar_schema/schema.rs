@@ -43,8 +43,9 @@ impl PulsarSchemaInfo {
     }
 }
 
-/// Returns the topic without partition suffix, as schemas are shared by all partitions.
-pub fn parse_non_partitioned_topic(topic: &str) -> ConnectorResult<Topic> {
+/// Returns the partitioned topic, i.e. the topic without partition suffix, as schemas are shared
+/// by all partitions.
+pub fn parse_partitioned_topic_name(topic: &str) -> ConnectorResult<Topic> {
     let mut topic = parse_topic(topic)?;
     topic.topic = topic.topic_str_without_partition()?;
     topic.partition_index = None;

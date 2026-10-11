@@ -67,7 +67,7 @@ pub async fn extract_pulsar_json_table_schema(
 ) -> Result<Vec<ColumnCatalog>> {
     try_consume_pulsar_schema_config_from_options(format_encode_options);
     let client = pulsar_schema::Client::new(config)?;
-    let topic = parse_non_partitioned_topic(get_pulsar_topic(with_properties)?)?;
+    let topic = parse_partitioned_topic_name(get_pulsar_topic(with_properties)?)?;
     let schema = client
         .get_schema(&topic, None)
         .await?

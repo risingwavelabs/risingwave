@@ -19,7 +19,7 @@ use moka::future::Cache;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
-use crate::schema::pulsar_schema::{Client, PulsarSchemaInfo, parse_non_partitioned_topic};
+use crate::schema::pulsar_schema::{Client, PulsarSchemaInfo, parse_partitioned_topic_name};
 use crate::source::pulsar::topic::Topic;
 
 /// Fetch schemas of a single Pulsar topic and cache writer schemas by version.
@@ -35,7 +35,7 @@ pub struct PulsarSchemaCache {
 impl PulsarSchemaCache {
     pub fn new(pulsar_client: Client, topic: &str) -> ConnectorResult<Self> {
         Ok(Self {
-            topic: parse_non_partitioned_topic(topic)?,
+            topic: parse_partitioned_topic_name(topic)?,
             writer_schemas: Cache::new(u64::MAX),
             pulsar_client,
         })
