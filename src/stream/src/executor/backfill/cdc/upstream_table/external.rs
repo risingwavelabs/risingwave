@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{Schema, TableId};
+#[cfg(test)]
+use std::collections::VecDeque;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
+
+use risingwave_common::catalog::{CdcKeyComparison, Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::cdc::external::{
@@ -44,9 +51,21 @@ pub struct ExternalStorageTable {
 
     pk_order_types: Vec<OrderType>,
 
+    /// Comparison semantics persisted in the stream graph.
+    ///
+    /// `None` is only expected for legacy MySQL graphs with Int64 primary-key columns, whose
+    /// signedness must be recovered from a live external table reader.
+    pk_comparisons: Option<Vec<CdcKeyComparison>>,
+
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table.
     pk_indices: Vec<usize>,
+
+    #[cfg(test)]
+    mock_snapshot_errors: Option<Arc<Mutex<VecDeque<usize>>>>,
+
+    #[cfg(test)]
+    mock_reader_create_count: Arc<AtomicUsize>,
 }
 
 impl ExternalStorageTable {
@@ -62,8 +81,13 @@ impl ExternalStorageTable {
         table_type: ExternalCdcTableType,
         schema: Schema,
         pk_order_types: Vec<OrderType>,
+        pk_comparisons: Option<Vec<CdcKeyComparison>>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        assert_eq!(pk_order_types.len(), pk_indices.len());
+        if let Some(pk_comparisons) = &pk_comparisons {
+            assert_eq!(pk_order_types.len(), pk_comparisons.len());
+        }
         Self {
             table_id,
             table_name,
@@ -73,7 +97,12 @@ impl ExternalStorageTable {
             table_type,
             schema,
             pk_order_types,
+            pk_comparisons,
             pk_indices,
+            #[cfg(test)]
+            mock_snapshot_errors: None,
+            #[cfg(test)]
+            mock_reader_create_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -88,8 +117,27 @@ impl ExternalStorageTable {
             table_type: ExternalCdcTableType::Undefined,
             schema: Schema::empty().to_owned(),
             pk_order_types: vec![],
+            pk_comparisons: Some(vec![]),
             pk_indices: vec![],
+            mock_snapshot_errors: None,
+            mock_reader_create_count: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    #[cfg(test)]
+    pub fn with_mock_snapshot_errors(
+        mut self,
+        snapshot_errors: impl IntoIterator<Item = usize>,
+    ) -> Self {
+        self.mock_snapshot_errors =
+            Some(Arc::new(Mutex::new(snapshot_errors.into_iter().collect())));
+
+        self
+    }
+
+    #[cfg(test)]
+    pub fn mock_reader_create_count(&self) -> usize {
+        self.mock_reader_create_count.load(Ordering::Relaxed)
     }
 
     pub fn table_id(&self) -> TableId {
@@ -100,12 +148,23 @@ impl ExternalStorageTable {
         &self.pk_order_types
     }
 
+    pub fn pk_comparisons(&self) -> Option<&[CdcKeyComparison]> {
+        self.pk_comparisons.as_deref()
+    }
+
     pub fn schema(&self) -> &Schema {
         &self.schema
     }
 
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
+    }
+
+    pub fn pk_names(&self) -> Vec<String> {
+        self.pk_indices
+            .iter()
+            .map(|&idx| self.schema.fields[idx].name.clone())
+            .collect()
     }
 
     pub fn schema_table_name(&self) -> SchemaTableName {
@@ -116,6 +175,22 @@ impl ExternalStorageTable {
     }
 
     pub async fn create_table_reader(&self) -> ConnectorResult<ExternalTableReaderImpl> {
+        #[cfg(test)]
+        if let Some(snapshot_errors) = &self.mock_snapshot_errors {
+            self.mock_reader_create_count
+                .fetch_add(1, Ordering::Relaxed);
+
+            let snapshot_errors = snapshot_errors
+                .lock()
+                .expect("mock snapshot error queue must not be poisoned")
+                .pop_front()
+                .unwrap_or_default();
+
+            return Ok(ExternalTableReaderImpl::Mock(
+                risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader::new_with_snapshot_errors(snapshot_errors),
+            ));
+        }
+
         self.table_type
             .create_table_reader(
                 self.config.clone(),
@@ -125,6 +200,7 @@ impl ExternalStorageTable {
                     schema_name: self.schema_name.clone(),
                     table_name: self.table_name.clone(),
                 },
+                self.table_id.as_raw_id(),
             )
             .await
     }

@@ -21,11 +21,13 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder, FilterByBitmap};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::{Row, RowExt, repeat_n};
 use risingwave_common::types::{DataType, Datum, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -474,6 +476,9 @@ impl JoinSpillManager {
 impl<K: HashKey> HashJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        // This invocation owns its accounting. Its private context releases remaining charges
+        // on completion, errors, or cancellation, even if the shared parent stays alive.
+        let mem_ctx = MemoryContext::new(Some(self.mem_ctx.clone()), TrAdderAtomic::new(0));
         let mut need_to_spill = false;
         // If the memory upper bound is less than 1MB, we don't need to check memory usage.
         let check_memory = match self.memory_upper_bound {
@@ -487,7 +492,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let build_data_types = self.build_side_source.schema().data_types();
         let full_data_types = [probe_data_types.clone(), build_data_types.clone()].concat();
 
-        let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
+        let mut build_side = Vec::new_in(mem_ctx.global_allocator());
         let mut build_row_count = 0;
         let mut build_side_stream = self.build_side_source.execute();
         #[for_await]
@@ -498,7 +503,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 let chunk_estimated_heap_size = build_chunk.estimated_heap_size();
                 // push build_chunk to build_side before checking memory limit, otherwise we will lose that chunk when spilling.
                 build_side.push(build_chunk);
-                if !self.mem_ctx.add(chunk_estimated_heap_size as i64) && check_memory {
+                mem_ctx.add_unchecked(chunk_estimated_heap_size as i64);
+                if check_memory && !mem_ctx.check_memory_usage() {
                     if self.spill_backend.is_some() {
                         need_to_spill = true;
                         break;
@@ -511,7 +517,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
             build_row_count,
             PrecomputedBuildHasher,
-            self.mem_ctx.global_allocator(),
+            mem_ctx.global_allocator(),
         );
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
@@ -521,7 +527,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut mem_added_by_hash_table = 0;
         if !need_to_spill {
             // Build hash map
-            for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
+            'build: for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
                 let build_keys = K::build_many(&self.build_key_idxs, build_chunk);
 
                 for (build_row_id, build_key) in build_keys
@@ -534,16 +540,18 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     if build_key.null_bitmap().is_subset(&null_matched) {
                         let row_id = RowId::new(build_chunk_id, build_row_id);
                         let build_key_size = build_key.estimated_heap_size() as i64;
+                        next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
+                        // Retain and charge the key before deciding whether to spill the table.
                         mem_added_by_hash_table += build_key_size;
-                        if !self.mem_ctx.add(build_key_size) && check_memory {
+                        mem_ctx.add_unchecked(build_key_size);
+                        if check_memory && !mem_ctx.check_memory_usage() {
                             if self.spill_backend.is_some() {
                                 need_to_spill = true;
-                                break;
+                                break 'build;
                             } else {
                                 Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
                             }
                         }
-                        next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                     }
                 }
             }
@@ -572,14 +580,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
             join_spill_manager.init_writers().await?;
 
             // Release memory occupied by the hash map
-            self.mem_ctx.add(-mem_added_by_hash_table);
             drop(hash_map);
             drop(next_build_row_with_same_key);
+            mem_ctx.add_unchecked(-mem_added_by_hash_table);
 
             // Spill buffered build side chunks
             for chunk in build_side {
                 // Release the memory occupied by the buffered chunks
-                self.mem_ctx.add(-(chunk.estimated_heap_size() as i64));
+                let chunk_size = chunk.estimated_heap_size() as i64;
                 let hash_codes = chunk.get_hash_values(
                     self.build_key_idxs.as_slice(),
                     join_spill_manager.spill_build_hasher,
@@ -593,6 +601,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             .collect(),
                     )
                     .await?;
+                mem_ctx.add_unchecked(-chunk_size);
             }
 
             // Spill build side chunks
@@ -759,6 +768,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     yield chunk?.project(&self.output_indices)
                 }
             }
+            // Build data can be reused throughout the join. The private context releases its
+            // remaining charges when this invocation exits.
         }
     }
 

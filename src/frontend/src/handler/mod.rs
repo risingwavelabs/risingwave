@@ -71,6 +71,7 @@ mod alter_utils;
 mod alter_watermark;
 mod backup;
 pub mod cancel_job;
+pub(crate) mod cdc;
 pub mod close_cursor;
 mod comment;
 pub mod create_aggregate;
@@ -1580,6 +1581,9 @@ pub async fn handle(
         },
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
+        }
+        Statement::AlterSystemClearFileCache { cache_type } => {
+            alter_system::handle_clear_file_cache(handler_args, cache_type).await
         }
         Statement::AlterSecret { name, operation } => match operation {
             AlterSecretOperation::ChangeCredential {

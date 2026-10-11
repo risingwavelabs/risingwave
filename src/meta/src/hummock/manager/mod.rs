@@ -67,6 +67,7 @@ pub(crate) mod checkpoint;
 mod commit_epoch;
 mod compaction;
 pub mod sequence;
+mod table_change_log;
 pub mod table_write_throughput_statistic;
 pub mod time_travel;
 mod timer_task;
@@ -77,7 +78,9 @@ mod worker;
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 pub use compaction::compaction_event_loop::*;
 use compaction::*;
-pub use compaction::{GroupState, GroupStateValidator, ManualCompactionTriggerResult};
+pub use compaction::{
+    GroupState, GroupStateValidator, ManualCompactionTriggerResult, ScheduleTrigger,
+};
 pub(crate) use utils::*;
 
 struct TableCommittedEpochNotifiers {
@@ -184,7 +187,7 @@ pub struct HummockManager {
 
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
-    pub compaction_state: CompactionState,
+    pub(super) compaction_state: CompactionState,
     full_gc_state: Arc<FullGcState>,
     now: Mutex<u64>,
     inflight_time_travel_query: Semaphore,
@@ -323,10 +326,7 @@ impl HummockManager {
             use_new_object_prefix_strategy,
         );
 
-        let max_table_statistic_expired_time = std::cmp::max(
-            env.opts.table_stat_throuput_window_seconds_for_split,
-            env.opts.table_stat_throuput_window_seconds_for_merge,
-        ) as i64;
+        let table_statistic_retention = env.opts.table_write_throughput_retention_seconds;
 
         let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
@@ -366,7 +366,7 @@ impl HummockManager {
             version_archive_dir,
             pause_version_checkpoint: AtomicBool::new(false),
             table_write_throughput_statistic_manager: parking_lot::RwLock::new(
-                TableWriteThroughputStatisticManager::new(max_table_statistic_expired_time),
+                TableWriteThroughputStatisticManager::new(table_statistic_retention),
             ),
             table_committed_epoch_notifiers: parking_lot::Mutex::new(
                 TableCommittedEpochNotifiers {

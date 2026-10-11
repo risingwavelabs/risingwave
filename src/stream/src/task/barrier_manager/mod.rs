@@ -64,7 +64,6 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        staging_table_id: TableId,
     },
     RegisterBarrierSender {
         actor_id: ActorId,
@@ -74,6 +73,7 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
         upstream_partial_graph_id: PartialGraphId,
+        term_id: String,
         tx: permit::Sender,
     },
     ReportCdcTableBackfillProgress {
@@ -188,6 +188,7 @@ impl LocalBarrierManager {
             actor_id,
             upstream_actor_id,
             upstream_partial_graph_id,
+            term_id: self.term_id.clone(),
             tx,
         });
         rx
@@ -223,18 +224,11 @@ impl LocalBarrierManager {
         });
     }
 
-    pub fn report_refresh_finished(
-        &self,
-        epoch: EpochPair,
-        actor_id: ActorId,
-        table_id: TableId,
-        staging_table_id: TableId,
-    ) {
+    pub fn report_refresh_finished(&self, epoch: EpochPair, actor_id: ActorId, table_id: TableId) {
         self.send_event(LocalBarrierEvent::RefreshFinished {
             epoch,
             actor_id,
             table_id,
-            staging_table_id,
         });
     }
 

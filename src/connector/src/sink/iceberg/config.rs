@@ -225,13 +225,12 @@ where
 }
 
 /// Compaction type for Iceberg sink
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CompactionType {
-    /// Auto compaction - selects a localized strategy from the current snapshot
+    /// Auto compaction - compacts the union of small and delete-heavy files
     Auto,
     /// Full compaction - rewrites all data files
-    #[default]
     Full,
     /// Small files compaction - only compact small files
     SmallFiles,
@@ -334,6 +333,13 @@ pub struct IcebergConfig {
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
+
+    /// For REST catalogs such as AWS Glue, derive a missing table location from the
+    /// namespace's `location` property. Defaults to false. An existing location
+    /// derived from `warehouse.path` takes precedence; a missing or empty namespace
+    /// location leaves server-side location assignment unchanged.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub default_table_location_from_namespace: bool,
 
     /// Whether it is `exactly_once`, the default is true.
     #[serde(default = "default_some_true")]
@@ -463,7 +469,7 @@ pub struct IcebergConfig {
     pub target_file_size_mb: Option<u64>,
 
     /// Compaction type: `auto`, `full`, `small-files`, or `files-with-delete`
-    /// If not set, will default to `full`
+    /// If not set, defaults to `auto` when Iceberg compaction is licensed, otherwise `full`
     #[serde(rename = "compaction.type", default)]
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub compaction_type: Option<CompactionType>,
@@ -611,6 +617,12 @@ impl IcebergConfig {
         Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
         config.validate_enable_pk_index()?;
         config.validate_manifest_rewrite_format(config.format_version)?;
+
+        if config.default_table_location_from_namespace && !config.common.is_rest_catalog()? {
+            return Err(SinkError::Config(anyhow!(
+                "`default_table_location_from_namespace` is only supported for REST catalogs"
+            )));
+        }
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = iceberg_java_catalog_props_from_options(
@@ -816,12 +828,6 @@ impl IcebergConfig {
 
     pub fn target_file_size_mb(&self) -> u64 {
         self.target_file_size_mb.unwrap_or(1024)
-    }
-
-    /// Get the compaction type as an enum
-    /// This method parses the string and returns the enum value
-    pub fn compaction_type(&self) -> CompactionType {
-        self.compaction_type.unwrap_or_default()
     }
 
     /// Get the parquet compression codec

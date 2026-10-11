@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::future;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::DatabaseId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt};
 use risingwave_connector::source::{SplitId, SplitMetaData};
 use risingwave_meta_model::{
@@ -54,7 +54,8 @@ pub struct WorkerReschedule {
 use risingwave_common::id::JobId;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
+use risingwave_meta_model::prelude::{Fragment, FragmentRelation, RefreshJob, StreamingJob};
+use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
@@ -227,6 +228,7 @@ impl ScaleController {
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
+        ensure_not_refreshing(&txn, policy.keys().copied()).await?;
 
         for (table_id, target) in &policy {
             let streaming_job = StreamingJob::find_by_id(*table_id)
@@ -433,6 +435,14 @@ impl ScaleController {
             .iter()
             .flat_map(|ensemble| ensemble.component_fragments())
             .collect();
+        let job_ids: Vec<JobId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::JobId)
+            .filter(fragment::Column::FragmentId.is_in(target_fragment_ids.iter().copied()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        ensure_not_refreshing(&txn, job_ids).await?;
         let commands = build_reschedule_intent_for_fragments(&txn, target_fragment_ids).await?;
 
         txn.commit().await?;
@@ -451,6 +461,33 @@ impl ScaleController {
         txn.commit().await?;
         Ok(commands)
     }
+}
+
+/// Rescheduling a job while its table is being refreshed would change the actor set the cycle
+/// is tracked against.
+async fn ensure_not_refreshing(
+    txn: &impl ConnectionTrait,
+    job_ids: impl IntoIterator<Item = JobId>,
+) -> MetaResult<()> {
+    let table_ids = job_ids
+        .into_iter()
+        .map(|job_id| job_id.as_mv_table_id())
+        .collect_vec();
+    let refreshing: Vec<TableId> = RefreshJob::find()
+        .select_only()
+        .column(refresh_job::Column::TableId)
+        .filter(refresh_job::Column::TableId.is_in(table_ids))
+        .filter(refresh_job::Column::CurrentStatus.ne(RefreshState::Idle))
+        .into_tuple()
+        .all(txn)
+        .await?;
+    if let Some(table_id) = refreshing.first() {
+        bail!(
+            "Cannot reschedule job {} because its table is being refreshed",
+            table_id.as_job_id()
+        );
+    }
+    Ok(())
 }
 
 async fn build_reschedule_intent_for_jobs(
@@ -1282,10 +1319,20 @@ impl GlobalStreamManager {
 
         let creating_streaming_jobs = self.metadata_manager.list_creating_jobs().await?;
 
-        let blocked_jobs = self
+        let mut blocked_jobs = self
             .metadata_manager
             .collect_reschedule_blocked_jobs_for_creating_jobs(&creating_streaming_jobs, true)
             .await?;
+        // A refreshing table is skipped like a job blocked by a creating one and picked up by a
+        // later pass once its cycle ends.
+        blocked_jobs.extend(
+            self.metadata_manager
+                .list_refresh_jobs()
+                .await?
+                .into_iter()
+                .filter(|job| job.current_status != RefreshState::Idle)
+                .map(|job| job.table_id.as_job_id()),
+        );
         let has_blocked_jobs = !blocked_jobs.is_empty();
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self

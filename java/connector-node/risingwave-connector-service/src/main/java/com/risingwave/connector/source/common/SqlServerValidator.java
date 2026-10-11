@@ -148,13 +148,28 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             var res = stmt.executeQuery();
+            boolean tableExists = false;
             while (res.next()) {
-                if (res.getInt(1) == 0) {
+                tableExists = true;
+                var catalogSchemaName = res.getString(1);
+                var catalogTableName = res.getString(2);
+                if (!schemaName.equals(catalogSchemaName) || !tableName.equals(catalogTableName)) {
                     throw ValidatorUtils.invalidArgument(
                             String.format(
-                                    "Sql Server table '%s'.'%s' doesn't exist in '%s'",
-                                    schemaName, tableName, dbName));
+                                    "SQL Server table '%s'.'%s' matches catalog table '%s'.'%s' under the database collation, but the casing differs; use the exact table name '%s.%s'",
+                                    schemaName,
+                                    tableName,
+                                    catalogSchemaName,
+                                    catalogTableName,
+                                    catalogSchemaName,
+                                    catalogTableName));
                 }
+            }
+            if (!tableExists) {
+                throw ValidatorUtils.invalidArgument(
+                        String.format(
+                                "Sql Server table '%s'.'%s' doesn't exist in '%s'",
+                                schemaName, tableName, dbName));
             }
         }
 

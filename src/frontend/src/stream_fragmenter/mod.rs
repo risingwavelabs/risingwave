@@ -92,7 +92,7 @@ impl BuildFragmentGraphState {
     }
 
     /// Generate an operator id
-    fn gen_operator_id(&mut self) -> StreamNodeLocalOperatorId {
+    pub(crate) fn gen_operator_id(&mut self) -> StreamNodeLocalOperatorId {
         self.next_operator_id -= 1;
         LocalOperatorId::new(self.next_operator_id).into()
     }
@@ -496,14 +496,14 @@ fn build_fragment(
             }
 
             NodeBody::StreamCdcScan(node) => {
-                if let Some(o) = node.options
-                    && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
-                {
-                    // Use parallel CDC backfill.
-                    current_fragment
-                        .fragment_type_mask
-                        .add(FragmentTypeFlag::StreamCdcScan);
-                } else {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::StreamCdcScan);
+                let is_parallelized_backfill = node
+                    .options
+                    .as_ref()
+                    .is_some_and(|o| CdcScanOptions::from_proto(o).is_parallelized_backfill());
+                if !is_parallelized_backfill {
                     current_fragment
                         .fragment_type_mask
                         .add(FragmentTypeFlag::StreamScan);
@@ -548,6 +548,10 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::Values);
+                current_fragment.requires_singleton = true;
+            }
+
+            NodeBody::CompactionResolver(_) => {
                 current_fragment.requires_singleton = true;
             }
 

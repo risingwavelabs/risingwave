@@ -156,6 +156,8 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default = "default::storage::check_compaction_result")]
     pub check_compaction_result: bool,
+    /// Legacy setting retained for configuration compatibility. This has no effect because
+    /// prefetched blocks are fully buffered before consumption.
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
     #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
@@ -215,6 +217,11 @@ pub struct StorageConfig {
     pub table_change_log_cache_capacity: u64,
 
     // iceberg compaction
+    /// Estimated heap memory budget used to schedule tasks in the dedicated Iceberg compactor, in
+    /// megabytes. This controls admission only; it is not a hard `DataFusion` allocation limit.
+    /// When unset, the budget is derived from the compactor's available memory.
+    #[serde(default)]
+    pub iceberg_compaction_memory_limit_mb: Option<usize>,
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
     #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
@@ -253,6 +260,9 @@ pub struct StorageConfig {
         default = "default::storage::iceberg_compaction_pending_parallelism_budget_multiplier"
     )]
     pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
+    /// Maximum number of Iceberg compaction tasks requested in one pull.
+    #[serde(default = "default::storage::iceberg_compaction_max_pull_task_count")]
+    pub iceberg_compaction_max_pull_task_count: u32,
     /// Pull interval for iceberg compaction task requests in milliseconds.
     #[serde(
         default = "default::storage::iceberg_compaction_pull_interval_ms",
@@ -456,6 +466,10 @@ pub enum FileCacheRuntimeConfig {
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
     pub dir: String,
+
+    /// Whether to use direct I/O for file cache reads and writes on Linux.
+    #[serde(default = "default::file_cache::direct_io")]
+    pub direct_io: bool,
 
     #[serde(default = "default::file_cache::capacity_mb")]
     pub capacity_mb: usize,
@@ -1028,13 +1042,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            match std::env::var("RW_COMPACTOR_MODE")
-                .unwrap_or_default()
-                .as_str()
-            {
-                mode if mode.contains("iceberg") => 12.0000,
-                _ => 3.0000,
-            }
+            3.0
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -1215,6 +1223,10 @@ pub mod default {
             4.0
         }
 
+        pub fn iceberg_compaction_max_pull_task_count() -> u32 {
+            1
+        }
+
         pub fn iceberg_compaction_pull_interval_ms() -> u64 {
             5000
         }
@@ -1245,6 +1257,10 @@ pub mod default {
 
         pub fn dir() -> String {
             "".to_owned()
+        }
+
+        pub fn direct_io() -> bool {
+            false
         }
 
         pub fn capacity_mb() -> usize {

@@ -20,12 +20,18 @@ import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
+import io.debezium.connector.mongodb.MongoDbConnectorConfig;
+import io.debezium.heartbeat.DatabaseHeartbeatImpl;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
+import java.util.regex.Pattern;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
 import org.slf4j.Logger;
@@ -69,14 +75,23 @@ public class DbzConnectorConfig {
     public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
     public static final String SQL_SERVER_ENCRYPT = "database.encrypt";
 
+    /* Oracle configs */
+    public static final String ORACLE_PDB_NAME = "database.pdb.name";
+    public static final String ORACLE_SCHEMA_NAME = "schema.name";
+    public static final String ORACLE_HEARTBEAT_TABLE_NAME = "heartbeat.table.name";
+
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
     private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
     private static final String SQL_SERVER_CONFIG_FILE = "sql_server.properties";
+    private static final String ORACLE_CONFIG_FILE = "oracle.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
+
+    public static final String HEARTBEAT_ACTION_QUERY_KEY =
+            DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
 
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
@@ -84,6 +99,18 @@ public class DbzConnectorConfig {
     public static class MongoDb {
         public static final String MONGO_URL = "mongodb.url";
         public static final String MONGO_COLLECTION_NAME = "collection.name";
+
+        private static final String DATABASE_GROUP = "database";
+        private static final Pattern LITERAL_COLLECTION_LIST_PATTERN =
+                Pattern.compile(
+                        "(?:\\A|[ ]*,[ ]*)"
+                                + "(?<database>[A-Za-z_][A-Za-z0-9_-]*)\\."
+                                + "(?<collection>[A-Za-z_][A-Za-z0-9_-]*)");
+        private static final Set<String> RAW_FILTER_OPTIONS_DISABLING_INFERENCE =
+                Set.of(
+                        DBZ_PROPERTY_PREFIX + MongoDbConnectorConfig.DATABASE_INCLUDE_LIST.name(),
+                        DBZ_PROPERTY_PREFIX + MongoDbConnectorConfig.DATABASE_EXCLUDE_LIST.name(),
+                        DBZ_PROPERTY_PREFIX + MongoDbConnectorConfig.FILTERS_MATCH_MODE.name());
     }
 
     private static Map<String, String> extractDebeziumProperties(
@@ -134,7 +161,9 @@ public class DbzConnectorConfig {
             boolean snapshotDone,
             boolean isCdcSourceJob) {
 
-        StringSubstitutor substitutor = new StringSubstitutor(userProps);
+        var substitutionProps = new HashMap<>(userProps);
+        substitutionProps.put("source.id", Long.toString(sourceId));
+        StringSubstitutor substitutor = new StringSubstitutor(substitutionProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         var isCdcBackfill =
                 null != userProps.get(SNAPSHOT_MODE_KEY)
@@ -144,7 +173,8 @@ public class DbzConnectorConfig {
                         userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "60"));
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}, waitStreamingStartTimeout={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={},"
+                        + " isCdcBackfill={}, isCdcSourceJob={}, waitStreamingStartTimeout={}",
                 source,
                 sourceId,
                 startOffset,
@@ -291,6 +321,29 @@ public class DbzConnectorConfig {
 
             var mongodbUrl = userProps.get(MongoDb.MONGO_URL);
             var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
+            var hasRawFilterOverride =
+                    MongoDb.RAW_FILTER_OPTIONS_DISABLING_INFERENCE.stream()
+                            .anyMatch(userProps::containsKey);
+            if (!hasRawFilterOverride) {
+                inferMongoDatabaseList(collection)
+                        .ifPresent(
+                                databaseList -> {
+                                    mongodbProps.setProperty(
+                                            MongoDbConnectorConfig.DATABASE_INCLUDE_LIST.name(),
+                                            databaseList);
+                                    mongodbProps.setProperty(
+                                            MongoDbConnectorConfig.FILTERS_MATCH_MODE.name(),
+                                            MongoDbConnectorConfig.FiltersMatchMode.LITERAL
+                                                    .getValue());
+                                    LOG.info(
+                                            "Inferred MongoDB database include list '{}' and"
+                                                    + " literal filter match mode from collection list"
+                                                    + " '{}'",
+                                            databaseList,
+                                            collection);
+                                });
+            }
+
             var connectionStr = new ConnectionString(mongodbUrl);
             var connectorName =
                     String.format(
@@ -330,6 +383,19 @@ public class DbzConnectorConfig {
                 LOG.info("Disable table filtering for the shared Sql Server source");
                 dbzProps.remove("table.include.list");
             }
+        } else if (source == SourceTypeE.ORACLE) {
+            var oracleProps = initiateDbConfig(ORACLE_CONFIG_FILE, substitutor);
+            var heartbeatTable =
+                    OracleHeartbeatTable.parse(userProps.get(ORACLE_HEARTBEAT_TABLE_NAME));
+            oracleProps.setProperty(
+                    DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME,
+                    heartbeatTable.actionQuery());
+            dbzProps.putAll(oracleProps);
+            if (isCdcSourceJob) {
+                // A shared Oracle source captures tables from multiple schemas in one PDB.
+                LOG.info("Disable table filtering for the shared Oracle source");
+                dbzProps.remove("table.include.list");
+            }
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
@@ -341,7 +407,6 @@ public class DbzConnectorConfig {
         // Calculate max.queue.size.in.bytes based on JVM heap size and ratio
         calculateAndSetMaxQueueSizeInBytes(dbzProps);
 
-        LOG.info("Final Debezium properties: {}", dbzProps);
         LOG.info(
                 "Debezium max.queue.size.in.bytes: {} bytes ({} MB)",
                 dbzProps.getProperty("max.queue.size.in.bytes", "not set"),
@@ -356,6 +421,28 @@ public class DbzConnectorConfig {
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
         this.waitStreamingStartTimeout = waitStreamingStartTimeout;
+    }
+
+    private static Optional<String> inferMongoDatabaseList(String collectionList) {
+        if (collectionList == null) {
+            return Optional.empty();
+        }
+
+        var matcher = MongoDb.LITERAL_COLLECTION_LIST_PATTERN.matcher(collectionList);
+        var databases = new LinkedHashSet<String>();
+        var matchedUntil = 0;
+        while (matcher.find()) {
+            if (matcher.start() != matchedUntil) {
+                return Optional.empty();
+            }
+            databases.add(matcher.group(MongoDb.DATABASE_GROUP));
+            matchedUntil = matcher.end();
+        }
+
+        if (databases.isEmpty() || matchedUntil != collectionList.length()) {
+            return Optional.empty();
+        }
+        return Optional.of(String.join(",", databases));
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
@@ -396,7 +483,8 @@ public class DbzConnectorConfig {
             // User did not specify ratio, do nothing
             // Debezium will use its default max.queue.size from debezium.properties
             LOG.info(
-                    "Debezium {} not specified, skipping calculating and setting max.queue.size.in.bytes calculation",
+                    "Debezium {} not specified, skipping calculating and setting"
+                            + " max.queue.size.in.bytes calculation",
                     QUEUE_MAX_MEMORY_RATIO);
             return;
         }

@@ -473,8 +473,20 @@ pub mod default {
             1000
         }
 
+        pub fn table_change_log_truncate_interval_sec() -> u64 {
+            600
+        }
+
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
+        }
+
+        pub fn enable_locality_sort_buffer() -> bool {
+            true
+        }
+
+        pub fn locality_sort_buffer_activate_threshold() -> u64 {
+            65536
         }
 
         pub fn cache_refill_policy() -> CacheRefillPolicy {

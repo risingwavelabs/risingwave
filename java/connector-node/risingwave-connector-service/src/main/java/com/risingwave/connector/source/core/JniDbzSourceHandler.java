@@ -30,8 +30,6 @@ import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,10 +64,6 @@ public class JniDbzSourceHandler {
             var request =
                     ConnectorServiceProto.GetEventStreamRequest.parseFrom(
                             getEventStreamRequestBytes);
-            // userProps extracted from request, underlying implementation is
-            // UnmodifiableMap
-            Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
-            mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
             boolean isCdcSourceJob = request.getIsSourceJob();
 
             if (request.getSourceType() == POSTGRES) {
@@ -82,7 +76,7 @@ public class JniDbzSourceHandler {
                             SourceTypeE.valueOf(request.getSourceType()),
                             request.getSourceId(),
                             request.getStartOffset(),
-                            mutableUserProps,
+                            request.getPropertiesMap(),
                             request.getSnapshotDone(),
                             isCdcSourceJob);
             JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channel);
@@ -128,11 +122,15 @@ public class JniDbzSourceHandler {
             JniDbzSourceRegistry.register(this);
 
             // Start the engine
-            var startOk = runner.start();
-            if (!sendHandshakeMessage(runner, channel, startOk)) {
+            // A null send only probes receiver liveness; it does not enqueue a message.
+            var startOk = runner.start(() -> channel.send(null));
+            if (!sendHandshakeMessage(channel, startOk)) {
                 LOG.error(
                         "Failed to send handshake message to channel. sourceId={}",
                         config.getSourceId());
+                return;
+            }
+            if (!startOk) {
                 return;
             }
 
@@ -162,7 +160,6 @@ public class JniDbzSourceHandler {
                     LOG.info(
                             "Engine#{}: JNI receiver closed, stop the engine",
                             config.getSourceId());
-                    runner.stop();
                     return;
                 }
             }
@@ -173,19 +170,19 @@ public class JniDbzSourceHandler {
             // correct error propagation.
             channel.sendError(t.getMessage());
 
+        } finally {
             try {
                 runner.stop();
             } catch (Exception e) {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
+            } finally {
+                // remove the handler from registry
+                JniDbzSourceRegistry.unregister(this);
             }
-        } finally {
-            // remove the handler from registry
-            JniDbzSourceRegistry.unregister(this);
         }
     }
 
-    private boolean sendHandshakeMessage(
-            DbzCdcEngineRunner runner, CdcSourceChannel channel, boolean startOk) throws Exception {
+    private boolean sendHandshakeMessage(CdcSourceChannel channel, boolean startOk) {
         // send a handshake message to notify the Source executor
         // if the handshake is not ok, the split reader will return error to source
         // actor
@@ -197,12 +194,6 @@ public class JniDbzSourceHandler {
                         .setSourceId(config.getSourceId())
                         .setControl(controlInfo)
                         .build();
-        var success = channel.send(handshakeMsg.toByteArray());
-        if (!success) {
-            LOG.info(
-                    "Engine#{}: JNI sender broken detected, stop the engine", config.getSourceId());
-            runner.stop();
-        }
-        return success;
+        return channel.send(handshakeMsg.toByteArray());
     }
 }

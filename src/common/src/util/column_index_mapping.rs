@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::cmp::max;
 use std::fmt::Debug;
 use std::vec;
@@ -273,6 +274,22 @@ impl ColIndexMapping {
     /// Will panic if `index >= self.source_size()` or `index` is not mapped.
     pub fn map(&self, index: usize) -> usize {
         self.try_map(index).unwrap()
+    }
+
+    /// Map source column indices to target indices, preserving their order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any source index is out of bounds or not mapped, like [`Self::map`].
+    pub fn map_all<I>(&self, indices: I) -> Vec<usize>
+    where
+        I: IntoIterator,
+        I::Item: Borrow<usize>,
+    {
+        indices
+            .into_iter()
+            .map(|index| self.map(*index.borrow()))
+            .collect()
     }
 
     /// Returns the size of the target range. Target index is in the range `(0..target_size)`.

@@ -27,6 +27,7 @@ use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::util::retry::exponential_backoff;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkId;
@@ -42,7 +43,7 @@ use tokio::select;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
-use tokio_retry::strategy::{ExponentialBackoff, jitter};
+use tokio_retry::strategy::jitter;
 use tonic::Status;
 use tracing::{error, warn};
 
@@ -156,8 +157,7 @@ impl TwoPhaseCommitHandler {
 
     #[define_opaque(RetryBackoffStrategy)]
     fn get_retry_backoff_strategy() -> RetryBackoffStrategy {
-        ExponentialBackoff::from_millis(10)
-            .max_delay(Duration::from_secs(60))
+        exponential_backoff(Duration::from_millis(10), 10, Duration::from_secs(60))
             .map(jitter)
             .map(|delay| Box::pin(tokio::time::sleep(delay)))
     }

@@ -20,8 +20,9 @@ use anyhow::Context;
 use risingwave_pb::common::PbHostAddress;
 use thiserror_ext::AsReport;
 use tokio::time::sleep;
-use tokio_retry::strategy::ExponentialBackoff;
 use tracing::error;
+
+use crate::util::retry::exponential_backoff;
 
 /// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -97,9 +98,7 @@ pub fn is_local_address(server_addr: &HostAddr, peer_addr: &HostAddr) -> bool {
 
 pub async fn try_resolve_dns(host: &str, port: i32) -> Result<SocketAddr, String> {
     let addr = format!("{}:{}", host, port);
-    let mut backoff = ExponentialBackoff::from_millis(100)
-        .max_delay(Duration::from_secs(3))
-        .factor(5);
+    let mut backoff = exponential_backoff(Duration::from_millis(100), 5, Duration::from_secs(3));
     const MAX_RETRY: usize = 20;
     for i in 1..=MAX_RETRY {
         let err = match addr.to_socket_addrs() {
