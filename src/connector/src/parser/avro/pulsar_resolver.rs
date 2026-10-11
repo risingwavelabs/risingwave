@@ -14,14 +14,13 @@
 
 use std::sync::Arc;
 
-use anyhow::Context;
 use apache_avro::Schema;
 use moka::future::Cache;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
-use crate::schema::pulsar_schema::{Client, PulsarSchemaInfo};
-use crate::source::pulsar::topic::{Topic, parse_topic};
+use crate::schema::pulsar_schema::{Client, PulsarSchemaInfo, parse_non_partitioned_topic};
+use crate::source::pulsar::topic::Topic;
 
 /// Fetch schemas of a single Pulsar topic and cache writer schemas by version.
 /// Each parser configuration owns a resolver and shares it with its clones through `Arc`.
@@ -35,23 +34,15 @@ pub struct PulsarSchemaCache {
 
 impl PulsarSchemaCache {
     pub fn new(pulsar_client: Client, topic: &str) -> ConnectorResult<Self> {
-        let mut topic = parse_topic(topic)?;
-        topic.topic = topic.topic_str_without_partition()?;
-        topic.partition_index = None;
         Ok(Self {
-            topic,
+            topic: parse_non_partitioned_topic(topic)?,
             writer_schemas: Cache::new(u64::MAX),
             pulsar_client,
         })
     }
 
     fn parse_schema(raw_schema: PulsarSchemaInfo) -> ConnectorResult<Arc<Schema>> {
-        if !raw_schema.r#type.eq_ignore_ascii_case("AVRO") {
-            bail!("expected Pulsar AVRO schema, got {}", raw_schema.r#type);
-        }
-        let schema =
-            Schema::parse_str(&raw_schema.data).context("failed to parse Pulsar Avro schema")?;
-        Ok(Arc::new(schema))
+        Ok(Arc::new(raw_schema.parse_avro_definition("AVRO")?))
     }
 
     /// Fetches the current latest schema for a parser's reader schema and caches its version.

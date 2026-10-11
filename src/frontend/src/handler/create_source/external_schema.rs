@@ -308,16 +308,30 @@ async fn bind_columns_from_source_for_non_cdc(
                 );
             }
 
-            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
-            stream_source_info.use_schema_registry =
-                json_schema_infer_use_schema_registry(&schema_config);
+            if let Some(config) =
+                PulsarSchemaConfig::from_options(&format_encode_options_to_consume)?
+            {
+                Some(
+                    extract_pulsar_json_table_schema(
+                        &config,
+                        &options_with_secret,
+                        &mut format_encode_options_to_consume,
+                    )
+                    .await?,
+                )
+            } else {
+                let schema_config =
+                    get_json_schema_location(&mut format_encode_options_to_consume)?;
+                stream_source_info.use_schema_registry =
+                    json_schema_infer_use_schema_registry(&schema_config);
 
-            extract_json_table_schema(
-                &schema_config,
-                &options_with_secret,
-                &mut format_encode_options_to_consume,
-            )
-            .await?
+                extract_json_table_schema(
+                    &schema_config,
+                    &options_with_secret,
+                    &mut format_encode_options_to_consume,
+                )
+                .await?
+            }
         }
         (Format::None, Encode::None) => {
             if options_with_secret.is_iceberg_connector() {
@@ -472,7 +486,9 @@ pub fn schema_has_schema_registry(schema: &FormatEncodeOptions) -> bool {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {
             let mut options = WithOptions::try_from(schema.row_options()).unwrap();
-            matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
+            options.contains_key(PULSAR_SCHEMA_URL_KEY)
+                || options.secret_ref().contains_key(PULSAR_SCHEMA_URL_KEY)
+                || matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
         }
         _ => false,
     }

@@ -42,11 +42,12 @@ use risingwave_connector::parser::additional_columns::{
 use risingwave_connector::parser::{
     AvroParserConfig, DEBEZIUM_IGNORE_KEY, DebeziumAvroParserConfig, ProtobufParserConfig,
     SchemaLocation, SpecificParserConfig, TimestamptzHandling,
-    fetch_json_schema_and_map_to_columns,
+    fetch_json_schema_and_map_to_columns, get_pulsar_topic,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::pulsar_schema::{
-    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY,
+    self, PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY, PulsarSchemaConfig,
+    parse_non_partitioned_topic,
 };
 use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,

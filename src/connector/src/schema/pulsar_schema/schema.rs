@@ -13,13 +13,42 @@
 // limitations under the License.
 
 use anyhow::Context;
+use apache_avro::Schema;
+use risingwave_common::bail;
 use serde::Deserialize;
+
+use crate::error::ConnectorResult;
+use crate::source::pulsar::topic::{Topic, parse_topic};
 
 #[derive(Debug, Deserialize)]
 pub struct PulsarSchemaInfo {
     pub version: i64,
     pub r#type: String,
     pub data: String,
+}
+
+impl PulsarSchemaInfo {
+    /// Parses the schema definition, which Pulsar stores as an Avro record for both `AVRO` and
+    /// `JSON` schemas.
+    pub fn parse_avro_definition(&self, expected_type: &str) -> ConnectorResult<Schema> {
+        if !self.r#type.eq_ignore_ascii_case(expected_type) {
+            bail!(
+                "expected Pulsar {expected_type} schema, got {}",
+                self.r#type
+            );
+        }
+        let schema = Schema::parse_str(&self.data)
+            .with_context(|| format!("failed to parse Pulsar {expected_type} schema"))?;
+        Ok(schema)
+    }
+}
+
+/// Returns the topic without partition suffix, as schemas are shared by all partitions.
+pub fn parse_non_partitioned_topic(topic: &str) -> ConnectorResult<Topic> {
+    let mut topic = parse_topic(topic)?;
+    topic.topic = topic.topic_str_without_partition()?;
+    topic.partition_index = None;
+    Ok(topic)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +77,27 @@ mod tests {
         let schema: PulsarSchemaInfo =
             serde_json::from_str(r#"{"version":0,"type":"AVRO","data":"{}"}"#).unwrap();
         assert_eq!(schema.r#type, "AVRO");
+    }
+
+    #[test]
+    fn json_schema_definition_is_parsed_as_avro() {
+        let schema: PulsarSchemaInfo = serde_json::from_value(serde_json::json!({
+            "version": 0,
+            "type": "JSON",
+            "data": r#"{"type":"record","name":"Event","fields":[{"name":"id","type":"int"}]}"#,
+        }))
+        .unwrap();
+        assert!(matches!(
+            schema.parse_avro_definition("JSON").unwrap(),
+            Schema::Record(_)
+        ));
+        assert_eq!(
+            schema
+                .parse_avro_definition("AVRO")
+                .unwrap_err()
+                .to_string(),
+            "expected Pulsar AVRO schema, got JSON"
+        );
     }
 
     #[test]

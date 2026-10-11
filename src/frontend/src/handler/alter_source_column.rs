@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::max_column_id;
+use risingwave_connector::schema::pulsar_schema::PULSAR_SCHEMA_URL_KEY;
 use risingwave_connector::source::{SourceEncode, SourceStruct, extract_source_struct};
 use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
 
@@ -77,7 +78,17 @@ pub async fn handle_alter_source_column(
             )
             .into());
         }
-        SourceEncode::Json if catalog.info.use_schema_registry => {
+        SourceEncode::Json
+            if catalog.info.use_schema_registry
+                || catalog
+                    .info
+                    .format_encode_options
+                    .contains_key(PULSAR_SCHEMA_URL_KEY)
+                || catalog
+                    .info
+                    .format_encode_secret_refs
+                    .contains_key(PULSAR_SCHEMA_URL_KEY) =>
+        {
             return Err(ErrorCode::NotSupported(
                 "alter source with schema registry".to_owned(),
                 "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),

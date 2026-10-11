@@ -175,10 +175,10 @@ fn validate_pulsar_schema_options(
 
     if connector != PULSAR_CONNECTOR
         || format_encode.format != Format::Plain
-        || format_encode.row_encode != Encode::Avro
+        || !matches!(format_encode.row_encode, Encode::Avro | Encode::Json)
     {
         return Err(RwError::from(ProtocolError(format!(
-            "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO"
+            "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO or JSON"
         ))));
     }
 
@@ -376,16 +376,18 @@ mod tests {
     }
 
     #[test]
-    fn pulsar_schema_accepts_minimal_plain_avro_options() {
-        let format_encode = format_encode(
-            Format::Plain,
-            Encode::Avro,
-            &[
-                (PULSAR_SCHEMA_URL_KEY, "https://localhost:8443"),
-                (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
-            ],
-        );
-        validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+    fn pulsar_schema_accepts_minimal_plain_avro_and_json_options() {
+        for encode in [Encode::Avro, Encode::Json] {
+            let format_encode = format_encode(
+                Format::Plain,
+                encode,
+                &[
+                    (PULSAR_SCHEMA_URL_KEY, "https://localhost:8443"),
+                    (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
+                ],
+            );
+            validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+        }
     }
 
     #[test]
@@ -393,8 +395,9 @@ mod tests {
         for (connector, format, encode) in [
             (KAFKA_CONNECTOR, Format::Plain, Encode::Avro),
             (PULSAR_CONNECTOR, Format::Upsert, Encode::Avro),
+            (KAFKA_CONNECTOR, Format::Plain, Encode::Json),
+            (PULSAR_CONNECTOR, Format::Upsert, Encode::Json),
             (PULSAR_CONNECTOR, Format::Plain, Encode::Protobuf),
-            (PULSAR_CONNECTOR, Format::Plain, Encode::Json),
         ] {
             let format_encode = format_encode(
                 format,
@@ -404,7 +407,7 @@ mod tests {
             let error =
                 validate_compatibility(&format_encode, &mut source_options(connector)).unwrap_err();
             assert!(error.to_string().contains(
-                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
+                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO or JSON"
             ));
         }
     }

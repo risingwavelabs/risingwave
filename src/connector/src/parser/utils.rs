@@ -67,7 +67,7 @@ pub(super) fn get_kafka_topic(props: &BTreeMap<String, String>) -> ConnectorResu
 }
 
 /// Get the Pulsar topic name.
-pub(super) fn get_pulsar_topic(props: &BTreeMap<String, String>) -> ConnectorResult<&String> {
+pub fn get_pulsar_topic(props: &BTreeMap<String, String>) -> ConnectorResult<&String> {
     get_topic(props, "pulsar.topic")
 }
 
