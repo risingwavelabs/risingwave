@@ -19,7 +19,9 @@ use moka::future::Cache;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
-use crate::schema::pulsar_schema::{Client, PulsarSchemaInfo, parse_partitioned_topic_name};
+use crate::schema::pulsar_schema::{
+    Client, PulsarSchema, PulsarSchemaInfo, parse_partitioned_topic_name,
+};
 use crate::source::pulsar::topic::Topic;
 
 /// Fetch schemas of a single Pulsar topic and cache writer schemas by version.
@@ -42,7 +44,10 @@ impl PulsarSchemaCache {
     }
 
     fn parse_schema(raw_schema: PulsarSchemaInfo) -> ConnectorResult<Arc<Schema>> {
-        Ok(Arc::new(raw_schema.parse_avro_definition("AVRO")?))
+        match raw_schema.parse()? {
+            PulsarSchema::Avro(schema) => Ok(Arc::new(schema)),
+            PulsarSchema::Json(_) => bail!("expected Pulsar AVRO schema, got JSON"),
+        }
     }
 
     /// Fetches the current latest schema for a parser's reader schema and caches its version.

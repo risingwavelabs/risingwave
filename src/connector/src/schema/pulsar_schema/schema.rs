@@ -27,19 +27,25 @@ pub struct PulsarSchemaInfo {
     pub data: String,
 }
 
+/// A Pulsar schema by type. Pulsar stores both `AVRO` and `JSON` schemas as Avro record
+/// definitions, but their payloads are Avro binary and plain JSON respectively.
+#[derive(Debug)]
+pub enum PulsarSchema {
+    Avro(Schema),
+    Json(Schema),
+}
+
 impl PulsarSchemaInfo {
-    /// Parses the schema definition, which Pulsar stores as an Avro record for both `AVRO` and
-    /// `JSON` schemas.
-    pub fn parse_avro_definition(&self, expected_type: &str) -> ConnectorResult<Schema> {
-        if !self.r#type.eq_ignore_ascii_case(expected_type) {
-            bail!(
-                "expected Pulsar {expected_type} schema, got {}",
-                self.r#type
-            );
-        }
+    /// Parses the schema definition according to its type.
+    pub fn parse(&self) -> ConnectorResult<PulsarSchema> {
+        let wrap = match self.r#type.to_ascii_uppercase().as_str() {
+            "AVRO" => PulsarSchema::Avro,
+            "JSON" => PulsarSchema::Json,
+            _ => bail!("unsupported Pulsar schema type {}", self.r#type),
+        };
         let schema = Schema::parse_str(&self.data)
-            .with_context(|| format!("failed to parse Pulsar {expected_type} schema"))?;
-        Ok(schema)
+            .with_context(|| format!("failed to parse Pulsar {} schema", self.r#type))?;
+        Ok(wrap(schema))
     }
 }
 
@@ -89,15 +95,18 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(
-            schema.parse_avro_definition("JSON").unwrap(),
-            Schema::Record(_)
+            schema.parse().unwrap(),
+            PulsarSchema::Json(Schema::Record(_))
         ));
+    }
+
+    #[test]
+    fn unsupported_schema_type_is_rejected() {
+        let schema: PulsarSchemaInfo =
+            serde_json::from_str(r#"{"version":0,"type":"PROTOBUF","data":"{}"}"#).unwrap();
         assert_eq!(
-            schema
-                .parse_avro_definition("AVRO")
-                .unwrap_err()
-                .to_string(),
-            "expected Pulsar AVRO schema, got JSON"
+            schema.parse().unwrap_err().to_string(),
+            "unsupported Pulsar schema type PROTOBUF"
         );
     }
 

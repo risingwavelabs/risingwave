@@ -15068,7 +15068,6 @@ dependencies = [
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
  "risingwave_connector",
- "risingwave_connector_codec",
  "risingwave_dml",
  "risingwave_expr",
  "risingwave_expr_impl",

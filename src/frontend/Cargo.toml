@@ -76,7 +76,6 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
-risingwave_connector_codec = { workspace = true }
 risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_frontend_macro = { path = "macro" }

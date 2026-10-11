@@ -215,6 +215,7 @@ mod upsert_parser;
 mod utils;
 use access_builder::{AccessBuilder, AccessBuilderImpl};
 pub use config::*;
+pub use risingwave_connector_codec::decoder::avro::avro_schema_to_fields;
 pub use utils::get_pulsar_topic;
 
 pub(crate) fn into_data_chunk_stream(

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_connector_codec::decoder::avro::avro_schema_to_fields;
-
 use super::*;
 
 pub fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool)>) -> bool {
@@ -68,10 +66,11 @@ pub async fn extract_pulsar_json_table_schema(
     try_consume_pulsar_schema_config_from_options(format_encode_options);
     let client = pulsar_schema::Client::new(config)?;
     let topic = parse_partitioned_topic_name(get_pulsar_topic(with_properties)?)?;
-    let schema = client
-        .get_schema(&topic, None)
-        .await?
-        .parse_avro_definition("JSON")?;
+    let PulsarSchema::Json(schema) = client.get_schema(&topic, None).await?.parse()? else {
+        return Err(RwError::from(ProtocolError(
+            "expected Pulsar JSON schema, got AVRO".to_owned(),
+        )));
+    };
     Ok(avro_schema_to_fields(&schema, None)?
         .iter()
         .map(|field| ColumnCatalog {
