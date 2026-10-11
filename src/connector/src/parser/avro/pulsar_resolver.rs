@@ -20,7 +20,7 @@ use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
 use crate::schema::pulsar_schema::{
-    Client, PulsarSchema, PulsarSchemaInfo, parse_partitioned_topic_name,
+    Client, PulsarSchema, PulsarSchemaInfo, parse_partitioned_topic,
 };
 use crate::source::pulsar::topic::Topic;
 
@@ -37,7 +37,7 @@ pub struct PulsarSchemaCache {
 impl PulsarSchemaCache {
     pub fn new(pulsar_client: Client, topic: &str) -> ConnectorResult<Self> {
         Ok(Self {
-            topic: parse_partitioned_topic_name(topic)?,
+            topic: parse_partitioned_topic(topic)?,
             writer_schemas: Cache::new(u64::MAX),
             pulsar_client,
         })

@@ -167,9 +167,7 @@ fn validate_pulsar_schema_options(
     connector: &str,
 ) -> Result<bool> {
     let options = WithOptions::try_from(format_encode.row_options())?;
-    if !options.contains_key(PULSAR_SCHEMA_URL_KEY)
-        && !options.secret_ref().contains_key(PULSAR_SCHEMA_URL_KEY)
-    {
+    if !uses_pulsar_schema(&options, options.secret_ref()) {
         return Ok(false);
     }
 

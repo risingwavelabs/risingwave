@@ -486,8 +486,7 @@ pub fn schema_has_schema_registry(schema: &FormatEncodeOptions) -> bool {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {
             let mut options = WithOptions::try_from(schema.row_options()).unwrap();
-            options.contains_key(PULSAR_SCHEMA_URL_KEY)
-                || options.secret_ref().contains_key(PULSAR_SCHEMA_URL_KEY)
+            uses_pulsar_schema(&options, options.secret_ref())
                 || matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
         }
         _ => false,

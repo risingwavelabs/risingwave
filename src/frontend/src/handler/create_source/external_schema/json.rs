@@ -64,20 +64,16 @@ pub async fn extract_pulsar_json_table_schema(
     format_encode_options: &mut BTreeMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
     try_consume_pulsar_schema_config_from_options(format_encode_options);
-    let client = pulsar_schema::Client::new(config)?;
-    let topic = parse_partitioned_topic_name(get_pulsar_topic(with_properties)?)?;
-    let PulsarSchema::Json(schema) = client.get_schema(&topic, None).await?.parse()? else {
-        return Err(RwError::from(ProtocolError(
-            "expected Pulsar JSON schema, got AVRO".to_owned(),
-        )));
-    };
-    Ok(avro_schema_to_fields(&schema, None)?
-        .iter()
-        .map(|field| ColumnCatalog {
-            column_desc: ColumnDesc::from_field_without_column_id(field),
-            is_hidden: false,
-        })
-        .collect_vec())
+    Ok(
+        fetch_pulsar_json_schema_and_map_to_columns(config, with_properties)
+            .await?
+            .into_iter()
+            .map(|col| ColumnCatalog {
+                column_desc: ColumnDesc::from_field_without_column_id(&col),
+                is_hidden: false,
+            })
+            .collect_vec(),
+    )
 }
 
 pub fn get_json_schema_location(
