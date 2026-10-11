@@ -411,7 +411,7 @@ impl GlobalStreamManager {
                     stream_manager
                         .metadata_manager
                         .catalog_controller
-                        .notify_frontend_trivial()
+                        .current_notification_version()
                         .await
                 }
                 CreateType::Foreground => {

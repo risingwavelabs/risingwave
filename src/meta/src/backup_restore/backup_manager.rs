@@ -262,14 +262,12 @@ impl BackupManager {
             BackupJobResult::Succeeded => {
                 self.metrics.job_latency_success.observe(job_latency);
                 tracing::info!("succeeded backup job {}", job_id);
-                self.env
-                    .notification_manager()
-                    .notify_hummock_without_version(
-                        Operation::Update,
-                        Info::MetaBackupManifestId(MetaBackupManifestId {
-                            id: self.backup_store.load().0.manifest().await.manifest_id,
-                        }),
-                    );
+                self.env.notification_manager().notify_hummock(
+                    Operation::Update,
+                    Info::MetaBackupManifestId(MetaBackupManifestId {
+                        id: self.backup_store.load().0.manifest().await.manifest_id,
+                    }),
+                );
                 self.latest_job_info.store(Arc::new((
                     job_id,
                     BackupJobStatus::Succeeded,
@@ -304,14 +302,12 @@ impl BackupManager {
     /// Deletes existent backups from backup storage.
     pub async fn delete_backups(&self, ids: &[MetaSnapshotId]) -> MetaResult<()> {
         self.backup_store.load().0.delete(ids).await?;
-        self.env
-            .notification_manager()
-            .notify_hummock_without_version(
-                Operation::Update,
-                Info::MetaBackupManifestId(MetaBackupManifestId {
-                    id: self.backup_store.load().0.manifest().await.manifest_id,
-                }),
-            );
+        self.env.notification_manager().notify_hummock(
+            Operation::Update,
+            Info::MetaBackupManifestId(MetaBackupManifestId {
+                id: self.backup_store.load().0.manifest().await.manifest_id,
+            }),
+        );
         Ok(())
     }
 
