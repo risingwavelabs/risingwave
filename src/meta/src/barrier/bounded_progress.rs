@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use risingwave_common::bail;
 use risingwave_common::id::{ActorId, DatabaseId, FragmentId, JobId, SourceId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
+use risingwave_connector::source::refresh_mode::RefreshMode;
 use risingwave_meta_model::{bounded_job, object};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{BoundedLoadAttempt, StreamNode};
@@ -117,10 +118,8 @@ impl BoundedLoadTracker {
             visit_stream_node_body(&fragment.nodes, |body| {
                 if let NodeBody::Source(source) = body
                     && let Some(source) = &source.source_inner
-                    && source
-                        .refresh_mode
-                        .as_ref()
-                        .is_some_and(|mode| mode.is_bounded())
+                    && RefreshMode::from_proto(source.refresh_mode.as_ref())
+                        .is_ok_and(|mode| mode.is_bounded())
                 {
                     source_id = Some(source.source_id);
                 }

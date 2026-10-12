@@ -22,7 +22,6 @@ use risingwave_common::catalog::{
 };
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
@@ -200,11 +199,9 @@ impl LogicalSource {
     }
 
     fn is_full_reload_refresh(core: &generic::Source) -> bool {
-        core.catalog.as_ref().is_some_and(|catalog| {
-            catalog.refresh_mode.as_ref().is_some_and(|refresh_mode| {
-                matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_)))
-            })
-        })
+        core.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.refresh_mode.is_full_reload())
     }
 
     fn is_bounded(core: &generic::Source) -> bool {

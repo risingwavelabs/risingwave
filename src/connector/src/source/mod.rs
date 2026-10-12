@@ -82,6 +82,7 @@ mod common;
 pub mod iceberg;
 mod manager;
 pub mod reader;
+pub mod refresh_mode;
 pub mod test_source;
 feature_gated_source_mod!(adbc_snowflake, "adbc_snowflake");
 

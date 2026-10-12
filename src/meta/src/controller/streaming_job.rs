@@ -38,6 +38,7 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::refresh_mode::RefreshMode;
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
 };
@@ -60,9 +61,6 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{ObjectDependency as PbObjectDependency, PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
-use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
-};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -699,15 +697,17 @@ impl CatalogController {
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
 
+                let refresh_mode = src
+                    .as_ref()
+                    .map(|source| {
+                        RefreshMode::from_proto(source.refresh_mode.as_ref())
+                            .expect("frontend should build a valid refresh mode")
+                    })
+                    .unwrap_or_default();
+
                 if let Some(source) = src.as_ref()
-                    && let Some(bounded) =
-                        source.refresh_mode.as_ref().and_then(|mode| mode.bounded())
+                    && refresh_mode.is_bounded()
                 {
-                    assert!(
-                        bounded.iceberg_snapshot_id().is_some(),
-                        "bounded source {} has no pinned snapshot",
-                        source.id
-                    );
                     BoundedJob::insert(bounded_job::ActiveModel {
                         job_id: Set(job_id),
                         source_id: Set(source.id),
@@ -718,19 +718,7 @@ impl CatalogController {
                 }
 
                 if table.refreshable {
-                    let trigger_interval_secs = src
-                        .as_ref()
-                        .and_then(|source_catalog| source_catalog.refresh_mode)
-                        .and_then(
-                            |source_refresh_mode| match source_refresh_mode.refresh_mode {
-                                Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
-                                    refresh_interval_sec,
-                                })) => refresh_interval_sec,
-                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {}))
-                                | Some(RefreshMode::Bounded(_)) => None,
-                                None => None,
-                            },
-                        );
+                    let trigger_interval_secs = refresh_mode.refresh_interval_sec();
 
                     RefreshJob::insert(refresh_job::ActiveModel {
                         table_id: Set(table.id),

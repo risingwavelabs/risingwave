@@ -20,18 +20,14 @@ pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::{
     PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
+use risingwave_connector::source::iceberg::IcebergBoundedScan;
 use risingwave_connector::source::kafka::private_link::{
     PRIVATELINK_ENDPOINT_KEY, insert_privatelink_broker_rewrite_map,
 };
+use risingwave_connector::source::refresh_mode::{BoundedInput, RefreshMode};
 use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::plan_common::iceberg_bounded_scan::{Scan, Snapshot};
-use risingwave_pb::plan_common::source_refresh_mode::source_refresh_mode_bounded::Input;
-use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeBounded, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
-};
-use risingwave_pb::plan_common::{IcebergBoundedScan, SourceRefreshMode};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
@@ -435,146 +431,180 @@ fn resolve_secret_refs_inner(
     Ok(resolved_secret_refs)
 }
 
+/// The refresh modes accepted by the `refresh_mode` option.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RefreshModeKind {
+    Streaming,
+    FullReload,
+    Bounded,
+}
+
+impl RefreshModeKind {
+    const ALL: [Self; 3] = [Self::Streaming, Self::FullReload, Self::Bounded];
+
+    /// `WITH` options that only this mode may set.
+    fn own_keys(self) -> &'static [&'static str] {
+        match self {
+            Self::Streaming => &[],
+            Self::FullReload => &[SOURCE_REFRESH_INTERVAL_SEC_KEY],
+            Self::Bounded => &[SOURCE_SNAPSHOT_ID_KEY],
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Streaming => "STREAMING",
+            Self::FullReload => "FULL_RELOAD",
+            Self::Bounded => "BOUNDED",
+        }
+    }
+
+    fn parse(value: &str) -> RwResult<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.name().eq_ignore_ascii_case(value))
+            .ok_or_else(|| {
+                invalid_parameter(format!(
+                    "Invalid key `{}`: {}, accepted values are 'STREAMING', 'FULL_RELOAD' and 'BOUNDED'",
+                    SOURCE_REFRESH_MODE_KEY, value
+                ))
+            })
+    }
+
+    /// Removes and parses the options owned by this mode.
+    fn parse_options(self, with_options: &mut WithOptions) -> RwResult<RefreshMode> {
+        /// Removes `key` and parses its value as an integer, if present.
+        fn take_i64(
+            with_options: &mut WithOptions,
+            key: &str,
+            expected: &str,
+        ) -> RwResult<Option<i64>> {
+            with_options
+                .remove(key)
+                .map(|value| {
+                    value.parse::<i64>().map_err(|e| {
+                        invalid_parameter(format!(
+                            "`{}` must be {}, but got: {} (error: {})",
+                            key,
+                            expected,
+                            value,
+                            e.as_report()
+                        ))
+                    })
+                })
+                .transpose()
+        }
+
+        Ok(match self {
+            Self::Streaming => RefreshMode::Streaming,
+            Self::FullReload => {
+                let interval_sec = take_i64(
+                    with_options,
+                    SOURCE_REFRESH_INTERVAL_SEC_KEY,
+                    "a positive integer and larger than 0",
+                )?;
+
+                if let Some(interval_sec) = interval_sec
+                    && interval_sec <= 0
+                {
+                    return Err(invalid_parameter(format!(
+                        "`{}` must be larger than 0, but got: {}",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, interval_sec
+                    )));
+                }
+
+                RefreshMode::FullReload { interval_sec }
+            }
+            Self::Bounded => {
+                let snapshot_id = take_i64(with_options, SOURCE_SNAPSHOT_ID_KEY, "an integer")?
+                    .ok_or_else(|| {
+                        invalid_parameter(format!(
+                            "`{}` is required when `{}` is 'BOUNDED'. Snapshot ids of an Iceberg table \
+                             can be found in `rw_catalog.rw_iceberg_snapshots` through an Iceberg source",
+                            SOURCE_SNAPSHOT_ID_KEY, SOURCE_REFRESH_MODE_KEY
+                        ))
+                    })?;
+
+                RefreshMode::Bounded(BoundedInput::Iceberg(IcebergBoundedScan::Snapshot {
+                    snapshot_id,
+                }))
+            }
+        })
+    }
+}
+
+/// Resolves the `refresh_mode` option and the options owned by each mode.
+/// Returns `None` if `refresh_mode` is not set.
 pub(crate) fn resolve_source_refresh_mode_in_with_option(
     with_options: &mut WithOptions,
-) -> RwResult<Option<SourceRefreshMode>> {
-    let source_refresh_interval_sec =
-        {
-            if let Some(maybe_int) = with_options.remove(SOURCE_REFRESH_INTERVAL_SEC_KEY) {
-                let some_int = maybe_int.parse::<i64>().map_err(|e| {
-                RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "`{}` must be a positive integer and larger than 0, but got: {} (error: {})",
-                    SOURCE_REFRESH_INTERVAL_SEC_KEY, maybe_int, e.as_report()
-                )))
-            })?;
-                if some_int <= 0 {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "`{}` must be larger than 0, but got: {}",
-                        SOURCE_REFRESH_INTERVAL_SEC_KEY, some_int
-                    ))));
-                }
-                Some(some_int)
-            } else {
-                None
-            }
-        };
-
-    let snapshot_id = with_options
-        .remove(SOURCE_SNAPSHOT_ID_KEY)
-        .map(|snapshot_id| {
-            snapshot_id.parse::<i64>().map_err(|e| {
-                RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "`{}` must be an integer, but got: {} (error: {})",
-                    SOURCE_SNAPSHOT_ID_KEY,
-                    snapshot_id,
-                    e.as_report()
-                )))
-            })
-        })
+) -> RwResult<Option<RefreshMode>> {
+    let kind = with_options
+        .remove(SOURCE_REFRESH_MODE_KEY)
+        .map(|value| RefreshModeKind::parse(&value))
         .transpose()?;
 
-    let mut is_full_reload = false;
-    let mut is_bounded = false;
-    let source_refresh_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
-    let source_refresh_mode = if let Some(source_refresh_mode_str) = &source_refresh_mode_str {
-        Some(match source_refresh_mode_str.to_uppercase().as_str() {
-            "STREAMING" => {
-                if source_refresh_interval_sec.is_some() {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "`{}` is not allowed when `{}` is 'STREAMING'",
-                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
-                    ))));
-                }
-                SourceRefreshMode {
-                    refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
-                }
-            }
-            "FULL_RELOAD" => {
-                is_full_reload = true;
-                SourceRefreshMode {
-                    refresh_mode: Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
-                        refresh_interval_sec: source_refresh_interval_sec,
-                    })),
-                }
-            }
-            "BOUNDED" => {
-                is_bounded = true;
-
-                if source_refresh_interval_sec.is_some() {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "`{}` is not allowed when `{}` is 'BOUNDED'",
-                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
-                    ))));
-                }
-
-                let Some(snapshot_id) = snapshot_id else {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "`{}` is required when `{}` is 'BOUNDED'. Snapshot ids of an Iceberg table \
-                         can be found in `rw_catalog.rw_iceberg_snapshots` through an Iceberg source",
-                        SOURCE_SNAPSHOT_ID_KEY, SOURCE_REFRESH_MODE_KEY
-                    ))));
-                };
-
-                let input = Input::Iceberg(IcebergBoundedScan {
-                    scan: Some(Scan::Snapshot(Snapshot { snapshot_id })),
-                });
-
-                SourceRefreshMode {
-                    refresh_mode: Some(RefreshMode::Bounded(SourceRefreshModeBounded {
-                        input: Some(input),
-                    })),
-                }
-            }
-            _ => {
-                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "Invalid key `{}`: {}, accepted values are 'STREAMING', 'FULL_RELOAD' and 'BOUNDED'",
-                    SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
-                ))));
-            }
-        })
-    } else {
-        // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
-        if source_refresh_interval_sec.is_some() {
-            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                "`{}` is not allowed when `{}` is not 'FULL_RELOAD'",
-                SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
-            ))));
+    // Options owned by a mode other than the chosen one are not allowed.
+    for other in RefreshModeKind::ALL
+        .into_iter()
+        .filter(|other| Some(*other) != kind)
+    {
+        if let Some(key) = other
+            .own_keys()
+            .iter()
+            .find(|key| with_options.contains_key(**key))
+        {
+            return Err(invalid_parameter(format!(
+                "`{}` is only allowed when `{}` is '{}'",
+                key,
+                SOURCE_REFRESH_MODE_KEY,
+                other.name()
+            )));
         }
-        None
-    };
-
-    if snapshot_id.is_some() && !is_bounded {
-        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-            "`{}` is only allowed when `{}` is 'BOUNDED'",
-            SOURCE_SNAPSHOT_ID_KEY, SOURCE_REFRESH_MODE_KEY
-        ))));
     }
 
-    if is_bounded && !with_options.is_iceberg_connector() {
-        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-            "BOUNDED refresh mode is only supported for the iceberg connector, but got: {}",
-            with_options
-                .get_connector()
-                .unwrap_or_else(|| "<missing>".to_owned()),
-        ))));
-    }
+    let refresh_mode = kind
+        .map(|kind| kind.parse_options(with_options))
+        .transpose()?;
 
-    // Batch connectors require FULL_RELOAD mode.
-    if with_options.is_batch_connector() && !is_full_reload {
-        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-            "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
-            with_options.get_connector().unwrap(),
-        ))));
+    check_connector_supports_refresh_mode(kind, with_options)?;
+
+    Ok(refresh_mode)
+}
+
+fn check_connector_supports_refresh_mode(
+    kind: Option<RefreshModeKind>,
+    with_options: &WithOptions,
+) -> RwResult<()> {
+    let connector = with_options
+        .get_connector()
+        .unwrap_or_else(|| "<missing>".to_owned());
+
+    match kind {
+        Some(RefreshModeKind::Bounded) if !with_options.is_iceberg_connector() => {
+            Err(invalid_parameter(format!(
+                "BOUNDED refresh mode is only supported for the iceberg connector, but got: {}",
+                connector
+            )))
+        }
+        Some(RefreshModeKind::FullReload) if !with_options.supports_full_reload_refresh() => {
+            Err(invalid_parameter(format!(
+                "FULL_RELOAD refresh mode is only supported for connectors: s3, gcs, __for_testing_only_batch_posix_fs, iceberg, adbc_snowflake, but got: {}",
+                connector
+            )))
+        }
+        // Batch connectors require FULL_RELOAD mode.
+        kind if with_options.is_batch_connector() && kind != Some(RefreshModeKind::FullReload) => {
+            Err(invalid_parameter(format!(
+                "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
+                connector
+            )))
+        }
+        _ => Ok(()),
     }
-    if is_full_reload && !with_options.supports_full_reload_refresh() {
-        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-            "FULL_RELOAD refresh mode is only supported for connectors: s3, gcs, __for_testing_only_batch_posix_fs, iceberg, adbc_snowflake, but got: {}",
-            with_options
-                .get_connector()
-                .unwrap_or_else(|| "<missing>".to_owned()),
-        ))));
-    }
-    Ok(source_refresh_mode)
+}
+
+fn invalid_parameter(message: String) -> RwError {
+    RwError::from(ErrorCode::InvalidParameterValue(message))
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(
@@ -710,5 +740,124 @@ impl TryFrom<&Statement> for WithOptions {
 
             _ => Ok(Default::default()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolve(options: &[(&str, &str)]) -> RwResult<Option<RefreshMode>> {
+        let mut with_options = WithOptions::new_with_options(
+            options
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
+        );
+        resolve_source_refresh_mode_in_with_option(&mut with_options)
+    }
+
+    fn resolve_err(options: &[(&str, &str)]) -> String {
+        resolve(options).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn test_resolve_refresh_mode() {
+        assert_eq!(resolve(&[("connector", "kafka")]).unwrap(), None);
+        assert_eq!(
+            resolve(&[("connector", "kafka"), ("refresh_mode", "streaming")]).unwrap(),
+            Some(RefreshMode::Streaming)
+        );
+        assert_eq!(
+            resolve(&[
+                ("connector", "iceberg"),
+                ("refresh_mode", "FULL_RELOAD"),
+                ("refresh_interval_sec", "10"),
+            ])
+            .unwrap(),
+            Some(RefreshMode::FullReload {
+                interval_sec: Some(10)
+            })
+        );
+        assert_eq!(
+            resolve(&[
+                ("connector", "iceberg"),
+                ("refresh_mode", "BOUNDED"),
+                ("snapshot_id", "42"),
+            ])
+            .unwrap(),
+            Some(RefreshMode::Bounded(BoundedInput::Iceberg(
+                IcebergBoundedScan::Snapshot { snapshot_id: 42 }
+            )))
+        );
+    }
+
+    #[test]
+    fn test_reject_options_of_other_modes() {
+        let err = resolve_err(&[("connector", "iceberg"), ("refresh_interval_sec", "10")]);
+        assert!(
+            err.contains(
+                "`refresh_interval_sec` is only allowed when `refresh_mode` is 'FULL_RELOAD'"
+            ),
+            "{err}"
+        );
+
+        let err = resolve_err(&[
+            ("connector", "iceberg"),
+            ("refresh_mode", "BOUNDED"),
+            ("snapshot_id", "42"),
+            ("refresh_interval_sec", "10"),
+        ]);
+        assert!(
+            err.contains(
+                "`refresh_interval_sec` is only allowed when `refresh_mode` is 'FULL_RELOAD'"
+            ),
+            "{err}"
+        );
+
+        let err = resolve_err(&[
+            ("connector", "iceberg"),
+            ("refresh_mode", "FULL_RELOAD"),
+            ("snapshot_id", "42"),
+        ]);
+        assert!(
+            err.contains("`snapshot_id` is only allowed when `refresh_mode` is 'BOUNDED'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_invalid_mode_options() {
+        let err = resolve_err(&[("connector", "iceberg"), ("refresh_mode", "BOUNDED")]);
+        assert!(err.contains("`snapshot_id` is required"), "{err}");
+
+        let err = resolve_err(&[
+            ("connector", "iceberg"),
+            ("refresh_mode", "FULL_RELOAD"),
+            ("refresh_interval_sec", "0"),
+        ]);
+        assert!(err.contains("must be larger than 0"), "{err}");
+
+        let err = resolve_err(&[("connector", "iceberg"), ("refresh_mode", "SOMETIMES")]);
+        assert!(err.contains("accepted values are"), "{err}");
+    }
+
+    #[test]
+    fn test_reject_unsupported_connectors() {
+        let err = resolve_err(&[
+            ("connector", "kafka"),
+            ("refresh_mode", "BOUNDED"),
+            ("snapshot_id", "42"),
+        ]);
+        assert!(
+            err.contains("BOUNDED refresh mode is only supported for the iceberg connector"),
+            "{err}"
+        );
+
+        let err = resolve_err(&[("connector", "kafka"), ("refresh_mode", "FULL_RELOAD")]);
+        assert!(
+            err.contains("FULL_RELOAD refresh mode is only supported for connectors"),
+            "{err}"
+        );
     }
 }
