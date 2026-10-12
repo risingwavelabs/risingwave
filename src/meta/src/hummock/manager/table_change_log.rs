@@ -140,7 +140,9 @@ fn resolve_table_change_log_truncate_epochs(
 }
 
 impl HummockManager {
-    /// Returns the exclusive epoch before which the upstream change log can be truncated.
+    /// Returns the minimum fully consumed epoch across all vnodes. The existing truncation path
+    /// deletes change-log epochs strictly before this frontier, preserving it as the recovery
+    /// anchor.
     async fn query_progress_table_truncate_epoch(
         &self,
         subscriber: &ProgressTableChangeLogSubscriber,
@@ -230,7 +232,8 @@ impl HummockManager {
                 };
                 let epoch =
                     u64::try_from(epoch.into_int64()).context("progress epoch is negative")?;
-                let truncate_epoch = epoch.saturating_add(u64::from(is_epoch_finished.into_bool()));
+                let truncate_epoch =
+                    epoch.saturating_sub(u64::from(!is_epoch_finished.into_bool()));
                 min_truncate_epoch =
                     Some(min_truncate_epoch.map_or(truncate_epoch, |min_epoch: u64| {
                         min_epoch.min(truncate_epoch)
