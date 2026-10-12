@@ -1274,16 +1274,17 @@ impl DatabaseCheckpointControl {
                     ?blocked_job_ids,
                     "reject dropping snapshot backfill jobs while activating their upstream edges"
                 );
+                let err: MetaError = anyhow!(
+                    "cannot drop snapshot backfill jobs {:?} while they are starting to consume \
+                     upstream; database recovery is being triggered to force the catalog drop to \
+                     take effect",
+                    blocked_job_ids
+                )
+                .into();
                 if let Some(notifier) = notifier_start {
-                    notifier.notify_start_failed(
-                        anyhow!(
-                            "cannot drop snapshot backfill jobs {:?} while they are starting to consume upstream",
-                            blocked_job_ids
-                        )
-                        .into(),
-                    );
+                    notifier.notify_start_failed(err.clone());
                 }
-                return Ok(());
+                return Err(err);
             }
         }
         if let Some(Command::DropStreamingJobs {
