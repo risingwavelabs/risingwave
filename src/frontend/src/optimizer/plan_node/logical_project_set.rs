@@ -105,7 +105,6 @@ impl LogicalProjectSet {
                         return_type,
                         function_type,
                         user_defined,
-                        money_column_indices,
                     } = table_func;
                     let args = args
                         .into_iter()
@@ -118,7 +117,6 @@ impl LogicalProjectSet {
                         return_type,
                         function_type,
                         user_defined,
-                        money_column_indices,
                     }
                     .into()
                 } else {

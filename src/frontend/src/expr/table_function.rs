@@ -38,25 +38,9 @@ use crate::error::ErrorCode::BindError;
 use crate::expr::reject_impure;
 use crate::utils::FRONTEND_RUNTIME;
 
-/// Parse a strict boolean TVF argument. Returns the default when the argument
-/// is absent (e.g. the 2-arg source-reference form) and an error when the user
-/// supplies a value that is not a case-insensitive `true` / `false`. We avoid
-/// `s.parse::<bool>().unwrap_or(default)` because that would silently coerce
-/// typos like `yes` or `1` — and a typo on a security-critical flag like
-/// `trust_cert` would weaken transport security without any user-visible error.
-fn parse_strict_bool_arg(value: Option<&String>, default: bool) -> anyhow::Result<bool> {
-    match value {
-        None => Ok(default),
-        Some(s) => match s.trim().to_ascii_lowercase().as_str() {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            other => Err(anyhow::anyhow!(
-                "expected 'true' or 'false', got {:?}",
-                other
-            )),
-        },
-    }
-}
+pub(crate) const MSSQL_QUERY_ARG_COUNT: usize = 8;
+const MSSQL_QUERY_ENCRYPT_ARG_INDEX: usize = 6;
+const MSSQL_QUERY_TRUST_CERT_ARG_INDEX: usize = 7;
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -70,14 +54,6 @@ pub struct TableFunction {
     pub function_type: TableFunctionType,
     /// Catalog of user defined table function.
     pub user_defined: Option<Arc<FunctionCatalog>>,
-    /// 0-based ordinals of `MONEY` / `SMALLMONEY` columns in the
-    /// discovered result schema. Set by the `mssql_query` binder from
-    /// `describe_mssql_query`; `None` (or empty) for table functions
-    /// that don't surface MONEY data. Carried through to the
-    /// `BatchMssqlQuery` plan node so the executor can apply the
-    /// `i64 / 10000` → `Decimal` decoding even when Tiberius reports
-    /// `CAST(... AS MONEY)` as `ColumnType::Intn`.
-    pub money_column_indices: Vec<usize>,
 }
 
 impl TableFunction {
@@ -90,7 +66,6 @@ impl TableFunction {
             return_type,
             function_type: func_type,
             user_defined: None,
-            money_column_indices: vec![],
         })
     }
 
@@ -104,7 +79,6 @@ impl TableFunction {
             return_type: catalog.return_type.clone(),
             function_type: TableFunctionType::UserDefined,
             user_defined: Some(catalog),
-            money_column_indices: vec![],
         }
     }
 
@@ -322,7 +296,6 @@ impl TableFunction {
             return_type,
             function_type: TableFunctionType::FileScan,
             user_defined: None,
-            money_column_indices: vec![],
         })
     }
 
@@ -409,7 +382,6 @@ impl TableFunction {
                 return_type: schema,
                 function_type: TableFunctionType::PostgresQuery,
                 user_defined: None,
-                money_column_indices: vec![],
             })
         }
     }
@@ -544,7 +516,6 @@ impl TableFunction {
                 return_type: schema,
                 function_type: TableFunctionType::MysqlQuery,
                 user_defined: None,
-                money_column_indices: vec![],
             })
         }
     }
@@ -563,11 +534,34 @@ impl TableFunction {
     /// `describe_mssql_query` against the user-provided query. The
     /// `encrypt` and `trust_cert` flags are parsed strictly (any value
     /// other than case-insensitive `true` / `false` is a bind error).
-    pub fn new_mssql_query(args: Vec<ExprImpl>) -> RwResult<Self> {
+    pub fn new_mssql_query(mut args: Vec<ExprImpl>) -> RwResult<Self> {
+        if args.len() != MSSQL_QUERY_ARG_COUNT {
+            return Err(BindError(format!(
+                "mssql_query expects {MSSQL_QUERY_ARG_COUNT} resolved arguments, got {}",
+                args.len()
+            ))
+            .into());
+        }
         let evaled_args = args
             .iter()
             .map(expr_impl_to_string_fn)
             .collect::<RwResult<Vec<_>>>()?;
+
+        let encrypt = evaled_args[MSSQL_QUERY_ENCRYPT_ARG_INDEX]
+            .trim()
+            .to_ascii_lowercase()
+            .parse::<bool>()
+            .context("invalid `encrypt` value for mssql_query: expected 'true' or 'false'")?;
+        let trust_cert = evaled_args[MSSQL_QUERY_TRUST_CERT_ARG_INDEX]
+            .trim()
+            .to_ascii_lowercase()
+            .parse::<bool>()
+            .context("invalid `trust_cert` value for mssql_query: expected 'true' or 'false'")?;
+        // These flags are strings at the SQL boundary to preserve the public
+        // function signature, but booleans everywhere in the internal plan.
+        // This also ensures they are parsed exactly once.
+        args[MSSQL_QUERY_ENCRYPT_ARG_INDEX] = ExprImpl::literal_bool(encrypt);
+        args[MSSQL_QUERY_TRUST_CERT_ARG_INDEX] = ExprImpl::literal_bool(trust_cert);
 
         #[cfg(madsim)]
         {
@@ -579,27 +573,17 @@ impl TableFunction {
 
         #[cfg(not(madsim))]
         {
+            // Schema discovery is async and yields on `FRONTEND_RUNTIME` while
+            // waiting for network I/O. The binder API itself is synchronous,
+            // so `block_in_place` tells the caller's Tokio runtime to move its
+            // other tasks off this worker while it waits for the async result.
             let schema = tokio::task::block_in_place(|| {
                 FRONTEND_RUNTIME.block_on(async {
-                    let port: u16 = evaled_args[1]
-                        .parse()
-                        .with_context(|| format!("invalid sql server port `{}`", evaled_args[1]))?;
-                    // The binder always emits encrypt/trust_cert (either
-                    // from the inline form or from the source-reference
-                    // form's defaults); both must parse cleanly to a
-                    // boolean. Reject anything else rather than silently
-                    // coercing — a typo could open a plaintext connection
-                    // or bypass certificate validation.
-                    let encrypt = parse_strict_bool_arg(evaled_args.get(6), false).context(
-                        "invalid `encrypt` value for mssql_query: expected 'true' or 'false'",
-                    )?;
-                    let trust_cert = parse_strict_bool_arg(evaled_args.get(7), true).context(
-                        "invalid `trust_cert` value for mssql_query: expected 'true' or 'false'",
-                    )?;
-
                     let conn_config = MssqlConnectionConfig {
                         host: evaled_args[0].clone(),
-                        port,
+                        port: evaled_args[1].parse().with_context(|| {
+                            format!("invalid sql server port `{}`", evaled_args[1])
+                        })?,
                         user: evaled_args[2].clone(),
                         password: evaled_args[3].clone(),
                         database: evaled_args[4].clone(),
@@ -607,24 +591,19 @@ impl TableFunction {
                         trust_cert,
                     };
 
-                    let (rw_types, money_indices) =
-                        describe_mssql_query(&conn_config, &evaled_args[5]).await?;
+                    let rw_types = describe_mssql_query(&conn_config, &evaled_args[5]).await?;
 
-                    Ok::<(risingwave_common::types::DataType, Vec<usize>), anyhow::Error>((
-                        DataType::Struct(StructType::new(rw_types)),
-                        money_indices,
+                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
+                        StructType::new(rw_types),
                     ))
                 })
             })?;
-
-            let (schema, money_indices) = schema;
 
             Ok(TableFunction {
                 args,
                 return_type: schema,
                 function_type: TableFunctionType::MssqlQuery,
                 user_defined: None,
-                money_column_indices: money_indices,
             })
         }
     }
@@ -643,7 +622,6 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalBackfillProgress,
             user_defined: None,
-            money_column_indices: vec![],
         }
     }
 
@@ -659,7 +637,6 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalSourceBackfillProgress,
             user_defined: None,
-            money_column_indices: vec![],
         }
     }
 
@@ -675,7 +652,6 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalGetChannelDeltaStats,
             user_defined: None,
-            money_column_indices: vec![],
         }
     }
 

@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-use std::str::FromStr;
 use std::sync::LazyLock;
 
-use anyhow::{Context, bail};
+use anyhow::{Context, bail, ensure};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppressor;
@@ -24,116 +22,129 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
     DataType, Date, Datum, Decimal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
+use risingwave_common::util::iter_util::ZipEqFast;
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
-use tiberius::Row;
 use tiberius::xml::XmlData;
+use tiberius::{Column, ColumnType, Row};
 use uuid::Uuid;
 
 use crate::parser::utils::log_error;
 
 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
-pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
-    let money_indices = sql_server_money_field_indices(row);
-    sql_server_row_to_owned_row_inner(row, schema, &money_indices)
-}
-
-/// Decode a row to a RisingWave [`OwnedRow`] using bind-time knowledge of
-/// which columns are `MONEY` / `SMALLMONEY`.
+/// Decoder built from the TDS metadata that precedes a SQL Server result set.
 ///
-/// Identical to [`sql_server_row_to_owned_row`] except the money-column set
-/// is supplied by the caller (typically the `mssql_query` plan node, which
-/// received it from `describe_mssql_query` at bind time). This is necessary
-/// because Tiberius reports `CAST(... AS MONEY)` as `ColumnType::Intn` and
-/// therefore the runtime-only [`sql_server_money_field_indices`] would miss
-/// those expressions. Pass an empty list to disable the MONEY override
-/// (degenerate case) — the runtime check then takes over.
-pub fn sql_server_row_to_owned_row_with_money_indices(
-    row: &mut Row,
-    schema: &Schema,
-    money_indices: &[usize],
-) -> OwnedRow {
-    let set: HashSet<usize> = money_indices.iter().copied().collect();
-    sql_server_row_to_owned_row_inner(row, schema, &set)
+/// Tiberius keeps the payload representation (`i64` for MONEY) separate from
+/// the TDS column type. Build the MONEY classification from the latter once
+/// per result set and reuse it for all rows. `mssql_type_to_rw_type` maps the
+/// corresponding schema type to [`DataType::Decimal`].
+pub struct SqlServerRowDecoder {
+    schema: Schema,
+    money_columns: Vec<bool>,
 }
 
-fn sql_server_row_to_owned_row_inner(
-    row: &mut Row,
-    schema: &Schema,
-    money_indices: &HashSet<usize>,
-) -> OwnedRow {
-    let mut datums = Vec::with_capacity(schema.fields.len());
-    for (i, rw_field) in schema.fields.iter().enumerate() {
-        let name = rw_field.name.as_str();
-        let datum = match sql_server_cell_to_rw_datum(
-            row,
-            i,
-            name,
-            &rw_field.data_type,
-            money_indices.contains(&i),
-        ) {
-            Ok(datum) => datum,
-            Err(err) => {
-                log_error!(name, err, "parse column failed");
-                None
-            }
-        };
-        datums.push(datum);
+impl SqlServerRowDecoder {
+    pub fn new(columns: &[Column], schema: &Schema) -> anyhow::Result<Self> {
+        ensure!(
+            columns.len() == schema.len(),
+            "SQL Server returned {} columns, but the planned schema has {} columns",
+            columns.len(),
+            schema.len()
+        );
+
+        let money_columns = columns
+            .iter()
+            .zip_eq_fast(&schema.fields)
+            .map(|(column, field)| {
+                let column_type = column.column_type();
+                match (column_type, &field.data_type) {
+                    (ColumnType::Money | ColumnType::Money4, DataType::Decimal) => Ok(true),
+                    (ColumnType::Money | ColumnType::Money4, data_type) => bail!(
+                        "SQL Server MONEY column `{}` has incompatible RisingWave type {}",
+                        field.name,
+                        data_type
+                    ),
+                    (ColumnType::Decimaln | ColumnType::Numericn, DataType::Decimal) => Ok(false),
+                    (_, DataType::Decimal) => bail!(
+                        "SQL Server column `{}` has TDS type {:?}, which is incompatible with the planned RisingWave Decimal type",
+                        field.name,
+                        column_type
+                    ),
+                    _ => Ok(false),
+                }
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        Ok(Self {
+            schema: schema.clone(),
+            money_columns,
+        })
     }
-    OwnedRow::new(datums)
-}
 
-/// Decode primary-key columns strictly while preserving the legacy lenient behavior for all
-/// other columns in a SQL Server CDC snapshot row.
-pub fn sql_server_row_to_owned_row_with_strict_pk(
-    row: &mut Row,
-    schema: &Schema,
-    pk_indices: &[usize],
-) -> anyhow::Result<OwnedRow> {
-    let money_indices = sql_server_money_field_indices(row);
-    super::decode_row_with_strict_pk(
-        "SQL Server",
-        schema,
-        pk_indices,
-        |index, field| {
-            sql_server_cell_to_rw_datum(
+    fn validate_row(&self, row: &Row) -> anyhow::Result<()> {
+        ensure!(
+            row.result_index() == 0,
+            "mssql_query returned more than one result set"
+        );
+        ensure!(
+            row.columns().len() == self.schema.len(),
+            "SQL Server row has {} columns, but the planned schema has {} columns",
+            row.columns().len(),
+            self.schema.len()
+        );
+        Ok(())
+    }
+
+    pub fn decode(&self, row: &mut Row) -> anyhow::Result<OwnedRow> {
+        self.validate_row(row)?;
+
+        let mut datums = Vec::with_capacity(self.schema.len());
+        for (i, rw_field) in self.schema.fields.iter().enumerate() {
+            let name = rw_field.name.as_str();
+            let datum = match sql_server_cell_to_rw_datum(
                 row,
-                index,
-                &field.name,
-                &field.data_type,
-                money_indices.contains(&index),
-            )
-        },
-        |name, err| log_error!(name, err, "parse column failed"),
-    )
-}
-
-/// Return the set of column indices whose wire type is SQL Server `MONEY`
-/// or `SMALLMONEY`. Indexed by ordinal rather than by wire name because
-/// Tiberius reports an empty name for unnamed columns (e.g.
-/// `SELECT CAST(1 AS MONEY)` produces a column with no name, while
-/// RisingWave's `describe_mssql_query` assigns it the synthetic
-/// `column_1`). Looking money columns up by ordinal guarantees the
-/// money-to-Decimal conversion runs regardless of name.
-///
-/// Tiberius distinguishes the two MONEY variants at the protocol level:
-/// `MONEY` (8 bytes, fixed-point factor 1/10000) maps to
-/// [`tiberius::ColumnType::Money`]; `SMALLMONEY` (4 bytes) maps to
-/// [`tiberius::ColumnType::Money4`]. Both decode the wire payload to an
-/// `i64` (see `tds::codec::column_data::money`), so the conversion
-/// logic is identical — we treat both as money columns here.
-fn sql_server_money_field_indices(row: &Row) -> HashSet<usize> {
-    let mut money_indices = HashSet::new();
-    for (i, (column, _)) in row.cells().enumerate() {
-        if matches!(
-            column.column_type(),
-            tiberius::ColumnType::Money | tiberius::ColumnType::Money4
-        ) {
-            money_indices.insert(i);
+                i,
+                name,
+                &rw_field.data_type,
+                self.money_columns[i],
+            ) {
+                Ok(datum) => datum,
+                Err(err) => {
+                    log_error!(name, err, "parse column failed");
+                    None
+                }
+            };
+            datums.push(datum);
         }
+        Ok(OwnedRow::new(datums))
     }
-    money_indices
+
+    /// Decode primary-key columns strictly while preserving the legacy
+    /// lenient behavior for all other columns in a SQL Server CDC snapshot.
+    pub fn decode_with_strict_pk(
+        &self,
+        row: &mut Row,
+        pk_indices: &[usize],
+    ) -> anyhow::Result<OwnedRow> {
+        self.validate_row(row)?;
+
+        super::decode_row_with_strict_pk(
+            "SQL Server",
+            &self.schema,
+            pk_indices,
+            |index, field| {
+                sql_server_cell_to_rw_datum(
+                    row,
+                    index,
+                    &field.name,
+                    &field.data_type,
+                    self.money_columns[index],
+                )
+            },
+            |name, err| log_error!(name, err, "parse column failed"),
+        )
+    }
 }
 
 fn sql_server_cell_to_rw_datum(
@@ -174,28 +185,11 @@ fn coerce_scalar_to_target_type(scalar: ScalarImpl, target_type: &DataType) -> S
 fn try_convert_money_i64_to_type(value: i64, data_type: &DataType) -> anyhow::Result<ScalarImpl> {
     match data_type {
         DataType::Decimal => {
-            // SQL Server MONEY / SMALLMONEY are wire-encoded as a scaled
-            // i64 with factor 1/10000. Divide to land the value in the
-            // RisingWave Decimal builder.
-            let mut result = Decimal::from(value) / Decimal::from_str("10000").unwrap();
-            // Integer-valued money amounts (`$1.00` ⇒ raw = 1 with scale 0)
-            // would otherwise display as "1" rather than "1.0". Bump the
-            // scale up to a minimum of 1 so the rendered SQL output
-            // preserves a decimal point. SQL Server's MONEY type is
-            // conceptually a 4-dp fixed point, so existing higher-scale
-            // values (`$1234.56` ⇒ scale 2) are unchanged.
-            //
-            // Use `rescale` rather than the format+parse trick: the
-            // RisingWave `Decimal` enum wraps a `rust_decimal::Decimal`
-            // and the wrapper's `Display` impl does not propagate format
-            // precision to the inner value, so `format!("{:.1}", ...)`
-            // would silently keep the original scale.
-            let current_scale = result.scale().expect("non-NaN/Inf money value") as u32;
-            let target_scale = std::cmp::max(1u32, current_scale);
-            if target_scale > current_scale {
-                result.rescale(target_scale);
-            }
-            Ok(ScalarImpl::Decimal(result))
+            // SQL Server MONEY and SMALLMONEY use a fixed scale of four.
+            Ok(ScalarImpl::Decimal(Decimal::from_i128_with_scale(
+                value as i128,
+                4,
+            )))
         }
         _ => bail!("conversion of SQL Server money to {data_type} is not supported"),
     }
@@ -203,9 +197,31 @@ fn try_convert_money_i64_to_type(value: i64, data_type: &DataType) -> anyhow::Re
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::F32;
 
     use super::*;
+
+    #[test]
+    fn test_row_decoder_uses_tds_money_metadata() {
+        let columns = vec![
+            Column::new("money".into(), ColumnType::Money),
+            Column::new("decimal".into(), ColumnType::Decimaln),
+        ];
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Decimal, "money"),
+            Field::with_name(DataType::Decimal, "decimal"),
+        ]);
+
+        let decoder = SqlServerRowDecoder::new(&columns, &schema).unwrap();
+        assert_eq!(decoder.money_columns, vec![true, false]);
+
+        assert!(SqlServerRowDecoder::new(&columns[..1], &schema).is_err());
+
+        let intn_column = [Column::new("not_money".into(), ColumnType::Intn)];
+        let decimal_schema = Schema::new(vec![Field::with_name(DataType::Decimal, "not_money")]);
+        assert!(SqlServerRowDecoder::new(&intn_column, &decimal_schema).is_err());
+    }
 
     #[test]
     fn test_integer_upcast_coercion() {
@@ -233,31 +249,30 @@ mod tests {
     }
 
     /// `MONEY` / `SMALLMONEY` are stored by SQL Server / Tiberius as a
-    /// scaled `i64` with a factor of 10000. The decoder must divide by
-    /// 10000 to land the value in the RisingWave `Decimal` builder.
+    /// scaled `i64` with a fixed scale of four.
     /// Covers the common cases used by the SLT suite.
     #[test]
     fn test_money_i64_to_decimal() {
-        let decimal = try_convert_money_i64_to_type(10000, &DataType::Decimal).unwrap();
-        assert_eq!(decimal, ScalarImpl::Decimal(Decimal::from(1)));
+        fn assert_money(raw: i64, expected: Decimal) {
+            let ScalarImpl::Decimal(actual) =
+                try_convert_money_i64_to_type(raw, &DataType::Decimal).unwrap()
+            else {
+                unreachable!()
+            };
+            assert_eq!(actual, expected);
+            assert_eq!(actual.scale(), Some(4));
+        }
+
+        assert_money(10000, Decimal::from(1));
 
         // $1.23 -> 12300 cents of 1/10000 -> 1.23
-        let decimal = try_convert_money_i64_to_type(12300, &DataType::Decimal).unwrap();
-        assert_eq!(
-            decimal,
-            ScalarImpl::Decimal(Decimal::from(123) / Decimal::from(100))
-        );
+        assert_money(12300, Decimal::from(123) / Decimal::from(100));
 
         // $1234.56 -> 12345600 -> 1234.56
-        let decimal = try_convert_money_i64_to_type(12345600, &DataType::Decimal).unwrap();
-        assert_eq!(
-            decimal,
-            ScalarImpl::Decimal(Decimal::from(123456) / Decimal::from(100))
-        );
+        assert_money(12345600, Decimal::from(123456) / Decimal::from(100));
 
         // 0 must not panic.
-        let decimal = try_convert_money_i64_to_type(0, &DataType::Decimal).unwrap();
-        assert_eq!(decimal, ScalarImpl::Decimal(Decimal::from(0)));
+        assert_money(0, Decimal::from(0));
     }
 
     /// Money columns must not be coerced into non-Decimal targets: that

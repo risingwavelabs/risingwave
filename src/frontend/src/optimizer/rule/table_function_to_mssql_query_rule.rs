@@ -17,7 +17,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::prelude::{PlanRef, *};
-use crate::expr::{Expr, TableFunctionType};
+use crate::expr::{Expr, ExprImpl, MSSQL_QUERY_ARG_COUNT, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalMssqlQuery, LogicalTableFunction, MssqlConnection};
 
@@ -28,6 +28,23 @@ use crate::optimizer::plan_node::{LogicalMssqlQuery, LogicalTableFunction, Mssql
 /// rules). Validates that exactly 8 arguments were supplied; the 2-arg
 /// source-reference form is handled earlier by the binder, not here.
 pub struct TableFunctionToMssqlQueryRule {}
+
+fn fold_const_varchar(expr: &ExprImpl) -> Option<String> {
+    let value = expr.try_fold_const()?.ok()??;
+    match value {
+        ScalarImpl::Utf8(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn fold_const_bool(expr: &ExprImpl) -> Option<bool> {
+    let value = expr.try_fold_const()?.ok()??;
+    match value {
+        ScalarImpl::Bool(value) => Some(value),
+        _ => None,
+    }
+}
+
 impl Rule<Logical> for TableFunctionToMssqlQueryRule {
     /// Apply the rewrite: if the plan is a `LogicalTableFunction` of
     /// type `MSSQL_QUERY`, build a `LogicalMssqlQuery` from its 8 inline
@@ -37,7 +54,11 @@ impl Rule<Logical> for TableFunctionToMssqlQueryRule {
         if logical_table_function.table_function().function_type != TableFunctionType::MssqlQuery {
             return None;
         }
-        assert!(!logical_table_function.with_ordinality());
+        // The binder rejects this form with a user-facing error. Keep this
+        // check fallible as defense against malformed internally-built plans.
+        if logical_table_function.with_ordinality() {
+            return None;
+        }
         let table_function_return_type = logical_table_function.table_function().return_type();
 
         if let DataType::Struct(st) = table_function_return_type {
@@ -48,39 +69,23 @@ impl Rule<Logical> for TableFunctionToMssqlQueryRule {
 
             let schema = Schema::new(fields);
 
-            // mssql_query has 8 args: hostname, port, username, password, database, query, encrypt, trust_cert
-            assert_eq!(logical_table_function.table_function().args.len(), 8);
-            let mut eval_args = vec![];
-            for arg in &logical_table_function.table_function().args {
-                assert_eq!(arg.return_type(), DataType::Varchar);
-                let value = arg.try_fold_const().unwrap().unwrap();
-                match value {
-                    Some(ScalarImpl::Utf8(s)) => {
-                        eval_args.push(s.to_string());
-                    }
-                    _ => {
-                        unreachable!("must be a varchar")
-                    }
-                }
+            let args = &logical_table_function.table_function().args;
+            if args.len() != MSSQL_QUERY_ARG_COUNT {
+                return None;
             }
-            let hostname = eval_args[0].clone();
-            let port = eval_args[1].clone();
-            let username = eval_args[2].clone();
-            let password = eval_args[3].clone();
-            let database = eval_args[4].clone();
-            let query = eval_args[5].clone();
-            let encrypt = Some(eval_args[6].clone());
-            let trust_cert = Some(eval_args[7].clone());
 
-            // The binder populated the `MONEY` / `SMALLMONEY` column
-            // ordinals alongside the schema. Forward them to the
-            // executor — the wire metadata (Tiberius `ColumnType`) is
-            // insufficient because `CAST(... AS MONEY)` is reported as
-            // `ColumnType::Intn`.
-            let money_column_indices = logical_table_function
-                .table_function()
-                .money_column_indices
-                .clone();
+            // `TableFunction::new_mssql_query` validates all arguments as
+            // constants and normalizes the two TLS flags to boolean literals.
+            // Re-check the invariant here instead of panicking if an internal
+            // caller constructs a malformed table function.
+            let hostname = fold_const_varchar(&args[0])?;
+            let port = fold_const_varchar(&args[1])?;
+            let username = fold_const_varchar(&args[2])?;
+            let password = fold_const_varchar(&args[3])?;
+            let database = fold_const_varchar(&args[4])?;
+            let query = fold_const_varchar(&args[5])?;
+            let encrypt = fold_const_bool(&args[6])?;
+            let trust_cert = fold_const_bool(&args[7])?;
 
             Some(
                 LogicalMssqlQuery::new(
@@ -96,7 +101,6 @@ impl Rule<Logical> for TableFunctionToMssqlQueryRule {
                         trust_cert,
                     },
                     query,
-                    money_column_indices,
                 )
                 .into(),
             )

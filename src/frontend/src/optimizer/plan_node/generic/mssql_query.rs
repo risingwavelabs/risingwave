@@ -19,6 +19,21 @@ use super::GenericPlanNode;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
+/// SQL Server connection parameters for an `mssql_query` plan.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MssqlConnection {
+    pub hostname: String,
+    pub port: String,
+    pub username: String,
+    pub password: String,
+    pub database: String,
+    /// Whether all SQL Server traffic must use TLS.
+    pub encrypt: bool,
+    /// Whether to skip TLS certificate-chain and hostname validation.
+    /// This is a boolean setting, not certificate content or a file path.
+    pub trust_cert: bool,
+}
+
 /// Generic (logical) plan node for the `mssql_query` table function.
 /// Carries the connection parameters, the pre-discovered schema, and the
 /// user query. This is the shared body used by both
@@ -30,29 +45,8 @@ use crate::optimizer::property::FunctionalDependencySet;
 pub struct MssqlQuery {
     /// Result schema discovered at bind time by `describe_mssql_query`.
     pub schema: Schema,
-    pub hostname: String,
-    pub port: String,
-    pub username: String,
-    pub password: String,
-    pub database: String,
+    pub connection: MssqlConnection,
     pub query: String,
-    /// SQL Server `encrypt` connection string option: `true` or `false`.
-    /// `None` for the 2-arg source-reference form (the value is taken
-    /// from the referenced `sqlserver-cdc` source instead).
-    pub encrypt: Option<String>,
-    /// SQL Server `TrustServerCertificate` connection string option:
-    /// `true` or `false`. `None` for the 2-arg source-reference form.
-    pub trust_cert: Option<String>,
-    /// 0-based ordinals of result columns whose SQL Server type is
-    /// `MONEY` or `SMALLMONEY`. Produced at bind time by
-    /// `describe_mssql_query` from `sp_describe_first_result_set`'s
-    /// `system_type_name`. Necessary because Tiberius reports
-    /// `CAST(... AS MONEY)` as `ColumnType::Intn`, so the wire metadata
-    /// alone cannot identify these columns at execution time.
-    #[educe(PartialEq(ignore))]
-    #[educe(Hash(ignore))]
-    pub money_column_indices: Vec<usize>,
-
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,

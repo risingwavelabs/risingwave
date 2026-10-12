@@ -140,7 +140,6 @@ pub trait ExprRewriter {
             return_type,
             function_type,
             user_defined: udtf_catalog,
-            money_column_indices,
         } = table_func;
         let args = args
             .into_iter()
@@ -151,7 +150,6 @@ pub trait ExprRewriter {
             return_type,
             function_type,
             user_defined: udtf_catalog,
-            money_column_indices,
         }
         .into()
     }

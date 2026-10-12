@@ -19,6 +19,8 @@ use tiberius::{AuthMethod, Client, Config, EncryptionLevel};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
+pub type MssqlClient = Client<tokio_util::compat::Compat<TcpStream>>;
+
 /// Configuration for connecting to a SQL Server instance.
 ///
 /// Mirrors `PgConnectionConfig` for PostgreSQL. Used by the `mssql_query`
@@ -50,13 +52,7 @@ pub struct MssqlConnectionConfig {
 /// - `trust_cert = true` forces TLS on (matches SQL Server behavior where
 ///   `TrustServerCertificate=true` is only meaningful with encryption).
 /// - Otherwise encryption follows the `encrypt` flag directly.
-///
-/// Note: this does not handle the `Routing { host, port }` redirect case
-/// (Azure SQL gateway redirect). Callers that need to follow a redirect should
-/// use `SqlServerClient::new_with_config` in `crate::sink::sqlserver` instead.
-pub async fn create_mssql_client(
-    config: &MssqlConnectionConfig,
-) -> anyhow::Result<Client<tokio_util::compat::Compat<TcpStream>>> {
+pub async fn create_mssql_client(config: &MssqlConnectionConfig) -> anyhow::Result<MssqlClient> {
     let mut tiberius_config = Config::new();
     tiberius_config.host(&config.host);
     tiberius_config.port(config.port);
@@ -72,24 +68,48 @@ pub async fn create_mssql_client(
     }
     tiberius_config.authentication(AuthMethod::sql_server(&config.user, &config.password));
 
-    let tcp = TcpStream::connect(tiberius_config.get_addr())
+    create_mssql_client_with_config(tiberius_config)
         .await
         .with_context(|| {
             format!(
-                "failed to connect to sql server at {}:{}",
-                config.host, config.port
-            )
-        })?;
-    let client = Client::connect(tiberius_config, tcp.compat_write())
-        .await
-        .with_context(|| {
-            format!(
-                "failed to authenticate against sql server {}:{} as user {}",
+                "failed to connect to sql server {}:{} as user {}",
                 config.host, config.port, config.user
             )
-        })?;
+        })
+}
 
-    Ok(client)
+async fn connect_mssql_tcp(config: &Config, after_routing: bool) -> anyhow::Result<TcpStream> {
+    let address = config.get_addr();
+    let phase = if after_routing { " after routing" } else { "" };
+    let tcp = TcpStream::connect(&address)
+        .await
+        .with_context(|| format!("failed to connect to sql server at {address}{phase}"))?;
+    tcp.set_nodelay(true)
+        .with_context(|| format!("failed to set TCP_NODELAY for sql server at {address}{phase}"))?;
+    Ok(tcp)
+}
+
+/// Connect using a fully built Tiberius configuration.
+///
+/// SQL Server gateways, notably Azure SQL, can return one routing redirect
+/// during login. Follow that redirect here so query, CDC, and sink callers all
+/// use identical connection behavior.
+pub async fn create_mssql_client_with_config(mut config: Config) -> anyhow::Result<MssqlClient> {
+    let tcp = connect_mssql_tcp(&config, false).await?;
+    let connect_result = Client::connect(config.clone(), tcp.compat_write()).await;
+
+    match connect_result {
+        Ok(client) => Ok(client),
+        Err(tiberius::error::Error::Routing { host, port }) => {
+            config.host(&host);
+            config.port(port);
+            let tcp = connect_mssql_tcp(&config, true).await?;
+            Client::connect(config, tcp.compat_write())
+                .await
+                .context("failed to authenticate with sql server after routing")
+        }
+        Err(error) => Err(error).context("failed to authenticate with sql server"),
+    }
 }
 
 /// Discover the projected schema of an arbitrary user query against SQL Server.
@@ -97,40 +117,29 @@ pub async fn create_mssql_client(
 /// Wraps the user query in `sp_describe_first_result_set`, which returns one
 /// row per result column with `name` and `system_type_name` (e.g. `int`,
 /// `nvarchar(50)`, `decimal(18,2)`). Each row is mapped to a RisingWave
-/// [`DataType`]. Columns whose `system_type_name` is `money` or `smallmoney`
-/// are additionally recorded in a parallel index list so the executor can
-/// apply the `i64 / 10000` → `Decimal` decoding for them; `CAST(... AS MONEY)`
-/// expressions produce such columns but Tiberius reports them as `ColumnType::Intn`,
-/// so the wire metadata alone is insufficient to identify them.
+/// [`DataType`].
 ///
-/// The user query is passed as a literal to `EXEC sp_describe_first_result_set`,
-/// so any single-quote in the query is escaped by doubling it (standard T-SQL
-/// string escaping).
+/// The user query is passed to `sp_describe_first_result_set` as a bound
+/// parameter. It is data for the stored procedure rather than part of the
+/// outer `EXEC` statement.
 pub async fn describe_mssql_query(
     config: &MssqlConnectionConfig,
     user_query: &str,
-) -> anyhow::Result<(Vec<(String, DataType)>, Vec<usize>)> {
+) -> anyhow::Result<Vec<(String, DataType)>> {
     let mut client = create_mssql_client(config).await?;
 
-    let escaped = user_query.replace('\'', "''");
-    let describe_query = format!("EXEC sp_describe_first_result_set N'{}'", escaped);
-
-    let stream = client.query(describe_query.as_str(), &[]).await?;
+    let stream = client
+        .query(
+            "EXEC sys.sp_describe_first_result_set @tsql = @P1",
+            &[&user_query],
+        )
+        .await?;
     let mut row_stream = stream.into_row_stream();
 
     let mut rw_types = vec![];
-    let mut money_indices = vec![];
-    // `column_ordinal` is 1-based and monotonically increasing within the
-    // visible columns. We re-number to 0-based (`visible_idx`) so the
-    // executor can index directly into the schema fields. Hidden columns are
-    // skipped, so the visible ordinal is denser than the raw ordinal.
-    let mut visible_idx: usize = 0;
     while let Some(row) = row_stream.try_next().await? {
         // Column ordinal 0 -> `is_hidden` (bit). 0 = visible, 1 = hidden
         // (a column hidden from the client, e.g. an unused join key).
-        // Column ordinal 1 -> `column_ordinal` (int). 1-based position
-        // of this column in the result set; used to disambiguate unnamed
-        // columns (`COUNT(*)` etc.) since `name` is empty for those.
         // Column ordinal 2 -> `name` (sysname / nvarchar). Empty for
         // hidden or computed-but-unnamed columns.
         // Column ordinal 5 -> `system_type_name` (e.g. "int", "nvarchar(50)",
@@ -140,26 +149,22 @@ pub async fn describe_mssql_query(
             // Skip hidden columns: they are not visible in the result set.
             continue;
         }
-        let column_ordinal: i32 = row.try_get::<i32, _>(1)?.unwrap_or(0);
         let name: &str = row.try_get::<&str, _>(2)?.unwrap_or("");
         let type_name: &str = row.try_get::<&str, _>(5)?.unwrap_or("");
 
-        let is_money = is_money_type(type_name);
-        let data_type = mssql_type_to_rw_type_str(type_name)
+        let data_type = mssql_type_to_rw_type(type_name)
             .with_context(|| format!("unsupported column type {:?}", type_name))?;
         // Visible but unnamed columns (e.g. `SELECT COUNT(*) FROM t`) get a
         // synthetic `column_N` name where N is the 1-based column ordinal.
         // We keep the same default-name convention as the CDC source.
         let column_name = if name.is_empty() {
-            format!("column_{column_ordinal}")
+            row.try_get::<i32, _>(1)?
+                .map(|column_ordinal| format!("column_{column_ordinal}"))
+                .unwrap_or_else(|| format!("column_{}", rw_types.len() + 1))
         } else {
             name.to_owned()
         };
-        if is_money {
-            money_indices.push(visible_idx);
-        }
         rw_types.push((column_name, data_type));
-        visible_idx += 1;
     }
 
     if rw_types.is_empty() {
@@ -174,21 +179,7 @@ pub async fn describe_mssql_query(
         ));
     }
 
-    Ok((rw_types, money_indices))
-}
-
-/// Return `true` if the SQL Server `system_type_name` from
-/// `sp_describe_first_result_set` represents `MONEY` or `SMALLMONEY`. Both map
-/// to a RisingWave [`DataType::Decimal`] but require the i64 / 10000 → Decimal
-/// decoding the wire payload carries.
-fn is_money_type(type_name: &str) -> bool {
-    // Strip the precision/scale/length suffix, e.g. "money(19,4)" -> "money",
-    // so the dispatch is purely on the base type. `MONEY` and `SMALLMONEY`
-    // never actually take a parenthesized suffix, but the stripping keeps us
-    // robust if a future SQL Server version changes that.
-    let lower = type_name.to_lowercase();
-    let base = lower.split_once('(').map(|(b, _)| b).unwrap_or(&lower);
-    matches!(base.trim(), "money" | "smallmoney")
+    Ok(rw_types)
 }
 
 /// Map a SQL Server `system_type_name` (as returned by
@@ -196,11 +187,10 @@ fn is_money_type(type_name: &str) -> bool {
 ///
 /// The name is the human-readable form including precision/length parameters,
 /// e.g. `int`, `nvarchar(50)`, `decimal(18,2)`, `datetime2(7)`. We strip the
-/// parenthesized suffix and dispatch on the base type, mirroring the mapping
-/// used by `mssql_type_to_rw_type` in
-/// `src/connector/src/source/cdc/external/sql_server.rs` (which sees the bare
-/// type from `INFORMATION_SCHEMA.COLUMNS`).
-fn mssql_type_to_rw_type_str(type_name: &str) -> anyhow::Result<DataType> {
+/// parenthesized suffix and dispatch on the base type. SQL Server CDC reuses
+/// this function with the bare type names from `INFORMATION_SCHEMA.COLUMNS`,
+/// keeping query schema discovery and CDC snapshots consistent.
+pub fn mssql_type_to_rw_type(type_name: &str) -> anyhow::Result<DataType> {
     let lower = type_name.to_lowercase();
     // Strip precision/scale/length suffix, e.g. "nvarchar(50)" -> "nvarchar".
     let base = lower.split_once('(').map(|(b, _)| b).unwrap_or(&lower);
@@ -234,33 +224,27 @@ fn mssql_type_to_rw_type_str(type_name: &str) -> anyhow::Result<DataType> {
 mod tests {
     use risingwave_common::types::DataType;
 
-    use super::mssql_type_to_rw_type_str;
+    use super::mssql_type_to_rw_type;
 
     /// Verify that the common base SQL Server types map to the expected
     /// RisingWave `DataType`s: int/bigint/bit/float/date/datetime2/datetimeoffset/uniqueidentifier.
     #[test]
     fn mssql_type_to_rw_type_str_base_types() {
-        assert_eq!(mssql_type_to_rw_type_str("int").unwrap(), DataType::Int32);
+        assert_eq!(mssql_type_to_rw_type("int").unwrap(), DataType::Int32);
+        assert_eq!(mssql_type_to_rw_type("bigint").unwrap(), DataType::Int64);
+        assert_eq!(mssql_type_to_rw_type("bit").unwrap(), DataType::Boolean);
+        assert_eq!(mssql_type_to_rw_type("float").unwrap(), DataType::Float64);
+        assert_eq!(mssql_type_to_rw_type("date").unwrap(), DataType::Date);
         assert_eq!(
-            mssql_type_to_rw_type_str("bigint").unwrap(),
-            DataType::Int64
-        );
-        assert_eq!(mssql_type_to_rw_type_str("bit").unwrap(), DataType::Boolean);
-        assert_eq!(
-            mssql_type_to_rw_type_str("float").unwrap(),
-            DataType::Float64
-        );
-        assert_eq!(mssql_type_to_rw_type_str("date").unwrap(), DataType::Date);
-        assert_eq!(
-            mssql_type_to_rw_type_str("datetime2").unwrap(),
+            mssql_type_to_rw_type("datetime2").unwrap(),
             DataType::Timestamp
         );
         assert_eq!(
-            mssql_type_to_rw_type_str("datetimeoffset").unwrap(),
+            mssql_type_to_rw_type("datetimeoffset").unwrap(),
             DataType::Timestamptz
         );
         assert_eq!(
-            mssql_type_to_rw_type_str("uniqueidentifier").unwrap(),
+            mssql_type_to_rw_type("uniqueidentifier").unwrap(),
             DataType::Varchar
         );
     }
@@ -271,19 +255,19 @@ mod tests {
     #[test]
     fn mssql_type_to_rw_type_str_parameterized() {
         assert_eq!(
-            mssql_type_to_rw_type_str("nvarchar(50)").unwrap(),
+            mssql_type_to_rw_type("nvarchar(50)").unwrap(),
             DataType::Varchar
         );
         assert_eq!(
-            mssql_type_to_rw_type_str("VARCHAR(255)").unwrap(),
+            mssql_type_to_rw_type("VARCHAR(255)").unwrap(),
             DataType::Varchar
         );
         assert_eq!(
-            mssql_type_to_rw_type_str("decimal(18, 2)").unwrap(),
+            mssql_type_to_rw_type("decimal(18, 2)").unwrap(),
             DataType::Decimal
         );
         assert_eq!(
-            mssql_type_to_rw_type_str("datetime2(7)").unwrap(),
+            mssql_type_to_rw_type("datetime2(7)").unwrap(),
             DataType::Timestamp
         );
     }
@@ -293,8 +277,8 @@ mod tests {
     /// the wrong type.
     #[test]
     fn mssql_type_to_rw_type_str_unknown() {
-        assert!(mssql_type_to_rw_type_str("geometry").is_err());
-        assert!(mssql_type_to_rw_type_str("hierarchyid").is_err());
-        assert!(mssql_type_to_rw_type_str("sql_variant").is_err());
+        assert!(mssql_type_to_rw_type("geometry").is_err());
+        assert!(mssql_type_to_rw_type("hierarchyid").is_err());
+        assert!(mssql_type_to_rw_type("sql_variant").is_err());
     }
 }

@@ -94,13 +94,10 @@ impl ToDistributedBatch for BatchMssqlQuery {
 
 impl ToBatchPb for BatchMssqlQuery {
     /// Serialize the node into a `NodeBody::MssqlQuery` proto for the
-    /// batch task. `encrypt` / `trust_cert` are emitted as the strings
-    /// `"true"` / `"false"`, with the default `false` / `true` used when
-    /// the binder did not set them (2-arg source-reference form).
-    /// `money_column_indices` carries the bind-time `MONEY` /
-    /// `SMALLMONEY` ordinals that the executor applies for the i64 / 10000
-    /// → `Decimal` decoding.
+    /// batch task. `encrypt` / `trust_cert` have already been parsed and
+    /// validated by the binder and are carried as booleans in the plan.
     fn to_batch_prost_body(&self) -> NodeBody {
+        let connection = &self.core.connection;
         NodeBody::MssqlQuery(MssqlQueryNode {
             columns: self
                 .core
@@ -108,28 +105,14 @@ impl ToBatchPb for BatchMssqlQuery {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect(),
-            hostname: self.core.hostname.clone(),
-            port: self.core.port.clone(),
-            username: self.core.username.clone(),
-            password: self.core.password.clone(),
-            database: self.core.database.clone(),
+            hostname: connection.hostname.clone(),
+            port: connection.port.clone(),
+            username: connection.username.clone(),
+            password: connection.password.clone(),
+            database: connection.database.clone(),
             query: self.core.query.clone(),
-            encrypt: self
-                .core
-                .encrypt
-                .clone()
-                .unwrap_or_else(|| "false".to_owned()),
-            trust_cert: self
-                .core
-                .trust_cert
-                .clone()
-                .unwrap_or_else(|| "true".to_owned()),
-            money_column_indices: self
-                .core
-                .money_column_indices
-                .iter()
-                .map(|i| *i as u32)
-                .collect(),
+            encrypt: connection.encrypt,
+            trust_cert: connection.trust_cert,
         })
     }
 }

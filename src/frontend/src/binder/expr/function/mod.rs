@@ -39,8 +39,9 @@ use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef, TableFunction,
-    TableFunctionType, UserDefinedFunction, expr_impl_to_string_fn,
+    Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef,
+    MSSQL_QUERY_ARG_COUNT, TableFunction, TableFunctionType, UserDefinedFunction,
+    expr_impl_to_string_fn,
 };
 use crate::handler::privilege::ObjectCheckItem;
 
@@ -60,9 +61,6 @@ const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
 ];
 
 const INLINE_QUERY_ARG_LEN: usize = 6;
-/// Inline arg length for the SQL Server flavor of the `_query` TVFs, which
-/// appends `encrypt` and `trust_cert` (8 total) on top of the standard 6.
-const MSSQL_INLINE_QUERY_ARG_LEN: usize = 8;
 const CDC_SOURCE_QUERY_ARG_LEN: usize = 2;
 
 pub(super) fn is_sys_function_without_args(ident: &Ident) -> bool {
@@ -192,15 +190,10 @@ impl Binder {
                     ));
                 } else if expected_connector_name.eq_ignore_ascii_case("sqlserver-cdc") {
                     // The CDC source is the source of truth for whether the
-                    // SQL Server connection requires SSL. The executor
-                    // treats anything other than the literal string
-                    // `"true"` as "no encryption" (matching the CDC
-                    // source-side default handling in
-                    // `connector_common::sql_server::create_mssql_client`).
-                    // The "true" / "false" string is passed through to the
-                    // executor; if the source defined
-                    // `database.encrypt = "true"`, propagate that —
-                    // otherwise default to "false".
+                    // SQL Server connection requires TLS. Normalize the
+                    // source property to the public TVF's string argument;
+                    // `TableFunction::new_mssql_query` parses it once and
+                    // carries a boolean through the internal plan.
                     let encrypt = secret_resolved
                         .get("database.encrypt")
                         .map(|v| v.eq_ignore_ascii_case("true").to_string())
@@ -591,7 +584,7 @@ impl Binder {
                     .bind_external_db_query_args(
                         schema_name.as_deref(),
                         args,
-                        MSSQL_INLINE_QUERY_ARG_LEN,
+                        MSSQL_QUERY_ARG_COUNT,
                         "sqlserver-cdc",
                     )
                     .context("mssql_query error")?;

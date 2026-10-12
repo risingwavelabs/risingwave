@@ -188,8 +188,11 @@ static TABLE_FUNCTION_TO_MYSQL_QUERY: LazyLock<OptimizationStage> = LazyLock::ne
 
 static TABLE_FUNCTION_TO_MSSQL_QUERY: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
-        "TableFunctionToMssqlQueryRule",
+        "Table Function To MSSQL Query",
         vec![TableFunctionToMssqlQueryRule::create()],
+        // This conversion targets a leaf node, so traversal order does not
+        // affect the result. Keep TopDown for consistency with the equivalent
+        // PostgreSQL, MySQL, and file-scan conversion stages above.
         ApplyOrder::TopDown,
     )
 });
