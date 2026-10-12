@@ -118,19 +118,47 @@ impl StreamEowcOverWindow {
     }
 
     /// Returns true if any window function requires intermediate state persistence.
-    /// Currently this includes numbering functions (`row_number`, `rank`, `dense_rank`).
+    /// This includes numbering functions (`row_number`, `rank`, `dense_rank`), and windows that may
+    /// be closed by watermark, whose output progress is persisted.
     fn needs_intermediate_state_table(&self) -> bool {
         self.window_functions().iter().any(|f| {
             matches!(
                 f.kind,
                 WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank
             )
-        })
+        }) || self.needs_watermark_trigger_table()
+    }
+
+    /// Returns true if the window of any window function may be closed by the watermark of the
+    /// order key.
+    fn needs_watermark_trigger_table(&self) -> bool {
+        self.window_functions()
+            .iter()
+            .any(|f| f.frame.bounds.may_close_by_watermark())
+    }
+
+    /// Map the input distribution key to the given columns of partition key, which start at
+    /// `offset` in an internal table.
+    fn partition_dist_key(&self, offset: usize) -> Vec<usize> {
+        let partition_key_indices = self.partition_key_indices();
+        self.core
+            .input
+            .distribution()
+            .dist_column_indices()
+            .iter()
+            .filter_map(|&idx| {
+                partition_key_indices
+                    .iter()
+                    .position(|&pk_idx| pk_idx == idx)
+            })
+            .map(|pos| pos + offset)
+            .collect()
     }
 
     /// Infer the intermediate state table for persisting window function states.
     ///
-    /// Schema: partition key columns + `state_0..state_{n-1}` (Bytea, one per window function call).
+    /// Schema: partition key columns + `state_0..state_{n-1}` (Bytea, one per window function
+    /// call) + `progress` (Bytea, only with the watermark trigger table).
     /// PK: partition key columns (ascending) only.
     fn infer_intermediate_state_table(&self) -> TableCatalog {
         let in_fields = self.core.input.schema().fields();
@@ -147,6 +175,9 @@ impl StreamEowcOverWindow {
         for i in 0..num_calls {
             tbl_builder.add_column(&Field::with_name(DataType::Bytea, format!("state_{}", i)));
         }
+        if self.needs_watermark_trigger_table() {
+            tbl_builder.add_column(&Field::with_name(DataType::Bytea, "progress"));
+        }
 
         // PK = partition key columns only (ascending)
         for i in 0..partition_key_indices.len() {
@@ -154,20 +185,32 @@ impl StreamEowcOverWindow {
         }
         let read_prefix_len_hint = tbl_builder.get_current_pk_len();
 
-        // Distribution key: same as partition key distribution
-        let in_dist_key = self.core.input.distribution().dist_column_indices();
-        // Map input distribution key indices to intermediate state table column indices.
         // The partition key columns are added first at indices 0..partition_key_indices.len().
-        let dist_key: Vec<usize> = in_dist_key
-            .iter()
-            .filter_map(|&idx| {
-                partition_key_indices
-                    .iter()
-                    .position(|&pk_idx| pk_idx == idx)
-            })
-            .collect();
+        tbl_builder.build(self.partition_dist_key(0), read_prefix_len_hint)
+    }
 
-        tbl_builder.build(dist_key, read_prefix_len_hint)
+    /// Infer the table that indexes partitions by the watermark of the order key at which to check
+    /// them again, see `WatermarkTriggers` of the executor.
+    ///
+    /// Schema: `trigger_watermark` (order key type) + `trigger_exclusive` (Boolean) + partition key
+    /// columns. PK: all columns (ascending).
+    fn infer_watermark_trigger_table(&self) -> TableCatalog {
+        let in_fields = self.core.input.schema().fields();
+        let mut tbl_builder = TableCatalogBuilder::default();
+
+        let order_key_type = in_fields[self.order_key_index()].data_type();
+        tbl_builder.add_column(&Field::with_name(order_key_type, "trigger_watermark"));
+        tbl_builder.add_column(&Field::with_name(DataType::Boolean, "trigger_exclusive"));
+        let partition_key_indices = self.partition_key_indices();
+        for &idx in &partition_key_indices {
+            tbl_builder.add_column(&in_fields[idx]);
+        }
+        for i in 0..2 + partition_key_indices.len() {
+            tbl_builder.add_order_column(i, OrderType::ascending());
+        }
+
+        // Only range scans by the trigger watermark.
+        tbl_builder.build(self.partition_dist_key(2), 0)
     }
 }
 
@@ -221,12 +264,20 @@ impl StreamNode for StreamEowcOverWindow {
             None
         };
 
+        let watermark_trigger_table = self.needs_watermark_trigger_table().then(|| {
+            self.infer_watermark_trigger_table()
+                .with_id(state.gen_table_id_wrapped())
+                .to_internal_table_prost()
+        });
+
         PbNodeBody::EowcOverWindow(Box::new(EowcOverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
             intermediate_state_table,
+            watermark_trigger_table,
+            version: PbEowcOverWindowNodeVersion::LATEST as _,
         }))
     }
 }
