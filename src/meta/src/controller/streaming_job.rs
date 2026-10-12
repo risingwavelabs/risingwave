@@ -136,7 +136,15 @@ pub struct IndependentJobChangeLogInfo {
 #[derive(Debug)]
 pub struct TableChangeLogTruncateInfo {
     pub subscription_retention_seconds: HashMap<TableId, u64>,
+    pub cross_db_backfills: Vec<CrossDbBackfillChangeLogInfo>,
     pub independent_jobs: Vec<IndependentJobChangeLogInfo>,
+}
+
+#[derive(Debug)]
+pub struct CrossDbBackfillChangeLogInfo {
+    pub downstream_job_id: JobId,
+    pub upstream_table_id: TableId,
+    pub progress_table: PbTable,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -244,17 +252,36 @@ impl CatalogController {
     ) -> MetaResult<TableChangeLogTruncateInfo> {
         let inner = self.inner.read().await;
 
-        let subscriptions: Vec<(TableId, i64)> = Subscription::find()
+        // Fragments are the source of truth for cross-database backfills and contain all
+        // information needed to resolve their safe change-log truncation epochs.
+        let cross_db_fragments = Fragment::find()
+            .filter(FragmentTypeMask::intersects(
+                FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+            ))
+            .all(&inner.db)
+            .await?;
+
+        let subscriptions: Vec<(SubscriptionId, TableId, Option<i64>)> = Subscription::find()
             .select_only()
             .columns([
+                subscription::Column::SubscriptionId,
                 subscription::Column::DependentTableId,
                 subscription::Column::RetentionSeconds,
             ])
+            .filter(subscription::Column::CrossDbDownstreamJobId.is_null())
             .into_tuple()
             .all(&inner.db)
             .await?;
         let mut subscription_retention_seconds = HashMap::new();
-        for (table_id, retention_seconds) in subscriptions {
+        for (subscription_id, table_id, retention_seconds) in subscriptions {
+            let Some(retention_seconds) = retention_seconds else {
+                return Err(anyhow!(
+                    "user subscription {} on table {} has no retention",
+                    subscription_id,
+                    table_id
+                )
+                .into());
+            };
             let retention_seconds = u64::try_from(retention_seconds).map_err(|_| {
                 anyhow!(
                     "subscription on table {} has invalid retention seconds {}",
@@ -266,6 +293,41 @@ impl CatalogController {
                 .entry(table_id)
                 .and_modify(|retention: &mut u64| *retention = (*retention).max(retention_seconds))
                 .or_insert(retention_seconds);
+        }
+
+        let mut cross_db_backfills = Vec::new();
+        for fragment in cross_db_fragments {
+            let mut collection_error = None;
+            visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+                let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                    Ok(scan_type) => scan_type,
+                    Err(err) => {
+                        collection_error = Some(anyhow::Error::new(err).context(format!(
+                            "invalid persisted stream scan type {} in job {} fragment {}",
+                            stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
+                        )));
+                        return;
+                    }
+                };
+                if scan_type != StreamScanType::CrossDbSnapshotBackfill {
+                    return;
+                }
+                let Some(progress_table) = stream_scan.state_table.clone() else {
+                    collection_error = Some(anyhow!(
+                        "cross-database backfill in job {} has no progress table",
+                        fragment.job_id
+                    ));
+                    return;
+                };
+                cross_db_backfills.push(CrossDbBackfillChangeLogInfo {
+                    downstream_job_id: fragment.job_id,
+                    upstream_table_id: stream_scan.table_id,
+                    progress_table,
+                });
+            });
+            if let Some(err) = collection_error {
+                return Err(err.into());
+            }
         }
 
         let jobs: Vec<JobId> = StreamingJobModel::find()
@@ -347,6 +409,7 @@ impl CatalogController {
             .collect();
         Ok(TableChangeLogTruncateInfo {
             subscription_retention_seconds,
+            cross_db_backfills,
             independent_jobs,
         })
     }
