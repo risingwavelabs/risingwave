@@ -1597,6 +1597,32 @@
         └─StreamEowcSort { sort_column: t.ts }
           └─StreamExchange { dist: HashShard(t.bi) }
             └─StreamTableScan { table: t, columns: [t.i, t.bi, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+  eowc_stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [window_start, window_end, t._row_id(hidden), t.bi(hidden)], stream_key: [t._row_id, t.bi], pk_columns: [t._row_id, t.bi], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [first_value, last_value, t._row_id, t.bi] }
+        └── StreamEowcOverWindow { window_functions: [first_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00), last_value(t.i) OVER(PARTITION BY t.bi ORDER BY t.ts ASC SESSION WITH GAP 00:10:00)] }
+            ├── tables: [ EowcOverWindow: 0, EowcOverWindowIntermediateState: 1, EowcOverWindowWatermarkTrigger: 2 ]
+            └── StreamEowcSort { sort_column: t.ts } { tables: [ Sort: 3 ] }
+                └── StreamExchange Hash([1]) from 1
+
+    Fragment 1
+    StreamTableScan { table: t, columns: [t.i, t.bi, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) } { tables: [ StreamScan: 4 ] }
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0 { columns: [ t_i, t_bi, t_ts, t__row_id, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+
+    Table 1 { columns: [ t_bi, state_0, state_1, progress, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 2 { columns: [ trigger_watermark, trigger_exclusive, t_bi, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 0 }
+
+    Table 3 { columns: [ t_i, t_bi, t_ts, t__row_id, _rw_timestamp ], primary key: [ $2 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
+
+    Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4294967294 { columns: [ window_start, window_end, t._row_id, t.bi, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 3 ], read pk prefix len hint: 2 }
+
 - sql: |
     create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
     select

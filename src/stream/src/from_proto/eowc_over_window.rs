@@ -64,7 +64,7 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
         let intermediate_state_table =
             if let Some(table_pb) = node.intermediate_state_table.as_ref() {
                 Some(
-                    StateTableBuilder::new(table_pb, store, vnodes)
+                    StateTableBuilder::new(table_pb, store.clone(), vnodes.clone())
                         // Use ConsistentOldValue because we update existing rows
                         .with_op_consistency_level(StateTableOpConsistencyLevel::ConsistentOldValue)
                         .enable_preload_all_rows_by_config(&params.config)
@@ -74,6 +74,19 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             } else {
                 None
             };
+
+        let watermark_trigger_table = if let Some(table_pb) = node.watermark_trigger_table.as_ref()
+        {
+            Some(
+                StateTableBuilder::new(table_pb, store, vnodes)
+                    .with_op_consistency_level(StateTableOpConsistencyLevel::ConsistentOldValue)
+                    .enable_preload_all_rows_by_config(&params.config)
+                    .build()
+                    .await,
+            )
+        } else {
+            None
+        };
 
         let exec = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
             actor_ctx: params.actor_context,
@@ -87,6 +100,9 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             state_table,
             watermark_epoch: params.watermark_epoch,
             intermediate_state_table,
+            watermark_trigger_table,
+            version: node.version(),
+            chunk_size: params.config.developer.chunk_size,
         });
         Ok((params.info, exec).into())
     }
