@@ -1291,7 +1291,6 @@ mod tests {
     fn tracking_job_new_with_source_backfill_tracks_finished_fragments() {
         use std::collections::{BTreeMap, BTreeSet};
 
-        use SourceId;
         use risingwave_pb::stream_plan::stream_node::NodeBody;
         use risingwave_pb::stream_plan::{MergeNode, SourceBackfillNode};
 
