@@ -192,8 +192,8 @@ SELECT * FROM mssql_query(
 # `MONEY`/`SMALLMONEY` come back from `sp_describe_first_result_set` as
 # `money`/`smallmoney` and we map them to `DECIMAL` in RisingWave. Tiberius
 # returns them as a scaled `i64`; the executor must convert that back to a
-# `Decimal` so the value lands in the Decimal builder as `1234.56`, not the
-# raw scaled `123456`.
+# `Decimal` so the value lands in the Decimal builder as `1234.5600`, not the
+# raw scaled `12345600`.
 query II
 SELECT * FROM mssql_query(
     '${SQLCMDSERVER:sqlserver-server}',
@@ -206,7 +206,7 @@ SELECT * FROM mssql_query(
     'true'
 );
 ----
-1234.56 12.34
+1234.5600 12.3400
 
 # ------------ 8-arg direct form: unnamed MONEY expression ------------
 # The synthetic `column_1` name produced by `describe_mssql_query` for
@@ -226,7 +226,7 @@ SELECT * FROM mssql_query(
     'true'
 );
 ----
-1.0 2.0
+1.0000 2.0000
 
 # ------------ cleanup stage ------------
 statement ok
