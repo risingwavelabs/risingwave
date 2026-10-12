@@ -111,6 +111,12 @@ impl<S: StateStore> CdcBackfillState<S> {
         row_count: u64,
         is_finished: bool,
     ) -> StreamExecutorResult<()> {
+        // An unfinished backfill without a snapshot cursor has no progress to persist.
+        // Skip it so recovery starts a fresh backfill instead of resuming from NULL PK cells.
+        if !is_finished && current_pk_pos.is_none() {
+            return Ok(());
+        }
+
         // schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
         let state = self.cached_state.as_mut_slice();
         let split_id = Some(ScalarImpl::from(self.split_id.clone()));

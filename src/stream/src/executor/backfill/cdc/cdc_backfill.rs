@@ -1637,53 +1637,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_snapshot_read_error_rebuilds_reader() {
-        let (tx, source) = MockSource::channel();
-        let source = source.into_executor(
-            Schema::new(vec![
-                Field::unnamed(DataType::Jsonb),
-                Field::unnamed(DataType::Varchar),
-            ]),
-            vec![0],
-        );
-        let external_table = ExternalStorageTable::new(
-            TableId::new(1234),
-            SchemaTableName {
-                schema_name: "public".to_owned(),
-                table_name: "mock_table".to_owned(),
-            },
-            "mydb".to_owned(),
-            ExternalTableConfig::default(),
-            ExternalCdcTableType::Mock,
-            Schema::new(vec![
-                Field::with_name(DataType::Int64, "id"),
-                Field::with_name(DataType::Float64, "price"),
-            ]),
-            vec![OrderType::ascending()],
-            Some(vec![CdcKeyComparison::Native]),
-            vec![0],
-        )
-        .with_mock_snapshot_errors([1, 0]);
+        let external_table = create_mock_external_table().with_mock_snapshot_errors([1, 0]);
         let reader_create_probe = external_table.clone();
-        let executor = CdcBackfillExecutor::new(
-            ActorContext::for_test(0x1a),
+        let (tx, executor) = create_mock_cdc_backfill(
             external_table,
-            source,
-            vec![0, 1],
-            vec![
-                ColumnDesc::named("id", ColumnId::new(1), DataType::Int64),
-                ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
-            ],
-            None,
-            StreamingMetrics::unused().into(),
             create_cdc_state_table(MemoryStateStore::new()).await,
-            None,
             CdcScanOptions {
                 snapshot_barrier_interval: 1,
                 ..Default::default()
             },
-            BTreeMap::default(),
-        )
-        .execute_inner();
+        );
+        let executor = executor.execute_inner();
         pin_mut!(executor);
 
         tx.send_barrier(Barrier::new_test_barrier(test_epoch(1)));
@@ -1725,6 +1689,83 @@ mod tests {
             executor.next().await.unwrap().unwrap(),
             Message::Barrier(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_read_error_before_first_chunk_survives_recovery() {
+        let scan_options = || CdcScanOptions {
+            snapshot_barrier_interval: 1,
+            ..Default::default()
+        };
+
+        let memory_state_store = MemoryStateStore::new();
+
+        // The first snapshot read fails before any row is emitted, and the next barrier
+        // checkpoints while there is no snapshot cursor.
+        {
+            let (tx, executor) = create_mock_cdc_backfill(
+                create_mock_external_table().with_mock_snapshot_errors([1]),
+                create_cdc_state_table(memory_state_store.clone()).await,
+                scan_options(),
+            );
+            let executor = executor.execute_inner();
+
+            pin_mut!(executor);
+
+            for epoch in 1..=3 {
+                tx.send_barrier(Barrier::new_test_barrier(test_epoch(epoch)));
+                assert!(matches!(
+                    executor.next().await.unwrap().unwrap(),
+                    Message::Barrier(_)
+                ));
+            }
+        }
+
+        let mut restored_state = CdcBackfillState::new(
+            TableId::new(1234),
+            create_cdc_state_table(memory_state_store.clone()).await,
+            5,
+        );
+        restored_state
+            .init_epoch(Barrier::new_test_barrier(test_epoch(4)).epoch)
+            .await
+            .unwrap();
+
+        // No snapshot progress was made, so no backfill state should be persisted.
+        let state = restored_state.restore_state().await.unwrap();
+        assert!(!state.is_finished);
+        assert_eq!(state.current_pk_pos, None);
+        assert_eq!(state.last_cdc_offset, None);
+        assert_eq!(state.row_count, 0);
+
+        // After recovery, the snapshot must restart from the beginning instead of resuming
+        // from a NULL cursor.
+        let (tx, executor) = create_mock_cdc_backfill(
+            create_mock_external_table(),
+            create_cdc_state_table(memory_state_store).await,
+            scan_options(),
+        );
+        let executor = executor.execute_inner();
+
+        pin_mut!(executor);
+
+        for epoch in 4..=5 {
+            tx.send_barrier(Barrier::new_test_barrier(test_epoch(epoch)));
+            assert!(matches!(
+                executor.next().await.unwrap().unwrap(),
+                Message::Barrier(_)
+            ));
+        }
+        let Message::Chunk(chunk) = tokio::time::timeout(Duration::from_secs(5), executor.next())
+            .await
+            .expect("recovered backfill should read the snapshot")
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("recovered reader should produce a snapshot chunk");
+        };
+
+        assert_eq!(chunk.cardinality(), 6);
     }
 
     #[tokio::test]
@@ -1858,6 +1899,60 @@ mod tests {
         )
     }
 
+    fn create_mock_external_table() -> ExternalStorageTable {
+        ExternalStorageTable::new(
+            TableId::new(1234),
+            SchemaTableName {
+                schema_name: "public".to_owned(),
+                table_name: "mock_table".to_owned(),
+            },
+            "mydb".to_owned(),
+            ExternalTableConfig::default(),
+            ExternalCdcTableType::Mock,
+            Schema::new(vec![
+                Field::with_name(DataType::Int64, "id"),
+                Field::with_name(DataType::Float64, "price"),
+            ]),
+            vec![OrderType::ascending()],
+            Some(vec![CdcKeyComparison::Native]),
+            vec![0],
+        )
+    }
+
+    /// Creates a CDC backfill executor over the `id`/`price` mock table, along with the sender
+    /// for its upstream.
+    fn create_mock_cdc_backfill(
+        external_table: ExternalStorageTable,
+        state_table: StateTable<MemoryStateStore>,
+        scan_options: CdcScanOptions,
+    ) -> (MessageSender, CdcBackfillExecutor<MemoryStateStore>) {
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(
+            Schema::new(vec![
+                Field::unnamed(DataType::Jsonb),
+                Field::unnamed(DataType::Varchar),
+            ]),
+            vec![0],
+        );
+        let executor = CdcBackfillExecutor::new(
+            ActorContext::for_test(0x1a),
+            external_table,
+            source,
+            vec![0, 1],
+            vec![
+                ColumnDesc::named("id", ColumnId::new(1), DataType::Int64),
+                ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
+            ],
+            None,
+            StreamingMetrics::unused().into(),
+            state_table,
+            None,
+            scan_options,
+            BTreeMap::default(),
+        );
+        (tx, executor)
+    }
+
     async fn create_cdc_state_table(store: MemoryStateStore) -> StateTable<MemoryStateStore> {
         let state_schema = Schema::new(vec![
             Field::with_name(DataType::Varchar, "split_id"),
@@ -1914,47 +2009,10 @@ mod tests {
             .await
             .unwrap();
 
-        let (tx, source) = MockSource::channel();
-        let source = source.into_executor(
-            Schema::new(vec![
-                Field::unnamed(DataType::Jsonb),
-                Field::unnamed(DataType::Varchar),
-            ]),
-            vec![0],
-        );
-        let external_table = ExternalStorageTable::new(
-            TableId::new(1234),
-            SchemaTableName {
-                schema_name: "public".to_owned(),
-                table_name: "mock_table".to_owned(),
-            },
-            "mydb".to_owned(),
-            ExternalTableConfig::default(),
-            ExternalCdcTableType::Mock,
-            Schema::new(vec![
-                Field::with_name(DataType::Int64, "id"),
-                Field::with_name(DataType::Float64, "price"),
-            ]),
-            vec![OrderType::ascending()],
-            Some(vec![CdcKeyComparison::Native]),
-            vec![0],
-        );
-        let output_columns = vec![
-            ColumnDesc::named("id", ColumnId::new(1), DataType::Int64),
-            ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
-        ];
-        let executor = CdcBackfillExecutor::new(
-            ActorContext::for_test(0x1a),
-            external_table,
-            source,
-            vec![0, 1],
-            output_columns,
-            None,
-            StreamingMetrics::unused().into(),
+        let (tx, executor) = create_mock_cdc_backfill(
+            create_mock_external_table(),
             create_cdc_state_table(memory_state_store.clone()).await,
-            None,
             CdcScanOptions::default(),
-            BTreeMap::default(),
         );
         (tx, executor, memory_state_store)
     }
@@ -2629,54 +2687,15 @@ mod tests {
         let memory_state_store = MemoryStateStore::new();
         let state_table = create_cdc_state_table(memory_state_store.clone()).await;
 
-        let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(
-            Schema::new(vec![
-                Field::unnamed(DataType::Jsonb),
-                Field::unnamed(DataType::Varchar),
-            ]),
-            vec![0],
-        );
-
-        let external_table = ExternalStorageTable::new(
-            TableId::new(1234),
-            SchemaTableName {
-                schema_name: "public".to_owned(),
-                table_name: "mock_table".to_owned(),
-            },
-            "mydb".to_owned(),
-            ExternalTableConfig::default(),
-            ExternalCdcTableType::Mock,
-            Schema::new(vec![
-                Field::with_name(DataType::Int64, "id"),
-                Field::with_name(DataType::Float64, "price"),
-            ]),
-            vec![OrderType::ascending()],
-            Some(vec![CdcKeyComparison::Native]),
-            vec![0],
-        );
-        let output_columns = vec![
-            ColumnDesc::named("id", ColumnId::new(1), DataType::Int64),
-            ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
-        ];
-
-        let executor = CdcBackfillExecutor::new(
-            ActorContext::for_test(0x1a),
-            external_table,
-            source,
-            vec![0, 1],
-            output_columns,
-            None,
-            StreamingMetrics::unused().into(),
+        let (mut tx, executor) = create_mock_cdc_backfill(
+            create_mock_external_table(),
             state_table,
-            None,
             CdcScanOptions {
                 snapshot_barrier_interval: 10,
                 ..Default::default()
             },
-            BTreeMap::default(),
-        )
-        .execute_inner();
+        );
+        let executor = executor.execute_inner();
         pin_mut!(executor);
 
         tx.send_barrier(Barrier::new_test_barrier(test_epoch(1)));
