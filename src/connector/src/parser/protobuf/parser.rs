@@ -25,6 +25,7 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::utils::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties, SchemaLocation};
+use crate::schema::pulsar_schema::{self, PulsarSchema, parse_partitioned_topic};
 use crate::schema::schema_registry::{Client, WireFormatError, extract_schema_id, handle_sr_list};
 use crate::schema::{
     ConfluentSchemaLoader, InvalidOptionError, SchemaLoader, bail_invalid_option_error,
@@ -95,9 +96,7 @@ impl TryFrom<&SchemaLocation> for WireType {
             SchemaLocation::Glue { .. } => bail_invalid_option_error!(
                 "encode protobuf from aws glue schema registry not supported yet"
             ),
-            SchemaLocation::Pulsar { .. } => bail_invalid_option_error!(
-                "encode protobuf from Pulsar schema registry not supported yet"
-            ),
+            SchemaLocation::Pulsar { .. } => Ok(Self::None),
         }
     }
 }
@@ -112,7 +111,7 @@ pub struct ProtobufParserConfig {
 impl ProtobufParserConfig {
     pub async fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
-        let message_name = &protobuf_config.message_name;
+        let mut message_name = protobuf_config.message_name.clone();
 
         let wire_type = (&protobuf_config.schema_location).try_into()?;
         if protobuf_config.key_message_name.is_some() {
@@ -154,13 +153,28 @@ impl ProtobufParserConfig {
             SchemaLocation::Glue { .. } => bail_invalid_option_error!(
                 "encode protobuf from aws glue schema registry not supported yet"
             ),
-            SchemaLocation::Pulsar { .. } => bail_invalid_option_error!(
-                "encode protobuf from Pulsar schema registry not supported yet"
-            ),
+            SchemaLocation::Pulsar {
+                client_config,
+                topic,
+            } => {
+                let client = pulsar_schema::Client::new(&client_config)?;
+                let topic = parse_partitioned_topic(&topic)?;
+                let raw_schema = client.get_schema(&topic, None).await?;
+                let PulsarSchema::ProtobufNative(root_message) = raw_schema.parse()? else {
+                    bail!(
+                        "expected Pulsar PROTOBUF_NATIVE schema, got {}",
+                        raw_schema.r#type
+                    );
+                };
+                if message_name.is_empty() {
+                    message_name = root_message.full_name().to_owned();
+                }
+                root_message.parent_pool().clone()
+            }
         };
 
         let message_descriptor = pool
-            .get_message_by_name(message_name)
+            .get_message_by_name(&message_name)
             .with_context(|| format!("cannot find message `{message_name}` in schema"))?;
 
         Ok(Self {
