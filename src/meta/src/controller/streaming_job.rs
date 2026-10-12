@@ -136,13 +136,13 @@ pub struct IndependentJobChangeLogInfo {
 #[derive(Debug)]
 pub struct TableChangeLogTruncateInfo {
     pub subscription_retention_seconds: HashMap<TableId, u64>,
-    pub cross_db_backfills: Vec<CrossDbBackfillChangeLogInfo>,
+    pub progress_table_subscribers: Vec<ProgressTableChangeLogSubscriber>,
     pub independent_jobs: Vec<IndependentJobChangeLogInfo>,
 }
 
 #[derive(Debug)]
-pub struct CrossDbBackfillChangeLogInfo {
-    pub downstream_job_id: JobId,
+pub struct ProgressTableChangeLogSubscriber {
+    pub subscriber_job_id: JobId,
     pub upstream_table_id: TableId,
     pub progress_table: PbTable,
 }
@@ -252,36 +252,17 @@ impl CatalogController {
     ) -> MetaResult<TableChangeLogTruncateInfo> {
         let inner = self.inner.read().await;
 
-        // Fragments are the source of truth for cross-database backfills and contain all
-        // information needed to resolve their safe change-log truncation epochs.
-        let cross_db_fragments = Fragment::find()
-            .filter(FragmentTypeMask::intersects(
-                FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
-            ))
-            .all(&inner.db)
-            .await?;
-
-        let subscriptions: Vec<(SubscriptionId, TableId, Option<i64>)> = Subscription::find()
+        let subscriptions: Vec<(TableId, i64)> = Subscription::find()
             .select_only()
             .columns([
-                subscription::Column::SubscriptionId,
                 subscription::Column::DependentTableId,
                 subscription::Column::RetentionSeconds,
             ])
-            .filter(subscription::Column::CrossDbDownstreamJobId.is_null())
             .into_tuple()
             .all(&inner.db)
             .await?;
         let mut subscription_retention_seconds = HashMap::new();
-        for (subscription_id, table_id, retention_seconds) in subscriptions {
-            let Some(retention_seconds) = retention_seconds else {
-                return Err(anyhow!(
-                    "user subscription {} on table {} has no retention",
-                    subscription_id,
-                    table_id
-                )
-                .into());
-            };
+        for (table_id, retention_seconds) in subscriptions {
             let retention_seconds = u64::try_from(retention_seconds).map_err(|_| {
                 anyhow!(
                     "subscription on table {} has invalid retention seconds {}",
@@ -295,32 +276,59 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
-        let mut cross_db_backfills = Vec::new();
-        for fragment in cross_db_fragments {
+        let iceberg_job_ids: Vec<JobId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::JobId)
+            .filter(FragmentTypeMask::intersects(
+                FragmentTypeFlag::IcebergWithPkIndexWriter,
+            ))
+            .distinct()
+            .into_tuple::<JobId>()
+            .all(&inner.db)
+            .await?;
+        let fragments: Vec<(FragmentId, JobId, StreamNode)> = if iceberg_job_ids.is_empty() {
+            Vec::new()
+        } else {
+            Fragment::find()
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentId,
+                    fragment::Column::JobId,
+                    fragment::Column::StreamNode,
+                ])
+                .filter(fragment::Column::JobId.is_in(iceberg_job_ids).and(
+                    FragmentTypeMask::intersects(FragmentTypeFlag::SnapshotBackfillStreamScan),
+                ))
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
+        let mut progress_table_subscribers = Vec::new();
+        for (fragment_id, job_id, stream_node) in fragments {
             let mut collection_error = None;
-            visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+            visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
                 let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
                     Ok(scan_type) => scan_type,
                     Err(err) => {
                         collection_error = Some(anyhow::Error::new(err).context(format!(
                             "invalid persisted stream scan type {} in job {} fragment {}",
-                            stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
+                            stream_scan.stream_scan_type, job_id, fragment_id
                         )));
                         return;
                     }
                 };
-                if scan_type != StreamScanType::CrossDbSnapshotBackfill {
+                if scan_type != StreamScanType::SnapshotBackfill {
                     return;
                 }
                 let Some(progress_table) = stream_scan.state_table.clone() else {
                     collection_error = Some(anyhow!(
-                        "cross-database backfill in job {} has no progress table",
-                        fragment.job_id
+                        "snapshot backfill in Iceberg V3 job {} has no progress table",
+                        job_id
                     ));
                     return;
                 };
-                cross_db_backfills.push(CrossDbBackfillChangeLogInfo {
-                    downstream_job_id: fragment.job_id,
+                progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
+                    subscriber_job_id: job_id,
                     upstream_table_id: stream_scan.table_id,
                     progress_table,
                 });
@@ -409,7 +417,7 @@ impl CatalogController {
             .collect();
         Ok(TableChangeLogTruncateInfo {
             subscription_retention_seconds,
-            cross_db_backfills,
+            progress_table_subscribers,
             independent_jobs,
         })
     }

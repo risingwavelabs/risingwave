@@ -38,7 +38,9 @@ use sea_orm::{
     QueryTrait, TransactionTrait,
 };
 
-use crate::controller::streaming_job::{CrossDbBackfillChangeLogInfo, TableChangeLogTruncateInfo};
+use crate::controller::streaming_job::{
+    ProgressTableChangeLogSubscriber, TableChangeLogTruncateInfo,
+};
 use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::model::ext::to_table_change_log;
@@ -83,7 +85,7 @@ fn resolve_table_change_log_truncate_epochs(
                 Some(_) => all_snapshot_epochs_none = false,
                 None => {
                     // The independent job has not fixed a safe snapshot epoch yet. This vetoes
-                    // truncation even when another consumer provides a concrete cutoff.
+                    // truncation even when another subscriber provides a concrete cutoff.
                     untruncatable_table_ids.insert(*upstream_table_id);
                 }
             }
@@ -138,72 +140,57 @@ fn resolve_table_change_log_truncate_epochs(
 }
 
 impl HummockManager {
-    /// Returns the exclusive change-log truncation epoch for this cross-database backfill.
-    ///
-    /// `Some(epoch)` means every vnode has fully consumed all epochs below `epoch`. A vnode that is
-    /// still consuming epoch `e` contributes `e`; one that finished `e` contributes `e + 1`, which
-    /// also permits truncating `e`. `None` means at least one vnode has no usable progress yet.
-    async fn query_cross_db_backfill_progress(
+    /// Returns the exclusive epoch before which the upstream change log can be truncated.
+    async fn query_progress_table_truncate_epoch(
         &self,
-        info: &CrossDbBackfillChangeLogInfo,
+        subscriber: &ProgressTableChangeLogSubscriber,
         version: &HummockVersion,
         worker: &PbWorkerNode,
     ) -> anyhow::Result<Option<u64>> {
-        let committed_epoch = version
-            .table_committed_epoch(info.progress_table.id)
-            .ok_or_else(|| {
-                anyhow!(
-                    "cannot get committed epoch of cross-database progress table {} for downstream job {}",
-                    info.progress_table.id,
-                    info.downstream_job_id
-                )
-            })?;
-        let table_desc = TableDesc::from_pb_table(&info.progress_table).try_to_protobuf()?;
+        let progress_table = &subscriber.progress_table;
+        let Some(committed_epoch) = version.table_committed_epoch(progress_table.id) else {
+            return Ok(None);
+        };
+        let table_desc = TableDesc::from_pb_table(progress_table).try_to_protobuf()?;
         let epoch_column_id = table_desc
             .columns
             .iter()
             .find(|column| column.name == "epoch")
-            .ok_or_else(|| {
-                anyhow!(
-                    "cross-database progress table {} has no epoch column",
-                    info.progress_table.id
-                )
-            })?
+            .ok_or_else(|| anyhow!("progress table {} has no epoch column", progress_table.id))?
             .column_id;
-        let is_finished_column_id = table_desc
+        let is_epoch_finished_column_id = table_desc
             .columns
             .iter()
-            .find(|column| column.name == "is_finished")
+            .find(|column| column.name == "is_epoch_finished")
             .ok_or_else(|| {
                 anyhow!(
-                    "cross-database progress table {} has no is_finished column",
-                    info.progress_table.id
+                    "progress table {} has no is_epoch_finished column",
+                    progress_table.id
                 )
             })?
             .column_id;
         let client = self.env.compute_client_pool().get(worker).await?;
-        let task_id = TaskId {
-            query_id: format!(
-                "meta-cross-db-progress-{}-{}-{}",
-                info.downstream_job_id,
-                info.progress_table.id,
-                uuid::Uuid::new_v4()
-            ),
-            stage_id: 0,
-            task_id: 0,
-        };
         let request = ExecuteRequest {
-            task_id: Some(task_id),
+            task_id: Some(TaskId {
+                query_id: format!(
+                    "meta-progress-table-{}-{}-{}",
+                    subscriber.subscriber_job_id,
+                    progress_table.id,
+                    uuid::Uuid::new_v4()
+                ),
+                stage_id: 0,
+                task_id: 0,
+            }),
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
-                    identity: "CrossDbBackfillProgressScan".to_owned(),
+                    identity: "ProgressTableScan".to_owned(),
                     node_body: Some(NodeBody::RowSeqScan(RowSeqScanNode {
                         table_desc: Some(table_desc),
-                        column_ids: vec![epoch_column_id, is_finished_column_id],
+                        column_ids: vec![epoch_column_id, is_epoch_finished_column_id],
                         scan_ranges: vec![],
                         vnode_bitmap: Some(
-                            Bitmap::ones(info.progress_table.vnode_count()).to_protobuf(),
+                            Bitmap::ones(progress_table.vnode_count()).to_protobuf(),
                         ),
                         ordered: false,
                         limit: None,
@@ -238,18 +225,19 @@ impl HummockManager {
                 let Some(epoch) = row.datum_at(0) else {
                     return Ok(None);
                 };
-                let Some(is_finished) = row.datum_at(1) else {
+                let Some(is_epoch_finished) = row.datum_at(1) else {
                     return Ok(None);
                 };
-                let epoch = u64::try_from(epoch.into_int64())?;
-                let truncate_epoch = epoch.saturating_add(u64::from(is_finished.into_bool()));
+                let epoch =
+                    u64::try_from(epoch.into_int64()).context("progress epoch is negative")?;
+                let truncate_epoch = epoch.saturating_add(u64::from(is_epoch_finished.into_bool()));
                 min_truncate_epoch =
                     Some(min_truncate_epoch.map_or(truncate_epoch, |min_epoch: u64| {
                         min_epoch.min(truncate_epoch)
                     }));
             }
         }
-        if row_count < info.progress_table.vnode_count() {
+        if row_count != progress_table.vnode_count() {
             return Ok(None);
         }
         Ok(min_truncate_epoch)
@@ -261,10 +249,10 @@ impl HummockManager {
         let _timer = self.metrics.table_change_log_truncate_latency.start_timer();
         let resolution_started_at = Instant::now();
         let version = self.versioning.read().await.current_version.clone();
-        let mut cross_db_truncate_epochs = HashMap::new();
-        let mut cross_db_untruncatable_table_ids = HashSet::new();
+        let mut progress_table_truncate_epochs = HashMap::new();
+        let mut progress_table_untruncatable_table_ids = HashSet::new();
         const MAX_PROGRESS_QUERY_CONCURRENCY: usize = 16;
-        let workers = if info.cross_db_backfills.is_empty() {
+        let workers = if info.progress_table_subscribers.is_empty() {
             Vec::new()
         } else {
             let workers = self
@@ -274,48 +262,47 @@ impl HummockManager {
                 .map_err(|err| Error::Internal(err.into()))?;
             if workers.is_empty() {
                 return Err(Error::Internal(anyhow!(
-                    "no active compute node for querying cross-database backfill progress"
+                    "no active compute node for querying progress tables"
                 )));
             }
             workers
         };
-        let cross_db_progress = futures::stream::iter(
-            info.cross_db_backfills
+        let progress_table_progress = futures::stream::iter(
+            info.progress_table_subscribers
                 .iter()
                 .enumerate()
-                .map(|(index, cross_db_backfill)| {
-                    (cross_db_backfill, &workers[index % workers.len()])
-                }),
+                .map(|(index, subscriber)| (subscriber, &workers[index % workers.len()])),
         )
-        .map(|(cross_db_backfill, worker)| {
+        .map(|(subscriber, worker)| {
             let version = version.clone();
             async move {
-                let progress_epoch = self
-                    .query_cross_db_backfill_progress(cross_db_backfill, version.as_ref(), worker)
+                let truncate_epoch = self
+                    .query_progress_table_truncate_epoch(subscriber, version.as_ref(), worker)
                     .await
                     .with_context(|| {
                         format!(
-                            "query progress table {} for cross-database downstream job {}",
-                            cross_db_backfill.progress_table.id,
-                            cross_db_backfill.downstream_job_id
+                            "query progress table {} for subscriber job {} on upstream table {}",
+                            subscriber.progress_table.id,
+                            subscriber.subscriber_job_id,
+                            subscriber.upstream_table_id
                         )
                     })?;
-                Ok::<_, anyhow::Error>((cross_db_backfill.upstream_table_id, progress_epoch))
+                Ok::<_, anyhow::Error>((subscriber.upstream_table_id, truncate_epoch))
             }
         })
         .buffer_unordered(MAX_PROGRESS_QUERY_CONCURRENCY)
         .try_collect::<Vec<_>>()
         .await
         .map_err(Error::Internal)?;
-        for (upstream_table_id, progress_epoch) in cross_db_progress {
-            if let Some(progress_epoch) = progress_epoch {
+        for (upstream_table_id, truncate_epoch) in progress_table_progress {
+            if let Some(truncate_epoch) = truncate_epoch {
                 update_truncate_epoch(
-                    &mut cross_db_truncate_epochs,
+                    &mut progress_table_truncate_epochs,
                     upstream_table_id,
-                    progress_epoch,
+                    truncate_epoch,
                 );
             } else {
-                cross_db_untruncatable_table_ids.insert(upstream_table_id);
+                progress_table_untruncatable_table_ids.insert(upstream_table_id);
             }
         }
         let mut versioning = self
@@ -330,10 +317,11 @@ impl HummockManager {
         )
         .map_err(Error::Internal)?;
         let mut truncate_epochs = truncate_epochs;
-        for (table_id, truncate_epoch) in cross_db_truncate_epochs {
+        for (table_id, truncate_epoch) in progress_table_truncate_epochs {
             update_truncate_epoch(&mut truncate_epochs, table_id, truncate_epoch);
         }
-        truncate_epochs.retain(|table_id, _| !cross_db_untruncatable_table_ids.contains(table_id));
+        truncate_epochs
+            .retain(|table_id, _| !progress_table_untruncatable_table_ids.contains(table_id));
         let truncate_epochs: Vec<_> = truncate_epochs
             .into_iter()
             .filter(|(table_id, _)| versioning.table_change_log.contains_key(table_id))
@@ -487,7 +475,7 @@ mod tests {
         ]);
         let info = TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::from([(upstream_table_id, 10)]),
-            cross_db_backfills: vec![],
+            progress_table_subscribers: vec![],
             independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([job_state_table_id]),
@@ -515,7 +503,7 @@ mod tests {
         ]);
         let info = TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::from([(upstream_table_id, 10)]),
-            cross_db_backfills: vec![],
+            progress_table_subscribers: vec![],
             independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([job_state_table_id]),
@@ -542,7 +530,7 @@ mod tests {
         ]);
         let info = TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::new(),
-            cross_db_backfills: vec![],
+            progress_table_subscribers: vec![],
             independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([state_table_id_1, state_table_id_2]),
