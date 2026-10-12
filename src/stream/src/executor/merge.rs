@@ -152,10 +152,9 @@ mod upstream {
         }
 
         fn update(&mut self, to_add: Vec<BoxedActorInput>, to_remove: &HashSet<ActorId>) {
-            assert_eq!(
-                to_remove,
-                &HashSet::from_iter([self.id()]),
-                "the removed upstream actor should be the same as the current input"
+            assert!(
+                to_remove.contains(&self.id()),
+                "the removed upstream actors should contain the current input"
             );
 
             // Replace the single input.

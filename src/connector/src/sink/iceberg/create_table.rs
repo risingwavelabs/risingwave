@@ -18,6 +18,9 @@ use std::sync::LazyLock;
 
 use anyhow::{Context, anyhow};
 use iceberg::arrow::schema_to_arrow_schema;
+use iceberg::metadata_columns::{
+    RESERVED_COL_NAME_LAST_UPDATED_SEQUENCE_NUMBER, RESERVED_COL_NAME_ROW_ID,
+};
 use iceberg::spec::{
     FormatVersion, NullOrder, SortDirection, SortField, SortOrder, TableProperties, Transform,
     UnboundPartitionField, UnboundPartitionSpec,
@@ -32,7 +35,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 };
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
@@ -93,6 +96,32 @@ pub async fn create_and_validate_table_impl(
     Ok(table)
 }
 
+/// Iceberg V3 stores row lineage in data files as the reserved `_row_id` and
+/// `_last_updated_sequence_number` columns. A table column with either name is ambiguous with the
+/// lineage metadata column, so reject it when creating a V3 table.
+pub fn validate_row_lineage_column_names(
+    format_version: FormatVersion,
+    columns: &[ColumnDesc],
+) -> Result<()> {
+    if format_version < FormatVersion::V3 {
+        return Ok(());
+    }
+    if let Some(column) = columns.iter().find(|column| {
+        [
+            RESERVED_COL_NAME_ROW_ID,
+            RESERVED_COL_NAME_LAST_UPDATED_SEQUENCE_NUMBER,
+        ]
+        .contains(&column.name.as_str())
+    }) {
+        return Err(SinkError::Config(anyhow!(
+            "cannot create an Iceberg V3 table with column `{}` because the name is reserved \
+             for row lineage metadata; please rename the column",
+            column.name
+        )));
+    }
+    Ok(())
+}
+
 /// Returns `true` if this call created the table, `false` if it already existed.
 pub(super) async fn create_table_if_not_exists_impl(
     config: &IcebergConfig,
@@ -125,6 +154,7 @@ pub(super) async fn create_table_if_not_exists_impl(
             column.name
         )));
     }
+    validate_row_lineage_column_names(config.table_format_version(), &param.columns)?;
 
     let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
     // convert risingwave schema -> arrow schema -> iceberg schema

@@ -503,8 +503,12 @@ public class ChangeEventSourceCoordinator<P extends Partition, O extends OffsetC
             ((io.debezium.connector.postgresql.PostgresStreamingChangeEventSource) streamingSource)
                     .forceCloseConnection();
         }
-        // SQL Server has the same uninterruptible JDBC commit() pattern; follow-up tracked
-        // separately. MySQL (BinaryLogClient) and MongoDB (cursor) are not affected.
+        if (streamingSource
+                instanceof io.debezium.connector.sqlserver.SqlServerStreamingChangeEventSource) {
+            ((io.debezium.connector.sqlserver.SqlServerStreamingChangeEventSource) streamingSource)
+                    .forceCloseConnection();
+        }
+        // MySQL (BinaryLogClient) and MongoDB (cursor) are not affected.
     }
 
     /** Stops this coordinator. */
@@ -537,16 +541,16 @@ public class ChangeEventSourceCoordinator<P extends Partition, O extends OffsetC
                     // shutdownNow() only interrupts; native JDBC commit() ignores
                     // Thread.interrupt(). Force-close the underlying source connection so the
                     // wedged commit throws SocketException, allowing the source thread to unwind
-                    // through its finally block (which releases keep-alive threads + replication
-                    // slot). See risingwavelabs/risingwave#26075.
+                    // and release upstream resources. See risingwavelabs/risingwave#26075 and
+                    // #26081.
                     forceCloseStreamingSourceConnection();
                     boolean forceCloseOk =
                             executor.awaitTermination(shutdownWaitTimeout, TimeUnit.MILLISECONDS);
                     if (!forceCloseOk) {
                         LOGGER.warn(
                                 "Source thread still not terminated after force-closing the "
-                                        + "connection; the replication slot may remain held. See "
-                                        + "risingwavelabs/risingwave#26075");
+                                        + "connection; upstream resources may remain held. See "
+                                        + "risingwavelabs/risingwave#26075 and #26081");
                     }
                 }
             }

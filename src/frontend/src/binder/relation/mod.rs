@@ -125,7 +125,9 @@ impl Relation {
             } => table_function.has_correlated_input_ref_by_depth(depth + 1),
             Relation::Share(share) => match &share.input {
                 BoundShareInput::Query(query) => query.is_correlated_by_depth(depth),
-                BoundShareInput::ChangeLog(change_log) => change_log.is_correlated_by_depth(depth),
+                BoundShareInput::ChangeLog { relation, .. } => {
+                    relation.is_correlated_by_depth(depth)
+                }
             },
             Relation::MatchRecognize(inner) => {
                 inner.input.is_correlated_by_depth(depth)
@@ -156,8 +158,8 @@ impl Relation {
                 BoundShareInput::Query(query) => {
                     query.is_correlated_by_correlated_id(correlated_id)
                 }
-                BoundShareInput::ChangeLog(change_log) => {
-                    change_log.is_correlated_by_correlated_id(correlated_id)
+                BoundShareInput::ChangeLog { relation, .. } => {
+                    relation.is_correlated_by_correlated_id(correlated_id)
                 }
             },
             Relation::MatchRecognize(inner) => {
@@ -219,13 +221,14 @@ impl Relation {
                 with_ordinality: _,
             } => table_function
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
-            Relation::Share(share) => match &mut share.input {
-                BoundShareInput::Query(query) => {
-                    query.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            Relation::Share(share) => {
+                match &mut share.input {
+                    BoundShareInput::Query(query) => query
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    BoundShareInput::ChangeLog { relation, .. } => relation
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 }
-                BoundShareInput::ChangeLog(change_log) => change_log
-                    .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-            },
+            }
             Relation::MatchRecognize(inner) => {
                 let mut indices = inner
                     .input
@@ -565,8 +568,11 @@ impl Binder {
                     // no matter it's recursive or not.
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
-                BindingCteState::ChangeLog { table } => {
-                    let input = BoundShareInput::ChangeLog(table);
+                BindingCteState::ChangeLog { table, key_indices } => {
+                    let input = BoundShareInput::ChangeLog {
+                        relation: table,
+                        key_indices,
+                    };
                     self.bind_table_to_context(
                         input.fields()?,
                         table_name,

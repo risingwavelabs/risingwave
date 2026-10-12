@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import javax.management.JMException;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
@@ -140,17 +141,22 @@ public class DbzSourceUtils {
     }
 
     public static boolean waitForStreamingRunning(
-            SourceTypeE sourceType, String dbServerName, int waitStreamingStartTimeout) {
+            SourceTypeE sourceType,
+            String dbServerName,
+            int waitStreamingStartTimeout,
+            BooleanSupplier shouldContinue)
+            throws InterruptedException {
         // Wait for streaming source of source that supported backfill
         LOG.info("Waiting for streaming source of {} to start", dbServerName);
         if (sourceType == SourceTypeE.MYSQL) {
-            return waitForStreamingRunningInner("mysql", dbServerName, waitStreamingStartTimeout);
+            return waitForStreamingRunningInner(
+                    "mysql", dbServerName, waitStreamingStartTimeout, shouldContinue);
         } else if (sourceType == SourceTypeE.POSTGRES) {
             return waitForStreamingRunningInner(
-                    "postgres", dbServerName, waitStreamingStartTimeout);
+                    "postgres", dbServerName, waitStreamingStartTimeout, shouldContinue);
         } else if (sourceType == SourceTypeE.SQL_SERVER) {
             return waitForStreamingRunningInner(
-                    "sql_server", dbServerName, waitStreamingStartTimeout);
+                    "sql_server", dbServerName, waitStreamingStartTimeout, shouldContinue);
         } else {
             LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
             return true;
@@ -158,9 +164,23 @@ public class DbzSourceUtils {
     }
 
     private static boolean waitForStreamingRunningInner(
-            String connector, String dbServerName, int waitStreamingStartTimeout) {
+            String connector,
+            String dbServerName,
+            int waitStreamingStartTimeout,
+            BooleanSupplier shouldContinue)
+            throws InterruptedException {
         int pollCount = 0;
-        while (!isStreamingRunning(connector, dbServerName, "streaming")) {
+        while (true) {
+            // Check cancellation before readiness: a replacement engine can register metrics
+            // under the same server name while the previous reader is being dropped.
+            if (!shouldContinue.getAsBoolean()) {
+                LOG.info("Cancelled waiting for streaming source of {} to start", dbServerName);
+                return false;
+            }
+            if (isStreamingRunning(connector, dbServerName, "streaming")) {
+                LOG.info("Debezium streaming source of {} started", dbServerName);
+                return true;
+            }
             if (pollCount > waitStreamingStartTimeout) {
                 LOG.error(
                         "Debezium streaming source of {} failed to start in timeout {}",
@@ -168,16 +188,9 @@ public class DbzSourceUtils {
                         waitStreamingStartTimeout);
                 return false;
             }
-            try {
-                TimeUnit.SECONDS.sleep(1); // poll interval
-                pollCount++;
-            } catch (InterruptedException e) {
-                LOG.warn("Interrupted while waiting for streaming source to start", e);
-            }
+            TimeUnit.SECONDS.sleep(1); // poll interval; interruption cancels startup
+            pollCount++;
         }
-
-        LOG.info("Debezium streaming source of {} started", dbServerName);
-        return true;
     }
 
     // Copy from debezium test suite: io.debezium.embedded.AbstractConnectorTest

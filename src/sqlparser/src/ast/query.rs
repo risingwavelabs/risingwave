@@ -364,8 +364,12 @@ impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.cte_inner {
             CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
-            CteInner::ChangeLog(obj_name) => {
-                write!(f, "{} AS changelog from {}", self.alias, obj_name)?
+            CteInner::ChangeLog { from, key } => {
+                write!(f, "{} AS changelog from {}", self.alias, from)?;
+
+                if let Some(key) = key {
+                    write!(f, " KEY ({})", display_comma_separated(key))?;
+                }
             }
         }
         Ok(())
@@ -375,7 +379,10 @@ impl fmt::Display for Cte {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CteInner {
     Query(Box<Query>),
-    ChangeLog(ObjectName),
+    ChangeLog {
+        from: ObjectName,
+        key: Option<Vec<Ident>>,
+    },
 }
 
 /// One item of the comma-separated list following `SELECT`

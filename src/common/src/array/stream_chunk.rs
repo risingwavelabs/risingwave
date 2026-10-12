@@ -283,7 +283,7 @@ impl StreamChunk {
         }
 
         let mut table = Table::new();
-        table.load_preset(DataChunk::PRETTY_TABLE_PRESET);
+        table.load_style(DataChunk::PRETTY_TABLE_STYLE);
 
         if let Some(schema) = schema {
             assert_eq!(self.dimension(), schema.len());
@@ -398,6 +398,19 @@ impl StreamChunk {
             ops: self.ops.clone(),
             data: self.data.with_visibility(vis),
         }
+    }
+
+    /// Keeps visible rows whose operation is in `ops`
+    pub fn retain_ops(self, ops: &[Op]) -> Self {
+        let mut chunk: StreamChunkMut = self.into();
+
+        for (_, mut row) in chunk.to_rows_mut() {
+            if !ops.contains(&row.op()) {
+                row.set_vis(false);
+            }
+        }
+
+        chunk.into()
     }
 }
 

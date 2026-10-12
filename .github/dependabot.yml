@@ -53,10 +53,6 @@ updates:
     google-cloud:
       patterns:
         - "google-cloud*"
-    rand:
-      patterns:
-        - "rand"
-        - "rand_chacha"
     strum:
       patterns:
         - "strum"

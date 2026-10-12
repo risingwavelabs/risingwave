@@ -203,3 +203,74 @@
     StreamMaterialize { columns: [id, value, id_plus_one, embedding, upper_value, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: create_udf_and_tables
+  sql: |
+    create function first_elem(arr jsonb, ts double precision) returns jsonb language javascript as $$
+    export function first_elem(arr, ts) {
+        return (Array.isArray(arr) && arr.length) ? arr[0] : null;
+    }
+    $$;
+    create table t (id int primary key, k varchar, ts double precision) append only;
+    create table d (k varchar primary key, arr jsonb, ts double precision);
+- name: a UDF result read more than once is evaluated once per row
+  before:
+  - create_udf_and_tables
+  sql: |
+    with picked as (
+      select t.*, first_elem(d.arr, t.ts) as p
+      from t left join d for system_time as of proctime() on d.k = t.k),
+    resolved as (
+      select *, p ->> 'a' as a, p ->> 'b' as b, p ->> 'c' as c from picked)
+    select id, a, b, c from resolved;
+  stream_plan: |-
+    StreamMaterialize { columns: [id, a, b, c, t.k(hidden)], stream_key: [id, t.k], pk_columns: [id, t.k], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.id, JsonbAccessStr($expr1, 'a':Varchar) as $expr2, JsonbAccessStr($expr1, 'b':Varchar) as $expr3, JsonbAccessStr($expr1, 'c':Varchar) as $expr4, t.k], noop_update_hint: true }
+      └─StreamProject { exprs: [t.id, first_elem(d.arr, t.ts) as $expr1, t.k] }
+        └─StreamTemporalJoin { type: LeftOuter, append_only: true, predicate: t.k = d.k, nested_loop: false, output: [t.id, t.ts, d.arr, t.k, d.k] }
+          ├─StreamExchange { dist: HashShard(t.k) }
+          │ └─StreamTableScan { table: t, columns: [t.id, t.k, t.ts], stream_scan_type: ArrangementBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+          └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(d.k) }
+            └─StreamTableScan { table: d, columns: [d.k, d.arr], stream_scan_type: UpstreamOnly, stream_key: [d.k], pk: [k], dist: UpstreamHashShard(d.k) }
+- name: a UDF result read more than once on a retract stream is materialized once
+  before:
+  - create_udf_and_tables
+  sql: |
+    select p ->> 'a' as a, p ->> 'b' as b from (select first_elem(arr, ts) as p from d) s;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [JsonbAccessStr($expr1, 'a':Varchar) as $expr2, JsonbAccessStr($expr1, 'b':Varchar) as $expr3] }
+      └─BatchProject { exprs: [first_elem(d.arr, d.ts) as $expr1] }
+        └─BatchScan { table: d, columns: [d.arr, d.ts], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, d.k(hidden)], stream_key: [d.k], pk_columns: [d.k], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [JsonbAccessStr($expr1, 'a':Varchar) as $expr2, JsonbAccessStr($expr1, 'b':Varchar) as $expr3, d.k], noop_update_hint: true }
+      └─StreamMaterializedExprs { exprs: [first_elem(d.arr, d.ts) as $expr1] }
+        └─StreamTableScan { table: d, columns: [d.arr, d.ts, d.k], stream_scan_type: SnapshotBackfill, stream_key: [d.k], pk: [k], dist: UpstreamHashShard(d.k) }
+- name: a UDF result read once is still merged into the outer project
+  before:
+  - create_udf_and_tables
+  sql: |
+    select p ->> 'a' as a from (select first_elem(arr, ts) as p from d) s;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [JsonbAccessStr(first_elem(d.arr, d.ts), 'a':Varchar) as $expr1] }
+      └─BatchScan { table: d, columns: [d.arr, d.ts], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, d.k(hidden)], stream_key: [d.k], pk_columns: [d.k], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [$expr1, d.k] }
+      └─StreamMaterializedExprs { exprs: [JsonbAccessStr(first_elem(d.arr, d.ts), 'a':Varchar) as $expr1] }
+        └─StreamTableScan { table: d, columns: [d.arr, d.ts, d.k], stream_scan_type: SnapshotBackfill, stream_key: [d.k], pk: [k], dist: UpstreamHashShard(d.k) }
+- name: a lambda result read more than once is evaluated once per row
+  sql: |
+    create table t (id int primary key, a int[]);
+    select x[1] as x1, x[2] as x2 from (select array_transform(a, |v| v * 2) as x from t) s;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [ArrayAccess($expr1, 1:Int32) as $expr2, ArrayAccess($expr1, 2:Int32) as $expr3] }
+      └─BatchProject { exprs: [ArrayTransform(t.a, (t.a * 2:Int32)) as $expr1] }
+        └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x1, x2, t.id(hidden)], stream_key: [t.id], pk_columns: [t.id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [ArrayAccess($expr1, 1:Int32) as $expr2, ArrayAccess($expr1, 2:Int32) as $expr3, t.id] }
+      └─StreamProject { exprs: [ArrayTransform(t.a, (t.a * 2:Int32)) as $expr1, t.id] }
+        └─StreamTableScan { table: t, columns: [t.a, t.id], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }

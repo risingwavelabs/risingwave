@@ -74,7 +74,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f
 ], optional = true }
 csv = "1.4"
 deltalake = { workspace = true, optional = true }
-duration-str = "0.18.0"
+duration-str = "0.21.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
@@ -126,7 +126,7 @@ parking_lot = { workspace = true }
 parquet = { version = "58", features = ["async"] }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
-phf = { version = "0.13", features = ["macros"] }
+phf = { version = "0.14", features = ["macros"] }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
@@ -183,7 +183,7 @@ sea-schema = { version = "0.16", default-features = false, features = [
 serde = { workspace = true, features = ["rc"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = { version = "0.17.0", features = ["hints"] }
+simd-json = { version = "0.18.1", features = ["hints"] }
 smallvec = { workspace = true }
 sqlx = { workspace = true }
 strum = "0.28"

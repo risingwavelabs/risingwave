@@ -25,7 +25,7 @@ use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{DatabaseId, PartialGraphId};
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
+    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
 };
 use tokio::task::JoinHandle;
 
@@ -70,8 +70,8 @@ pub(super) struct CompleteBarrierTask {
     pub(super) list_finished_source_ids: Vec<PbListFinishedSource>,
     /// Source load completion events that need `LoadFinish` commands
     pub(super) load_finished_source_ids: Vec<PbLoadFinishedSource>,
-    /// Table IDs that have finished materialize refresh and need completion signaling
-    pub(super) refresh_finished_table_job_ids: Vec<JobId>,
+    /// Materialize actors that have finished their part of a table refresh
+    pub(super) refresh_finished_actors: Vec<PbRefreshFinishedActor>,
     /// Iceberg pk-index sink reports and optional compaction overwrite metadata collected during
     /// this barrier. They are grouped per sink into one pre-commit before Hummock commits.
     pub(super) iceberg_pk_index_pre_commit_metadata: Vec<IcebergPkIndexPreCommitMetadata>,
@@ -137,33 +137,6 @@ impl CompleteBarrierTask {
                 .map(|(id, info)| (*id, info.barrier_info.prev_epoch()));
             context.advance_iceberg_pk_index_sink_committed_epochs(epochs);
 
-            // Handle list finished source IDs for refreshable batch sources
-            // Spawn this asynchronously to avoid deadlock during barrier collection
-            //
-            // This step is for fs-like refreshable-batch sources, which need to list the data first finishing loading. It guarantees finishing listing before loading.
-            // The other sources can skip this step.
-
-            if !self.list_finished_source_ids.is_empty() {
-                context
-                    .handle_list_finished_source_ids(self.list_finished_source_ids.clone())
-                    .await?;
-            }
-
-            // Handle load finished source IDs for refreshable batch sources
-            // Spawn this asynchronously to avoid deadlock during barrier collection
-            if !self.load_finished_source_ids.is_empty() {
-                context
-                    .handle_load_finished_source_ids(self.load_finished_source_ids.clone())
-                    .await?;
-            }
-
-            // Handle refresh finished table IDs for materialized view refresh completion
-            if !self.refresh_finished_table_job_ids.is_empty() {
-                context
-                    .handle_refresh_finished_table_ids(self.refresh_finished_table_job_ids.clone())
-                    .await?;
-            }
-
             for (partial_graph_id, info) in self.epoch_infos {
                 let (database_id, job_id) = from_partial_graph_id(partial_graph_id);
                 let command_name = info.post_collect_command.command_name().to_owned();
@@ -181,6 +154,24 @@ impl CompleteBarrierTask {
                         command_name,
                     );
                 }
+            }
+
+            // Refresh stage reports come after the commands of the barrier took effect: a stage
+            // may finish within the barrier that started the cycle.
+            if !self.list_finished_source_ids.is_empty() {
+                context
+                    .handle_list_finished_source_ids(self.list_finished_source_ids)
+                    .await?;
+            }
+            if !self.load_finished_source_ids.is_empty() {
+                context
+                    .handle_load_finished_source_ids(self.load_finished_source_ids)
+                    .await?;
+            }
+            if !self.refresh_finished_actors.is_empty() {
+                context
+                    .handle_refresh_finished_actors(self.refresh_finished_actors)
+                    .await?;
             }
 
             wait_commit_timer.observe_duration();
