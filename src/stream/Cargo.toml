@@ -101,6 +101,10 @@ name = "stream_hash_agg"
 harness = false
 
 [[bench]]
+name = "stream_match_recognize"
+harness = false
+
+[[bench]]
 name = "bench_state_table"
 harness = false
 
