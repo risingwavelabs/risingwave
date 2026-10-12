@@ -457,8 +457,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_function(&self, _function: PbFunction) -> Result<()> {
-        unreachable!()
+    async fn create_function(&self, mut function: PbFunction) -> Result<()> {
+        function.id = self.gen_id();
+        self.catalog.write().create_function(&function);
+        Ok(())
     }
 
     async fn create_connection(
@@ -1265,6 +1267,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _value: Option<String>,
     ) -> RpcResult<Option<SystemParamsReader>> {
         Ok(Some(SystemParams::default().into()))
+    }
+
+    async fn clear_file_cache(
+        &self,
+        _clear_meta_cache: bool,
+        _clear_data_cache: bool,
+    ) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn get_session_params(&self) -> RpcResult<SessionConfig> {

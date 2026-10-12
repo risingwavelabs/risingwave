@@ -71,6 +71,7 @@ mod alter_utils;
 mod alter_watermark;
 mod backup;
 pub mod cancel_job;
+pub(crate) mod cdc;
 pub mod close_cursor;
 mod comment;
 pub mod create_aggregate;
@@ -1581,6 +1582,9 @@ pub async fn handle(
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
+        Statement::AlterSystemClearFileCache { cache_type } => {
+            alter_system::handle_clear_file_cache(handler_args, cache_type).await
+        }
         Statement::AlterSecret { name, operation } => match operation {
             AlterSecretOperation::ChangeCredential {
                 with_options,
@@ -1777,13 +1781,6 @@ fn check_ban_alter_table_operation_for_iceberg_engine_table(
         AlterTableOperation::SetBackfillParallelism { .. } => {
             bail!(
                 "ALTER TABLE SET BACKFILL PARALLELISM is not supported for iceberg table: {}.{}",
-                schema_name,
-                table_name
-            );
-        }
-        AlterTableOperation::SetSchema { .. } => {
-            bail!(
-                "ALTER TABLE SET SCHEMA is not supported for iceberg table: {}.{}",
                 schema_name,
                 table_name
             );

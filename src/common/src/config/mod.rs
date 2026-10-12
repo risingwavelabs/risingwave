@@ -473,8 +473,20 @@ pub mod default {
             1000
         }
 
+        pub fn table_change_log_truncate_interval_sec() -> u64 {
+            600
+        }
+
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
+        }
+
+        pub fn enable_locality_sort_buffer() -> bool {
+            true
+        }
+
+        pub fn locality_sort_buffer_activate_threshold() -> u64 {
+            65536
         }
 
         pub fn cache_refill_policy() -> CacheRefillPolicy {
@@ -751,6 +763,34 @@ pub mod tests {
                 vec!["dummy".to_owned()]
             );
         }
+    }
+
+    #[test]
+    fn test_file_cache_separated_runtime_config_backward_compatibility() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [storage.data_file_cache.runtime_config.Separated.read_runtime_options]
+            worker_threads = 2
+            max_blocking_threads = 4
+
+            [storage.data_file_cache.runtime_config.Separated.write_runtime_options]
+            worker_threads = 6
+            max_blocking_threads = 8
+            "#,
+        )
+        .unwrap();
+
+        let storage::FileCacheRuntimeConfig::Separated {
+            read_runtime_options,
+            write_runtime_options,
+        } = config.storage.data_file_cache.runtime_config
+        else {
+            panic!("expected legacy separated file-cache runtime config");
+        };
+        assert_eq!(read_runtime_options.worker_threads, 2);
+        assert_eq!(read_runtime_options.max_blocking_threads, 4);
+        assert_eq!(write_runtime_options.worker_threads, 6);
+        assert_eq!(write_runtime_options.max_blocking_threads, 8);
     }
 
     #[test]

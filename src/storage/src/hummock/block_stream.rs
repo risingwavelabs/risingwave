@@ -20,16 +20,8 @@ use bytes::{Bytes, BytesMut};
 use fail::fail_point;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
-use super::{Block, BlockMeta};
+use super::BlockMeta;
 use crate::hummock::{BlockHolder, HummockResult};
-
-#[async_trait::async_trait]
-pub trait BlockStream: Send + Sync + 'static {
-    /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
-    /// left to read.
-    async fn next_block(&mut self) -> HummockResult<Option<BlockHolder>>;
-    fn next_block_index(&self) -> usize;
-}
 
 pub struct MemoryUsageTracker {
     total_usage: Arc<AtomicUsize>,
@@ -54,7 +46,7 @@ pub struct BlockDataStream {
     buf_reader: MonitoredStreamingReader,
 
     /// The index of the next block. Note that `block_idx` is relative to the start index of the
-    /// stream (and is compatible with `block_size_vec`); it is not relative to the corresponding
+    /// stream (and is compatible with `block_sizes`); it is not relative to the corresponding
     /// SST. That is, if streaming starts at block 2 of a given SST `T`, then `block_idx = 0`
     /// refers to the third block of `T`.
     block_idx: usize,
@@ -64,7 +56,7 @@ pub struct BlockDataStream {
     /// not contain the size of blocks which precede the first streamed block. That is, if
     /// streaming starts at block 2 of a given SST, then the list does not contain information
     /// about block 0 and block 1.
-    block_metas: Vec<BlockMeta>,
+    block_sizes: Vec<(u32, u32)>,
 
     buf: Bytes,
 
@@ -72,21 +64,22 @@ pub struct BlockDataStream {
 }
 
 impl BlockDataStream {
-    /// Constructs a new `BlockStream` object that reads from the given `byte_stream` and interprets
-    /// the data as blocks of the SST described in `sst_meta`, starting at block `block_index`.
-    ///
-    /// If `block_index >= sst_meta.block_metas.len()`, then `BlockStream` will not read any data
-    /// from `byte_stream`.
+    /// Reads the blocks described by `block_metas` from a byte stream positioned at their start.
+    /// The block index is relative to this slice, not to the full SST.
+    /// Only retain the lengths needed to frame and decode blocks, without cloning their keys.
     pub fn new(
         // The stream that provides raw data.
         byte_stream: MonitoredStreamingReader,
         // Meta data of the SST that is streamed.
-        block_metas: Vec<BlockMeta>,
+        block_metas: &[BlockMeta],
     ) -> Self {
         Self {
             buf_reader: byte_stream,
             block_idx: 0,
-            block_metas,
+            block_sizes: block_metas
+                .iter()
+                .map(|meta| (meta.len, meta.uncompressed_size))
+                .collect(),
             buf: Bytes::default(),
             buff_offset: 0,
         }
@@ -94,20 +87,20 @@ impl BlockDataStream {
 
     /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
     /// left to read.
-    pub async fn next_block_impl(&mut self) -> HummockResult<Option<(Bytes, usize)>> {
-        if self.block_idx >= self.block_metas.len() {
+    pub async fn next_block(&mut self) -> HummockResult<Option<(Bytes, usize)>> {
+        if self.block_idx >= self.block_sizes.len() {
             return Ok(None);
         }
 
-        let block_meta = &self.block_metas[self.block_idx];
+        let (compressed_size, uncompressed_size) = self.block_sizes[self.block_idx];
         fail_point!("stream_read_err", |_| Err(ObjectError::internal(
             "stream read error"
         )
         .into()));
-        let uncompressed_size = block_meta.uncompressed_size as usize;
-        let end = self.buff_offset + block_meta.len as usize;
+        let uncompressed_size = uncompressed_size as usize;
+        let end = self.buff_offset + compressed_size as usize;
         let data = if end > self.buf.len() {
-            let current_block = self.read_next_buf(block_meta.len as usize).await?;
+            let current_block = self.read_next_buf(compressed_size as usize).await?;
             self.buff_offset = 0;
             current_block
         } else {
@@ -146,29 +139,27 @@ impl BlockDataStream {
         self.buf = Bytes::default();
         Ok(read_buf.freeze())
     }
-
-    pub fn next_block_index(&self) -> usize {
-        self.block_idx
-    }
-
-    pub async fn next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
-        match self.next_block_impl().await? {
-            None => Ok(None),
-            Some((buf, uncompressed_size)) => {
-                Ok(Some(Box::new(Block::decode(buf, uncompressed_size)?)))
-            }
-        }
-    }
 }
 
+/// Consecutive decoded blocks whose I/O has already completed in `SstableStore::prefetch_blocks`.
+/// Consuming them is synchronous and infallible. The tracker is retained until the stream drops.
 pub struct PrefetchBlockStream {
     blocks: VecDeque<BlockHolder>,
+    /// SST index of the first remaining block, or the end index when exhausted.
     block_index: usize,
     _tracker: Option<MemoryUsageTracker>,
 }
 
+pub(super) enum PrefetchLookup {
+    Hit(BlockHolder),
+    /// The target precedes the remaining range. The stream is unchanged.
+    BeforeStart,
+    /// All buffered blocks were consumed without reaching the target.
+    Exhausted,
+}
+
 impl PrefetchBlockStream {
-    pub fn new(
+    pub(super) fn new(
         blocks: VecDeque<BlockHolder>,
         block_index: usize,
         _tracker: Option<MemoryUsageTracker>,
@@ -179,19 +170,108 @@ impl PrefetchBlockStream {
             _tracker,
         }
     }
+
+    /// Takes the block at the given SST index, discarding earlier buffered blocks.
+    /// A backward lookup leaves the stream unchanged; a lookup past the end exhausts it.
+    pub(super) fn take_block(&mut self, target: usize) -> PrefetchLookup {
+        if target < self.block_index {
+            return PrefetchLookup::BeforeStart;
+        }
+        while let Some(block) = self.blocks.pop_front() {
+            let block_index = self.block_index;
+            self.block_index += 1;
+            if block_index == target {
+                return PrefetchLookup::Hit(block);
+            }
+        }
+        PrefetchLookup::Exhausted
+    }
 }
 
-#[async_trait::async_trait]
-impl BlockStream for PrefetchBlockStream {
-    fn next_block_index(&self) -> usize {
-        self.block_index
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hummock::test_utils::test_key_of;
+    use crate::hummock::{Block, BlockBuilder, BlockBuilderOptions};
+
+    fn test_blocks() -> Vec<Arc<Block>> {
+        (10..14)
+            .map(|idx| {
+                let mut builder = BlockBuilder::new(BlockBuilderOptions::default());
+                builder.add_for_test(test_key_of(idx).to_ref(), b"value");
+                let capacity = builder.uncompressed_block_size();
+                Arc::new(Block::decode(Bytes::copy_from_slice(builder.build()), capacity).unwrap())
+            })
+            .collect()
     }
 
-    async fn next_block(&mut self) -> HummockResult<Option<BlockHolder>> {
-        if let Some(block) = self.blocks.pop_front() {
-            self.block_index += 1;
-            return Ok(Some(block));
-        }
-        Ok(None)
+    #[test]
+    fn test_prefetch_take_block_and_tracker_lifetime() {
+        let blocks = test_blocks();
+        let usage = Arc::new(AtomicUsize::new(7));
+        let mut stream = PrefetchBlockStream::new(
+            blocks
+                .iter()
+                .cloned()
+                .map(BlockHolder::from_ref_block)
+                .collect(),
+            10,
+            Some(MemoryUsageTracker::new(usage.clone(), 100)),
+        );
+        assert!(matches!(stream.take_block(9), PrefetchLookup::BeforeStart));
+        let PrefetchLookup::Hit(first) = stream.take_block(10) else {
+            panic!("missing first block");
+        };
+        assert!(std::ptr::eq(&*first, &*blocks[0]));
+        // Neither rereading a consumed block nor seeking backward may consume future blocks.
+        assert!(matches!(stream.take_block(10), PrefetchLookup::BeforeStart));
+        let PrefetchLookup::Hit(skipped_to) = stream.take_block(12) else {
+            panic!("missing block after a forward skip");
+        };
+        assert!(std::ptr::eq(&*skipped_to, &*blocks[2]));
+        assert_eq!(Arc::strong_count(&blocks[1]), 1);
+        assert!(matches!(stream.take_block(11), PrefetchLookup::BeforeStart));
+        let PrefetchLookup::Hit(last) = stream.take_block(13) else {
+            panic!("backward lookup consumed the remaining block");
+        };
+        assert!(std::ptr::eq(&*last, &*blocks[3]));
+        assert!(matches!(stream.take_block(14), PrefetchLookup::Exhausted));
+        assert!(matches!(
+            stream.take_block(usize::MAX),
+            PrefetchLookup::Exhausted
+        ));
+        assert_eq!(usage.load(Ordering::SeqCst), 107);
+        drop(stream);
+        assert_eq!(usage.load(Ordering::SeqCst), 7);
+        // Returned holders continue to own their blocks after the stream and tracker drop.
+        drop(blocks);
+        assert!(!first.data().is_empty());
+        assert!(!last.data().is_empty());
+    }
+
+    #[test]
+    fn test_prefetch_take_block_past_end_and_empty() {
+        let blocks = test_blocks();
+        let mut stream = PrefetchBlockStream::new(
+            blocks
+                .iter()
+                .cloned()
+                .map(BlockHolder::from_ref_block)
+                .collect(),
+            10,
+            None,
+        );
+        assert!(matches!(
+            stream.take_block(usize::MAX),
+            PrefetchLookup::Exhausted
+        ));
+        assert!(blocks.iter().all(|block| Arc::strong_count(block) == 1));
+        assert!(matches!(stream.take_block(14), PrefetchLookup::Exhausted));
+        assert!(matches!(stream.take_block(13), PrefetchLookup::BeforeStart));
+
+        let mut empty = PrefetchBlockStream::new(VecDeque::new(), 10, None);
+        assert!(matches!(empty.take_block(9), PrefetchLookup::BeforeStart));
+        assert!(matches!(empty.take_block(10), PrefetchLookup::Exhausted));
+        assert!(matches!(empty.take_block(11), PrefetchLookup::Exhausted));
     }
 }

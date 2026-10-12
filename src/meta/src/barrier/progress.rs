@@ -607,9 +607,13 @@ impl CreateMviewProgressTracker {
         };
 
         let new_tracking_actors = StreamJobFragments::tracking_progress_actor_ids_impl(
-            fragment_infos
-                .values()
-                .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
+            fragment_infos.values().map(|fragment| {
+                (
+                    fragment.fragment_type_mask,
+                    &fragment.nodes,
+                    fragment.actors.keys().copied(),
+                )
+            }),
         );
 
         #[cfg(debug_assertions)]
@@ -994,6 +998,96 @@ mod tests {
                 })
                 .collect(),
             state_table_ids: HashSet::new(),
+        }
+    }
+
+    #[test]
+    fn test_recover_legacy_cdc_progress_in_mixed_job() {
+        use risingwave_pb::stream_plan::stream_node::NodeBody;
+
+        for modern_mask in [false, true] {
+            let mut cdc = sample_inflight_fragment(
+                FragmentId::new(10),
+                &[ActorId::new(1)],
+                FragmentTypeFlag::StreamScan,
+            );
+            if modern_mask {
+                cdc.fragment_type_mask.add(FragmentTypeFlag::StreamCdcScan);
+            }
+            // The CDC scan can be nested under a materialize/project node. Old plans may
+            // also have no scan options; neither affects progress-reporter ownership.
+            cdc.nodes = PbStreamNode {
+                node_body: Some(NodeBody::Materialize(Default::default())),
+                input: vec![PbStreamNode {
+                    node_body: Some(NodeBody::StreamCdcScan(Default::default())),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            let mut fragments = HashMap::from([(cdc.fragment_id, cdc)]);
+            let recovered = CreateMviewProgressTracker::recover(
+                JobId::new(1),
+                &fragments,
+                Default::default(),
+                &HummockVersionStats::default(),
+            );
+            assert!(matches!(
+                recovered.status,
+                CreateMviewStatus::Finished { .. }
+            ));
+
+            let mv = sample_inflight_fragment(
+                FragmentId::new(20),
+                &[ActorId::new(2)],
+                FragmentTypeFlag::StreamScan,
+            );
+            fragments.insert(mv.fragment_id, mv);
+            let source = sample_inflight_fragment(
+                FragmentId::new(30),
+                &[ActorId::new(3)],
+                FragmentTypeFlag::SourceScan,
+            );
+            fragments.insert(source.fragment_id, source);
+            let mut recovered = CreateMviewProgressTracker::recover(
+                JobId::new(1),
+                &fragments,
+                Default::default(),
+                &HummockVersionStats::default(),
+            );
+            let CreateMviewStatus::Backfilling { progress, .. } = &recovered.status else {
+                panic!("ordinary backfill fragments must remain tracked");
+            };
+            assert_eq!(progress.states.len(), 2);
+            assert!(!progress.states.contains_key(&ActorId::new(1)));
+            assert_eq!(
+                progress.backfill_upstream_types[&ActorId::new(2)],
+                BackfillUpstreamType::MView
+            );
+            assert_eq!(
+                progress.backfill_upstream_types[&ActorId::new(3)],
+                BackfillUpstreamType::Source
+            );
+
+            let mv = sample_inflight_fragment(
+                FragmentId::new(20),
+                &[ActorId::new(4)],
+                FragmentTypeFlag::StreamScan,
+            );
+            fragments.insert(mv.fragment_id, mv);
+            let source = sample_inflight_fragment(
+                FragmentId::new(30),
+                &[ActorId::new(5)],
+                FragmentTypeFlag::SourceScan,
+            );
+            fragments.insert(source.fragment_id, source);
+            recovered.refresh_after_reschedule(&fragments, &HummockVersionStats::default());
+            let CreateMviewStatus::Backfilling { progress, .. } = recovered.status else {
+                panic!("ordinary backfill fragments must remain tracked after reschedule");
+            };
+            assert_eq!(
+                progress.states.keys().copied().collect::<HashSet<_>>(),
+                HashSet::from([ActorId::new(4), ActorId::new(5)])
+            );
         }
     }
 

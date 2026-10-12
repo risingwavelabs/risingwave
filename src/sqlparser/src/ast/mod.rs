@@ -38,9 +38,11 @@ pub use self::ddl::{
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
-    Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
-    NamedWindow, OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias,
-    TableFactor, TableWithJoins, Top, Values, With,
+    AfterMatchSkip, Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint,
+    JoinOperator, LateralView, MatchRecognizePattern, MatchRecognizeSymbol, Measure, NamedWindow,
+    OrderByExpr, Query, RepetitionQuantifier, RowsPerMatch, Select, SelectItem, SetExpr,
+    SetOperator, SubsetDefinition, SymbolDefinition, TableAlias, TableFactor, TableWithJoins, Top,
+    Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
@@ -1261,6 +1263,13 @@ pub enum WaitTarget {
     Index(ObjectName),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileCacheType {
+    Meta,
+    Data,
+    All,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1701,6 +1710,10 @@ pub enum Statement {
         param: Ident,
         value: SetVariableValue,
     },
+    /// ALTER SYSTEM CLEAR FILE CACHE [META | DATA | ALL]
+    AlterSystemClearFileCache {
+        cache_type: FileCacheType,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -2137,7 +2150,11 @@ impl Statement {
                 }
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
-                    write!(f, " TABLE '{}'", info.external_table_name)?;
+                    write!(
+                        f,
+                        " TABLE '{}'",
+                        value::escape_single_quote_string(&info.external_table_name)
+                    )?;
                 }
                 if let Some(info) = webhook_info
                     && let Some(signature_expr) = &info.signature_expr
@@ -2476,6 +2493,14 @@ impl Statement {
             Statement::AlterSystem { param, value } => {
                 f.write_str("ALTER SYSTEM SET ")?;
                 write!(f, "{param} = {value}",)
+            }
+            Statement::AlterSystemClearFileCache { cache_type } => {
+                f.write_str("ALTER SYSTEM CLEAR FILE CACHE ")?;
+                match cache_type {
+                    FileCacheType::Meta => f.write_str("META"),
+                    FileCacheType::Data => f.write_str("DATA"),
+                    FileCacheType::All => f.write_str("ALL"),
+                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -3295,6 +3320,16 @@ pub struct SqlOption {
     pub value: SqlOptionValue,
 }
 
+impl SqlOption {
+    /// Creates an option whose value is a typed secret reference.
+    pub fn from_secret_ref(name: &str, secret_ref: SecretRefValue) -> Self {
+        Self {
+            name: ObjectName(name.split('.').map(Ident::from_real_value).collect()),
+            value: SqlOptionValue::SecretRef(secret_ref),
+        }
+    }
+}
+
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let should_redact = REDACT_SQL_OPTION_KEYWORDS
@@ -3891,6 +3926,10 @@ impl fmt::Display for SetVariableValueSingle {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AsOf {
     ProcessTime,
+    /// Internal marker for a process-time temporal join whose lookup side is broadcast to all join
+    /// actors. It stays on the lookup relation so optimizer rewrites cannot detach the strategy
+    /// from that relation; [`crate::ast::Join`]'s `Display` renders the modifier in join position.
+    ProcessTimeBroadcast,
     // used by time travel
     ProcessTimeWithInterval((String, DateTimeField)),
     // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
@@ -3904,7 +3943,9 @@ impl fmt::Display for AsOf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use AsOf::*;
         match self {
-            ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            ProcessTime | ProcessTimeBroadcast => {
+                write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")
+            }
             ProcessTimeWithInterval((value, leading_field)) => write!(
                 f,
                 " FOR SYSTEM_TIME AS OF NOW() - '{}' {}",
@@ -4172,5 +4213,32 @@ mod tests {
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true )",
             format!("{}", create_function)
         );
+    }
+
+    #[test]
+    fn test_sql_option_from_secret_ref() {
+        let text_option = SqlOption::from_secret_ref(
+            "password",
+            SecretRefValue {
+                secret_name: ObjectName(vec![
+                    Ident::from_real_value("public"),
+                    Ident::from_real_value("s2"),
+                ]),
+                ref_as: SecretRefAsType::Text,
+            },
+        );
+
+        assert!(matches!(text_option.value, SqlOptionValue::SecretRef(_)));
+        assert_eq!(text_option.to_string(), "password = secret public.s2");
+
+        let file_option = SqlOption::from_secret_ref(
+            "certificate",
+            SecretRefValue {
+                secret_name: ObjectName(vec![Ident::from_real_value("cert")]),
+                ref_as: SecretRefAsType::File,
+            },
+        );
+
+        assert_eq!(file_option.to_string(), "certificate = secret cert AS FILE");
     }
 }

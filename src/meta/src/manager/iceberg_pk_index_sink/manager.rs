@@ -17,14 +17,14 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::RwLock;
-use risingwave_common::id::PartialGraphId;
+use risingwave_common::id::{JobId, PartialGraphId};
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
-use risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tracing::warn;
 
+use super::IcebergPkIndexPreCommitMetadata;
 use super::committed_epoch::PartialGraphCommittedEpochs;
 use super::coordinator::IcebergPkIndexSinkCoordinator;
 
@@ -46,7 +46,7 @@ struct ManagerInner {
     coordinators: RwLock<HashMap<SinkId, (PartialGraphId, CoordinatorRef)>>,
     /// Per-partial-graph committed-epoch cursor. A cursor entry exists exactly while a partial graph has
     /// a registered pk-index sink: created by `ensure` in `register_sink` and dropped by `remove` in
-    /// `unregister_sinks` (and `clear` in `reset`), all under the `coordinators` write lock. Advanced on
+    /// `unregister_jobs` (and `clear` in `reset`), all under the `coordinators` write lock. Advanced on
     /// every checkpoint completion via `advance_committed_epochs` (a no-op for partial graphs with no
     /// registered sink).
     committed_epochs: PartialGraphCommittedEpochs,
@@ -98,19 +98,17 @@ impl IcebergPkIndexSinkManager {
         Ok(())
     }
 
-    /// Pre-commit phase for one epoch: persist the merged report under `pending_sink_state` (no iceberg IO).
-    /// The barrier-complete path awaits this BEFORE issuing hummock `commit_epoch`.
-    pub async fn pre_commit_epoch(
+    /// Pre-commit one epoch, with an optional compaction overwrite folded into the same pending row.
+    /// The barrier-complete path awaits this before issuing Hummock `commit_epoch`.
+    pub(crate) async fn pre_commit(
         &self,
-        sink_id: SinkId,
-        prev_epoch: u64,
-        reports: Vec<PbIcebergPkIndexSinkMetadata>,
+        input: IcebergPkIndexPreCommitMetadata,
     ) -> anyhow::Result<()> {
-        let coordinator = self.coordinator(sink_id)?;
+        let coordinator = self.coordinator(input.sink_id)?;
         coordinator
             .lock()
             .await
-            .pre_commit(prev_epoch, reports)
+            .pre_commit(input.prev_epoch, input.reports, input.compaction)
             .await
     }
 
@@ -147,12 +145,13 @@ impl IcebergPkIndexSinkManager {
         Ok(snapshot_id)
     }
 
-    /// Unregister the given `sink_id`(s)' coordinator(s) (e.g. at DROP SINK time). Unregistering an unknown
-    /// `sink_id` is a no-op.
-    pub fn unregister_sinks(&self, sink_ids: Vec<SinkId>) {
+    /// Unregister the sink coordinators belonging to the given streaming jobs. Non-sink and unknown
+    /// job IDs are no-ops.
+    pub fn unregister_jobs(&self, job_ids: impl IntoIterator<Item = JobId>) {
         let mut coordinators = self.inner.coordinators.write();
         let mut touched_graphs = Vec::new();
-        for sink_id in sink_ids {
+        for job_id in job_ids {
+            let sink_id = job_id.as_sink_id();
             if let Some((partial_graph_id, _coord)) = coordinators.remove(&sink_id) {
                 touched_graphs.push(partial_graph_id);
             }

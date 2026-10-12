@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use rand::{Rng, rng as thread_rng};
+use rand::{RngExt as _, rng as thread_rng};
 use sqllogictest::substitution::well_known;
 use sqllogictest::{
     Condition, ParallelTestError, Partitioner, QueryExpect, Record, StatementExpect,
@@ -88,6 +88,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "tpch_upstream.slt",
     // Drop is not retryable in search path test.
     "search_path.slt",
+    // background CREATE SINK held at rate limit 0 can't be retried after a kill
+    "alter_mv/alter_mv_concurrency_check.slt",
     // Transaction statements are not retryable.
     "transaction/now.slt",
     "transaction/read_only_multi_conn.slt",
@@ -100,8 +102,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
 /// Randomly set DDL statements to use `background_ddl`
 mod background_ddl_mode {
     use anyhow::bail;
-    use rand::Rng;
-    use rand_chacha::ChaChaRng;
+    use rand::RngExt as _;
+    use rand::rngs::ChaCha20Rng;
     use sqllogictest::{Condition, Record, StatementExpect};
 
     use crate::client::RisingWave;
@@ -141,7 +143,7 @@ mod background_ddl_mode {
         record: &Record<T>,
         cmd: &SqlCmd,
         manual_background_ddl_enabled: bool,
-        rng: &mut ChaChaRng,
+        rng: &mut ChaCha20Rng,
         background_ddl_enabled: &mut bool,
     ) where
         D: sqllogictest::AsyncDB<ColumnType = T>,
@@ -259,7 +261,7 @@ mod vnode_mode {
 
 pub mod slt_env {
     use rand::SeedableRng;
-    use rand_chacha::ChaChaRng;
+    use rand::rngs::ChaCha20Rng;
 
     use crate::cluster::KillOpts;
 
@@ -280,12 +282,12 @@ pub mod slt_env {
             Self { opts }
         }
 
-        pub fn get_rng() -> ChaChaRng {
+        pub fn get_rng() -> ChaCha20Rng {
             let seed = std::env::var("MADSIM_TEST_SEED")
                 .unwrap_or("0".to_owned())
                 .parse::<u64>()
                 .unwrap();
-            ChaChaRng::seed_from_u64(seed)
+            ChaCha20Rng::seed_from_u64(seed)
         }
 
         pub fn background_ddl_rate(&self) -> f64 {
@@ -600,7 +602,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
                                     // otherwise it means that the catalog is not yet populated to fe.
                                     && !e.contains("gRPC request to meta service failed")
                                     && e.contains("exists")
-                                    && !e.contains("under creation")
+                                    && !e.contains("still being created")
                                     && e.contains("Catalog error") =>
                             {
                                 break;

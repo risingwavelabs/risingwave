@@ -90,6 +90,11 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
+                ORACLE_CDC_CONNECTOR => hashmap!(
+                    Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
+                ),
                 MONGODB_CDC_CONNECTOR => hashmap!(
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
@@ -121,6 +126,63 @@ fn validate_license(connector: &str) -> Result<()> {
         Feature::SqlServerCdcSource.check_available()?;
     }
     Ok(())
+}
+
+fn validate_decimal_handling_mode(props: &BTreeMap<String, String>) -> Result<()> {
+    if let Some(mode) = props.get("debezium.decimal.handling.mode")
+        && mode != "string"
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "'debezium.decimal.handling.mode' must be 'string', got: '{mode}'"
+        ))));
+    }
+    Ok(())
+}
+
+/// Requires an explicitly supplied heartbeat interval to be a positive signed 32-bit integer.
+/// Keep this policy in sync with Java's `SourceValidateHandler.validateHeartbeatInterval`.
+/// Validates user-supplied options, not the final Debezium configuration. On CREATE, an omitted
+/// interval uses the connector default; on ALTER, omission leaves the existing interval unchanged.
+/// Unrelated connector heartbeat mechanisms are not checked here.
+pub fn validate_heartbeat_interval(props: &BTreeMap<String, String>) -> Result<()> {
+    let Some(value) = props.get("debezium.heartbeat.interval.ms") else {
+        return Ok(());
+    };
+
+    // Match Java's ASCII integer syntax and Debezium's signed 32-bit range.
+    if !value.parse::<i32>().is_ok_and(|interval| interval > 0) {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "'debezium.heartbeat.interval.ms' must be a positive integer, got: '{value}'"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+/// Returns whether the Pulsar schema is used. The Pulsar schema options themselves are validated by
+/// `PulsarSchemaConfig::from_options` when building the parser config. Only the connector and
+/// format, which that config is unaware of, are checked here.
+fn validate_pulsar_schema_options(
+    format_encode: &FormatEncodeOptions,
+    connector: &str,
+) -> Result<bool> {
+    let options = WithOptions::try_from(format_encode.row_options())?;
+    if !options.contains_key(PULSAR_SCHEMA_URL_KEY)
+        && !options.secret_ref().contains_key(PULSAR_SCHEMA_URL_KEY)
+    {
+        return Ok(false);
+    }
+
+    if connector != PULSAR_CONNECTOR
+        || format_encode.format != Format::Plain
+        || format_encode.row_encode != Encode::Avro
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Pulsar schema requires connector = '{PULSAR_CONNECTOR}' with FORMAT PLAIN ENCODE AVRO"
+        ))));
+    }
+
+    Ok(true)
 }
 
 pub fn validate_compatibility(
@@ -156,8 +218,14 @@ pub fn validate_compatibility(
             )))
         })?;
 
+    // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
+    // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
+    // override must retain the common `string` default from `debezium.properties`.
+    validate_decimal_handling_mode(props)?;
+
     validate_license(&connector)?;
-    if connector != KAFKA_CONNECTOR {
+    let uses_pulsar_schema = validate_pulsar_schema_options(format_encode, &connector)?;
+    if connector != KAFKA_CONNECTOR && !uses_pulsar_schema {
         let res = match (&format_encode.format, &format_encode.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
                 let mut options = WithOptions::try_from(format_encode.row_options())?;
@@ -244,7 +312,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
         && timeout_value.parse::<u32>().is_err()
     {
@@ -260,7 +329,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(queue_size_value) = props.get("debezium.max.queue.size")
         && queue_size_value.parse::<u32>().is_err()
     {
@@ -271,17 +341,81 @@ pub fn validate_compatibility(
         .into());
     }
 
-    // Validate debezium.heartbeat.interval.ms for Postgres CDC: must be a valid integer and not 0
-    if connector == POSTGRES_CDC_CONNECTOR
-        && let Some(interval_value) = props.get("debezium.heartbeat.interval.ms")
-        && !interval_value.parse::<i64>().is_ok_and(|v| v != 0)
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "debezium.heartbeat.interval.ms".to_owned(),
-            config_value: interval_value.to_owned(),
+    validate_heartbeat_interval(props)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::ast::SqlOption;
+
+    use super::*;
+
+    fn format_encode(
+        format: Format,
+        encode: Encode,
+        options: &[(&str, &str)],
+    ) -> FormatEncodeOptions {
+        let row_options = options
+            .iter()
+            .map(|(name, value)| {
+                let name = name.to_string();
+                let value = value.to_string();
+                SqlOption::try_from((&name, &value)).unwrap()
+            })
+            .collect();
+        FormatEncodeOptions {
+            format,
+            row_encode: encode,
+            row_options,
+            key_encode: None,
         }
-        .into());
     }
 
-    Ok(())
+    fn source_options(connector: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([(UPSTREAM_SOURCE_KEY.to_owned(), connector.to_owned())])
+    }
+
+    #[test]
+    fn pulsar_schema_accepts_minimal_plain_avro_options() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[
+                (PULSAR_SCHEMA_URL_KEY, "https://localhost:8443"),
+                (PULSAR_SCHEMA_AUTH_TOKEN_KEY, "schema-token"),
+            ],
+        );
+        validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+    }
+
+    #[test]
+    fn pulsar_schema_rejects_other_connectors_and_formats() {
+        for (connector, format, encode) in [
+            (KAFKA_CONNECTOR, Format::Plain, Encode::Avro),
+            (PULSAR_CONNECTOR, Format::Upsert, Encode::Avro),
+            (PULSAR_CONNECTOR, Format::Plain, Encode::Protobuf),
+            (PULSAR_CONNECTOR, Format::Plain, Encode::Json),
+        ] {
+            let format_encode = format_encode(
+                format,
+                encode,
+                &[(PULSAR_SCHEMA_URL_KEY, "http://localhost:8080")],
+            );
+            let error =
+                validate_compatibility(&format_encode, &mut source_options(connector)).unwrap_err();
+            assert!(error.to_string().contains(
+                "Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
+            ));
+        }
+    }
+
+    #[test]
+    fn confluent_schema_registry_behavior_is_unchanged() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[("schema.registry", "http://localhost:8081")],
+        );
+        validate_compatibility(&format_encode, &mut source_options(KAFKA_CONNECTOR)).unwrap();
+    }
 }

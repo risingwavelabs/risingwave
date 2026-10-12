@@ -336,6 +336,13 @@ impl SourceManager {
         {
             let sources = metadata_manager.list_sources().await?;
             for source in sources {
+                if source
+                    .info
+                    .as_ref()
+                    .is_some_and(|info| info.external_table.is_some())
+                {
+                    continue;
+                }
                 create_source_worker_async(
                     source,
                     &mut managed_sources,
@@ -527,7 +534,7 @@ impl SourceManager {
             if let Err(e) = self.tick().await {
                 tracing::error!(
                     error = %e.as_report(),
-                    "error happened while running source manager tick",
+                    "source manager tick failed",
                 );
             }
         }

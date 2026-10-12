@@ -75,6 +75,7 @@ mod m20260519_000000_streaming_job_batch_refresh_seconds;
 mod m20260624_000000_pending_sink_state_object_fk;
 mod m20260705_000000_subscription_dependent_object_fk;
 mod m20260804_000000_worker_property_resource;
+mod m20260805_000000_object_belong_to_oid;
 mod utils;
 
 pub struct Migrator;
@@ -188,6 +189,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260624_000000_pending_sink_state_object_fk::Migration),
             Box::new(m20260705_000000_subscription_dependent_object_fk::Migration),
             Box::new(m20260804_000000_worker_property_resource::Migration),
+            Box::new(m20260805_000000_object_belong_to_oid::Migration),
         ]
     }
 }

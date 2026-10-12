@@ -25,13 +25,14 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use iceberg::io::FileIO;
+use iceberg::io::FileIOBuilder;
 use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
 use iceberg::table::Table;
 use iceberg::{
-    Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent, TableRequirement,
-    TableUpdate,
+    Catalog, Namespace, NamespaceIdent, Runtime, TableCommit, TableCreation, TableIdent,
+    TableRequirement, TableUpdate,
 };
+use iceberg_storage_opendal::OpenDalResolvingStorageFactory;
 use itertools::Itertools;
 use jni::objects::{GlobalRef, JObject};
 use risingwave_common::global_jvm::Jvm;
@@ -86,6 +87,13 @@ struct CommitTableResponse {
 struct ListNamespacesResponse {
     namespaces: Vec<NamespaceIdent>,
     next_page_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetNamespaceResponse {
+    namespace: NamespaceIdent,
+    #[serde(default)]
+    properties: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -202,8 +210,29 @@ impl Catalog for JniCatalog {
     }
 
     /// Get a namespace information from the catalog.
-    async fn get_namespace(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Namespace> {
-        todo!()
+    async fn get_namespace(&self, namespace: &NamespaceIdent) -> iceberg::Result<Namespace> {
+        let inner = self.inner.clone();
+        let namespace = namespace.clone();
+        execute_blocking_jni(move || {
+            execute_with_jni_env(inner.jvm, |env| {
+                let namespace_jstr = env.new_string(namespace_to_string(&namespace))?;
+                let result_json =
+                    call_method!(env, inner.java_catalog.as_obj(), {String getNamespace(String)},
+                    &namespace_jstr)
+                    .with_context(|| format!("Failed to get iceberg namespace: {namespace}"))?;
+                let rust_json_str = jobj_to_str(env, result_json)?;
+                let resp: GetNamespaceResponse = serde_json::from_str(&rust_json_str)?;
+                Ok(Namespace::with_properties(resp.namespace, resp.properties))
+            })
+        })
+        .await
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to get iceberg namespace.",
+            )
+            .with_source(e)
+        })
     }
 
     /// Check if namespace exists in catalog.
@@ -287,6 +316,7 @@ impl Catalog for JniCatalog {
     ) -> iceberg::Result<Table> {
         let inner = self.inner.clone();
         let file_io_props = self.file_io_props.clone();
+        let runtime = Runtime::try_current()?;
         let namespace = namespace.clone();
         execute_blocking_jni(move || {
             execute_with_jni_env(inner.jvm, |env| {
@@ -308,7 +338,7 @@ impl Catalog for JniCatalog {
 
                 let resp: LoadTableResponse = serde_json::from_str(&rust_json_str)?;
 
-                let metadata_location = resp.metadata_location.ok_or_else(|| {
+                let _metadata_location = resp.metadata_location.ok_or_else(|| {
                     iceberg::Error::new(
                         iceberg::ErrorKind::FeatureUnsupported,
                         "Loading uncommitted table is not supported!",
@@ -317,14 +347,16 @@ impl Catalog for JniCatalog {
 
                 let table_metadata = resp.metadata;
 
-                let file_io = FileIO::from_path(&metadata_location)?
+                let file_io =
+                    FileIOBuilder::new(Arc::new(OpenDalResolvingStorageFactory::new()))
                     .with_props(file_io_props.iter())
-                    .build()?;
+                    .build();
 
                 Ok(Table::builder()
                     .file_io(file_io)
                     .identifier(TableIdent::new(namespace, creation.name))
                     .metadata(table_metadata)
+                    .runtime(runtime)
                     .build())
             })
         })
@@ -342,6 +374,7 @@ impl Catalog for JniCatalog {
     async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
         let inner = self.inner.clone();
         let file_io_props = self.file_io_props.clone();
+        let runtime = Runtime::try_current()?;
         let table = table.clone();
         execute_blocking_jni(move || {
             execute_with_jni_env(inner.jvm, |env| {
@@ -371,14 +404,15 @@ impl Catalog for JniCatalog {
 
                 let table_metadata = resp.metadata;
 
-                let file_io = FileIO::from_path(&metadata_location)?
+                let file_io = FileIOBuilder::new(Arc::new(OpenDalResolvingStorageFactory::new()))
                     .with_props(file_io_props.iter())
-                    .build()?;
+                    .build();
 
                 Ok(Table::builder()
                     .file_io(file_io)
                     .identifier(table)
                     .metadata(table_metadata)
+                    .runtime(runtime)
                     .build())
             })
         })
@@ -417,6 +451,12 @@ impl Catalog for JniCatalog {
             )
             .with_source(e)
         })
+    }
+
+    async fn purge_table(&self, table: &TableIdent) -> iceberg::Result<()> {
+        let table_info = self.load_table(table).await?;
+        self.drop_table(table).await?;
+        iceberg::drop_table_data(&table_info).await
     }
 
     async fn register_table(
@@ -469,6 +509,7 @@ impl Catalog for JniCatalog {
     async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
         let inner = self.inner.clone();
         let file_io_props = self.file_io_props.clone();
+        let runtime = Runtime::try_current()?;
         execute_blocking_jni(move || {
             execute_with_jni_env(inner.jvm, |env| {
                 let requirements = commit.take_requirements();
@@ -503,14 +544,15 @@ impl Catalog for JniCatalog {
 
                 let table_metadata = response.metadata;
 
-                let file_io = FileIO::from_path(&response.metadata_location)?
+                let file_io = FileIOBuilder::new(Arc::new(OpenDalResolvingStorageFactory::new()))
                     .with_props(file_io_props.iter())
-                    .build()?;
+                    .build();
 
                 Ok(Table::builder()
                     .file_io(file_io)
                     .identifier(commit.identifier().clone())
                     .metadata(table_metadata)
+                    .runtime(runtime)
                     .build()?)
             })
         })

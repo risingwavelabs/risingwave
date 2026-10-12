@@ -69,7 +69,7 @@ impl GlobalBarrierManager {
         let job_info = self
             .metadata_manager
             .catalog_controller
-            .list_creating_jobs(true, true, None)
+            .list_creating_jobs(true, None)
             .await?;
         Ok(job_info
             .into_iter()
@@ -80,7 +80,7 @@ impl GlobalBarrierManager {
                         backfill_type,
                     } = match &mut backfill_progress {
                         Ok(progress) => progress.remove(&job_id).unwrap_or_else(|| {
-                            warn!(%job_id, "background job has no ddl progress");
+                            warn!(%job_id, "creating job has no ddl progress");
                             BackfillProgress {
                                 progress: "0.0%".into(),
                                 backfill_type: PbBackfillType::NormalBackfill,
@@ -196,7 +196,6 @@ impl GlobalBarrierManager {
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
-        barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
@@ -214,7 +213,6 @@ impl GlobalBarrierManager {
             iceberg_compaction_manager,
             scale_controller,
             request_rx,
-            barrier_scheduler,
             refresh_manager,
         )
         .await;

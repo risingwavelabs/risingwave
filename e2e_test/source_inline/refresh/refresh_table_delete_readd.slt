@@ -1,0 +1,142 @@
+# Rows deleted by the refresh merge phase must be dropped from the materialize cache,
+# otherwise a row that comes back in a later refresh is handled as an update and lost.
+
+control substitution on
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp && mkdir -p ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp
+
+system ok
+echo "1,100,alpha" > ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp/a.csv
+
+system ok
+printf "2,200,beta\n3,200,gamma\n" > ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp/b.csv
+
+system ok
+echo "4,300,delta" > ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp/c.csv
+
+statement ok
+CREATE TABLE refresh_delete_readd_t (rule_id int, company_id int, rule_name varchar, PRIMARY KEY (rule_id, company_id)) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_delete_readd_tmp',
+    refresh_mode = 'FULL_RELOAD',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_delete_readd_t;
+
+query IIT retry 3 backoff 5s
+SELECT * FROM refresh_delete_readd_t ORDER BY rule_id;
+----
+1 100 alpha
+2 200 beta
+3 200 gamma
+4 300 delta
+
+
+# A downstream MV turns on the conflict check, which goes through the materialize cache.
+statement ok
+CREATE MATERIALIZED VIEW refresh_delete_readd_mv AS SELECT DISTINCT company_id FROM refresh_delete_readd_t;
+
+# A refresh without upstream changes routes every row through the cache.
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_delete_readd_t;
+
+query T retry 12 backoff 5s
+SELECT s.current_status
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_delete_readd_t';
+----
+IDLE
+
+
+system ok
+rm ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp/a.csv
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_delete_readd_t;
+
+query II retry 3 backoff 5s
+SELECT rule_id, company_id FROM refresh_delete_readd_t ORDER BY rule_id;
+----
+2 200
+3 200
+4 300
+
+
+query I retry 3 backoff 5s
+SELECT company_id FROM refresh_delete_readd_mv ORDER BY company_id;
+----
+200
+300
+
+
+# Add rule 1 back with the identical content.
+system ok
+echo "1,100,alpha" > ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp/a.csv
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_delete_readd_t;
+
+query IIT retry 3 backoff 5s
+SELECT * FROM refresh_delete_readd_t ORDER BY rule_id;
+----
+1 100 alpha
+2 200 beta
+3 200 gamma
+4 300 delta
+
+
+query I retry 3 backoff 5s
+SELECT company_id FROM refresh_delete_readd_mv ORDER BY company_id;
+----
+100
+200
+300
+
+
+system ok
+rm ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp/a.csv
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_delete_readd_t;
+
+query II retry 3 backoff 5s
+SELECT rule_id, company_id FROM refresh_delete_readd_t ORDER BY rule_id;
+----
+2 200
+3 200
+4 300
+
+
+# Add rule 1 back with a different value.
+system ok
+echo "1,100,alpha_v2" > ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp/a.csv
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_delete_readd_t;
+
+query IIT retry 3 backoff 5s
+SELECT * FROM refresh_delete_readd_t ORDER BY rule_id;
+----
+1 100 alpha_v2
+2 200 beta
+3 200 gamma
+4 300 delta
+
+
+query I retry 3 backoff 5s
+SELECT company_id FROM refresh_delete_readd_mv ORDER BY company_id;
+----
+100
+200
+300
+
+
+statement ok
+DROP TABLE refresh_delete_readd_t CASCADE;
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_delete_readd_tmp

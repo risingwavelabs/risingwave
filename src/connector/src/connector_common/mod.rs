@@ -17,12 +17,16 @@
 mod mqtt_common;
 pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
+mod pubsub_common;
+pub(crate) use pubsub_common::resolve_pubsub_project_id;
+
 mod common;
 pub use common::{
     AwsAuthProps, AwsPrivateLinkItem, DISABLE_DEFAULT_CREDENTIAL, KafkaCommon,
     KafkaConnectionProps, KafkaPrivateLinkCommon, KinesisCommon, MongodbCommon, NatsCommon,
     NatsConnectionProps, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
     PulsarCommon, PulsarOauthCommon, RdKafkaPropertiesCommon, SHARED_NATS_CLIENT,
+    TcpKeepaliveConfig,
 };
 mod connection;
 pub use connection::{
@@ -41,7 +45,7 @@ pub use iceberg::{
     ResolvedIcebergCatalogConfig, iceberg_java_catalog_props_from_options,
 };
 pub use postgres::{
-    PgConnectionConfig, PostgresExternalTable, SslMode, TcpKeepaliveConfig, create_pg_client,
+    PgConnectionConfig, PostgresExternalTable, SslMode, create_pg_client,
     create_pg_client_from_properties, discover_pgvector_dimensions,
     pg_connection_config_from_properties,
 };

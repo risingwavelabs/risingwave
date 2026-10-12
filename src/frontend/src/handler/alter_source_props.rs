@@ -16,6 +16,7 @@ use risingwave_common::id::{ConnectionId, SourceId};
 use risingwave_pb::catalog::connection::Info::ConnectionParams;
 
 use super::RwPgResponse;
+use super::create_source::validate_heartbeat_interval;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
@@ -115,16 +116,7 @@ async fn handle_alter_source_props_inner(
         .into());
     }
 
-    // Validate debezium.heartbeat.interval.ms if present: must be a valid integer and not 0
-    if let Some(interval_value) = changed_props.get("debezium.heartbeat.interval.ms")
-        && !interval_value.parse::<i64>().is_ok_and(|v| v != 0)
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "debezium.heartbeat.interval.ms".to_owned(),
-            config_value: interval_value.to_owned(),
-        }
-        .into());
-    }
+    validate_heartbeat_interval(&changed_props)?;
 
     meta_client
         .alter_source_connector_props(
@@ -159,6 +151,13 @@ pub async fn handle_alter_source_connector_props(
         if source.associated_table_id.is_some() {
             return Err(ErrorCode::InvalidInputSyntax(
                 "Use `ALTER TABLE` to alter a table with connector.".to_owned(),
+            )
+            .into());
+        }
+        if source.is_cdc_table_source() {
+            return Err(ErrorCode::NotSupported(
+                "altering connector properties of a CDC table source is not supported".to_owned(),
+                "Drop and recreate the CDC table source".to_owned(),
             )
             .into());
         }

@@ -128,7 +128,7 @@ impl IcebergCompactionManager {
     /// Clear the iceberg maintenance state of the sink aborted by
     /// `try_abort_creating_streaming_job`, if any.
     pub fn clear_maintenance_for_aborted_job(&self, abort_result: &AbortCreatingJobResult) {
-        if let Some(sink_id) = abort_result.aborted_sink_id {
+        for &sink_id in &abort_result.aborted_sink_ids {
             self.clear_iceberg_maintenance_by_sink_id(sink_id);
         }
     }

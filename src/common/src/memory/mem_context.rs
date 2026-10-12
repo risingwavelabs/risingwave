@@ -103,11 +103,14 @@ impl MemoryContext {
         Self::new_with_mem_limit(None, TrAdderAtomic::new(0), 0)
     }
 
-    /// Add `bytes` memory usage. Pass negative value to decrease memory usage.
-    /// Returns `false` if the memory usage exceeds the limit.
+    /// Attempts to charge `bytes` against this context and its ancestors.
+    /// Returns `false`, without updating counters, if a positive charge would exceed a limit.
+    /// Negative values release previously recorded usage, even while over budget.
+    /// Use [`Self::add_unchecked`] to record allocations that proceed regardless of the budget.
     pub fn add(&self, bytes: i64) -> bool {
         if let Some(inner) = &self.inner {
-            if (inner.counter.get_bytes_used() + bytes) as u64 > inner.mem_limit {
+            // Releasing memory must succeed even if concurrent admissions exceeded the limit.
+            if bytes > 0 && (inner.counter.get_bytes_used() + bytes) as u64 > inner.mem_limit {
                 return false;
             }
             if let Some(parent) = &inner.parent {
@@ -121,6 +124,22 @@ impl MemoryContext {
             }
         }
         true
+    }
+
+    /// Records a memory-usage change without enforcing this context's or its ancestors' limits.
+    ///
+    /// Use this for allocations that have already succeeded and their corresponding releases.
+    /// Every recorded allocation must have a matching release. This does not allocate/free memory
+    /// or clamp the counter; callers remain responsible for balanced accounting.
+    /// For admission control, use [`Self::add`] instead. To inspect the resulting budget state,
+    /// use [`Self::check_memory_usage`].
+    pub fn add_unchecked(&self, bytes: i64) {
+        if let Some(inner) = &self.inner {
+            if let Some(parent) = &inner.parent {
+                parent.add_unchecked(bytes);
+            }
+            inner.counter.add(bytes);
+        }
     }
 
     pub fn get_bytes_used(&self) -> i64 {
@@ -163,7 +182,7 @@ impl MemoryContext {
 impl Drop for MemoryContextInner {
     fn drop(&mut self) {
         if let Some(p) = &self.parent {
-            p.add(-self.counter.get_bytes_used());
+            p.add_unchecked(-self.counter.get_bytes_used());
         }
     }
 }

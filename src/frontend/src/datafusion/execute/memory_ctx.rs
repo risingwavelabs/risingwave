@@ -100,11 +100,13 @@ impl std::fmt::Debug for RwMemoryPool {
 
 impl MemoryPool for RwMemoryPool {
     fn grow(&self, reservation: &MemoryReservation, additional: usize) {
-        let success = match reservation.consumer().can_spill() {
-            true => self.spillable_ctx.add(additional as i64),
-            false => self.unspillable_ctx.add(additional as i64),
+        let ctx = match reservation.consumer().can_spill() {
+            true => &self.spillable_ctx,
+            false => &self.unspillable_ctx,
         };
-        if !success {
+        // Unlike try_grow, grow cannot reject the reservation. Record it before checking limits.
+        ctx.add_unchecked(additional as i64);
+        if !ctx.check_memory_usage() {
             tracing::warn!(
                 error = %insufficient_capacity_err(
                     reservation,
@@ -116,8 +118,8 @@ impl MemoryPool for RwMemoryPool {
 
     fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
         match reservation.consumer().can_spill() {
-            true => self.spillable_ctx.add(-(shrink as i64)),
-            false => self.unspillable_ctx.add(-(shrink as i64)),
+            true => self.spillable_ctx.add_unchecked(-(shrink as i64)),
+            false => self.unspillable_ctx.add_unchecked(-(shrink as i64)),
         };
     }
 

@@ -20,7 +20,7 @@ use futures::{StreamExt as _, stream};
 use itertools::Itertools as _;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ConflictBehavior, checked_conflict_behaviors};
-use risingwave_common::row::{CompactedRow, OwnedRow, Row as _};
+use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt as _};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast as _;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
@@ -387,6 +387,21 @@ impl MaterializeCache {
         }
 
         Ok(())
+    }
+
+    /// Drop the entries of rows deleted from `table` without going through [`Self::handle_new`].
+    /// Entries are removed instead of set to `None` so mass deletes leave no tombstones behind.
+    pub fn invalidate_rows<S: StateStore, SD: ValueRowSerde>(
+        &mut self,
+        rows: impl IntoIterator<Item = impl Row>,
+        table: &StateTableInner<S, SD>,
+    ) {
+        for row in rows {
+            let key = row
+                .project(table.pk_indices())
+                .memcmp_serialize(table.pk_serde());
+            self.lru_cache.remove(&key);
+        }
     }
 
     /// Evict the LRU cache entries that are lower than the watermark.
