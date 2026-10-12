@@ -1056,7 +1056,7 @@ impl DiagnoseCommand {
         use comfy_table::{ContentArrangement, Row, Table};
 
         let mut table = Table::new();
-        table.load_preset(ASCII_BORDERS_ONLY);
+        table.load_style(ASCII_BORDERS_ONLY);
         table.set_content_arrangement(ContentArrangement::Dynamic);
         table.set_header({
             let mut row = Row::new();

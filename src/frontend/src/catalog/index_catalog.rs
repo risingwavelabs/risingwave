@@ -66,7 +66,12 @@ pub struct VectorIndex {
     pub vector_expr: ExprImpl,
     #[educe(Hash(ignore))]
     pub primary_to_included_info_column_mapping: HashMap<usize, usize>,
-    pub primary_key_idx_in_info_columns: Vec<usize>,
+    /// Positions of the primary table's primary key columns in the info columns.
+    ///
+    /// `None` if some primary key column is not stored in the index, e.g. the order key of an
+    /// `ORDER BY` materialized view left out of `INCLUDE`. Such an index can serve only queries it
+    /// fully covers, since it cannot locate rows of the primary table.
+    pub primary_key_idx_in_info_columns: Option<Vec<usize>>,
     pub included_info_columns: Vec<usize>,
     pub vector_index_info: PbVectorIndexInfo,
 }
@@ -195,7 +200,11 @@ impl IndexCatalog {
                 let primary_key_idx_in_info_columns = primary_table
                     .pk()
                     .iter()
-                    .map(|order| primary_to_included_info_column_mapping[&order.column_index])
+                    .map(|order| {
+                        primary_to_included_info_column_mapping
+                            .get(&order.column_index)
+                            .copied()
+                    })
                     .collect();
                 IndexType::Vector(Arc::new(VectorIndex {
                     index_table: index_table.clone(),
@@ -229,14 +238,24 @@ impl IndexCatalog {
 }
 
 impl TableIndex {
-    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<ColumnOrder> {
+    /// Map the primary key of the primary table to the columns of the index table.
+    ///
+    /// Returns `None` if some primary key column is not stored in the index table. The index
+    /// table always contains the *stream key* of the primary table, but the primary key (storage
+    /// order key) can be a superset of it, e.g. for a `TopN` materialized view whose primary key
+    /// is `[order_key..., stream_key...]`.
+    pub fn primary_table_pk_ref_to_index_table(&self) -> Option<Vec<ColumnOrder>> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .pk
             .iter()
-            .map(|x| ColumnOrder::new(*mapping.get(&x.column_index).unwrap(), x.order_type))
-            .collect_vec()
+            .map(|x| {
+                mapping
+                    .get(&x.column_index)
+                    .map(|idx| ColumnOrder::new(*idx, x.order_type))
+            })
+            .collect()
     }
 
     pub fn primary_table_distribute_key_ref_to_index_table(&self) -> Vec<usize> {

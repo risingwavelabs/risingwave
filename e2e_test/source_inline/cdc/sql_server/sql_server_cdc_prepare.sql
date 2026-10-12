@@ -47,6 +47,20 @@ VALUES
   (2, 1558430840001, 'Alice', 20.50, 2, 1),
   (3, 1558430840002, 'Alice', 18.50, 2, 1);
 
+-- The database uses a case-insensitive collation. Keep mixed casing in the catalog to verify that
+-- RisingWave rejects differently-cased identifiers before building the shared-CDC routing filter.
+CREATE TABLE MixedCaseTable (
+  id INT PRIMARY KEY,
+  payload VARCHAR(50)
+);
+
+EXEC sys.sp_cdc_enable_table
+  @source_schema = 'dbo',
+  @source_name = 'MixedCaseTable',
+  @role_name = NULL;
+
+INSERT INTO MixedCaseTable VALUES (1, 'snapshot');
+
 CREATE TABLE single_type (
   id INT PRIMARY KEY,
   c_time time

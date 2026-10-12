@@ -855,7 +855,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(
                         new_barrier,
                         &mut self.partial_graph_manager,
-                        self.active_streaming_nodes.current()
+                        &mut self.periodic_barriers,
+                        self.active_streaming_nodes.current(),
                     ) {
                         if !self.enable_recovery {
                             panic!(
@@ -1240,6 +1241,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             stream_actors,
                             mut source_splits,
                             batch_refresh,
+                            iceberg_v3,
                         } = rendered_info;
                         recoverer.inject_database_initial_barrier(
                             database_id,
@@ -1256,6 +1258,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             &hummock_version_stats,
                             &mut cdc_table_snapshot_splits,
                             batch_refresh,
+                            iceberg_v3,
                         )?
                     };
                     let collector = match result {

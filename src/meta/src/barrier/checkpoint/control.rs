@@ -237,6 +237,7 @@ impl CheckpointControl {
         &mut self,
         new_barrier: NewBarrier,
         partial_graph_manager: &mut PartialGraphManager,
+        periodic_barriers: &mut PeriodicBarriers,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let NewBarrier {
@@ -356,6 +357,7 @@ impl CheckpointControl {
                 checkpoint,
                 span,
                 partial_graph_manager,
+                periodic_barriers,
                 &self.hummock_version_stats,
                 worker_nodes,
             )
@@ -383,6 +385,7 @@ impl CheckpointControl {
                 checkpoint,
                 span,
                 partial_graph_manager,
+                periodic_barriers,
                 &self.hummock_version_stats,
                 worker_nodes,
             )
@@ -613,6 +616,9 @@ impl CheckpointControl {
                     }
                     IndependentCheckpointJob::CreatingStreamingJob(_) => {
                         unreachable!("creating streaming job should not initialize when running")
+                    }
+                    IndependentCheckpointJob::IcebergV3(_) => {
+                        unreachable!("Iceberg V3 jobs do not wait for graph initialization")
                     }
                 }
             }
@@ -1029,6 +1035,22 @@ impl DatabaseCheckpointControl {
                         independent_jobs_task.push((*job_id, epoch, resps, info));
                     }
                 }
+                IndependentCheckpointJob::IcebergV3(iceberg_job) => {
+                    if let Some((epoch, resps, info, tracking_job)) = iceberg_job
+                        .start_completing(partial_graph_manager, min_upstream_inflight_barrier)
+                    {
+                        if let Some(tracking_job) = tracking_job {
+                            let task = task.get_or_insert_default();
+                            task.finished_jobs.push(tracking_job);
+                        }
+                        independent_jobs_task.push((
+                            *job_id,
+                            epoch,
+                            resps.into_values().collect_vec(),
+                            info,
+                        ));
+                    }
+                }
             }
         }
         if !finished_jobs.is_empty() {
@@ -1210,6 +1232,7 @@ impl DatabaseCheckpointControl {
         checkpoint: bool,
         span: tracing::Span,
         partial_graph_manager: &mut PartialGraphManager,
+        periodic_barriers: &mut PeriodicBarriers,
         hummock_version_stats: &HummockVersionStats,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
@@ -1233,6 +1256,37 @@ impl DatabaseCheckpointControl {
         );
 
         let mut notifier_start = notifier.map(Notifier::start);
+        if let Some(Command::DropStreamingJobs {
+            streaming_job_ids, ..
+        }) = &command
+        {
+            let blocked_job_ids = streaming_job_ids
+                .iter()
+                .copied()
+                .filter(|job_id| {
+                    self.independent_checkpoint_job_controls
+                        .get(job_id)
+                        .is_some_and(|job| !job.can_drop())
+                })
+                .collect_vec();
+            if !blocked_job_ids.is_empty() {
+                warn!(
+                    ?blocked_job_ids,
+                    "reject dropping snapshot backfill jobs while activating their upstream edges"
+                );
+                let err: MetaError = anyhow!(
+                    "cannot drop snapshot backfill jobs {:?} while they are starting to consume \
+                     upstream; database recovery is being triggered to force the catalog drop to \
+                     take effect",
+                    blocked_job_ids
+                )
+                .into();
+                if let Some(notifier) = notifier_start {
+                    notifier.notify_start_failed(err.clone());
+                }
+                return Err(err);
+            }
+        }
         if let Some(Command::DropStreamingJobs {
             streaming_job_ids, ..
         }) = &mut command
@@ -1284,11 +1338,11 @@ impl DatabaseCheckpointControl {
 
         if !matches!(&command, Some(Command::CreateStreamingJob { .. }))
             && self.database_info.is_empty()
+            && self
+                .independent_checkpoint_job_controls
+                .values()
+                .all(|job| job.running().is_none())
         {
-            assert!(
-                self.independent_checkpoint_job_controls.is_empty(),
-                "should not have snapshot backfill job when there is no normal job in database"
-            );
             // Drop the guard to remove the metric series of this database.
             self.last_committed_barrier_time = None;
             // skip the command when there is nothing to do with the barrier
@@ -1327,6 +1381,7 @@ impl DatabaseCheckpointControl {
             &mut notifier_start,
             barrier_info,
             partial_graph_manager,
+            periodic_barriers,
             hummock_version_stats,
             worker_nodes,
         ) {
