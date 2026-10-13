@@ -45,8 +45,6 @@
 //! the MV or replaying the topic may interleave equal-ORDER-BY rows differently and legitimately
 //! produce different matches (the standard leaves tie order implementation-defined).
 
-use std::collections::HashMap;
-
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VnodeBitmapExt;
@@ -339,11 +337,49 @@ struct DefineSlot {
     offset: usize,
 }
 
+/// The compiled `DEFINE`s by pattern variable. `hashbrown` for its default hasher: the walker asks
+/// [`DefineMatcher::matches`] once per candidate row per path, and the lookup of the variable's
+/// predicate sits in front of the verdict cache on every one of those calls — with `std`'s
+/// `SipHash` it cost about as much as the walk step it served.
+type DefineMap = hashbrown::HashMap<String, CompiledDefine>;
+
 /// A `DEFINE` predicate compiled for execution: a boolean condition over a synthetic slot row.
 pub struct CompiledDefine {
     symbol: String,
     condition: NonStrictExpression,
     slots: Vec<DefineSlot>,
+    /// Column of this predicate in a [`VerdictCache`], when its verdict at a row is a function of
+    /// the row's position alone — every slot reads the candidate row or a physical `PREV` — so it
+    /// can be evaluated once per row per matcher instead of once per path that reaches the row.
+    /// `None` for a predicate that reads the running label assignment (`FIRST`/`LAST`), whose
+    /// verdict depends on the match path. Assigned by [`assign_verdict_slots`].
+    verdict_slot: Option<usize>,
+}
+
+impl CompiledDefine {
+    /// Whether the verdict at a row is a function of the row's position alone: every slot reads
+    /// the candidate row or a physical `PREV`, none the running label assignment. The one
+    /// condition behind both the walker's `(state, position)` failure memo (query-wide, see
+    /// `Memo` in the NFA module) and the per-predicate [`VerdictCache`].
+    fn is_path_independent(&self) -> bool {
+        self.slots
+            .iter()
+            .all(|s| matches!(s.kind, DefineSlotKind::SelfCol | DefineSlotKind::Prev))
+    }
+}
+
+/// Give every path-independent `DEFINE` a dense column index in the [`VerdictCache`]; returns the
+/// number of columns. (Map iteration order decides which predicate gets which column; any dense
+/// assignment is as good as another, and nothing persists it.)
+fn assign_verdict_slots(defines: &mut DefineMap) -> usize {
+    let mut next = 0;
+    for def in defines.values_mut() {
+        def.verdict_slot = def.is_path_independent().then(|| {
+            next += 1;
+            next - 1
+        });
+    }
+    next
 }
 
 impl CompiledDefine {
@@ -391,6 +427,7 @@ impl CompiledDefine {
             symbol: pb.symbol.clone(),
             condition,
             slots,
+            verdict_slot: None,
         })
     }
 }
@@ -400,12 +437,132 @@ impl CompiledDefine {
 /// universally true.
 struct DefineMatcher<'a> {
     rows: &'a [BufferedRow],
-    defines: &'a HashMap<String, CompiledDefine>,
+    defines: &'a DefineMap,
     /// `WITHIN` span predicate over `[last_order_key, first_order_key]`. Applied as a candidate is
     /// bound so the NFA prunes any extension that would push the match's span past the bound,
     /// yielding the longest match that fits the window rather than rejecting an overshooting greedy
     /// match after the fact.
     within: Option<&'a NonStrictExpression>,
+    /// Verdicts of the path-independent predicates at every row, filled on first evaluation. The
+    /// matcher borrows `rows` immutably for its whole life, so no entry can go stale; the cache
+    /// simply dies with the matcher.
+    verdicts: VerdictCache,
+}
+
+/// Per-matcher memo of `DEFINE` verdicts: one cell per `(row, path-independent predicate)`.
+///
+/// A backtracking walk asks the same `(var, pos)` question once per path that reaches the row —
+/// every pending start of an unbroken run re-evaluates every row of the run, so a run of `r` rows
+/// costs `Θ(r²)` predicate evaluations per arrival, each an expression-tree evaluation over a
+/// synthetic row. For a predicate whose slots read only the candidate row or a physical `PREV`,
+/// the answer is a function of `pos` alone (the read positions are position-determined, the
+/// running label assignment is not consulted), so it is computed once per row per matcher and the
+/// remaining `Θ(r²)` are cell loads. The `WITHIN` span test stays outside the cache: it depends on
+/// the match start.
+///
+/// Cells are allocated lazily in chunks of [`VERDICT_CHUNK_ROWS`] rows, on the first verdict
+/// stored in a chunk. A matcher is built per arriving row, per gate check and per prune pass over
+/// a buffer that can be far longer than the region the walk touches — a run of matchless rows
+/// awaiting the next watermark's prune sits in the buffer while each arrival's rescan is `O(1)` —
+/// and an eager `rows × slots` reservation would make every such construction `Θ(buffer)`,
+/// quadratic over a watermark interval (the trap `Memo` in the NFA module documents for its
+/// per-walk reservation). Construction is one pointer slot per chunk; memory touched follows the
+/// positions the walk visits.
+///
+/// Cells are atomics only because the walker requires `Sync` (the matcher is shared by reference
+/// across its async recursion). There is one logical thread of execution and never a concurrent
+/// accessor, so every access is `Relaxed`.
+struct VerdictCache {
+    chunks: Box<[std::sync::OnceLock<Box<[std::sync::atomic::AtomicU8]>>]>,
+    slots: usize,
+    /// Predicate evaluations actually performed, for tests that pin the cache's effect.
+    #[cfg(test)]
+    evaluations: std::sync::atomic::AtomicUsize,
+}
+
+/// Rows per lazily allocated chunk of [`VerdictCache`] cells.
+const VERDICT_CHUNK_ROWS: usize = 256;
+const VERDICT_UNKNOWN: u8 = 0;
+const VERDICT_FALSE: u8 = 1;
+const VERDICT_TRUE: u8 = 2;
+
+impl VerdictCache {
+    fn new(rows: usize, slots: usize) -> Self {
+        // No qualifying predicate: no chunks, and `get` is never reached (`verdict_slot` is `None`
+        // for every define).
+        let n_chunks = if slots == 0 {
+            0
+        } else {
+            rows.div_ceil(VERDICT_CHUNK_ROWS)
+        };
+        Self {
+            chunks: std::iter::repeat_with(std::sync::OnceLock::new)
+                .take(n_chunks)
+                .collect(),
+            slots,
+            #[cfg(test)]
+            evaluations: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn get(&self, pos: usize, slot: usize) -> Option<bool> {
+        let chunk = self.chunks[pos / VERDICT_CHUNK_ROWS].get()?;
+        let cell = &chunk[(pos % VERDICT_CHUNK_ROWS) * self.slots + slot];
+        match cell.load(std::sync::atomic::Ordering::Relaxed) {
+            VERDICT_TRUE => Some(true),
+            VERDICT_FALSE => Some(false),
+            _ => None,
+        }
+    }
+
+    fn set(&self, pos: usize, slot: usize, verdict: bool) {
+        let chunk = self.chunks[pos / VERDICT_CHUNK_ROWS].get_or_init(|| {
+            // Zeroed cells: `VERDICT_UNKNOWN`.
+            std::iter::repeat_with(|| std::sync::atomic::AtomicU8::new(VERDICT_UNKNOWN))
+                .take(VERDICT_CHUNK_ROWS * self.slots)
+                .collect()
+        });
+        let v = if verdict { VERDICT_TRUE } else { VERDICT_FALSE };
+        chunk[(pos % VERDICT_CHUNK_ROWS) * self.slots + slot]
+            .store(v, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Chunks whose cells were allocated, for tests that pin the laziness.
+    #[cfg(test)]
+    fn allocated_chunks(&self) -> usize {
+        self.chunks.iter().filter(|c| c.get().is_some()).count()
+    }
+}
+
+impl<'a> DefineMatcher<'a> {
+    fn new(
+        rows: &'a [BufferedRow],
+        defines: &'a DefineMap,
+        within: Option<&'a NonStrictExpression>,
+    ) -> Self {
+        let slots = defines
+            .values()
+            .filter(|d| d.verdict_slot.is_some())
+            .count();
+        // The columns must be exactly `0..slots`: a gap or a duplicate would alias two predicates
+        // onto one cell and answer one predicate's question with the other's verdict.
+        debug_assert!(
+            {
+                let mut seen = vec![false; slots];
+                defines
+                    .values()
+                    .filter_map(|d| d.verdict_slot)
+                    .all(|c| c < slots && !std::mem::replace(&mut seen[c], true))
+            },
+            "verdict slots must be dense and unique; assign them with `assign_verdict_slots`"
+        );
+        Self {
+            rows,
+            defines,
+            within,
+            verdicts: VerdictCache::new(rows.len(), slots),
+        }
+    }
 }
 
 impl DefineMatcher<'_> {
@@ -469,16 +626,33 @@ impl CandidateMatcher for DefineMatcher<'_> {
         let match_start = pos - labels.len();
         // A pattern variable with no DEFINE matches every row; one with a DEFINE must satisfy it.
         if let Some(def) = self.defines.get(var) {
-            let synthetic: Vec<Datum> = def
-                .slots
-                .iter()
-                .map(|slot| self.slot_value(slot, var, pos, match_start, labels))
-                .collect();
-            let value = def
-                .condition
-                .eval_row_infallible(&OwnedRow::new(synthetic))
-                .await;
-            if !value.is_some_and(|s| s.into_bool()) {
+            let cached = def
+                .verdict_slot
+                .and_then(|slot| self.verdicts.get(pos, slot));
+            let holds = match cached {
+                Some(holds) => holds,
+                None => {
+                    #[cfg(test)]
+                    self.verdicts
+                        .evaluations
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let synthetic: Vec<Datum> = def
+                        .slots
+                        .iter()
+                        .map(|slot| self.slot_value(slot, var, pos, match_start, labels))
+                        .collect();
+                    let value = def
+                        .condition
+                        .eval_row_infallible(&OwnedRow::new(synthetic))
+                        .await;
+                    let holds = value.is_some_and(|s| s.into_bool());
+                    if let Some(slot) = def.verdict_slot {
+                        self.verdicts.set(pos, slot, holds);
+                    }
+                    holds
+                }
+            };
+            if !holds {
                 return Ok(false);
             }
         }
@@ -551,7 +725,7 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     time_col: usize,
     measures: Vec<CompiledMeasure>,
     /// Compiled `DEFINE` predicates keyed by their pattern variable.
-    defines: HashMap<String, CompiledDefine>,
+    defines: DefineMap,
     within: Option<NonStrictExpression>,
     /// `WITHIN` deadline expr (see [`MatchRecognizeExecutorArgs`]); consulted on every watermark
     /// pass — which visits every partition, so an idle partition's timed-out partial is emitted or
@@ -697,11 +871,12 @@ struct BufferedRow {
 impl<S: StateStore> MatchRecognizeExecutor<S> {
     pub fn new(args: MatchRecognizeExecutorArgs<S>) -> Self {
         let time_col = args.order_key_indices[0];
-        let defines = args
+        let mut defines: DefineMap = args
             .defines
             .into_iter()
             .map(|d| (d.symbol.clone(), d))
             .collect();
+        assign_verdict_slots(&mut defines);
         Self {
             ctx: args.ctx,
             input: args.input,
@@ -733,7 +908,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         partition_key: &OwnedRow,
         nfa: &Nfa,
         skip: &SkipMode,
-        defines: &HashMap<String, CompiledDefine>,
+        defines: &DefineMap,
         within: Option<&NonStrictExpression>,
         measures: &[CompiledMeasure],
         watermark: Option<&ScalarImpl>,
@@ -815,11 +990,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 break;
             }
             let final_now = {
-                let matcher = DefineMatcher {
-                    rows: &run.rows,
-                    defines,
-                    within,
-                };
+                let matcher = DefineMatcher::new(&run.rows, defines, within);
                 match_is_final(
                     nfa,
                     &matcher,
@@ -911,7 +1082,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
     async fn prune_dead_prefix(
         run: &mut PartitionRun,
         nfa: &Nfa,
-        defines: &HashMap<String, CompiledDefine>,
+        defines: &DefineMap,
         within: Option<&NonStrictExpression>,
         w: &ScalarImpl,
         state_table: &mut StateTable<S>,
@@ -932,6 +1103,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // and fed positions coincide (`consume_prefix` keeps them aligned).
         let proven_dead = run.matcher.dead_prefix_end().min(n);
         let mut retain_from = n;
+        // One matcher for the whole pass: the liveness walks from successive starts read the same
+        // rows, and the rows do not change until `consume_prefix` below.
+        let matcher = DefineMatcher::new(&run.rows, defines, within);
         for p in 0..n {
             // Window closed (deadline < w): `p` is dead, skip it. A window that never closes (no
             // WITHIN, or a deadline past the type's range) fails this test, so `p` is retained.
@@ -941,11 +1115,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             if p < proven_dead {
                 continue;
             }
-            let matcher = DefineMatcher {
-                rows: &run.rows,
-                defines,
-                within,
-            };
             let alive = nfa
                 .reaches_boundary_alive(p, n, &matcher, budget, memoizable)
                 .await?;
@@ -998,7 +1167,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
     async fn consume_prefix(
         run: &mut PartitionRun,
         upto: usize,
-        defines: &HashMap<String, CompiledDefine>,
+        defines: &DefineMap,
         within: Option<&NonStrictExpression>,
         state_table: &mut StateTable<S>,
         budget: &mut ScanBudget,
@@ -1037,11 +1206,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             run.matcher.reset();
             if !run.rows.is_empty() {
                 let seqs: Vec<Seq> = run.rows.iter().map(|r| Seq(r.seq)).collect();
-                let matcher = DefineMatcher {
-                    rows: &run.rows,
-                    defines,
-                    within,
-                };
+                let matcher = DefineMatcher::new(&run.rows, defines, within);
                 run.matcher
                     .advance(&seqs, &matcher, budget, memoizable)
                     .await?;
@@ -1071,7 +1236,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         time_col: usize,
         nfa: &std::sync::Arc<Nfa>,
         skip: &SkipMode,
-        defines: &HashMap<String, CompiledDefine>,
+        defines: &DefineMap,
         within: Option<&NonStrictExpression>,
         within_deadline: &Option<NonStrictExpression>,
         memoizable: bool,
@@ -1148,11 +1313,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         for run in parts.values_mut() {
             let mut budget = ScanBudget::new(SCAN_BUDGET_EVALUATIONS);
             let fed: Vec<Seq> = run.rows.iter().map(|r| Seq(r.seq)).collect();
-            let matcher = DefineMatcher {
-                rows: &run.rows,
-                defines,
-                within,
-            };
+            let matcher = DefineMatcher::new(&run.rows, defines, within);
             run.matcher
                 .advance(&fed, &matcher, &mut budget, memoizable)
                 .await?;
@@ -1185,11 +1346,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
 
         // Whether the per-start `(state, position)` failure memo is sound for this query: no
         // `DEFINE` slot may read the running label assignment. See `Memo` in the NFA module.
-        let memoizable = defines.values().all(|d| {
-            d.slots
-                .iter()
-                .all(|s| matches!(s.kind, DefineSlotKind::SelfCol | DefineSlotKind::Prev))
-        });
+        let memoizable = defines.values().all(CompiledDefine::is_path_independent);
 
         // One shared automaton for every per-partition matcher (and every post-consumption
         // reset); the matchers hold it by `Arc`.
@@ -1336,11 +1493,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         retained_rows += 1;
                         {
                             let fed = [Seq(seq)];
-                            let matcher = DefineMatcher {
-                                rows: &run.rows,
-                                defines: &defines,
-                                within: within.as_ref(),
-                            };
+                            let matcher = DefineMatcher::new(&run.rows, &defines, within.as_ref());
                             run.matcher
                                 .advance(&fed, &matcher, &mut budget, memoizable)
                                 .await?;
@@ -1432,11 +1585,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // A budget-truncated FREEZE asks for the same: it left proven-dead
                         // progress to resume from, and an idle partition gets no arrival to do it.
                         if run.matcher.needs_refresh() {
-                            let matcher = DefineMatcher {
-                                rows: &run.rows,
-                                defines: &defines,
-                                within: within.as_ref(),
-                            };
+                            let matcher = DefineMatcher::new(&run.rows, &defines, within.as_ref());
                             run.matcher
                                 .refresh(&matcher, &mut budget, memoizable)
                                 .await?;
@@ -1702,20 +1851,29 @@ mod tests {
     }
 
     /// All matches over `vals`, with the whole buffer safe (no watermark boundary in play).
-    async fn find_all(
-        nfa: &Nfa,
-        defines: &HashMap<String, CompiledDefine>,
-        vals: &[i32],
-    ) -> Vec<LabeledMatch> {
+    ///
+    /// Runs the finder twice — over the defines as given (fresh ones carry no verdict slots, so
+    /// the cache is off) and again after `assign_verdict_slots` — and asserts the outputs agree,
+    /// so every finder test doubles as a cache-equivalence check.
+    async fn find_all(nfa: &Nfa, defines: &mut DefineMap, vals: &[i32]) -> Vec<LabeledMatch> {
         let rows = buffered(vals);
-        let matcher = DefineMatcher {
-            rows: &rows,
-            defines,
-            within: None,
+        let plain = {
+            let matcher = DefineMatcher::new(&rows, defines, None);
+            nfa.find_matches_dynamic(rows.len(), &matcher, &SkipMode::PastLastRow)
+                .await
+                .unwrap()
         };
-        nfa.find_matches_dynamic(rows.len(), &matcher, &SkipMode::PastLastRow)
+        assign_verdict_slots(defines);
+        let matcher = DefineMatcher::new(&rows, defines, None);
+        let cached = nfa
+            .find_matches_dynamic(rows.len(), &matcher, &SkipMode::PastLastRow)
             .await
-            .unwrap()
+            .unwrap();
+        assert_eq!(
+            plain, cached,
+            "the verdict cache changed the finder's output"
+        );
+        cached
     }
 
     /// `DEFINE a AS LAST(a.v) = a.v` is a tautology: SQL:2016 defines a pattern-variable-qualified
@@ -1724,9 +1882,10 @@ mod tests {
     /// candidate too — including on the match's first row, where no earlier `a` exists.
     #[tokio::test]
     async fn define_running_last_of_self_sees_candidate() {
-        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+        let mut defines =
+            DefineMap::from_iter([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
         assert_eq!(
-            find_all(&Nfa::compile(&plus("a")), &defines, &[1, 2, 3]).await,
+            find_all(&Nfa::compile(&plus("a")), &mut defines, &[1, 2, 3]).await,
             vec![LabeledMatch {
                 start: 0,
                 end: 3,
@@ -1741,12 +1900,9 @@ mod tests {
     #[tokio::test]
     async fn define_running_last_of_self_keeps_start_alive() {
         let rows = buffered(&[1]);
-        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
-        let matcher = DefineMatcher {
-            rows: &rows,
-            defines: &defines,
-            within: None,
-        };
+        let defines =
+            DefineMap::from_iter([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+        let matcher = DefineMatcher::new(&rows, &defines, None);
         let nfa = Nfa::compile(&Pattern::Concat(vec![
             Pattern::Var("a".to_owned()),
             Pattern::Var("b".to_owned()),
@@ -1768,9 +1924,10 @@ mod tests {
     /// bound, so this holds for the match's first row and then pins later rows to that value.
     #[tokio::test]
     async fn define_running_first_of_self_sees_candidate() {
-        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0))]);
+        let mut defines =
+            DefineMap::from_iter([nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0))]);
         assert_eq!(
-            find_all(&Nfa::compile(&plus("a")), &defines, &[5, 5, 7]).await,
+            find_all(&Nfa::compile(&plus("a")), &mut defines, &[5, 5, 7]).await,
             vec![
                 // 5, 5 share the first value; 7 breaks it and starts its own match.
                 LabeledMatch {
@@ -1793,7 +1950,7 @@ mod tests {
     /// `labels[1]` — pinning the `match_start + k` arithmetic where neither term is 0.
     #[tokio::test]
     async fn define_running_first_indexes_from_match_start() {
-        let defines = HashMap::from([
+        let mut defines = DefineMap::from_iter([
             nav_eq_self("x", nav_slot(KIND_PREV, &[], 1)),
             nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0)),
         ]);
@@ -1804,7 +1961,7 @@ mod tests {
         assert_eq!(
             // `x` = the second 9 (its physical predecessor is the first 9); the run of 7s is `a+`,
             // whose `FIRST` is `rows[2]`, so the trailing 5 ends the match.
-            find_all(&nfa, &defines, &[9, 9, 7, 7, 5]).await,
+            find_all(&nfa, &mut defines, &[9, 9, 7, 7, 5]).await,
             vec![LabeledMatch {
                 start: 1,
                 end: 4,
@@ -1822,10 +1979,10 @@ mod tests {
         // The slot's `vars` is `members_of(u)`, which preserves the SUBSET's declaration order, so
         // both orders must behave identically: membership is a set test, not a look at `vars[0]`.
         for members in [["a", "b"], ["b", "a"]] {
-            let defines =
-                HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &members, 0))]);
+            let mut defines =
+                DefineMap::from_iter([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &members, 0))]);
             assert_eq!(
-                find_all(&Nfa::compile(&plus("a")), &defines, &[1, 2, 3]).await,
+                find_all(&Nfa::compile(&plus("a")), &mut defines, &[1, 2, 3]).await,
                 vec![LabeledMatch {
                     start: 0,
                     end: 3,
@@ -1843,14 +2000,15 @@ mod tests {
     /// against the candidate `b`. This is the shape every existing DEFINE test uses.
     #[tokio::test]
     async fn define_running_last_of_other_var_excludes_candidate() {
-        let defines = HashMap::from([nav_eq_self("b", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+        let mut defines =
+            DefineMap::from_iter([nav_eq_self("b", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
         let nfa = Nfa::compile(&Pattern::Concat(vec![
             Pattern::Var("a".to_owned()),
             Pattern::Var("b".to_owned()),
         ]));
         // Equal values: the `b` row equals the running `a`, so `(a b)` matches.
         assert_eq!(
-            find_all(&nfa, &defines, &[7, 7]).await,
+            find_all(&nfa, &mut defines, &[7, 7]).await,
             vec![LabeledMatch {
                 start: 0,
                 end: 2,
@@ -1859,7 +2017,7 @@ mod tests {
         );
         // Different values: had the candidate been treated as the running last of `a`, this would
         // become a tautology and match.
-        assert_eq!(find_all(&nfa, &defines, &[7, 8]).await, vec![]);
+        assert_eq!(find_all(&nfa, &mut defines, &[7, 8]).await, vec![]);
     }
 
     /// Collects what the executor reports, so the `AFTER MATCH SKIP` diagnostic can be asserted
@@ -2091,12 +2249,8 @@ mod tests {
                 DataType::Boolean,
                 Some(ScalarImpl::Bool(true)),
             ));
-            let defines = HashMap::new();
-            let matcher = DefineMatcher {
-                rows: &rows,
-                defines: &defines,
-                within: Some(&within),
-            };
+            let defines = DefineMap::new();
+            let matcher = DefineMatcher::new(&rows, &defines, Some(&within));
             let nfa = Nfa::compile(&Pattern::Concat(vec![
                 Pattern::Var("a".to_owned()),
                 Pattern::Var("b".to_owned()),
@@ -2218,6 +2372,169 @@ mod tests {
         async fn within_finality_overrides_alive_gap() {
             let pattern = Pattern::Alt(vec![concat("xnn"), var("n")]);
             assert!(gate(&pattern, "xn", 0, 1, true).await);
+        }
+    }
+
+    /// The per-matcher verdict cache: a path-independent `DEFINE` is evaluated once per row per
+    /// matcher and answers every later path from the cache; a path-dependent one is never cached.
+    mod verdict_cache {
+        use std::sync::atomic::Ordering;
+
+        use super::*;
+
+        /// `DEFINE a AS PREV(a.v) = a.v`: path-independent (a physical `PREV` and the candidate
+        /// column) but value-dependent, so a wrong cache would be visible.
+        fn prev_eq_self(assign: bool) -> DefineMap {
+            let mut defines = DefineMap::from_iter([nav_eq_self("a", nav_slot(KIND_PREV, &[], 1))]);
+            if assign {
+                assert_eq!(assign_verdict_slots(&mut defines), 1);
+            }
+            defines
+        }
+
+        async fn verdicts(matcher: &DefineMatcher<'_>, n: usize) -> Vec<bool> {
+            let mut out = Vec::new();
+            for pos in 0..n {
+                // A candidate at `pos` with the match starting at 0: `labels` covers `[0, pos)`.
+                let labels = vec!["a".to_owned(); pos];
+                out.push(matcher.matches("a", pos, &labels).await.unwrap());
+            }
+            out
+        }
+
+        #[tokio::test]
+        async fn cached_matcher_agrees_with_uncached_and_evaluates_once_per_row() {
+            // PREV(v) = v: NULL at the first row (false), then equal / unequal neighbours.
+            let rows = buffered(&[1, 1, 2, 2, 2]);
+            let expected = vec![false, true, false, true, true];
+
+            let plain = prev_eq_self(false);
+            let m = DefineMatcher::new(&rows, &plain, None);
+            for _ in 0..3 {
+                assert_eq!(verdicts(&m, rows.len()).await, expected);
+            }
+            assert_eq!(
+                m.verdicts.evaluations.load(Ordering::Relaxed),
+                3 * rows.len(),
+                "without a slot every call evaluates"
+            );
+
+            let cached = prev_eq_self(true);
+            let m = DefineMatcher::new(&rows, &cached, None);
+            for _ in 0..3 {
+                assert_eq!(verdicts(&m, rows.len()).await, expected);
+            }
+            assert_eq!(
+                m.verdicts.evaluations.load(Ordering::Relaxed),
+                rows.len(),
+                "with a slot each row is evaluated once"
+            );
+        }
+
+        /// A predicate reading the running label assignment gets no slot: its verdict depends on
+        /// the path, and the cache would answer a different path's question.
+        #[tokio::test]
+        async fn path_dependent_define_is_never_cached() {
+            let mut defines =
+                DefineMap::from_iter([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+            assert_eq!(assign_verdict_slots(&mut defines), 0);
+            assert!(defines["a"].verdict_slot.is_none());
+            let rows = buffered(&[1, 2, 3]);
+            let m = DefineMatcher::new(&rows, &defines, None);
+            for _ in 0..2 {
+                verdicts(&m, rows.len()).await;
+            }
+            assert_eq!(
+                m.verdicts.evaluations.load(Ordering::Relaxed),
+                2 * rows.len()
+            );
+            assert!(m.verdicts.chunks.is_empty(), "no slots, no allocation");
+        }
+
+        /// Through the finder: the cache must not change which matches are found. `(a+ b)` with
+        /// `a AS PREV(a.v) = a.v` and `b AS PREV(b.v) = b.v` (the same predicate, so the cache
+        /// columns are exercised for two variables) over runs of equal values.
+        #[tokio::test]
+        async fn finder_output_is_identical_with_the_cache() {
+            let mk = |assign: bool| {
+                let mut defines = DefineMap::from_iter([
+                    nav_eq_self("a", nav_slot(KIND_PREV, &[], 1)),
+                    nav_eq_self("b", nav_slot(KIND_PREV, &[], 1)),
+                ]);
+                if assign {
+                    assert_eq!(assign_verdict_slots(&mut defines), 2);
+                }
+                defines
+            };
+            let nfa = Nfa::compile(&Pattern::Concat(vec![
+                plus("a"),
+                Pattern::Var("b".to_owned()),
+            ]));
+            let vals = [1, 1, 1, 2, 2, 3, 3, 3, 3];
+            // `find_all` itself asserts cached == uncached; this pins that the shape produces
+            // matches so that assertion is not vacuous, and that pre-assigned slots survive it.
+            let plain = find_all(&nfa, &mut mk(false), &vals).await;
+            let cached = find_all(&nfa, &mut mk(true), &vals).await;
+            assert_eq!(plain, cached);
+            assert!(!plain.is_empty(), "the shape must produce matches");
+        }
+
+        /// Only the `DEFINE` verdict is cached; the `WITHIN` span test depends on the match start
+        /// and must run on every call, cache hit or not.
+        #[tokio::test]
+        async fn within_is_tested_outside_the_cache() {
+            use risingwave_expr::expr::build_from_pretty;
+            // Three equal rows, order key = position, every window closing one key later.
+            let rows: Vec<BufferedRow> = (0..3)
+                .map(|i| BufferedRow {
+                    seq: i,
+                    order_key: Some(ScalarImpl::Int32(i as i32)),
+                    deadline: Deadline::At(ScalarImpl::Int32(i as i32 + 1)),
+                    row: OwnedRow::new(vec![Some(ScalarImpl::Int32(1))]),
+                })
+                .collect();
+            let defines = prev_eq_self(true);
+            // Only its presence matters to the matcher: the span is read off the cached deadline.
+            let within = NonStrictExpression::new_topmost(
+                build_from_pretty("(less_than_or_equal:boolean $0:int4 $1:int4)"),
+                LogReport,
+            );
+            let m = DefineMatcher::new(&rows, &defines, Some(&within));
+            let a = "a".to_owned();
+            // Candidate 2 as the second row of a match from 1: predicate true, span [1, 2] fits.
+            assert!(m.matches("a", 2, std::slice::from_ref(&a)).await.unwrap());
+            // Same candidate as the third row of a match from 0: the predicate verdict comes from
+            // the cache, but the span [0, 2] exceeds the bound — the answer must still be false.
+            assert!(!m.matches("a", 2, &[a.clone(), a]).await.unwrap());
+            assert_eq!(
+                m.verdicts.evaluations.load(Ordering::Relaxed),
+                1,
+                "the second call hit the cache for the predicate"
+            );
+        }
+
+        /// Cells are allocated per visited chunk, not per buffer: a matcher over a long buffer
+        /// whose walk touches one row allocates one chunk.
+        #[tokio::test]
+        async fn cells_are_allocated_per_visited_chunk() {
+            let vals: Vec<i32> = vec![1; 5 * VERDICT_CHUNK_ROWS];
+            let rows = buffered(&vals);
+            let defines = prev_eq_self(true);
+            let m = DefineMatcher::new(&rows, &defines, None);
+            assert_eq!(m.verdicts.allocated_chunks(), 0);
+            let last = rows.len() - 1;
+            assert!(
+                m.matches("a", last, &vec!["a".to_owned(); last])
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                m.verdicts.allocated_chunks(),
+                1,
+                "one chunk for one visited row"
+            );
+            assert!(m.matches("a", 0, &[]).await.is_ok());
+            assert_eq!(m.verdicts.allocated_chunks(), 2);
         }
     }
 }
