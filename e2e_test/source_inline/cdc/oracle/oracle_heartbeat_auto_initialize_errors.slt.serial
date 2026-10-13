@@ -16,10 +16,10 @@ statement ok
 DROP SOURCE IF EXISTS incompatible_oracle_hb CASCADE;
 
 statement ok
-DROP TABLE IF EXISTS unenforced_pk_oracle_hb;
+DROP SOURCE IF EXISTS unenforced_pk_oracle_hb CASCADE;
 
 statement ok
-DROP TABLE IF EXISTS seed_conflict_oracle_hb;
+DROP SOURCE IF EXISTS seed_conflict_oracle_hb CASCADE;
 
 # Initialization must not create the Oracle user that owns a missing schema.
 system ok
@@ -244,18 +244,14 @@ for heartbeat_table_sqls in [
     ],
 ]:
     prepare(create_heartbeat_tables_hook=no_op)
-    execute_oracle_sqls(heartbeat_table_sqls + [
-        "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
-        "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
-    ])
+    execute_oracle_sqls(heartbeat_table_sqls)
     execute_sqls(["""
-CREATE TABLE unenforced_pk_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+CREATE SOURCE unenforced_pk_oracle_hb WITH (
     $TEST_ORACLE_WITH_OPTIONS_COMMON,
     schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-    table.name = 'CUSTOMERS',
     heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
     heartbeat.table.auto.initialize = 'true'
-) FORMAT DEBEZIUM ENCODE JSON;
+) FORMAT PLAIN ENCODE JSON;
 """],
         after_sqls_hook=check_heartbeat_creation_error,
         after_sqls_hook_kwargs={
@@ -282,8 +278,6 @@ execute_oracle_sqls([
     "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
     "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL UNIQUE)",
     "INSERT INTO $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE (ID, HEARTBEAT) VALUES (2, 0)",
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
-    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
 ])
 PY
 
@@ -292,13 +286,12 @@ PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_sqls
 from oracle_test_hooks import check_heartbeat_creation_error
 execute_sqls(["""
-CREATE TABLE seed_conflict_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+CREATE SOURCE seed_conflict_oracle_hb WITH (
     $TEST_ORACLE_WITH_OPTIONS_COMMON,
     schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
-    table.name = 'CUSTOMERS',
     heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
     heartbeat.table.auto.initialize = 'true'
-) FORMAT DEBEZIUM ENCODE JSON;
+) FORMAT PLAIN ENCODE JSON;
 """],
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={

@@ -50,6 +50,7 @@ You may need to learn how to build and test RisingWave when implementing feature
   - You can connect right after the command finishes.
   - Logs are written to files in `.risingwave/log` folder.
 - Use `./risedev k` to stop a RisingWave instance started by `./risedev d`.
+  - `./risedev k` does not delete cluster data. Before a run that must start fresh, or when `./risedev d` fails because of leftover state (for example, meta panics with "Data directory is already used by another cluster"), run `./risedev k` and then `./risedev clean-data` before `./risedev d`.
 - Only when a RisingWave instance is running, you can use `./risedev psql -c "<your query>"` to run SQL queries in RW.
 - Only when a RisingWave instance is running, you can use `./risedev slt './path/to/e2e-test-file.slt'` to run end-to-end SLT tests.
   - File globs like `/**/*.slt` is allowed.
