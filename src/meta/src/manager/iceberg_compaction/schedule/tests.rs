@@ -1985,21 +1985,28 @@ async fn test_recovered_maintenance_only_fills_missing_tracks_of_live_sinks() {
     let sink_id = SinkId::new(43);
     let now = Instant::now();
     let config = new_test_iceberg_config(60, 10, CompactionType::Full);
-    let backlog = |pending_commit_count| RecoveredBacklog {
-        pending_commit_count,
-        observed_snapshot: Some(committed_snapshot(7, 7)),
+    let apply_recovery = || {
+        manager.apply_recovered_maintenance(
+            sink_id,
+            &config,
+            RecoveredBacklog {
+                pending_commit_count: 1,
+                observed_snapshot: Some(committed_snapshot(7, 7)),
+            },
+            now,
+        );
     };
-    let recover = |pending_commit_count| {
+    let recover = || {
         manager.inner.write().recovering_sink_ids.insert(sink_id);
-        manager.apply_recovered_maintenance(sink_id, &config, backlog(pending_commit_count), now);
+        apply_recovery();
     };
 
-    // The recovered backlog is scheduled by the configured interval.
-    recover(2);
+    // The recovered pending commit is scheduled by the configured interval.
+    recover();
     {
         let guard = manager.inner.read();
         let track = &guard.sink_schedules[&sink_id];
-        assert_eq!(track.pending_commit_count, 2);
+        assert_eq!(track.pending_commit_count, 1);
         assert_eq!(
             track
                 .latest_observed_snapshot
@@ -2012,16 +2019,23 @@ async fn test_recovered_maintenance_only_fills_missing_tracks_of_live_sinks() {
         assert!(guard.recovering_sink_ids.is_empty());
     }
 
-    // A track created by a commit after the restart is kept.
-    recover(5);
+    // A track updated by commits after the restart is kept.
+    manager
+        .inner
+        .write()
+        .sink_schedules
+        .get_mut(&sink_id)
+        .unwrap()
+        .pending_commit_count = 3;
+    recover();
     assert_eq!(
         manager.inner.read().sink_schedules[&sink_id].pending_commit_count,
-        2
+        3
     );
 
     // A sink dropped while its table was loading is not rebuilt.
     manager.inner.write().recovering_sink_ids.insert(sink_id);
     manager.clear_iceberg_maintenance_by_sink_id(sink_id);
-    manager.apply_recovered_maintenance(sink_id, &config, backlog(2), now);
+    apply_recovery();
     assert!(!manager.inner.read().sink_schedules.contains_key(&sink_id));
 }

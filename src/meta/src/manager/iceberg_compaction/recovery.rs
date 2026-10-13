@@ -17,9 +17,7 @@ use std::time::Instant;
 
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_connector::connector_common::{
-    IcebergCommittedSnapshot, recover_pending_commit_count,
-};
+use risingwave_connector::connector_common::IcebergCommittedSnapshot;
 use risingwave_connector::sink::iceberg::{IcebergWriteMode, commit_branch};
 use risingwave_pb::catalog::PbStreamJobStatus;
 use thiserror_ext::AsReport;
@@ -32,13 +30,18 @@ use super::*;
 const RECOVERY_CONCURRENCY: usize = 16;
 
 /// Compaction backlog of a sink, rebuilt from its Iceberg table metadata.
+///
+/// The exact number of unconsumed commits cannot be derived from the table, so a sink whose
+/// commit branch has a snapshot gets one pending commit. It triggers one compaction after the
+/// configured interval, which publishes or compacts nothing if the table is already clean.
 pub(super) struct RecoveredBacklog {
     pub(super) pending_commit_count: usize,
     pub(super) observed_snapshot: Option<IcebergCommittedSnapshot>,
 }
 
 impl IcebergCompactionManager {
-    /// Rebuilds the maintenance state of existing Iceberg sinks once after meta starts.
+    /// Rebuilds the maintenance state of existing Iceberg sinks once after meta starts. It runs
+    /// only when `iceberg_compaction_schedule_on_startup` is enabled.
     ///
     /// The state is kept only in memory and is otherwise created by sink commits. Without
     /// this recovery, a copy-on-write sink whose latest commits were not yet published to
@@ -114,13 +117,16 @@ impl IcebergCompactionManager {
 
         let branch = commit_branch(config.r#type.as_str(), config.write_mode);
         match config.load_table().await {
-            Ok(table) => RecoveredBacklog {
-                pending_commit_count: recover_pending_commit_count(table.metadata(), &branch),
-                observed_snapshot: IcebergCommittedSnapshot::from_branch_head(
-                    table.metadata(),
-                    &branch,
-                ),
-            },
+            Ok(table) => {
+                // A branch without a snapshot has nothing to compact, and an automatic
+                // merge-on-read round must start from an observed snapshot.
+                let observed_snapshot =
+                    IcebergCommittedSnapshot::from_branch_head(table.metadata(), &branch);
+                RecoveredBacklog {
+                    pending_commit_count: usize::from(observed_snapshot.is_some()),
+                    observed_snapshot,
+                }
+            }
             Err(e) => {
                 tracing::warn!(
                     iceberg_component = "compaction_scheduler",
