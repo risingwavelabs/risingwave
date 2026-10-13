@@ -595,8 +595,9 @@ impl Binder {
                 );
                 self.ensure_table_function_allowed()?;
 
-                // Enterprise feature gating
-                Feature::MssqlQuery.check_available()?;
+                // Reuse the SQL Server CDC source entitlement instead of
+                // introducing a separate license gate for this query surface.
+                Feature::SqlServerCdcSource.check_available()?;
 
                 let args = self
                     .bind_external_db_query_args(
