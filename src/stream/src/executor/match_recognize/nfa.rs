@@ -165,20 +165,34 @@ impl Memo {
         }
     }
 
-    fn slot(&mut self, pos: usize) -> &mut Visited {
-        let idx = pos - self.base;
+    /// The failure set at `pos`, or `None` for a position before the memo's start — which no
+    /// walk can reach (a walk only moves forward from its start). Checked rather than assumed:
+    /// without overflow checks a position below `base` would wrap the index and the growth loop
+    /// below would allocate until the process died, which is worse than either verdict.
+    fn slot(&mut self, pos: usize) -> Option<&mut Visited> {
+        let Some(idx) = pos.checked_sub(self.base) else {
+            crate::consistency::consistency_panic!(
+                pos,
+                base = self.base,
+                "MATCH_RECOGNIZE walk memo asked about a position before its start",
+            );
+            return None;
+        };
         while self.failed.len() <= idx {
             self.failed.push(Visited::new(self.n_states));
         }
-        &mut self.failed[idx]
+        Some(&mut self.failed[idx])
     }
 
+    /// Unknown positions are not failed: the walk proceeds as without a memo.
     fn is_failed(&mut self, state: StateId, pos: usize) -> bool {
-        self.slot(pos).contains(state)
+        self.slot(pos).is_some_and(|v| v.contains(state))
     }
 
     fn record_failure(&mut self, state: StateId, pos: usize) {
-        self.slot(pos).insert(state);
+        if let Some(v) = self.slot(pos) {
+            v.insert(state);
+        }
     }
 }
 
@@ -835,7 +849,17 @@ impl Nfa {
             // what keeps a rescan over a long pending run of a chain pattern (`a{600}`) from
             // walking every start to the boundary, Θ(k²) per rescan. (Not a matchless start: the
             // walk it stands in for is blocked at the boundary, and more rows may complete it.)
-            if n_rows - i < self.min_match_rows() {
+            let Some(rows_ahead) = n_rows.checked_sub(i) else {
+                // A start past the boundary cannot come from the scan loop (it stops at `n_rows`);
+                // do not walk it — the walk would read rows that do not exist.
+                crate::consistency::consistency_panic!(
+                    start = i,
+                    n_rows,
+                    "MATCH_RECOGNIZE scan start lies past the fed boundary",
+                );
+                return Ok(None);
+            };
+            if rows_ahead < self.min_match_rows() {
                 scan.next_start += 1;
                 continue;
             }
@@ -921,8 +945,19 @@ impl Nfa {
         // makes freezing a long chain match (`a{600}`) cheap: every position of its region has the
         // rest of the match, and more, ahead of it. (With EXACTLY that many rows the walk runs: a
         // match ending on the boundary keeps its start alive.)
+        let Some(rows_ahead) = n_rows.checked_sub(pos) else {
+            // A position past the boundary is a caller error, not a dead row. Without overflow
+            // checks the subtraction would wrap and the position would read as dead — evicting a
+            // row a live match may still need. Retain it.
+            crate::consistency::consistency_panic!(
+                pos,
+                n_rows,
+                "MATCH_RECOGNIZE liveness asked about a position past the fed boundary",
+            );
+            return Ok(true);
+        };
         if let Some(max) = self.max_match_rows
-            && n_rows - pos > max
+            && rows_ahead > max
         {
             return Ok(false);
         }
@@ -2774,5 +2809,78 @@ mod tests {
             vec![(0, 600), (600, 1200)],
             "two exact matches; the 100-row tail cannot complete a third"
         );
+    }
+
+    /// Guards on the position arithmetic that production builds (no overflow checks) would
+    /// otherwise wrap silently. Under strict consistency — the default, and the test default —
+    /// a breach panics through `consistency_panic!`; in the non-strict escape hatch it logs and
+    /// takes the conservative branch instead.
+    mod position_guards {
+        use super::*;
+
+        /// Run `f` with strict consistency disabled — the escape hatch in which a breached guard
+        /// logs and takes its conservative branch instead of panicking.
+        async fn non_strict<F: std::future::Future>(f: F) -> F::Output {
+            let config = risingwave_common::config::StreamingConfig {
+                unsafe_disable_strict_consistency: true,
+                ..Default::default()
+            };
+            crate::CONFIG.scope(std::sync::Arc::new(config), f).await
+        }
+
+        /// A memo asked about a position before its start: previously `pos - base` wrapped and
+        /// the slot-growth loop allocated until the process died.
+        #[test]
+        #[should_panic(expected = "inconsistency")]
+        fn memo_position_before_base_is_reported_not_wrapped() {
+            let mut memo = Memo::new(5, 10, 3);
+            let _ = memo.is_failed(0, 3);
+        }
+
+        /// A liveness question about a position past the fed boundary: previously `n_rows - pos`
+        /// wrapped past `max_match_rows` and the position read as dead — an eviction.
+        #[tokio::test]
+        #[should_panic(expected = "inconsistency")]
+        async fn liveness_past_the_boundary_is_reported_not_dead() {
+            let nfa = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
+            let m = SetMatcher::new(rows("ab"));
+            let _ = nfa
+                .reaches_boundary_alive(3, 2, &m, &mut ScanBudget::unlimited(), false)
+                .await;
+        }
+
+        /// Non-strict: the memo forgets nothing it knows and learns nothing it cannot place — a
+        /// below-base position is "not failed", and recording there is a no-op.
+        #[tokio::test]
+        async fn non_strict_memo_before_base_is_not_failed() {
+            non_strict(async {
+                let mut memo = Memo::new(5, 10, 3);
+                memo.record_failure(1, 3);
+                assert!(!memo.is_failed(1, 3));
+                assert!(
+                    memo.failed.is_empty(),
+                    "nothing allocated for a position it cannot place"
+                );
+                // In range still works.
+                memo.record_failure(1, 7);
+                assert!(memo.is_failed(1, 7));
+            })
+            .await;
+        }
+
+        /// Non-strict: a position past the boundary is retained, not evicted.
+        #[tokio::test]
+        async fn non_strict_liveness_past_the_boundary_is_alive() {
+            non_strict(async {
+                let nfa = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
+                let m = SetMatcher::new(rows("ab"));
+                let alive = nfa
+                    .reaches_boundary_alive(3, 2, &m, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                assert!(alive);
+            })
+            .await;
+        }
     }
 }
