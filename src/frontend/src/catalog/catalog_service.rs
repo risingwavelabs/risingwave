@@ -604,7 +604,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .ok_or_else(|| anyhow!("wait version not set"))?;
         self.wait_version(version).await?;
         if let Some(drop_result) = response.drop_result {
-            notice_drop_cascade_objects(&drop_result.cascade_objects);
+            notice_drop_cascade_objects(&drop_result);
         }
         Ok(())
     }

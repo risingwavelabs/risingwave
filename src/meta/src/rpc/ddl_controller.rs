@@ -54,7 +54,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    CascadeObject as PbCascadeObject, DdlProgress, TableJobType, WaitVersion, alter_name_request,
+    DdlProgress, DropResult, TableJobType, WaitVersion, alter_name_request,
     alter_set_schema_request, alter_swap_rename_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType as PbFragmentDistributionType;
@@ -281,19 +281,19 @@ impl DdlCommand {
 
 pub struct DdlCommandResult {
     pub version: Option<WaitVersion>,
-    pub cascade_objects: Option<Vec<PbCascadeObject>>,
+    pub drop_result: Option<DropResult>,
 }
 
 struct ExecutedDdlCommand {
     version: NotificationVersion,
-    cascade_objects: Option<Vec<PbCascadeObject>>,
+    drop_result: Option<DropResult>,
 }
 
 impl ExecutedDdlCommand {
-    fn without_cascade_objects(version: NotificationVersion) -> Self {
+    fn without_drop_result(version: NotificationVersion) -> Self {
         Self {
             version,
-            cascade_objects: None,
+            drop_result: None,
         }
     }
 }
@@ -472,9 +472,7 @@ impl DdlController {
         let fut = Box::pin(async move {
             macro_rules! execute {
                 ($future:expr) => {
-                    ($future)
-                        .await
-                        .map(ExecutedDdlCommand::without_cascade_objects)
+                    ($future).await.map(ExecutedDdlCommand::without_drop_result)
                 };
             }
 
@@ -608,7 +606,7 @@ impl DdlController {
                 catalog_version: result.version,
                 hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
             }),
-            cascade_objects: result.cascade_objects,
+            drop_result: result.drop_result,
         })
     }
 
@@ -1007,7 +1005,7 @@ impl DdlController {
         let database_id = subscription.database_id;
         let DropObjectResult {
             version,
-            cascade_objects,
+            drop_result,
             ..
         } = self
             .metadata_manager
@@ -1020,7 +1018,7 @@ impl DdlController {
         tracing::debug!("finish drop subscription");
         Ok(ExecutedDdlCommand {
             version,
-            cascade_objects,
+            drop_result,
         })
     }
 
@@ -1533,7 +1531,7 @@ impl DdlController {
         let DropObjectResult {
             release_context: release_ctx,
             version,
-            cascade_objects,
+            drop_result,
         } = self
             .metadata_manager
             .catalog_controller
@@ -1658,7 +1656,7 @@ impl DdlController {
         }
         Ok(ExecutedDdlCommand {
             version,
-            cascade_objects,
+            drop_result,
         })
     }
 
@@ -1994,13 +1992,13 @@ impl DdlController {
                     .await?;
                 self.iceberg_compaction_manager
                     .clear_maintenance_for_aborted_job(&abort_result);
-                ExecutedDdlCommand::without_cascade_objects(IGNORED_NOTIFICATION_VERSION)
+                ExecutedDdlCommand::without_drop_result(IGNORED_NOTIFICATION_VERSION)
             }
             JobStatus::Creating => {
                 self.stream_manager
                     .cancel_streaming_jobs(vec![job_id.id()])
                     .await?;
-                ExecutedDdlCommand::without_cascade_objects(IGNORED_NOTIFICATION_VERSION)
+                ExecutedDdlCommand::without_drop_result(IGNORED_NOTIFICATION_VERSION)
             }
             JobStatus::Created => self.drop_object(object_type, object_id, drop_mode).await?,
         };

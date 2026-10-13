@@ -15,7 +15,7 @@
 use risingwave_common::catalog::ICEBERG_SINK_PREFIX;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::common::PbObjectType;
-use risingwave_pb::ddl_service::CascadeObject as PbCascadeObject;
+use risingwave_pb::ddl_service::{CascadeObject as PbCascadeObject, DropResult, TypeCount};
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
 use sea_orm::{
     ColumnTrait, DatabaseTransaction, EntityTrait, JoinType, ModelTrait, QueryFilter, QuerySelect,
@@ -25,7 +25,7 @@ use sea_orm::{
 pub struct DropObjectResult {
     pub release_context: ReleaseContext,
     pub version: NotificationVersion,
-    pub cascade_objects: Option<Vec<PbCascadeObject>>,
+    pub drop_result: Option<DropResult>,
 }
 
 use super::*;
@@ -119,12 +119,11 @@ impl CatalogController {
 
         // The dependency query includes incoming sinks. Build notices before adding owned
         // objects, which are implicitly removed with their parent.
-        let cascade_objects =
-            if drop_mode == DropMode::Cascade && object_type != ObjectType::Database {
-                Some(build_cascade_objects_for_notice(object_id, &removed_objects, &txn).await?)
-            } else {
-                None
-            };
+        let drop_result = if drop_mode == DropMode::Cascade && object_type != ObjectType::Database {
+            Some(build_drop_result_for_notice(object_id, &removed_objects, &txn).await?)
+        } else {
+            None
+        };
 
         removed_objects.push(obj);
         let mut removed_object_ids: HashSet<_> =
@@ -367,7 +366,7 @@ impl CatalogController {
                 removed_iceberg_pk_index_sink_ids,
             },
             version,
-            cascade_objects,
+            drop_result,
         })
     }
 
@@ -445,219 +444,299 @@ async fn report_drop_object(
     }
 }
 
-async fn build_cascade_objects_for_notice(
+/// Maximum number of complete object names included in a cascade notice.
+const MAX_CASCADE_NOTICE_OBJECTS: usize = 10;
+
+/// Build complete counts and bounded details from the same dependency set used for deletion.
+async fn build_drop_result_for_notice(
     root_object_id: ObjectId,
     objects: &[PartialObject],
     txn: &DatabaseTransaction,
-) -> MetaResult<Vec<PbCascadeObject>> {
-    let grouped = objects
-        .iter()
-        .filter(|object| object.oid != root_object_id)
-        .cloned()
-        .into_group_map_by(|object| object.obj_type);
+) -> MetaResult<DropResult> {
+    let mut seen = HashSet::new();
+    let mut reportable_objects = Vec::new();
+    let mut table_ids = Vec::new();
+    for object in objects {
+        if object.oid == root_object_id || !seen.insert(object.oid) {
+            continue;
+        }
+        let object_type = match object.obj_type {
+            ObjectType::Table => {
+                table_ids.push(object.oid);
+                continue;
+            }
+            ObjectType::Source => PbObjectType::Source,
+            ObjectType::Sink => PbObjectType::Sink,
+            ObjectType::View => PbObjectType::View,
+            ObjectType::Function => PbObjectType::Function,
+            ObjectType::Connection => PbObjectType::Connection,
+            ObjectType::Subscription => PbObjectType::Subscription,
+            ObjectType::Secret => PbObjectType::Secret,
+            ObjectType::Schema => PbObjectType::Schema,
+            // Indexes are implicitly removed with their primary table.
+            ObjectType::Index | ObjectType::Database => continue,
+        };
+        reportable_objects.push((object_type, object.oid));
+    }
+
+    // Classify tables without loading names for the entire dependency graph.
+    if !table_ids.is_empty() {
+        let tables: Vec<(ObjectId, TableType)> = Table::find()
+            .select_only()
+            .columns([table::Column::TableId, table::Column::TableType])
+            .filter(table::Column::TableId.is_in(table_ids))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        for (oid, table_type) in tables {
+            let object_type = match table_type {
+                TableType::Table => PbObjectType::Table,
+                TableType::MaterializedView => PbObjectType::Mview,
+                TableType::Index | TableType::Internal | TableType::VectorIndex => continue,
+            };
+            reportable_objects.push((object_type, oid));
+        }
+    }
+
+    let (mut drop_result, detail_objects) = summarize_cascade_objects(reportable_objects);
+    let grouped = detail_objects.into_iter().into_group_map();
     let mut result = vec![];
 
-    for (object_type, objects) in grouped {
-        let object_ids = objects.iter().map(|object| object.oid);
+    for (object_type, object_ids) in grouped {
         match object_type {
-            ObjectType::Table => {
-                let rows: Vec<(String, String, TableType)> = Object::find()
+            PbObjectType::Table | PbObjectType::Mview => {
+                let rows: Vec<(ObjectId, String, String)> = Object::find()
                     .join(JoinType::InnerJoin, object::Relation::Table.def())
                     .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .column(table::Column::Name)
-                    .column(table::Column::TableType)
                     .filter(object::Column::Oid.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-
-                result.extend(rows.into_iter().filter_map(
-                    |(schema_name, object_name, table_type)| {
-                        let object_type = match table_type {
-                            TableType::Table => PbObjectType::Table,
-                            TableType::MaterializedView => PbObjectType::Mview,
-                            TableType::Index | TableType::Internal | TableType::VectorIndex => {
-                                return None;
-                            }
-                        };
-                        Some(PbCascadeObject {
+                result.extend(rows.into_iter().map(|(oid, schema_name, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
                             object_type: object_type as _,
                             schema_name: Some(schema_name),
                             object_name,
-                        })
-                    },
-                ));
+                        },
+                    )
+                }));
             }
-            ObjectType::Source => {
-                let rows: Vec<(String, String)> = Object::find()
+            PbObjectType::Source => {
+                let rows: Vec<(ObjectId, String, String)> = Object::find()
                     .join(JoinType::InnerJoin, object::Relation::Source.def())
                     .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .column(source::Column::Name)
                     .filter(object::Column::Oid.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-                result.extend(
-                    rows.into_iter()
-                        .map(|(schema_name, object_name)| PbCascadeObject {
+                result.extend(rows.into_iter().map(|(oid, schema_name, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
                             object_type: PbObjectType::Source as _,
                             schema_name: Some(schema_name),
                             object_name,
-                        }),
-                );
+                        },
+                    )
+                }));
             }
-            ObjectType::Sink => {
-                let rows: Vec<(String, String)> = Object::find()
+            PbObjectType::Sink => {
+                let rows: Vec<(ObjectId, String, String)> = Object::find()
                     .join(JoinType::InnerJoin, object::Relation::Sink.def())
                     .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .column(sink::Column::Name)
                     .filter(object::Column::Oid.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-                result.extend(
-                    rows.into_iter()
-                        .map(|(schema_name, object_name)| PbCascadeObject {
+                result.extend(rows.into_iter().map(|(oid, schema_name, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
                             object_type: PbObjectType::Sink as _,
                             schema_name: Some(schema_name),
                             object_name,
-                        }),
-                );
+                        },
+                    )
+                }));
             }
-            ObjectType::View => {
-                let rows: Vec<(String, String)> = Object::find()
+            PbObjectType::View => {
+                let rows: Vec<(ObjectId, String, String)> = Object::find()
                     .join(JoinType::InnerJoin, object::Relation::View.def())
                     .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .column(view::Column::Name)
                     .filter(object::Column::Oid.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-                result.extend(
-                    rows.into_iter()
-                        .map(|(schema_name, object_name)| PbCascadeObject {
+                result.extend(rows.into_iter().map(|(oid, schema_name, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
                             object_type: PbObjectType::View as _,
                             schema_name: Some(schema_name),
                             object_name,
-                        }),
-                );
+                        },
+                    )
+                }));
             }
-            ObjectType::Function => {
-                let rows: Vec<(String, String)> = Object::find()
+            PbObjectType::Function => {
+                let rows: Vec<(ObjectId, String, String)> = Object::find()
                     .join(JoinType::InnerJoin, object::Relation::Function.def())
                     .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .column(function::Column::Name)
                     .filter(object::Column::Oid.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-                result.extend(
-                    rows.into_iter()
-                        .map(|(schema_name, object_name)| PbCascadeObject {
+                result.extend(rows.into_iter().map(|(oid, schema_name, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
                             object_type: PbObjectType::Function as _,
                             schema_name: Some(schema_name),
                             object_name,
-                        }),
-                );
+                        },
+                    )
+                }));
             }
-            ObjectType::Connection => {
-                let rows: Vec<(String, String)> = Object::find()
+            PbObjectType::Connection => {
+                let rows: Vec<(ObjectId, String, String)> = Object::find()
                     .join(JoinType::InnerJoin, object::Relation::Connection.def())
                     .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .column(connection::Column::Name)
                     .filter(object::Column::Oid.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-                result.extend(
-                    rows.into_iter()
-                        .map(|(schema_name, object_name)| PbCascadeObject {
+                result.extend(rows.into_iter().map(|(oid, schema_name, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
                             object_type: PbObjectType::Connection as _,
                             schema_name: Some(schema_name),
                             object_name,
-                        }),
-                );
+                        },
+                    )
+                }));
             }
-            ObjectType::Subscription => {
-                let rows: Vec<(String, String)> = Object::find()
+            PbObjectType::Subscription => {
+                let rows: Vec<(ObjectId, String, String)> = Object::find()
                     .join(JoinType::InnerJoin, object::Relation::Subscription.def())
                     .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .column(subscription::Column::Name)
                     .filter(object::Column::Oid.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-                result.extend(
-                    rows.into_iter()
-                        .map(|(schema_name, object_name)| PbCascadeObject {
+                result.extend(rows.into_iter().map(|(oid, schema_name, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
                             object_type: PbObjectType::Subscription as _,
                             schema_name: Some(schema_name),
                             object_name,
-                        }),
-                );
+                        },
+                    )
+                }));
             }
-            ObjectType::Secret => {
-                let rows: Vec<(String, String)> = Secret::find()
+            PbObjectType::Secret => {
+                let rows: Vec<(ObjectId, String, String)> = Secret::find()
                     .inner_join(Object)
                     .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .column(secret::Column::Name)
                     .filter(secret::Column::SecretId.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-                result.extend(
-                    rows.into_iter()
-                        .map(|(schema_name, object_name)| PbCascadeObject {
+                result.extend(rows.into_iter().map(|(oid, schema_name, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
                             object_type: PbObjectType::Secret as _,
                             schema_name: Some(schema_name),
                             object_name,
-                        }),
-                );
+                        },
+                    )
+                }));
             }
-            ObjectType::Schema => {
-                let rows: Vec<String> = Object::find()
+            PbObjectType::Schema => {
+                let rows: Vec<(ObjectId, String)> = Object::find()
                     .join(JoinType::InnerJoin, object::Relation::Schema.def())
                     .select_only()
+                    .column(object::Column::Oid)
                     .column(schema::Column::Name)
                     .filter(object::Column::Oid.is_in(object_ids))
                     .into_tuple()
                     .all(txn)
                     .await?;
-                result.extend(rows.into_iter().map(|object_name| PbCascadeObject {
-                    object_type: PbObjectType::Schema as _,
-                    schema_name: None,
-                    object_name,
+                result.extend(rows.into_iter().map(|(oid, object_name)| {
+                    (
+                        oid,
+                        PbCascadeObject {
+                            object_type: PbObjectType::Schema as _,
+                            schema_name: None,
+                            object_name,
+                        },
+                    )
                 }));
             }
-            // Indexes are implicitly dropped with their primary table and should not be presented
-            // as objects removed specifically because CASCADE was requested.
-            ObjectType::Index | ObjectType::Database => {}
+            PbObjectType::Index | PbObjectType::Database | PbObjectType::Unspecified => {
+                unreachable!("non-reportable cascade object")
+            }
         }
     }
 
-    result.sort_by(|a, b| {
-        (&a.object_type, &a.schema_name, &a.object_name).cmp(&(
-            &b.object_type,
-            &b.schema_name,
-            &b.object_name,
-        ))
-    });
-    result.dedup();
-    Ok(result)
+    // Queries and hash-map iteration do not preserve the selected (type, ID) order.
+    result.sort_by_key(|(oid, object)| (object.object_type, *oid));
+    drop_result.cascade_objects = result.into_iter().map(|(_, object)| object).collect();
+    Ok(drop_result)
+}
+
+fn summarize_cascade_objects(
+    mut objects: Vec<(PbObjectType, ObjectId)>,
+) -> (DropResult, Vec<(PbObjectType, ObjectId)>) {
+    objects.sort_unstable_by_key(|(object_type, oid)| (*object_type as i32, *oid));
+    let counts_by_type = objects
+        .chunk_by(|a, b| a.0 == b.0)
+        .map(|objects| TypeCount {
+            object_type: objects[0].0 as _,
+            count: objects.len() as u64,
+        })
+        .collect();
+    let result = DropResult {
+        total_count: objects.len() as u64,
+        counts_by_type,
+        cascade_objects: vec![],
+    };
+    objects.truncate(MAX_CASCADE_NOTICE_OBJECTS);
+    (result, objects)
 }
