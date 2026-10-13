@@ -339,7 +339,8 @@ impl CheckpointControl {
                     | Command::ResetSource { .. }
                     | Command::ResumeBackfill { .. }
                     | Command::InjectSourceOffsets { .. }
-                    | Command::ApplyIcebergPkIndexCompaction { .. } => {
+                    | Command::ApplyIcebergPkIndexCompaction { .. }
+                    | Command::BoundedLoad { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -1133,6 +1134,8 @@ impl DatabaseCheckpointControl {
                 );
                 self.completing_barrier = Some(info.barrier_info.epoch());
                 task.finished_jobs.extend(staging_commit_info.finished_jobs);
+                task.bounded_load_actions
+                    .extend(staging_commit_info.bounded_load_actions);
                 task.finished_cdc_table_backfill
                     .extend(staging_commit_info.finished_cdc_table_backfill);
                 task.epoch_infos

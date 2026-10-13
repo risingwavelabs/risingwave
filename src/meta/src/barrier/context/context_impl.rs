@@ -20,18 +20,24 @@ use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::{JobId, PartialGraphId, SinkId};
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
-use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
+use risingwave_meta_model::{ActorId, bounded_job};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbTableRefillRuntimeConfig;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::stream_plan::bounded_load_mutation::{
+    Action as PbBoundedLoadAction, ListSealed,
+};
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
 };
 use risingwave_rpc_client::StreamingControlHandle;
+use sea_orm::prelude::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use thiserror_ext::AsReport;
 
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{
@@ -41,7 +47,7 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, CreateStreamingJobCommandInfo,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
     Scheduled,
 };
@@ -311,6 +317,43 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.env
             .notification_manager()
             .notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+        Ok(())
+    }
+
+    async fn apply_bounded_load_action(&self, action: BoundedLoadAction) -> MetaResult<()> {
+        match action {
+            BoundedLoadAction::SealListing {
+                database_id,
+                attempt,
+            } => {
+                if let Err(error) = self.barrier_scheduler.run_command_no_wait(
+                    database_id,
+                    Command::BoundedLoad {
+                        attempt,
+                        action: PbBoundedLoadAction::ListSealed(ListSealed {}),
+                    },
+                ) {
+                    tracing::warn!(
+                        database_id = %database_id,
+                        generation = attempt.generation,
+                        error = %error.as_report(),
+                        "skip bounded list seal during recovery"
+                    );
+                }
+            }
+            BoundedLoadAction::Complete { job_id, source_id } => {
+                bounded_job::Entity::update_many()
+                    .col_expr(
+                        bounded_job::Column::CompletedAt,
+                        Expr::value(chrono::Utc::now().timestamp_millis()),
+                    )
+                    .filter(bounded_job::Column::JobId.eq(job_id))
+                    .filter(bounded_job::Column::SourceId.eq(source_id))
+                    .filter(bounded_job::Column::CompletedAt.is_null())
+                    .exec(&self.env.meta_store_ref().conn)
+                    .await?;
+            }
+        }
         Ok(())
     }
 

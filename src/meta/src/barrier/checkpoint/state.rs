@@ -701,6 +701,7 @@ impl DatabaseCheckpointControl {
                         self.state.is_paused(),
                         edges,
                         None,
+                        HashMap::new(), // snapshot backfill is not bounded ingestion
                         &resolved_split_assignment,
                         &actors.stream_actors,
                     )?;
@@ -809,7 +810,6 @@ impl DatabaseCheckpointControl {
 
                 let subscriber_id = job_id.as_subscriber_id();
                 let mutation = Mutation::Add(AddMutation {
-                    actor_bounded_attempts: Default::default(),
                     actor_dispatchers: Default::default(),
                     added_actors: Default::default(),
                     actor_splits: Default::default(),
@@ -1132,6 +1132,10 @@ impl DatabaseCheckpointControl {
                     .database_info
                     .assign_cdc_backfill_splits(info.stream_job_fragments.stream_job_id())?;
 
+                let actor_bounded_attempts = self
+                    .database_info
+                    .start_bounded_load(info.streaming_job.id())?;
+
                 // Mutation
                 let is_currently_paused = self.state.is_paused();
                 let mutation = Command::create_streaming_job_to_mutation(
@@ -1141,6 +1145,7 @@ impl DatabaseCheckpointControl {
                     is_currently_paused,
                     edges,
                     actor_cdc_table_snapshot_splits,
+                    actor_bounded_attempts,
                     &resolved_split_assignment,
                     &actors.stream_actors,
                 )?;
@@ -1735,6 +1740,10 @@ impl DatabaseCheckpointControl {
                 skip_forward_to_iceberg_job = Some(job_id);
                 self.apply_simple_command(None, "ApplyIcebergPkIndexCompaction")
             }
+            Some(Command::BoundedLoad { attempt, action }) => {
+                let mutation = Some(Command::bounded_load_to_mutation(attempt, action));
+                self.apply_simple_command(mutation, "BoundedLoad")
+            }
         };
 
         let mut independent_job_throttle_mutations = HashMap::new();
@@ -1969,6 +1978,7 @@ impl DatabaseCheckpointControl {
                             fragment_infos: new_fragment_info,
                             subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
                             status: CreateStreamingJobStatus::Created,
+                            bounded_load_tracker: None,
                             cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
                         });
                     }
