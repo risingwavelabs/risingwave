@@ -154,7 +154,9 @@ struct ExecutorInner<S: StateStore> {
     partition_key_indices: Vec<usize>,
     order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
     state_table: StateTable<S>,
-    state_table_schema_len: usize,
+    /// For each column of the state table, its index in
+    /// `partition key | order key | input stream key | NULL`, to rebuild the row of an evicted key.
+    evict_row_indices: Vec<usize>,
     watermark_sequence: AtomicU64Ref,
     /// Optional state table for persisting window function intermediate states.
     /// See `StreamEowcOverWindow::infer_intermediate_state_table` for schema definition.
@@ -195,6 +197,31 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info().clone();
 
+        // Evictions rebuild state table rows from these columns only.
+        debug_assert!(
+            args.state_table.pk_indices().iter().all(|i| {
+                args.partition_key_indices.contains(i)
+                    || *i == args.order_key_index
+                    || input_info.stream_key.contains(i)
+            }),
+            "state table pk must consist of partition key, order key and input stream key columns"
+        );
+        let num_partition_key_cols = args.partition_key_indices.len();
+        let evict_row_indices = (0..input_info.schema.len())
+            .map(|i| {
+                if let Some(j) = args.partition_key_indices.iter().position(|&k| k == i) {
+                    j
+                } else if i == args.order_key_index {
+                    num_partition_key_cols
+                } else if let Some(j) = input_info.stream_key.iter().position(|&k| k == i) {
+                    num_partition_key_cols + 1 + j
+                } else {
+                    // NULL
+                    num_partition_key_cols + 1 + input_info.stream_key.len()
+                }
+            })
+            .collect_vec();
+
         // Build pk_serde if intermediate_state_table is present
         let pk_serde = args.intermediate_state_table.as_ref().map(|_| {
             let pk_data_types: Vec<_> = input_info
@@ -220,7 +247,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 partition_key_indices: args.partition_key_indices,
                 order_key_index: args.order_key_index,
                 state_table: args.state_table,
-                state_table_schema_len: input_info.schema.len(),
+                evict_row_indices,
                 watermark_sequence: args.watermark_epoch,
                 intermediate_state_table: args.intermediate_state_table,
                 pk_serde,
@@ -502,15 +529,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             &[this.schema[this.order_key_index].data_type()],
                             &[OrderType::ascending()],
                         )?;
-                        let state_row_pk = (&partition_key).chain(order_key).chain(key.pk);
-                        let state_row = {
-                            // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
-                            let mut state_row = vec![None; this.state_table_schema_len];
-                            for (i_in_pk, &i) in this.state_table.pk_indices().iter().enumerate() {
-                                state_row[i] = state_row_pk.datum_at(i_in_pk).to_owned_datum();
-                            }
-                            OwnedRow::new(state_row)
-                        };
+                        // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
+                        let state_row = (&partition_key)
+                            .chain(&order_key)
+                            .chain(key.pk.as_inner())
+                            .chain(row::once(Datum::None))
+                            .project(&this.evict_row_indices);
                         // NOTE: We don't know the value of the row here, so the table must allow
                         // inconsistent ops.
                         this.state_table.delete(state_row);
