@@ -144,6 +144,8 @@ impl<S: StateStore> NoSnapshotUpstreamHandler<'_, S> {
                                 upstream_table_name = self.upstream_table_name,
                                 "CdcBackfill has been dropped due to config change"
                             );
+                            self.state_impl.commit_state(barrier.epoch).await?;
+
                             return Ok(NoSnapshotUpstreamOutcome::Stop(barrier));
                         }
                         _ => (),
@@ -899,6 +901,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     upstream_table_name,
                                                     "CdcBackfill has been dropped due to config change"
                                                 );
+                                                state_impl.commit_state(barrier.epoch).await?;
                                                 yield Message::Barrier(barrier);
                                                 break 'backfill_loop;
                                             }
