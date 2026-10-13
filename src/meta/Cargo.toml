@@ -21,7 +21,7 @@ base64-url = { version = "3.0.0" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { workspace = true }
 clap = { workspace = true }
-comfy-table = "7"
+comfy-table = "8"
 crepe = "0.2"
 easy-ext = "1"
 educe = "0.6"

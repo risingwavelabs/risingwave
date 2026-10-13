@@ -677,6 +677,16 @@ impl catalog::Table {
     }
 }
 
+impl catalog::table::TableType {
+    /// Whether this table type is backed by the normal state store iterator.
+    pub fn supports_cache_warm_up(self) -> bool {
+        matches!(
+            self,
+            Self::Table | Self::MaterializedView | Self::Index | Self::Internal
+        )
+    }
+}
+
 impl std::fmt::Debug for meta::SystemParams {
     /// Directly formatting `SystemParams` can be inaccurate or leak sensitive information.
     ///
@@ -692,14 +702,10 @@ impl std::fmt::Debug for data::DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data::DataType {
             precision,
-            scale,
-            interval_type,
             field_type,
             field_names,
             field_ids,
             type_name,
-            // currently all data types are nullable
-            is_nullable: _,
         } = self;
 
         let type_name = data::data_type::TypeName::try_from(*type_name)
@@ -709,12 +715,6 @@ impl std::fmt::Debug for data::DataType {
         let mut s = f.debug_struct(type_name);
         if self.precision != 0 {
             s.field("precision", precision);
-        }
-        if self.scale != 0 {
-            s.field("scale", scale);
-        }
-        if self.interval_type != 0 {
-            s.field("interval_type", interval_type);
         }
         if !self.field_type.is_empty() {
             s.field("field_type", field_type);
@@ -844,21 +844,25 @@ impl streaming_job_resource_type::ResourceType {
 
 #[cfg(test)]
 mod tests {
-    use crate::data::{DataType, data_type};
+    use crate::catalog::table::TableType;
+    use crate::data::{DataChunk, DataType, data_type};
     use crate::plan_common::Field;
     use crate::stream_plan::stream_node::NodeBody;
 
     #[test]
     fn test_getter() {
         let data_type: DataType = DataType {
-            is_nullable: true,
+            type_name: data_type::TypeName::Double.into(),
             ..Default::default()
         };
         let field = Field {
             data_type: Some(data_type),
             name: "".to_owned(),
         };
-        assert!(field.get_data_type().unwrap().is_nullable);
+        assert_eq!(
+            field.get_data_type().unwrap().type_name(),
+            data_type::TypeName::Double
+        );
     }
 
     #[test]
@@ -880,12 +884,12 @@ mod tests {
 
     #[test]
     fn test_primitive_getter() {
-        let data_type: DataType = DataType::default();
-        let new_data_type = DataType {
-            is_nullable: data_type.get_is_nullable(),
+        let chunk = DataChunk::default();
+        let new_chunk = DataChunk {
+            cardinality: chunk.get_cardinality(),
             ..Default::default()
         };
-        assert!(!new_data_type.is_nullable);
+        assert_eq!(new_chunk.cardinality, 0);
     }
 
     #[test]
@@ -894,6 +898,16 @@ mod tests {
         // box all fields in NodeBody to avoid large_enum_variant
         // see https://github.com/risingwavelabs/risingwave/issues/19910
         const_assert_eq!(std::mem::size_of::<NodeBody>(), 16);
+    }
+
+    #[test]
+    fn test_table_type_supports_cache_warm_up() {
+        assert!(TableType::Table.supports_cache_warm_up());
+        assert!(TableType::MaterializedView.supports_cache_warm_up());
+        assert!(TableType::Index.supports_cache_warm_up());
+        assert!(TableType::Internal.supports_cache_warm_up());
+        assert!(!TableType::VectorIndex.supports_cache_warm_up());
+        assert!(!TableType::Unspecified.supports_cache_warm_up());
     }
 
     #[test]

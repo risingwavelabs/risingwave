@@ -70,6 +70,7 @@ impl CreateIndependentStreamingJobCommandInfo {
                 }
             }
             kind @ IndependentStreamingJobType::BatchRefresh { .. } => kind,
+            IndependentStreamingJobType::IcebergV3 => IndependentStreamingJobType::IcebergV3,
         };
         PostCollectCommand::CreateStreamingJob {
             info: self.info,

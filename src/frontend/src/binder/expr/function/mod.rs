@@ -99,12 +99,34 @@ impl Binder {
                 Ok(cast_args)
             }
             CDC_SOURCE_QUERY_ARG_LEN => {
-                let source_name = expr_impl_to_string_fn(&args[0])?;
+                use crate::catalog::root_catalog::SchemaPath;
+                use thiserror_ext::AsReport as _;
+
+                let schema_path = self.bind_schema_path(schema_name);
+                let raw_source_name = expr_impl_to_string_fn(&args[0])?;
+                // Accept `schema.source` and quoted identifiers, matching every other SQL surface.
+                // Historical behavior fed the whole string (dot included) into the catalog lookup,
+                // so a qualified name could never match and an unqualified name only searched the
+                // session `search_path` — which broke sources created in non-default schemas.
+                let object_name =
+                    Parser::parse_object_name_str(&raw_source_name).map_err(|e| {
+                        ErrorCode::BindError(format!(
+                            "invalid source name `{}`: {}",
+                            raw_source_name,
+                            e.to_report_string(),
+                        ))
+                    })?;
+                let (explicit_schema, source_name) =
+                    Binder::resolve_schema_qualified_name(&self.db_name, &object_name)?;
+                let source_schema_path = match explicit_schema.as_deref() {
+                    Some(schema) => SchemaPath::Name(schema),
+                    None => schema_path,
+                };
                 let source_catalog = self
                     .catalog
                     .get_source_by_name(
                         &self.db_name,
-                        self.bind_schema_path(schema_name),
+                        source_schema_path,
                         &source_name,
                     )?
                     .0;

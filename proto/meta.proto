@@ -956,8 +956,20 @@ message GetServingVnodeMappingsResponse {
   repeated FragmentWorkerSlotMapping worker_slot_mappings = 3;
 }
 
+message WarmUpTableCacheRequest {
+  uint32 table_id = 1;
+  // Maximum number of vnodes scanned concurrently on each compute node.
+  uint32 concurrency = 2;
+}
+
+message WarmUpTableCacheResponse {
+  uint64 key_count = 1;
+  uint32 worker_count = 2;
+}
+
 service ServingService {
   rpc GetServingVnodeMappings(GetServingVnodeMappingsRequest) returns (GetServingVnodeMappingsResponse);
+  rpc WarmUpTableCache(WarmUpTableCacheRequest) returns (WarmUpTableCacheResponse);
 }
 
 message EventLog {

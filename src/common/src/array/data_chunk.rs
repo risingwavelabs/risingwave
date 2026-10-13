@@ -18,6 +18,7 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use comfy_table::{ContentLineStyle, LineStyle, TableStyle};
 use either::Either;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
@@ -68,7 +69,12 @@ pub struct DataChunk {
 }
 
 impl DataChunk {
-    pub(crate) const PRETTY_TABLE_PRESET: &'static str = "||--+-++|    ++++++";
+    pub(crate) const PRETTY_TABLE_STYLE: TableStyle = TableStyle::new()
+        .top_border(LineStyle::new('+', '-', '+', '+'))
+        .header_lines(ContentLineStyle::new('|', '|', '|'))
+        .header_separator(LineStyle::new('+', '-', '+', '+'))
+        .content_lines(ContentLineStyle::new('|', '|', '|'))
+        .bottom_border(LineStyle::new('+', '-', '+', '+'));
 
     /// Create a `DataChunk` with `columns` and visibility.
     ///
@@ -387,7 +393,7 @@ impl DataChunk {
         }
 
         let mut table = Table::new();
-        table.load_preset(Self::PRETTY_TABLE_PRESET);
+        table.load_style(Self::PRETTY_TABLE_STYLE);
 
         for row in self.rows() {
             let cells: Vec<_> = row

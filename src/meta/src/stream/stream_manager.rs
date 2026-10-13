@@ -411,7 +411,7 @@ impl GlobalStreamManager {
                     stream_manager
                         .metadata_manager
                         .catalog_controller
-                        .notify_frontend_trivial()
+                        .current_notification_version()
                         .await
                 }
                 CreateType::Foreground => {
@@ -667,7 +667,36 @@ impl GlobalStreamManager {
             refresh_interval_sec,
         };
 
-        let create_job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+        let create_job_type = if matches!(
+            &streaming_job,
+            StreamingJob::Sink(sink, _)
+                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(
+                    &sink.properties
+                )
+        ) {
+            if refresh_interval_sec.is_some() || since_timestamp_epoch.is_some() {
+                bail!("Iceberg V3 sinks do not support batch refresh or since_timestamp");
+            }
+            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
+                anyhow::anyhow!("Iceberg V3 sinks must be planned with snapshot backfill")
+            })?;
+            for fragment in info.stream_job_fragments.inner.fragments.values() {
+                let mask = fragment.fragment_type_mask;
+                if mask.contains(FragmentTypeFlag::Source)
+                    || mask.contains(FragmentTypeFlag::SourceScan)
+                {
+                    bail!(
+                        "Iceberg V3 sinks must not contain source or source-backfill fragments; \
+                         fragment {} has source/source-backfill nodes",
+                        fragment.fragment_id
+                    );
+                }
+            }
+            CreateStreamingJobType::Independent {
+                snapshot_backfill_info,
+                kind: IndependentStreamingJobType::IcebergV3,
+            }
+        } else if let Some(refresh_interval_sec) = refresh_interval_sec {
             if since_timestamp_epoch.is_some() {
                 bail!("since_timestamp should not be specified when no snapshot backfill");
             }
@@ -792,7 +821,7 @@ impl GlobalStreamManager {
                     tmp_id,
                     to_drop_state_table_ids: {
                         if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
-                            vec![drop_table_connector_ctx.to_remove_state_table_id]
+                            drop_table_connector_ctx.to_remove_state_table_ids.clone()
                         } else {
                             Vec::new()
                         }
