@@ -18,20 +18,25 @@ use either::Either;
 use futures::stream;
 use iceberg::scan::FileScanTask;
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME};
 use risingwave_common::config::StreamingConfig;
-use risingwave_common::id::TableId;
+use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
+use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::{
     GLOBAL_ICEBERG_SCAN_METRICS, IcebergFileScanMetrics, IcebergScanMetricsLabels, IcebergScanOpts,
     PersistedFileScanTask, scan_task_to_chunk_with_deletes,
 };
 use risingwave_connector::source::reader::desc::SourceDesc;
+use risingwave_pb::stream_plan::bounded_load_mutation::Action as BoundedLoadAction;
+use risingwave_pb::stream_service::barrier_complete_response::bounded_load_progress::{
+    Progress, ReaderDone,
+};
 use thiserror_ext::AsReport;
 
+use super::load_mode::LoadMode;
 use crate::executor::prelude::*;
 use crate::executor::source::{ChunksWithState, StreamSourceCore, prune_additional_cols};
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -40,18 +45,20 @@ use crate::task::LocalBarrierManager;
 /// Type alias for file entries in the queue: (`file_name`, `scan_task_json`)
 type FileEntry = (String, JsonbVal);
 
-struct FetchState {
-    /// Whether we are in a refresh cycle (started by `RefreshStart`, ended by load finished report)
-    is_refreshing: bool,
+#[derive(PartialEq, Eq)]
+enum FetchPhase {
+    Idle,
+    /// More file assignments may arrive from upstream.
+    Loading,
+    /// Listing is sealed; finish the remaining files.
+    Draining,
+}
 
-    /// Whether the upstream list executor has finished listing all files
-    is_list_finished: bool,
+struct FetchState {
+    phase: FetchPhase,
 
     /// Number of files currently being fetched in the active batch reader
     splits_on_fetch: usize,
-
-    /// Shared flag indicating whether the current batch reader has finished reading all files
-    is_batch_finished: Arc<RwLock<bool>>,
 
     /// Queue of files waiting to be processed
     file_queue: VecDeque<FileEntry>,
@@ -64,19 +71,17 @@ struct FetchState {
 impl FetchState {
     fn new() -> Self {
         Self {
-            is_refreshing: false,
-            is_list_finished: false,
+            phase: FetchPhase::Idle,
             splits_on_fetch: 0,
-            is_batch_finished: Arc::new(RwLock::new(false)),
             file_queue: VecDeque::new(),
             in_flight_files: Vec::new(),
         }
     }
 
-    /// Reset all state for a new refresh cycle.
-    fn reset_for_refresh(&mut self) {
+    /// Clear previous work and start a new load.
+    fn start_load(&mut self) {
         tracing::info!(
-            "reset_for_refresh: clearing file_queue_len={}, in_flight_files_len={}, splits_on_fetch={}",
+            "start_load: clearing file_queue_len={}, in_flight_files_len={}, splits_on_fetch={}",
             self.file_queue.len(),
             self.in_flight_files.len(),
             self.splits_on_fetch
@@ -84,30 +89,32 @@ impl FetchState {
         self.file_queue.clear();
         self.in_flight_files.clear();
         self.splits_on_fetch = 0;
-        self.is_refreshing = true;
-        self.is_list_finished = false;
-        *self.is_batch_finished.write() = false;
+        self.phase = FetchPhase::Loading;
     }
 
-    /// Check if we should report load finished to the barrier manager.
-    fn should_report_load_finished(&self) -> bool {
+    fn seal_listing(&mut self) {
+        if self.phase == FetchPhase::Loading {
+            self.phase = FetchPhase::Draining;
+        }
+    }
+
+    /// Check if we should report completion to the barrier manager.
+    fn should_report_finished(&self) -> bool {
         self.splits_on_fetch == 0
             && self.file_queue.is_empty()
             && self.in_flight_files.is_empty()
-            && self.is_list_finished
-            && self.is_refreshing
+            && self.phase == FetchPhase::Draining
     }
 
-    /// Mark the refresh cycle as complete after reporting load finished.
-    fn mark_refresh_complete(&mut self) {
-        self.is_list_finished = false;
-        self.is_refreshing = false;
+    /// Mark the load as complete after reporting completion.
+    fn mark_complete(&mut self) {
+        self.phase = FetchPhase::Idle;
     }
 
     /// Check if we should start a new batch reader.
     fn should_start_batch_reader(&self, need_rebuild: bool) -> bool {
-        need_rebuild
-            || (self.splits_on_fetch == 0 && !self.file_queue.is_empty() && self.is_refreshing)
+        self.phase != FetchPhase::Idle
+            && (need_rebuild || (self.splits_on_fetch == 0 && !self.file_queue.is_empty()))
     }
 
     /// Mark one file as successfully fetched.
@@ -115,8 +122,6 @@ impl FetchState {
         self.splits_on_fetch -= 1;
 
         // When all files in the current batch complete successfully, clear in-flight tracking.
-        // We don't need to wait for is_batch_finished because by the time splits_on_fetch reaches 0,
-        // all files have been processed successfully.
         if self.splits_on_fetch == 0 {
             tracing::info!("All files fetched successfully, clearing in_flight_files");
             self.in_flight_files.clear();
@@ -133,7 +138,6 @@ impl FetchState {
             }
         }
         self.splits_on_fetch = 0;
-        *self.is_batch_finished.write() = false;
     }
 
     /// Enqueue new file assignments from upstream.
@@ -209,6 +213,7 @@ pub struct BatchIcebergFetchExecutor<S: StateStore> {
     streaming_config: Arc<StreamingConfig>,
 
     associated_table_id: TableId,
+    is_bounded: bool,
 
     scan_metrics: Option<IcebergScanMetricsLabels>,
     file_scan_metrics: Option<IcebergFileScanMetrics>,
@@ -222,6 +227,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         barrier_manager: LocalBarrierManager,
         streaming_config: Arc<StreamingConfig>,
         associated_table_id: Option<TableId>,
+        is_bounded: bool,
     ) -> Self {
         assert!(associated_table_id.is_some());
         Self {
@@ -231,6 +237,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             barrier_manager,
             streaming_config,
             associated_table_id: associated_table_id.unwrap(),
+            is_bounded,
             scan_metrics: None,
             file_scan_metrics: None,
         }
@@ -243,6 +250,13 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         // Initialize upstream and wait for first barrier
         let mut upstream = self.upstream.take().unwrap().execute();
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let mode = if self.is_bounded {
+            LoadMode::Bounded
+        } else {
+            LoadMode::FullReload
+        };
+        let starts_on_creation = mode.starts_on_creation(&first_barrier, self.actor_ctx.id);
+        let pause_on_startup = first_barrier.is_pause_on_startup();
         yield Message::Barrier(first_barrier);
 
         // Initialize source description
@@ -260,9 +274,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         // Initialize metrics context
         let iceberg_metrics = &GLOBAL_ICEBERG_SCAN_METRICS;
         let iceberg_table_name = match &source_desc.source.config {
-            risingwave_connector::source::ConnectorProperties::Iceberg(props) => {
-                props.table.table_name().to_owned()
-            }
+            ConnectorProperties::Iceberg(props) => props.table.table_name().to_owned(),
             _ => unreachable!("BatchIcebergFetchExecutor must be built with Iceberg properties"),
         };
         let source_id_str = core.source_id.to_string();
@@ -289,6 +301,14 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             upstream,
             stream::pending().boxed(),
         );
+
+        if pause_on_startup {
+            stream.pause_stream();
+        }
+
+        if starts_on_creation {
+            state.start_load();
+        }
 
         // Main processing loop
         while let Some(msg) = stream.next().await {
@@ -335,12 +355,13 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     Message::Barrier(barrier) => {
                         let need_rebuild = Self::handle_barrier_mutations(
                             &barrier,
-                            &core,
+                            core.source_id,
                             &mut state,
                             &mut stream,
+                            &mode,
                         );
 
-                        if barrier.is_checkpoint() && state.should_report_load_finished() {
+                        if barrier.is_checkpoint() && state.should_report_finished() {
                             tracing::info!(
                                 ?barrier.epoch,
                                 actor_id = %self.actor_ctx.id,
@@ -348,13 +369,25 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                 table_id = %self.associated_table_id,
                                 "Reporting load finished"
                             );
-                            self.barrier_manager.report_source_load_finished(
-                                barrier.epoch,
-                                self.actor_ctx.id,
-                                self.associated_table_id,
-                                core.source_id,
-                            );
-                            state.mark_refresh_complete();
+                            match mode {
+                                LoadMode::FullReload => {
+                                    self.barrier_manager.report_source_load_finished(
+                                        barrier.epoch,
+                                        self.actor_ctx.id,
+                                        self.associated_table_id,
+                                        core.source_id,
+                                    );
+                                }
+                                LoadMode::Bounded => {
+                                    self.barrier_manager.report_bounded_load_progress(
+                                        barrier.epoch,
+                                        self.actor_ctx.id,
+                                        self.actor_ctx.fragment_id,
+                                        Progress::ReaderDone(ReaderDone {}),
+                                    );
+                                }
+                            }
+                            state.mark_complete();
                         }
 
                         yield Message::Barrier(barrier);
@@ -403,9 +436,10 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
     /// Handle barrier mutations and return whether reader needs to be rebuilt.
     fn handle_barrier_mutations(
         barrier: &Barrier,
-        core: &StreamSourceCore<S>,
+        source_id: SourceId,
         state: &mut FetchState,
         stream: &mut StreamReaderWithPause<true, ChunksWithState>,
+        mode: &LoadMode,
     ) -> bool {
         let Some(mutation) = barrier.mutation.as_deref() else {
             return false;
@@ -423,28 +457,44 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             Mutation::RefreshStart {
                 associated_source_id,
                 ..
-            } if associated_source_id == &core.source_id => {
+            } if associated_source_id == &source_id && mode.accepts_refresh_mutations() => {
                 tracing::info!(
                     ?barrier.epoch,
-                    source_id = %core.source_id,
+                    source_id = %source_id,
                     is_checkpoint = barrier.is_checkpoint(),
-                    "RefreshStart: resetting state for new refresh cycle"
+                    "RefreshStart: starting new refresh cycle"
                 );
-                state.reset_for_refresh();
+                state.start_load();
                 true
             }
             Mutation::ListFinish {
                 associated_source_id,
-            } if associated_source_id == &core.source_id => {
+            } if associated_source_id == &source_id && mode.accepts_refresh_mutations() => {
                 tracing::info!(
                     ?barrier.epoch,
-                    source_id = %core.source_id,
+                    source_id = %source_id,
                     is_checkpoint = barrier.is_checkpoint(),
                     "ListFinish: upstream finished listing files"
                 );
-                state.is_list_finished = true;
+                state.seal_listing();
                 false
             }
+            Mutation::BoundedLoad {
+                source_id: target_source_id,
+                action,
+            } if target_source_id == &source_id && mode.accepts_bounded_mutations() => match action
+            {
+                BoundedLoadAction::ListSealed(_) => {
+                    tracing::info!(
+                        ?barrier.epoch,
+                        source_id = %source_id,
+                        is_checkpoint = barrier.is_checkpoint(),
+                        "BoundedLoad: upstream sealed listing"
+                    );
+                    state.seal_listing();
+                    false
+                }
+            },
             _ => false,
         }
     }
@@ -492,13 +542,11 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         } else {
             tracing::debug!("Starting batch reader with {} files", batch.len());
             state.splits_on_fetch += batch.len();
-            *state.is_batch_finished.write() = false;
 
             let batch_reader = Self::build_batched_stream_reader(
                 source_desc,
                 batch,
                 streaming_config.developer.chunk_size,
-                state.is_batch_finished.clone(),
                 file_scan_metrics,
             );
             stream.replace_data_stream(batch_reader.boxed());
@@ -513,11 +561,10 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         source_desc: SourceDesc,
         tasks: Vec<FileScanTask>,
         chunk_size: usize,
-        batch_finished: Arc<RwLock<bool>>,
         file_scan_metrics: IcebergFileScanMetrics,
     ) {
         let properties = match source_desc.source.config.clone() {
-            risingwave_connector::source::ConnectorProperties::Iceberg(props) => props,
+            ConnectorProperties::Iceberg(props) => props,
             _ => unreachable!("Expected Iceberg connector properties"),
         };
         let table = properties.load_table().await?;
@@ -542,8 +589,6 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 last_read_pos: None,
             };
         }
-
-        *batch_finished.write() = true;
     }
 }
 

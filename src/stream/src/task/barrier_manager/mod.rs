@@ -23,6 +23,8 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::{FragmentId, PartialGraphId, SinkId};
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
+use risingwave_pb::stream_service::barrier_complete_response::BoundedLoadProgress;
+use risingwave_pb::stream_service::barrier_complete_response::bounded_load_progress::Progress;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -59,6 +61,10 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         table_id: TableId,
         associated_source_id: SourceId,
+    },
+    ReportBoundedLoadProgress {
+        epoch: EpochPair,
+        report: BoundedLoadProgress,
     },
     RefreshFinished {
         epoch: EpochPair,
@@ -221,6 +227,23 @@ impl LocalBarrierManager {
             actor_id,
             table_id,
             associated_source_id,
+        });
+    }
+
+    pub fn report_bounded_load_progress(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+        progress: Progress,
+    ) {
+        self.send_event(LocalBarrierEvent::ReportBoundedLoadProgress {
+            epoch,
+            report: BoundedLoadProgress {
+                actor_id,
+                fragment_id,
+                progress: Some(progress),
+            },
         });
     }
 
