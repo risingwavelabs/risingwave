@@ -31,12 +31,13 @@ use risingwave_connector::parser::{
     SpecificParserConfig, TimeHandling, TimestampHandling, TimestamptzHandling,
 };
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::{CdcOffset, ExternalCdcTableType};
+use risingwave_connector::source::cdc::external::{
+    CdcOffset, CdcOffsetParseFunc, ExternalCdcTableType, ExternalTableReaderImpl,
+};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 
-use crate::executor::Mutation;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::reader::{
@@ -51,6 +52,7 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
+use crate::executor::{Mutation, TableId};
 use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
@@ -67,6 +69,155 @@ fn can_poll_upstream_while_creating_reader(
     pk_comparisons_are_known: bool,
 ) -> bool {
     current_pk_pos.is_none() || pk_comparisons_are_known
+}
+
+/// Result of handling an upstream message while no snapshot is running.
+enum NoSnapshotUpstreamOutcome {
+    /// Forward the message downstream, if any, and keep going.
+    /// `None` means nothing to emit: a watermark, or a chunk with no visible rows to emit.
+    Continue(Option<Message>),
+    /// The actor is stopped: forward the barrier and exit the executor.
+    Stop(Barrier),
+}
+
+/// Snapshot cursor together with the PK comparisons needed to filter upstream changes
+/// against it.
+#[derive(Clone, Copy)]
+struct SnapshotCursor<'a> {
+    pk_pos: &'a OwnedRow,
+    pk_needs_unsigned_i64_compare: &'a [bool],
+}
+
+struct NoSnapshotUpstreamHandler<'a, S: StateStore> {
+    actor_ctx: &'a ActorContextRef,
+    metrics: &'a CdcBackfillMetrics,
+    table_id: TableId,
+    upstream_table_name: &'a str,
+    offset_parse_func: &'a mut CdcOffsetParseFunc,
+    output_indices: &'a [usize],
+    pk_indices: &'a [usize],
+    pk_order: &'a [OrderType],
+    /// `None` means the next snapshot starts from the beginning.
+    cursor: Option<SnapshotCursor<'a>>,
+    total_snapshot_row_count: u64,
+    state_impl: &'a mut CdcBackfillState<S>,
+    last_binlog_offset: &'a mut Option<CdcOffset>,
+    is_snapshot_paused: &'a mut bool,
+    rate_limit_rps: &'a mut Option<u32>,
+}
+
+impl<S: StateStore> NoSnapshotUpstreamHandler<'_, S> {
+    async fn handle_upstream(
+        &mut self,
+        msg: Message,
+    ) -> StreamExecutorResult<NoSnapshotUpstreamOutcome> {
+        match msg {
+            Message::Barrier(barrier) => {
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Pause => {
+                            *self.is_snapshot_paused = true;
+                            tracing::info!(
+                                table_id = %self.table_id,
+                                upstream_table_name = self.upstream_table_name,
+                                "snapshot is paused by barrier"
+                            );
+                        }
+                        Mutation::Resume => {
+                            *self.is_snapshot_paused = false;
+                            tracing::info!(
+                                table_id = %self.table_id,
+                                upstream_table_name = self.upstream_table_name,
+                                "snapshot is resumed by barrier"
+                            );
+                        }
+                        Mutation::Throttle(_) => {
+                            if let Some(entry) =
+                                mutation.backfill_throttle_config(self.actor_ctx.fragment_id)
+                            {
+                                *self.rate_limit_rps = entry.rate_limit;
+                            }
+                        }
+                        mutation if mutation.is_stop(self.actor_ctx.id) => {
+                            tracing::info!(
+                                table_id = %self.table_id,
+                                upstream_table_name = self.upstream_table_name,
+                                "CdcBackfill has been dropped due to config change"
+                            );
+                            return Ok(NoSnapshotUpstreamOutcome::Stop(barrier));
+                        }
+                        _ => (),
+                    }
+                }
+
+                // Commit after all preceding upstream chunks have been emitted.
+                self.state_impl
+                    .mutate_and_commit_state(
+                        self.cursor.map(|cursor| cursor.pk_pos.clone()),
+                        self.last_binlog_offset.clone(),
+                        self.total_snapshot_row_count,
+                        false,
+                        barrier.epoch,
+                    )
+                    .await?;
+
+                Ok(NoSnapshotUpstreamOutcome::Continue(Some(Message::Barrier(
+                    barrier,
+                ))))
+            }
+            Message::Chunk(chunk) => {
+                let Some(cursor) = self.cursor else {
+                    // The next snapshot starts from the beginning and covers these changes.
+                    return Ok(NoSnapshotUpstreamOutcome::Continue(None));
+                };
+
+                if !chunk.has_visible_rows() {
+                    return Ok(NoSnapshotUpstreamOutcome::Continue(None));
+                }
+
+                let (chunk, consumed_offset) = CdcBackfillExecutor::<S>::filter_recovery_chunk(
+                    self.offset_parse_func,
+                    chunk,
+                    cursor.pk_pos,
+                    PkCompareInfo {
+                        indices: self.pk_indices,
+                        order: self.pk_order,
+                        needs_unsigned_i64_compare: cursor.pk_needs_unsigned_i64_compare,
+                    },
+                    self.last_binlog_offset,
+                    self.output_indices,
+                )?;
+
+                if let Some(consumed_offset) = consumed_offset {
+                    *self.last_binlog_offset = Some(consumed_offset);
+                }
+
+                let chunk = chunk.map(|chunk| {
+                    CdcBackfillExecutor::<S>::report_metrics(
+                        self.metrics,
+                        0,
+                        chunk.cardinality() as u64,
+                    );
+
+                    Message::Chunk(chunk)
+                });
+
+                Ok(NoSnapshotUpstreamOutcome::Continue(chunk))
+            }
+            Message::Watermark(_) => Ok(NoSnapshotUpstreamOutcome::Continue(None)),
+        }
+    }
+
+    async fn wait_for_reader(
+        &mut self,
+        upstream: &mut (impl Stream<Item = StreamExecutorResult<Message>> + Unpin),
+        future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,
+    ) -> StreamExecutorResult<Either<NoSnapshotUpstreamOutcome, ExternalTableReaderImpl>> {
+        match build_reader_and_poll_upstream(upstream, future).await? {
+            Either::Left(msg) => Ok(Either::Left(self.handle_upstream(msg).await?)),
+            Either::Right(table_reader) => Ok(Either::Right(table_reader)),
+        }
+    }
 }
 
 // The TimestampHandling/TimestamptzHandling/TimeHandling parser's behavior depends on the debezium.time.precision.mode setting:
@@ -205,7 +356,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     /// the emitted chunks. Rows with `PK > current_pk_pos` are visible in the
     /// retained buffer.
     fn consume_upstream_chunk_buffer(
-        offset_parse_func: &risingwave_connector::source::cdc::external::CdcOffsetParseFunc,
+        offset_parse_func: &CdcOffsetParseFunc,
         upstream_chunk_buffer: &mut Vec<StreamChunk>,
         current_pk_pos: Option<&OwnedRow>,
         pk_compare: PkCompareInfo<'_>,
@@ -302,7 +453,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     ///
     /// Rows are safe to send downstream if in binlog range and `PK <= current_pk_pos`.
     fn filter_recovery_chunk(
-        offset_parse_func: &risingwave_connector::source::cdc::external::CdcOffsetParseFunc,
+        offset_parse_func: &CdcOffsetParseFunc,
         chunk: StreamChunk,
         current_pos: &OwnedRow,
         pk_compare: PkCompareInfo<'_>,
@@ -430,7 +581,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // beginning. Recovery preserves events for the already-scanned prefix while reader
             // creation is retried. Legacy MySQL graphs with Int64 PK columns must first recover
             // comparison metadata from the reader so events use unsigned-aware ordering if needed.
-            let offset_parse_func = self.external_table.table_type().get_cdc_offset_parser()?;
+            let mut offset_parse_func = self.external_table.table_type().get_cdc_offset_parser()?;
             let mut future = Box::pin(create_table_reader_with_retry(
                 self.external_table.clone(),
                 self.actor_ctx.id,
@@ -440,91 +591,39 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 current_pk_pos.as_ref(),
                 pk_needs_unsigned_i64_compare.is_some(),
             ) {
+                let mut handler = NoSnapshotUpstreamHandler {
+                    actor_ctx: &self.actor_ctx,
+                    metrics: &self.metrics,
+                    table_id,
+                    upstream_table_name: &upstream_table_name,
+                    offset_parse_func: &mut offset_parse_func,
+                    output_indices: &self.output_indices,
+                    pk_indices: &pk_indices,
+                    pk_order: &pk_order,
+                    cursor: current_pk_pos.as_ref().map(|pk_pos| SnapshotCursor {
+                        pk_pos,
+                        pk_needs_unsigned_i64_compare: pk_needs_unsigned_i64_compare
+                            .as_deref()
+                            .expect("checked by can_poll_upstream_while_creating_reader"),
+                    }),
+                    total_snapshot_row_count,
+                    state_impl: &mut state_impl,
+                    last_binlog_offset: &mut last_binlog_offset,
+                    is_snapshot_paused: &mut is_snapshot_paused,
+                    rate_limit_rps: &mut self.rate_limit_rps,
+                };
                 loop {
-                    match build_reader_and_poll_upstream(&mut upstream, &mut future).await? {
-                        Either::Left(msg) => match msg {
-                            Message::Barrier(barrier) => {
-                                if let Some(mutation) = barrier.mutation.as_deref() {
-                                    match mutation {
-                                        Mutation::Pause => {
-                                            is_snapshot_paused = true;
-                                        }
-                                        Mutation::Resume => {
-                                            is_snapshot_paused = false;
-                                        }
-                                        Mutation::Throttle(_) => {
-                                            if let Some(entry) = mutation.backfill_throttle_config(
-                                                self.actor_ctx.fragment_id,
-                                            ) {
-                                                self.rate_limit_rps = entry.rate_limit;
-                                            }
-                                        }
-                                        mutation if mutation.is_stop(self.actor_ctx.id) => {
-                                            tracing::info!(
-                                                %table_id,
-                                                upstream_table_name,
-                                                "CdcBackfill has been dropped due to config change"
-                                            );
-                                            yield Message::Barrier(barrier);
-                                            return Ok(());
-                                        }
-                                        _ => (),
-                                    }
-                                }
-
-                                if last_binlog_offset.is_some() {
-                                    state_impl
-                                        .mutate_state(
-                                            current_pk_pos.clone(),
-                                            last_binlog_offset.clone(),
-                                            total_snapshot_row_count,
-                                            false,
-                                        )
-                                        .await?;
-                                }
-
-                                state_impl.commit_state(barrier.epoch).await?;
-
-                                yield Message::Barrier(barrier);
+                    match handler.wait_for_reader(&mut upstream, &mut future).await? {
+                        Either::Left(NoSnapshotUpstreamOutcome::Continue(msg)) => {
+                            if let Some(msg) = msg {
+                                yield msg;
                             }
-                            Message::Chunk(chunk) => {
-                                if let Some(current_pos) = current_pk_pos.as_ref() {
-                                    let pk_needs_unsigned_i64_compare =
-                                    pk_needs_unsigned_i64_compare.as_deref().expect(
-                                        "recovery may only poll upstream with known PK comparisons",
-                                    );
-                                    let (chunk, consumed_offset) = Self::filter_recovery_chunk(
-                                        &offset_parse_func,
-                                        chunk,
-                                        current_pos,
-                                        PkCompareInfo {
-                                            indices: &pk_indices,
-                                            order: &pk_order,
-                                            needs_unsigned_i64_compare:
-                                                pk_needs_unsigned_i64_compare,
-                                        },
-                                        &last_binlog_offset,
-                                        &self.output_indices,
-                                    )?;
-                                    if let Some(chunk) = chunk {
-                                        Self::report_metrics(
-                                            &self.metrics,
-                                            0,
-                                            chunk.cardinality() as u64,
-                                        );
-                                        yield Message::Chunk(chunk);
-                                    }
-                                    if let Some(consumed_offset) = consumed_offset {
-                                        last_binlog_offset = Some(consumed_offset);
-                                    }
-                                } else {
-                                    // The snapshot starts from the beginning and covers these changes.
-                                }
-                            }
-                            Message::Watermark(_) => {
-                                // ignore watermark
-                            }
-                        },
+                        }
+                        Either::Left(NoSnapshotUpstreamOutcome::Stop(barrier)) => {
+                            yield Message::Barrier(barrier);
+
+                            return Ok(());
+                        }
                         Either::Right(table_reader) => break table_reader,
                     }
                 }
@@ -586,80 +685,59 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             let _ = Pin::new(&mut upstream).peek().await;
 
             // wait for a barrier to make sure the backfill starts after upstream source
+            let mut handler = NoSnapshotUpstreamHandler {
+                actor_ctx: &self.actor_ctx,
+                metrics: &self.metrics,
+                table_id,
+                upstream_table_name: &upstream_table_name,
+                offset_parse_func: &mut offset_parse_func,
+                output_indices: &self.output_indices,
+                pk_indices: &pk_indices,
+                pk_order: &pk_order,
+                cursor: current_pk_pos.as_ref().map(|pk_pos| SnapshotCursor {
+                    pk_pos,
+                    pk_needs_unsigned_i64_compare: &pk_needs_unsigned_i64_compare,
+                }),
+                total_snapshot_row_count,
+                state_impl: &mut state_impl,
+                last_binlog_offset: &mut last_binlog_offset,
+                is_snapshot_paused: &mut is_snapshot_paused,
+                rate_limit_rps: &mut self.rate_limit_rps,
+            };
             #[for_await]
             for msg in upstream.by_ref() {
                 match msg? {
-                    Message::Barrier(barrier) => {
-                        match barrier.mutation.as_deref() {
-                            Some(crate::executor::Mutation::Pause) => {
-                                is_snapshot_paused = true;
-                                tracing::info!(
-                                    %table_id,
-                                    upstream_table_name,
-                                    "snapshot is paused by barrier"
-                                );
-                            }
-                            Some(crate::executor::Mutation::Resume) => {
-                                is_snapshot_paused = false;
-                                tracing::info!(
-                                    %table_id,
-                                    upstream_table_name,
-                                    "snapshot is resumed by barrier"
-                                );
-                            }
-                            _ => {
-                                // ignore other mutations
-                            }
-                        }
-                        // Commit after all preceding recovery chunks have been emitted.
-                        if current_pk_pos.is_some() {
-                            state_impl
-                                .mutate_state(
-                                    current_pk_pos.clone(),
-                                    last_binlog_offset.clone(),
-                                    total_snapshot_row_count,
-                                    false,
-                                )
-                                .await?;
-                        }
-
-                        state_impl.commit_state(barrier.epoch).await?;
-                        yield Message::Barrier(barrier);
-                        break;
-                    }
-                    Message::Chunk(chunk) => {
-                        if let Some(current_pos) = current_pk_pos.as_ref() {
-                            let (chunk, consumed_offset) = Self::filter_recovery_chunk(
-                                &offset_parse_func,
-                                chunk,
-                                current_pos,
-                                PkCompareInfo {
-                                    indices: &pk_indices,
-                                    order: &pk_order,
-                                    needs_unsigned_i64_compare: &pk_needs_unsigned_i64_compare,
-                                },
-                                &last_binlog_offset,
-                                &self.output_indices,
-                            )?;
-                            if let Some(chunk) = chunk {
-                                Self::report_metrics(&self.metrics, 0, chunk.cardinality() as u64);
-                                yield Message::Chunk(chunk);
-                            }
-                            if let Some(consumed_offset) = consumed_offset {
-                                last_binlog_offset = Some(consumed_offset);
-                            }
-                        } else if let Some(chunk_offset) =
-                            get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?
-                            && last_binlog_offset
+                    Message::Chunk(chunk) if handler.cursor.is_none() => {
+                        // Without a snapshot cursor, the snapshot covers these changes, but the
+                        // binlog offset still advances past them.
+                        if chunk.has_visible_rows()
+                            && let Some(chunk_offset) =
+                                get_cdc_chunk_last_offset(handler.offset_parse_func, &chunk)?
+                            && handler
+                                .last_binlog_offset
                                 .as_ref()
                                 .is_none_or(|last| *last < chunk_offset)
                         {
-                            last_binlog_offset = Some(chunk_offset);
+                            *handler.last_binlog_offset = Some(chunk_offset);
                         }
                     }
-                    Message::Watermark(_) => {
-                        // Ignore watermark
-                    }
+                    msg => match handler.handle_upstream(msg).await? {
+                        NoSnapshotUpstreamOutcome::Continue(Some(msg)) => {
+                            let is_barrier = matches!(msg, Message::Barrier(_));
+
+                            yield msg;
+
+                            if is_barrier {
+                                break;
+                            }
+                        }
+                        NoSnapshotUpstreamOutcome::Continue(None) => {}
+                        NoSnapshotUpstreamOutcome::Stop(barrier) => {
+                            yield Message::Barrier(barrier);
+
+                            return Ok(());
+                        }
+                    },
                 }
             }
 
@@ -698,113 +776,37 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         self.actor_ctx.fragment_id,
                     ));
 
+                    let mut handler = NoSnapshotUpstreamHandler {
+                        actor_ctx: &self.actor_ctx,
+                        metrics: &self.metrics,
+                        table_id,
+                        upstream_table_name: &upstream_table_name,
+                        offset_parse_func: &mut offset_parse_func,
+                        output_indices: &self.output_indices,
+                        pk_indices: &pk_indices,
+                        pk_order: &pk_order,
+                        cursor: current_pk_pos.as_ref().map(|pk_pos| SnapshotCursor {
+                            pk_pos,
+                            pk_needs_unsigned_i64_compare: &pk_needs_unsigned_i64_compare,
+                        }),
+                        total_snapshot_row_count,
+                        state_impl: &mut state_impl,
+                        last_binlog_offset: &mut last_binlog_offset,
+                        is_snapshot_paused: &mut is_snapshot_paused,
+                        rate_limit_rps: &mut self.rate_limit_rps,
+                    };
                     let table_reader = loop {
-                        match build_reader_and_poll_upstream(&mut upstream, &mut future).await? {
-                            Either::Left(msg) => match msg {
-                                Message::Barrier(barrier) => {
-                                    if let Some(mutation) = barrier.mutation.as_deref() {
-                                        match mutation {
-                                            Mutation::Pause => {
-                                                is_snapshot_paused = true;
-                                            }
-                                            Mutation::Resume => {
-                                                is_snapshot_paused = false;
-                                            }
-                                            Mutation::Throttle(_) => {
-                                                if let Some(entry) = mutation
-                                                    .backfill_throttle_config(
-                                                        self.actor_ctx.fragment_id,
-                                                    )
-                                                {
-                                                    self.rate_limit_rps = entry.rate_limit;
-                                                }
-                                            }
-                                            mutation if mutation.is_stop(self.actor_ctx.id) => {
-                                                tracing::info!(
-                                                    %table_id,
-                                                    upstream_table_name,
-                                                    "CdcBackfill has been dropped due to config change"
-                                                );
-                                                yield Message::Barrier(barrier);
-                                                return Ok(());
-                                            }
-                                            _ => (),
-                                        }
-                                    }
-
-                                    // Replacement reader starts fresh snapshot,
-                                    // events beyond current PK will be covered so they can be dropped,
-                                    // events before must be emitted before barrier
-                                    let mut upstream_processed_row_count = 0;
-                                    let mut rebuild_consumed_binlog_offset = None;
-
-                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                        rebuild_consumed_binlog_offset =
-                                            get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
-                                        if let Some(current_pos) = current_pk_pos.as_ref() {
-                                            let chunk = mapping_chunk(
-                                                mark_cdc_chunk(
-                                                    &offset_parse_func,
-                                                    chunk,
-                                                    current_pos,
-                                                    &pk_indices,
-                                                    &pk_order,
-                                                    &pk_needs_unsigned_i64_compare,
-                                                    last_binlog_offset.clone(),
-                                                )?,
-                                                &self.output_indices,
-                                            );
-
-                                            upstream_processed_row_count +=
-                                                chunk.cardinality() as u64;
-
-                                            if chunk.has_visible_rows() {
-                                                yield Message::Chunk(chunk);
-                                            }
-                                        }
-                                    }
-
-                                    if let Some(consumed_offset) = rebuild_consumed_binlog_offset {
-                                        last_binlog_offset = Some(consumed_offset);
-                                    }
-
-                                    Self::report_metrics(
-                                        &self.metrics,
-                                        0,
-                                        upstream_processed_row_count,
-                                    );
-
-                                    state_impl
-                                        .mutate_and_commit_state(
-                                            current_pk_pos.clone(),
-                                            last_binlog_offset.clone(),
-                                            total_snapshot_row_count,
-                                            false,
-                                            barrier.epoch,
-                                        )
-                                        .await?;
-
-                                    yield Message::Barrier(barrier);
+                        match handler.wait_for_reader(&mut upstream, &mut future).await? {
+                            Either::Left(NoSnapshotUpstreamOutcome::Continue(msg)) => {
+                                if let Some(msg) = msg {
+                                    yield msg;
                                 }
-                                Message::Chunk(chunk) => {
-                                    if !chunk.has_visible_rows() {
-                                        continue;
-                                    }
+                            }
+                            Either::Left(NoSnapshotUpstreamOutcome::Stop(barrier)) => {
+                                yield Message::Barrier(barrier);
 
-                                    let chunk_binlog_offset =
-                                        get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
-                                    if let (Some(last_binlog_offset), Some(chunk_offset)) =
-                                        (last_binlog_offset.as_ref(), chunk_binlog_offset)
-                                        && chunk_offset < *last_binlog_offset
-                                    {
-                                        continue;
-                                    }
-                                    upstream_chunk_buffer.push(chunk.compact_vis());
-                                }
-                                Message::Watermark(_) => {
-                                    // Ignore watermark while the snapshot reader is unavailable.
-                                }
-                            },
+                                return Ok(());
+                            }
                             Either::Right(table_reader) => break table_reader,
                         }
                     };
