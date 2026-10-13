@@ -63,6 +63,7 @@ use risingwave_connector::source::cdc::{
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{EventType, get_event_data_types_with_names};
+use risingwave_connector::source::refresh_mode::{BoundedInput, RefreshMode};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 pub use risingwave_connector::source::{
     ADBC_SNOWFLAKE_CONNECTOR, UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR,
@@ -76,8 +77,7 @@ use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
-use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
+use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
@@ -757,20 +757,19 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     format_encode: &FormatEncodeOptions,
     is_create_source: bool,
-) -> Result<(WithOptions, SourceRefreshMode)> {
+) -> Result<(WithOptions, RefreshMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(format_encode, &mut with_properties)?;
     let refresh_mode = {
         let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
+
         if is_create_source && refresh_mode.is_some() {
             return Err(RwError::from(ProtocolError(
                 "`refresh_mode` only supported for CREATE TABLE".to_owned(),
             )));
         }
 
-        refresh_mode.unwrap_or(SourceRefreshMode {
-            refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
-        })
+        refresh_mode.unwrap_or_default()
     };
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
@@ -909,7 +908,7 @@ pub async fn bind_create_source_or_table_with_connector(
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
-    refresh_mode: SourceRefreshMode,
+    refresh_mode: RefreshMode,
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
@@ -1108,6 +1107,19 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     let (mut columns, pk_col_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
+    if let Some(bounded) = refresh_mode.bounded_input() {
+        // A bounded load restarts from scratch on recovery, so rows must be deduplicated by key.
+        if row_id_index.is_some() {
+            return Err(ErrorCode::BindError(
+                "Bounded tables must have a PRIMARY KEY. Please define a primary key for the table."
+                    .to_owned(),
+            )
+            .into());
+        }
+
+        check_bounded_snapshot(&with_properties, bounded).await?;
+    }
+
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
@@ -1169,9 +1181,36 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
-        refresh_mode: Some(refresh_mode),
+        refresh_mode,
     };
     Ok(source)
+}
+
+/// Checks that the snapshot pinned by a bounded load exists in the Iceberg table.
+async fn check_bounded_snapshot(
+    with_properties: &WithOptionsSecResolved,
+    bounded: BoundedInput,
+) -> Result<()> {
+    let ConnectorProperties::Iceberg(properties) =
+        ConnectorProperties::extract(with_properties.clone(), true)?
+    else {
+        return Err(ErrorCode::BindError(
+            "`scan.bounded.mode` is only supported for the iceberg connector".to_owned(),
+        )
+        .into());
+    };
+
+    let table = properties.load_table().await?;
+
+    let snapshot_id = bounded.iceberg_snapshot_id();
+
+    if table.metadata().snapshot_by_id(snapshot_id).is_none() {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "snapshot {snapshot_id} does not exist in the Iceberg table"
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 pub async fn handle_create_source(

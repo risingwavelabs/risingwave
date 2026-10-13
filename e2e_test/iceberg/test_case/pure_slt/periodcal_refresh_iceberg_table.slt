@@ -47,6 +47,7 @@ create table iceberg_batch_table ( primary key (id) ) with (
   catalog.type = 'storage',
   table.name = 't_refresh',
   database.name = 'public',
+  refresh_mode = 'FULL_RELOAD',
   refresh_interval_sec = 'abcdef'
 );
 ----
@@ -67,6 +68,7 @@ create table iceberg_batch_table ( primary key (id) ) with (
   catalog.type = 'storage',
   table.name = 't_refresh',
   database.name = 'public',
+  refresh_mode = 'FULL_RELOAD',
   refresh_interval_sec = '-10'
 );
 ----
@@ -93,7 +95,7 @@ create table iceberg_batch_table ( primary key (id) ) with (
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Invalid parameter value: `refresh_interval_sec` is not allowed when `refresh_mode` is not 'FULL_RELOAD'
+  Invalid parameter value: `refresh_interval_sec` is only allowed when `refresh_mode` is 'FULL_RELOAD'
 
 
 statement ok

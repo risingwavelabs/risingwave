@@ -121,7 +121,7 @@ impl StreamNode for StreamSource {
                 downstream_columns: self.downstream_columns.as_ref().map(|cols| Columns {
                     columns: cols.iter().map(|c| c.to_protobuf()).collect_vec(),
                 }),
-                refresh_mode: source_catalog.refresh_mode,
+                refresh_mode: Some(source_catalog.refresh_mode.to_proto()),
                 associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });
