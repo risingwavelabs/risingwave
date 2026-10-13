@@ -804,15 +804,23 @@ impl IcebergCompactionManager {
         let table = config.load_table().await?;
         let branch = commit_branch(config.r#type.as_str(), config.write_mode);
         // A branch without a snapshot has nothing to compact.
-        if let Some(observed_snapshot) =
+        let Some(observed_snapshot) =
             IcebergCommittedSnapshot::from_branch_head(table.metadata(), &branch)
-        {
-            self.update_iceberg_commit_info(IcebergSinkCompactionUpdate {
-                sink_id,
-                force_compaction: false,
-                observed_snapshot,
-            })
-            .await;
+        else {
+            return Ok(());
+        };
+        let prepared_update = PreparedSinkUpdate {
+            sink_id,
+            kind: SinkUpdateKind::Commit { observed_snapshot },
+            now: Instant::now(),
+            allow_track_initialization: true,
+            loaded_config: Some(config),
+        };
+        let mut guard = self.inner.write();
+        // A commit during the loads above may have recorded a newer snapshot. Do not overwrite
+        // it with the head read here.
+        if !guard.sink_schedules.contains_key(&sink_id) {
+            self.apply_sink_update(&mut guard, prepared_update);
         }
         Ok(())
     }
