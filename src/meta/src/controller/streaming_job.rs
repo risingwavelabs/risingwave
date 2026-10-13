@@ -707,7 +707,8 @@ impl CatalogController {
                                 Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
                                     refresh_interval_sec,
                                 })) => refresh_interval_sec,
-                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})) => None,
+                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {}))
+                                | Some(RefreshMode::Bounded(_)) => None,
                                 None => None,
                             },
                         );

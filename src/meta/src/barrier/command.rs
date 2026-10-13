@@ -1148,6 +1148,7 @@ impl Command {
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
 
                 let mut add_mutation = AddMutation {
+                    actor_bounded_attempts: Default::default(),
                     actor_dispatchers: Default::default(),
                     added_actors,
                     actor_splits,
@@ -1397,6 +1398,7 @@ impl Command {
     ) -> Mutation {
         {
             Mutation::Add(AddMutation {
+                actor_bounded_attempts: Default::default(),
                 actor_dispatchers: Default::default(),
                 added_actors: vec![],
                 actor_splits: Default::default(),
