@@ -14,8 +14,9 @@
 
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
+use futures::StreamExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::license::Feature;
@@ -24,8 +25,11 @@ use risingwave_connector::connector_common::{
 };
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
-use risingwave_connector::sink::iceberg::{CompactionType, IcebergConfig, IcebergWriteMode};
+use risingwave_connector::sink::iceberg::{
+    CompactionType, IcebergConfig, IcebergWriteMode, commit_branch,
+};
 use risingwave_hummock_sdk::HummockContextId;
+use risingwave_pb::catalog::PbStreamJobStatus;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportTask as IcebergReportTask;
@@ -33,6 +37,7 @@ use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_reques
 use risingwave_pb::id::IcebergCompactionTaskId;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use super::*;
 
@@ -80,6 +85,44 @@ struct ScheduledCompactionTask {
     compactor_context_id: HummockContextId,
 }
 
+/// Outcome history of one sink's compaction attempts.
+///
+/// This is observability-only state: it never affects scheduling decisions, and it
+/// is lost when meta restarts or the track is removed.
+#[derive(Debug, Clone, Default)]
+struct CompactionHealth {
+    last_success_at: Option<SystemTime>,
+    last_failure_at: Option<SystemTime>,
+    last_error: Option<String>,
+    consecutive_failures: u32,
+    /// Latest observed snapshot whose commits have been consumed by a completed
+    /// compaction.
+    compacted_snapshot: Option<IcebergCommittedSnapshot>,
+    /// Snapshot that started the active sequence-bounded round. It becomes
+    /// `compacted_snapshot` when the round drains.
+    round_start_snapshot: Option<IcebergCommittedSnapshot>,
+}
+
+impl CompactionHealth {
+    fn record_progress(&mut self) {
+        self.last_success_at = Some(SystemTime::now());
+        self.consecutive_failures = 0;
+    }
+
+    fn record_completion(&mut self, compacted_snapshot: Option<IcebergCommittedSnapshot>) {
+        self.record_progress();
+        if compacted_snapshot.is_some() {
+            self.compacted_snapshot = compacted_snapshot;
+        }
+    }
+
+    fn record_failure(&mut self, error: String) {
+        self.last_failure_at = Some(SystemTime::now());
+        self.last_error = Some(error);
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompactionTrackFinishAction {
     KeepTrack,
@@ -106,6 +149,7 @@ pub(super) struct CompactionTrack {
     /// removing its track; re-enabling can restore `KeepTrack`.
     finish_action: CompactionTrackFinishAction,
     state: CompactionTrackState,
+    health: CompactionHealth,
 }
 
 impl CompactionTrack {
@@ -132,6 +176,7 @@ impl CompactionTrack {
                 next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
                 manual_task_type: None,
             },
+            health: CompactionHealth::default(),
         }
     }
 
@@ -244,6 +289,7 @@ impl CompactionTrack {
         if let Some(max_file_sequence_number) = new_round_boundary {
             self.round_max_file_sequence_number = Some(max_file_sequence_number);
             self.pending_commit_count = 0;
+            self.health.round_start_snapshot = self.latest_observed_snapshot.clone();
         }
         let attempt = Arc::new(CompactionAttempt {
             task_type,
@@ -341,10 +387,11 @@ impl CompactionTrack {
         )
     }
 
-    fn finish_failed(&mut self, now: Instant) -> CompactionTrackFinishAction {
+    fn finish_failed(&mut self, now: Instant, error: String) -> CompactionTrackFinishAction {
         if !matches!(self.state, CompactionTrackState::InFlight { .. }) {
             unreachable!("Only an in-flight attempt can finish")
         }
+        self.health.record_failure(error);
         self.state = CompactionTrackState::Idle {
             next_compaction_time: now + COMPACTION_RETRY_BACKOFF,
             manual_task_type: None,
@@ -366,6 +413,8 @@ impl CompactionTrack {
         if !self.is_pending_dispatch() {
             unreachable!("Only a pending attempt can be reverted")
         }
+        self.health
+            .record_failure("compaction task failed before dispatch to a compactor".to_owned());
         self.state = CompactionTrackState::Idle {
             next_compaction_time: now + COMPACTION_RETRY_BACKOFF,
             manual_task_type: None,
@@ -404,6 +453,7 @@ impl CompactionTrack {
         if attempt.max_file_sequence_number.is_some() {
             // Success means this attempt made progress, but only `Drained`
             // proves that no work remains below the fixed boundary.
+            self.health.record_progress();
             self.state = CompactionTrackState::Idle {
                 next_compaction_time: now,
                 manual_task_type: None,
@@ -412,6 +462,8 @@ impl CompactionTrack {
             self.pending_commit_count = self
                 .pending_commit_count
                 .saturating_sub(attempt.pending_commit_count_at_start);
+            self.health
+                .record_completion(attempt.gc_watermark_snapshot.clone());
             self.state = CompactionTrackState::Idle {
                 next_compaction_time: now + Duration::from_secs(self.trigger_interval_sec),
                 manual_task_type: None,
@@ -432,11 +484,20 @@ impl CompactionTrack {
         );
         debug_assert!(attempt.max_file_sequence_number.is_some());
         self.round_max_file_sequence_number = None;
+        let round_start_snapshot = self.health.round_start_snapshot.take();
+        self.health.record_completion(round_start_snapshot);
         self.state = CompactionTrackState::Idle {
             next_compaction_time: now + Duration::from_secs(self.trigger_interval_sec),
             manual_task_type: None,
         };
         self.finish_action
+    }
+
+    fn compaction_lag(&self) -> Option<Duration> {
+        let latest = self.latest_observed_snapshot.as_ref()?;
+        let compacted = self.health.compacted_snapshot.as_ref()?;
+        let lag_ms = latest.timestamp_ms.saturating_sub(compacted.timestamp_ms);
+        Some(Duration::from_millis(lag_ms.max(0) as u64))
     }
 
     fn is_in_flight_bounded_attempt(&self) -> bool {
@@ -643,6 +704,14 @@ pub struct IcebergCompactionScheduleStatus {
     pub next_compaction_after_sec: Option<u64>,
     pub pending_snapshot_count: Option<usize>,
     pub is_triggerable: bool,
+    pub last_success_at: Option<SystemTime>,
+    pub last_failure_at: Option<SystemTime>,
+    pub last_error: Option<String>,
+    pub consecutive_failures: u32,
+    /// Commit-time gap between the latest observed snapshot and the snapshot
+    /// consumed by the last completed compaction. For copy-on-write sinks, this
+    /// is how far `main` lags behind the ingestion branch.
+    pub compaction_lag: Option<Duration>,
 }
 
 impl IcebergCompactionManager {
@@ -675,6 +744,85 @@ impl IcebergCompactionManager {
         track.trigger_snapshot_count = trigger_snapshot_count;
         track.update_interval(trigger_interval_sec, now);
         track.mark_config_refreshed(now);
+    }
+
+    /// Schedules existing Iceberg sinks once after meta starts. See
+    /// `iceberg_compaction_schedule_on_startup`.
+    pub fn schedule_on_startup_task(manager: Arc<Self>) -> (JoinHandle<()>, oneshot::Sender<()>) {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = manager.schedule_existing_sinks() => {}
+                _ = shutdown_rx => {}
+            }
+        });
+        (join_handle, shutdown_tx)
+    }
+
+    async fn schedule_existing_sinks(&self) {
+        let sinks = match self.metadata_manager.catalog_controller.list_sinks().await {
+            Ok(sinks) => sinks,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    "failed to list sinks to schedule iceberg compaction on startup"
+                );
+                return;
+            }
+        };
+        let sink_ids = sinks
+            .into_iter()
+            .filter(|sink| {
+                sink.stream_job_status() == PbStreamJobStatus::Created
+                    && is_iceberg_sink(&sink.properties)
+            })
+            .map(|sink| sink.id);
+        futures::stream::iter(sink_ids)
+            .for_each_concurrent(16, |sink_id| async move {
+                if let Err(e) = self.schedule_sink_on_startup(sink_id).await {
+                    tracing::warn!(
+                        %sink_id,
+                        error = %e.as_report(),
+                        "failed to schedule iceberg compaction on startup"
+                    );
+                }
+            })
+            .await;
+    }
+
+    /// Records the head of the commit branch as one sink commit, so the sink is compacted after
+    /// the compaction interval. The compaction commits nothing if the table is already clean.
+    async fn schedule_sink_on_startup(&self, sink_id: SinkId) -> MetaResult<()> {
+        // A commit after the restart has already scheduled the sink.
+        if self.inner.read().sink_schedules.contains_key(&sink_id) {
+            return Ok(());
+        }
+        let config = self.load_iceberg_config(sink_id).await?;
+        if !config.enable_compaction {
+            return Ok(());
+        }
+        let table = config.load_table().await?;
+        let branch = commit_branch(config.r#type.as_str(), config.write_mode);
+        // A branch without a snapshot has nothing to compact.
+        let Some(observed_snapshot) =
+            IcebergCommittedSnapshot::from_branch_head(table.metadata(), &branch)
+        else {
+            return Ok(());
+        };
+        let prepared_update = PreparedSinkUpdate {
+            sink_id,
+            kind: SinkUpdateKind::Commit { observed_snapshot },
+            now: Instant::now(),
+            allow_track_initialization: true,
+            loaded_config: Some(config),
+        };
+        let mut guard = self.inner.write();
+        // A commit during the loads above may have recorded a newer snapshot. Do not overwrite
+        // it with the head read here.
+        if !guard.sink_schedules.contains_key(&sink_id) {
+            self.apply_sink_update(&mut guard, prepared_update);
+        }
+        Ok(())
     }
 
     pub async fn update_iceberg_commit_info(&self, msg: IcebergSinkCompactionUpdate) {
@@ -988,7 +1136,11 @@ impl IcebergCompactionManager {
                     sink_id = %sink_id,
                     "iceberg_compaction_task_report_timed_out",
                 );
-                timed_out_tasks.push((sink_id, track.finish_failed(now)));
+                let error = format!(
+                    "compaction task report timed out after {}s",
+                    track.report_timeout.as_secs()
+                );
+                timed_out_tasks.push((sink_id, track.finish_failed(now, error)));
             }
         }
 
@@ -1152,6 +1304,7 @@ impl IcebergCompactionManager {
                     | CompactionTrackState::InFlight { .. } => None,
                 };
                 let is_triggerable = track.should_trigger(now);
+                let compaction_lag = track.compaction_lag();
 
                 IcebergCompactionScheduleStatus {
                     sink_id,
@@ -1169,6 +1322,11 @@ impl IcebergCompactionManager {
                     next_compaction_after_sec,
                     pending_snapshot_count: Some(track.pending_commit_count),
                     is_triggerable,
+                    last_success_at: track.health.last_success_at,
+                    last_failure_at: track.health.last_failure_at,
+                    last_error: track.health.last_error,
+                    consecutive_failures: track.health.consecutive_failures,
+                    compaction_lag,
                 }
             })
             .collect_vec();
@@ -1209,7 +1367,10 @@ impl IcebergCompactionManager {
                                 error_message = report.error_message.as_deref().unwrap_or_default(),
                                 "iceberg_compaction_task_reported_failure",
                             );
-                            track.finish_failed(now)
+                            let error = report.error_message.clone().unwrap_or_else(|| {
+                                format!("compaction task reported {}", status.as_str_name())
+                            });
+                            track.finish_failed(now, error)
                         }
                     };
 

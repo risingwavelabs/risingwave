@@ -1117,10 +1117,14 @@ mod tests {
     use std::time::Duration;
 
     use bytes::Bytes;
+    use foyer::{
+        BlockEngineConfig, CacheBuilder, DeviceBuilder, FsDeviceBuilder, HybridCacheBuilder,
+        PsyncIoEngineConfig,
+    };
     use parking_lot::Mutex;
     use risingwave_common::bitmap::Bitmap;
-    use risingwave_common::config::Role;
     use risingwave_common::config::streaming::CacheRefillPolicy;
+    use risingwave_common::config::{MetricLevel, Role};
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
@@ -1136,16 +1140,58 @@ mod tests {
         CacheRefillConfig, CacheRefillContext, CacheRefiller, DataCacheRefillTaskGenerator,
         SpawnRefillTask, SstDeltaInfo, block_vnode_range, vnode_range_overlaps_bitmap,
     };
-    use crate::hummock::iterator::test_utils::{
-        iterator_test_table_key_of, mock_sstable_store, mock_sstable_store_with_recent_filter,
-    };
+    use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::recent_filter::simple::SimpleRecentFilter;
+    use crate::hummock::sstable_store::{SstableStore, SstableStoreConfig};
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_table_ids,
     };
     use crate::hummock::value::HummockValue;
     use crate::hummock::{RecentFilter, RecentFilterTrait, SstableStoreRef, TableHolder};
+    use crate::monitor::global_hummock_state_store_metrics;
+
+    async fn mock_sstable_store_with_disk_cache(
+        recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
+    ) -> (SstableStoreRef, tempfile::TempDir) {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let device = FsDeviceBuilder::new(cache_dir.path())
+            .with_capacity(16 << 20)
+            .build()
+            .unwrap();
+        let block_cache = HybridCacheBuilder::new()
+            .memory(64 << 20)
+            .with_shards(2)
+            .storage()
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(
+                BlockEngineConfig::new(device)
+                    .with_block_size(1 << 20)
+                    .with_buffer_pool_size(4 << 20),
+            )
+            .build()
+            .await
+            .unwrap();
+        assert!(block_cache.is_hybrid());
+        let memory_store = mock_sstable_store().await;
+        let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+            store: memory_store.store(),
+            path: "test".to_owned(),
+            prefetch_buffer_capacity: 64 << 20,
+            max_prefetch_block_number: 16,
+            recent_filter: recent_filter.unwrap_or_else(|| memory_store.recent_filter().clone()),
+            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
+                MetricLevel::Disabled,
+            )),
+            use_new_object_prefix_strategy: true,
+            skip_bloom_filter_in_serde: false,
+            meta_cache: memory_store.meta_cache().clone(),
+            block_cache,
+            vector_meta_cache: CacheBuilder::new(64 << 20).build(),
+            vector_block_cache: CacheBuilder::new(64 << 20).build(),
+        }));
+        (sstable_store, cache_dir)
+    }
 
     fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
         CacheRefillConfig {
@@ -1200,6 +1246,7 @@ mod tests {
         sst: TableHolder,
         sst_info: SstableInfo,
         deleted_sst_object_id: HummockSstableObjectId,
+        _cache_dir: tempfile::TempDir,
     }
 
     impl DataRefillGeneratorTestFixture {
@@ -1207,10 +1254,8 @@ mod tests {
             recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
         ) -> Self {
             let table_id = TableId::from(233);
-            let sstable_store = match recent_filter {
-                Some(recent_filter) => mock_sstable_store_with_recent_filter(recent_filter).await,
-                None => mock_sstable_store().await,
-            };
+            let (sstable_store, cache_dir) =
+                mock_sstable_store_with_disk_cache(recent_filter).await;
             let (sst, sst_info) =
                 gen_test_sst_with_object_id(table_id, sstable_store.clone(), 1).await;
             Self {
@@ -1219,6 +1264,7 @@ mod tests {
                 sst,
                 sst_info,
                 deleted_sst_object_id: 2330.into(),
+                _cache_dir: cache_dir,
             }
         }
 
@@ -1741,6 +1787,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_data_refill_requires_disk_cache() {
+        let fixture = DataRefillGeneratorTestFixture::new(None).await;
+        let delta = fixture.normal_l0_delta();
+        let mut context = fixture.context(CacheRefillPolicy::Enabled, None, None, |_| {});
+        assert!(!fixture.generate(&context, &delta).await.is_empty());
+
+        context.sstable_store = mock_sstable_store().await;
+        assert!(!context.sstable_store.block_cache().is_hybrid());
+        assert!(fixture.generate(&context, &delta).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn test_normal_refill_applies_policy_and_vnode_ownership() {
         let fixture = DataRefillGeneratorTestFixture::new(None).await;
         let delta = fixture.normal_l0_delta();
@@ -1968,7 +2026,7 @@ mod tests {
     async fn test_refill_units_do_not_cross_table_projection_boundaries() {
         let table_a = TableId::from(233);
         let table_b = TableId::from(234);
-        let sstable_store = mock_sstable_store().await;
+        let (sstable_store, _cache_dir) = mock_sstable_store_with_disk_cache(None).await;
         let (sst, sst_info) = gen_test_sstable_with_table_ids(
             default_builder_opt_for_test(),
             1,
@@ -2103,7 +2161,7 @@ mod tests {
         let table_a = TableId::from(233);
         let table_b = TableId::from(234);
         let vnode_a = VirtualNode::COUNT_FOR_TEST - 1;
-        let sstable_store = mock_sstable_store().await;
+        let (sstable_store, _cache_dir) = mock_sstable_store_with_disk_cache(None).await;
         let (sst, sst_info) = gen_test_sstable_with_table_ids(
             default_builder_opt_for_test(),
             1,

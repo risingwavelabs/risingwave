@@ -256,9 +256,6 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
-  // The effective barrier interval for this database: the database-specific override when set,
-  // or the system-wide interval otherwise.
-  uint32 barrier_interval_ms = 10;
 }
 
 message Watermark {
@@ -455,9 +452,15 @@ message FilterNode {
 }
 
 message ChangeLogNode {
+  message Keyed {}
+
   // Whether or not there is an op in the final output.
   bool need_op = 1;
   repeated uint32 distribution_keys = 2;
+  oneof mode {
+    Keyed keyed = 3;
+  }
+  repeated uint32 stream_keys = 4;
 }
 
 message CdcFilterNode {
@@ -812,10 +815,9 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. Already deprecated.
   repeated plan_common.Field fields = 4 [deprecated = true];
-  // Allows this merge to have no upstream actors, either initially or after a MergeUpdate.
-  // When true, the merge must not use the singleton receiver optimization because a singleton
-  // receiver cannot transition to empty.
-  bool allow_empty_upstream = 5;
+  // Deprecated. Executors that need to support an empty upstream use an explicit runtime
+  // constructor instead.
+  bool allow_empty_upstream = 5 [deprecated = true];
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -1172,6 +1174,10 @@ message LocalityProviderNode {
   optional catalog.Table progress_table = 3;
   // Rate limit of the drain phase, set by `BACKFILL_RATE_LIMIT`.
   optional uint32 rate_limit = 4;
+  // Ephemeral sorted log table for buffering and re-ordering amplified input
+  // within an epoch after backfill is finished. Only present when the sort
+  // buffer feature is enabled at plan time.
+  optional catalog.Table sort_buffer_table = 5;
 }
 
 message EowcGapFillNode {

@@ -88,8 +88,8 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
-    ensure_object_id, ensure_user_id, fetch_target_fragments, get_belong_objects,
-    get_belong_objects_by_ids, get_referring_objects, get_table_columns,
+    ensure_object_id, ensure_user_id, fetch_target_fragments, format_with_option_secret_resolved,
+    get_belong_objects, get_belong_objects_by_ids, get_referring_objects, get_table_columns,
     grant_default_privileges_automatically, insert_fragment_relations,
     list_object_dependencies_by_object_id, list_user_info_by_ids, upsert_user_privileges,
 };
@@ -1212,7 +1212,8 @@ impl CatalogController {
         if !objs.is_empty() {
             // We also have notified the frontend about these objects,
             // so we need to notify the frontend to delete them here.
-            self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
+            let _version = self
+                .notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
         let aborted_sink_ids = objects_to_abort
@@ -1485,15 +1486,15 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        let mut notifications = self.frontend_notification_batch();
         if let Some(objects) = creating_objects {
-            self.notify_frontend(
+            notifications.add(
                 NotificationOperation::Add,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects,
                     dependencies: vec![],
                 }),
-            )
-            .await;
+            );
         }
 
         let Some((
@@ -1506,6 +1507,9 @@ impl CatalogController {
             updated_user_info,
         )) = replace_sink_post_collect
         else {
+            if let Some(version) = notifications.publish().await {
+                tracing::debug!(job_id = %job_id, version, "notified frontend of creating streaming job");
+            }
             return Ok(None);
         };
 
@@ -1520,28 +1524,27 @@ impl CatalogController {
                 old_fragment_ids.iter().map(|id| *id as _).collect(),
             );
 
-        let _ = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                build_object_group_for_delete(old_objects),
-            )
-            .await;
+        notifications.add(
+            NotificationOperation::Delete,
+            build_object_group_for_delete(old_objects),
+        );
 
-        let _ = self
-            .notify_frontend(
-                // The replacement sink is not pre-notified to frontend while creating, so the
-                // cutover should add the new finalized sink after deleting the old one.
-                NotificationOperation::Add,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: new_objects,
-                    dependencies,
-                }),
-            )
-            .await;
+        // The replacement sink is not pre-notified to frontend while creating, so the cutover
+        // should add the new finalized sink after deleting the old one.
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: new_objects,
+                dependencies,
+            }),
+        );
 
-        if !updated_user_info.is_empty() {
-            let _ = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the replacement notification batch contains the replacement sink");
+        tracing::debug!(job_id = %job_id, version, "notified frontend of replacement streaming job");
 
         Ok(Some(old_state_table_ids))
     }
@@ -1691,20 +1694,21 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let mut version = self
-            .notify_frontend(
-                notification_op,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects,
-                    dependencies,
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            notification_op,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects,
+                dependencies,
+            }),
+        );
 
         // notify users about the default privileges
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the streaming job notification batch contains the streaming job");
 
         inner
             .creating_table_finish_notifier
@@ -1952,25 +1956,26 @@ impl CatalogController {
             new_fragment_ids.iter().map(|id| *id as _).collect(),
         );
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects,
-                    dependencies: vec![],
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects,
+                dependencies: vec![],
+            }),
+        );
 
         if let Some((user_infos, to_drop_objects)) = delete_notification_objs {
-            self.notify_users_update(user_infos).await;
-            version = self
-                .notify_frontend(
-                    NotificationOperation::Delete,
-                    build_object_group_for_delete(to_drop_objects),
-                )
-                .await;
+            Self::add_users_update_notifications(&mut notifications, user_infos);
+            notifications.add(
+                NotificationOperation::Delete,
+                build_object_group_for_delete(to_drop_objects),
+            );
         }
+        let version = notifications
+            .publish()
+            .await
+            .expect("the replacement notification batch contains the updated object");
 
         Ok(version)
     }
@@ -2871,6 +2876,8 @@ impl CatalogController {
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
+        ensure_source_props_not_set_by_connection(&txn, &source, &alter_props, &alter_secret_refs)
+            .await?;
         let connector = source.with_properties.0.get_connector().unwrap();
         let is_shared_source = source.is_shared();
 
@@ -2915,6 +2922,8 @@ impl CatalogController {
                 .map(|secret_ref| secret_ref.to_protobuf())
                 .unwrap_or_default(),
         );
+        let altered_options_with_secret =
+            WithOptionsSecResolved::new(alter_props.clone(), alter_secret_refs.clone());
         let (to_add_secret_dep, to_remove_secret_dep) =
             options_with_secret.handle_update(alter_props, alter_secret_refs)?;
 
@@ -2945,50 +2954,18 @@ impl CatalogController {
                 .try_into()
                 .unwrap();
 
-            /// Formats SQL options with secret values properly resolved
-            ///
-            /// This function processes configuration options that may contain sensitive data:
-            /// - Plaintext options are directly converted to `SqlOption`
-            /// - Secret options are retrieved from the database and formatted as "SECRET {name}"
-            ///   without exposing the actual secret value
-            ///
-            /// # Arguments
-            /// * `txn` - Database transaction for retrieving secrets
-            /// * `options_with_secret` - Container of options with both plaintext and secret values
-            ///
-            /// # Returns
-            /// * `MetaResult<Vec<SqlOption>>` - List of formatted SQL options or error
-            async fn format_with_option_secret_resolved(
-                txn: &DatabaseTransaction,
-                options_with_secret: &WithOptionsSecResolved,
-            ) -> MetaResult<Vec<SqlOption>> {
-                let mut options = Vec::new();
-                for (k, v) in options_with_secret.as_plaintext() {
-                    let sql_option = SqlOption::try_from((k, &format!("'{}'", v)))
-                        .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
-                    options.push(sql_option);
-                }
-                for (k, v) in options_with_secret.as_secret() {
-                    if let Some(secret_model) = Secret::find_by_id(v.secret_id).one(txn).await? {
-                        let sql_option =
-                            SqlOption::try_from((k, &format!("SECRET {}", secret_model.name)))
-                                .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
-                        options.push(sql_option);
-                    } else {
-                        return Err(MetaError::catalog_id_not_found("secret", v.secret_id));
-                    }
-                }
-                Ok(options)
-            }
-
             match &mut stmt {
                 Statement::CreateSource { stmt } => {
-                    stmt.with_properties.0 =
-                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                    let altered_sql_options =
+                        format_with_option_secret_resolved(&txn, &altered_options_with_secret)
+                            .await?;
+                    merge_with_options(&mut stmt.with_properties.0, altered_sql_options);
                 }
                 Statement::CreateTable { with_options, .. } => {
-                    *with_options =
-                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                    let altered_sql_options =
+                        format_with_option_secret_resolved(&txn, &altered_options_with_secret)
+                            .await?;
+                    merge_with_options(with_options, altered_sql_options);
                     associate_table_id = source.optional_associated_table_id;
                     preferred_id = associate_table_id.unwrap().as_object_id();
                 }
@@ -3106,14 +3083,15 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        self.notify_frontend(
-            NotificationOperation::Update,
-            NotificationInfo::ObjectGroup(PbObjectGroup {
-                objects: to_update_objs,
-                dependencies: vec![],
-            }),
-        )
-        .await;
+        let _version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: to_update_objs,
+                    dependencies: vec![],
+                }),
+            )
+            .await;
 
         Ok(options_with_secret)
     }
@@ -3131,7 +3109,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+        validate_sink_props(&sink, &props, &props.keys().cloned().collect_vec())?;
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
             .map_err(|e| SinkError::Config(anyhow!(e)))?
@@ -3201,7 +3179,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+        validate_sink_props(&sink, &props, &props.keys().cloned().collect_vec())?;
 
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
@@ -3620,37 +3598,7 @@ impl CatalogController {
             for (sink, _obj) in sinks_with_objs {
                 let sink_id = sink.sink_id;
 
-                // Validate that sink props can be altered
-                match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-                    Some(connector) => {
-                        let connector_type = connector.to_lowercase();
-                        check_sink_allow_alter_on_fly_fields(&connector_type, &prop_keys)
-                            .map_err(|e| SinkError::Config(anyhow!(e)))?;
-
-                        match_sink_name_str!(
-                            connector_type.as_str(),
-                            SinkType,
-                            {
-                                let mut new_sink_props = sink.properties.0.clone();
-                                new_sink_props.extend(alter_props.clone());
-                                SinkType::validate_alter_config_change(
-                                    &new_sink_props,
-                                    &alter_props,
-                                )
-                            },
-                            |sink: &str| Err(SinkError::Config(anyhow!(
-                                "unsupported sink type {}",
-                                sink
-                            )))
-                        )?
-                    }
-                    None => {
-                        return Err(SinkError::Config(anyhow!(
-                            "connector not specified when alter sink"
-                        ))
-                        .into());
-                    }
-                };
+                validate_sink_props(&sink, &alter_props, &prop_keys)?;
 
                 let mut new_sink_props = sink.properties.0.clone();
                 new_sink_props.extend(alter_props.clone());
@@ -3755,14 +3703,15 @@ impl CatalogController {
 
         // Notify frontend about all updated objects
         if !updated_objects.is_empty() {
-            self.notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: updated_objects,
-                    dependencies: vec![],
-                }),
-            )
-            .await;
+            let _version = self
+                .notify_frontend(
+                    NotificationOperation::Update,
+                    NotificationInfo::ObjectGroup(PbObjectGroup {
+                        objects: updated_objects,
+                        dependencies: vec![],
+                    }),
+                )
+                .await;
         }
 
         Ok((
@@ -3949,32 +3898,39 @@ impl CatalogController {
     }
 }
 
-fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> MetaResult<()> {
-    // Validate that props can be altered
-    match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-        Some(connector) => {
-            let connector_type = connector.to_lowercase();
-            let field_names: Vec<String> = props.keys().cloned().collect();
-            check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-
-            match_sink_name_str!(
-                connector_type.as_str(),
-                SinkType,
-                {
-                    let mut new_props = sink.properties.0.clone();
-                    new_props.extend(props.clone());
-                    SinkType::validate_alter_config_change(&new_props, props)
-                },
-                |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
-            )?
-        }
-        None => {
-            return Err(
-                SinkError::Config(anyhow!("connector not specified when alter sink")).into(),
-            );
-        }
+/// Validates altering `alter_props` of a sink. `altered_field_names` are all the keys being
+/// altered, including secret-backed ones that are not part of `alter_props`.
+fn validate_sink_props(
+    sink: &sink::Model,
+    alter_props: &BTreeMap<String, String>,
+    altered_field_names: &[String],
+) -> MetaResult<()> {
+    let Some(connector) = sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) else {
+        return Err(SinkError::Config(anyhow!("connector not specified when alter sink")).into());
     };
+    let connector_type = connector.to_lowercase();
+    check_sink_allow_alter_on_fly_fields(&connector_type, altered_field_names)
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+    // Validate against the config the sink actually runs with: properties stored as secrets
+    // live in `secret_ref` rather than `properties`, and some of them are required fields.
+    let mut new_props = LocalSecretManager::global()
+        .fill_secrets(
+            sink.properties.0.clone(),
+            sink.secret_ref
+                .as_ref()
+                .map(|secret_ref| secret_ref.to_protobuf())
+                .unwrap_or_default(),
+        )
+        .map_err(MetaError::from)?;
+    new_props.extend(alter_props.clone());
+
+    match_sink_name_str!(
+        connector_type.as_str(),
+        SinkType,
+        SinkType::validate_alter_config_change(&new_props, alter_props),
+        |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+    )?;
     Ok(())
 }
 
@@ -3997,6 +3953,54 @@ fn update_stmt_with_props(
             .map(|sql_option| (&sql_option.name, sql_option)),
     );
     *with_properties = new_sql_options.into_values().cloned().collect();
+    Ok(())
+}
+
+fn merge_with_options(with_properties: &mut Vec<SqlOption>, altered_options: Vec<SqlOption>) {
+    for altered_option in altered_options {
+        if let Some(existing_option) = with_properties
+            .iter_mut()
+            .find(|option| option.name.real_value() == altered_option.name.real_value())
+        {
+            *existing_option = altered_option;
+        } else {
+            with_properties.push(altered_option);
+        }
+    }
+}
+
+async fn ensure_source_props_not_set_by_connection(
+    txn: &DatabaseTransaction,
+    source: &source::Model,
+    alter_props: &BTreeMap<String, String>,
+    alter_secret_refs: &BTreeMap<String, PbSecretRef>,
+) -> MetaResult<()> {
+    let Some(connection_id) = source.connection_id else {
+        return Ok(());
+    };
+
+    let connection = Connection::find_by_id(connection_id)
+        .one(txn)
+        .await?
+        .ok_or_else(|| {
+            MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+        })?;
+    let connection_params = connection.params.to_protobuf();
+
+    if let Some(key) = alter_props
+        .keys()
+        .chain(alter_secret_refs.keys())
+        .find(|key| {
+            connection_params.properties.contains_key(*key)
+                || connection_params.secret_refs.contains_key(*key)
+        })
+    {
+        return Err(MetaError::invalid_parameter(format!(
+            "Cannot alter source connector property `{key}` because it is set by CONNECTION `{}`. Use ALTER CONNECTION instead.",
+            connection.name
+        )));
+    }
+
     Ok(())
 }
 
@@ -4120,4 +4124,38 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::ast::{SqlOption, Statement};
+
+    use super::{Parser, merge_with_options};
+
+    #[test]
+    fn test_merge_with_options_normalizes_altered_option_name() {
+        let mut statements = Parser::parse_sql(
+            "CREATE SOURCE s WITH (properties.receive.message.max.bytes = 'old', \
+             connection = kafka_conn) FORMAT PLAIN ENCODE JSON",
+        )
+        .unwrap();
+        let Statement::CreateSource { stmt } = statements.remove(0) else {
+            unreachable!()
+        };
+        let mut with_properties = stmt.with_properties.0;
+        let altered_name = "properties.receive.message.max.bytes".to_owned();
+        let altered_value = "new".to_owned();
+
+        merge_with_options(
+            &mut with_properties,
+            vec![SqlOption::try_from((&altered_name, &altered_value)).unwrap()],
+        );
+
+        assert_eq!(with_properties.len(), 2);
+        assert_eq!(
+            with_properties[0].to_string(),
+            "properties.receive.\"message\".\"max\".bytes = 'new'"
+        );
+        assert_eq!(with_properties[1].to_string(), "connection = kafka_conn");
+    }
 }

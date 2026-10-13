@@ -295,6 +295,7 @@ services:
       - db
       - message_queue
       - mysql
+      - sqlserver-server
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s

@@ -15,12 +15,14 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
+use chrono::NaiveDateTime;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
+use risingwave_connector::sink::iceberg::IcebergCommitResult;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
@@ -41,7 +43,7 @@ use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
+    AddMutation, ConnectorPropsChangeMutation, Dispatcher, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
     PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
@@ -63,14 +65,14 @@ use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
-    ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
-    FragmentId, FragmentReplaceUpstream, StreamActor, StreamActorWithDispatchers,
-    StreamJobActorsToCreate, StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
+    ActorId, ActorUpstreams, DispatcherId, FragmentDownstreamRelation, FragmentId,
+    FragmentReplaceUpstream, StreamActor, StreamActorWithDispatchers, StreamJobActorsToCreate,
+    StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
-    ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState, UpstreamSinkInfo,
-    build_actor_connector_splits,
+    RefreshCycleActors, ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState,
+    UpstreamSinkInfo, build_actor_connector_splits,
 };
 use crate::{MetaError, MetaResult};
 
@@ -442,6 +444,7 @@ pub struct SinceEpochInfo {
 pub enum IndependentStreamingJobType {
     SnapshotBackfill { since_epoch: Option<SinceEpochInfo> },
     BatchRefresh { refresh_interval_sec: u64 },
+    IcebergV3,
 }
 
 #[derive(Debug, Clone)]
@@ -556,11 +559,14 @@ pub enum Command {
 
     ConnectorPropsChange(ConnectorPropsChange),
 
-    /// `Refresh` command generates a barrier to refresh a table by truncating state
-    /// and reloading data from source.
+    /// Starts the refresh cycle `trigger_time` of a table: the barrier's commit truncates the
+    /// staging table, which an abandoned cycle leaves dirty, and its post-collect moves the job to
+    /// `Refreshing`.
     Refresh {
         table_id: TableId,
         associated_source_id: SourceId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
     },
     ListFinish {
         table_id: TableId,
@@ -569,6 +575,14 @@ pub enum Command {
     LoadFinish {
         table_id: TableId,
         associated_source_id: SourceId,
+    },
+    /// Ends the refresh cycle `trigger_time` of a table once every materialize actor merged: the
+    /// barrier's commit truncates the staging table, which nothing reads after the merge, and its
+    /// post-collect moves the job back to `Idle`.
+    FinishRefresh {
+        table_id: TableId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
     },
 
     /// `ResetSource` command generates a barrier to reset CDC source offset to latest.
@@ -591,6 +605,22 @@ pub enum Command {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+
+    /// Apply a completed Iceberg data-file compaction to the pk-index sink graph.
+    ApplyIcebergPkIndexCompaction {
+        sink_id: SinkId,
+        task_id: risingwave_pb::id::IcebergCompactionTaskId,
+        overwrite: IcebergPkIndexCompactionOverwrite,
+    },
+}
+
+#[derive(Clone, educe::Educe)]
+#[educe(Debug)]
+pub struct IcebergPkIndexCompactionOverwrite {
+    #[educe(Debug(ignore))]
+    pub output_result: IcebergCommitResult,
+    pub input_file_paths: Vec<String>,
+    pub read_snapshot_id: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -650,10 +680,12 @@ impl std::fmt::Display for Command {
             Command::Refresh {
                 table_id,
                 associated_source_id,
+                trigger_time,
+                ..
             } => write!(
                 f,
-                "Refresh: {} (source: {})",
-                table_id, associated_source_id
+                "Refresh: {} (source: {}, cycle: {})",
+                table_id, associated_source_id, trigger_time
             ),
             Command::ListFinish {
                 table_id,
@@ -671,6 +703,11 @@ impl std::fmt::Display for Command {
                 "LoadFinish: {} (source: {})",
                 table_id, associated_source_id
             ),
+            Command::FinishRefresh {
+                table_id,
+                trigger_time,
+                ..
+            } => write!(f, "FinishRefresh: {} (cycle: {})", table_id, trigger_time),
             Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
             Command::ResumeBackfill { target } => match target {
                 ResumeBackfillTarget::Job(job_id) => {
@@ -688,6 +725,12 @@ impl std::fmt::Display for Command {
                 "InjectSourceOffsets: {} ({} splits)",
                 source_id,
                 split_offsets.len()
+            ),
+            Command::ApplyIcebergPkIndexCompaction {
+                sink_id, task_id, ..
+            } => write!(
+                f,
+                "ApplyIcebergPkIndexCompaction: sink={sink_id} task={task_id}"
             ),
         }
     }
@@ -735,6 +778,21 @@ pub enum PostCollectCommand {
     ResumeBackfill {
         target: ResumeBackfillTarget,
     },
+    /// The actors the `RefreshStart` barrier reached, so the cycle is tracked against the actor
+    /// set it actually runs on.
+    RefreshStarted {
+        table_id: TableId,
+        database_id: DatabaseId,
+        associated_source_id: SourceId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
+        actors: RefreshCycleActors,
+    },
+    FinishRefresh {
+        table_id: TableId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
+    },
 }
 
 impl PostCollectCommand {
@@ -751,7 +809,9 @@ impl PostCollectCommand {
             | PostCollectCommand::SourceChangeSplit { .. }
             | PostCollectCommand::CreateSubscription { .. }
             | PostCollectCommand::ConnectorPropsChange(_)
-            | PostCollectCommand::ResumeBackfill { .. } => true,
+            | PostCollectCommand::ResumeBackfill { .. }
+            | PostCollectCommand::RefreshStarted { .. }
+            | PostCollectCommand::FinishRefresh { .. } => true,
             PostCollectCommand::Command(_) => false,
         }
     }
@@ -767,6 +827,8 @@ impl PostCollectCommand {
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
             PostCollectCommand::ResumeBackfill { .. } => "ResumeBackfill",
+            PostCollectCommand::RefreshStarted { .. } => "Refresh",
+            PostCollectCommand::FinishRefresh { .. } => "FinishRefresh",
         }
     }
 }
@@ -848,7 +910,6 @@ impl Command {
             new_table_watermarks,
             old_value_ssts,
             vector_index_adds,
-            truncate_tables,
             iceberg_pk_index_sink_metadata,
         ) = collect_resp_info(resps);
 
@@ -914,7 +975,24 @@ impl Command {
                 )
                 .expect("non-duplicate");
         }
-        info.truncate_tables.extend(truncate_tables);
+        if let PostCollectCommand::RefreshStarted {
+            table_id,
+            staging_table_id,
+            ..
+        }
+        | PostCollectCommand::FinishRefresh {
+            table_id,
+            staging_table_id,
+            ..
+        } = &barrier_info.post_collect_command
+        {
+            // The table may have been dropped after the command was scheduled.
+            if barrier_info.table_ids_to_commit.contains(staging_table_id) {
+                info.truncate_tables.insert(*staging_table_id);
+            } else {
+                tracing::warn!(%table_id, %staging_table_id, "skip truncating the staging table of a dropped table");
+            }
+        }
         task.iceberg_pk_index_pre_commit_metadata
             .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
     }
@@ -990,23 +1068,18 @@ impl Command {
         job_type: &CreateStreamingJobType,
         dropped_actors: impl IntoIterator<Item = ActorId>,
         is_currently_paused: bool,
-        edges: &mut FragmentEdgeBuildResult,
-        control_stream_manager: &ControlStreamManager,
+        mut edges: FragmentEdgeBuildResult,
         actor_cdc_table_snapshot_splits: Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>,
         split_assignment: &SplitAssignment,
         stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
-        actor_location: &HashMap<ActorId, WorkerId>,
     ) -> MetaResult<Mutation> {
         {
             {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
-                    upstream_fragment_downstreams,
                     fragment_backfill_ordering,
-                    streaming_job,
                     ..
                 } = info;
-                let database_id = streaming_job.database_id();
                 let added_actors: Vec<ActorId> = stream_actors
                     .values()
                     .flatten()
@@ -1051,27 +1124,17 @@ impl Command {
                         ..
                     }) = job_type
                     {
-                        let new_sink_actors = stream_actors
-                            .get(sink_fragment_id)
-                            .unwrap_or_else(|| {
-                                panic!("upstream sink fragment {sink_fragment_id} does not exist")
-                            })
-                            .iter()
-                            .map(|actor| {
-                                let worker_id = actor_location[&actor.actor_id];
-                                PbActorInfo {
-                                    actor_id: actor.actor_id,
-                                    host: Some(control_stream_manager.host_addr(worker_id)),
-                                    partial_graph_id: to_partial_graph_id(database_id, None),
-                                }
-                            });
+                        let upstream_actors = edges.take_common_upstream_actors(
+                            *sink_fragment_id,
+                            new_sink_downstream.downstream_fragment_id,
+                        )?;
                         let new_upstream_sink = PbNewUpstreamSink {
                             info: Some(PbUpstreamSinkInfo {
                                 upstream_fragment_id: *sink_fragment_id,
                                 sink_output_schema: sink_output_fields.clone(),
                                 project_exprs: project_exprs.clone(),
                             }),
-                            upstream_actors: new_sink_actors.collect(),
+                            upstream_actors,
                         };
                         HashMap::from([(
                             new_sink_downstream.downstream_fragment_id,
@@ -1084,15 +1147,8 @@ impl Command {
                 let actor_cdc_table_snapshot_splits = actor_cdc_table_snapshot_splits
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
 
-                let add_mutation = AddMutation {
-                    actor_dispatchers: edges
-                        .dispatchers
-                        .extract_if(|fragment_id, _| {
-                            upstream_fragment_downstreams.contains_key(fragment_id)
-                        })
-                        .flat_map(|(_, fragment_dispatchers)| fragment_dispatchers.into_iter())
-                        .map(|(actor_id, dispatchers)| (actor_id, Dispatchers { dispatchers }))
-                        .collect(),
+                let mut add_mutation = AddMutation {
+                    actor_dispatchers: Default::default(),
                     added_actors,
                     actor_splits,
                     // If the cluster is already paused, the new actors should be paused too.
@@ -1107,6 +1163,7 @@ impl Command {
                         .map(|old_sink_id| vec![old_sink_id])
                         .unwrap_or_default(),
                 };
+                edges.apply_to_add_mutation(&mut add_mutation);
 
                 Ok(Mutation::Add(add_mutation))
             }
@@ -1117,27 +1174,15 @@ impl Command {
     pub(super) fn replace_stream_job_to_mutation(
         ReplaceStreamJobPlan {
             old_fragments,
-            replace_upstream,
-            upstream_fragment_downstreams,
             auto_refresh_schema_sinks,
             ..
         }: &ReplaceStreamJobPlan,
-        edges: &mut FragmentEdgeBuildResult,
+        edges: FragmentEdgeBuildResult,
         database_info: &mut InflightDatabaseInfo,
         split_assignment: &SplitAssignment,
-    ) -> MetaResult<Option<Mutation>> {
+    ) -> MetaResult<Mutation> {
         {
             {
-                let merge_updates = edges
-                    .merge_updates
-                    .extract_if(|fragment_id, _| replace_upstream.contains_key(fragment_id))
-                    .collect();
-                let dispatchers = edges
-                    .dispatchers
-                    .extract_if(|fragment_id, _| {
-                        upstream_fragment_downstreams.contains_key(fragment_id)
-                    })
-                    .collect();
                 let actor_cdc_table_snapshot_splits = database_info
                     .assign_cdc_backfill_splits(old_fragments.stream_job_id)?
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
@@ -1153,8 +1198,7 @@ impl Command {
                         .flat_map(|fragment_id| {
                             database_info.fragment(fragment_id).actors.keys().copied()
                         }),
-                    merge_updates,
-                    dispatchers,
+                    edges,
                     split_assignment,
                     actor_cdc_table_snapshot_splits,
                     auto_refresh_schema_sinks.as_ref(),
@@ -1621,27 +1665,18 @@ impl Command {
 
     fn generate_update_mutation_for_replace_table(
         dropped_actors: impl IntoIterator<Item = ActorId>,
-        merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
-        dispatchers: FragmentActorDispatchers,
+        edges: FragmentEdgeBuildResult,
         split_assignment: &SplitAssignment,
         cdc_table_snapshot_split_assignment: Option<PbCdcTableSnapshotSplitsWithGeneration>,
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
-    ) -> Option<Mutation> {
+    ) -> Mutation {
         let dropped_actors = dropped_actors.into_iter().collect();
-
-        let actor_new_dispatchers = dispatchers
-            .into_values()
-            .flatten()
-            .map(|(actor_id, dispatchers)| (actor_id, Dispatchers { dispatchers }))
-            .collect();
 
         let actor_splits = split_assignment
             .values()
             .flat_map(build_actor_connector_splits)
             .collect();
-        Some(Mutation::Update(UpdateMutation {
-            actor_new_dispatchers,
-            merge_update: merge_updates.into_values().flatten().collect(),
+        let mut mutation = UpdateMutation {
             dropped_actors,
             actor_splits,
             actor_cdc_table_snapshot_splits: cdc_table_snapshot_split_assignment,
@@ -1676,7 +1711,9 @@ impl Command {
                 })
                 .collect(),
             ..Default::default()
-        }))
+        };
+        edges.apply_to_update_mutation(&mut mutation);
+        Mutation::Update(mutation)
     }
 }
 

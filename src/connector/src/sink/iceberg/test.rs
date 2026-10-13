@@ -23,7 +23,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
     Fields as ArrowFields, Schema as ArrowSchema,
 };
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::types::{DataType, MapType, StructType};
 
 use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
@@ -32,6 +32,7 @@ use crate::sink::iceberg::{
     CompactionType, DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM,
     ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
     IcebergWriteMode, parse_order_key_exprs, validate_order_key_columns,
+    validate_row_lineage_column_names,
 };
 
 pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -1101,4 +1102,27 @@ fn test_iceberg_sink_upper_case_primary_key() {
         sink.upsert_primary_key_column_names,
         Some(vec!["Key".to_owned()])
     );
+}
+
+#[test]
+fn test_validate_row_lineage_column_names() {
+    let columns = |name: &str| {
+        vec![
+            ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
+            ColumnDesc::named(name, ColumnId::new(2), DataType::Int64),
+        ]
+    };
+
+    for reserved in ["_row_id", "_last_updated_sequence_number"] {
+        let err =
+            validate_row_lineage_column_names(FormatVersion::V3, &columns(reserved)).unwrap_err();
+        assert!(
+            err.to_string().contains(reserved),
+            "unexpected error: {err}"
+        );
+        validate_row_lineage_column_names(FormatVersion::V2, &columns(reserved)).unwrap();
+    }
+    // The pk-index sink carries a pk-less upstream's hidden row id as the relation-qualified
+    // `<table>._row_id`, which does not collide with the lineage column.
+    validate_row_lineage_column_names(FormatVersion::V3, &columns("t._row_id")).unwrap();
 }

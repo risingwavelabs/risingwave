@@ -45,6 +45,7 @@ futures = { version = "0.3", default-features = false, features = [
     "alloc",
     "executor",
 ] }
+prometheus = { version = "0.14" }
 
 futures-async-stream = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }

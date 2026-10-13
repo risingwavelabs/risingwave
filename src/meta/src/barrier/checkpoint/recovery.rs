@@ -268,10 +268,10 @@ impl DatabaseStatusAction<'_, EnterReset> {
         self,
         barrier_complete_output: Option<BarrierCompleteOutput>,
         partial_graph_manager: &mut PartialGraphManager,
-    ) {
+    ) -> MetaResult<()> {
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
-            self.control.ack_completed(partial_graph_manager, output);
+            self.control.ack_completed(partial_graph_manager, output)?;
         }
         let database_status = self
             .control
@@ -342,6 +342,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                 }
             },
         }
+        Ok(())
     }
 }
 
@@ -389,7 +390,6 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         self,
         runtime_info: DatabaseRuntimeInfoSnapshot,
         rendered_info: RenderedDatabaseRuntimeInfo,
-        barrier_interval_ms: u32,
         partial_graph_manager: &mut PartialGraphManager,
     ) {
         let database_status = self
@@ -422,12 +422,12 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             stream_actors,
             mut source_splits,
             batch_refresh,
+            iceberg_v3,
         } = rendered_info;
         let mut recoverer = partial_graph_manager.start_recover();
         let result: MetaResult<_> = try {
             recoverer.inject_database_initial_barrier(
                 self.database_id,
-                barrier_interval_ms,
                 job_infos,
                 &recovery_context.job_extra_info,
                 &mut state_table_committed_epochs,
@@ -441,6 +441,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_splits,
                 batch_refresh,
+                iceberg_v3,
             )?
         };
         match result {
