@@ -175,11 +175,11 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
     "nightly",
 ] }
 hytra = "0.1"
-# branch dev_rebase_main_20260807
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e645680f1ed886c62600c2a491fe88be6606cc8a" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e645680f1ed886c62600c2a491fe88be6606cc8a" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e645680f1ed886c62600c2a491fe88be6606cc8a" }
-iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e645680f1ed886c62600c2a491fe88be6606cc8a", features = [
+# branch feat/gcs-vended-credentials
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "68e7132792e9ad88a14ef5fe9b600c73baa00e42" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "68e7132792e9ad88a14ef5fe9b600c73baa00e42" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "68e7132792e9ad88a14ef5fe9b600c73baa00e42" }
+iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "68e7132792e9ad88a14ef5fe9b600c73baa00e42", features = [
     "opendal-azblob",
     "opendal-azdls",
     "opendal-fs",
@@ -497,3 +497,11 @@ prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost"
 prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "040a192409e45069158300baec4f402ad1fe101a" }
+
+[patch."https://github.com/risingwavelabs/iceberg-rust.git"]
+# Temporary until iceberg-compaction updates its Iceberg revision. Cargo cannot
+# patch the same Git URL; this public HTTPS alias redirects to the same repository.
+iceberg = { git = "https://www.github.com/risingwavelabs/iceberg-rust.git", rev = "68e7132792e9ad88a14ef5fe9b600c73baa00e42" }
+iceberg-catalog-glue = { git = "https://www.github.com/risingwavelabs/iceberg-rust.git", rev = "68e7132792e9ad88a14ef5fe9b600c73baa00e42" }
+iceberg-catalog-rest = { git = "https://www.github.com/risingwavelabs/iceberg-rust.git", rev = "68e7132792e9ad88a14ef5fe9b600c73baa00e42" }
+iceberg-storage-opendal = { git = "https://www.github.com/risingwavelabs/iceberg-rust.git", rev = "68e7132792e9ad88a14ef5fe9b600c73baa00e42" }

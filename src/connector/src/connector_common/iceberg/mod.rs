@@ -189,8 +189,9 @@ pub struct IcebergCommon {
 
     /// Security type for REST catalog authentication.
     /// Supported values: `none`, `oauth2`, `google`.
-    /// When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
-    /// for authentication using Google Application Default Credentials (ADC).
+    /// When set to `google`, authenticates using `gcs.credential` or Google
+    /// Application Default Credentials (ADC). Vended credentials use the native
+    /// Rust REST catalog; the JNI catalog uses Iceberg's `GoogleAuthManager`.
     #[serde(rename = "catalog.security")]
     pub catalog_security: Option<String>,
 
@@ -207,8 +208,8 @@ pub struct IcebergCommon {
     /// - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
     /// - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
     /// - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
-    /// Google Cloud Lakehouse Iceberg REST catalogs with credential vending require
-    /// `org.apache.iceberg.gcp.gcs.GCSFileIO`.
+    /// Applies only to JNI catalogs. Native REST catalogs route storage by URI
+    /// and support GCS vended credentials without a Java `FileIO` class.
     #[serde(rename = "catalog.io_impl")]
     pub catalog_io_impl: Option<String>,
 }
@@ -655,6 +656,17 @@ impl IcebergCommon {
 
     fn build_native_rest_catalog_props(&self) -> ConnectorResult<CatalogBuildPlan> {
         let mut iceberg_configs = HashMap::new();
+
+        if self
+            .catalog_security
+            .as_deref()
+            .is_some_and(|security| security.eq_ignore_ascii_case("google"))
+        {
+            iceberg_configs.insert("rest.auth.type".to_owned(), "google".to_owned());
+        }
+        if let Some(scopes) = &self.gcp_auth_scopes {
+            iceberg_configs.insert("gcp.auth.scopes".to_owned(), scopes.clone());
+        }
 
         // check gcs credential or s3 access key and secret key
         if let Some(gcs_credential) = &self.gcs_credential {
@@ -1319,6 +1331,55 @@ mod tests {
             common.resolve_catalog_kind().unwrap(),
             IcebergCatalogKind::Rest(IcebergCatalogRuntime::JavaJni)
         );
+    }
+
+    #[test]
+    fn test_gcs_vended_rest_catalog_passes_google_authentication() {
+        let common = IcebergCommon {
+            catalog_uri: Some("https://catalog.example".to_owned()),
+            warehouse_path: Some("gs://bucket/warehouse".to_owned()),
+            catalog_security: Some("google".to_owned()),
+            gcp_auth_scopes: Some("scope-a,scope-b".to_owned()),
+            gcs_credential: Some("service-account-json".to_owned()),
+            catalog_header: Some("x-goog-user-project=billing-project".to_owned()),
+            vended_credentials: Some(true),
+            ..test_common("rest")
+        };
+        assert_eq!(
+            common.resolve_catalog_kind().unwrap(),
+            IcebergCatalogKind::Rest(IcebergCatalogRuntime::NativeRust)
+        );
+        let CatalogBuildPlan::NativeRest(props) = common.build_native_rest_catalog_props().unwrap()
+        else {
+            panic!("expected native REST catalog");
+        };
+        assert_eq!(props["rest.auth.type"], "google");
+        assert_eq!(props["gcp.auth.scopes"], "scope-a,scope-b");
+        assert_eq!(props[GCS_CREDENTIALS_JSON], "service-account-json");
+        assert_eq!(props["warehouse"], "gs://bucket/warehouse");
+        assert_eq!(
+            props["header.X-Iceberg-Access-Delegation"],
+            "vended-credentials"
+        );
+        assert_eq!(props["header.x-goog-user-project"], "billing-project");
+        assert!(!props.contains_key("io-impl"));
+    }
+
+    #[test]
+    fn test_native_google_catalog_supports_adc_without_storage_credentials() {
+        let common = IcebergCommon {
+            catalog_uri: Some("https://catalog.example".to_owned()),
+            catalog_security: Some("google".to_owned()),
+            vended_credentials: Some(true),
+            ..test_common("rest_rust")
+        };
+        let CatalogBuildPlan::NativeRest(props) = common.build_native_rest_catalog_props().unwrap()
+        else {
+            panic!("expected native REST catalog");
+        };
+        assert_eq!(props["rest.auth.type"], "google");
+        assert!(!props.contains_key(GCS_CREDENTIALS_JSON));
+        assert!(!props.contains_key("gcp.auth.scopes"));
     }
 
     #[test]
