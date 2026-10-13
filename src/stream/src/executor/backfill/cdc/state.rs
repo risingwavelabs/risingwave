@@ -92,8 +92,13 @@ impl<S: StateStore> CdcBackfillState<S> {
                 };
 
                 let current_pk_pos = state[1..state_len - 3].to_vec();
+                let current_pk_pos = if current_pk_pos.iter().all(Option::is_none) {
+                    None
+                } else {
+                    Some(OwnedRow::new(current_pk_pos))
+                };
                 Ok(CdcStateRecord {
-                    current_pk_pos: Some(OwnedRow::new(current_pk_pos)),
+                    current_pk_pos,
                     is_finished,
                     last_cdc_offset: cdc_offset,
                     row_count,
