@@ -32,7 +32,7 @@ async def create_stream(stream_name: str, subjects: str):
 
         # Add the stream
         await js.add_stream(stream_config)
-        print(f"Stream '{stream_name}' added successfully with subject '{subject}'.")
+        print(f"Stream '{stream_name}' added successfully with subjects {subjects}.")
 
     except Exception as e:
         print(f"Error: {e}")
@@ -42,25 +42,17 @@ async def create_stream(stream_name: str, subjects: str):
         await nc.close()
         print("Disconnected from NATS server.")
 
-async def produce_message(stream_name: str, subject: str):
+async def produce_message(subject: str, with_headers: bool = False):
     nc = NATS()
     await nc.connect(servers=[NATS_SERVER])
     js = nc.jetstream()
     for i in range(100):
-        payload = {"i": i}
-        await js.publish(subject, str.encode(json.dumps(payload)))
-
-    await nc.close()
-
-
-async def produce_message_with_headers(stream_name: str, subject: str):
-    nc = NATS()
-    await nc.connect(servers=[NATS_SERVER])
-    js = nc.jetstream()
-    for i in range(100):
-        payload = {"i": i}
-        headers = {"foo": "bar", "hop": str(i)}
-        await js.publish(subject, str.encode(json.dumps(payload)), headers=headers)
+        payload = str.encode(json.dumps({"i": i}))
+        if with_headers:
+            headers = {"foo": "bar", "hop": str(i)}
+            await js.publish(subject, payload, headers=headers)
+        else:
+            await js.publish(subject, payload)
 
     await nc.close()
 
@@ -129,7 +121,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     command = sys.argv[1]
-    if command in ["create_stream", "produce_stream"]:
+    if command in ["create_stream", "produce_stream", "produce_stream_with_headers"]:
         if len(sys.argv) != 4:
             print("Error: Both stream name and subject are required")
             sys.exit(1)
@@ -139,14 +131,9 @@ if __name__ == "__main__":
         if command == "create_stream":
             asyncio.run(create_stream(stream_name, subject))
         elif command == "produce_stream":
-            asyncio.run(produce_message(stream_name, subject))
-    elif command == "produce_stream_with_headers":
-        if len(sys.argv) != 4:
-            print("Error: Both stream name and subject are required")
-            sys.exit(1)
-        stream_name = sys.argv[2]
-        subject = sys.argv[3]
-        asyncio.run(produce_message_with_headers(stream_name, subject))
+            asyncio.run(produce_message(subject))
+        elif command == "produce_stream_with_headers":
+            asyncio.run(produce_message(subject, with_headers=True))
     elif command == "validate_state":
         if len(sys.argv) != 4:
             print("Error: Both table name and expected count are required")
