@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use ::iceberg::spec::TableMetadata;
+
 use crate::sink::catalog::SinkId;
 
 #[derive(Debug, Clone)]
@@ -19,6 +21,17 @@ pub struct IcebergCommittedSnapshot {
     pub branch: String,
     pub snapshot_id: i64,
     pub timestamp_ms: i64,
+}
+
+impl IcebergCommittedSnapshot {
+    /// Describes the head snapshot of `branch`, or returns `None` if the branch has no snapshot.
+    pub fn from_branch_head(metadata: &TableMetadata, branch: &str) -> Option<Self> {
+        metadata.snapshot_for_ref(branch).map(|snapshot| Self {
+            branch: branch.to_owned(),
+            snapshot_id: snapshot.snapshot_id(),
+            timestamp_ms: snapshot.timestamp_ms(),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
