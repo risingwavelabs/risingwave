@@ -854,8 +854,32 @@ impl GlobalBarrierWorkerContextImpl {
                 }
                 Ordering::Greater => {
                     if let Some(table_change_log) = table_change_log.get(&upstream_table_id) {
+                        // The downstream committed epoch may be synthetic and therefore fall
+                        // between two upstream checkpoints. Preserve the latest checkpoint group
+                        // at or before it so the job-specific recovery logic can decide whether
+                        // exact checkpoint alignment is required.
+                        //
+                        // For checkpoint epochs [100, 102], `binary_search` returns:
+                        // - `Err(0)` for 99: no preceding checkpoint exists;
+                        // - `Ok(0)` for 100: start from checkpoint 100;
+                        // - `Err(1)` for 101: start from the preceding checkpoint at index 0;
+                        // - `Ok(1)` for 102: start from checkpoint 102;
+                        // - `Err(2)` for 103: start from the preceding checkpoint at index 1.
+                        let first_checkpoint_index = match table_change_log
+                            .binary_search_by_checkpoint_epoch(downstream_committed_epoch)
+                        {
+                            Ok(index) => index,
+                            Err(0) => {
+                                bail!(
+                                    "no upstream checkpoint epoch at or before downstream committed epoch {} on table {}",
+                                    downstream_committed_epoch,
+                                    upstream_table_id
+                                );
+                            }
+                            Err(index) => index - 1,
+                        };
                         let epochs = table_change_log
-                            .filter_epoch((downstream_committed_epoch, upstream_committed_epoch))
+                            .range(first_checkpoint_index..)
                             .map(|epoch_log| {
                                 (
                                     epoch_log.non_checkpoint_epochs.clone(),
@@ -863,18 +887,6 @@ impl GlobalBarrierWorkerContextImpl {
                                 )
                             })
                             .collect_vec();
-                        let first_epochs = epochs.first();
-                        if let Some((_, first_checkpoint_epoch)) = &first_epochs
-                            && *first_checkpoint_epoch == downstream_committed_epoch
-                        {
-                        } else {
-                            bail!(
-                                "resolved first log epoch {:?} on table {} not matched with downstream committed epoch {}",
-                                epochs,
-                                upstream_table_id,
-                                downstream_committed_epoch
-                            );
-                        }
                         log_epochs
                             .try_insert(upstream_table_id, epochs)
                             .expect("non-duplicated");
@@ -1175,19 +1187,102 @@ impl GlobalBarrierWorkerContextImpl {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::FragmentTypeMask;
+    use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::id::WorkerId;
+    use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog};
+    use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_meta_model::DispatcherType;
     use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_pb::hummock::StateTableInfo;
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{
-        PbDispatchOutputMapping, PbStreamNode, UpstreamSinkUnionNode as PbUpstreamSinkUnionNode,
+        PbDispatchOutputMapping, PbStreamNode, StreamScanNode, StreamScanType,
+        UpstreamSinkUnionNode as PbUpstreamSinkUnionNode,
     };
 
     use super::*;
     use crate::controller::fragment::InflightActorInfo;
     use crate::model::DownstreamFragmentRelation;
     use crate::stream::UpstreamSinkInfo;
+
+    #[test]
+    fn test_resolve_hummock_version_epochs_keeps_checkpoint_before_synthetic_epoch() {
+        let job_id = JobId::new(10);
+        let fragment_id = FragmentId::new(100);
+        let upstream_table_id = TableId::new(200);
+        let state_table_id = TableId::new(300);
+        let fragments = HashMap::from([(
+            fragment_id,
+            LoadedFragment {
+                fragment_id,
+                job_id,
+                fragment_type_mask: FragmentTypeMask::from(
+                    FragmentTypeFlag::SnapshotBackfillStreamScan as i32,
+                ),
+                distribution_type: DistributionType::Hash,
+                vnode_count: 1,
+                nodes: PbStreamNode {
+                    node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
+                        table_id: upstream_table_id,
+                        stream_scan_type: StreamScanType::SnapshotBackfill as i32,
+                        snapshot_backfill_epoch: Some(100),
+                        ..Default::default()
+                    }))),
+                    ..Default::default()
+                },
+                state_table_ids: HashSet::from([state_table_id]),
+                parallelism: None,
+            },
+        )]);
+
+        let mut version = HummockVersion::default();
+        version.state_table_info =
+            HummockVersionStateTableInfo::from_protobuf_owned(HashMap::from([
+                (
+                    state_table_id,
+                    StateTableInfo {
+                        committed_epoch: 101,
+                        compaction_group_id: 1.into(),
+                    },
+                ),
+                (
+                    upstream_table_id,
+                    StateTableInfo {
+                        committed_epoch: 102,
+                        compaction_group_id: 1.into(),
+                    },
+                ),
+            ]));
+        let table_change_log = HashMap::from([(
+            upstream_table_id,
+            TableChangeLog::new([
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![],
+                    checkpoint_epoch: 100,
+                },
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![],
+                    checkpoint_epoch: 102,
+                },
+            ]),
+        )]);
+
+        let (_, log_epochs) = GlobalBarrierWorkerContextImpl::resolve_hummock_version_epochs(
+            std::iter::once((job_id, &fragments)),
+            &version,
+            &table_change_log,
+        )
+        .unwrap();
+
+        assert_eq!(
+            log_epochs.get(&upstream_table_id).unwrap(),
+            &vec![(vec![], 100), (vec![], 102)]
+        );
+    }
 
     #[test]
     fn test_recovery_table_with_upstream_sinks_updates_union_node() {
