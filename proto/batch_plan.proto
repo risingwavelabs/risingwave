@@ -155,6 +155,21 @@ message MySqlQueryNode {
   string query = 7;
 }
 
+// NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.
+message MssqlQueryNode {
+  repeated plan_common.ColumnDesc columns = 1;
+  string hostname = 2;
+  string port = 3;
+  string username = 4;
+  string password = 5;
+  string database = 6;
+  string query = 7;
+  // SQL Server TLS settings. `trust_cert` skips certificate-chain and
+  // hostname validation; it does not contain certificate data or a path.
+  bool encrypt = 8;
+  bool trust_cert = 9;
+}
+
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
 }
@@ -467,6 +482,7 @@ message PlanNode {
     AzblobFileScanNode azblob_file_scan = 43;
     VectorIndexNearestNode vector_index_nearest = 44;
     GetChannelDeltaStatsNode get_channel_delta_stats = 45;
+    MssqlQueryNode mssql_query = 47;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

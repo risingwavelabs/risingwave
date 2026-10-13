@@ -35,12 +35,12 @@ mod iceberg;
 #[cfg(not(madsim))]
 mod maybe_tls_connector;
 pub mod postgres;
+pub mod sql_server;
 
 pub use iceberg::{IcebergCommon, IcebergTableIdentifier};
 pub use postgres::{
     PostgresExternalTable, SslMode, create_pg_client, create_pg_client_from_properties,
     discover_pgvector_dimensions, pg_connection_config_from_properties,
 };
-
 #[cfg(test)]
 mod common_test;

@@ -12,60 +12,135 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-use std::str::FromStr;
 use std::sync::LazyLock;
 
+use anyhow::{Context, bail, ensure};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
+use risingwave_common::types::{
+    DataType, Date, Datum, Decimal, ScalarImpl, Time, Timestamp, Timestamptz,
+};
+use risingwave_common::util::iter_util::ZipEqFast;
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
-use tiberius::Row;
 use tiberius::xml::XmlData;
+use tiberius::{Column, ColumnType, Row};
 use uuid::Uuid;
 
 use crate::parser::utils::log_error;
 
 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
-pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
-    let mut datums: Vec<Option<ScalarImpl>> = vec![];
-    let mut money_fields: HashSet<&str> = HashSet::new();
-    // Special handling of the money field, as the third-party library Tiberius converts the money type to i64.
-    for (column, _) in row.cells() {
-        if column.column_type() == tiberius::ColumnType::Money {
-            money_fields.insert(column.name());
-        }
-    }
-    for i in 0..schema.fields.len() {
-        let rw_field = &schema.fields[i];
-        let name = rw_field.name.as_str();
-        let datum = match money_fields.contains(name) {
-            true => match row.try_get::<i64, usize>(i) {
-                Ok(Some(value)) => Some(convert_money_i64_to_type(value, &rw_field.data_type)),
-                Ok(None) => None,
-                Err(err) => {
-                    log_error!(name, err, "parse column failed");
-                    None
-                }
-            },
-            false => match row.try_get::<ScalarImplTiberiusWrapper, usize>(i) {
-                Ok(datum) => datum
-                    .map(|d| d.0)
-                    .map(|scalar| coerce_scalar_to_target_type(scalar, &rw_field.data_type)),
-                Err(err) => {
-                    log_error!(name, err, "parse column failed");
-                    None
-                }
-            },
-        };
+/// Decoder built from the TDS metadata that precedes a SQL Server result set.
+///
+/// Tiberius keeps the payload representation (`i64` for MONEY) separate from
+/// the TDS column type. Build the MONEY classification from the latter once
+/// per result set and reuse it for all rows. `mssql_type_to_rw_type` maps the
+/// corresponding schema type to [`DataType::Decimal`].
+pub struct SqlServerRowDecoder {
+    schema: Schema,
+    money_columns: Vec<bool>,
+}
 
-        datums.push(datum);
+impl SqlServerRowDecoder {
+    pub fn new(columns: &[Column], schema: &Schema) -> anyhow::Result<Self> {
+        ensure!(
+            columns.len() == schema.len(),
+            "SQL Server returned {} columns, but the planned schema has {} columns",
+            columns.len(),
+            schema.len()
+        );
+
+        let money_columns = columns
+            .iter()
+            .zip_eq_fast(&schema.fields)
+            .map(|(column, field)| {
+                let column_type = column.column_type();
+                match (column_type, &field.data_type) {
+                    (ColumnType::Money | ColumnType::Money4, DataType::Decimal) => Ok(true),
+                    (ColumnType::Money | ColumnType::Money4, data_type) => bail!(
+                        "SQL Server MONEY column `{}` has incompatible RisingWave type {}",
+                        field.name,
+                        data_type
+                    ),
+                    (ColumnType::Decimaln | ColumnType::Numericn, DataType::Decimal) => Ok(false),
+                    (_, DataType::Decimal) => bail!(
+                        "SQL Server column `{}` has TDS type {:?}, which is incompatible with the planned RisingWave Decimal type",
+                        field.name,
+                        column_type
+                    ),
+                    _ => Ok(false),
+                }
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        Ok(Self {
+            schema: schema.clone(),
+            money_columns,
+        })
     }
-    OwnedRow::new(datums)
+
+    fn validate_row(&self, row: &Row) -> anyhow::Result<()> {
+        ensure!(
+            row.result_index() == 0,
+            "mssql_query returned more than one result set"
+        );
+        ensure!(
+            row.columns().len() == self.schema.len(),
+            "SQL Server row has {} columns, but the planned schema has {} columns",
+            row.columns().len(),
+            self.schema.len()
+        );
+        Ok(())
+    }
+
+    pub fn decode(&self, row: &mut Row) -> anyhow::Result<OwnedRow> {
+        self.validate_row(row)?;
+
+        let mut datums = Vec::with_capacity(self.schema.len());
+        for (i, rw_field) in self.schema.fields.iter().enumerate() {
+            let name = rw_field.name.as_str();
+            let datum = match sql_server_cell_to_rw_datum(
+                row,
+                i,
+                name,
+                &rw_field.data_type,
+                self.money_columns[i],
+            ) {
+                Ok(datum) => datum,
+                Err(err) => {
+                    log_error!(name, err, "parse column failed");
+                    None
+                }
+            };
+            datums.push(datum);
+        }
+        Ok(OwnedRow::new(datums))
+    }
+}
+
+fn sql_server_cell_to_rw_datum(
+    row: &Row,
+    index: usize,
+    name: &str,
+    data_type: &DataType,
+    is_money: bool,
+) -> anyhow::Result<Datum> {
+    if is_money {
+        return row
+            .try_get::<i64, usize>(index)
+            .with_context(|| format!("failed to decode SQL Server money column `{name}`"))?
+            .map(|value| try_convert_money_i64_to_type(value, data_type))
+            .transpose();
+    }
+
+    Ok(row
+        .try_get::<ScalarImplTiberiusWrapper, usize>(index)
+        .with_context(|| format!("failed to decode SQL Server snapshot column `{name}`"))?
+        .map(|datum| datum.0)
+        .map(|scalar| coerce_scalar_to_target_type(scalar, data_type)))
 }
 
 fn coerce_scalar_to_target_type(scalar: ScalarImpl, target_type: &DataType) -> ScalarImpl {
@@ -81,25 +156,46 @@ fn coerce_scalar_to_target_type(scalar: ScalarImpl, target_type: &DataType) -> S
     }
 }
 
-pub fn convert_money_i64_to_type(value: i64, data_type: &DataType) -> ScalarImpl {
+fn try_convert_money_i64_to_type(value: i64, data_type: &DataType) -> anyhow::Result<ScalarImpl> {
     match data_type {
         DataType::Decimal => {
-            ScalarImpl::Decimal(Decimal::from(value) / Decimal::from_str("10000").unwrap())
+            // SQL Server MONEY and SMALLMONEY use a fixed scale of four.
+            Ok(ScalarImpl::Decimal(Decimal::from_i128_with_scale(
+                value as i128,
+                4,
+            )))
         }
-        _ => {
-            panic!(
-                "Conversion of Money type to {:?} is not supported",
-                data_type
-            );
-        }
+        _ => bail!("conversion of SQL Server money to {data_type} is not supported"),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::F32;
 
     use super::*;
+
+    #[test]
+    fn test_row_decoder_uses_tds_money_metadata() {
+        let columns = vec![
+            Column::new("money".into(), ColumnType::Money),
+            Column::new("decimal".into(), ColumnType::Decimaln),
+        ];
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Decimal, "money"),
+            Field::with_name(DataType::Decimal, "decimal"),
+        ]);
+
+        let decoder = SqlServerRowDecoder::new(&columns, &schema).unwrap();
+        assert_eq!(decoder.money_columns, vec![true, false]);
+
+        assert!(SqlServerRowDecoder::new(&columns[..1], &schema).is_err());
+
+        let intn_column = [Column::new("not_money".into(), ColumnType::Intn)];
+        let decimal_schema = Schema::new(vec![Field::with_name(DataType::Decimal, "not_money")]);
+        assert!(SqlServerRowDecoder::new(&intn_column, &decimal_schema).is_err());
+    }
 
     #[test]
     fn test_integer_upcast_coercion() {
@@ -124,6 +220,51 @@ mod tests {
     fn test_non_upcast_keeps_original() {
         let v = coerce_scalar_to_target_type(ScalarImpl::Int32(7), &DataType::Int32);
         assert_eq!(v, ScalarImpl::Int32(7));
+    }
+
+    /// `MONEY` / `SMALLMONEY` are stored by SQL Server / Tiberius as a
+    /// scaled `i64` with a fixed scale of four.
+    /// Covers the common cases used by the SLT suite.
+    #[test]
+    fn test_money_i64_to_decimal() {
+        fn assert_money(raw: i64, expected: Decimal) {
+            let ScalarImpl::Decimal(actual) =
+                try_convert_money_i64_to_type(raw, &DataType::Decimal).unwrap()
+            else {
+                unreachable!()
+            };
+            assert_eq!(actual, expected);
+            assert_eq!(actual.scale(), Some(4));
+        }
+
+        assert_money(10000, Decimal::from(1));
+
+        // $1.23 -> 12300 cents of 1/10000 -> 1.23
+        assert_money(12300, Decimal::from(123) / Decimal::from(100));
+
+        // $1234.56 -> 12345600 -> 1234.56
+        assert_money(12345600, Decimal::from(123456) / Decimal::from(100));
+
+        // 0 must not panic.
+        assert_money(0, Decimal::from(0));
+    }
+
+    /// Money columns must not be coerced into non-Decimal targets: that
+    /// would silently throw away the scaled i64 instead of producing a
+    /// value with the right scale.
+    #[test]
+    fn test_money_i64_to_unsupported_type_errors() {
+        for unsupported in [
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float64,
+            DataType::Varchar,
+        ] {
+            assert!(
+                try_convert_money_i64_to_type(12345600, &unsupported).is_err(),
+                "expected error for money -> {unsupported:?}"
+            );
+        }
     }
 }
 macro_rules! impl_tiberius_wrapper {
