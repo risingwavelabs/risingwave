@@ -1,0 +1,243 @@
+# Bounded Iceberg tables load one pinned snapshot once and then stop.
+#
+# The upstream Iceberg table is written by a Rust Iceberg sink. A plain Iceberg source on the same
+# table exposes its snapshot ids through `rw_iceberg_snapshots`.
+
+statement ok
+DROP TABLE IF EXISTS bounded_first;
+
+statement ok
+DROP TABLE IF EXISTS bounded_latest;
+
+statement ok
+DROP SOURCE IF EXISTS bounded_upstream_src;
+
+statement ok
+DROP SINK IF EXISTS bounded_upstream_sink;
+
+statement ok
+DROP TABLE IF EXISTS bounded_upstream;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg/
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+CREATE TABLE bounded_upstream (id INT, v VARCHAR) APPEND ONLY;
+
+statement ok
+CREATE SINK bounded_upstream_sink FROM bounded_upstream WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true'
+);
+
+statement ok
+INSERT INTO bounded_upstream VALUES (1, 'a'), (2, 'b'), (3, 'c');
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SOURCE bounded_upstream_src WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t'
+);
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_upstream_src';
+----
+1
+
+statement ok
+INSERT INTO bounded_upstream VALUES (4, 'd'), (5, 'e');
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_upstream_src';
+----
+2
+
+# ==== option validation
+
+statement error `scan.bounded.snapshot.id` is required when `scan.bounded.mode` is 'snapshot'
+CREATE TABLE bounded_invalid (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t',
+    scan.bounded.mode = 'snapshot'
+);
+
+statement error `scan.bounded.snapshot.id` must be an integer
+CREATE TABLE bounded_invalid (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = 'latest'
+);
+
+statement error snapshot 1 does not exist in the Iceberg table
+CREATE TABLE bounded_invalid (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '1'
+);
+
+statement error Bounded tables must have a PRIMARY KEY
+CREATE TABLE bounded_invalid WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '1'
+);
+
+statement error `scan.bounded.mode` is only supported for the iceberg connector
+CREATE TABLE bounded_invalid (v INT) WITH (
+    connector = 'datagen',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '1'
+);
+
+# ==== load pinned snapshots
+
+# Pin the first snapshot, which only contains the first batch.
+system ok
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT snapshot_id FROM rw_iceberg_snapshots WHERE source_name = 'bounded_upstream_src' ORDER BY timestamp_ms LIMIT 1") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "CREATE TABLE bounded_first (PRIMARY KEY (id)) WITH (connector = 'iceberg', warehouse.path = 's3://hummock001/bounded_iceberg', s3.endpoint = 'http://127.0.0.1:9301', s3.region = 'us-east-1', s3.access.key = 'hummockadmin', s3.secret.key = 'hummockadmin', catalog.type = 'storage', database.name = 'bounded_db', table.name = 'bounded_t', scan.bounded.mode = 'snapshot', scan.bounded.snapshot.id = '$snapshot_id')"
+
+# Pin the latest snapshot, which contains both batches.
+system ok
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT snapshot_id FROM rw_iceberg_snapshots WHERE source_name = 'bounded_upstream_src' ORDER BY timestamp_ms DESC LIMIT 1") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "CREATE TABLE bounded_latest (PRIMARY KEY (id)) WITH (connector = 'iceberg', warehouse.path = 's3://hummock001/bounded_iceberg', s3.endpoint = 'http://127.0.0.1:9301', s3.region = 'us-east-1', s3.access.key = 'hummockadmin', s3.secret.key = 'hummockadmin', catalog.type = 'storage', database.name = 'bounded_db', table.name = 'bounded_t', scan.bounded.mode = 'snapshot', scan.bounded.snapshot.id = '$snapshot_id')"
+
+query T retry 30 backoff 1s
+SELECT status FROM rw_bounded_jobs ORDER BY job_id;
+----
+COMPLETED
+COMPLETED
+
+# Each job reports the snapshot it pinned: the first and the second snapshot, in commit order.
+query I
+SELECT s.nth
+FROM rw_bounded_jobs j
+JOIN (
+  SELECT snapshot_id, row_number() OVER (ORDER BY timestamp_ms) AS nth
+  FROM rw_iceberg_snapshots
+  WHERE source_name = 'bounded_upstream_src'
+) s ON (j.pinned_input -> 'iceberg_snapshot' ->> 'snapshot_id')::BIGINT = s.snapshot_id
+ORDER BY j.job_id;
+----
+1
+2
+
+query IT
+SELECT id, v FROM bounded_first ORDER BY id;
+----
+1 a
+2 b
+3 c
+
+query IT
+SELECT id, v FROM bounded_latest ORDER BY id;
+----
+1 a
+2 b
+3 c
+4 d
+5 e
+
+# ==== a completed load does not pick up new upstream data
+
+statement ok
+INSERT INTO bounded_upstream VALUES (6, 'f');
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_upstream_src';
+----
+3
+
+sleep 5s
+
+query I
+SELECT count(*) FROM bounded_latest;
+----
+5
+
+# ==== unsupported alterations
+
+statement error altering connector properties of a bounded table is not supported
+ALTER TABLE bounded_latest CONNECTOR WITH (s3.region = 'us-west-2');
+
+# ==== cleanup
+
+statement ok
+DROP TABLE bounded_first;
+
+statement ok
+DROP TABLE bounded_latest;
+
+query I
+SELECT count(*) FROM rw_bounded_jobs;
+----
+0
+
+statement ok
+DROP SOURCE bounded_upstream_src;
+
+statement ok
+DROP SINK bounded_upstream_sink;
+
+statement ok
+DROP TABLE bounded_upstream;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg/
