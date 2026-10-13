@@ -17,6 +17,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
+use risingwave_connector::source::refresh_mode::RefreshMode;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_expr::bail;
@@ -36,7 +37,6 @@ use crate::executor::source::{
     BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
     SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
-use crate::from_proto::source::is_full_reload_refresh;
 
 pub struct SourceExecutorBuilder;
 
@@ -147,7 +147,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
+            let refresh_mode = RefreshMode::from_proto(source.refresh_mode.as_ref())?;
+            let is_full_reload_refresh = refresh_mode.is_full_reload();
+            let bounded_scan = refresh_mode.iceberg_bounded_scan();
+            let is_bounded = bounded_scan.is_some();
+
             let exec = {
                 let source_id = source.source_id;
                 let source_name = source.source_name.clone();
@@ -254,7 +258,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    if is_full_reload_refresh {
+                    if is_full_reload_refresh || is_bounded {
                         BatchIcebergListExecutor::new(
                             params.actor_context.clone(),
                             stream_source_core,
@@ -266,6 +270,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             barrier_receiver,
                             params.local_barrier_manager.clone(),
                             associated_table_id,
+                            bounded_scan,
                         )
                         .boxed()
                     } else {
