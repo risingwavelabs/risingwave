@@ -1,0 +1,51 @@
+# A MySQL BIT(n>1) value is stored with a different byte order depending on the
+# path it took into the CDC table: the backfill snapshot (row 1, inserted before
+# the table exists) keeps MySQL's big-endian bytes, the Debezium binlog stream
+# (row 2, inserted after backfill) delivers io.debezium.data.Bits, little-endian.
+
+control substitution on
+
+system ok
+mysql -e "
+DROP DATABASE IF EXISTS snap_vs_stream;
+CREATE DATABASE snap_vs_stream;
+USE snap_vs_stream;
+CREATE TABLE t (id INT PRIMARY KEY, v BIT(10));
+INSERT INTO t VALUES (1, b'1010');
+"
+
+statement ok
+create source s with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'snap_vs_stream'
+);
+
+statement ok
+create table t (id int primary key, v bytea) from s table 'snap_vs_stream.t';
+
+# Row 1 arrives through the backfill snapshot.
+query IT retry 6 backoff 1s
+select * from t;
+----
+1 \x000a
+
+# Let the backfill finish so that row 2 can only arrive through the binlog stream.
+sleep 5s
+
+system ok
+mysql -e "USE snap_vs_stream; INSERT INTO t VALUES (2, b'1010');"
+
+# Same upstream value, byte-swapped.
+query IT retry 6 backoff 1s
+select * from t order by id;
+----
+1 \x000a
+2 \x0a00
+
+statement ok
+drop source s cascade;
+
+system ok
+mysql -e "DROP DATABASE snap_vs_stream;"
