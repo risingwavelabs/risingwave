@@ -132,7 +132,7 @@ pub struct MetaOpts {
     pub iceberg_compaction_report_timeout_sec: u64,
     /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it.
     pub iceberg_compaction_config_refresh_interval_sec: u64,
-    /// Whether to rebuild Iceberg sink maintenance when meta starts.
+    /// Whether to schedule one compaction for every Iceberg sink when meta starts.
     pub iceberg_compaction_schedule_on_startup: bool,
     pub time_travel_vacuum_interval_sec: u64,
     pub time_travel_vacuum_max_version_count: Option<u32>,

@@ -180,12 +180,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::iceberg_compaction_config_refresh_interval_sec")]
     pub iceberg_compaction_config_refresh_interval_sec: u64,
 
-    /// Whether to rebuild Iceberg sink maintenance when meta starts. The compaction schedule
-    /// lives only in meta memory and is otherwise rebuilt by sink commits, so a sink that
-    /// receives no commit after a restart is not compacted, and a copy-on-write sink keeps its
-    /// latest commits unpublished on `main`. When enabled, meta loads the table of every sink
-    /// with automatic compaction and schedules one compaction after the compaction interval.
-    /// Snapshot expiration and manifest rewriting are resumed as well.
+    /// Whether to schedule one compaction for every Iceberg sink with automatic compaction when
+    /// meta starts. Compaction schedules are kept only in meta memory and are otherwise created by
+    /// sink commits, so without it, a sink that receives no commit after a restart is not
+    /// compacted, and a copy-on-write sink leaves its latest commits unpublished on `main`.
     #[serde(default)]
     pub iceberg_compaction_schedule_on_startup: bool,
 

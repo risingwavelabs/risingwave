@@ -499,7 +499,7 @@ pub async fn start_service_as_election_leader(
     ));
 
     if env.opts.iceberg_compaction_schedule_on_startup {
-        sub_tasks.push(IcebergCompactionManager::schedule_recovery_task(
+        sub_tasks.push(IcebergCompactionManager::schedule_on_startup_task(
             iceberg_compaction_mgr.clone(),
         ));
     }

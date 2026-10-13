@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use futures::StreamExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::license::Feature;
@@ -24,8 +25,11 @@ use risingwave_connector::connector_common::{
 };
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
-use risingwave_connector::sink::iceberg::{CompactionType, IcebergConfig, IcebergWriteMode};
+use risingwave_connector::sink::iceberg::{
+    CompactionType, IcebergConfig, IcebergWriteMode, commit_branch,
+};
 use risingwave_hummock_sdk::HummockContextId;
+use risingwave_pb::catalog::PbStreamJobStatus;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportTask as IcebergReportTask;
@@ -33,6 +37,7 @@ use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_reques
 use risingwave_pb::id::IcebergCompactionTaskId;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use super::*;
 
@@ -213,16 +218,6 @@ impl CompactionTrack {
 
     fn record_observed_snapshot(&mut self, observed_snapshot: IcebergCommittedSnapshot) {
         self.latest_observed_snapshot = Some(observed_snapshot);
-    }
-
-    /// Restores the backlog of a track rebuilt from Iceberg metadata after meta restarts.
-    pub(super) fn restore_backlog(
-        &mut self,
-        pending_commit_count: usize,
-        observed_snapshot: Option<IcebergCommittedSnapshot>,
-    ) {
-        self.pending_commit_count = pending_commit_count;
-        self.latest_observed_snapshot = observed_snapshot;
     }
 
     fn record_commit(&mut self) {
@@ -751,6 +746,77 @@ impl IcebergCompactionManager {
         track.mark_config_refreshed(now);
     }
 
+    /// Schedules existing Iceberg sinks once after meta starts. See
+    /// `iceberg_compaction_schedule_on_startup`.
+    pub fn schedule_on_startup_task(manager: Arc<Self>) -> (JoinHandle<()>, oneshot::Sender<()>) {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = manager.schedule_existing_sinks() => {}
+                _ = shutdown_rx => {}
+            }
+        });
+        (join_handle, shutdown_tx)
+    }
+
+    async fn schedule_existing_sinks(&self) {
+        let sinks = match self.metadata_manager.catalog_controller.list_sinks().await {
+            Ok(sinks) => sinks,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    "failed to list sinks to schedule iceberg compaction on startup"
+                );
+                return;
+            }
+        };
+        let sink_ids = sinks
+            .into_iter()
+            .filter(|sink| {
+                sink.stream_job_status() == PbStreamJobStatus::Created
+                    && is_iceberg_sink(&sink.properties)
+            })
+            .map(|sink| sink.id);
+        futures::stream::iter(sink_ids)
+            .for_each_concurrent(16, |sink_id| async move {
+                if let Err(e) = self.schedule_sink_on_startup(sink_id).await {
+                    tracing::warn!(
+                        %sink_id,
+                        error = %e.as_report(),
+                        "failed to schedule iceberg compaction on startup"
+                    );
+                }
+            })
+            .await;
+    }
+
+    /// Records the head of the commit branch as one sink commit, so the sink is compacted after
+    /// the compaction interval. The compaction commits nothing if the table is already clean.
+    async fn schedule_sink_on_startup(&self, sink_id: SinkId) -> MetaResult<()> {
+        // A commit after the restart has already scheduled the sink.
+        if self.inner.read().sink_schedules.contains_key(&sink_id) {
+            return Ok(());
+        }
+        let config = self.load_iceberg_config(sink_id).await?;
+        if !config.enable_compaction {
+            return Ok(());
+        }
+        let table = config.load_table().await?;
+        let branch = commit_branch(config.r#type.as_str(), config.write_mode);
+        // A branch without a snapshot has nothing to compact.
+        if let Some(observed_snapshot) =
+            IcebergCommittedSnapshot::from_branch_head(table.metadata(), &branch)
+        {
+            self.update_iceberg_commit_info(IcebergSinkCompactionUpdate {
+                sink_id,
+                force_compaction: false,
+                observed_snapshot,
+            })
+            .await;
+        }
+        Ok(())
+    }
+
     pub async fn update_iceberg_commit_info(&self, msg: IcebergSinkCompactionUpdate) {
         let IcebergSinkCompactionUpdate {
             sink_id,
@@ -1139,7 +1205,6 @@ impl IcebergCompactionManager {
             let task_to_cancel = Self::remove_sink_schedule(&mut guard, sink_id);
             guard.snapshot_expiration_sink_ids.remove(&sink_id);
             guard.manifest_rewrite_sink_ids.remove(&sink_id);
-            guard.recovering_sink_ids.remove(&sink_id);
             let waiter = guard.manual_compaction_waiters.remove(&sink_id);
             (task_to_cancel, waiter)
         };
