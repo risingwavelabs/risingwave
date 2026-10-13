@@ -22,8 +22,15 @@ message CascadeObject {
   string object_name = 3;
 }
 
+message TypeCount {
+  common.ObjectType object_type = 1;
+  uint64 count = 2;
+}
+
 message DropResult {
   repeated CascadeObject cascade_objects = 1;
+  uint64 total_count = 2;
+  repeated TypeCount counts_by_type = 3;
 }
 
 message CreateDatabaseRequest {

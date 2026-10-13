@@ -764,9 +764,7 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropTableResponse {
             status: None,
             version: result.version,
-            drop_result: result
-                .cascade_objects
-                .map(|cascade_objects| DropResult { cascade_objects }),
+            drop_result: result.drop_result,
         }))
     }
 

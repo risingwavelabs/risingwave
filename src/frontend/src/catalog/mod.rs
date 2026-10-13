@@ -24,7 +24,7 @@ use risingwave_common::catalog::{
 use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::common::PbObjectType;
-use risingwave_pb::ddl_service::CascadeObject;
+use risingwave_pb::ddl_service::{CascadeObject, DropResult};
 use risingwave_pb::user::grant_privilege::Object as PbGrantObject;
 use risingwave_sqlparser::ast::QuoteIdent;
 use thiserror::Error;
@@ -106,46 +106,89 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn notice_drop_cascade_objects(objects: &[CascadeObject]) {
-    if let Some(notice) = format_drop_cascade_notice(objects) {
+/// Report the completed drop using Meta's full counts and bounded object details.
+pub(crate) fn notice_drop_cascade_objects(result: &DropResult) {
+    if let Some(notice) = format_drop_cascade_notice(result) {
         notice_to_user(notice);
     }
 }
 
-fn format_drop_cascade_notice(objects: &[CascadeObject]) -> Option<String> {
-    match objects {
-        [] => None,
-        [object] => Some(format_drop_cascade_object(object)),
-        objects => {
-            let detail = objects
-                .iter()
-                .map(format_drop_cascade_object)
-                .collect::<Vec<_>>()
-                .join("\n");
-            Some(format!(
-                "drop cascades to {} other objects\nDETAIL:  {detail}",
-                objects.len()
-            ))
-        }
+fn format_drop_cascade_notice(result: &DropResult) -> Option<String> {
+    if result.total_count == 0 {
+        return None;
     }
+
+    let mut details = result
+        .cascade_objects
+        .iter()
+        .map(format_drop_cascade_object)
+        .collect::<Vec<_>>();
+
+    if result.total_count == 1 && details.len() == 1 {
+        return details.pop();
+    }
+
+    let header = format!(
+        "drop cascades to {} other {}",
+        result.total_count,
+        cascade_object_type_name(PbObjectType::Unspecified, result.total_count),
+    );
+    let mut counts = result.counts_by_type.iter().collect::<Vec<_>>();
+    counts.sort_by_key(|count| count.object_type);
+    let summary = counts
+        .into_iter()
+        .filter(|count| count.count != 0)
+        .map(|count| {
+            format!(
+                "{} {}",
+                count.count,
+                cascade_object_type_name(count.object_type(), count.count)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let omitted = result.total_count - details.len() as u64;
+    let mut notice = header;
+    if omitted > 0 && !summary.is_empty() {
+        notice.push_str(": ");
+        notice.push_str(&summary);
+    }
+    notice.push_str("\nDETAIL:  ");
+    notice.push_str(&details.join("\n"));
+    if omitted > 0 {
+        if !details.is_empty() {
+            notice.push('\n');
+        }
+        notice.push_str(&format!(
+            "and {omitted} other {}",
+            cascade_object_type_name(PbObjectType::Unspecified, omitted),
+        ));
+    }
+    Some(notice)
+}
+
+fn cascade_object_type_name(object_type: PbObjectType, count: u64) -> &'static str {
+    let (singular, plural) = match object_type {
+        PbObjectType::Database => ("database", "databases"),
+        PbObjectType::Schema => ("schema", "schemas"),
+        PbObjectType::Table => ("table", "tables"),
+        PbObjectType::Mview => ("materialized view", "materialized views"),
+        PbObjectType::Source => ("source", "sources"),
+        PbObjectType::Sink => ("sink", "sinks"),
+        PbObjectType::View => ("view", "views"),
+        PbObjectType::Index => ("index", "indexes"),
+        PbObjectType::Function => ("function", "functions"),
+        PbObjectType::Connection => ("connection", "connections"),
+        PbObjectType::Subscription => ("subscription", "subscriptions"),
+        PbObjectType::Secret => ("secret", "secrets"),
+        PbObjectType::Unspecified => ("object", "objects"),
+    };
+    if count == 1 { singular } else { plural }
 }
 
 fn format_drop_cascade_object(object: &CascadeObject) -> String {
-    let object_type = match object.object_type() {
-        PbObjectType::Database => "database",
-        PbObjectType::Schema => "schema",
-        PbObjectType::Table => "table",
-        PbObjectType::Mview => "materialized view",
-        PbObjectType::Source => "source",
-        PbObjectType::Sink => "sink",
-        PbObjectType::View => "view",
-        PbObjectType::Index => "index",
-        PbObjectType::Function => "function",
-        PbObjectType::Connection => "connection",
-        PbObjectType::Subscription => "subscription",
-        PbObjectType::Secret => "secret",
-        PbObjectType::Unspecified => "object",
-    };
+    let object_type = cascade_object_type_name(object.object_type(), 1);
     let object_name = match &object.schema_name {
         Some(schema_name) => format!(
             "{}.{}",
@@ -272,6 +315,8 @@ pub struct OwnedGrantObject {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::ddl_service::TypeCount;
+
     use super::*;
 
     #[test]
@@ -309,8 +354,22 @@ mod tests {
             },
         ];
 
+        let result = DropResult {
+            cascade_objects: objects.to_vec(),
+            total_count: 2,
+            counts_by_type: vec![
+                TypeCount {
+                    object_type: PbObjectType::Mview as _,
+                    count: 1,
+                },
+                TypeCount {
+                    object_type: PbObjectType::View as _,
+                    count: 1,
+                },
+            ],
+        };
         assert_eq!(
-            format_drop_cascade_notice(&objects).as_deref(),
+            format_drop_cascade_notice(&result).as_deref(),
             Some(
                 "drop cascades to 2 other objects\nDETAIL:  drop cascades to view public.order_view\n\
                  drop cascades to materialized view public.order_mv"
