@@ -92,6 +92,7 @@ pub struct BatchIcebergListExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> BatchIcebergListExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
