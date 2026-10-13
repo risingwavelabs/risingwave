@@ -15,6 +15,12 @@ DROP TABLE IF EXISTS seeded_app_oracle_hb;
 statement ok
 DROP TABLE IF EXISTS incompatible_oracle_hb;
 
+statement ok
+DROP TABLE IF EXISTS unenforced_pk_oracle_hb;
+
+statement ok
+DROP TABLE IF EXISTS seed_conflict_oracle_hb;
+
 # Initialization must not create the Oracle user that owns a missing schema.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
@@ -230,6 +236,97 @@ CREATE TABLE incompatible_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) W
         "owner": "$TEST_ORACLE_USER",
         "expected_message": "must contain NUMBER columns named 'ID' and 'HEARTBEAT'",
         "after_error_check_hook": check_incompatible_heartbeat_unchanged,
+    },
+)
+PY
+
+# Initialization must reject an ID primary key that is disabled, deferrable, or not validated.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls, execute_sqls, prepare
+from oracle_test_hooks import check_heartbeat_creation_error, check_heartbeat_empty, no_op
+for heartbeat_table_sqls in [
+    [
+        "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
+        "(ID NUMBER(1), HEARTBEAT NUMBER(1) NOT NULL, "
+        "CONSTRAINT RW_HEARTBEAT_PK PRIMARY KEY (ID) DISABLE NOVALIDATE)",
+    ],
+    [
+        "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
+        "(ID NUMBER(1) PRIMARY KEY DEFERRABLE INITIALLY DEFERRED, HEARTBEAT NUMBER(1) NOT NULL)",
+    ],
+    [
+        "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
+        "(ID NUMBER(1), HEARTBEAT NUMBER(1) NOT NULL)",
+        "CREATE INDEX $TEST_ORACLE_USER.RW_HEARTBEAT_ID_IDX "
+        "ON $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE (ID)",
+        "ALTER TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
+        "ADD CONSTRAINT RW_HEARTBEAT_PK PRIMARY KEY (ID) "
+        "USING INDEX $TEST_ORACLE_USER.RW_HEARTBEAT_ID_IDX ENABLE NOVALIDATE",
+    ],
+]:
+    prepare(create_heartbeat_tables_hook=no_op)
+    execute_oracle_sqls(heartbeat_table_sqls + [
+        "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+        "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    ])
+    execute_sqls(["""
+CREATE TABLE unenforced_pk_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+    $TEST_ORACLE_WITH_OPTIONS_COMMON,
+    schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+    table.name = 'CUSTOMERS',
+    heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
+    heartbeat.table.auto.initialize = 'true'
+) FORMAT DEBEZIUM ENCODE JSON;
+"""],
+        after_sqls_hook=check_heartbeat_creation_error,
+        after_sqls_hook_kwargs={
+            "owner": "$TEST_ORACLE_USER",
+            "expected_message": "must use 'ID' as its single-column primary key, enabled, validated, and not deferrable",
+            "after_error_check_hook": check_heartbeat_empty,
+            "after_error_check_hook_kwargs": {"owner": "$TEST_ORACLE_USER"},
+        },
+    )
+PY
+
+# A seed failure that is not a lost race must report the original Oracle error.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import prepare
+from oracle_test_hooks import no_op
+prepare(create_heartbeat_tables_hook=no_op)
+PY
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
+    "(ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL UNIQUE)",
+    "INSERT INTO $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE (ID, HEARTBEAT) VALUES (2, 0)",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+])
+PY
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_creation_error
+execute_sqls(["""
+CREATE TABLE seed_conflict_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH (
+    $TEST_ORACLE_WITH_OPTIONS_COMMON,
+    schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+    table.name = 'CUSTOMERS',
+    heartbeat.table.name = '$TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE',
+    heartbeat.table.auto.initialize = 'true'
+) FORMAT DEBEZIUM ENCODE JSON;
+"""],
+    after_sqls_hook=check_heartbeat_creation_error,
+    after_sqls_hook_kwargs={
+        "owner": "$TEST_ORACLE_USER",
+        "expected_message": "(Oracle error 1: ORA-00001",
+        "create_table": False,
     },
 )
 PY

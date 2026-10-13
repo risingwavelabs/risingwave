@@ -45,8 +45,6 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private static final Set<String> REQUIRED_ROLES =
             Set.of("SELECT_CATALOG_ROLE", "EXECUTE_CATALOG_ROLE");
 
-    private static final int ORA_DUPLICATE_KEY = 1;
-    private static final int ORA_NAME_ALREADY_USED = 955;
     private static final int ORA_CONTAINER_DOES_NOT_EXIST = 65011;
     private static final int INITIALIZATION_TIMEOUT_SECONDS = 30;
 
@@ -336,30 +334,25 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private void tryInitializeHeartbeatTable(
             OracleHeartbeatTable heartbeatTable, String sessionUser) throws SQLException {
         if (!heartbeatTableExists(heartbeatTable)) {
+            SQLException createError = null;
             try {
                 executeInitializationStatement(heartbeatTable.createTableSql());
             } catch (SQLException e) {
-                if (e.getErrorCode() != ORA_NAME_ALREADY_USED) {
-                    throw initializationFailure(
-                            "create",
-                            heartbeatTable,
-                            e,
-                            heartbeatTable.manualSetupSql(
-                                    pdbName,
-                                    sessionUser,
-                                    OracleHeartbeatTable.ManualSetup.TABLE_AND_SEED_ROW));
-                }
+                createError = e;
             }
             if (!heartbeatTableExists(heartbeatTable)) {
                 var objectTypes = heartbeatObjectTypes(heartbeatTable);
                 if (!objectTypes.isEmpty()) {
                     throw incompatibleHeartbeatObject(heartbeatTable, objectTypes, sessionUser);
                 }
-                throw ValidatorUtils.failedPrecondition(
-                        String.format(
-                                "Oracle reported that object '%s' already exists in PDB '%s', "
-                                        + "but it is not a visible table",
-                                heartbeatTable.qualifiedName(), pdbName));
+                throw initializationFailure(
+                        "create",
+                        heartbeatTable,
+                        createError,
+                        heartbeatTable.manualSetupSql(
+                                pdbName,
+                                sessionUser,
+                                OracleHeartbeatTable.ManualSetup.TABLE_AND_SEED_ROW));
             }
         }
 
@@ -367,36 +360,29 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         validateHeartbeatColumns(heartbeatTable, sessionUser);
         validateHeartbeatPrimaryKey(heartbeatTable, sessionUser);
         if (!heartbeatRowExists(heartbeatTable)) {
+            SQLException seedError = null;
             try {
                 executeInitializationStatement(heartbeatTable.insertSeedRowSql());
                 if (!jdbcConnection.getAutoCommit()) {
                     jdbcConnection.commit();
                 }
             } catch (SQLException e) {
-                if (e.getErrorCode() != ORA_DUPLICATE_KEY) {
-                    if (!jdbcConnection.getAutoCommit()) {
-                        try {
-                            jdbcConnection.rollback();
-                        } catch (SQLException rollbackError) {
-                            e.addSuppressed(rollbackError);
-                        }
+                seedError = e;
+                if (!jdbcConnection.getAutoCommit()) {
+                    try {
+                        jdbcConnection.rollback();
+                    } catch (SQLException rollbackError) {
+                        e.addSuppressed(rollbackError);
                     }
-                    throw initializationFailure(
-                            "insert the seed row into",
-                            heartbeatTable,
-                            e,
-                            heartbeatTable.manualSetupSql(
-                                    pdbName,
-                                    sessionUser,
-                                    OracleHeartbeatTable.ManualSetup.SEED_ROW));
                 }
             }
             if (!heartbeatRowExists(heartbeatTable)) {
-                throw ValidatorUtils.failedPrecondition(
-                        String.format(
-                                "Oracle heartbeat table '%s' still has no row with %s = 1 after "
-                                        + "concurrent initialization",
-                                heartbeatTable.qualifiedName(), OracleHeartbeatTable.ID_COLUMN));
+                throw initializationFailure(
+                        "insert the seed row into",
+                        heartbeatTable,
+                        seedError,
+                        heartbeatTable.manualSetupSql(
+                                pdbName, sessionUser, OracleHeartbeatTable.ManualSetup.SEED_ROW));
             }
         }
     }
@@ -413,16 +399,18 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             OracleHeartbeatTable heartbeatTable,
             SQLException error,
             String setupSql) {
+        // A null error means the statement succeeded, but the follow-up check still cannot see
+        // its result, for example because a trigger or row-level security policy hides the row.
+        var cause =
+                error == null
+                        ? "the result is not visible to the connector user"
+                        : String.format(
+                                "Oracle error %d: %s", error.getErrorCode(), error.getMessage());
         return ValidatorUtils.failedPrecondition(
                 String.format(
                         "Failed to %s Oracle heartbeat table '%s' in PDB '%s' "
-                                + "(Oracle error %d: %s). A DBA can prepare it with:\n%s",
-                        operation,
-                        heartbeatTable.qualifiedName(),
-                        pdbName,
-                        error.getErrorCode(),
-                        error.getMessage(),
-                        setupSql));
+                                + "(%s). A DBA can prepare it with:\n%s",
+                        operation, heartbeatTable.qualifiedName(), pdbName, cause, setupSql));
     }
 
     private RuntimeException incompatibleHeartbeatObject(
@@ -461,7 +449,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                 var columns = new HashSet<String>();
                 while (result.next()) {
                     if ("NUMBER".equalsIgnoreCase(result.getString("DATA_TYPE"))) {
-                        columns.add(result.getString("COLUMN_NAME").toUpperCase(Locale.ROOT));
+                        columns.add(result.getString("COLUMN_NAME"));
                     }
                 }
                 if (!columns.containsAll(
@@ -490,6 +478,8 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                                 + "JOIN ALL_CONS_COLUMNS CC "
                                 + "ON C.OWNER = CC.OWNER AND C.CONSTRAINT_NAME = CC.CONSTRAINT_NAME "
                                 + "WHERE C.OWNER = ? AND C.TABLE_NAME = ? AND C.CONSTRAINT_TYPE = 'P' "
+                                + "AND C.STATUS = 'ENABLED' AND C.VALIDATED = 'VALIDATED' "
+                                + "AND C.DEFERRABLE = 'NOT DEFERRABLE' "
                                 + "GROUP BY C.CONSTRAINT_NAME "
                                 + "HAVING COUNT(*) = 1 AND MAX(CC.COLUMN_NAME) = ?)")) {
             stmt.setString(1, heartbeatTable.owner());
@@ -501,7 +491,8 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                     throw ValidatorUtils.invalidArgument(
                             String.format(
                                     "Oracle heartbeat table '%s' must use '%s' as its "
-                                            + "single-column primary key%s",
+                                            + "single-column primary key, enabled, validated, "
+                                            + "and not deferrable%s",
                                     heartbeatTable.qualifiedName(),
                                     OracleHeartbeatTable.ID_COLUMN,
                                     incompatibleHeartbeatTableHint(heartbeatTable, sessionUser)));
