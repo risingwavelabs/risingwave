@@ -423,7 +423,7 @@ fn bind_columns_from_source_for_cdc(
     Ok((Some(columns), stream_source_info))
 }
 
-fn format_to_prost(format: &Format) -> FormatType {
+pub(super) fn format_to_prost(format: &Format) -> FormatType {
     match format {
         Format::Native => FormatType::Native,
         Format::Plain => FormatType::Plain,
@@ -435,7 +435,7 @@ fn format_to_prost(format: &Format) -> FormatType {
         Format::None => FormatType::None,
     }
 }
-fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
+pub(super) fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
     match row_encode {
         Encode::Native => EncodeType::Native,
         Encode::Json => EncodeType::Json,
