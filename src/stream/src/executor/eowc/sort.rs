@@ -347,4 +347,67 @@ mod tests {
         // Consume the watermark
         recovered_sort_executor.expect_watermark().await;
     }
+
+    /// Collects the rows output before the next watermark.
+    async fn rows_before_watermark(sort_executor: &mut BoxedMessageStream) -> Vec<OwnedRow> {
+        let mut rows = vec![];
+        loop {
+            match sort_executor.next().await.unwrap().unwrap() {
+                Message::Chunk(chunk) => rows.extend(chunk.rows().map(|(op, row)| {
+                    assert_eq!(op, Op::Insert);
+                    row.into_owned_row()
+                })),
+                Message::Watermark(_) => return rows,
+                Message::Barrier(_) => panic!("unexpected barrier"),
+            }
+        }
+    }
+
+    fn int64_rows(rows: &[(i64, i64)]) -> Vec<OwnedRow> {
+        rows.iter()
+            .map(|&(a, b)| OwnedRow::new(vec![Some(a.into()), Some(b.into())]))
+            .collect()
+    }
+
+    /// A change to the only row left in the cache empties it, after which the cache is refilled
+    /// from the table, which still has the rows output earlier in the epoch.
+    #[tokio::test]
+    async fn test_sort_executor_change_empties_cache() {
+        let sort_column_index = 1;
+        for barrier_between in [false, true] {
+            for (change, expected) in [
+                (" I I\n - 3 3", vec![]),
+                (" I I\n U- 3 3\n U+ 3 3", vec![(3, 3)]),
+            ] {
+                let store = MemoryStateStore::new();
+                let (mut tx, mut sort_executor) = create_executor(sort_column_index, store).await;
+                tx.push_barrier(test_epoch(1), false);
+                sort_executor.expect_barrier().await;
+
+                tx.push_chunk(StreamChunk::from_pretty(
+                    " I I
+                    + 1 1
+                    + 2 2
+                    + 3 3",
+                ));
+                tx.push_int64_watermark(sort_column_index, 3_i64);
+                assert_eq!(
+                    rows_before_watermark(&mut sort_executor).await,
+                    int64_rows(&[(1, 1), (2, 2)])
+                );
+
+                if barrier_between {
+                    tx.push_barrier(test_epoch(2), false);
+                    sort_executor.expect_barrier().await;
+                }
+                tx.push_chunk(StreamChunk::from_pretty(change));
+                tx.push_int64_watermark(sort_column_index, 10_i64);
+                assert_eq!(
+                    rows_before_watermark(&mut sort_executor).await,
+                    int64_rows(&expected),
+                    "change: {change:?}, barrier_between: {barrier_between}"
+                );
+            }
+        }
+    }
 }

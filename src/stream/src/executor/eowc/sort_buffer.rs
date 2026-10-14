@@ -184,7 +184,8 @@ impl<S: StateStore> SortBuffer<S> {
         }
     }
 
-    /// Clear the cache and refill it with the current content of the buffer table.
+    /// Clear the cache and refill it with the current content of the buffer table, after
+    /// `last_table_pk` if given.
     pub async fn refill_cache(
         &mut self,
         last_table_pk: Option<OwnedRow>,
@@ -192,12 +193,16 @@ impl<S: StateStore> SortBuffer<S> {
     ) -> StreamExecutorResult<()> {
         let mut filler = self.cache.begin_syncing();
 
-        let pk_range = (
-            last_table_pk
-                .map(Bound::Excluded)
-                .unwrap_or(Bound::Unbounded),
-            Bound::<row::Empty>::Unbounded,
-        );
+        let start = match (last_table_pk, buffer_table.get_pending_watermark()) {
+            (Some(pk), _) => Bound::Excluded(pk),
+            // The rows below the watermark consumed in this epoch are output, but stay in the table
+            // until the commit cleans them.
+            (None, Some(watermark)) => {
+                Bound::Included(OwnedRow::new(vec![Some(watermark.clone())]))
+            }
+            (None, None) => Bound::Unbounded,
+        };
+        let pk_range = (start, Bound::<row::Empty>::Unbounded);
 
         let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnodes().iter_vnodes().map(|vnode| {
