@@ -810,6 +810,7 @@ impl DatabaseCheckpointControl {
 
                 let subscriber_id = job_id.as_subscriber_id();
                 let mutation = Mutation::Add(AddMutation {
+                    actor_bounded_attempts: Default::default(),
                     actor_dispatchers: Default::default(),
                     added_actors: Default::default(),
                     actor_splits: Default::default(),
