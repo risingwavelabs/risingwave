@@ -21,6 +21,7 @@ pub(crate) use batch_opendal_fs_list::*;
 mod batch_opendal_fs_fetch;
 pub use batch_opendal_fs_fetch::*;
 mod batch_iceberg_list;
+mod load_mode;
 pub use batch_iceberg_list::*;
 mod batch_iceberg_fetch;
 pub use batch_iceberg_fetch::*;
