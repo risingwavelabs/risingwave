@@ -179,38 +179,17 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         }
         tracing::info!(?source_id, "CDC connector started");
 
-        let instance = match T::source_type() {
-            CdcSourceType::Mysql
-            | CdcSourceType::Postgres
-            | CdcSourceType::Mongodb
-            | CdcSourceType::SqlServer
-            | CdcSourceType::Oracle => Self {
-                source_id: split.split_id() as u64,
-                start_offset: split.start_offset().clone(),
-                server_addr: None,
-                conn_props,
-                split_id,
-                snapshot_done: split.snapshot_done(),
-                parser_config,
-                source_ctx,
-                rx,
-            },
-            CdcSourceType::Citus => Self {
-                source_id: split.split_id() as u64,
-                start_offset: split.start_offset().clone(),
-                server_addr: citus_server_addr,
-                conn_props,
-                split_id,
-                snapshot_done: split.snapshot_done(),
-                parser_config,
-                source_ctx,
-                rx,
-            },
-            CdcSourceType::Unspecified => {
-                unreachable!();
-            }
-        };
-        Ok(instance)
+        Ok(Self {
+            source_id: split.split_id() as u64,
+            start_offset: split.start_offset().clone(),
+            server_addr: citus_server_addr,
+            conn_props,
+            split_id,
+            snapshot_done: split.snapshot_done(),
+            parser_config,
+            source_ctx,
+            rx,
+        })
     }
 
     fn into_stream(self) -> BoxSourceChunkStream {

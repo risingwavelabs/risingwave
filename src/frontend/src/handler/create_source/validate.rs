@@ -12,8 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::dispatch_cdc_source_type;
+use risingwave_connector::source::cdc::{
+    CDC_CONNECTOR_NAMES, CdcSourceFrontendValidator, CdcSourceType, is_cdc_connector_name,
+};
 use risingwave_connector::source::{ADBC_SNOWFLAKE_CONNECTOR, BATCH_POSIX_FS_CONNECTOR};
 
+use super::external_schema::{format_to_prost, row_encode_to_prost};
 use super::*;
 
 pub static SOURCE_ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
@@ -80,24 +85,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 BATCH_POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],
                 ),
-                MYSQL_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                    // support source stream job
-                    Format::Plain => vec![Encode::Json],
-                ),
-                POSTGRES_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                    // support source stream job
-                    Format::Plain => vec![Encode::Json],
-                ),
-                ORACLE_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                    // support source stream job
-                    Format::Plain => vec![Encode::Json],
-                ),
-                MONGODB_CDC_CONNECTOR => hashmap!(
-                    Format::DebeziumMongo => vec![Encode::Json],
-                ),
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Bytes],
                 ),
@@ -113,18 +100,46 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ADBC_SNOWFLAKE_CONNECTOR => hashmap!(
                     Format::None => vec![Encode::None],
                 ),
-                SQL_SERVER_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                    // support source stream job
-                    Format::Plain => vec![Encode::Json],
-                ),
         ))
     });
 
-fn validate_license(connector: &str) -> Result<()> {
-    if connector == SQL_SERVER_CDC_CONNECTOR {
-        Feature::SqlServerCdcSource.check_available()?;
-    }
+/// Format, license and connector-specific option checks of a CDC connector, each defined by the
+/// connector's `CdcSourceFrontendValidator` impl.
+fn validate_cdc_connector(
+    connector: &str,
+    format_encode: &FormatEncodeOptions,
+    props: &mut BTreeMap<String, String>,
+) -> Result<()> {
+    let format = format_to_prost(&format_encode.format);
+    let encode = row_encode_to_prost(&format_encode.row_encode);
+    dispatch_cdc_source_type!(
+        CdcSourceType::from(connector),
+        T,
+        {
+            let compatible_encodes = T::COMPATIBLE_FORMATS
+                .iter()
+                .find(|(compatible_format, _)| *compatible_format == format)
+                .map(|(_, encodes)| *encodes)
+                .ok_or_else(|| {
+                    RwError::from(ProtocolError(format!(
+                        "connector {} does not support format {:?}",
+                        connector, format_encode.format
+                    )))
+                })?;
+            if !compatible_encodes.contains(&encode) {
+                return Err(RwError::from(ProtocolError(format!(
+                    "connector {} does not support format {:?} with encode {:?}",
+                    connector, format_encode.format, format_encode.row_encode
+                ))));
+            }
+            if let Some(feature) = T::LICENSE_FEATURE {
+                feature.check_available()?;
+            }
+            T::fill_and_validate_props(props)
+                .map_err(|err| ProtocolError(err.to_report_string()))?;
+        },
+        unreachable!("{connector} is not a CDC connector")
+    );
     Ok(())
 }
 
@@ -208,22 +223,24 @@ pub fn validate_compatibility(
         connector = OPENDAL_S3_CONNECTOR.to_owned();
     }
 
-    let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
-        .get(&connector)
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "connector {:?} is not supported, accept {:?}",
-                connector,
-                CONNECTORS_COMPATIBLE_FORMATS.keys()
-            )))
-        })?;
+    let is_cdc = is_cdc_connector_name(&connector);
+    if !is_cdc && !CONNECTORS_COMPATIBLE_FORMATS.contains_key(&connector) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connector {:?} is not supported, accept {:?}",
+            connector,
+            CONNECTORS_COMPATIBLE_FORMATS
+                .keys()
+                .map(String::as_str)
+                .chain(CDC_CONNECTOR_NAMES.iter().copied())
+                .collect::<Vec<_>>()
+        ))));
+    }
 
     // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
     // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
     // override must retain the common `string` default from `debezium.properties`.
     validate_decimal_handling_mode(props)?;
 
-    validate_license(&connector)?;
     let uses_pulsar_schema = validate_pulsar_schema_options(format_encode, &connector)?;
     if connector != KAFKA_CONNECTOR && !uses_pulsar_schema {
         let res = match (&format_encode.format, &format_encode.row_encode) {
@@ -243,77 +260,27 @@ pub fn validate_compatibility(
         }
     }
 
-    let compatible_encodes = compatible_formats
-        .get(&format_encode.format)
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "connector {} does not support format {:?}",
-                connector, format_encode.format
-            )))
-        })?;
-    if !compatible_encodes.contains(&format_encode.row_encode) {
-        return Err(RwError::from(ProtocolError(format!(
-            "connector {} does not support format {:?} with encode {:?}",
-            connector, format_encode.format, format_encode.row_encode
-        ))));
-    }
-
-    if connector == POSTGRES_CDC_CONNECTOR || connector == CITUS_CDC_CONNECTOR {
-        match props.get("slot.name") {
-            None => {
-                // Build a random slot name with UUID
-                // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
-                let uuid = uuid::Uuid::new_v4();
-                props.insert("slot.name".into(), format!("rw_cdc_{}", uuid.simple()));
-            }
-            Some(slot_name) => {
-                // please refer to
-                // - https://github.com/debezium/debezium/blob/97956ce25b7612e3413d363658661896b7d2e0a2/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresConnectorConfig.java#L1179
-                // - https://doxygen.postgresql.org/slot_8c.html#afac399f07320b9adfd2c599cf822aaa3
-                if !slot_name
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                    || slot_name.len() > 63
-                {
-                    return Err(RwError::from(ProtocolError(format!(
-                        "Invalid replication slot name: {:?}. Valid replication slot name must contain only digits, lowercase characters and underscores with length <= 63",
-                        slot_name
-                    ))));
-                }
-            }
+    if is_cdc {
+        validate_cdc_connector(&connector, format_encode, props)?;
+    } else {
+        let compatible_encodes = CONNECTORS_COMPATIBLE_FORMATS[&connector]
+            .get(&format_encode.format)
+            .ok_or_else(|| {
+                RwError::from(ProtocolError(format!(
+                    "connector {} does not support format {:?}",
+                    connector, format_encode.format
+                )))
+            })?;
+        if !compatible_encodes.contains(&format_encode.row_encode) {
+            return Err(RwError::from(ProtocolError(format!(
+                "connector {} does not support format {:?} with encode {:?}",
+                connector, format_encode.format, format_encode.row_encode
+            ))));
         }
-
-        if !props.contains_key("schema.name") {
-            // Default schema name is "public"
-            props.insert("schema.name".into(), "public".into());
-        }
-        if !props.contains_key("publication.name") {
-            // Build a random publication name with UUID to avoid conflicts between sources
-            // e.g. "rw_publication_f9a3567e6dd54bf5900444c8b1c03815"
-            let uuid = uuid::Uuid::new_v4();
-            props.insert(
-                "publication.name".into(),
-                format!("rw_publication_{}", uuid.simple()),
-            );
-        }
-        if !props.contains_key("publication.create.enable") {
-            // Default auto create publication if doesn't exist
-            props.insert("publication.create.enable".into(), "true".into());
-        }
-    }
-
-    if connector == SQL_SERVER_CDC_CONNECTOR && !props.contains_key("schema.name") {
-        // Default schema name is "dbo"
-        props.insert("schema.name".into(), "dbo".into());
     }
 
     // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
-    if (connector == MYSQL_CDC_CONNECTOR
-        || connector == POSTGRES_CDC_CONNECTOR
-        || connector == CITUS_CDC_CONNECTOR
-        || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR
-        || connector == ORACLE_CDC_CONNECTOR)
+    if is_cdc
         && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
         && timeout_value.parse::<u32>().is_err()
     {
@@ -325,12 +292,7 @@ pub fn validate_compatibility(
     }
 
     // Validate debezium.max.queue.size for all CDC connectors
-    if (connector == MYSQL_CDC_CONNECTOR
-        || connector == POSTGRES_CDC_CONNECTOR
-        || connector == CITUS_CDC_CONNECTOR
-        || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR
-        || connector == ORACLE_CDC_CONNECTOR)
+    if is_cdc
         && let Some(queue_size_value) = props.get("debezium.max.queue.size")
         && queue_size_value.parse::<u32>().is_err()
     {

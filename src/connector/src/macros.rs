@@ -366,7 +366,7 @@ macro_rules! impl_connector_properties {
 #[macro_export]
 macro_rules! impl_cdc_source_type {
     (
-        {$({$cdc_source_type:tt}),*},
+        {$({$cdc_source_type:ident}),*},
         {$($_ignore:tt),*}
     ) => {
         $(
@@ -375,20 +375,47 @@ macro_rules! impl_cdc_source_type {
                 pub struct $cdc_source_type;
                 impl CdcSourceTypeTrait for $cdc_source_type {
                     const CDC_CONNECTOR_NAME: &'static str = concat!(stringify!([<$cdc_source_type:lower>]), "-cdc");
+                    const DEFAULT_DEBEZIUM_CDC_SPLIT_SPLIT_FIELD: &'static str = stringify!([<$cdc_source_type:snake _split>]);
                     fn source_type() -> CdcSourceType {
                         CdcSourceType::$cdc_source_type
                     }
                 }
                 pub type [<$cdc_source_type CdcProperties>] = CdcProperties<$cdc_source_type>;
+                pub const [<$cdc_source_type:snake:upper _CDC_CONNECTOR>]: &str = $cdc_source_type::CDC_CONNECTOR_NAME;
             }
         )*
 
-        #[derive(Clone)]
+        /// `connector` option values of all registered CDC connectors.
+        pub const CDC_CONNECTOR_NAMES: &[&str] = &[
+            $(
+                $cdc_source_type::CDC_CONNECTOR_NAME,
+            )*
+        ];
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum CdcSourceType {
             $(
                 $cdc_source_type,
             )*
             Unspecified,
+        }
+
+        impl<'a> From<&'a str> for CdcSourceType {
+            fn from(name: &'a str) -> Self {
+                $crate::paste! {
+                    match name {
+                        $(
+                            [<$cdc_source_type:snake:upper _CDC_CONNECTOR>] => CdcSourceType::$cdc_source_type,
+                        )*
+                        _ => CdcSourceType::Unspecified,
+                    }
+                }
+            }
+        }
+
+        /// Whether `name` is the `connector` option value of a registered CDC connector.
+        pub fn is_cdc_connector_name(name: &str) -> bool {
+            CdcSourceType::from(name) != CdcSourceType::Unspecified
         }
 
         impl From<PbSourceType> for CdcSourceType {
@@ -414,4 +441,67 @@ macro_rules! impl_cdc_source_type {
         }
 
     }
+}
+
+#[macro_export]
+macro_rules! dispatch_cdc_source_type_inner {
+    (
+        {$({$cdc_source_type:ident}),*},
+        {$($_ignore:tt),*},
+        $source_type:tt,
+        $T:ident,
+        $body:expr,
+        $on_unspecified:expr
+    ) => {
+        match $source_type {
+            $(
+                $crate::source::cdc::CdcSourceType::$cdc_source_type => {
+                    #[allow(dead_code)]
+                    type $T = $crate::source::cdc::$cdc_source_type;
+                    {
+                        $body
+                    }
+                }
+            )*
+            $crate::source::cdc::CdcSourceType::Unspecified => $on_unspecified,
+        }
+    };
+}
+
+/// Template for a `match` over [`CdcSourceType`](crate::source::cdc::CdcSourceType) with one arm
+/// per CDC connector in the registry, plus a hardcoded `Unspecified` arm. In each arm `$T` is
+/// bound to that connector's marker type.
+///
+/// ```ignore
+/// dispatch_cdc_source_type!(source_type, T, {
+///     check_format_supported(T::COMPATIBLE_FORMATS, format, encode)?;
+///     T::fill_and_validate_props(props)?;
+/// }, { unreachable!() })
+/// // expands to
+/// match source_type {
+///     CdcSourceType::Mysql => {
+///         type T = Mysql;
+///         check_format_supported(T::COMPATIBLE_FORMATS, format, encode)?;
+///         T::fill_and_validate_props(props)?;
+///     }
+///     CdcSourceType::Postgres => {
+///         type T = Postgres;
+///         check_format_supported(T::COMPATIBLE_FORMATS, format, encode)?;
+///         T::fill_and_validate_props(props)?;
+///     }
+///     // ... one arm per registered connector
+///     CdcSourceType::Unspecified => unreachable!(),
+/// }
+/// ```
+#[macro_export]
+macro_rules! dispatch_cdc_source_type {
+    ($source_type:expr, $T:ident, $body:expr, $on_unspecified:expr) => {{
+        $crate::for_all_classified_sources! {
+            $crate::dispatch_cdc_source_type_inner,
+            { $source_type },
+            $T,
+            { $body },
+            { $on_unspecified }
+        }
+    }};
 }
