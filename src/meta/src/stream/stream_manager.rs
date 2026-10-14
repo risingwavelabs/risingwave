@@ -411,7 +411,7 @@ impl GlobalStreamManager {
                     stream_manager
                         .metadata_manager
                         .catalog_controller
-                        .notify_frontend_trivial()
+                        .current_notification_version()
                         .await
                 }
                 CreateType::Foreground => {
@@ -821,7 +821,7 @@ impl GlobalStreamManager {
                     tmp_id,
                     to_drop_state_table_ids: {
                         if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
-                            vec![drop_table_connector_ctx.to_remove_state_table_id]
+                            drop_table_connector_ctx.to_remove_state_table_ids.clone()
                         } else {
                             Vec::new()
                         }

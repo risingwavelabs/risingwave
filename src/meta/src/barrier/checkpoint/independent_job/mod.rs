@@ -388,6 +388,14 @@ impl IndependentCheckpointJob {
         }
     }
 
+    fn can_drop(&self) -> bool {
+        match self {
+            Self::CreatingStreamingJob(j) => j.can_drop(),
+            Self::BatchRefresh(_) => true,
+            Self::IcebergV3(_) => true,
+        }
+    }
+
     fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
         match self {
             Self::CreatingStreamingJob(j) => j.pinned_upstream_tables(),
@@ -576,7 +584,7 @@ impl IndependentCheckpointJobControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         epoch: u64,
-    ) {
+    ) -> MetaResult<()> {
         match self {
             Self::Running {
                 status: IndependentCheckpointJobStatus::Ready,
@@ -596,7 +604,7 @@ impl IndependentCheckpointJobControl {
                 status: IndependentCheckpointJobStatus::Ready,
                 job: IndependentCheckpointJob::IcebergV3(j),
                 ..
-            } => j.ack_completed(partial_graph_manager, epoch),
+            } => j.ack_completed(partial_graph_manager, epoch)?,
             Self::Running {
                 status: IndependentCheckpointJobStatus::Initial { .. },
                 ..
@@ -608,6 +616,7 @@ impl IndependentCheckpointJobControl {
                 // The partial graph has already been reset, so skip the ack.
             }
         }
+        Ok(())
     }
 
     pub(crate) fn on_partial_graph_reset(self) -> Vec<PbSubscriptionUpstreamInfo> {
@@ -625,6 +634,13 @@ impl IndependentCheckpointJobControl {
             Self::Running { .. } => {
                 panic!("should be resetting when receiving reset partial graph resp")
             }
+        }
+    }
+
+    pub(crate) fn can_drop(&self) -> bool {
+        match self {
+            Self::Running { job, .. } => job.can_drop(),
+            Self::Resetting { .. } => true,
         }
     }
 
