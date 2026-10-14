@@ -30,10 +30,11 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
 use crate::barrier::progress::TrackingJob;
-use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
+use crate::barrier::schedule::{BarrierScheduler, MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, CreateStreamingJobCommandInfo,
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, IndependentStreamingJobType,
@@ -123,6 +124,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         job: TrackingJob,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
+    fn apply_bounded_load_action(
+        &self,
+        action: BoundedLoadAction,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
     fn finish_cdc_table_backfill(
         &self,
         job_id: JobId,
@@ -186,6 +192,9 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
 pub(super) struct GlobalBarrierWorkerContextImpl {
     scheduled_barriers: ScheduledBarriers,
 
+    /// Schedules follow-up commands decided by the barrier worker itself.
+    barrier_scheduler: BarrierScheduler,
+
     status: Arc<ArcSwap<BarrierManagerStatus>>,
 
     pub(super) metadata_manager: MetadataManager,
@@ -213,6 +222,7 @@ impl GlobalBarrierWorkerContextImpl {
     #[expect(clippy::too_many_arguments)]
     pub(super) fn new(
         scheduled_barriers: ScheduledBarriers,
+        barrier_scheduler: BarrierScheduler,
         status: Arc<ArcSwap<BarrierManagerStatus>>,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
@@ -227,6 +237,7 @@ impl GlobalBarrierWorkerContextImpl {
     ) -> Self {
         Self {
             scheduled_barriers,
+            barrier_scheduler,
             status,
             metadata_manager,
             hummock_manager,

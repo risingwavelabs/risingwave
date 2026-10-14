@@ -522,6 +522,7 @@ pub async fn start_service_as_election_leader(
 
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
+        barrier_scheduler.clone(),
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),

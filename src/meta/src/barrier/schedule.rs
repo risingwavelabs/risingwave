@@ -755,6 +755,7 @@ mod tests {
     use risingwave_meta_model::PartialGraphId;
 
     use super::*;
+    use crate::barrier::bounded_progress::BoundedLoadAction;
 
     fn create_test_database(
         id: u32,
@@ -872,6 +873,10 @@ mod tests {
                 risingwave_pb::stream_service::barrier_complete_response::PbLoadFinishedSource,
             >,
         ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn apply_bounded_load_action(&self, _action: BoundedLoadAction) -> MetaResult<()> {
             unimplemented!()
         }
 
