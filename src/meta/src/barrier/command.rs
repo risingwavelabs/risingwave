@@ -888,6 +888,7 @@ impl Command {
             old_value_ssts,
             vector_index_adds,
             iceberg_pk_index_sink_metadata,
+            table_change_log_progress,
         ) = collect_resp_info(resps);
 
         let new_table_fragment_infos = match &barrier_info.post_collect_command {
@@ -972,6 +973,8 @@ impl Command {
         }
         task.iceberg_pk_index_pre_commit_metadata
             .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
+        info.table_change_log_progress
+            .extend(table_change_log_progress);
     }
 }
 

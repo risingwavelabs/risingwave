@@ -2805,6 +2805,19 @@ mod tests {
         }
         .insert(&txn)
         .await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(103)),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(0),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode::default())),
+            state_table_ids: Set(vec![TableId::new(9999)].into()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
 
         let (iceberg_job_id, _, progress_table_id) =
             insert_test_streaming_job(&txn, "iceberg_v3_sink", false, None).await?;
@@ -2856,22 +2869,22 @@ mod tests {
             truncate_info.subscription_retention_seconds,
             HashMap::from([(upstream_table_id, 123)])
         );
-        assert_eq!(truncate_info.independent_jobs.len(), 1);
-        let independent_job = &truncate_info.independent_jobs[0];
-        assert_eq!(independent_job.job_id, job_id);
+        assert_eq!(truncate_info.committed_epoch_truncate_jobs.len(), 1);
+        let committed_epoch_truncate_job = &truncate_info.committed_epoch_truncate_jobs[0];
+        assert_eq!(committed_epoch_truncate_job.job_id, job_id);
         assert_eq!(
-            independent_job.state_table_ids,
+            committed_epoch_truncate_job.state_table_ids,
             HashSet::from([state_table_id])
         );
         assert_eq!(
-            independent_job.upstream_table_snapshot_epochs,
+            committed_epoch_truncate_job.upstream_table_snapshot_epochs,
             HashMap::from([(upstream_table_id, None)])
         );
         assert_eq!(truncate_info.progress_table_subscribers.len(), 1);
         let progress_subscriber = truncate_info.progress_table_subscribers.first().unwrap();
         assert_eq!(progress_subscriber.subscriber_job_id, iceberg_job_id);
         assert_eq!(progress_subscriber.upstream_table_id, upstream_table_id);
-        assert_eq!(progress_subscriber.progress_table.id, progress_table_id);
+        assert_eq!(progress_subscriber.progress_table_id, progress_table_id);
 
         Ok(())
     }

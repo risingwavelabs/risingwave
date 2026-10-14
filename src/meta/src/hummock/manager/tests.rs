@@ -56,7 +56,7 @@ use tokio::time::Instant;
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
-use crate::controller::streaming_job::{IndependentJobChangeLogInfo, TableChangeLogTruncateInfo};
+use crate::controller::streaming_job::{CommittedEpochTruncateJob, TableChangeLogTruncateInfo};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
@@ -265,7 +265,7 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
         .truncate_table_change_log(TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::new(),
             progress_table_subscribers: vec![],
-            independent_jobs: vec![IndependentJobChangeLogInfo {
+            committed_epoch_truncate_jobs: vec![CommittedEpochTruncateJob {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(table_id, Some(truncate_epoch))]),
