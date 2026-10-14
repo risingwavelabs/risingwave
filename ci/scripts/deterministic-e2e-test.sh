@@ -20,6 +20,8 @@ popd
 echo "--- Extract data for SqlSmith"
 pushd ./src/tests/sqlsmith/tests
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snapshots.git
+# Pin the snapshot for release-2.8; newer snapshots use unsupported types such as VARIANT.
+git -C sqlsmith-query-snapshots checkout --detach acc83b57f76ac824aa161f9c32e79941d8a89ef4
 # FIXME(kwannoel): Uncomment this to stage changes. Should have a better approach.
 # pushd sqlsmith-query-snapshots
 # git checkout stage
