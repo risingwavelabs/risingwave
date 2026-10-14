@@ -1227,6 +1227,12 @@ pub async fn handle_create_source(
         ensure_local_fs_connector_allowed(&session, &connector)?;
     }
 
+    // Check the CREATE privilege before `bind_columns_from_source`, which may fetch from
+    // user-supplied URLs (schema registry, schema file).
+    let (schema_name, _) =
+        Binder::resolve_schema_qualified_name(&session.database(), &stmt.source_name)?;
+    session.get_database_and_schema_id_for_create(schema_name)?;
+
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         &session,
