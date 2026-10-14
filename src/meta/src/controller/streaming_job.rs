@@ -136,7 +136,15 @@ pub struct IndependentJobChangeLogInfo {
 #[derive(Debug)]
 pub struct TableChangeLogTruncateInfo {
     pub subscription_retention_seconds: HashMap<TableId, u64>,
+    pub progress_table_subscribers: Vec<ProgressTableChangeLogSubscriber>,
     pub independent_jobs: Vec<IndependentJobChangeLogInfo>,
+}
+
+#[derive(Debug)]
+pub struct ProgressTableChangeLogSubscriber {
+    pub subscriber_job_id: JobId,
+    pub upstream_table_id: TableId,
+    pub progress_table: PbTable,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -268,6 +276,68 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
+        let iceberg_job_ids: Vec<JobId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::JobId)
+            .filter(FragmentTypeMask::intersects(
+                FragmentTypeFlag::IcebergWithPkIndexWriter,
+            ))
+            .distinct()
+            .into_tuple::<JobId>()
+            .all(&inner.db)
+            .await?;
+        let fragments: Vec<(FragmentId, JobId, StreamNode)> = if iceberg_job_ids.is_empty() {
+            Vec::new()
+        } else {
+            Fragment::find()
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentId,
+                    fragment::Column::JobId,
+                    fragment::Column::StreamNode,
+                ])
+                .filter(fragment::Column::JobId.is_in(iceberg_job_ids).and(
+                    FragmentTypeMask::intersects(FragmentTypeFlag::SnapshotBackfillStreamScan),
+                ))
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
+        let mut progress_table_subscribers = Vec::new();
+        for (fragment_id, job_id, stream_node) in fragments {
+            let mut collection_error = None;
+            visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
+                let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                    Ok(scan_type) => scan_type,
+                    Err(err) => {
+                        collection_error = Some(anyhow::Error::new(err).context(format!(
+                            "invalid persisted stream scan type {} in job {} fragment {}",
+                            stream_scan.stream_scan_type, job_id, fragment_id
+                        )));
+                        return;
+                    }
+                };
+                if scan_type != StreamScanType::SnapshotBackfill {
+                    return;
+                }
+                let Some(progress_table) = stream_scan.state_table.clone() else {
+                    collection_error = Some(anyhow!(
+                        "snapshot backfill in Iceberg V3 job {} has no progress table",
+                        job_id
+                    ));
+                    return;
+                };
+                progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
+                    subscriber_job_id: job_id,
+                    upstream_table_id: stream_scan.table_id,
+                    progress_table,
+                });
+            });
+            if let Some(err) = collection_error {
+                return Err(err.into());
+            }
+        }
+
         let jobs: Vec<JobId> = StreamingJobModel::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -347,6 +417,7 @@ impl CatalogController {
             .collect();
         Ok(TableChangeLogTruncateInfo {
             subscription_retention_seconds,
+            progress_table_subscribers,
             independent_jobs,
         })
     }

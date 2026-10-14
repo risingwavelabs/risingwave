@@ -264,6 +264,7 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
     hummock_manager
         .truncate_table_change_log(TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::new(),
+            progress_table_subscribers: vec![],
             independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([state_table_id]),
