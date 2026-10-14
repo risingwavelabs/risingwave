@@ -158,6 +158,23 @@ impl JsonEncoder {
         }
     }
 
+    pub fn new_with_qdrant(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+        let config = JsonEncoderConfig {
+            time_handling_mode: TimeHandlingMode::String,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::Iso8601String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::Qdrant,
+            jsonb_handling_mode: JsonbHandlingMode::Dynamic,
+        };
+        Self {
+            schema,
+            col_indices,
+            kafka_connect: None,
+            config,
+        }
+    }
+
     pub fn with_kafka_connect(self, kafka_connect: KafkaConnectParams) -> Self {
         Self {
             kafka_connect: Some(Arc::new(kafka_connect)),
@@ -257,7 +274,10 @@ fn datum_to_json_object(
             json!(v)
         }
         (DataType::Serial, ScalarRefImpl::Serial(v)) => {
-            if matches!(&config.custom_json_type, CustomJsonType::Turbopuffer) {
+            if matches!(
+                &config.custom_json_type,
+                CustomJsonType::Turbopuffer | CustomJsonType::Qdrant
+            ) {
                 json!(v.into_inner())
             } else {
                 // The serial type needs to be handled as a string to prevent primary key conflicts caused by the precision issues of JSON numbers.
@@ -280,6 +300,11 @@ fn datum_to_json_object(
                 v.rescale(*s as u32);
                 json!(v.to_text())
             }
+            // Non-finite values become null, like non-finite floats.
+            CustomJsonType::Qdrant => f64::try_from(v)
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+                .map_or(Value::Null, Value::Number),
             CustomJsonType::Turbopuffer => {
                 let value = f64::try_from(v).map_err(|err| {
                     ArrayError::internal(format!(
@@ -356,9 +381,11 @@ fn datum_to_json_object(
             json!(general_purpose::STANDARD.encode(v))
         }
         // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
-        (DataType::Interval, ScalarRefImpl::Interval(v)) => {
-            json!(v.as_iso_8601())
-        }
+        (DataType::Interval, ScalarRefImpl::Interval(v)) => match config.custom_json_type {
+            // `as_iso_8601` drops the sign of the time part.
+            CustomJsonType::Qdrant => json!(v.to_text()),
+            _ => json!(v.as_iso_8601()),
+        },
 
         (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
             match config.jsonb_handling_mode_for_field(&field.name) {
@@ -410,7 +437,10 @@ fn datum_to_json_object(
                         "starrocks can't support struct".to_owned(),
                     ));
                 }
-                CustomJsonType::Es | CustomJsonType::None | CustomJsonType::Turbopuffer => {
+                CustomJsonType::Es
+                | CustomJsonType::None
+                | CustomJsonType::Turbopuffer
+                | CustomJsonType::Qdrant => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()
@@ -645,6 +675,40 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("non-finite decimal")
+        );
+
+        let qdrant_config = JsonEncoderConfig {
+            custom_json_type: CustomJsonType::Qdrant,
+            ..turbopuffer_config
+        };
+        let qdrant_value = |data_type, scalar: ScalarImpl| {
+            let field = Field {
+                data_type,
+                ..mock_field.clone()
+            };
+            datum_to_json_object(&field, Some(scalar.as_scalar_ref_impl()), &qdrant_config).unwrap()
+        };
+        assert_eq!(
+            qdrant_value(DataType::Serial, ScalarImpl::Serial(i64::MAX.into())),
+            json!(i64::MAX)
+        );
+        assert_eq!(
+            qdrant_value(
+                DataType::Decimal,
+                ScalarImpl::Decimal(Decimal::try_from(1.25).unwrap())
+            ),
+            json!(1.25)
+        );
+        assert_eq!(
+            qdrant_value(DataType::Decimal, ScalarImpl::Decimal(Decimal::NaN)),
+            Value::Null
+        );
+        assert_eq!(
+            qdrant_value(
+                DataType::Interval,
+                ScalarImpl::Interval(Interval::from_month_day_usec(-1, 2, -14_706_000_000))
+            ),
+            json!("-1 mons +2 days -04:05:06")
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java

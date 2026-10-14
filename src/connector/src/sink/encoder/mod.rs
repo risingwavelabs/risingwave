@@ -160,6 +160,8 @@ pub enum CustomJsonType {
     StarRocks,
     // turbopuffer expects serial and decimal attributes to match `int` and `float` schema types.
     Turbopuffer,
+    // qdrant writes serial and decimal as numbers, and interval as PostgreSQL text.
+    Qdrant,
     None,
 }
 
