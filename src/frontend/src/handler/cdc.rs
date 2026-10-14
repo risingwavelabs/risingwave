@@ -16,15 +16,11 @@ use anyhow::{Context, anyhow};
 use fancy_regex::Regex;
 use itertools::Itertools;
 use risingwave_common::catalog::{CdcKeyComparison, ColumnCatalog};
-use risingwave_connector::WithOptionsSecResolved;
-use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
+use risingwave_connector::source::cdc::CdcExternalTableNameParser;
 use risingwave_connector::source::cdc::external::{
-    DATABASE_NAME_KEY, ExternalTableConfig, ExternalTableImpl, SCHEMA_NAME_KEY, SchemaTableName,
-    TABLE_NAME_KEY,
+    ExternalTableConfig, ExternalTableImpl, SchemaTableName,
 };
-use risingwave_connector::source::cdc::{
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
-};
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type};
 use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
 use thiserror_ext::AsReport;
 
@@ -34,207 +30,28 @@ use crate::handler::create_table::{bind_sql_columns, bind_sql_pk_names, bind_tab
 
 /// Derive connector properties and normalize `external_table_name` for CDC tables.
 ///
-/// Returns (`connector_properties`, `normalized_external_table_name`) where:
-/// - For SQL Server: Normalizes 'db.schema.table' (3 parts) to 'schema.table' (2 parts),
-///   because users can optionally include database name for verification, but it needs to be
-///   stripped to match the format returned by Debezium's `extract_table_name()`.
-/// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
+/// Returns (`connector_properties`, `normalized_external_table_name`). The parsing is the
+/// connector's [`CdcExternalTableNameParser::fill_table_name_options`].
 pub(crate) fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
 ) -> Result<(WithOptionsSecResolved, String)> {
-    // we should remove the prefix from `full_table_name`
-    let source_database_name: &str = source_with_properties
-        .get("database.name")
-        .ok_or_else(|| anyhow!("The source with properties does not contain 'database.name'"))?
-        .as_str();
+    if source_with_properties.get("database.name").is_none() {
+        return Err(anyhow!("The source with properties does not contain 'database.name'").into());
+    }
     let mut with_options = source_with_properties.clone();
-    if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
-        match connector.as_str() {
-            MYSQL_CDC_CONNECTOR => {
-                // MySQL doesn't allow '.' in database name and table name, so we can split the
-                // external table name by '.' to get the table name
-                let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {
-                    anyhow!("The upstream table name must contain database name prefix, e.g. 'database.table'")
-                })?;
-                // We allow multiple database names in the source definition
-                if !source_database_name
-                    .split(',')
-                    .map(|s| s.trim())
-                    .any(|name| name == db_name)
-                {
-                    return Err(anyhow!(
-                        "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
-                        db_name,
-                        source_database_name
-                    ).into());
-                }
-                with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
-                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
-                // Return original external_table_name unchanged for MySQL
-                return Ok((with_options, external_table_name));
-            }
-            POSTGRES_CDC_CONNECTOR => {
-                let (schema_name, table_name) =
-                    parse_postgres_cdc_external_table_name(&external_table_name)?;
-
-                // insert 'schema.name' into connect properties
-                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name);
-                with_options.insert(TABLE_NAME_KEY.into(), table_name);
-                // Return original external_table_name unchanged for Postgres
-                return Ok((with_options, external_table_name));
-            }
-            SQL_SERVER_CDC_CONNECTOR => {
-                // SQL Server external table name must be in one of two formats:
-                // 1. 'schemaName.tableName' (2 parts) - database is already specified in source
-                // 2. 'databaseName.schemaName.tableName' (3 parts) - for explicit verification
-                //
-                // We do NOT allow single table name (e.g., 't') because:
-                // - Unlike database name (already in source), schema name is NOT pre-specified
-                // - User must explicitly provide schema (even if it's 'dbo')
-                let parts: Vec<&str> = external_table_name.split('.').collect();
-                let (schema_name, table_name) = match parts.len() {
-                    3 => {
-                        // Format: database.schema.table
-                        // Verify that the database name matches the one in source definition
-                        let db_name = parts[0];
-                        let schema_name = parts[1];
-                        let table_name = parts[2];
-
-                        if db_name != source_database_name {
-                            return Err(anyhow!(
-                                "The database name '{}' in FROM clause does not match the database name '{}' specified in source definition. \
-                                 You can either use 'schema.table' format (recommended) or ensure the database name matches.",
-                                db_name,
-                                source_database_name
-                            ).into());
-                        }
-                        (schema_name, table_name)
-                    }
-                    2 => {
-                        // Format: schema.table (recommended)
-                        // Database name is taken from source definition
-                        let schema_name = parts[0];
-                        let table_name = parts[1];
-                        (schema_name, table_name)
-                    }
-                    1 => {
-                        // Format: table only
-                        // Reject with clear error message
-                        return Err(anyhow!(
-                            "Invalid table name format '{}'. For SQL Server CDC, you must specify the schema name. \
-                             Use 'schema.table' format (e.g., 'dbo.{}') or 'database.schema.table' format (e.g., '{}.dbo.{}').",
-                            external_table_name,
-                            external_table_name,
-                            source_database_name,
-                            external_table_name
-                        ).into());
-                    }
-                    _ => {
-                        // Invalid format (4+ parts or empty)
-                        return Err(anyhow!(
-                            "Invalid table name format '{}'. Expected 'schema.table' or 'database.schema.table'.",
-                            external_table_name
-                        ).into());
-                    }
-                };
-
-                // Insert schema and table names into connector properties
-                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
-                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
-
-                // Normalize external_table_name to 'schema.table' format
-                // This ensures consistency with extract_table_name() in message.rs
-                let normalized_external_table_name = format!("{}.{}", schema_name, table_name);
-                return Ok((with_options, normalized_external_table_name));
-            }
-            _ => {
-                return Err(RwError::from(anyhow!(
-                    "connector {} is not supported for cdc table",
-                    connector
-                )));
-            }
-        };
-    }
-    unreachable!("All valid CDC connectors should have returned by now")
-}
-
-/// Parse the schema/table name from the CDC `TABLE` clause.
-///
-/// Column names do not need the same parsing here: wildcard schema derivation reads
-/// them from PostgreSQL catalogs after the exact table has been identified.
-fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
-    let mut parts = vec![];
-    let mut current = String::new();
-    let mut chars = external_table_name.chars().peekable();
-    let mut in_quote = false;
-    let mut just_closed_quote = false;
-
-    while let Some(ch) = chars.next() {
-        if in_quote {
-            if ch == '"' {
-                if chars.peek() == Some(&'"') {
-                    current.push('"');
-                    chars.next();
-                } else {
-                    in_quote = false;
-                    just_closed_quote = true;
-                }
-            } else {
-                current.push(ch);
-            }
-        } else {
-            match ch {
-                '.' => {
-                    if current.is_empty() {
-                        return Err(anyhow!(
-                            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                            external_table_name
-                        )
-                        .into());
-                    }
-                    parts.push(std::mem::take(&mut current));
-                    just_closed_quote = false;
-                }
-                '"' if current.is_empty() => {
-                    in_quote = true;
-                }
-                '"' => {
-                    return Err(anyhow!(
-                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                        external_table_name
-                    )
-                    .into());
-                }
-                _ if just_closed_quote => {
-                    return Err(anyhow!(
-                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                        external_table_name
-                    )
-                    .into());
-                }
-                _ => current.push(ch),
-            }
-        }
-    }
-
-    if in_quote || current.is_empty() {
+    let external_table_name = dispatch_cdc_source_type!(
+        source_with_properties.cdc_source_type(),
+        T,
+        T::fill_table_name_options(&mut with_options, &external_table_name)
+            .map_err(|err| RwError::from(anyhow::Error::from(err)))?,
         return Err(anyhow!(
-            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-            external_table_name
+            "connector {} is not supported for cdc table",
+            source_with_properties.get_connector().unwrap_or_default()
         )
-        .into());
-    }
-    parts.push(current);
-
-    if let [schema_name, table_name] = parts.as_slice() {
-        Ok((schema_name.clone(), table_name.clone()))
-    } else {
-        Err(
-            anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'")
-                .into(),
-        )
-    }
+        .into())
+    );
+    Ok((with_options, external_table_name))
 }
 
 /// Reject a CDC table when a primary-key column is filtered out of Debezium change-event
@@ -256,7 +73,12 @@ pub(crate) fn reject_pk_filtered_by_debezium_column_filter(
     const EXCLUDE_KEY: &str = "debezium.column.exclude.list";
     const INCLUDE_KEY: &str = "debezium.column.include.list";
 
-    let st = SchemaTableName::from_properties(cdc_with_options.as_plaintext());
+    let st = dispatch_cdc_source_type!(
+        cdc_with_options.cdc_source_type(),
+        T,
+        T::schema_table_name_from_options(cdc_with_options.as_plaintext()),
+        unreachable!("cdc table options must name a cdc connector")
+    );
     reject_pk_filtered_by_debezium_column_filter_inner(
         pk_names,
         &st,
@@ -592,38 +414,5 @@ mod tests {
             Some("Public.Orders.Plan_ID,Public.Orders.Site_ID"),
         )
         .unwrap();
-    }
-
-    #[test]
-    fn test_parse_postgres_cdc_external_table_name() {
-        for (input, expected) in [
-            ("public.Note", ("public", "Note")),
-            ("public.\"Note\"", ("public", "Note")),
-            (
-                "\"Mixed.Schema\".\"Note.Table\"",
-                ("Mixed.Schema", "Note.Table"),
-            ),
-            ("public.\"Note\"\"Archive\"", ("public", "Note\"Archive")),
-        ] {
-            assert_eq!(
-                parse_postgres_cdc_external_table_name(input).unwrap(),
-                (expected.0.to_owned(), expected.1.to_owned()),
-                "input: {input}"
-            );
-        }
-
-        for input in [
-            "Note",
-            "public.",
-            ".Note",
-            "public.\"Note",
-            "public.\"Note\"Archive",
-            "public.Note.Archive",
-        ] {
-            assert!(
-                parse_postgres_cdc_external_table_name(input).is_err(),
-                "input should be rejected: {input}"
-            );
-        }
     }
 }

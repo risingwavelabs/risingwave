@@ -15,8 +15,10 @@
 use risingwave_common::types::{DatumRef, ScalarRefImpl, Timestamptz};
 use risingwave_pb::connector_service::{CdcMessage, SourceType, cdc_message};
 
+use crate::dispatch_cdc_source_type;
 use crate::source::SourceMeta;
 use crate::source::base::SourceMessage;
+use crate::source::cdc::{CdcExternalTableNameParser, CdcSourceType};
 
 #[derive(Clone, Debug)]
 pub enum CdcMessageType {
@@ -103,100 +105,27 @@ impl DebeziumCdcMeta {
         Some(ScalarRefImpl::Utf8(table))
     }
 
-    /// Derive indices for slicing `full_table_name`.
-    ///
-    /// # Background
-    ///
-    /// RisingWave's Java `DbzChangeEventConsumer` extracts `full_table_name` from the Debezium
-    /// change event's topic name by removing everything through the first `.`. RisingWave
-    /// configures the removed first component as Debezium's `topic.prefix`. The remaining suffix
-    /// follows a connector-specific format:
-    ///
-    /// - **MySQL** ([Debezium topic names](https://debezium.io/documentation/reference/3.2/connectors/mysql.html#mysql-topic-names)):
-    ///   `"database.table"` (1 dot, 2 parts)
-    ///   - Example: `"risedev.orders"`
-    ///   - User provides: `"risedev.orders"` (same format)
-    ///   - Result: Keep entire string → `table_name_start` = 0
-    ///
-    /// - **`MongoDB`** ([Debezium topic names](https://debezium.io/documentation/reference/3.2/connectors/mongodb.html#mongodb-topic-names)):
-    ///   `"database.collection"` (1 dot, 2 parts)
-    ///   - Example: `"inventory.customers"`
-    ///   - Result: Keep entire string → `table_name_start` = 0
-    ///
-    /// - **Postgres/Citus** ([Debezium topic names](https://debezium.io/documentation/reference/3.2/connectors/postgresql.html#postgresql-topic-names)):
-    ///   `"schema.table"` (1 dot, 2 parts)
-    ///   - Example: `"public.users"`
-    ///   - User provides: `"public.users"` (same format)
-    ///   - Result: Keep entire string → `table_name_start` = 0
-    ///
-    /// - **Oracle** ([Debezium topic names](https://debezium.io/documentation/reference/3.2/connectors/oracle.html#oracle-topic-names)):
-    ///   `"schema.table"` (1 dot, 2 parts)
-    ///   - Example: `"INVENTORY.CUSTOMERS"`
-    ///   - User provides: `"INVENTORY.CUSTOMERS"` (same format)
-    ///   - Result: Keep entire string → `table_name_start` = 0
-    ///
-    /// - **SQL Server** ([Debezium topic names](https://debezium.io/documentation/reference/3.2/connectors/sqlserver.html#sqlserver-topic-names)):
-    ///   `"database.schema.table"` (2 dots, 3 parts)
-    ///   - Example: `"mydb.dbo.orders"`
-    ///   - User provides: `"dbo.orders"` (database already in source config)
-    ///   - Result: Skip "mydb." → `table_name_start` = 5
-    ///
-    /// # Why the difference?
-    ///
-    /// - **MySQL/MongoDB** have no separate schema component, so routing keeps
-    ///   `database.table`/`database.collection`
-    /// - **Postgres/Oracle** topics omit the configured database, so the table identifier is
-    ///   already `schema.table`
-    /// - **SQL Server** topics include the database, which is stripped for `schema.table` routing
-    fn derive_name_indices_from_full_table_name(
-        full_table_name: &str,
-        source_type: SourceType,
-    ) -> (usize, usize) {
-        let Some(first_dot) = full_table_name.find('.') else {
-            // No dot found (should not happen in practice for valid CDC messages)
-            return (0, 0);
-        };
-
-        let has_second_dot = full_table_name[first_dot + 1..].find('.').is_some();
-        match source_type {
-            // MySQL/MongoDB routing key keeps the full identifier (`db.table` / `db.collection`).
-            SourceType::Mysql | SourceType::Mongodb => (first_dot, 0),
-
-            // Postgres/Citus/SQL Server/Oracle routing key is `schema.table` if database is present.
-            // If `full_table_name` only contains one dot (e.g. `schema.table`), we can still route
-            // correctly, but we can't derive the database name from it.
-            SourceType::Postgres
-            | SourceType::Citus
-            | SourceType::SqlServer
-            | SourceType::Oracle => {
-                if has_second_dot {
-                    (first_dot, first_dot + 1)
-                } else {
-                    (0, 0)
-                }
-            }
-
-            // Fall back to the old heuristic:
-            // - 2 dots: `db.schema.table` → strip db for routing
-            // - 1 dot: treat as MySQL-style `db.table`
-            SourceType::Unspecified => {
-                if has_second_dot {
-                    (first_dot, first_dot + 1)
-                } else {
-                    (first_dot, 0)
-                }
-            }
-        }
-    }
-
+    /// Messages without a source type fall back to a heuristic for slicing `full_table_name`: a
+    /// two-dot suffix is taken as `db.schema.table` and the database is stripped for routing, a
+    /// one-dot suffix as `db.table`.
     pub fn new(
         full_table_name: String,
         source_ts_ms: i64,
         msg_type: cdc_message::CdcMessageType,
         source_type: SourceType,
     ) -> Self {
-        let (db_name_end, table_name_start) =
-            Self::derive_name_indices_from_full_table_name(&full_table_name, source_type);
+        let (db_name_end, table_name_start) = dispatch_cdc_source_type!(
+            CdcSourceType::from(source_type),
+            T,
+            T::db_name_end_and_table_name_start_from_debezium_topic_suffix(&full_table_name),
+            match full_table_name.find('.') {
+                Some(first_dot) if full_table_name[first_dot + 1..].contains('.') => {
+                    (first_dot, first_dot + 1)
+                }
+                Some(first_dot) => (first_dot, 0),
+                None => (0, 0),
+            }
+        );
         Self {
             source_type,
             db_name_end,

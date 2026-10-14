@@ -24,9 +24,9 @@ use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
 use thiserror_ext::AsReport as _;
 
-use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
+use crate::source::cdc::CdcSourceRuntimeFlags;
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
     DEFAULT_REFRESH_INTERVAL_SEC, OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
@@ -38,6 +38,7 @@ use crate::source::{
     CreateSplitReaderOpt, CreateSplitReaderResult, SourceColumnDesc, SourceContext,
     WaitCheckpointTask,
 };
+use crate::{WithOptionsSecResolved, dispatch_cdc_source_type};
 
 #[derive(Clone, Debug)]
 pub struct SourceReader {
@@ -122,8 +123,15 @@ impl SourceReader {
 
     /// Refer to `WaitCheckpointWorker` for more details.
     pub async fn create_wait_checkpoint_task(&self) -> ConnectorResult<Option<WaitCheckpointTask>> {
+        if dispatch_cdc_source_type!(
+            self.config.cdc_source_type(),
+            T,
+            T::COMMIT_OFFSET_ON_CHECKPOINT,
+            false
+        ) {
+            return Ok(Some(WaitCheckpointTask::CommitCdcOffset(None)));
+        }
         Ok(match &self.config {
-            ConnectorProperties::PostgresCdc(_) => Some(WaitCheckpointTask::CommitCdcOffset(None)),
             ConnectorProperties::GooglePubsub(prop) => Some(WaitCheckpointTask::AckPubsubMessage(
                 prop.subscription_client().await?,
                 vec![],

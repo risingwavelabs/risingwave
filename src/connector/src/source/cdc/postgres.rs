@@ -20,10 +20,16 @@ use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
-use crate::source::cdc::external::DebeziumOffset;
 use crate::source::cdc::external::postgres::PostgresOffset;
+use crate::source::cdc::external::{
+    DebeziumOffset, SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY,
+};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
-use crate::source::cdc::{CdcSerializedFieldNames, CdcSourceFrontendValidator, Postgres};
+use crate::source::cdc::{
+    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
+    CdcSourceRuntimeFlags, Postgres,
+    db_name_end_and_table_name_start_from_schema_qualified_topic_suffix,
+};
 
 // ------- Persisted names -------
 
@@ -100,6 +106,119 @@ pub(crate) fn fill_and_validate_postgres_props(
         props.insert("publication.create.enable".into(), "true".into());
     }
     Ok(())
+}
+
+// ------- Runtime flags -------
+
+impl CdcSourceRuntimeFlags for Postgres {
+    const CAN_BACKFILL: bool = true;
+    const COMMIT_OFFSET_ON_CHECKPOINT: bool = true;
+    const ENABLE_TRANSACTION_METADATA: bool = true;
+}
+
+// ------- Table name -------
+
+impl CdcExternalTableNameParser for Postgres {
+    /// Accepts `schema.table` with optional double-quoted identifiers, e.g. `public."Orders"`.
+    /// The returned name has the quotes stripped, `public.Orders`, which is how Debezium reports
+    /// the table in change-event topics and schema-change events.
+    fn fill_table_name_options(
+        options: &mut BTreeMap<String, String>,
+        external_table_name: &str,
+    ) -> ConnectorResult<String> {
+        let (schema_name, table_name) =
+            parse_postgres_cdc_external_table_name(external_table_name)?;
+        let normalized_external_table_name = format!("{}.{}", schema_name, table_name);
+        options.insert(SCHEMA_NAME_KEY.into(), schema_name);
+        options.insert(TABLE_NAME_KEY.into(), table_name);
+        Ok(normalized_external_table_name)
+    }
+
+    fn schema_table_name_from_options(options: &BTreeMap<String, String>) -> SchemaTableName {
+        SchemaTableName {
+            schema_name: options.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default(),
+            table_name: options.get(TABLE_NAME_KEY).cloned().unwrap_or_default(),
+        }
+    }
+
+    fn db_name_end_and_table_name_start_from_debezium_topic_suffix(
+        topic_suffix: &str,
+    ) -> (usize, usize) {
+        db_name_end_and_table_name_start_from_schema_qualified_topic_suffix(topic_suffix)
+    }
+}
+
+/// Parse the schema/table name from the CDC `TABLE` clause.
+///
+/// Column names do not need the same parsing here: wildcard schema derivation reads
+/// them from PostgreSQL catalogs after the exact table has been identified.
+fn parse_postgres_cdc_external_table_name(
+    external_table_name: &str,
+) -> ConnectorResult<(String, String)> {
+    let mut parts = vec![];
+    let mut current = String::new();
+    let mut chars = external_table_name.chars().peekable();
+    let mut in_quote = false;
+    let mut just_closed_quote = false;
+
+    while let Some(ch) = chars.next() {
+        if in_quote {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    current.push('"');
+                    chars.next();
+                } else {
+                    in_quote = false;
+                    just_closed_quote = true;
+                }
+            } else {
+                current.push(ch);
+            }
+        } else {
+            match ch {
+                '.' => {
+                    if current.is_empty() {
+                        bail!(
+                            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                            external_table_name
+                        );
+                    }
+                    parts.push(std::mem::take(&mut current));
+                    just_closed_quote = false;
+                }
+                '"' if current.is_empty() => {
+                    in_quote = true;
+                }
+                '"' => {
+                    bail!(
+                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                        external_table_name
+                    );
+                }
+                _ if just_closed_quote => {
+                    bail!(
+                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                        external_table_name
+                    );
+                }
+                _ => current.push(ch),
+            }
+        }
+    }
+
+    if in_quote || current.is_empty() {
+        bail!(
+            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+            external_table_name
+        );
+    }
+    parts.push(current);
+
+    if let [schema_name, table_name] = parts.as_slice() {
+        Ok((schema_name.clone(), table_name.clone()))
+    } else {
+        bail!("The upstream table name must contain schema name prefix, e.g. 'public.table'")
+    }
 }
 
 // ------- Split -------
@@ -417,5 +536,48 @@ mod tests {
 
         assert_eq!(split.pg_lsn_commit(), Some(33_969_832));
         assert_eq!(split.pg_lsn_proc(), Some(33_918_336));
+    }
+
+    #[test]
+    fn test_parse_postgres_cdc_external_table_name() {
+        for (input, expected) in [
+            ("public.Note", ("public", "Note")),
+            ("public.\"Note\"", ("public", "Note")),
+            (
+                "\"Mixed.Schema\".\"Note.Table\"",
+                ("Mixed.Schema", "Note.Table"),
+            ),
+            ("public.\"Note\"\"Archive\"", ("public", "Note\"Archive")),
+        ] {
+            assert_eq!(
+                parse_postgres_cdc_external_table_name(input).unwrap(),
+                (expected.0.to_owned(), expected.1.to_owned()),
+                "input: {input}"
+            );
+        }
+
+        for input in [
+            "Note",
+            "public.",
+            ".Note",
+            "public.\"Note",
+            "public.\"Note\"Archive",
+            "public.Note.Archive",
+        ] {
+            assert!(
+                parse_postgres_cdc_external_table_name(input).is_err(),
+                "input should be rejected: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_fill_table_name_options_strips_quotes() {
+        let mut options = BTreeMap::from([("database.name".to_owned(), "mydb".to_owned())]);
+        let external_table_name =
+            Postgres::fill_table_name_options(&mut options, r#"public."QuotedNote""#).unwrap();
+        assert_eq!(external_table_name, "public.QuotedNote");
+        assert_eq!(options.get(SCHEMA_NAME_KEY).unwrap(), "public");
+        assert_eq!(options.get(TABLE_NAME_KEY).unwrap(), "QuotedNote");
     }
 }

@@ -12,11 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::external::{SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait};
-use crate::source::cdc::{CdcSerializedFieldNames, CdcSourceFrontendValidator, Oracle};
+use crate::source::cdc::{
+    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
+    CdcSourceRuntimeFlags, Oracle,
+    db_name_end_and_table_name_start_from_schema_qualified_topic_suffix,
+};
 
 // ------- Persisted names -------
 
@@ -40,6 +47,27 @@ impl CdcSourceFrontendValidator for Oracle {
         // support source stream job
         (PbFormatType::Plain, &[PbEncodeType::Json]),
     ];
+}
+
+// ------- Runtime flags -------
+
+impl CdcSourceRuntimeFlags for Oracle {}
+
+// ------- Table name -------
+
+impl CdcExternalTableNameParser for Oracle {
+    fn schema_table_name_from_options(options: &BTreeMap<String, String>) -> SchemaTableName {
+        SchemaTableName {
+            schema_name: options.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default(),
+            table_name: options.get(TABLE_NAME_KEY).cloned().unwrap_or_default(),
+        }
+    }
+
+    fn db_name_end_and_table_name_start_from_debezium_topic_suffix(
+        topic_suffix: &str,
+    ) -> (usize, usize) {
+        db_name_end_and_table_name_start_from_schema_qualified_topic_suffix(topic_suffix)
+    }
 }
 
 // ------- Split -------

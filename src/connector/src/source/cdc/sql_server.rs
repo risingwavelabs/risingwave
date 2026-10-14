@@ -14,13 +14,21 @@
 
 use std::collections::BTreeMap;
 
+use risingwave_common::bail;
 use risingwave_common::license::Feature;
 use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
+use crate::source::cdc::external::{
+    DATABASE_NAME_KEY, SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY,
+};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
-use crate::source::cdc::{CdcSerializedFieldNames, CdcSourceFrontendValidator, SqlServer};
+use crate::source::cdc::{
+    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
+    CdcSourceRuntimeFlags, SqlServer,
+    db_name_end_and_table_name_start_from_schema_qualified_topic_suffix,
+};
 
 // ------- Persisted names -------
 
@@ -50,6 +58,78 @@ impl CdcSourceFrontendValidator for SqlServer {
             .entry("schema.name".to_owned())
             .or_insert_with(|| "dbo".to_owned());
         Ok(())
+    }
+}
+
+// ------- Runtime flags -------
+
+impl CdcSourceRuntimeFlags for SqlServer {
+    const CAN_BACKFILL: bool = true;
+    const MUST_WAIT_OFFSET_BEFORE_REPORT: bool = true;
+}
+
+// ------- Table name -------
+
+impl CdcExternalTableNameParser for SqlServer {
+    /// Accepts `schema.table`, or `database.schema.table` where the database must match the
+    /// source's `database.name`. A bare table name is rejected because the schema is not known
+    /// from the source. The returned name is always `schema.table`, which is what Debezium
+    /// reports.
+    fn fill_table_name_options(
+        options: &mut BTreeMap<String, String>,
+        external_table_name: &str,
+    ) -> ConnectorResult<String> {
+        let source_database_name = options
+            .get(DATABASE_NAME_KEY)
+            .map(String::as_str)
+            .unwrap_or_default();
+        let parts: Vec<&str> = external_table_name.split('.').collect();
+        let (schema_name, table_name) = match parts.as_slice() {
+            [db_name, schema_name, table_name] => {
+                if *db_name != source_database_name {
+                    bail!(
+                        "The database name '{}' in FROM clause does not match the database name '{}' specified in source definition. \
+                         You can either use 'schema.table' format (recommended) or ensure the database name matches.",
+                        db_name,
+                        source_database_name
+                    );
+                }
+                (*schema_name, *table_name)
+            }
+            [schema_name, table_name] => (*schema_name, *table_name),
+            [_] => {
+                bail!(
+                    "Invalid table name format '{}'. For SQL Server CDC, you must specify the schema name. \
+                     Use 'schema.table' format (e.g., 'dbo.{}') or 'database.schema.table' format (e.g., '{}.dbo.{}').",
+                    external_table_name,
+                    external_table_name,
+                    source_database_name,
+                    external_table_name
+                );
+            }
+            _ => {
+                bail!(
+                    "Invalid table name format '{}'. Expected 'schema.table' or 'database.schema.table'.",
+                    external_table_name
+                );
+            }
+        };
+        options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
+        options.insert(TABLE_NAME_KEY.into(), table_name.into());
+        Ok(format!("{}.{}", schema_name, table_name))
+    }
+
+    fn schema_table_name_from_options(options: &BTreeMap<String, String>) -> SchemaTableName {
+        SchemaTableName {
+            schema_name: options.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default(),
+            table_name: options.get(TABLE_NAME_KEY).cloned().unwrap_or_default(),
+        }
+    }
+
+    fn db_name_end_and_table_name_start_from_debezium_topic_suffix(
+        topic_suffix: &str,
+    ) -> (usize, usize) {
+        db_name_end_and_table_name_start_from_schema_qualified_topic_suffix(topic_suffix)
     }
 }
 

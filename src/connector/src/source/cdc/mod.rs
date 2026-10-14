@@ -42,6 +42,7 @@ pub use source::*;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
+use crate::source::cdc::external::SchemaTableName;
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
@@ -68,22 +69,6 @@ pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
 /// Build a unique CDC table identifier from a source ID and external table name
 pub fn build_cdc_table_id(source_id: SourceId, external_table_name: &str) -> String {
     format!("{}.{}", source_id, external_table_name)
-}
-
-pub fn normalize_simple_postgres_quoted_table_name(table_name: &str) -> Option<String> {
-    let (schema_name, table_name) = table_name.split_once('.')?;
-    let table_name = table_name.strip_prefix('"')?.strip_suffix('"')?;
-    if schema_name.is_empty()
-        || table_name.is_empty()
-        || table_name.contains('.')
-        || table_name.contains('"')
-        || table_name.contains('\\')
-        || schema_name.contains('"')
-    {
-        return None;
-    }
-
-    Some(format!("{schema_name}.{table_name}"))
 }
 
 /// Marker type of a CDC connector. Implemented for each entry of the CDC block in
@@ -124,6 +109,86 @@ pub trait CdcSourceFrontendValidator: CdcSourceTypeTrait {
     fn fill_and_validate_props(_props: &mut BTreeMap<String, String>) -> ConnectorResult<()> {
         Ok(())
     }
+}
+
+/// Behavior switches consulted at runtime by the frontend planner, the source executor and the
+/// source reader. Implemented per connector in its own module; every item has a default so a
+/// connector only overrides what differs. Reached through `dispatch_cdc_source_type!`.
+pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
+    /// Whether `CREATE TABLE ... FROM <source>` with CDC backfill is supported, i.e. whether a
+    /// source of this connector is shareable.
+    const CAN_BACKFILL: bool = false;
+    /// Whether a shared source sets Debezium's `provide.transaction.metadata`. Debezium then
+    /// emits BEGIN/END events for every upstream transaction, and the parser uses them to put
+    /// all rows of one transaction into a single chunk. Kept off where the END event arrives
+    /// late, e.g. SQL Server only emits it with the first event of the next transaction.
+    const ENABLE_TRANSACTION_METADATA: bool = false;
+    /// Whether the source executor must see a non-empty split offset before reporting the
+    /// initial CDC offset, which `CREATE SOURCE` waits for before finishing. The frontend rejects
+    /// `source_rate_limit = 0` for such connectors: a zero rate limit blocks the whole reader
+    /// stream, heartbeats included, so the offset would never be seen.
+    const MUST_WAIT_OFFSET_BEFORE_REPORT: bool = false;
+    /// Whether the consumed offset is committed back to the upstream database on each checkpoint
+    /// (`WaitCheckpointTask::CommitCdcOffset`).
+    const COMMIT_OFFSET_ON_CHECKPOINT: bool = false;
+}
+
+/// Parses the upstream table identifier in the three forms a CDC connector meets it: the
+/// `TABLE '...'` clause of `CREATE TABLE ... FROM <source>`, the `database.name` / `schema.name`
+/// / `table.name` options persisted from that clause, and the Debezium topic suffix carried on
+/// every change event.
+///
+/// Implemented per connector in its own module. Connectors that cannot be used with
+/// `CREATE TABLE ... FROM` keep the default of [`Self::fill_table_name_options`].
+pub trait CdcExternalTableNameParser: CdcSourceTypeTrait {
+    /// Parses the `TABLE '...'` clause and writes `table.name` plus `database.name` or
+    /// `schema.name` into `options`. Returns the external table name as stored in `CdcTableDesc`
+    /// and matched against the `_rw_table_name` column of change events.
+    fn fill_table_name_options(
+        _options: &mut BTreeMap<String, String>,
+        _external_table_name: &str,
+    ) -> ConnectorResult<String> {
+        risingwave_common::bail!(
+            "connector {} is not supported for cdc table",
+            Self::CDC_CONNECTOR_NAME
+        )
+    }
+
+    /// Reads back what [`Self::fill_table_name_options`] wrote, for the snapshot reader.
+    fn schema_table_name_from_options(options: &BTreeMap<String, String>) -> SchemaTableName;
+
+    /// Slices the Debezium topic suffix (the topic name without `topic.prefix`) for
+    /// `DebeziumCdcMeta`. Returns `(db_name_end, table_name_start)`: `topic_suffix[..db_name_end]`
+    /// is the database name (empty when the suffix has none) and
+    /// `topic_suffix[table_name_start..]` is the routing key compared with the external table
+    /// name, `database.table` or `schema.table` depending on the connector.
+    fn db_name_end_and_table_name_start_from_debezium_topic_suffix(
+        topic_suffix: &str,
+    ) -> (usize, usize);
+}
+
+/// Indices for a Debezium topic suffix of the form `schema.table` or `database.schema.table`,
+/// shared by connectors whose tables live in schemas. The routing key is `schema.table`; the
+/// database name is only available in the three-part form.
+pub fn db_name_end_and_table_name_start_from_schema_qualified_topic_suffix(
+    topic_suffix: &str,
+) -> (usize, usize) {
+    let Some(first_dot) = topic_suffix.find('.') else {
+        return (0, 0);
+    };
+    if topic_suffix[first_dot + 1..].contains('.') {
+        (first_dot, first_dot + 1)
+    } else {
+        (0, 0)
+    }
+}
+
+/// Indices for a Debezium topic suffix of the form `database.table`, shared by connectors
+/// without schemas. The database is the first part and the routing key is the whole suffix.
+pub fn db_name_end_and_table_name_start_from_database_qualified_topic_suffix(
+    topic_suffix: &str,
+) -> (usize, usize) {
+    (topic_suffix.find('.').unwrap_or(0), 0)
 }
 
 for_all_classified_sources!(impl_cdc_source_type);
@@ -375,38 +440,5 @@ impl CdcScanOptions {
         !self.disable_backfill
             && self.backfill_num_rows_per_split > 0
             && self.backfill_parallelism > 0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_normalize_simple_postgres_quoted_table_name() {
-        assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#"public."TableName""#).as_deref(),
-            Some("public.TableName")
-        );
-        assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#"public."pg_my_table""#).as_deref(),
-            Some("public.pg_my_table")
-        );
-        assert_eq!(
-            normalize_simple_postgres_quoted_table_name("public.table"),
-            None
-        );
-        assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#""Mixed.Schema"."TableName""#),
-            None
-        );
-        assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#"public."table.name""#),
-            None
-        );
-        assert_eq!(
-            normalize_simple_postgres_quoted_table_name(r#"public."table\name""#),
-            None
-        );
     }
 }

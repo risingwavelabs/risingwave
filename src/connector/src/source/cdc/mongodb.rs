@@ -12,11 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::external::{DATABASE_NAME_KEY, SchemaTableName, TABLE_NAME_KEY};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait};
-use crate::source::cdc::{CdcSerializedFieldNames, CdcSourceFrontendValidator, Mongodb};
+use crate::source::cdc::{
+    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
+    CdcSourceRuntimeFlags, Mongodb,
+    db_name_end_and_table_name_start_from_database_qualified_topic_suffix,
+};
 
 // ------- Persisted names -------
 
@@ -32,6 +39,27 @@ impl CdcSourceFrontendValidator for Mongodb {
     ];
     const COMPATIBLE_FORMATS: &'static [(PbFormatType, &'static [PbEncodeType])] =
         &[(PbFormatType::DebeziumMongo, &[PbEncodeType::Json])];
+}
+
+// ------- Runtime flags -------
+
+impl CdcSourceRuntimeFlags for Mongodb {}
+
+// ------- Table name -------
+
+impl CdcExternalTableNameParser for Mongodb {
+    fn schema_table_name_from_options(options: &BTreeMap<String, String>) -> SchemaTableName {
+        SchemaTableName {
+            schema_name: options.get(DATABASE_NAME_KEY).cloned().unwrap_or_default(),
+            table_name: options.get(TABLE_NAME_KEY).cloned().unwrap_or_default(),
+        }
+    }
+
+    fn db_name_end_and_table_name_start_from_debezium_topic_suffix(
+        topic_suffix: &str,
+    ) -> (usize, usize) {
+        db_name_end_and_table_name_start_from_database_qualified_topic_suffix(topic_suffix)
+    }
 }
 
 // ------- Split -------

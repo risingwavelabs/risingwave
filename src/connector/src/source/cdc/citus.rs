@@ -18,9 +18,13 @@ use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
+use crate::source::cdc::external::SchemaTableName;
 use crate::source::cdc::postgres::fill_and_validate_postgres_props;
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
-use crate::source::cdc::{CdcSerializedFieldNames, CdcSourceFrontendValidator, Citus, Postgres};
+use crate::source::cdc::{
+    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
+    CdcSourceRuntimeFlags, Citus, Postgres,
+};
 
 // ------- Persisted names -------
 
@@ -35,6 +39,25 @@ impl CdcSourceFrontendValidator for Citus {
 
     fn fill_and_validate_props(props: &mut BTreeMap<String, String>) -> ConnectorResult<()> {
         fill_and_validate_postgres_props(props)
+    }
+}
+
+// ------- Runtime flags -------
+
+impl CdcSourceRuntimeFlags for Citus {}
+
+// ------- Table name -------
+
+/// Citus names tables like Postgres, but `CREATE TABLE ... FROM` is not supported for it.
+impl CdcExternalTableNameParser for Citus {
+    fn schema_table_name_from_options(options: &BTreeMap<String, String>) -> SchemaTableName {
+        Postgres::schema_table_name_from_options(options)
+    }
+
+    fn db_name_end_and_table_name_start_from_debezium_topic_suffix(
+        topic_suffix: &str,
+    ) -> (usize, usize) {
+        Postgres::db_name_end_and_table_name_start_from_debezium_topic_suffix(topic_suffix)
     }
 }
 

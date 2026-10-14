@@ -17,7 +17,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::cdc::normalize_simple_postgres_quoted_table_name;
 use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 
@@ -300,28 +299,7 @@ impl StreamCdcTableScan {
     // The filter node receive input chunks in `(payload, _rw_offset, _rw_table_name)` schema
     pub fn build_cdc_filter_expr(cdc_table_name: &str) -> ExprImpl {
         let table_name_ref: ExprImpl = InputRef::new(2, DataType::Varchar).into();
-        let mut filter_expr = build_cdc_table_name_eq_expr(table_name_ref.clone(), cdc_table_name);
-
-        if let Some(compat_table_name) = normalize_simple_postgres_quoted_table_name(cdc_table_name)
-        {
-            // The left branch keeps matching the catalog/user-facing table name stored in
-            // `ExternalTableDesc`, e.g. `public."TableName"`. The right branch matches the
-            // Debezium runtime routing key carried in `_rw_table_name`, e.g. `public.TableName`.
-            // See `DbzChangeEventConsumer` for deriving the runtime table name from Debezium
-            // topics, and `DebeziumCdcMeta::extract_table_name` for how `_rw_table_name` is
-            // populated from that runtime name.
-            filter_expr = FunctionCall::new(
-                ExprType::Or,
-                vec![
-                    filter_expr,
-                    build_cdc_table_name_eq_expr(table_name_ref, &compat_table_name),
-                ],
-            )
-            .unwrap()
-            .into();
-        }
-
-        filter_expr
+        build_cdc_table_name_eq_expr(table_name_ref, cdc_table_name)
     }
 }
 
@@ -401,25 +379,5 @@ mod tests {
             filter_expr.eval_row(&row3).await.unwrap(),
             Some(ScalarImpl::Bool(true))
         )
-    }
-
-    #[tokio::test]
-    async fn test_cdc_filter_expr_postgres_quoted_table_name_compat() {
-        let row_with_unquoted_schema_table =
-            OwnedRow::new(vec![None, None, Some("public.QuotedNoteE2e".into())]);
-        let row_with_other_table = OwnedRow::new(vec![None, None, Some("public.other".into())]);
-
-        let filter_expr = StreamCdcTableScan::build_cdc_filter_expr(r#"public."QuotedNoteE2e""#);
-        assert_eq!(
-            filter_expr
-                .eval_row(&row_with_unquoted_schema_table)
-                .await
-                .unwrap(),
-            Some(ScalarImpl::Bool(true))
-        );
-        assert_eq!(
-            filter_expr.eval_row(&row_with_other_table).await.unwrap(),
-            Some(ScalarImpl::Bool(false))
-        );
     }
 }

@@ -50,6 +50,7 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::batch::BatchSourceSplitImpl;
+use crate::source::cdc::CdcSourceType;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
@@ -774,13 +775,36 @@ impl ConnectorProperties {
 for_all_sources!(impl_split);
 for_all_connections!(impl_connection);
 
-/// Generates the CDC-only methods of [`SplitImpl`], one arm per CDC connector in the registry.
+/// Generates the CDC-only methods of [`SplitImpl`] and [`ConnectorProperties`], one arm per CDC
+/// connector in the registry.
 macro_rules! impl_split_impl_cdc_methods {
     ({$({$cdc_source_type:ident}),*}, {$($_ignore:tt),*}) => {
         $crate::paste! {
+            impl ConnectorProperties {
+                /// The CDC connector of these properties, or `Unspecified` for a non-CDC source.
+                pub fn cdc_source_type(&self) -> CdcSourceType {
+                    match self {
+                        $(
+                            ConnectorProperties::[<$cdc_source_type Cdc>](_) => CdcSourceType::$cdc_source_type,
+                        )*
+                        _ => CdcSourceType::Unspecified,
+                    }
+                }
+            }
+
             impl SplitImpl {
                 pub fn is_cdc_split(&self) -> bool {
                     matches!(self, $(SplitImpl::[<$cdc_source_type Cdc>](_))|*)
+                }
+
+                /// The CDC connector of this split, or `Unspecified` for a non-CDC split.
+                pub fn cdc_source_type(&self) -> CdcSourceType {
+                    match self {
+                        $(
+                            SplitImpl::[<$cdc_source_type Cdc>](_) => CdcSourceType::$cdc_source_type,
+                        )*
+                        _ => CdcSourceType::Unspecified,
+                    }
                 }
 
                 /// Get the current split offset.

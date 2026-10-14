@@ -28,10 +28,12 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::external::{
     CdcTableSnapshotSplitOption, ExternalCdcTableType, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
 };
-use risingwave_connector::source::cdc::{CdcScanOptions, build_cdc_table_snapshot_split};
+use risingwave_connector::source::cdc::{
+    CdcExternalTableNameParser, CdcScanOptions, build_cdc_table_snapshot_split,
+};
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
+use risingwave_connector::{WithPropertiesExt, dispatch_cdc_source_type};
 use risingwave_meta_model::cdc_table_snapshot_split::Relation::Object;
 use risingwave_meta_model::{cdc_table_snapshot_split, object};
 use risingwave_meta_model_migration::JoinType;
@@ -94,7 +96,12 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
         table_desc.secret_refs.clone(),
     )
     .context("failed to parse external table config")?;
-    let schema_table_name = SchemaTableName::from_properties(&table_desc.connect_properties);
+    let schema_table_name = dispatch_cdc_source_type!(
+        table_desc.connect_properties.cdc_source_type(),
+        T,
+        T::schema_table_name_from_options(&table_desc.connect_properties),
+        unreachable!("cdc table options must name a cdc connector")
+    );
     let reader = table_type
         .create_table_reader(
             table_config,

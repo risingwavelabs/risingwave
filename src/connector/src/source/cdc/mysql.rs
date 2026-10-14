@@ -15,12 +15,18 @@
 use std::collections::BTreeMap;
 
 use rand::Rng;
+use risingwave_common::bail;
 use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
+use crate::source::cdc::external::{DATABASE_NAME_KEY, SchemaTableName, TABLE_NAME_KEY};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
-use crate::source::cdc::{CdcSerializedFieldNames, CdcSourceFrontendValidator, Mysql};
+use crate::source::cdc::{
+    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
+    CdcSourceRuntimeFlags, Mysql,
+    db_name_end_and_table_name_start_from_database_qualified_topic_suffix,
+};
 
 // ------- Persisted names -------
 
@@ -51,6 +57,63 @@ impl CdcSourceFrontendValidator for Mysql {
             .entry("server.id".to_owned())
             .or_insert_with(|| rand::rng().random_range(1..u32::MAX).to_string());
         Ok(())
+    }
+}
+
+// ------- Runtime flags -------
+
+impl CdcSourceRuntimeFlags for Mysql {
+    const CAN_BACKFILL: bool = true;
+    const ENABLE_TRANSACTION_METADATA: bool = true;
+    const MUST_WAIT_OFFSET_BEFORE_REPORT: bool = true;
+}
+
+// ------- Table name -------
+
+impl CdcExternalTableNameParser for Mysql {
+    /// MySQL has no schemas and forbids `.` in database and table names, so the clause is
+    /// `database.table`. The database must be one of those listed in the source's
+    /// `database.name`, and replaces that list in the table's options.
+    fn fill_table_name_options(
+        options: &mut BTreeMap<String, String>,
+        external_table_name: &str,
+    ) -> ConnectorResult<String> {
+        let Some((db_name, table_name)) = external_table_name.split_once('.') else {
+            bail!(
+                "The upstream table name must contain database name prefix, e.g. 'database.table'"
+            );
+        };
+        let source_database_name = options
+            .get(DATABASE_NAME_KEY)
+            .map(String::as_str)
+            .unwrap_or_default();
+        if !source_database_name
+            .split(',')
+            .map(str::trim)
+            .any(|name| name == db_name)
+        {
+            bail!(
+                "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
+                db_name,
+                source_database_name
+            );
+        }
+        options.insert(DATABASE_NAME_KEY.into(), db_name.into());
+        options.insert(TABLE_NAME_KEY.into(), table_name.into());
+        Ok(external_table_name.to_owned())
+    }
+
+    fn schema_table_name_from_options(options: &BTreeMap<String, String>) -> SchemaTableName {
+        SchemaTableName {
+            schema_name: options.get(DATABASE_NAME_KEY).cloned().unwrap_or_default(),
+            table_name: options.get(TABLE_NAME_KEY).cloned().unwrap_or_default(),
+        }
+    }
+
+    fn db_name_end_and_table_name_start_from_debezium_topic_suffix(
+        topic_suffix: &str,
+    ) -> (usize, usize) {
+        db_name_end_and_table_name_start_from_database_qualified_topic_suffix(topic_suffix)
     }
 }
 

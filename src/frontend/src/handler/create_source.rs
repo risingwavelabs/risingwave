@@ -56,7 +56,7 @@ use risingwave_connector::schema::schema_registry::{
 use risingwave_connector::source::cdc::{
     CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
     CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, MYSQL_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CdcSourceRuntimeFlags,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -70,7 +70,7 @@ use risingwave_connector::source::{
     KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
     OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
-use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt, dispatch_cdc_source_type};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
@@ -817,9 +817,11 @@ pub fn bind_connector_props(
 }
 
 fn must_wait_cdc_offset_before_report(with_properties: &WithOptions) -> bool {
-    matches!(
-        with_properties.get_connector().as_deref(),
-        Some(MYSQL_CDC_CONNECTOR) | Some(SQL_SERVER_CDC_CONNECTOR)
+    dispatch_cdc_source_type!(
+        with_properties.cdc_source_type(),
+        T,
+        T::MUST_WAIT_OFFSET_BEFORE_REPORT,
+        false
     )
 }
 

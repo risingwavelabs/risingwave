@@ -112,17 +112,6 @@ macro_rules! impl_external_cdc_table_type {
 crate::for_all_classified_sources!(impl_external_cdc_table_type);
 
 impl ExternalCdcTableType {
-    pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::Mysql | Self::Postgres | Self::SqlServer)
-    }
-
-    pub fn enable_transaction_metadata(&self) -> bool {
-        // In Debezium, transactional metadata cause delay of the newest events, as the `END` message is never sent unless a new transaction starts.
-        // So we only allow transactional metadata for MySQL and Postgres.
-        // See more in https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
-        matches!(self, Self::Mysql | Self::Postgres)
-    }
-
     pub fn get_cdc_offset_parser(&self) -> ConnectorResult<CdcOffsetParseFunc> {
         match self {
             Self::Mysql => Ok(MysqlExternalTableReader::get_cdc_offset_parser()),
@@ -179,37 +168,6 @@ pub struct SchemaTableName {
 pub const TABLE_NAME_KEY: &str = "table.name";
 pub const SCHEMA_NAME_KEY: &str = "schema.name";
 pub const DATABASE_NAME_KEY: &str = "database.name";
-
-impl SchemaTableName {
-    pub fn from_properties(properties: &BTreeMap<String, String>) -> Self {
-        let table_type = ExternalCdcTableType::from_properties(properties);
-        let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
-
-        let schema_name = match table_type {
-            ExternalCdcTableType::Mysql => properties
-                .get(DATABASE_NAME_KEY)
-                .cloned()
-                .unwrap_or_default(),
-            ExternalCdcTableType::Postgres | ExternalCdcTableType::Citus => {
-                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
-            }
-            ExternalCdcTableType::SqlServer => {
-                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
-            }
-            ExternalCdcTableType::Unspecified
-            | ExternalCdcTableType::Mock
-            | ExternalCdcTableType::Mongodb
-            | ExternalCdcTableType::Oracle => {
-                unreachable!("invalid external table type: {:?}", table_type);
-            }
-        };
-
-        Self {
-            schema_name,
-            table_name,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum CdcOffset {

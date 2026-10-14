@@ -17,10 +17,9 @@ use std::sync::Arc;
 use anyhow::Context;
 use risingwave_common::catalog::{CdcKeyComparison, Schema};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::{
-    ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
-};
+use risingwave_connector::source::cdc::external::{ExternalCdcTableType, ExternalTableConfig};
+use risingwave_connector::source::cdc::{CdcExternalTableNameParser, CdcScanOptions};
+use risingwave_connector::{WithPropertiesExt, dispatch_cdc_source_type};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
@@ -133,7 +132,12 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .map(Into::into)
             .collect();
 
-        let schema_table_name = SchemaTableName::from_properties(&properties);
+        let schema_table_name = dispatch_cdc_source_type!(
+            properties.cdc_source_type(),
+            T,
+            T::schema_table_name_from_options(&properties),
+            unreachable!("cdc table options must name a cdc connector")
+        );
         let table_config = ExternalTableConfig::try_from_btreemap(
             properties.clone(),
             table_desc.secret_refs.clone(),
