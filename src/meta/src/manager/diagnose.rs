@@ -34,6 +34,7 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
+use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use risingwave_sqlparser::parser::Parser;
@@ -845,23 +846,13 @@ impl DiagnoseCommand {
         database_id: Option<DatabaseId>,
     ) {
         let actor_ids = if database_id.is_some() {
-            match self
-                .metadata_manager
-                .catalog_controller
-                .list_actor_info(database_id)
-                .await
-            {
-                Ok(actors) => Some(
-                    actors
-                        .into_iter()
-                        .map(|(id, ..)| id.as_raw_id())
-                        .collect::<HashSet<_>>(),
-                ),
-                Err(err) => {
-                    tracing::warn!(error = ?err.as_report(), "failed to list actors for await tree filter");
-                    return;
-                }
-            }
+            Some(
+                self.metadata_manager
+                    .catalog_controller
+                    .list_actor_info(database_id)
+                    .await
+                    .map(|actors| actors.into_iter().map(|(id, ..)| id.as_raw_id()).collect()),
+            )
         } else {
             None
         };
@@ -872,11 +863,8 @@ impl DiagnoseCommand {
         )
         .await;
 
-        if let Ok(mut all) = all {
-            if let Some(actor_ids) = actor_ids {
-                all.actor_traces.retain(|id, _| actor_ids.contains(id));
-            }
-            write!(s, "{}", all.output()).unwrap();
+        if let Ok(all) = all {
+            write_await_tree_response(s, all, actor_ids);
         } else {
             tracing::warn!("failed to dump await tree");
         }
@@ -1269,6 +1257,27 @@ impl DiagnoseCommand {
     }
 }
 
+fn write_await_tree_response(
+    s: &mut String,
+    mut traces: StackTraceResponse,
+    actor_ids: Option<MetaResult<HashSet<u32>>>,
+) {
+    match actor_ids {
+        Some(Ok(actor_ids)) => traces.actor_traces.retain(|id, _| actor_ids.contains(id)),
+        Some(Err(err)) => {
+            tracing::warn!(error = ?err.as_report(), "failed to list actors for await tree filter");
+            traces.actor_traces.clear();
+            let _ = writeln!(
+                s,
+                "Actor traces omitted: failed to list actors for the database filter. \
+                 Shared cluster await-tree diagnostics are included below."
+            );
+        }
+        None => {}
+    }
+    write!(s, "{}", traces.output()).unwrap();
+}
+
 fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Option<T>) {
     match t {
         Some(t) => {
@@ -1341,4 +1350,72 @@ fn format_adaptive_parallelism_strategy(strategy: &str) -> Option<String> {
             AdaptiveParallelismStrategy::Bounded(n) => format!("bounded({n})"),
             AdaptiveParallelismStrategy::Ratio(r) => format!("ratio({r})"),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MetaError;
+
+    #[test]
+    fn test_await_tree_actor_lookup_failure_preserves_shared_traces() {
+        let traces = StackTraceResponse {
+            actor_traces: [(1, "actor trace".into())].into(),
+            rpc_traces: [("rpc".into(), "rpc trace".into())].into(),
+            batch_traces: [("batch".into(), "batch trace".into())].into(),
+            compaction_task_traces: [("compaction".into(), "compaction trace".into())].into(),
+            inflight_barrier_traces: [(1, "barrier trace".into())].into(),
+            barrier_worker_state: [(1.into(), "barrier worker state".into())].into(),
+            jvm_stack_traces: [(1.into(), "jvm trace".into())].into(),
+            meta_traces: [("meta".into(), "meta trace".into())].into(),
+            node_errors: [(1.into(), "worker connection error".into())].into(),
+        };
+        let mut report = String::new();
+        write_await_tree_response(
+            &mut report,
+            traces,
+            Some(Err(MetaError::unavailable("shared actor info missing"))),
+        );
+
+        assert!(
+            report.contains("Actor traces omitted: failed to list actors for the database filter")
+        );
+        assert!(!report.contains(">> Actor"));
+        assert!(!report.contains("actor trace"));
+        for shared_trace in [
+            "rpc trace",
+            "batch trace",
+            "compaction trace",
+            "barrier trace",
+            "barrier worker state",
+            "jvm trace",
+            "meta trace",
+            "worker connection error",
+        ] {
+            assert!(
+                report.contains(shared_trace),
+                "missing {shared_trace}: {report}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_await_tree_actor_filter() {
+        for (actor_ids, includes_other_actor) in
+            [(None, true), (Some(Ok(HashSet::from([1]))), false)]
+        {
+            let traces = StackTraceResponse {
+                actor_traces: [(1, "selected actor".into()), (2, "other actor".into())].into(),
+                rpc_traces: [("rpc".into(), "shared rpc trace".into())].into(),
+                ..Default::default()
+            };
+            let mut report = String::new();
+            write_await_tree_response(&mut report, traces, actor_ids);
+
+            assert!(report.contains("selected actor"));
+            assert_eq!(report.contains("other actor"), includes_other_actor);
+            assert!(report.contains("shared rpc trace"));
+            assert!(!report.contains("Actor traces omitted"));
+        }
+    }
 }
