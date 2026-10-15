@@ -138,19 +138,32 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub _phantom: PhantomData<T>,
 }
 
+/// Projects the schema sent to upstream CDC validation onto non-INCLUDE columns.
+/// Primary-key indices are remapped to the projection; the RisingWave table keeps its full key.
 pub fn table_schema_exclude_additional_columns(table_schema: &TableSchema) -> TableSchema {
+    let mut old_to_new = vec![None; table_schema.columns.len()];
+    let mut columns = Vec::with_capacity(table_schema.columns.len());
+    for (old_index, col) in table_schema.columns.iter().enumerate() {
+        if col
+            .additional_column
+            .as_ref()
+            .is_some_and(|additional| additional.column_type.is_some())
+        {
+            continue;
+        }
+        old_to_new[old_index] = Some(columns.len() as u32);
+        columns.push(col.clone());
+    }
+
     TableSchema {
-        columns: table_schema
-            .columns
+        columns,
+        // INCLUDE columns form part of RisingWave's key, but upstream validation
+        // only needs the key fields that remain in its projected schema.
+        pk_indices: table_schema
+            .pk_indices
             .iter()
-            .filter(|col| {
-                col.additional_column
-                    .as_ref()
-                    .is_some_and(|val| val.column_type.is_none())
-            })
-            .cloned()
+            .filter_map(|&index| old_to_new[index as usize])
             .collect(),
-        pk_indices: table_schema.pk_indices.clone(),
     }
 }
 
@@ -373,7 +386,77 @@ impl CdcScanOptions {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+    use risingwave_pb::plan_common::additional_column::ColumnType;
+    use risingwave_pb::plan_common::{AdditionalCollectionName, AdditionalDatabaseName};
+
     use super::*;
+
+    /// Checks that removing namespace columns remaps key indices without reordering them.
+    #[test]
+    fn projection_remaps_keys_around_include_columns() {
+        let mut company =
+            ColumnDesc::named("company_name", ColumnId::new(0), DataType::Varchar).to_protobuf();
+        company.additional_column = Some(risingwave_pb::plan_common::AdditionalColumn {
+            column_type: Some(ColumnType::DatabaseName(AdditionalDatabaseName {})),
+        });
+        let id = ColumnDesc::named("_id", ColumnId::new(1), DataType::Jsonb).to_protobuf();
+        let payload = ColumnDesc::named("payload", ColumnId::new(2), DataType::Jsonb).to_protobuf();
+        let mut collection =
+            ColumnDesc::named("collection_name", ColumnId::new(3), DataType::Varchar).to_protobuf();
+        collection.additional_column = Some(risingwave_pb::plan_common::AdditionalColumn {
+            column_type: Some(ColumnType::CollectionName(AdditionalCollectionName {})),
+        });
+
+        let schema = TableSchema {
+            columns: vec![company, id, payload, collection],
+            pk_indices: vec![0, 1, 3],
+        };
+        let projected = table_schema_exclude_additional_columns(&schema);
+        assert_eq!(projected.columns.len(), 2);
+        assert_eq!(projected.columns[0].name, "_id");
+        assert_eq!(projected.columns[1].name, "payload");
+        assert_eq!(projected.pk_indices, vec![0]);
+
+        let schema = TableSchema {
+            pk_indices: vec![2, 1],
+            ..schema
+        };
+        let projected = table_schema_exclude_additional_columns(&schema);
+        assert_eq!(projected.pk_indices, vec![1, 0]);
+    }
+
+    /// Checks that ordinary CDC keys survive projection with or without trailing metadata.
+    #[test]
+    fn projection_preserves_ordinary_cdc_keys() {
+        // Both protobuf representations of a regular column must survive projection.
+        let mut tenant =
+            ColumnDesc::named("tenant_id", ColumnId::new(0), DataType::Int32).to_protobuf();
+        tenant.additional_column = None;
+        let mut id = ColumnDesc::named("id", ColumnId::new(1), DataType::Int32).to_protobuf();
+        id.additional_column = Some(Default::default());
+        let schema = TableSchema {
+            columns: vec![tenant, id],
+            pk_indices: vec![1, 0],
+        };
+        assert_eq!(table_schema_exclude_additional_columns(&schema), schema);
+
+        let mut schema_with_metadata = schema.clone();
+        let mut database =
+            ColumnDesc::named("database_name", ColumnId::new(2), DataType::Varchar).to_protobuf();
+        database.additional_column = Some(risingwave_pb::plan_common::AdditionalColumn {
+            column_type: Some(ColumnType::DatabaseName(AdditionalDatabaseName {})),
+        });
+        schema_with_metadata.columns.push(database);
+        assert_eq!(
+            table_schema_exclude_additional_columns(&schema_with_metadata),
+            schema
+        );
+
+        let empty = TableSchema::default();
+        assert_eq!(table_schema_exclude_additional_columns(&empty), empty);
+    }
 
     #[test]
     fn test_normalize_simple_postgres_quoted_table_name() {

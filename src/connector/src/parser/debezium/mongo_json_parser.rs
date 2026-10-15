@@ -152,11 +152,14 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::row::Row;
     use risingwave_common::types::{ScalarImpl, StructType, ToOwnedDatum};
+    use risingwave_pb::connector_service::{SourceType, cdc_message};
+    use risingwave_pb::plan_common::additional_column::ColumnType;
 
     use super::*;
     use crate::parser::unified::debezium::{extract_bson_field, extract_bson_id};
-    use crate::parser::{MongoProperties, SourceStreamChunkBuilder};
-    use crate::source::{ConnectorProperties, SourceCtrlOpts};
+    use crate::parser::{MessageMeta, MongoProperties, SourceStreamChunkBuilder};
+    use crate::source::cdc::DebeziumCdcMeta;
+    use crate::source::{ConnectorProperties, SourceCtrlOpts, SourceMeta};
     fn generate_source_context_ref() -> Arc<SourceContext> {
         Arc::new(SourceContext {
             connector_props: ConnectorProperties::MongodbCdc(Box::default()),
@@ -270,6 +273,109 @@ mod tests {
 
         // payload should be null
         assert_eq!(row.datum_at(1).to_owned_datum(), None);
+    }
+
+    /// Checks that snapshot and live events derive namespace keys from the envelope,
+    /// including deletes without pre-images and tables without a collection column.
+    #[tokio::test]
+    async fn test_namespace_key_on_upsert_and_delete() {
+        let oid = "65bc9fb6c485f419a7a877fe";
+        let key = serde_json::to_vec(&serde_json::json!({
+            "schema": null,
+            "payload": { "id": serde_json::json!({"$oid": oid}).to_string() }
+        }))
+        .unwrap();
+
+        for include_collection in [false, true] {
+            let mut db = SourceColumnDesc::simple("company_name", DataType::Varchar, 0.into());
+            db.additional_column.column_type = Some(ColumnType::DatabaseName(Default::default()));
+            db.is_pk = true;
+            let mut id = SourceColumnDesc::simple("_id", DataType::Varchar, 1.into());
+            id.is_pk = true;
+            let mut columns = vec![db, id];
+            if include_collection {
+                let mut collection =
+                    SourceColumnDesc::simple("collection_name", DataType::Varchar, 2.into());
+                collection.additional_column.column_type =
+                    Some(ColumnType::CollectionName(Default::default()));
+                collection.is_pk = true;
+                columns.push(collection);
+            }
+            columns.push(SourceColumnDesc::simple(
+                "payload",
+                DataType::Jsonb,
+                3.into(),
+            ));
+
+            let mut parser = DebeziumMongoJsonParser::new(
+                columns.clone(),
+                generate_source_context_ref(),
+                MongoProperties::default(),
+            )
+            .unwrap();
+
+            for (company, operation, expected_op) in [
+                ("company1", "r", Op::Insert),
+                ("company2", "r", Op::Insert),
+                ("company1", "c", Op::Insert),
+                ("company1", "u", Op::Insert),
+                ("company1", "d", Op::Delete),
+            ] {
+                let after = (operation != "d").then(|| {
+                    serde_json::json!({"_id": {"$oid": oid}, "company": company}).to_string()
+                });
+                let payload = serde_json::to_vec(&serde_json::json!({
+                    "schema": null,
+                    "payload": {
+                        "before": null,
+                        "after": after,
+                        "source": {"db": company, "collection": "documents"},
+                        "op": operation
+                    }
+                }))
+                .unwrap();
+                let mut builder =
+                    SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
+                // MongoDB namespace columns must come from the event envelope.
+                let source_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                    "wrong.documents".to_owned(),
+                    0,
+                    cdc_message::CdcMessageType::Data,
+                    SourceType::Mongodb,
+                ));
+                parser
+                    .parse_inner(
+                        Some(key.clone()),
+                        Some(payload),
+                        builder.row_writer().with_meta(MessageMeta {
+                            source_meta: &source_meta,
+                            split_id: "0",
+                            offset: "0",
+                        }),
+                    )
+                    .await
+                    .unwrap();
+                builder.finish_current_chunk();
+                let chunk = builder.consume_ready_chunks().next().unwrap();
+                assert_eq!(chunk.cardinality(), 1);
+                let (op, row) = chunk.rows().next().unwrap();
+                assert_eq!(op, expected_op);
+                assert_eq!(
+                    row.datum_at(0).to_owned_datum(),
+                    Some(ScalarImpl::Utf8(company.into()))
+                );
+                assert_eq!(
+                    row.datum_at(1).to_owned_datum(),
+                    Some(ScalarImpl::Utf8(oid.into()))
+                );
+                if include_collection {
+                    assert_eq!(
+                        row.datum_at(2).to_owned_datum(),
+                        Some(ScalarImpl::Utf8("documents".into()))
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]

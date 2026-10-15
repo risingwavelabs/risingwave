@@ -1,0 +1,308 @@
+# MongoDB namespaces are part of row identity when one table watches several collections.
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+const a = db.getSiblingDB('rw_mongo_key_a');
+const b = db.getSiblingDB('rw_mongo_key_b');
+a.dropDatabase();
+b.dropDatabase();
+const id = ObjectId('6911a33502454e0f774f8810');
+a.documents.insertOne({ _id: id, version: 'a0' });
+b.documents.insertOne({ _id: id, version: 'b0' });
+a.other_documents.insertOne({ _id: id, version: 'other0' });
+EOF
+
+statement ok
+CREATE TABLE mongo_key_by_database (
+  _id JSONB,
+  payload JSONB,
+  PRIMARY KEY (company_name, _id)
+)
+INCLUDE DATABASE_NAME AS company_name
+WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = '${MONGODB_URL}',
+  collection.name = 'rw_mongo_key_[ab][.]documents'
+);
+
+statement ok
+CREATE TABLE mongo_key_by_namespace (
+  _id JSONB,
+  payload JSONB,
+  PRIMARY KEY (company_name, collection_name, _id)
+)
+INCLUDE DATABASE_NAME AS company_name
+INCLUDE COLLECTION_NAME AS collection_name
+WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = '${MONGODB_URL}',
+  collection.name = 'rw_mongo_key_a[.](documents|other_documents)'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW mongo_key_derived AS
+SELECT company_name, _id, payload ->> 'version' AS version
+FROM mongo_key_by_database;
+
+query TTT rowsort retry 30 backoff 1s
+SELECT company_name, _id, payload ->> 'version' FROM mongo_key_by_database;
+----
+rw_mongo_key_a {"$oid": "6911a33502454e0f774f8810"} a0
+rw_mongo_key_b {"$oid": "6911a33502454e0f774f8810"} b0
+
+query TTT rowsort retry 30 backoff 1s
+SELECT company_name, collection_name, payload ->> 'version' FROM mongo_key_by_namespace;
+----
+rw_mongo_key_a documents a0
+rw_mongo_key_a other_documents other0
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+const a = db.getSiblingDB('rw_mongo_key_a');
+const id = ObjectId('6911a33502454e0f774f8810');
+a.documents.updateOne({ _id: id }, { $set: { version: 'a1' } });
+EOF
+
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_derived;
+----
+rw_mongo_key_a a1
+rw_mongo_key_b b0
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+const a = db.getSiblingDB('rw_mongo_key_a');
+a.documents.deleteOne({ _id: ObjectId('6911a33502454e0f774f8810') });
+EOF
+
+query TT retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_derived;
+----
+rw_mongo_key_b b0
+
+query TT rowsort retry 30 backoff 1s
+SELECT collection_name, payload ->> 'version' FROM mongo_key_by_namespace;
+----
+other_documents other0
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+const a = db.getSiblingDB('rw_mongo_key_a');
+a.documents.insertOne({ _id: ObjectId('6911a33502454e0f774f8810'), version: 'a2' });
+EOF
+
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_derived;
+----
+rw_mongo_key_a a2
+rw_mongo_key_b b0
+
+statement ok
+CREATE TABLE mongo_key_no_snapshot (
+  _id JSONB,
+  payload JSONB,
+  PRIMARY KEY (company_name, _id)
+)
+INCLUDE DATABASE_NAME AS company_name
+WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = '${MONGODB_URL}',
+  collection.name = 'rw_mongo_key_[ab][.]documents',
+  debezium.snapshot.mode = 'no_data'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW mongo_key_no_snapshot_derived AS
+SELECT company_name, _id, payload ->> 'version' AS version
+FROM mongo_key_no_snapshot;
+
+query I
+SELECT count(*) FROM mongo_key_no_snapshot;
+----
+0
+
+# MongoDB's no_data stream may start after CREATE TABLE returns. Produce a fresh
+# event on each attempt until it is observed, then remove the readiness probe.
+system ok retry 30 backoff 1s
+set -e
+mongosh "$MONGODB_URL" <<'EOF'
+db.getSiblingDB('rw_mongo_key_a').documents.updateOne(
+  { _id: ObjectId('6911a33502454e0f774f8812') },
+  { $inc: { probe: 1 } },
+  { upsert: true }
+);
+EOF
+test "$(psql -XAt -v ON_ERROR_STOP=1 -h "$SLT_HOST" -p "$SLT_PORT" -U root -d "$SLT_DB" -c "SELECT count(*) FROM mongo_key_no_snapshot WHERE payload ->> 'probe' IS NOT NULL")" = 1
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+db.getSiblingDB('rw_mongo_key_a').documents.deleteOne({ _id: ObjectId('6911a33502454e0f774f8812') });
+EOF
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM mongo_key_no_snapshot_derived;
+----
+0
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+const a = db.getSiblingDB('rw_mongo_key_a');
+const id = ObjectId('6911a33502454e0f774f8811');
+a.documents.insertOne({ _id: id, version: 'live_a0' });
+EOF
+
+# After company A arrives, both the CDC table and its derived view have one row.
+query TT retry 30 backoff 1s
+SELECT company_name, payload ->> 'version' FROM mongo_key_no_snapshot;
+----
+rw_mongo_key_a live_a0
+
+query TT retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_no_snapshot_derived;
+----
+rw_mongo_key_a live_a0
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+const b = db.getSiblingDB('rw_mongo_key_b');
+const id = ObjectId('6911a33502454e0f774f8811');
+b.documents.insertOne({ _id: id, version: 'live_b0' });
+EOF
+
+# Company B reuses the ObjectId. Neither relation may overwrite company A.
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, payload ->> 'version' FROM mongo_key_no_snapshot;
+----
+rw_mongo_key_a live_a0
+rw_mongo_key_b live_b0
+
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_no_snapshot_derived;
+----
+rw_mongo_key_a live_a0
+rw_mongo_key_b live_b0
+
+query II retry 30 backoff 1s
+SELECT count(*), count(DISTINCT _id) FROM mongo_key_no_snapshot;
+----
+2 1
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+const a = db.getSiblingDB('rw_mongo_key_a');
+const id = ObjectId('6911a33502454e0f774f8811');
+a.documents.updateOne({ _id: id }, { $set: { version: 'live_a1' } });
+EOF
+
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, payload ->> 'version' FROM mongo_key_no_snapshot;
+----
+rw_mongo_key_a live_a1
+rw_mongo_key_b live_b0
+
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_no_snapshot_derived;
+----
+rw_mongo_key_a live_a1
+rw_mongo_key_b live_b0
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+db.getSiblingDB('rw_mongo_key_a').documents.deleteOne({
+  _id: ObjectId('6911a33502454e0f774f8811')
+});
+EOF
+
+query TT retry 30 backoff 1s
+SELECT company_name, payload ->> 'version' FROM mongo_key_no_snapshot;
+----
+rw_mongo_key_b live_b0
+
+query TT retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_no_snapshot_derived;
+----
+rw_mongo_key_b live_b0
+
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_derived;
+----
+rw_mongo_key_a a2
+rw_mongo_key_b b0
+rw_mongo_key_b live_b0
+
+onlyif can-use-recover
+statement ok
+recover;
+
+onlyif can-use-recover
+sleep 10s
+
+onlyif can-use-recover
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+const a = db.getSiblingDB('rw_mongo_key_a');
+const b = db.getSiblingDB('rw_mongo_key_b');
+a.documents.updateOne(
+  { _id: ObjectId('6911a33502454e0f774f8810') },
+  { $set: { version: 'a3' } }
+);
+b.documents.updateOne(
+  { _id: ObjectId('6911a33502454e0f774f8811') },
+  { $set: { version: 'live_b1' } }
+);
+EOF
+
+onlyif can-use-recover
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_derived;
+----
+rw_mongo_key_a a3
+rw_mongo_key_b b0
+rw_mongo_key_b live_b1
+
+onlyif can-use-recover
+query TT rowsort retry 30 backoff 1s
+SELECT collection_name, payload ->> 'version' FROM mongo_key_by_namespace;
+----
+documents a3
+other_documents other0
+
+# no_data skips old snapshots, but an update to an old document is a new event.
+onlyif can-use-recover
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, payload ->> 'version' FROM mongo_key_no_snapshot;
+----
+rw_mongo_key_a a3
+rw_mongo_key_b live_b1
+
+onlyif can-use-recover
+query TT rowsort retry 30 backoff 1s
+SELECT company_name, version FROM mongo_key_no_snapshot_derived;
+----
+rw_mongo_key_a a3
+rw_mongo_key_b live_b1
+
+statement ok
+DROP MATERIALIZED VIEW mongo_key_derived;
+
+statement ok
+DROP MATERIALIZED VIEW mongo_key_no_snapshot_derived;
+
+statement ok
+DROP TABLE mongo_key_by_database;
+
+statement ok
+DROP TABLE mongo_key_by_namespace;
+
+statement ok
+DROP TABLE mongo_key_no_snapshot;
+
+system ok
+mongosh "$MONGODB_URL" <<'EOF'
+db.getSiblingDB('rw_mongo_key_a').dropDatabase();
+db.getSiblingDB('rw_mongo_key_b').dropDatabase();
+EOF
