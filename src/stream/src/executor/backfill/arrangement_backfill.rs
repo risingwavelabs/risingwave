@@ -541,6 +541,17 @@ where
                     total_snapshot_processed_rows,
                 );
 
+                // If the snapshot read is complete, the buffered upstream chunks have been forwarded
+                // without marking above, including rows beyond `current_pos` or in vnodes that
+                // have not started. Persist all vnodes as finished on this barrier, so that the
+                // persisted progress is consistent with the forwarded rows. Otherwise, recovering
+                // from this barrier would scan these rows from the snapshot and emit them again.
+                if snapshot_read_complete {
+                    for vnode in upstream_table.vnodes().iter_vnodes() {
+                        backfill_state.finish_progress(vnode, upstream_table.pk_indices().len());
+                    }
+                }
+
                 // Persist state on barrier
                 persist_state_per_vnode(
                     barrier.epoch,
@@ -881,6 +892,57 @@ mod tests {
         OwnedRow::new(vec![Some(k.into()), Some(v.into())])
     }
 
+    fn upstream(messages: Vec<Message>) -> Executor {
+        MockSource::with_messages(messages)
+            .stop_on_finish(false)
+            .into_executor(
+                Schema::new(vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ]),
+                vec![0],
+            )
+    }
+
+    /// Commit `rows` to the upstream mv in the epoch `epoch`, as the upstream materialize
+    /// executor does.
+    async fn commit_upstream_rows(store: &MemoryStateStore, epoch: u64, rows: Vec<OwnedRow>) {
+        let mut upstream_mv = StateTable::from_table_catalog_inconsistent_op(
+            &upstream_table_catalog(),
+            store.clone(),
+            None,
+        )
+        .await;
+        let mut epoch = EpochPair::new_test_epoch(epoch);
+        upstream_mv.init_epoch(epoch).await.unwrap();
+        for row in rows {
+            upstream_mv.insert(row);
+        }
+        epoch.inc_for_test();
+        upstream_mv.commit_for_test(epoch).await.unwrap();
+    }
+
+    /// Prepare the committed upstream mv `{(1, 10)}` and the backfill progress
+    /// `InProgress { current_pos: 1, snapshot_row_count: 1 }` for the singleton vnode in epoch
+    /// `test_epoch(1)`, as if row 1 had been backfilled before a recovery.
+    async fn prepare_in_progress_backfill(store: &MemoryStateStore) {
+        commit_upstream_rows(store, test_epoch(1), vec![row(1, 10)]).await;
+
+        let mut state_table =
+            StateTable::from_table_catalog(&backfill_state_table_catalog(), store.clone(), None)
+                .await;
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+        state_table.init_epoch(epoch).await.unwrap();
+        state_table.insert(OwnedRow::new(vec![
+            Some(VirtualNode::ZERO.to_scalar().into()),
+            Some(1_i64.into()),
+            Some(false.into()),
+            Some(1_i64.into()),
+        ]));
+        epoch.inc_for_test();
+        state_table.commit_for_test(epoch).await.unwrap();
+    }
+
     async fn build_executor(
         store: MemoryStateStore,
         upstream: Executor,
@@ -945,7 +1007,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let test_env = LocalBarrierTestEnv::for_test().await;
 
-        let upstream = MockSource::with_messages(vec![
+        let upstream = upstream(vec![
             Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(StreamChunk::from_pretty(
                 " I I
@@ -962,15 +1024,7 @@ mod tests {
                 + 4 40",
             )),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
-        ])
-        .stop_on_finish(false)
-        .into_executor(
-            Schema::new(vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ]),
-            vec![0],
-        );
+        ]);
 
         let mut backfill = build_executor(store, upstream, &test_env).await;
         let (rows, barrier_epochs) = collect_until_barriers(&mut backfill, 3).await;
@@ -988,36 +1042,9 @@ mod tests {
     async fn test_snapshot_read_complete_on_barrier_forwards_upstream_when_in_progress() {
         let store = MemoryStateStore::new();
         let test_env = LocalBarrierTestEnv::for_test().await;
+        prepare_in_progress_backfill(&store).await;
 
-        // Prepare the committed upstream mv `{(1, 10)}` and the backfill progress
-        // `InProgress { current_pos: 1, snapshot_row_count: 1 }` for the singleton vnode,
-        // as if row 1 had been backfilled before a recovery.
-        {
-            let mut upstream_mv =
-                StateTable::from_table_catalog(&upstream_table_catalog(), store.clone(), None)
-                    .await;
-            let mut state_table = StateTable::from_table_catalog(
-                &backfill_state_table_catalog(),
-                store.clone(),
-                None,
-            )
-            .await;
-            let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-            upstream_mv.init_epoch(epoch).await.unwrap();
-            state_table.init_epoch(epoch).await.unwrap();
-            upstream_mv.insert(row(1, 10));
-            state_table.insert(OwnedRow::new(vec![
-                Some(VirtualNode::ZERO.to_scalar().into()),
-                Some(1_i64.into()),
-                Some(false.into()),
-                Some(1_i64.into()),
-            ]));
-            epoch.inc_for_test();
-            upstream_mv.commit_for_test(epoch).await.unwrap();
-            state_table.commit_for_test(epoch).await.unwrap();
-        }
-
-        let upstream = MockSource::with_messages(vec![
+        let upstream = upstream(vec![
             Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(StreamChunk::from_pretty(
                 " I I
@@ -1030,15 +1057,7 @@ mod tests {
                 + 4 40",
             )),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
-        ])
-        .stop_on_finish(false)
-        .into_executor(
-            Schema::new(vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ]),
-            vec![0],
-        );
+        ]);
 
         let mut backfill = build_executor(store, upstream, &test_env).await;
         let (rows, barrier_epochs) = collect_until_barriers(&mut backfill, 3).await;
@@ -1047,5 +1066,100 @@ mod tests {
             vec![test_epoch(2), test_epoch(3), test_epoch(4)]
         );
         assert_eq!(rows, vec![row(2, 20), row(3, 30), row(4, 40)]);
+    }
+
+    /// Recover right after the barrier on which the snapshot read completes and the buffered
+    /// upstream rows are forwarded, before the next barrier. The upstream mv has committed the
+    /// forwarded rows in that checkpoint, so backfill must not emit them again from the
+    /// snapshot after recovery.
+    #[tokio::test]
+    async fn test_recover_after_snapshot_read_complete_on_barrier_when_not_started() {
+        let store = MemoryStateStore::new();
+        let test_env = LocalBarrierTestEnv::for_test().await;
+
+        let upstream_before_recovery = upstream(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I I
+                + 1 10
+                + 2 20
+                + 3 30",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+        ]);
+        let mut backfill = build_executor(store.clone(), upstream_before_recovery, &test_env).await;
+        let (rows, barrier_epochs) = collect_until_barriers(&mut backfill, 2).await;
+        assert_eq!(barrier_epochs, vec![test_epoch(1), test_epoch(2)]);
+        assert_eq!(rows, vec![row(1, 10), row(2, 20), row(3, 30)]);
+        drop(backfill);
+
+        // The upstream mv commits the rows forwarded above in the same checkpoint.
+        commit_upstream_rows(
+            &store,
+            test_epoch(1),
+            vec![row(1, 10), row(2, 20), row(3, 30)],
+        )
+        .await;
+
+        // Recover from the checkpoint committed by the barrier of `test_epoch(2)`.
+        let upstream_after_recovery = upstream(vec![
+            Message::Barrier(Barrier::with_prev_epoch_for_test(
+                test_epoch(3),
+                test_epoch(1),
+            )),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I I
+                + 4 40",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+        ]);
+        let mut backfill = build_executor(store, upstream_after_recovery, &test_env).await;
+        let (rows, barrier_epochs) = collect_until_barriers(&mut backfill, 2).await;
+        assert_eq!(barrier_epochs, vec![test_epoch(3), test_epoch(4)]);
+        assert_eq!(rows, vec![row(4, 40)]);
+    }
+
+    /// Same as above, but the vnode has already made progress before the snapshot read
+    /// completes.
+    #[tokio::test]
+    async fn test_recover_after_snapshot_read_complete_on_barrier_when_in_progress() {
+        let store = MemoryStateStore::new();
+        let test_env = LocalBarrierTestEnv::for_test().await;
+        prepare_in_progress_backfill(&store).await;
+
+        let upstream_before_recovery = upstream(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I I
+                + 2 20
+                + 3 30",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ]);
+        let mut backfill = build_executor(store.clone(), upstream_before_recovery, &test_env).await;
+        let (rows, barrier_epochs) = collect_until_barriers(&mut backfill, 2).await;
+        assert_eq!(barrier_epochs, vec![test_epoch(2), test_epoch(3)]);
+        assert_eq!(rows, vec![row(2, 20), row(3, 30)]);
+        drop(backfill);
+
+        // The upstream mv commits the rows forwarded above in the same checkpoint.
+        commit_upstream_rows(&store, test_epoch(2), vec![row(2, 20), row(3, 30)]).await;
+
+        // Recover from the checkpoint committed by the barrier of `test_epoch(3)`.
+        let upstream_after_recovery = upstream(vec![
+            Message::Barrier(Barrier::with_prev_epoch_for_test(
+                test_epoch(4),
+                test_epoch(2),
+            )),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I I
+                + 4 40",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(5))),
+        ]);
+        let mut backfill = build_executor(store, upstream_after_recovery, &test_env).await;
+        let (rows, barrier_epochs) = collect_until_barriers(&mut backfill, 2).await;
+        assert_eq!(barrier_epochs, vec![test_epoch(4), test_epoch(5)]);
+        assert_eq!(rows, vec![row(4, 40)]);
     }
 }
