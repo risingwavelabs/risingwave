@@ -42,7 +42,9 @@ use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
     MySqlExternalTable, MySqlExternalTableReader, MySqlOffset,
 };
-use crate::source::cdc::external::oracle::{OracleExternalTable, OracleOffset};
+use crate::source::cdc::external::oracle::{
+    OracleExternalTable, OracleExternalTableReader, OracleOffset,
+};
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 use crate::source::cdc::external::sql_server::{
     SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
@@ -287,12 +289,11 @@ pub struct CdcTableSnapshotSplitOption {
     pub backfill_split_pk_column_index: u32,
 }
 
-// TODO(#26804): Add `OracleExternalTableReader` when Oracle CDC backfill and offset
-// parsing are implemented.
 pub enum ExternalTableReaderImpl {
     MySql(MySqlExternalTableReader),
     Postgres(PostgresExternalTableReader),
     SqlServer(SqlServerExternalTableReader),
+    Oracle(OracleExternalTableReader),
     Mock(MockExternalTableReader),
 }
 
@@ -310,8 +311,8 @@ pub struct ExternalTableConfig {
     #[serde(rename = "schema.name", default = "Default::default")]
     pub schema: String,
     /// The Oracle pluggable database name. This field is only used by the Oracle CDC connector.
-    #[serde(rename = "database.pdb.name", default = "Default::default")]
-    pub pdb_name: String,
+    #[serde(rename = "database.pdb.name")]
+    pub pdb_name: Option<String>,
     #[serde(rename = "table.name")]
     pub table: String,
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
@@ -374,6 +375,7 @@ impl ExternalTableReader for ExternalTableReaderImpl {
             ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
             ExternalTableReaderImpl::Postgres(postgres) => postgres.current_cdc_offset().await,
             ExternalTableReaderImpl::SqlServer(sql_server) => sql_server.current_cdc_offset().await,
+            ExternalTableReaderImpl::Oracle(oracle) => oracle.current_cdc_offset().await,
             ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
         }
     }
@@ -427,6 +429,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::SqlServer(_) => {
                 SqlServerExternalTableReader::get_cdc_offset_parser()
             }
+            ExternalTableReaderImpl::Oracle(_) => {
+                OracleExternalTableReader::get_cdc_offset_parser()
+            }
             ExternalTableReaderImpl::Mock(_) => MockExternalTableReader::get_cdc_offset_parser(),
         }
     }
@@ -449,6 +454,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::SqlServer(sql_server) => {
                 sql_server.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
+            ExternalTableReaderImpl::Oracle(oracle) => {
+                oracle.snapshot_read(table_name, start_pk, primary_keys, limit)
+            }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
@@ -468,6 +476,7 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::MySql(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Postgres(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::SqlServer(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Oracle(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Mock(e) => e.get_parallel_cdc_splits(options),
         };
         pin_mut!(stream);
@@ -495,6 +504,9 @@ impl ExternalTableReaderImpl {
             }
             ExternalTableReaderImpl::SqlServer(sql_server) => {
                 sql_server.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::Oracle(oracle) => {
+                oracle.split_snapshot_read(table_name, left, right, split_columns)
             }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.split_snapshot_read(table_name, left, right, split_columns)

@@ -18,38 +18,148 @@ package com.risingwave.connector.source.common;
 
 import com.google.protobuf.ByteString;
 import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.PlanCommon;
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.sql.SQLNonTransientConnectionException;
+import java.sql.SQLRecoverableException;
+import java.sql.SQLTransientConnectionException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Pull-based Oracle catalog and live table scan operations used by the Rust CDC backfill. */
 final class OracleExternalTable {
+    private static final Logger LOG = LoggerFactory.getLogger(OracleExternalTable.class);
     private static final Pattern ORACLE_UNQUOTED_IDENTIFIER =
             Pattern.compile("[A-Za-z][A-Za-z0-9_$#]*");
+    private static final int BATCH_ROW_COUNT = 256;
+    private static final BufferAllocator ROOT_ALLOCATOR = new RootAllocator();
 
     private OracleExternalTable() {}
 
-    static ConnectorServiceProto.OracleExternalTableResponse discover(
-            ConnectorServiceProto.OracleExternalTableRequest request) throws SQLException {
-        try (var connection = connect(request.getPropertiesMap())) {
-            var schemaName = propertyIdentifier(request, DbzConnectorConfig.ORACLE_SCHEMA_NAME);
-            var tableName = propertyIdentifier(request, DbzConnectorConfig.TABLE_NAME);
+    static Session openSession(Map<String, String> properties) {
+        return new Session(properties);
+    }
+
+    /**
+     * An Oracle connection shared by the current-SCN queries and snapshot pages of one Rust
+     * external table reader. The connection is opened lazily and reopened after a connection
+     * failure.
+     */
+    static final class Session implements AutoCloseable {
+        private final Map<String, String> properties;
+        private Connection connection;
+
+        private Session(Map<String, String> properties) {
+            this.properties = Map.copyOf(properties);
+        }
+
+        synchronized long currentScn() throws SQLException, IOException {
+            return execute(OracleExternalTable::currentScn, () -> true);
+        }
+
+        synchronized void snapshotRead(
+                ConnectorServiceProto.OracleSnapshotReadRequest request,
+                List<Object> startPk,
+                long channelPtr)
+                throws SQLException, IOException {
+            var delivered = new boolean[] {false};
+            execute(
+                    connection -> {
+                        OracleExternalTable.snapshotRead(
+                                connection, request, startPk, channelPtr, delivered);
+                        return null;
+                    },
+                    () -> !delivered[0]);
+        }
+
+        @Override
+        public synchronized void close() {
+            closeConnection();
+        }
+
+        private <T> T execute(ConnectionOperation<T> operation, BooleanSupplier canRetry)
+                throws SQLException, IOException {
+            try {
+                return operation.apply(connection());
+            } catch (SQLException error) {
+                if (!isConnectionFailure(error)) {
+                    throw error;
+                }
+                closeConnection();
+                if (!canRetry.getAsBoolean()) {
+                    throw error;
+                }
+                LOG.warn("Oracle connection failed; retrying once on a new connection", error);
+                try {
+                    return operation.apply(connection());
+                } catch (SQLException retryError) {
+                    if (isConnectionFailure(retryError)) {
+                        closeConnection();
+                    }
+                    throw retryError;
+                }
+            }
+        }
+
+        private Connection connection() throws SQLException {
+            if (connection == null || connection.isClosed()) {
+                connection = connect(properties);
+            }
+            return connection;
+        }
+
+        private void closeConnection() {
+            if (connection == null) {
+                return;
+            }
+            try {
+                connection.close();
+            } catch (SQLException error) {
+                LOG.warn("Failed to close Oracle connection", error);
+            }
+            connection = null;
+        }
+
+        private static boolean isConnectionFailure(SQLException error) {
+            var state = error.getSQLState();
+            return error instanceof SQLRecoverableException
+                    || error instanceof SQLTransientConnectionException
+                    || error instanceof SQLNonTransientConnectionException
+                    || (state != null && state.startsWith("08"));
+        }
+    }
+
+    @FunctionalInterface
+    private interface ConnectionOperation<T> {
+        T apply(Connection connection) throws SQLException, IOException;
+    }
+
+    static ConnectorServiceProto.TableSchema discover(
+            ConnectorServiceProto.OracleConnectionProperties properties) throws SQLException {
+        var propertiesMap = properties.getPropertiesMap();
+        try (var connection = connect(propertiesMap)) {
+            var schemaName =
+                    propertyIdentifier(propertiesMap, DbzConnectorConfig.ORACLE_SCHEMA_NAME);
+            var tableName = propertyIdentifier(propertiesMap, DbzConnectorConfig.TABLE_NAME);
             var columns = discoverColumns(connection, schemaName, tableName);
             if (columns.isEmpty()) {
                 throw new SQLException(
@@ -88,16 +198,12 @@ final class OracleExternalTable {
                                 schemaName, tableName));
             }
 
-            return ConnectorServiceProto.OracleExternalTableResponse.newBuilder()
-                    .setTableSchema(tableSchema)
-                    .build();
+            return tableSchema.build();
         }
     }
 
-    static ConnectorServiceProto.OracleExternalTableResponse currentScn(
-            ConnectorServiceProto.OracleExternalTableRequest request) throws SQLException {
-        try (var connection = connect(request.getPropertiesMap());
-                var statement = connection.createStatement();
+    private static long currentScn(Connection connection) throws SQLException {
+        try (var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT CURRENT_SCN FROM V$DATABASE")) {
             if (!result.next()) {
                 throw new SQLException(
@@ -107,14 +213,17 @@ final class OracleExternalTable {
             if (scn <= 0) {
                 throw new SQLException("Oracle returned an invalid current SCN: " + scn);
             }
-            return ConnectorServiceProto.OracleExternalTableResponse.newBuilder()
-                    .setSnapshotScn(scn)
-                    .build();
+            return scn;
         }
     }
 
-    static ConnectorServiceProto.OracleExternalTableResponse snapshotRead(
-            ConnectorServiceProto.OracleExternalTableRequest request) throws SQLException {
+    private static void snapshotRead(
+            Connection connection,
+            ConnectorServiceProto.OracleSnapshotReadRequest request,
+            List<Object> startPk,
+            long channelPtr,
+            boolean[] delivered)
+            throws SQLException, IOException {
         if (!request.hasTableSchema()) {
             throw new SQLException(
                     "Oracle snapshot request is missing its RisingWave table schema");
@@ -123,34 +232,52 @@ final class OracleExternalTable {
             throw new SQLException("Oracle snapshot request has an invalid limit");
         }
 
-        var schemaName = propertyIdentifier(request, DbzConnectorConfig.ORACLE_SCHEMA_NAME);
-        var tableName = propertyIdentifier(request, DbzConnectorConfig.TABLE_NAME);
+        var schemaName = normalizeIdentifier(request.getSchemaName(), "schema name");
+        var tableName = normalizeIdentifier(request.getTableName(), "table name");
         var tableSchema = request.getTableSchema();
         var columnNames =
                 tableSchema.getColumnsList().stream().map(PlanCommon.ColumnDesc::getName).toList();
-        validatePrimaryKeys(request, tableSchema);
+        validatePrimaryKeys(request, tableSchema, startPk);
         var sql =
                 buildSnapshotSql(
                         columnNames,
                         schemaName,
                         tableName,
                         request.getPrimaryKeysList(),
-                        request.getStartPkCount() > 0,
+                        !startPk.isEmpty(),
                         request.getLimit());
 
-        var response = ConnectorServiceProto.OracleExternalTableResponse.newBuilder();
-        try (var connection = connect(request.getPropertiesMap());
-                var statement = connection.prepareStatement(sql)) {
-            if (request.getStartPkCount() > 0) {
-                bindStartPrimaryKey(statement, request, tableSchema);
+        try (var statement = connection.prepareStatement(sql);
+                var allocator =
+                        ROOT_ALLOCATOR.newChildAllocator("oracle-snapshot", 0, Long.MAX_VALUE);
+                var writer = new OracleArrowBatchWriter(allocator, tableSchema)) {
+            if (!startPk.isEmpty()) {
+                bindStartPrimaryKey(statement, startPk);
             }
             try (var result = statement.executeQuery()) {
                 while (result.next()) {
-                    response.addRows(readRow(result, tableSchema));
+                    writer.append(result);
+                    if (writer.rowCount() == BATCH_ROW_COUNT
+                            && !sendBatch(writer, channelPtr, delivered)) {
+                        return;
+                    }
                 }
             }
+            if (writer.rowCount() > 0) {
+                sendBatch(writer, channelPtr, delivered);
+            }
         }
-        return response.build();
+    }
+
+    private static boolean sendBatch(
+            OracleArrowBatchWriter writer, long channelPtr, boolean[] delivered)
+            throws IOException {
+        var response =
+                ConnectorServiceProto.OracleSnapshotReadResponse.newBuilder()
+                        .setArrowIpc(ByteString.copyFrom(writer.finishBatch()))
+                        .build();
+        delivered[0] = true;
+        return Binding.sendOracleSnapshotResponseToChannel(channelPtr, response.toByteArray());
     }
 
     private static Connection connect(Map<String, String> properties) throws SQLException {
@@ -413,16 +540,20 @@ final class OracleExternalTable {
     }
 
     private static void validatePrimaryKeys(
-            ConnectorServiceProto.OracleExternalTableRequest request,
-            ConnectorServiceProto.TableSchema tableSchema)
+            ConnectorServiceProto.OracleSnapshotReadRequest request,
+            ConnectorServiceProto.TableSchema tableSchema,
+            List<Object> startPk)
             throws SQLException {
         if (request.getPrimaryKeysCount() != tableSchema.getPkIndicesCount()) {
             throw new SQLException(
                     "Oracle snapshot primary-key names and indices have different lengths");
         }
-        if (request.getStartPkCount() != 0
-                && request.getStartPkCount() != request.getPrimaryKeysCount()) {
+        if (!startPk.isEmpty() && startPk.size() != request.getPrimaryKeysCount()) {
             throw new SQLException("Oracle snapshot start key has the wrong number of values");
+        }
+        if (startPk.stream().anyMatch(Objects::isNull)) {
+            throw new SQLException(
+                    "Oracle snapshot primary-key value cannot be NULL or a non-finite decimal");
         }
         for (int i = 0; i < request.getPrimaryKeysCount(); i++) {
             var schemaIndex = tableSchema.getPkIndices(i);
@@ -440,123 +571,14 @@ final class OracleExternalTable {
         }
     }
 
-    private static void bindStartPrimaryKey(
-            PreparedStatement statement,
-            ConnectorServiceProto.OracleExternalTableRequest request,
-            ConnectorServiceProto.TableSchema tableSchema)
+    private static void bindStartPrimaryKey(PreparedStatement statement, List<Object> startPk)
             throws SQLException {
         var parameterIndex = 1;
-        for (int greaterIndex = 0; greaterIndex < request.getPrimaryKeysCount(); greaterIndex++) {
+        for (int greaterIndex = 0; greaterIndex < startPk.size(); greaterIndex++) {
             for (int keyIndex = 0; keyIndex <= greaterIndex; keyIndex++) {
-                var columnIndex = tableSchema.getPkIndices(keyIndex);
-                bindDatum(
-                        statement,
-                        parameterIndex++,
-                        request.getStartPk(keyIndex),
-                        tableSchema.getColumns(columnIndex).getColumnType().getTypeName());
+                statement.setObject(parameterIndex++, startPk.get(keyIndex));
             }
         }
-    }
-
-    private static void bindDatum(
-            PreparedStatement statement,
-            int parameterIndex,
-            ConnectorServiceProto.OracleDatum datum,
-            TypeName typeName)
-            throws SQLException {
-        if (datum.getIsNull()) {
-            throw new SQLException("Oracle snapshot primary-key value cannot be NULL");
-        }
-        if (typeName == TypeName.BYTEA) {
-            statement.setBytes(parameterIndex, datum.getValue().toByteArray());
-            return;
-        }
-
-        var text = datum.getValue().toString(StandardCharsets.UTF_8);
-        switch (typeName) {
-            case INT16, INT32, INT64 -> statement.setLong(parameterIndex, Long.parseLong(text));
-            case FLOAT -> statement.setFloat(parameterIndex, Float.parseFloat(text));
-            case DOUBLE -> statement.setDouble(parameterIndex, Double.parseDouble(text));
-            case DECIMAL -> statement.setBigDecimal(parameterIndex, new BigDecimal(text));
-            case BOOLEAN -> statement.setBoolean(parameterIndex, parseBoolean(text));
-            case DATE -> statement.setObject(parameterIndex, java.time.LocalDate.parse(text));
-            case TIMESTAMP ->
-                    statement.setObject(
-                            parameterIndex, java.time.LocalDateTime.parse(text.replace(' ', 'T')));
-            case TIMESTAMPTZ ->
-                    statement.setObject(
-                            parameterIndex, OffsetDateTime.parse(text.replace(' ', 'T')));
-            case VARCHAR, JSONB -> statement.setString(parameterIndex, text);
-            default ->
-                    throw new SQLException(
-                            "Unsupported RisingWave primary-key type for Oracle snapshot: "
-                                    + typeName);
-        }
-    }
-
-    private static ConnectorServiceProto.OracleRow readRow(
-            ResultSet result, ConnectorServiceProto.TableSchema tableSchema) throws SQLException {
-        var row = ConnectorServiceProto.OracleRow.newBuilder();
-        for (int index = 0; index < tableSchema.getColumnsCount(); index++) {
-            var typeName = tableSchema.getColumns(index).getColumnType().getTypeName();
-            row.addValues(readDatum(result, index + 1, typeName));
-        }
-        return row.build();
-    }
-
-    private static ConnectorServiceProto.OracleDatum readDatum(
-            ResultSet result, int jdbcIndex, TypeName typeName) throws SQLException {
-        byte[] value;
-        if (typeName == TypeName.BYTEA) {
-            value = result.getBytes(jdbcIndex);
-        } else {
-            String text =
-                    switch (typeName) {
-                        case BOOLEAN -> Boolean.toString(result.getBoolean(jdbcIndex));
-                        case DECIMAL -> {
-                            var decimal = result.getBigDecimal(jdbcIndex);
-                            yield decimal == null ? null : decimal.toPlainString();
-                        }
-                        case DATE -> {
-                            var date = result.getDate(jdbcIndex);
-                            yield date == null ? null : date.toLocalDate().toString();
-                        }
-                        case TIMESTAMP -> {
-                            var timestamp = result.getTimestamp(jdbcIndex);
-                            yield timestamp == null ? null : timestamp.toLocalDateTime().toString();
-                        }
-                        case TIMESTAMPTZ -> readTimestampWithTimeZone(result, jdbcIndex);
-                        default -> result.getString(jdbcIndex);
-                    };
-            value = text == null ? null : text.getBytes(StandardCharsets.UTF_8);
-        }
-        if (value == null || result.wasNull()) {
-            return ConnectorServiceProto.OracleDatum.newBuilder().setIsNull(true).build();
-        }
-        return ConnectorServiceProto.OracleDatum.newBuilder()
-                .setValue(ByteString.copyFrom(value))
-                .build();
-    }
-
-    private static String readTimestampWithTimeZone(ResultSet result, int jdbcIndex)
-            throws SQLException {
-        try {
-            var value = result.getObject(jdbcIndex, OffsetDateTime.class);
-            return value == null ? null : value.toString();
-        } catch (SQLException unsupportedConversion) {
-            var value = result.getTimestamp(jdbcIndex);
-            return value == null
-                    ? null
-                    : value.toLocalDateTime().atOffset(ZoneOffset.UTC).toString();
-        }
-    }
-
-    private static boolean parseBoolean(String value) throws SQLException {
-        return switch (value) {
-            case "t", "true", "TRUE", "1" -> true;
-            case "f", "false", "FALSE", "0" -> false;
-            default -> throw new SQLException("Invalid RisingWave boolean value: " + value);
-        };
     }
 
     private static Integer nullableInteger(ResultSet result, String column) throws SQLException {
@@ -564,9 +586,8 @@ final class OracleExternalTable {
         return result.wasNull() ? null : value;
     }
 
-    private static String propertyIdentifier(
-            ConnectorServiceProto.OracleExternalTableRequest request, String property) {
-        return normalizeIdentifier(request.getPropertiesMap().get(property), property);
+    private static String propertyIdentifier(Map<String, String> properties, String property) {
+        return normalizeIdentifier(properties.get(property), property);
     }
 
     private static String quoteIdentifier(String identifier) {

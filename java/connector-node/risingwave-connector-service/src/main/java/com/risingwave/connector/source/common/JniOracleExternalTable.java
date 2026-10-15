@@ -16,51 +16,102 @@
 
 package com.risingwave.connector.source.common;
 
+import com.risingwave.java.binding.SingletonRow;
 import com.risingwave.proto.ConnectorServiceProto;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Byte-array JNI facade for {@link OracleExternalTable}. */
 public final class JniOracleExternalTable {
+    private static final AtomicLong NEXT_SESSION_ID = new AtomicLong(1);
+    private static final Map<Long, OracleExternalTable.Session> SESSIONS =
+            new ConcurrentHashMap<>();
+
     private JniOracleExternalTable() {}
 
-    public static byte[] discover(byte[] requestBytes) {
-        return invoke(requestBytes, Operation.DISCOVER);
+    public static byte[] discover(byte[] propertiesBytes) {
+        return invoke(
+                () ->
+                        OracleExternalTable.discover(
+                                        ConnectorServiceProto.OracleConnectionProperties.parseFrom(
+                                                propertiesBytes))
+                                .toByteArray());
     }
 
-    public static byte[] currentScn(byte[] requestBytes) {
-        return invoke(requestBytes, Operation.CURRENT_SCN);
+    public static long openSession(byte[] propertiesBytes) {
+        return invoke(
+                () -> {
+                    var properties =
+                            ConnectorServiceProto.OracleConnectionProperties.parseFrom(
+                                    propertiesBytes);
+                    var sessionId = NEXT_SESSION_ID.getAndIncrement();
+                    SESSIONS.put(
+                            sessionId,
+                            OracleExternalTable.openSession(properties.getPropertiesMap()));
+                    return sessionId;
+                });
     }
 
-    public static byte[] snapshotRead(byte[] requestBytes) {
-        return invoke(requestBytes, Operation.SNAPSHOT_READ);
+    public static long currentScn(long sessionId) {
+        return invoke(() -> session(sessionId).currentScn());
     }
 
-    private static byte[] invoke(byte[] requestBytes, Operation operation) {
+    public static void snapshotRead(
+            long sessionId, byte[] requestBytes, long startPkPointer, long channelPtr) {
+        invoke(
+                () -> {
+                    var request =
+                            ConnectorServiceProto.OracleSnapshotReadRequest.parseFrom(requestBytes);
+                    var tableSchema = request.getTableSchema();
+                    var pkTypes =
+                            tableSchema.getPkIndicesList().stream()
+                                    .map(
+                                            index ->
+                                                    tableSchema
+                                                            .getColumns(index)
+                                                            .getColumnType()
+                                                            .getTypeName())
+                                    .toList();
+                    var startPk =
+                            startPkPointer == 0
+                                    ? List.<Object>of()
+                                    : new SingletonRow(startPkPointer).getValues(pkTypes);
+                    session(sessionId).snapshotRead(request, startPk, channelPtr);
+                    return null;
+                });
+    }
+
+    public static void closeSession(long sessionId) {
+        var session = SESSIONS.remove(sessionId);
+        if (session != null) {
+            session.close();
+        }
+    }
+
+    private static OracleExternalTable.Session session(long sessionId) {
+        var session = SESSIONS.get(sessionId);
+        if (session == null) {
+            throw new IllegalStateException("Oracle session " + sessionId + " is not open");
+        }
+        return session;
+    }
+
+    private static <T> T invoke(Operation<T> operation) {
         try {
-            var request = ConnectorServiceProto.OracleExternalTableRequest.parseFrom(requestBytes);
-            var response =
-                    switch (operation) {
-                        case DISCOVER -> OracleExternalTable.discover(request);
-                        case CURRENT_SCN -> OracleExternalTable.currentScn(request);
-                        case SNAPSHOT_READ -> OracleExternalTable.snapshotRead(request);
-                    };
-            return response.toByteArray();
+            return operation.run();
         } catch (Exception error) {
             var message = error.getMessage();
             if (message == null || message.isBlank()) {
                 message = error.getClass().getSimpleName();
             }
-            return ConnectorServiceProto.OracleExternalTableResponse.newBuilder()
-                    .setError(
-                            ConnectorServiceProto.ValidationError.newBuilder()
-                                    .setErrorMessage(message))
-                    .build()
-                    .toByteArray();
+            throw new RuntimeException(message, error);
         }
     }
 
-    private enum Operation {
-        DISCOVER,
-        CURRENT_SCN,
-        SNAPSHOT_READ
+    @FunctionalInterface
+    private interface Operation<T> {
+        T run() throws Exception;
     }
 }

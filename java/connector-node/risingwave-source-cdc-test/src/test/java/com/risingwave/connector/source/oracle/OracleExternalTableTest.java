@@ -17,13 +17,12 @@
 package com.risingwave.connector.source.oracle;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import com.risingwave.connector.source.common.JniOracleExternalTable;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data.DataType.TypeName;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -167,104 +166,25 @@ public class OracleExternalTableTest extends OracleSourceTestBase {
     }
 
     @Test
-    public void readsLiveCompositePrimaryKeyPages() throws Exception {
-        var qualifiedTable = "APP.EXT_SNAPSHOT";
+    public void discoversCompositePrimaryKey() throws Exception {
+        var qualifiedTable = "APP.EXT_COMPOSITE_PK";
         createTable(
                 qualifiedTable,
                 "CREATE TABLE "
                         + qualifiedTable
                         + " (REGION VARCHAR2(16), ID NUMBER(9), TEST_VALUE VARCHAR2(32), "
                         + "ACTIVE BOOLEAN, PRIMARY KEY (REGION, ID))");
-        execute(
-                "INSERT ALL "
-                        + "INTO "
-                        + qualifiedTable
-                        + " VALUES ('east', 1, 'east-one', TRUE) "
-                        + "INTO "
-                        + qualifiedTable
-                        + " VALUES ('east', 2, 'east-two', FALSE) "
-                        + "INTO "
-                        + qualifiedTable
-                        + " VALUES ('east', 3, 'east-three', TRUE) "
-                        + "INTO "
-                        + qualifiedTable
-                        + " VALUES ('west', 1, 'west-one', FALSE) "
-                        + "INTO "
-                        + qualifiedTable
-                        + " VALUES ('west', 2, 'west-two', TRUE) SELECT 1 FROM DUAL");
 
-        var catalogRequest = catalogRequest("EXT_SNAPSHOT");
-        var tableSchema = discover(catalogRequest).getTableSchema();
+        var tableSchema = discover(connectionProperties("EXT_COMPOSITE_PK"));
         assertEquals(
                 List.of("REGION", "ID", "TEST_VALUE", "ACTIVE"),
                 tableSchema.getColumnsList().stream().map(column -> column.getName()).toList());
         assertEquals(List.of(0, 1), tableSchema.getPkIndicesList());
-
-        var snapshotRequest =
-                ConnectorServiceProto.OracleExternalTableRequest.newBuilder()
-                        .putAllProperties(catalogRequest.getPropertiesMap())
-                        .setTableSchema(tableSchema)
-                        .addAllPrimaryKeys(List.of("REGION", "ID"))
-                        .setLimit(2)
-                        .build();
-        var firstPage = snapshotRead(snapshotRequest);
-
-        // Live pages must include rows inserted ahead of the already-read PK frontier.
-        execute("INSERT INTO " + qualifiedTable + " VALUES ('west', 3, 'after-first-page', TRUE)");
-        assertEquals(6, queryInt("SELECT COUNT(*) FROM " + qualifiedTable));
-
-        var rows = new ArrayList<String>();
-        var pageSizes = new ArrayList<Integer>();
-        var page = firstPage;
-        for (int pageIndex = 0; pageIndex < 4; pageIndex++) {
-            pageSizes.add(page.getRowsCount());
-            if (page.getRowsCount() == 0) {
-                break;
-            }
-            for (var row : page.getRowsList()) {
-                rows.add(
-                        datumText(row.getValues(0))
-                                + ":"
-                                + datumText(row.getValues(1))
-                                + "="
-                                + datumText(row.getValues(2))
-                                + ":"
-                                + datumText(row.getValues(3)));
-            }
-            var lastRow = page.getRows(page.getRowsCount() - 1);
-            var pageRequest =
-                    snapshotRequest.toBuilder()
-                            .clearStartPk()
-                            .addStartPk(lastRow.getValues(0))
-                            .addStartPk(lastRow.getValues(1))
-                            .build();
-            page = snapshotRead(pageRequest);
-        }
-
-        assertEquals(List.of(2, 2, 2, 0), pageSizes);
-        assertEquals(
-                List.of(
-                        "east:1=east-one:true",
-                        "east:2=east-two:false",
-                        "east:3=east-three:true",
-                        "west:1=west-one:false",
-                        "west:2=west-two:true",
-                        "west:3=after-first-page:true"),
-                rows);
-    }
-
-    @Test
-    public void rejectsMissingSchemaAndInvalidLimit() throws Exception {
-        var request = ConnectorServiceProto.OracleExternalTableRequest.newBuilder().setLimit(1);
-        assertSnapshotError(request.build(), "missing its RisingWave table schema");
-        request.setTableSchema(ConnectorServiceProto.TableSchema.getDefaultInstance());
-        assertSnapshotError(request.clone().setLimit(0).build(), "invalid limit");
-        assertSnapshotError(request.clone().setLimit(-1).build(), "invalid limit");
     }
 
     private void assertDiscoveredTypes(String tableName, Map<String, TypeName> expectedTypes)
             throws Exception {
-        var tableSchema = discover(catalogRequest(tableName)).getTableSchema();
+        var tableSchema = discover(connectionProperties(tableName));
         var actualTypes = new LinkedHashMap<String, TypeName>();
         for (var column : tableSchema.getColumnsList()) {
             actualTypes.put(column.getName(), column.getColumnType().getTypeName());
@@ -273,62 +193,25 @@ public class OracleExternalTableTest extends OracleSourceTestBase {
         assertEquals(List.of(0), tableSchema.getPkIndicesList());
     }
 
-    private void assertDiscoveryError(String tableName, String expectedMessage) throws Exception {
-        var response =
-                parseResponse(
-                        JniOracleExternalTable.discover(catalogRequest(tableName).toByteArray()));
-        assertTrue(
-                response.getError().getErrorMessage(),
-                response.getError().getErrorMessage().contains(expectedMessage));
+    private void assertDiscoveryError(String tableName, String expectedMessage) {
+        var properties = connectionProperties(tableName);
+        var error =
+                assertThrows(
+                        RuntimeException.class,
+                        () -> JniOracleExternalTable.discover(properties.toByteArray()));
+        assertTrue(error.getMessage(), error.getMessage().contains(expectedMessage));
     }
 
-    private void assertSnapshotError(
-            ConnectorServiceProto.OracleExternalTableRequest request, String expectedMessage)
-            throws Exception {
-        var response = snapshotReadResponse(request);
-        assertTrue(
-                response.getError().getErrorMessage(),
-                response.getError().getErrorMessage().contains(expectedMessage));
-    }
-
-    private ConnectorServiceProto.OracleExternalTableRequest catalogRequest(String tableName) {
-        return ConnectorServiceProto.OracleExternalTableRequest.newBuilder()
+    private ConnectorServiceProto.OracleConnectionProperties connectionProperties(
+            String tableName) {
+        return ConnectorServiceProto.OracleConnectionProperties.newBuilder()
                 .putAllProperties(oracle.sourceProperties(tableName))
                 .build();
     }
 
-    private ConnectorServiceProto.OracleExternalTableResponse discover(
-            ConnectorServiceProto.OracleExternalTableRequest request) throws Exception {
-        return successfulResponse(JniOracleExternalTable.discover(request.toByteArray()));
-    }
-
-    private ConnectorServiceProto.OracleExternalTableResponse snapshotRead(
-            ConnectorServiceProto.OracleExternalTableRequest request) throws Exception {
-        return successfulResponse(snapshotReadResponse(request));
-    }
-
-    private ConnectorServiceProto.OracleExternalTableResponse snapshotReadResponse(
-            ConnectorServiceProto.OracleExternalTableRequest request) throws Exception {
-        return parseResponse(JniOracleExternalTable.snapshotRead(request.toByteArray()));
-    }
-
-    private static ConnectorServiceProto.OracleExternalTableResponse successfulResponse(
-            byte[] bytes) throws Exception {
-        return successfulResponse(parseResponse(bytes));
-    }
-
-    private static ConnectorServiceProto.OracleExternalTableResponse successfulResponse(
-            ConnectorServiceProto.OracleExternalTableResponse response) {
-        assertEquals("", response.getError().getErrorMessage());
-        return response;
-    }
-
-    private static ConnectorServiceProto.OracleExternalTableResponse parseResponse(byte[] bytes)
-            throws Exception {
-        return ConnectorServiceProto.OracleExternalTableResponse.parseFrom(bytes);
-    }
-
-    private static String datumText(ConnectorServiceProto.OracleDatum datum) {
-        return datum.getValue().toString(StandardCharsets.UTF_8);
+    private ConnectorServiceProto.TableSchema discover(
+            ConnectorServiceProto.OracleConnectionProperties properties) throws Exception {
+        return ConnectorServiceProto.TableSchema.parseFrom(
+                JniOracleExternalTable.discover(properties.toByteArray()));
     }
 }

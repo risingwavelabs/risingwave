@@ -13,33 +13,39 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::ops::Deref;
 
 use anyhow::{Context, anyhow};
+use arrow_58_ipc::reader::StreamReader;
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use futures_async_stream::try_stream;
+use jni::sys::jlong;
 use prost::Message;
+use risingwave_common::array::DataChunk;
+use risingwave_common::array::arrow::Arrow58FromArrow;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, ScalarImpl, ToText};
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
+use risingwave_jni_core::{JavaBindingIterator, JniSenderType, call_static_method};
 use risingwave_pb::connector_service::{
-    OracleDatum, OracleExternalTableRequest, OracleExternalTableResponse, OracleRow, TableSchema,
+    OracleConnectionProperties, OracleSnapshotReadRequest, OracleSnapshotReadResponse, TableSchema,
 };
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
+use tokio::sync::{OnceCell, mpsc};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcTableSnapshotSplitOption, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, ExternalTableConfig,
+    ExternalTableReader, SchemaTableName,
 };
+
+const ORACLE_SNAPSHOT_CHANNEL_SIZE: usize = 4;
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct OracleOffset {
@@ -53,18 +59,11 @@ pub struct OracleExternalTable {
 
 impl OracleExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
-        let request = OracleExternalTableRequest {
-            properties: config.oracle_connection_properties(),
-            ..Default::default()
-        };
-        let response = tokio::task::spawn_blocking(move || discover_table(request))
+        let properties = config.oracle_connection_properties()?;
+        let table_schema = tokio::task::spawn_blocking(move || invoke_jni_discover(&properties))
             .await
             .context("failed to join Oracle schema discovery task")??;
-        ensure_success(&response)?;
 
-        let table_schema = response
-            .table_schema
-            .context("Oracle schema discovery returned no table schema")?;
         let column_descs = table_schema
             .columns
             .iter()
@@ -108,28 +107,23 @@ impl OracleExternalTable {
 
 #[derive(Debug)]
 pub struct OracleExternalTableReader {
-    config: ExternalTableConfig,
+    connection_properties: OracleConnectionProperties,
     rw_schema: Schema,
     pk_indices: Vec<usize>,
     table_schema: TableSchema,
+    session_id: OnceCell<i64>,
 }
 
 impl ExternalTableReader for OracleExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
-        let request = OracleExternalTableRequest {
-            properties: self.config.oracle_connection_properties(),
-            ..Default::default()
-        };
-        let response = tokio::task::spawn_blocking(move || current_scn(request))
+        let session_id = self.session_id().await?;
+        let scn = tokio::task::spawn_blocking(move || invoke_jni_current_scn(session_id))
             .await
             .context("failed to join Oracle SCN query task")??;
-        ensure_success(&response)?;
-        if response.snapshot_scn == 0 {
-            bail!("Oracle returned an invalid current SCN");
+        if scn <= 0 {
+            bail!("Oracle returned an invalid current SCN: {scn}");
         }
-        Ok(CdcOffset::Oracle(OracleOffset {
-            scn: response.snapshot_scn,
-        }))
+        Ok(CdcOffset::Oracle(OracleOffset { scn: scn as u64 }))
     }
 
     fn snapshot_read(
@@ -166,6 +160,11 @@ impl ExternalTableReader for OracleExternalTableReader {
 }
 
 impl OracleExternalTableReader {
+    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
+        // TODO(#26804): Parse Oracle Debezium offsets when Oracle CDC backfill is implemented.
+        Box::new(|_offset| Err(anyhow!("Oracle CDC offset parsing is not supported yet").into()))
+    }
+
     pub fn new(
         config: ExternalTableConfig,
         rw_schema: Schema,
@@ -200,11 +199,25 @@ impl OracleExternalTableReader {
         };
 
         Ok(Self {
-            config,
+            connection_properties: config.oracle_connection_properties()?,
             rw_schema,
             pk_indices,
             table_schema,
+            session_id: OnceCell::new(),
         })
+    }
+
+    async fn session_id(&self) -> ConnectorResult<i64> {
+        let session_id = self
+            .session_id
+            .get_or_try_init(|| async {
+                let properties = self.connection_properties.clone();
+                tokio::task::spawn_blocking(move || invoke_jni_open_session(&properties))
+                    .await
+                    .context("failed to join Oracle session open task")?
+            })
+            .await?;
+        Ok(*session_id)
     }
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
@@ -226,224 +239,208 @@ impl OracleExternalTableReader {
             ))?;
         }
 
-        let start_pk = start_pk
-            .map(|row| encode_start_pk(row, &self.rw_schema, &self.pk_indices))
-            .transpose()?;
+        if let Some(start_pk) = &start_pk {
+            validate_start_pk(start_pk, self.pk_indices.len())?;
+        }
 
-        let properties = self
-            .config
-            .oracle_connection_properties_with_schema_table_name(table_name);
-        let request = OracleExternalTableRequest {
-            properties,
+        let session_id = self.session_id().await?;
+        let request = OracleSnapshotReadRequest {
+            schema_name: table_name.schema_name,
+            table_name: table_name.table_name,
             table_schema: Some(self.table_schema.clone()),
-            start_pk: start_pk.unwrap_or_default(),
             primary_keys,
             limit,
         };
-        let response = tokio::task::spawn_blocking(move || read_snapshot(request))
+        let (sender, mut receiver) = mpsc::channel(ORACLE_SNAPSHOT_CHANNEL_SIZE);
+        let read_task = tokio::task::spawn_blocking(move || {
+            invoke_jni_snapshot_read(session_id, &request, start_pk, &sender)
+        });
+
+        while let Some(response) = receiver.recv().await {
+            let chunk = decode_arrow_batch(&response?.arrow_ipc, &self.rw_schema)?;
+            for row in chunk.rows() {
+                // Oracle guarantees that no column of a primary key is NULL ("Primary Key
+                // Constraints" in https://docs.oracle.com/en/database/oracle/oracle-database/23/sqlrf/constraint.html).
+                // Pagination depends on it rather than only checking it: the keyset predicate uses
+                // `=` and `>`, which never match NULL, the next start key cannot be NULL, and
+                // parallel CDC backfill reserves an all-NULL key for an unbounded split edge.
+                if let Some(&index) = self
+                    .pk_indices
+                    .iter()
+                    .find(|&&index| row.datum_at(index).is_none())
+                {
+                    Err(anyhow!(
+                        "Oracle snapshot primary key `{}` cannot be NULL",
+                        self.rw_schema.fields[index].name
+                    ))?;
+                }
+                yield row.into_owned_row();
+            }
+        }
+        read_task
             .await
             .context("failed to join Oracle snapshot query task")??;
-        ensure_success(&response)?;
+    }
+}
 
-        for row in response.rows {
-            yield decode_row(row, &self.rw_schema, &self.pk_indices)?;
+impl Drop for OracleExternalTableReader {
+    fn drop(&mut self) {
+        let Some(&session_id) = self.session_id.get() else {
+            return;
+        };
+        let close = move || {
+            if let Err(error) = invoke_jni_close_session(session_id) {
+                tracing::warn!(
+                    session_id,
+                    error = %error.as_report(),
+                    "failed to close Oracle session"
+                );
+            }
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => drop(handle.spawn_blocking(close)),
+            Err(_) => close(),
         }
     }
 }
 
 impl ExternalTableConfig {
-    pub fn oracle_connection_properties(&self) -> HashMap<String, String> {
-        HashMap::from([
-            ("hostname".to_owned(), self.host.clone()),
-            ("port".to_owned(), self.port.clone()),
-            ("username".to_owned(), self.username.clone()),
-            ("password".to_owned(), self.password.clone()),
-            ("database.name".to_owned(), self.database.clone()),
-            ("database.pdb.name".to_owned(), self.pdb_name.clone()),
-            ("schema.name".to_owned(), self.schema.clone()),
-            ("table.name".to_owned(), self.table.clone()),
-        ])
-    }
-
-    pub fn oracle_connection_properties_with_schema_table_name(
-        &self,
-        table_name: SchemaTableName,
-    ) -> HashMap<String, String> {
-        let mut properties = self.oracle_connection_properties();
-        properties.insert("schema.name".to_owned(), table_name.schema_name);
-        properties.insert("table.name".to_owned(), table_name.table_name);
-        properties
+    pub fn oracle_connection_properties(&self) -> ConnectorResult<OracleConnectionProperties> {
+        let pdb_name = self
+            .pdb_name
+            .clone()
+            .context("Oracle CDC requires 'database.pdb.name'")?;
+        Ok(OracleConnectionProperties {
+            properties: HashMap::from([
+                ("hostname".to_owned(), self.host.clone()),
+                ("port".to_owned(), self.port.clone()),
+                ("username".to_owned(), self.username.clone()),
+                ("password".to_owned(), self.password.clone()),
+                ("database.name".to_owned(), self.database.clone()),
+                ("database.pdb.name".to_owned(), pdb_name),
+                ("schema.name".to_owned(), self.schema.clone()),
+                ("table.name".to_owned(), self.table.clone()),
+            ]),
+        })
     }
 }
 
-fn encode_start_pk(
-    row: OwnedRow,
-    schema: &Schema,
-    pk_indices: &[usize],
-) -> ConnectorResult<Vec<OracleDatum>> {
-    if row.len() != pk_indices.len() {
+fn validate_start_pk(row: &OwnedRow, pk_len: usize) -> ConnectorResult<()> {
+    if row.len() != pk_len {
         bail!(
             "Oracle snapshot start key has {} values for {} primary-key columns",
             row.len(),
-            pk_indices.len()
+            pk_len
         );
     }
-    row.into_iter()
-        .zip_eq_fast(pk_indices)
-        .enumerate()
-        .map(|(position, (datum, &schema_index))| {
-            let scalar = datum.with_context(|| {
-                format!("Oracle snapshot primary-key position {position} cannot be NULL")
-            })?;
-            let value = match &schema.fields[schema_index].data_type {
-                DataType::Bytea => scalar.into_bytea().into_vec(),
-                data_type => scalar
-                    .as_scalar_ref_impl()
-                    .to_text_with_type(data_type)
-                    .into_bytes(),
-            };
-            Ok(OracleDatum {
-                is_null: false,
-                value,
-            })
-        })
-        .collect()
-}
-
-fn decode_row(row: OracleRow, schema: &Schema, pk_indices: &[usize]) -> ConnectorResult<OwnedRow> {
-    if row.values.len() != schema.len() {
-        bail!(
-            "Oracle snapshot row has {} values for a {}-column schema",
-            row.values.len(),
-            schema.len()
-        );
-    }
-
-    let datums = row
-        .values
-        .into_iter()
-        .zip_eq_fast(&schema.fields)
-        .enumerate()
-        .map(|(index, (datum, field))| {
-            if datum.is_null {
-                if pk_indices.contains(&index) {
-                    return Err(anyhow!(
-                        "Oracle snapshot primary key `{}` cannot be NULL",
-                        field.name
-                    ));
-                }
-                return Ok(None);
-            }
-
-            let parsed = match &field.data_type {
-                DataType::Bytea => Ok(ScalarImpl::Bytea(datum.value.into())),
-                data_type => {
-                    let text = std::str::from_utf8(&datum.value).with_context(|| {
-                        format!("Oracle snapshot column `{}` is not valid UTF-8", field.name)
-                    })?;
-                    ScalarImpl::from_text(text, data_type).map_err(|error| anyhow!(error))
-                }
-            };
-            match parsed {
-                Ok(value) => Ok(Some(value)),
-                Err(error) if pk_indices.contains(&index) => Err(error.context(format!(
-                    "failed to decode Oracle snapshot primary key `{}`",
-                    field.name
-                ))),
-                Err(error) => {
-                    tracing::warn!(
-                        column = field.name,
-                        data_type = %field.data_type,
-                        error = %error.as_report(),
-                        "failed to decode Oracle snapshot value; using NULL",
-                    );
-                    Ok(None)
-                }
-            }
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    Ok(OwnedRow::new(datums))
-}
-
-fn ensure_success(response: &OracleExternalTableResponse) -> ConnectorResult<()> {
-    if let Some(error) = &response.error {
-        bail!(
-            "Oracle external table operation failed: {}",
-            error.error_message
-        );
+    if let Some(position) = row.iter().position(|datum| datum.is_none()) {
+        bail!("Oracle snapshot primary-key position {position} cannot be NULL");
     }
     Ok(())
 }
 
-fn discover_table(
-    request: OracleExternalTableRequest,
-) -> anyhow::Result<OracleExternalTableResponse> {
-    invoke_jni_discover(&request)
+fn decode_arrow_batch(arrow_ipc: &[u8], schema: &Schema) -> ConnectorResult<DataChunk> {
+    let mut reader = StreamReader::try_new(Cursor::new(arrow_ipc), None)
+        .context("failed to read Oracle snapshot Arrow stream")?;
+    let batch = reader
+        .next()
+        .context("Oracle snapshot Arrow stream has no record batch")?
+        .context("failed to read Oracle snapshot Arrow record batch")?;
+    let chunk = OracleArrowConvert
+        .from_record_batch(&batch)
+        .context("failed to convert Oracle snapshot Arrow record batch")?;
+    if chunk.data_types() != schema.data_types() {
+        bail!(
+            "Oracle snapshot batch has types {:?} but the table schema has types {:?}",
+            chunk.data_types(),
+            schema.data_types()
+        );
+    }
+    Ok(chunk)
 }
 
-fn current_scn(request: OracleExternalTableRequest) -> anyhow::Result<OracleExternalTableResponse> {
-    invoke_jni_current_scn(&request)
-}
+struct OracleArrowConvert;
 
-fn read_snapshot(
-    request: OracleExternalTableRequest,
-) -> anyhow::Result<OracleExternalTableResponse> {
-    invoke_jni_snapshot_read(&request)
-}
+impl Arrow58FromArrow for OracleArrowConvert {}
 
-fn invoke_jni_discover(
-    request: &OracleExternalTableRequest,
-) -> anyhow::Result<OracleExternalTableResponse> {
+fn invoke_jni_discover(properties: &OracleConnectionProperties) -> anyhow::Result<TableSchema> {
     let jvm = Jvm::get_or_init()?;
     execute_with_jni_env(jvm, |env| {
-        let request_bytes = env.byte_array_from_slice(&request.encode_to_vec())?;
+        let properties_bytes = env.byte_array_from_slice(&properties.encode_to_vec())?;
         let response_bytes = call_static_method!(
             env,
             {com.risingwave.connector.source.common.JniOracleExternalTable},
-            {byte[] discover(byte[] requestBytes)},
-            &request_bytes
+            {byte[] discover(byte[] propertiesBytes)},
+            &properties_bytes
         )?;
-        OracleExternalTableResponse::decode(
-            risingwave_jni_core::to_guarded_slice(&response_bytes, env)?.deref(),
-        )
-        .map_err(Into::into)
+        TableSchema::decode(risingwave_jni_core::to_guarded_slice(&response_bytes, env)?.deref())
+            .map_err(Into::into)
     })
 }
 
-fn invoke_jni_current_scn(
-    request: &OracleExternalTableRequest,
-) -> anyhow::Result<OracleExternalTableResponse> {
+fn invoke_jni_open_session(properties: &OracleConnectionProperties) -> anyhow::Result<i64> {
     let jvm = Jvm::get_or_init()?;
     execute_with_jni_env(jvm, |env| {
-        let request_bytes = env.byte_array_from_slice(&request.encode_to_vec())?;
-        let response_bytes = call_static_method!(
+        let properties_bytes = env.byte_array_from_slice(&properties.encode_to_vec())?;
+        let session_id = call_static_method!(
             env,
             {com.risingwave.connector.source.common.JniOracleExternalTable},
-            {byte[] currentScn(byte[] requestBytes)},
-            &request_bytes
+            {long openSession(byte[] propertiesBytes)},
+            &properties_bytes
         )?;
-        OracleExternalTableResponse::decode(
-            risingwave_jni_core::to_guarded_slice(&response_bytes, env)?.deref(),
-        )
-        .map_err(Into::into)
+        Ok(session_id)
+    })
+}
+
+fn invoke_jni_close_session(session_id: i64) -> anyhow::Result<()> {
+    let jvm = Jvm::get_or_init()?;
+    execute_with_jni_env(jvm, |env| {
+        call_static_method!(
+            env,
+            {com.risingwave.connector.source.common.JniOracleExternalTable},
+            {void closeSession(long sessionId)},
+            session_id
+        )?;
+        Ok(())
+    })
+}
+
+fn invoke_jni_current_scn(session_id: i64) -> anyhow::Result<i64> {
+    let jvm = Jvm::get_or_init()?;
+    execute_with_jni_env(jvm, |env| {
+        let scn = call_static_method!(
+            env,
+            {com.risingwave.connector.source.common.JniOracleExternalTable},
+            {long currentScn(long sessionId)},
+            session_id
+        )?;
+        Ok(scn)
     })
 }
 
 fn invoke_jni_snapshot_read(
-    request: &OracleExternalTableRequest,
-) -> anyhow::Result<OracleExternalTableResponse> {
+    session_id: i64,
+    request: &OracleSnapshotReadRequest,
+    start_pk: Option<OwnedRow>,
+    sender: &JniSenderType<OracleSnapshotReadResponse>,
+) -> anyhow::Result<()> {
+    let start_pk = start_pk.map(JavaBindingIterator::new_singleton_row);
+    let start_pk_pointer = start_pk
+        .as_ref()
+        .map_or(0, |row| row as *const JavaBindingIterator<'_> as jlong);
+    let channel_pointer = sender as *const JniSenderType<OracleSnapshotReadResponse> as jlong;
     let jvm = Jvm::get_or_init()?;
     execute_with_jni_env(jvm, |env| {
         let request_bytes = env.byte_array_from_slice(&request.encode_to_vec())?;
-        let response_bytes = call_static_method!(
+        call_static_method!(
             env,
             {com.risingwave.connector.source.common.JniOracleExternalTable},
-            {byte[] snapshotRead(byte[] requestBytes)},
-            &request_bytes
+            {void snapshotRead(long sessionId, byte[] requestBytes, long startPkPointer, long channelPtr)},
+            session_id,
+            &request_bytes,
+            start_pk_pointer,
+            channel_pointer
         )?;
-        OracleExternalTableResponse::decode(
-            risingwave_jni_core::to_guarded_slice(&response_bytes, env)?.deref(),
-        )
-        .map_err(Into::into)
+        Ok(())
     })
 }
