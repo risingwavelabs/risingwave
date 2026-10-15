@@ -63,9 +63,10 @@ pub use iceberg_compaction::set_simulated_pk_index_compaction_result;
 #[cfg(madsim)]
 use iceberg_compaction::simulated_pk_index_compaction_result;
 use iceberg_compaction::{
-    IcebergPlanCompletion, IcebergTaskQueue, IcebergTaskReport, IcebergTaskTracker, PushResult,
-    ReportSendResult, build_drained_iceberg_task_report, build_iceberg_task_report,
-    create_task_execution, flush_pending_iceberg_task_reports, send_or_buffer_iceberg_task_report,
+    IcebergPlanCompletion, IcebergTaskExecution, IcebergTaskQueue, IcebergTaskReport,
+    IcebergTaskTracker, PushResult, ReportSendResult, build_drained_iceberg_task_report,
+    build_iceberg_task_report, create_task_execution, flush_pending_iceberg_task_reports,
+    send_or_buffer_iceberg_task_report,
 };
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
@@ -627,6 +628,7 @@ pub fn start_iceberg_compactor(
                                 let task_id = iceberg_compaction_task.task_id;
                                 let sink_id = iceberg_compaction_task.sink_id;
                                 let is_bounded_round = iceberg_compaction_task.max_file_sequence_number.is_some();
+                                let pk_index_coordinated = iceberg_compaction_task.pk_index_coordinated;
                                 // iceberg-rust internally spawns on native Tokio, which is not
                                 // available inside a madsim node. Tests can replace only the
                                 // rewrite result while retaining the real compactor stream and
@@ -744,40 +746,47 @@ pub fn start_iceberg_compactor(
                                     }
                                 };
 
-                                let sink_id = task_execution.sink_id;
-                                let plan_runners = task_execution.plan_runners;
-
-                                if plan_runners.is_empty() {
-                                    // For a bounded round, an empty plan is the terminal proof.
-                                    tracing::info!(
-                                        iceberg_component = "compaction_worker",
-                                        iceberg_operation = "enqueue_plan",
-                                        task_id = %task_id,
-                                        sink_id = sink_id,
-                                        "iceberg_compaction_task_skipped_no_plans",
-                                    );
-                                    let report = if is_bounded_round {
-                                        build_drained_iceberg_task_report(task_id, sink_id)
-                                    } else {
-                                        build_iceberg_task_report(task_id, sink_id, None)
-                                    };
-                                    if matches!(
-                                        send_or_buffer_iceberg_task_report(
-                                            &request_sender,
-                                            &mut pending_task_reports,
-                                            report,
-                                        ),
-                                        ReportSendResult::RestartStream
-                                    ) {
-                                        continue 'start_stream;
+                                let (sink_id, plan_runners) = match task_execution {
+                                    IcebergTaskExecution::Ready { sink_id, plan_runners } => {
+                                        (sink_id, plan_runners)
                                     }
-                                    continue 'consume_stream;
-                                }
+                                    IcebergTaskExecution::Blocked { sink_id, status, reason } => {
+                                        let mut report = build_iceberg_task_report(task_id, sink_id, Some(reason));
+                                        report.status = status as i32;
+                                        if matches!(
+                                            send_or_buffer_iceberg_task_report(&request_sender, &mut pending_task_reports, report),
+                                            ReportSendResult::RestartStream
+                                        ) {
+                                            continue 'start_stream;
+                                        }
+                                        continue 'consume_stream;
+                                    }
+                                    IcebergTaskExecution::NoWork { sink_id } => {
+                                        // Only validated empty planning proves a bounded round drained.
+                                        let report = if is_bounded_round {
+                                            build_drained_iceberg_task_report(task_id, sink_id)
+                                        } else {
+                                            build_iceberg_task_report(task_id, sink_id, None)
+                                        };
+                                        if matches!(
+                                            send_or_buffer_iceberg_task_report(
+                                                &request_sender,
+                                                &mut pending_task_reports,
+                                                report,
+                                            ),
+                                            ReportSendResult::RestartStream
+                                        ) {
+                                            continue 'start_stream;
+                                        }
+                                        continue 'consume_stream;
+                                    }
+                                };
 
                                 // Enqueue each plan runner independently
                                 let planned_count = plan_runners.len();
                                 let mut admitted_count = 0;
                                 let mut rejection_reason = None;
+                                let mut rejection_status = None;
 
                                 for runner in plan_runners {
                                     let meta = runner.to_meta();
@@ -805,6 +814,7 @@ pub fn start_iceberg_compactor(
                                             );
                                         },
                                         PushResult::RejectedCapacity => {
+                                            rejection_status = Some(risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_task::Status::Busy);
                                             tracing::warn!(
                                                 iceberg_component = "compaction_worker",
                                                 iceberg_operation = "enqueue_plan",
@@ -823,6 +833,7 @@ pub fn start_iceberg_compactor(
                                             break;
                                         },
                                         PushResult::RejectedTooLarge => {
+                                            rejection_status = Some(risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_task::Status::BlockedCapacity);
                                             rejection_reason.get_or_insert_with(|| {
                                                 format!(
                                                     "Iceberg compaction plan {plan_index} requires parallelism {required_parallelism} and an estimated {memory_reservation_bytes} bytes of memory, exceeding worker capacities of {max_task_parallelism} parallelism and {iceberg_compaction_memory_limit_bytes} bytes"
@@ -872,13 +883,16 @@ pub fn start_iceberg_compactor(
                                 }
 
                                 if admitted_count == 0 {
-                                    let report = build_iceberg_task_report(
+                                    let mut report = build_iceberg_task_report(
                                         task_id,
                                         sink_id,
                                         Some(rejection_reason.unwrap_or_else(|| {
                                             "Failed to enqueue all iceberg compaction plans".to_owned()
                                         })),
                                     );
+                                    if let Some(status) = rejection_status {
+                                        report.status = status as i32;
+                                    }
                                     if matches!(
                                         send_or_buffer_iceberg_task_report(
                                             &request_sender,
@@ -894,12 +908,14 @@ pub fn start_iceberg_compactor(
                                     // runner was admitted. Otherwise an immediate re-plan
                                     // rediscovers the deferred work.
                                     let fully_admitted_bounded_round =
-                                        is_bounded_round && admitted_count == planned_count;
+                                        is_bounded_round
+                                            && admitted_count == planned_count;
                                     task_trackers.insert(
                                         task_id,
                                         IcebergTaskTracker::new(
                                             sink_id,
                                             admitted_count,
+                                            pk_index_coordinated,
                                             fully_admitted_bounded_round,
                                         ),
                                     );
@@ -1779,7 +1795,8 @@ mod tests {
         assert_eq!(task_queue.waiting_parallelism_sum(), 7);
 
         let shutdown_map = Arc::new(Mutex::new(HashMap::new()));
-        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 2, false))]);
+        let mut task_trackers =
+            HashMap::from([(task_id, IcebergTaskTracker::new(10, 2, false, false))]);
 
         cancel_iceberg_task(task_id, &mut task_queue, &shutdown_map, &mut task_trackers);
 
@@ -1795,7 +1812,8 @@ mod tests {
         let shutdown_map = Arc::new(Mutex::new(HashMap::new()));
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         shutdown_map.lock().unwrap().insert(task_key, shutdown_tx);
-        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 1, false))]);
+        let mut task_trackers =
+            HashMap::from([(task_id, IcebergTaskTracker::new(10, 1, false, false))]);
 
         cancel_iceberg_task(task_id, &mut task_queue, &shutdown_map, &mut task_trackers);
 

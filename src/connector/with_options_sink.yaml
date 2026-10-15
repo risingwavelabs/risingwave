@@ -826,6 +826,13 @@ IcebergConfig:
     default: Default::default
     allow_alter_on_fly: true
     iceberg_engine: true
+  - name: compaction.delete_ratio_percent
+    field_type: u32
+    comments: Minimum percentage of deleted physical rows for PK-index compaction.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.trigger_snapshot_count
     field_type: usize
     required: false
