@@ -174,28 +174,37 @@ async fn bind_columns_from_source_for_non_cdc(
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
         (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
-            let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options_to_consume)?;
-            let message_name = consume_string_from_options(
-                &mut format_encode_options_to_consume,
-                MESSAGE_NAME_KEY,
-            )?;
-            let name_strategy = get_sr_name_strategy_check(
-                &mut format_encode_options_to_consume,
-                use_schema_registry,
-            )?;
+            if format_encode_options_to_consume.contains_key(PULSAR_SCHEMA_URL_KEY) {
+                if let Some(message_name) = try_consume_string_from_options(
+                    &mut format_encode_options_to_consume,
+                    MESSAGE_NAME_KEY,
+                ) {
+                    stream_source_info.proto_message_name = message_name.0;
+                }
+            } else {
+                let (row_schema_location, use_schema_registry) =
+                    get_schema_location(&mut format_encode_options_to_consume)?;
+                let message_name = consume_string_from_options(
+                    &mut format_encode_options_to_consume,
+                    MESSAGE_NAME_KEY,
+                )?;
+                let name_strategy = get_sr_name_strategy_check(
+                    &mut format_encode_options_to_consume,
+                    use_schema_registry,
+                )?;
 
-            stream_source_info.use_schema_registry = use_schema_registry;
-            stream_source_info
-                .row_schema_location
-                .clone_from(&row_schema_location.0);
-            stream_source_info
-                .proto_message_name
-                .clone_from(&message_name.0);
-            stream_source_info.key_message_name =
-                get_key_message_name(&mut format_encode_options_to_consume);
-            stream_source_info.name_strategy =
-                name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
+                stream_source_info.use_schema_registry = use_schema_registry;
+                stream_source_info
+                    .row_schema_location
+                    .clone_from(&row_schema_location.0);
+                stream_source_info
+                    .proto_message_name
+                    .clone_from(&message_name.0);
+                stream_source_info.key_message_name =
+                    get_key_message_name(&mut format_encode_options_to_consume);
+                stream_source_info.name_strategy =
+                    name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
+            }
 
             Some(
                 extract_protobuf_table_schema(
@@ -308,16 +317,30 @@ async fn bind_columns_from_source_for_non_cdc(
                 );
             }
 
-            let schema_config = get_json_schema_location(&mut format_encode_options_to_consume)?;
-            stream_source_info.use_schema_registry =
-                json_schema_infer_use_schema_registry(&schema_config);
+            if let Some(config) =
+                PulsarSchemaConfig::from_options(&format_encode_options_to_consume)?
+            {
+                Some(
+                    extract_pulsar_json_table_schema(
+                        &config,
+                        &options_with_secret,
+                        &mut format_encode_options_to_consume,
+                    )
+                    .await?,
+                )
+            } else {
+                let schema_config =
+                    get_json_schema_location(&mut format_encode_options_to_consume)?;
+                stream_source_info.use_schema_registry =
+                    json_schema_infer_use_schema_registry(&schema_config);
 
-            extract_json_table_schema(
-                &schema_config,
-                &options_with_secret,
-                &mut format_encode_options_to_consume,
-            )
-            .await?
+                extract_json_table_schema(
+                    &schema_config,
+                    &options_with_secret,
+                    &mut format_encode_options_to_consume,
+                )
+                .await?
+            }
         }
         (Format::None, Encode::None) => {
             if options_with_secret.is_iceberg_connector() {
@@ -472,7 +495,8 @@ pub fn schema_has_schema_registry(schema: &FormatEncodeOptions) -> bool {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {
             let mut options = WithOptions::try_from(schema.row_options()).unwrap();
-            matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
+            uses_pulsar_schema(&options, options.secret_ref())
+                || matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
         }
         _ => false,
     }
