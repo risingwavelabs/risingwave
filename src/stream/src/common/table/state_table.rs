@@ -1715,6 +1715,12 @@ where
         self.committed_watermark.as_ref()
     }
 
+    /// Get the watermark fed through `update_watermark` in the current epoch, which takes effect at
+    /// the commit.
+    pub fn get_pending_watermark(&self) -> Option<&ScalarImpl> {
+        self.pending_watermark.as_ref()
+    }
+
     pub async fn commit(
         &mut self,
         new_epoch: EpochPair,

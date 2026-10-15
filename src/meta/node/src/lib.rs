@@ -412,6 +412,9 @@ pub fn start(
                 iceberg_compaction_config_refresh_interval_sec: config
                     .meta
                     .iceberg_compaction_config_refresh_interval_sec,
+                iceberg_compaction_schedule_on_startup: config
+                    .meta
+                    .iceberg_compaction_schedule_on_startup,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,

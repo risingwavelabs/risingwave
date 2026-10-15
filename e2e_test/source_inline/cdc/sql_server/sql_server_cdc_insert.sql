@@ -16,6 +16,8 @@ VALUES
 
 INSERT INTO single_type VALUES (13, '23:59:59.999')
 
+INSERT INTO MixedCaseTable VALUES (2, 'streaming');
+
 INSERT INTO sqlserver_all_data_types VALUES (11, 'False', 0, 0, 0, 0, 0, 0, 0, '', '', N'中', N'中', 0xff, NULL, NULL, '2001-01-01', '00:00:00', '2001-01-01 00:00:00', '2001-01-01 00:00:00', '<Person><Name>John Doe</Name><Age>30</Age></Person>', 200.5);
 
 INSERT INTO sqlserver_all_data_types VALUES (12, 'True', 255, -32768, -2147483648, -9223372036854775808, -10.0, -9999.999999, -10000.0, 'aa', 'aa', N'🌹', N'🌹', NULL, 0xff, '6f9619ff-8b86-d011-b42d-00c04fc964ff', '1990-01-01', '13:59:59.123', '2000-01-01 11:00:00.123', '2026-06-23 00:01:05.0900948 -07:00', '<Person> <Name>Jane Doe</Name> <Age>28</Age> </Person>', 200.5);

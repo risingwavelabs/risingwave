@@ -14,7 +14,9 @@
 
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(register_tool)]
 #![feature(trait_alias)]
+#![register_tool(rw)]
 
 use std::ops::Deref;
 use std::sync::LazyLock;

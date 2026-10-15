@@ -45,6 +45,9 @@ use risingwave_connector::parser::{
     fetch_json_schema_and_map_to_columns,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
+use risingwave_connector::schema::pulsar_schema::{
+    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY,
+};
 use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
     SCHEMA_REGISTRY_CA_PEM_PATH, SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD,
@@ -162,6 +165,14 @@ fn try_consume_schema_registry_config_from_options(
     .for_each(|key| {
         try_consume_string_from_options(format_encode_options, key);
     });
+}
+
+fn try_consume_pulsar_schema_config_from_options(
+    format_encode_options: &mut BTreeMap<String, String>,
+) {
+    for key in [PULSAR_SCHEMA_URL_KEY, PULSAR_SCHEMA_AUTH_TOKEN_KEY] {
+        try_consume_string_from_options(format_encode_options, key);
+    }
 }
 
 fn consume_string_from_options(
@@ -1544,6 +1555,7 @@ pub mod tests {
     };
     use risingwave_common::config::FrontendConfig;
     use risingwave_common::types::{DataType, StructType};
+    use risingwave_connector::parser::additional_columns::get_kafka_header_item_datatype;
     use risingwave_pb::plan_common::EncodeType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -1943,6 +1955,68 @@ pub mod tests {
             ]
         "#]]
         .assert_debug_eq(&columns);
+        drop(catalog_reader);
+
+        let sql =
+            "CREATE SOURCE s_nats (v1 int) include header 'trace-id' as nats_header with (connector = 'nats') format plain encode json".to_owned();
+        frontend.run_sql(sql).await.unwrap();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "s_nats",
+            )
+            .unwrap();
+        assert_eq!(source.name, "s_nats");
+
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<Vec<(&str, DataType)>>();
+
+        expect_test::expect![[r#"
+            [
+                (
+                    "v1",
+                    Int32,
+                ),
+                (
+                    "nats_header",
+                    Bytea,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
+        drop(catalog_reader);
+
+        // Bare `INCLUDE header AS ...` -- list-of-struct dispatch through the NATS DDL path.
+        let sql =
+            "CREATE SOURCE s_nats_all (v1 int) include header as nats_all_headers with (connector = 'nats') format plain encode json".to_owned();
+        frontend.run_sql(sql).await.unwrap();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "s_nats_all",
+            )
+            .unwrap();
+        assert_eq!(source.name, "s_nats_all");
+        let all_headers_col = source
+            .columns
+            .iter()
+            .find(|c| c.name() == "nats_all_headers")
+            .expect("nats_all_headers column present");
+        assert_eq!(
+            all_headers_col.data_type(),
+            &DataType::list(get_kafka_header_item_datatype()),
+        );
         drop(catalog_reader);
 
         let sql =
