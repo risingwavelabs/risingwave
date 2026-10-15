@@ -42,6 +42,8 @@ pub use source::*;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
+use crate::parser::schema_change::{TableChangeColumn, TableChangeContext};
+use crate::parser::{AccessError, AccessResult, DebeziumTransactionStatus, TransactionControl};
 use crate::source::cdc::external::SchemaTableName;
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
@@ -104,6 +106,10 @@ pub trait CdcSourceFrontendValidator: CdcSourceTypeTrait {
     const ALLOW_ALTER_ON_FLY_FIELDS: &'static [&'static str];
     /// License feature required to create a source with this connector, if any.
     const LICENSE_FEATURE: Option<Feature> = None;
+    /// `INCLUDE` columns accepted on `CREATE SOURCE`. `None` rejects any `INCLUDE` clause; the
+    /// hidden `partition` and `offset` columns are still added. Tables created from a shared
+    /// source use `CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS` instead.
+    const SUPPORTED_ADDITIONAL_COLUMNS: Option<&'static [&'static str]> = None;
 
     /// Fills defaults into, and validates, the connector-specific WITH options.
     fn fill_and_validate_props(_props: &mut BTreeMap<String, String>) -> ConnectorResult<()> {
@@ -165,6 +171,36 @@ pub trait CdcExternalTableNameParser: CdcSourceTypeTrait {
     fn db_name_end_and_table_name_start_from_debezium_topic_suffix(
         topic_suffix: &str,
     ) -> (usize, usize);
+}
+
+/// How to read the connector-specific parts of Debezium payloads: the transaction id in
+/// transaction-metadata events, and the upstream column types and default expressions in
+/// schema-change events. The shared envelope handling lives in `parser::unified::debezium` and
+/// reaches the right impl through `dispatch_cdc_source_type!`. Connectors without transaction
+/// metadata or auto schema change keep the defaults.
+pub trait CdcDebeziumPayloadInterpreter: CdcSourceTypeTrait {
+    /// Builds the transaction control message from the `status` and `id` of a
+    /// transaction-metadata event. `None` means this connector emits no usable transaction
+    /// metadata.
+    fn transaction_control_from_transaction_meta(
+        _status: DebeziumTransactionStatus,
+        _id: &str,
+    ) -> Option<TransactionControl> {
+        None
+    }
+
+    /// Maps the columns of one `tableChanges[]` entry of a schema-change event to RisingWave
+    /// column definitions. Called by `parse_schema_change` once per table.
+    async fn columns_from_table_change(
+        _ctx: &TableChangeContext<'_>,
+    ) -> AccessResult<Vec<TableChangeColumn>> {
+        Err(AccessError::Uncategorized {
+            message: format!(
+                "auto schema change is not supported for connector {}",
+                Self::CDC_CONNECTOR_NAME
+            ),
+        })
+    }
 }
 
 /// Indices for a Debezium topic suffix of the form `schema.table` or `database.schema.table`,

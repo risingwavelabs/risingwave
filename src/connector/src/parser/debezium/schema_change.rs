@@ -12,15 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::types::{DataType, JsonbRef};
 use risingwave_pb::ddl_service::table_schema_change::TableChangeType as PbTableChangeType;
 use risingwave_pb::ddl_service::{
     SchemaChangeEnvelope as PbSchemaChangeEnvelope, TableSchemaChange as PbTableSchemaChange,
 };
 
+use crate::parser::unified::AccessError;
+
 #[derive(Debug)]
 pub struct SchemaChangeEnvelope {
     pub table_changes: Vec<TableSchemaChange>,
+}
+
+/// Input of `CdcDebeziumPayloadInterpreter::columns_from_table_change`: one `tableChanges[]`
+/// entry of a Debezium schema-change event, handed from the shared envelope loop in
+/// `parse_schema_change` to the connector that maps its columns.
+#[derive(Debug, Clone, Copy)]
+pub struct TableChangeContext<'a> {
+    /// WITH options of the source, for connectors that consult the upstream catalog.
+    pub source_properties: &'a BTreeMap<String, String>,
+    /// The `table.columns` array of this entry.
+    pub columns: JsonbRef<'a>,
+    pub source_name: &'a str,
+    /// `tableChanges[].id` as Debezium reports it, e.g. `"public"."orders"`.
+    pub debezium_table_id: &'a str,
+    /// `debezium_table_id` without the quotes.
+    pub table_name: &'a str,
+}
+
+impl TableChangeContext<'_> {
+    pub fn unsupported_type(&self, ty: String) -> AccessError {
+        AccessError::CdcAutoSchemaChangeError {
+            ty,
+            table_name: format!("{}.{}", self.source_name, self.table_name),
+        }
+    }
+}
+
+/// Output of `CdcDebeziumPayloadInterpreter::columns_from_table_change`: one column of a
+/// [`TableChangeContext`] with its upstream type mapped to a RisingWave type. The shared loop in
+/// `parse_schema_change` turns it into a `ColumnDesc` by parsing `default_value_text`.
+#[derive(Debug)]
+pub struct TableChangeColumn {
+    pub name: String,
+    pub data_type: DataType,
+    /// The upstream default expression as Debezium reports it, kept for diagnostics.
+    pub default_value_expression: Option<String>,
+    /// The default value in the text form that `ScalarImpl::from_text` parses for `data_type`.
+    pub default_value_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

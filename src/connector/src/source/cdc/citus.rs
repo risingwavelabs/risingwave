@@ -22,8 +22,8 @@ use crate::source::cdc::external::SchemaTableName;
 use crate::source::cdc::postgres::fill_and_validate_postgres_props;
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
 use crate::source::cdc::{
-    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
-    CdcSourceRuntimeFlags, Citus, Postgres,
+    CdcDebeziumPayloadInterpreter, CdcExternalTableNameParser, CdcSerializedFieldNames,
+    CdcSourceFrontendValidator, CdcSourceRuntimeFlags, Citus, Postgres,
 };
 
 // ------- Persisted names -------
@@ -60,6 +60,10 @@ impl CdcExternalTableNameParser for Citus {
         Postgres::db_name_end_and_table_name_start_from_debezium_topic_suffix(topic_suffix)
     }
 }
+
+// ------- Debezium payload -------
+
+impl CdcDebeziumPayloadInterpreter for Citus {}
 
 // ------- Split -------
 

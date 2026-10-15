@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 use crate::source::cdc::external::{SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait};
 use crate::source::cdc::{
-    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
-    CdcSourceRuntimeFlags, Oracle,
+    CdcDebeziumPayloadInterpreter, CdcExternalTableNameParser, CdcSerializedFieldNames,
+    CdcSourceFrontendValidator, CdcSourceRuntimeFlags, Oracle,
     db_name_end_and_table_name_start_from_schema_qualified_topic_suffix,
 };
 
@@ -69,6 +69,10 @@ impl CdcExternalTableNameParser for Oracle {
         db_name_end_and_table_name_start_from_schema_qualified_topic_suffix(topic_suffix)
     }
 }
+
+// ------- Debezium payload -------
+
+impl CdcDebeziumPayloadInterpreter for Oracle {}
 
 // ------- Split -------
 

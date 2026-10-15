@@ -228,6 +228,8 @@ pub(crate) fn into_data_chunk_stream(
 }
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use debezium::schema_change::SchemaChangeEnvelope;
+pub use unified::debezium::DebeziumTransactionStatus;
+pub(crate) use unified::debezium::jsonb_access_field;
 pub use unified::{AccessError, AccessResult};
 
 /// The meta data of the original message for a row writer.

@@ -16,15 +16,24 @@ use std::collections::BTreeMap;
 
 use rand::Rng;
 use risingwave_common::bail;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
+use crate::parser::schema_change::{TableChangeColumn, TableChangeContext};
+use crate::parser::{
+    AccessError, AccessResult, DebeziumTransactionStatus, TransactionControl, jsonb_access_field,
+};
+use crate::source::cdc::external::mysql::{
+    mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
+};
 use crate::source::cdc::external::{DATABASE_NAME_KEY, SchemaTableName, TABLE_NAME_KEY};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
 use crate::source::cdc::{
-    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
-    CdcSourceRuntimeFlags, Mysql,
+    CdcDebeziumPayloadInterpreter, CdcExternalTableNameParser, CdcSerializedFieldNames,
+    CdcSourceFrontendValidator, CdcSourceRuntimeFlags, Mysql,
     db_name_end_and_table_name_start_from_database_qualified_topic_suffix,
 };
 
@@ -114,6 +123,67 @@ impl CdcExternalTableNameParser for Mysql {
         topic_suffix: &str,
     ) -> (usize, usize) {
         db_name_end_and_table_name_start_from_database_qualified_topic_suffix(topic_suffix)
+    }
+}
+
+// ------- Debezium payload -------
+
+impl CdcDebeziumPayloadInterpreter for Mysql {
+    /// The id is `source_id:transaction_id`, e.g. `3E11FA47-71CA-11E1-9E33-C80AA9429562:23`,
+    /// and is used as is.
+    fn transaction_control_from_transaction_meta(
+        status: DebeziumTransactionStatus,
+        id: &str,
+    ) -> Option<TransactionControl> {
+        Some(status.into_control(id))
+    }
+
+    /// Types come from `type_name_to_mysql_type`. A `timestamp` default is interpreted in UTC
+    /// because MySQL `timestamp` maps to `timestamptz`.
+    async fn columns_from_table_change(
+        ctx: &TableChangeContext<'_>,
+    ) -> AccessResult<Vec<TableChangeColumn>> {
+        let mut columns = vec![];
+        for col in ctx.columns.array_elements().unwrap() {
+            let name: String = jsonb_access_field!(col, "name", string);
+            let type_name: String = jsonb_access_field!(col, "typeName", string);
+            let data_type = match type_name_to_mysql_type(type_name.as_str()) {
+                Some(ty) => match mysql_type_to_rw_type(&ty) {
+                    Ok(data_type) => data_type,
+                    Err(err) => {
+                        tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
+                        return Err(ctx.unsupported_type(type_name));
+                    }
+                },
+                None => return Err(ctx.unsupported_type(type_name)),
+            };
+
+            let default_value_expression = col
+                .access_object_field("defaultValueExpression")
+                .filter(|v| !v.is_jsonb_null())
+                .map(|v| v.as_str().unwrap().to_owned());
+            let default_value_text = match &default_value_expression {
+                Some(expr) if data_type == DataType::Timestamptz => {
+                    Some(timestamp_val_to_timestamptz(expr).map_err(|err| {
+                        tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
+                        AccessError::TypeError {
+                            expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
+                            got: data_type.to_string(),
+                            value: expr.clone(),
+                        }
+                    })?)
+                }
+                Some(expr) => Some(expr.clone()),
+                None => None,
+            };
+            columns.push(TableChangeColumn {
+                name,
+                data_type,
+                default_value_expression,
+                default_value_text,
+            });
+        }
+        Ok(columns)
     }
 }
 

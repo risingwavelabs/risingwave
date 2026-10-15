@@ -790,6 +790,16 @@ macro_rules! impl_split_impl_cdc_methods {
                         _ => CdcSourceType::Unspecified,
                     }
                 }
+
+                /// The WITH options of a CDC source, or `None` for a non-CDC source.
+                pub fn cdc_properties(&self) -> Option<&BTreeMap<String, String>> {
+                    match self {
+                        $(
+                            ConnectorProperties::[<$cdc_source_type Cdc>](props) => Some(&props.properties),
+                        )*
+                        _ => None,
+                    }
+                }
             }
 
             impl SplitImpl {

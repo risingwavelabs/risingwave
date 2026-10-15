@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 use crate::source::cdc::external::{DATABASE_NAME_KEY, SchemaTableName, TABLE_NAME_KEY};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait};
 use crate::source::cdc::{
-    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
-    CdcSourceRuntimeFlags, Mongodb,
+    CdcDebeziumPayloadInterpreter, CdcExternalTableNameParser, CdcSerializedFieldNames,
+    CdcSourceFrontendValidator, CdcSourceRuntimeFlags, Mongodb,
     db_name_end_and_table_name_start_from_database_qualified_topic_suffix,
 };
 
@@ -39,6 +39,13 @@ impl CdcSourceFrontendValidator for Mongodb {
     ];
     const COMPATIBLE_FORMATS: &'static [(PbFormatType, &'static [PbEncodeType])] =
         &[(PbFormatType::DebeziumMongo, &[PbEncodeType::Json])];
+    const SUPPORTED_ADDITIONAL_COLUMNS: Option<&'static [&'static str]> = Some(&[
+        "timestamp",
+        "partition",
+        "offset",
+        "database_name",
+        "collection_name",
+    ]);
 }
 
 // ------- Runtime flags -------
@@ -61,6 +68,10 @@ impl CdcExternalTableNameParser for Mongodb {
         db_name_end_and_table_name_start_from_database_qualified_topic_suffix(topic_suffix)
     }
 }
+
+// ------- Debezium payload -------
+
+impl CdcDebeziumPayloadInterpreter for Mongodb {}
 
 // ------- Split -------
 

@@ -28,7 +28,8 @@ use risingwave_pb::plan_common::{
 };
 
 use crate::error::ConnectorResult;
-use crate::source::cdc::MONGODB_CDC_CONNECTOR;
+use crate::for_all_classified_sources;
+use crate::source::cdc::{CdcSourceFrontendValidator, CdcSourceTypeTrait};
 use crate::source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, MQTT_CONNECTOR,
     NATS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
@@ -84,20 +85,35 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                 POSIX_FS_CONNECTOR,
                 HashSet::from(["file", "offset", "payload"]),
             ),
-            // mongodb-cdc doesn't support cdc backfill table
-            (
-                MONGODB_CDC_CONNECTOR,
-                HashSet::from([
-                    "timestamp",
-                    "partition",
-                    "offset",
-                    "database_name",
-                    "collection_name",
-                ]),
-            ),
             (MQTT_CONNECTOR, HashSet::from(["offset", "partition"])),
         ])
     });
+
+/// Generates [`CDC_COMPATIBLE_ADDITIONAL_COLUMNS`] from every registered CDC connector's
+/// `CdcSourceFrontendValidator::SUPPORTED_ADDITIONAL_COLUMNS`.
+macro_rules! impl_cdc_compatible_additional_columns {
+    ({$({$cdc_source_type:ident}),*}, {$($_ignore:tt),*}) => {
+        pub static CDC_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<
+            HashMap<&'static str, HashSet<&'static str>>,
+        > = LazyLock::new(|| {
+            [
+                $(
+                    (
+                        <$crate::source::cdc::$cdc_source_type as CdcSourceTypeTrait>::CDC_CONNECTOR_NAME,
+                        <$crate::source::cdc::$cdc_source_type as CdcSourceFrontendValidator>::SUPPORTED_ADDITIONAL_COLUMNS,
+                    ),
+                )*
+            ]
+            .into_iter()
+            .filter_map(|(name, columns)| {
+                columns.map(|columns| (name, columns.iter().copied().collect()))
+            })
+            .collect()
+        });
+    };
+}
+
+for_all_classified_sources!(impl_cdc_compatible_additional_columns);
 
 // For CDC backfill table, the additional columns are added to the schema of `StreamCdcScan`
 pub static CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS: LazyLock<Option<HashSet<&'static str>>> =
@@ -117,7 +133,9 @@ pub fn get_supported_additional_columns(
     if is_cdc_backfill {
         CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS.as_ref()
     } else {
-        COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name)
+        COMPATIBLE_ADDITIONAL_COLUMNS
+            .get(connector_name)
+            .or_else(|| CDC_COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name))
     }
 }
 
@@ -163,7 +181,10 @@ pub fn build_additional_column_desc(
             bail!(
                 "additional column is not supported for connector {}, acceptable connectors: {:?}",
                 connector_name,
-                COMPATIBLE_ADDITIONAL_COLUMNS.keys(),
+                COMPATIBLE_ADDITIONAL_COLUMNS
+                    .keys()
+                    .chain(CDC_COMPATIBLE_ADDITIONAL_COLUMNS.keys())
+                    .collect::<Vec<_>>(),
             );
         }
     };

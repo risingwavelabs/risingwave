@@ -20,13 +20,14 @@ use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
+use crate::parser::{DebeziumTransactionStatus, TransactionControl};
 use crate::source::cdc::external::{
     DATABASE_NAME_KEY, SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY,
 };
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
 use crate::source::cdc::{
-    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
-    CdcSourceRuntimeFlags, SqlServer,
+    CdcDebeziumPayloadInterpreter, CdcExternalTableNameParser, CdcSerializedFieldNames,
+    CdcSourceFrontendValidator, CdcSourceRuntimeFlags, SqlServer,
     db_name_end_and_table_name_start_from_schema_qualified_topic_suffix,
 };
 
@@ -130,6 +131,18 @@ impl CdcExternalTableNameParser for SqlServer {
         topic_suffix: &str,
     ) -> (usize, usize) {
         db_name_end_and_table_name_start_from_schema_qualified_topic_suffix(topic_suffix)
+    }
+}
+
+// ------- Debezium payload -------
+
+impl CdcDebeziumPayloadInterpreter for SqlServer {
+    /// The id is the commit LSN, e.g. `00000027:00000ac0:0002`, and is used as is.
+    fn transaction_control_from_transaction_meta(
+        status: DebeziumTransactionStatus,
+        id: &str,
+    ) -> Option<TransactionControl> {
+        Some(status.into_control(id))
     }
 }
 

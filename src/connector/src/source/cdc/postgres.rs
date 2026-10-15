@@ -12,22 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
 use risingwave_common::bail;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
+use crate::connector_common::{create_pg_client_from_properties, discover_pgvector_dimensions};
 use crate::error::ConnectorResult;
-use crate::source::cdc::external::postgres::PostgresOffset;
+use crate::parser::schema_change::{TableChangeColumn, TableChangeContext};
+use crate::parser::{
+    AccessError, AccessResult, DebeziumTransactionStatus, TransactionControl, jsonb_access_field,
+};
+use crate::source::cdc::external::postgres::{
+    PostgresOffset, pg_type_to_rw_type, type_name_to_pg_type,
+};
 use crate::source::cdc::external::{
     DebeziumOffset, SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY,
 };
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
 use crate::source::cdc::{
-    CdcExternalTableNameParser, CdcSerializedFieldNames, CdcSourceFrontendValidator,
-    CdcSourceRuntimeFlags, Postgres,
+    CdcDebeziumPayloadInterpreter, CdcExternalTableNameParser, CdcSerializedFieldNames,
+    CdcSourceFrontendValidator, CdcSourceRuntimeFlags, Postgres,
     db_name_end_and_table_name_start_from_schema_qualified_topic_suffix,
 };
 
@@ -219,6 +228,235 @@ fn parse_postgres_cdc_external_table_name(
     } else {
         bail!("The upstream table name must contain schema name prefix, e.g. 'public.table'")
     }
+}
+
+// ------- Debezium payload -------
+
+/// JDBC type constants found in Debezium schema change events.
+mod debezium_sql_types {
+    pub const STRUCT: i32 = 2002;
+    pub const ARRAY: i32 = 2003;
+}
+
+impl CdcDebeziumPayloadInterpreter for Postgres {
+    /// The id is `txId:LSN`; only the transaction id is kept.
+    fn transaction_control_from_transaction_meta(
+        status: DebeziumTransactionStatus,
+        id: &str,
+    ) -> Option<TransactionControl> {
+        let (tx_id, _) = id.split_once(':').unwrap();
+        Some(status.into_control(tx_id))
+    }
+
+    /// Builtin types come from `type_name_to_pg_type`. User-defined enum and composite types are
+    /// not in that list because their names are user-chosen; Debezium marks enums with a
+    /// non-null `enumValues` and composites with `jdbcType == STRUCT`, and both become `varchar`
+    /// (composite values are converted to text by our `CustomConverter`). `vector` columns and
+    /// arrays of user-defined types need the upstream catalog, which is queried with
+    /// `source_properties`. Default expressions arrive as `'value'::type` and are stripped to
+    /// `value`.
+    async fn columns_from_table_change(
+        ctx: &TableChangeContext<'_>,
+    ) -> AccessResult<Vec<TableChangeColumn>> {
+        let mut pgvector_dims_cache: HashMap<(String, String), HashMap<String, usize>> =
+            HashMap::new();
+        let mut columns = vec![];
+        for col in ctx.columns.array_elements().unwrap() {
+            let name: String = jsonb_access_field!(col, "name", string);
+            let type_name: String = jsonb_access_field!(col, "typeName", string);
+            let is_enum =
+                matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
+            let jdbc_type = col
+                .access_object_field("jdbcType")
+                .and_then(|v| v.as_number().ok())
+                .map(|n| n.0 as i32);
+            let is_composite = jdbc_type == Some(debezium_sql_types::STRUCT);
+
+            let data_type = if is_composite || is_enum {
+                tracing::debug!(target: "auto_schema_change",
+                    "Convert PostgreSQL user-defined type '{}' ({}) to VARCHAR",
+                    type_name,
+                    if is_composite { "composite" } else { "enum" });
+                DataType::Varchar
+            } else if type_name.eq_ignore_ascii_case("vector") {
+                let Some(cache_key) = parse_schema_table_from_debezium_id(ctx.debezium_table_id)
+                else {
+                    return Err(ctx.unsupported_type(type_name));
+                };
+                if !pgvector_dims_cache.contains_key(&cache_key) {
+                    let fetched = fetch_pgvector_dimensions_for_table(
+                        ctx.source_properties,
+                        &cache_key.0,
+                        &cache_key.1,
+                    )
+                    .await?;
+                    pgvector_dims_cache.insert(cache_key.clone(), fetched);
+                }
+                match pgvector_dims_cache
+                    .get(&cache_key)
+                    .and_then(|m| m.get(name.as_str()).copied())
+                {
+                    Some(dim) if (1..=DataType::VEC_MAX_SIZE).contains(&dim) => {
+                        DataType::Vector(dim)
+                    }
+                    _ => return Err(ctx.unsupported_type(type_name)),
+                }
+            } else {
+                match type_name_to_pg_type(type_name.as_str()) {
+                    Some(ty) => match pg_type_to_rw_type(&ty) {
+                        Ok(data_type) => data_type,
+                        Err(err) => {
+                            tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
+                            return Err(ctx.unsupported_type(type_name));
+                        }
+                    },
+                    None if jdbc_type == Some(debezium_sql_types::ARRAY)
+                        && can_fallback_array_to_varchar(
+                            ctx.source_properties,
+                            type_name.as_str(),
+                        )
+                        .await? =>
+                    {
+                        tracing::debug!(target: "auto_schema_change",
+                            "Fall back PostgreSQL array type '{}' to VARCHAR[]",
+                            type_name);
+                        DataType::Varchar.list()
+                    }
+                    None => return Err(ctx.unsupported_type(type_name)),
+                }
+            };
+
+            let default_value_expression = col
+                .access_object_field("defaultValueExpression")
+                .filter(|v| !v.is_jsonb_null())
+                .map(|v| v.as_str().unwrap().to_owned());
+            let default_value_text = default_value_expression.as_deref().and_then(|expr| {
+                expr.split("::")
+                    .map(|s| s.trim_matches('\''))
+                    .next()
+                    .map(ToOwned::to_owned)
+            });
+            columns.push(TableChangeColumn {
+                name,
+                data_type,
+                default_value_expression,
+                default_value_text,
+            });
+        }
+        Ok(columns)
+    }
+}
+
+/// Parse Debezium `tableChanges[].id` into `(schema_name, table_name)`.
+///
+/// Input examples observed in Debezium schema-change events:
+/// - `"public"."orders"` (quoted format)
+/// - `public.orders` (plain dotted format)
+/// - `db.public.orders` (database-prefixed dotted format)
+///
+/// Why two parsing branches:
+/// - Different Debezium versions/connectors may emit quoted or plain identifiers.
+/// - We normalize both forms so downstream lookup can consistently query upstream catalogs.
+///
+/// Output:
+/// - `Some((schema, table))` when both schema and table are successfully extracted.
+/// - `None` when the id is malformed or does not contain enough segments.
+fn parse_schema_table_from_debezium_id(id: &str) -> Option<(String, String)> {
+    let trimmed = id.trim();
+    if trimmed.contains("\".\"") {
+        let parts: Vec<_> = trimmed
+            .split("\".\"")
+            .map(|s| s.trim_matches('"').trim())
+            .collect();
+        if parts.len() >= 2 {
+            let schema = parts[parts.len() - 2].to_owned();
+            let table = parts[parts.len() - 1].to_owned();
+            if !schema.is_empty() && !table.is_empty() {
+                return Some((schema, table));
+            }
+        }
+    }
+
+    let cleaned = trimmed.trim_matches('"');
+    let parts: Vec<_> = cleaned.split('.').collect();
+    if parts.len() >= 2 {
+        let schema = parts[parts.len() - 2].trim().to_owned();
+        let table = parts[parts.len() - 1].trim().to_owned();
+        if !schema.is_empty() && !table.is_empty() {
+            return Some((schema, table));
+        }
+    }
+    None
+}
+
+async fn fetch_pgvector_dimensions_for_table(
+    props: &BTreeMap<String, String>,
+    schema: &str,
+    table: &str,
+) -> AccessResult<HashMap<String, usize>> {
+    let client = create_pg_client_from_properties(props, None)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to connect upstream postgres for schema change lookup: {}",
+                err.as_report()
+            ),
+        })?;
+
+    discover_pgvector_dimensions(&client, schema, table)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to query upstream postgres schema for {schema}.{table}: {}",
+                err.as_report()
+            ),
+        })
+}
+
+/// Decide whether an unknown array column type (one not resolved by
+/// `type_name_to_pg_type`) can be represented as `varchar[]` in RW. This is the
+/// single question this function answers; the criteria behind it may grow over
+/// time.
+///
+/// Right now the answer is "yes iff the array's element type is a user-defined
+/// enum or composite". Debezium does not expose element enum/composite metadata
+/// on the array column (the `enumValues` field is only set for scalar enum
+/// columns, and `jdbcType == STRUCT` is only set for scalar composite columns),
+/// so we ask the upstream catalog directly: follow the array type's `typelem`
+/// to its element type and check `typtype IN ('e', 'c')`. Enum values are plain
+/// text, and composite values are converted to text by our `CustomConverter`,
+/// hence `varchar[]`.
+async fn can_fallback_array_to_varchar(
+    props: &BTreeMap<String, String>,
+    array_type_name: &str,
+) -> AccessResult<bool> {
+    let client = create_pg_client_from_properties(props, None)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to connect upstream postgres for schema change lookup: {}",
+                err.as_report()
+            ),
+        })?;
+
+    let row = client
+        .query_opt(
+            "SELECT t_elem.typtype IN ('e', 'c') \
+             FROM pg_type t \
+             JOIN pg_type t_elem ON t.typelem = t_elem.oid \
+             WHERE t.typname = $1 \
+             LIMIT 1",
+            &[&array_type_name],
+        )
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to query upstream postgres for array element type of `{array_type_name}`: {}",
+                err.as_report()
+            ),
+        })?;
+
+    Ok(row.map(|r| r.get::<_, bool>(0)).unwrap_or(false))
 }
 
 // ------- Split -------
