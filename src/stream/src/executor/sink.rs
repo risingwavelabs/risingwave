@@ -928,7 +928,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             drop(future);
             match message {
                 RebuildSinkMessage::RebuildSink(new_vnode, notify) => {
-                    sink_writer_param.vnode_bitmap = Some((*new_vnode).clone());
+                    sink_writer_param.vnode_bitmap = (*new_vnode).clone();
                     if notify.send(()).is_err() {
                         warn!("failed to notify rebuild sink");
                     }

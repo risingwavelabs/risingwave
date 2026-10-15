@@ -45,11 +45,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             params.eval_error_report.clone(),
         )?;
         let event_time_col_idx = watermark_desc.watermark_idx as usize;
-        let vnodes = Arc::new(
-            params
-                .vnode_bitmap
-                .expect("vnodes not set for watermark filter"),
-        );
+        let vnodes = Arc::new(params.vnode_bitmap);
 
         // TODO: may use consistent op for watermark filter after we have upsert.
         let [table]: [_; 1] = node.get_tables().clone().try_into().unwrap();
