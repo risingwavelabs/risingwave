@@ -1437,7 +1437,8 @@ impl LogicalAgg {
     /// back to `0`), and the group's row count can't either because it also counts NULL inputs.
     ///
     /// For retractable input, pair each such call with a `count` of the same input and filter
-    /// (reusing an existing one if any), and output NULL when the count is `0`.
+    /// (reusing an existing one if any), and output NULL when the count is `0`. `DISTINCT` doesn't
+    /// change whether the count is `0`, so a new `count` is non-distinct to avoid dedup state.
     ///
     /// Returns the agg with the extra `count` calls and the exprs projecting it back to the original
     /// output, or `None` if there's no such call.
@@ -1472,19 +1473,22 @@ impl LogicalAgg {
             if !needs_guard(call) {
                 continue;
             }
-            let count = PlanAggCall {
-                agg_type: PbAggKind::Count.into(),
-                return_type: DataType::Int64,
-                inputs: call.inputs.clone(),
-                distinct: call.distinct,
-                order_by: vec![],
-                filter: call.filter.clone(),
-                direct_args: vec![],
-            };
-            let count_idx = match core.agg_calls.iter().position(|c| c == &count) {
+            let count_type: AggType = PbAggKind::Count.into();
+            let existing = core.agg_calls.iter().position(|c| {
+                c.agg_type == count_type && c.inputs == call.inputs && c.filter == call.filter
+            });
+            let count_idx = match existing {
                 Some(idx) => idx,
                 None => {
-                    core.agg_calls.push(count);
+                    core.agg_calls.push(PlanAggCall {
+                        agg_type: count_type,
+                        return_type: DataType::Int64,
+                        inputs: call.inputs.clone(),
+                        distinct: false,
+                        order_by: vec![],
+                        filter: call.filter.clone(),
+                        direct_args: vec![],
+                    });
                     core.agg_calls.len() - 1
                 }
             };
