@@ -26,6 +26,7 @@ import java.sql.Types;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.OptionalInt;
+import java.util.Properties;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.junit.Test;
@@ -34,14 +35,24 @@ public class MySqlBitToBytesConverterTest {
 
     /** Registers the converter for a column and returns it, or null if nothing was registered. */
     private static CustomConverter.Converter converterFor(String typeName, OptionalInt length) {
+        return converterFor(typeName, length, "true");
+    }
+
+    private static CustomConverter.Converter converterFor(
+            String typeName, OptionalInt length, String bigEndian) {
         var registered = new CustomConverter.Converter[1];
-        new MySqlBitToBytesConverter()
-                .converterFor(
-                        new FakeColumn(typeName, length),
-                        (SchemaBuilder schema, CustomConverter.Converter converter) -> {
-                            assertEquals(Schema.Type.BYTES, schema.type());
-                            registered[0] = converter;
-                        });
+        var bitConverter = new MySqlBitToBytesConverter();
+        var props = new Properties();
+        if (bigEndian != null) {
+            props.setProperty(MySqlBitToBytesConverter.BIG_ENDIAN, bigEndian);
+        }
+        bitConverter.configure(props);
+        bitConverter.converterFor(
+                new FakeColumn(typeName, length),
+                (SchemaBuilder schema, CustomConverter.Converter converter) -> {
+                    assertEquals(Schema.Type.BYTES, schema.type());
+                    registered[0] = converter;
+                });
         return registered[0];
     }
 
@@ -68,6 +79,13 @@ public class MySqlBitToBytesConverterTest {
         assertArrayEquals(expected, (byte[]) converter.convert(new byte[] {0x00, 0x0a}));
         // Column default value path: big-endian bytes without leading zero bytes.
         assertArrayEquals(expected, (byte[]) converter.convert(new byte[] {0x0a}));
+    }
+
+    @Test
+    public void testDisabledByDefault() {
+        // Existing sources keep Debezium's default handling unless they opt in.
+        assertNull(converterFor("BIT", OptionalInt.of(10), null));
+        assertNull(converterFor("BIT", OptionalInt.of(10), "false"));
     }
 
     @Test

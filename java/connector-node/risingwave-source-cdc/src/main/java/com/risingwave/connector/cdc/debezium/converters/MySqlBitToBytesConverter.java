@@ -32,15 +32,29 @@ import org.apache.kafka.connect.data.SchemaBuilder;
  * zero-padded on the left to {@code ceil(n/8)} bytes.
  *
  * <p>{@code BIT(1)} is left to Debezium, which maps it to a boolean.
+ *
+ * <p>The conversion is opt-in via {@code big.endian} (the {@code debezium.bit.bytea.big.endian}
+ * source option). Sources created before it existed already store the little-endian binlog bytes,
+ * possibly in primary keys, so switching them over would make later updates and deletes miss the
+ * stored rows.
  */
 public class MySqlBitToBytesConverter implements CustomConverter<SchemaBuilder, RelationalColumn> {
 
+    static final String BIG_ENDIAN = "big.endian";
+
+    private boolean bigEndian = false;
+
     @Override
-    public void configure(Properties props) {}
+    public void configure(Properties props) {
+        bigEndian = Boolean.parseBoolean(props.getProperty(BIG_ENDIAN, "false").trim());
+    }
 
     @Override
     public void converterFor(
             RelationalColumn column, ConverterRegistration<SchemaBuilder> registration) {
+        if (!bigEndian) {
+            return;
+        }
         int numBits = column.length().orElse(1);
         if ("BIT".equalsIgnoreCase(column.typeName()) && numBits > 1) {
             int numBytes = (numBits + Byte.SIZE - 1) / Byte.SIZE;

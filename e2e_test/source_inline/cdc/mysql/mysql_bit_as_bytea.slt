@@ -1,7 +1,8 @@
 control substitution on
 
 # MySQL BIT(n > 1) mapped to bytea must have the same bytes on the backfill
-# path and on the binlog path (big-endian, ceil(n/8) bytes).
+# path and on the binlog path (big-endian, ceil(n/8) bytes) when the source
+# opts in with `debezium.bit.bytea.big.endian`.
 # https://github.com/risingwavelabs/risingwave/issues/27488
 
 system ok
@@ -26,7 +27,8 @@ create source s_mysql_bit_as_bytea with (
   ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
   username = '${RISEDEV_MYSQL_USER}',
   password = '${MYSQL_PWD}',
-  database.name = 'risedev'
+  database.name = 'risedev',
+  debezium.bit.bytea.big.endian = 'true'
 );
 
 sleep 2s
