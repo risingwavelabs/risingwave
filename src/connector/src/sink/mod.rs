@@ -80,7 +80,7 @@ use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::config::StreamingConfig;
-use risingwave_common::hash::ActorId;
+use risingwave_common::hash::{ActorId, VnodeBitmapExt};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedHistogramVec, LabelGuardedIntCounter,
     LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
@@ -674,7 +674,7 @@ impl SinkMetrics {
 pub struct SinkWriterParam {
     // TODO(eric): deprecate executor_id
     pub executor_id: ExecutorId,
-    pub vnode_bitmap: Option<Bitmap>,
+    pub vnode_bitmap: Bitmap,
     pub meta_client: Option<SinkMetaClient>,
     // The val has two effect:
     // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
@@ -779,7 +779,7 @@ impl SinkWriterParam {
     pub fn for_test() -> Self {
         SinkWriterParam {
             executor_id: Default::default(),
-            vnode_bitmap: Default::default(),
+            vnode_bitmap: Bitmap::singleton().clone(),
             meta_client: Default::default(),
             extra_partition_col_idx: Default::default(),
 

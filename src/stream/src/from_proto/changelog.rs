@@ -35,9 +35,7 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
-        let vnodes = params
-            .vnode_bitmap
-            .expect("vnodes not set for changelog executor");
+        let vnodes = params.vnode_bitmap;
         let vnode_count = params.actor_context.vnode_count;
         let distribution_keys = node
             .distribution_keys

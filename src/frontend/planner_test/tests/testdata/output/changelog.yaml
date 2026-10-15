@@ -127,3 +127,35 @@
     create table t (id int);
     with c as changelog from t key (missing) select * from c;
   binder_error: 'Item not found: Invalid column: missing'
+- name: changelog over a singleton input
+  sql: |
+    create table t (v int);
+    create materialized view mv as select count(*) as c from t;
+    with x as changelog from mv select * from x;
+  stream_plan: |-
+    StreamMaterialize { columns: [c, changelog_op, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └─StreamChangeLog
+      └─StreamTableScan { table: mv, columns: [mv.c], stream_scan_type: SnapshotBackfill, stream_key: [], pk: [], dist: Single }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [c, changelog_op, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └── StreamChangeLog
+        └── StreamTableScan { table: mv, columns: [mv.c], stream_scan_type: SnapshotBackfill, stream_key: [], pk: [], dist: Single } { tables: [ StreamScan: 0 ] }
+            ├── Upstream
+            └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ c, changelog_op, _changelog_row_id, _rw_timestamp ]
+    ├── primary key: [ $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 1
+

@@ -223,14 +223,18 @@ impl ToStream for LogicalChangeLog {
             input
         };
 
-        let dist = input.distribution();
-        let distribution_keys = match dist {
+        let row_id_index = self.schema().fields().len() - 1;
+        // The changelog row id encodes the vnode of the input row, so the output of a
+        // hash-distributed input is hash-distributed by the row id. A singleton input stays
+        // in its singleton fragment.
+        let (distribution_keys, dist) = match input.distribution() {
             Distribution::HashShard(distribution_keys)
-            | Distribution::UpstreamHashShard(distribution_keys, _) => distribution_keys.clone(),
-            Distribution::Single => {
-                vec![]
-            }
-            _ => {
+            | Distribution::UpstreamHashShard(distribution_keys, _) => (
+                distribution_keys.clone(),
+                Distribution::HashShard(vec![row_id_index]),
+            ),
+            Distribution::Single => (vec![], Distribution::Single),
+            dist => {
                 return Err(BindError(format!(
                     "ChangeLog requires input to be hash distributed, single, but got {:?}",
                     dist
@@ -239,10 +243,9 @@ impl ToStream for LogicalChangeLog {
             }
         };
         let core = self.core.clone_with_input(input);
-        let row_id_index = self.schema().fields().len() - 1;
         let plan = StreamChangeLog::new_with_dist(
             core,
-            Distribution::HashShard(vec![row_id_index]),
+            dist,
             distribution_keys.into_iter().map(|k| k as u32).collect(),
         )
         .into();

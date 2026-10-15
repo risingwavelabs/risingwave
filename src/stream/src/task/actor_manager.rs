@@ -23,6 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_config_section};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
@@ -52,6 +53,14 @@ use crate::task::{
     ActorEvalErrorReport, ActorId, AtomicU64Ref, FragmentId, LocalBarrierManager, NewOutputRequest,
     StreamEnvironment, await_tree_key,
 };
+
+/// An actor without a vnode bitmap is a singleton, which owns the only `SINGLETON_VNODE`.
+fn actor_vnode_bitmap(actor: &BuildActorInfo) -> Bitmap {
+    actor
+        .vnode_bitmap
+        .as_ref()
+        .map_or_else(|| Bitmap::singleton().clone(), Bitmap::from)
+}
 
 /// Default capacity for `ConfigOverrideCache`.
 /// Since we only support per-job config override right now, 256 jobs should be sufficient on a single node.
@@ -139,7 +148,7 @@ impl StreamActorManager {
         stream_node: &StreamNode,
         node: &StreamScanNode,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Option<Bitmap>,
+        vnode_bitmap: Bitmap,
         local_barrier_manager: &LocalBarrierManager,
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
@@ -174,12 +183,16 @@ impl StreamActorManager {
 
         let progress = local_barrier_manager.register_create_mview_progress(actor_context);
 
-        let vnodes = vnode_bitmap.map(Arc::new);
-        let upstream_table =
-            BatchTable::new_partial(state_store.clone(), column_ids, vnodes.clone(), table_desc);
+        let vnodes = Arc::new(vnode_bitmap);
+        let upstream_table = BatchTable::new_partial(
+            state_store.clone(),
+            column_ids,
+            Some(vnodes.clone()),
+            table_desc,
+        );
 
         let state_table = node.get_state_table()?;
-        let state_table = StateTableBuilder::new(state_table, state_store.clone(), vnodes)
+        let state_table = StateTableBuilder::new(state_table, state_store.clone(), Some(vnodes))
             .enable_preload_all_rows_by_config(&actor_context.config)
             .build()
             .await;
@@ -223,7 +236,7 @@ impl StreamActorManager {
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Option<Bitmap>,
+        vnode_bitmap: Bitmap,
         has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
         local_barrier_manager: &LocalBarrierManager,
@@ -346,7 +359,7 @@ impl StreamActorManager {
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Option<Bitmap>,
+        vnode_bitmap: Bitmap,
         local_barrier_manager: &LocalBarrierManager,
         input: Vec<Executor>,
     ) -> StreamResult<Executor> {
@@ -416,7 +429,7 @@ impl StreamActorManager {
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
-        vnode_bitmap: Option<Bitmap>,
+        vnode_bitmap: Bitmap,
         local_barrier_manager: &LocalBarrierManager,
     ) -> StreamResult<(Executor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
@@ -488,7 +501,7 @@ impl StreamActorManager {
             actor_config,
             self.env.clone(),
         );
-        let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
+        let vnode_bitmap = actor_vnode_bitmap(&actor);
 
         let (executor, subtasks) = self
             .create_nodes(
@@ -542,7 +555,7 @@ impl StreamActorManager {
             actor_config,
             self.env.clone(),
         );
-        let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
+        let vnode_bitmap = actor_vnode_bitmap(&actor);
 
         let [input] = node.input.as_slice() else {
             bail!("SyncLogStoreNode should have exactly one input");
@@ -743,7 +756,7 @@ pub struct ExecutorParams {
     pub actor_context: ActorContextRef,
 
     /// Vnodes owned by this executor. Represented in bitmap.
-    pub vnode_bitmap: Option<Bitmap>,
+    pub vnode_bitmap: Bitmap,
 
     /// Used for reporting expression evaluation errors.
     pub eval_error_report: ActorEvalErrorReport,
