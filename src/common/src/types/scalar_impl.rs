@@ -166,7 +166,27 @@ impl ScalarRef<'_> for Decimal {
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.normalize().hash(state)
+        #[derive(Default)]
+        struct RecordingHasher(Vec<Vec<u8>>);
+
+        impl std::hash::Hasher for RecordingHasher {
+            fn write(&mut self, bytes: &[u8]) {
+                self.0.push(bytes.to_vec());
+            }
+
+            fn finish(&self) -> u64 {
+                unreachable!()
+            }
+        }
+
+        let mut hasher = RecordingHasher::default();
+        self.normalize().hash(&mut hasher);
+
+        // hasher.0.reverse();
+
+        for part in hasher.0 {
+            state.write(&part);
+        }
     }
 }
 
