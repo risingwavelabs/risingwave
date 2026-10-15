@@ -998,10 +998,10 @@
     select Array(select c from t2 where b = d) arr from t1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: [$expr1] }
-      ├─BatchExchange { order: [], dist: HashShard(t1.b) }
-      │ └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
-      └─BatchProject { exprs: [t1.b, Coalesce(array_agg(t2.c) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr1] }
+    └─BatchProject { exprs: [Coalesce(array_agg(t2.c) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr1] }
+      └─BatchHashJoin { type: Inner, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(t1.b) }
+        │ └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
         └─BatchHashAgg { group_key: [t1.b], aggs: [array_agg(t2.c) filter(IsNotNull(1:Int32))] }
           └─BatchHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t2.d, output: [t1.b, t2.c, 1:Int32] }
             ├─BatchHashAgg { group_key: [t1.b], aggs: [] }
@@ -1012,12 +1012,12 @@
                 └─BatchFilter { predicate: IsNotNull(t2.d) }
                   └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [arr, t1._row_id(hidden), t1.b(hidden), t1.b#1(hidden)], stream_key: [t1._row_id, t1.b], pk_columns: [t1._row_id, t1.b], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t1._row_id, t1.b) }
-      └─StreamHashJoin { type: Inner, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: [$expr1, t1._row_id, t1.b, t1.b] }
+    StreamMaterialize { columns: [arr, t1._row_id(hidden), t1.b(hidden)], stream_key: [t1._row_id, t1.b], pk_columns: [t1._row_id, t1.b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [Coalesce(array_agg(t2.c) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr1, t1._row_id, t1.b] }
+      └─StreamHashJoin { type: Inner, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: [t1.b, t1.b, array_agg(t2.c) filter(IsNotNull(1:Int32)), t1._row_id] }
         ├─StreamExchange { dist: HashShard(t1.b) }
         │ └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamProject { exprs: [t1.b, Coalesce(array_agg(t2.c) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr1] }
+        └─StreamProject { exprs: [t1.b, array_agg(t2.c) filter(IsNotNull(1:Int32))] }
           └─StreamHashAgg { group_key: [t1.b], aggs: [array_agg(t2.c) filter(IsNotNull(1:Int32)), count] }
             └─StreamHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t2.d, output: [t1.b, t2.c, 1:Int32, t2._row_id] }
               ├─StreamProject { exprs: [t1.b], noop_update_hint: true }
@@ -1044,34 +1044,33 @@
     ORDER BY 1;
   batch_plan: |-
     BatchExchange { order: [rw_users.name ASC], dist: Single }
-    └─BatchProject { exprs: [rw_users.name, rw_users.is_super, true:Boolean, rw_users.create_user, rw_users.create_db, rw_users.can_login, -1:Int32, null:Timestamptz, $expr1, true:Boolean, true:Boolean] }
+    └─BatchProject { exprs: [rw_users.name, rw_users.is_super, true:Boolean, rw_users.create_user, rw_users.create_db, rw_users.can_login, -1:Int32, null:Timestamptz, Coalesce(array_agg(rw_users.name) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1, true:Boolean, true:Boolean] }
       └─BatchSort { order: [rw_users.name ASC] }
         └─BatchHashJoin { type: Inner, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: all }
           ├─BatchExchange { order: [], dist: HashShard(rw_users.id) }
           │ └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
           │   └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login], distribution: Single }
-          └─BatchProject { exprs: [rw_users.id, Coalesce(array_agg(rw_users.name) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1] }
-            └─BatchHashAgg { group_key: [rw_users.id], aggs: [array_agg(rw_users.name) filter(IsNotNull(1:Int32))] }
-              └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: [rw_users.id, rw_users.name, 1:Int32] }
-                ├─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
-                │ └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                │   └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
-                │     └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
-                └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                  └─BatchProject { exprs: [rw_users.id, rw_users.name, 1:Int32] }
-                    └─BatchHashJoin { type: Inner, predicate: null:Int32 = rw_users.id, output: [rw_users.id, rw_users.name] }
-                      ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
-                      │ └─BatchProject { exprs: [rw_users.id, null:Int32] }
-                      │   └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-                      │     ├─BatchExchange { order: [], dist: Single }
-                      │     │ └─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
-                      │     │   └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                      │     │     └─BatchFilter { predicate: false:Boolean }
-                      │     │       └─BatchSysScan { table: rw_users, columns: [rw_users.id], distribution: Single }
-                      │     └─BatchFilter { predicate: false:Boolean }
-                      │       └─BatchValues { rows: [] }
-                      └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                        └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+          └─BatchHashAgg { group_key: [rw_users.id], aggs: [array_agg(rw_users.name) filter(IsNotNull(1:Int32))] }
+            └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: [rw_users.id, rw_users.name, 1:Int32] }
+              ├─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
+              │ └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
+              │   └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
+              │     └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+              └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
+                └─BatchProject { exprs: [rw_users.id, rw_users.name, 1:Int32] }
+                  └─BatchHashJoin { type: Inner, predicate: null:Int32 = rw_users.id, output: [rw_users.id, rw_users.name] }
+                    ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
+                    │ └─BatchProject { exprs: [rw_users.id, null:Int32] }
+                    │   └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                    │     ├─BatchExchange { order: [], dist: Single }
+                    │     │ └─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
+                    │     │   └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
+                    │     │     └─BatchFilter { predicate: false:Boolean }
+                    │     │       └─BatchSysScan { table: rw_users, columns: [rw_users.id], distribution: Single }
+                    │     └─BatchFilter { predicate: false:Boolean }
+                    │       └─BatchValues { rows: [] }
+                    └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
+                      └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
 - name: correlated array subquery (issue 14423)
   sql: |
     CREATE TABLE array_types ( x BIGINT[] );
@@ -1083,10 +1082,10 @@
     FROM array_types AS t0;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: [$expr1] }
-      ├─BatchExchange { order: [], dist: HashShard(array_types.x) }
-      │ └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
-      └─BatchProject { exprs: [array_types.x, Coalesce(array_agg(array_types.x) filter(IsNotNull(1:Int32)), ARRAY[]:List(List(Int64))) as $expr1] }
+    └─BatchProject { exprs: [Coalesce(array_agg(array_types.x) filter(IsNotNull(1:Int32)), ARRAY[]:List(List(Int64))) as $expr1] }
+      └─BatchHashJoin { type: Inner, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(array_types.x) }
+        │ └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
         └─BatchHashAgg { group_key: [array_types.x], aggs: [array_agg(array_types.x) filter(IsNotNull(1:Int32))] }
           └─BatchHashJoin { type: LeftOuter, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: [array_types.x, array_types.x, 1:Int32] }
             ├─BatchHashAgg { group_key: [array_types.x], aggs: [] }
@@ -2338,39 +2337,38 @@
       ) as kv
     from rawdata
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: [$expr5] }
-    ├─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
-    └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Coalesce(array_agg($expr4) filter(IsNotNull(1:Int32)), ARRAY[]:List(List(Int32))) as $expr5] }
+    LogicalProject { exprs: [Coalesce(array_agg($expr4) filter(IsNotNull(1:Int32)), ARRAY[]:List(List(Int32))) as $expr5] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: all }
+      ├─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
       └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [array_agg($expr4) filter(IsNotNull(1:Int32))] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4, 1:Int32] }
           ├─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
           │ └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
-          └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4, 1:Int32] }
-            └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom($expr1, $expr2) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr4] }
+          └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Coalesce(array_agg(1:Int32) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr4, 1:Int32] }
+            └─LogicalJoin { type: Inner, on: IsNotDistinctFrom($expr1, $expr2) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: all }
               ├─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr1] }
               │ └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
               │   └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
               │     └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
               │       └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
-              └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2, Coalesce(array_agg(1:Int32) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr4] }
-                └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2], aggs: [array_agg(1:Int32) filter(IsNotNull(1:Int32))] }
-                  └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom($expr2, $expr3) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2, 1:Int32, 1:Int32] }
-                    ├─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2], aggs: [] }
-                    │ └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr2] }
-                    │   └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
-                    │     └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
-                    │       └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
-                    │         └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
-                    └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3, 1:Int32, 1:Int32] }
-                      └─LogicalProjectSet { select_list: [$0, $1, JsonbEach(Case((JsonbTypeof($2) = 'object':Varchar), $2, '{}':Jsonb))] }
-                        └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
-                          └─LogicalProjectSet { select_list: [$0, $1, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
-                            └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3], aggs: [] }
-                              └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr3] }
-                                └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
-                                  └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
-                                    └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
-                                      └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+              └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2], aggs: [array_agg(1:Int32) filter(IsNotNull(1:Int32))] }
+                └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom($expr2, $expr3) AND IsNotDistinctFrom('{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, '{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb), output: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2, 1:Int32, 1:Int32] }
+                  ├─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr2], aggs: [] }
+                  │ └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr2] }
+                  │   └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
+                  │     └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
+                  │       └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
+                  │         └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+                  └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3, 1:Int32, 1:Int32] }
+                    └─LogicalProjectSet { select_list: [$0, $1, JsonbEach(Case((JsonbTypeof($2) = 'object':Varchar), $2, '{}':Jsonb))] }
+                      └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
+                        └─LogicalProjectSet { select_list: [$0, $1, JsonbArrayElements(Case((JsonbTypeof(JsonbAccess($1, 'value':Varchar)) = 'array':Varchar), JsonbAccess($1, 'value':Varchar), '[]':Jsonb))] }
+                          └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, $expr3], aggs: [] }
+                            └─LogicalProject { exprs: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb, Field(JsonbEach($0), 1:Int32) as $expr3] }
+                              └─LogicalFilter { predicate: (JsonbTypeof(Field(JsonbEach($0), 1:Int32)) = 'object':Varchar) AND JsonbExists(Field(JsonbEach($0), 1:Int32), 'value':Varchar) }
+                                └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
+                                  └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
+                                    └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
 - name: subquery with CTE
   sql: |
     create table t1(x int, y int);
@@ -2403,7 +2401,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: ['Empty JSON item':Varchar, Case(IsNull(JsonbPathQueryFirst(JsonbPathQueryFirst('{}':Jsonb, '$.binary_set_attribute':Varchar), '$.BS':Varchar)), null:List(Bytea), $expr2) as $expr9, Case(IsNull(JsonbPathQueryFirst(JsonbPathQueryFirst('{}':Jsonb, '$.number_set_attribute':Varchar), '$.NS':Varchar)), null:List(Int64), $expr4) as $expr10, Case(IsNull(JsonbPathQueryFirst(JsonbPathQueryFirst('{}':Jsonb, '$.float_set_attribute':Varchar), '$.NS':Varchar)), null:List(Float64), $expr6) as $expr11, Case(IsNull(JsonbPathQueryFirst(JsonbPathQueryFirst('{}':Jsonb, '$.string_set_attribute':Varchar), '$.SS':Varchar)), null:List(Varchar), $expr8) as $expr12] }
-      └─BatchHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['Empty JSON item':Varchar, '{}':Jsonb, $expr2, $expr4, $expr6, $expr8] }
+      └─BatchHashJoin { type: Inner, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['Empty JSON item':Varchar, '{}':Jsonb, $expr2, $expr4, $expr6, $expr8] }
         ├─BatchExchange { order: [], dist: HashShard('{}':Jsonb) }
         │ └─BatchValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb]] }
         └─BatchExchange { order: [], dist: HashShard('{}':Jsonb) }
@@ -2459,7 +2457,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [test_case, binary_set_attribute, number_set_attribute, float_set_attribute, string_set_attribute, _row_id(hidden), '{}':Jsonb(hidden), '{}':Jsonb#1(hidden), '{}':Jsonb#2(hidden), '{}':Jsonb#3(hidden)], stream_key: [_row_id, '{}':Jsonb, '{}':Jsonb#1, '{}':Jsonb#2, '{}':Jsonb#3], pk_columns: [_row_id, '{}':Jsonb, '{}':Jsonb#1, '{}':Jsonb#2, '{}':Jsonb#3], pk_conflict: NoCheck }
     └─StreamProject { exprs: ['Empty JSON item':Varchar, Case(IsNull(JsonbPathQueryFirst(JsonbPathQueryFirst('{}':Jsonb, '$.binary_set_attribute':Varchar), '$.BS':Varchar)), null:List(Bytea), $expr2) as $expr9, Case(IsNull(JsonbPathQueryFirst(JsonbPathQueryFirst('{}':Jsonb, '$.number_set_attribute':Varchar), '$.NS':Varchar)), null:List(Int64), $expr4) as $expr10, Case(IsNull(JsonbPathQueryFirst(JsonbPathQueryFirst('{}':Jsonb, '$.float_set_attribute':Varchar), '$.NS':Varchar)), null:List(Float64), $expr6) as $expr11, Case(IsNull(JsonbPathQueryFirst(JsonbPathQueryFirst('{}':Jsonb, '$.string_set_attribute':Varchar), '$.SS':Varchar)), null:List(Varchar), $expr8) as $expr12, _row_id, '{}':Jsonb, '{}':Jsonb, '{}':Jsonb, '{}':Jsonb] }
-      └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['Empty JSON item':Varchar, '{}':Jsonb, $expr2, $expr4, $expr6, $expr8, _row_id, '{}':Jsonb, '{}':Jsonb, '{}':Jsonb, '{}':Jsonb] }
+      └─StreamHashJoin { type: Inner, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['Empty JSON item':Varchar, '{}':Jsonb, $expr2, $expr4, $expr6, $expr8, _row_id, '{}':Jsonb, '{}':Jsonb, '{}':Jsonb, '{}':Jsonb] }
         ├─StreamExchange { dist: HashShard('{}':Jsonb) }
         │ └─StreamShare { id: 1 }
         │   └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
@@ -2567,3 +2565,104 @@
         └─BatchProject { exprs: [users.id] }
           └─BatchFilter { predicate: (users.is_active = false:Boolean) }
             └─BatchScan { table: users, columns: [users.id, users.is_active], distribution: SomeShard }
+- name: array subquery uses inner join
+  sql: |
+    create table t1(id int primary key);
+    create table t2(id int primary key, t1_id int, val varchar);
+    select t1.id, array(select t2.val from t2 where t2.t1_id = t1.id) as arr from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t1.id, Coalesce(array_agg(t2.val) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1] }
+      └─BatchHashJoin { type: Inner, predicate: t1.id IS NOT DISTINCT FROM t1.id, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(t1.id) }
+        │ └─BatchScan { table: t1, columns: [t1.id], distribution: UpstreamHashShard(t1.id) }
+        └─BatchHashAgg { group_key: [t1.id], aggs: [array_agg(t2.val) filter(IsNotNull(1:Int32))] }
+          └─BatchHashJoin { type: LeftOuter, predicate: t1.id IS NOT DISTINCT FROM t2.t1_id, output: [t1.id, t2.val, 1:Int32] }
+            ├─BatchExchange { order: [], dist: HashShard(t1.id) }
+            │ └─BatchSortAgg { group_key: [t1.id], aggs: [] }
+            │   └─BatchScan { table: t1, columns: [t1.id], distribution: UpstreamHashShard(t1.id) }
+            └─BatchExchange { order: [], dist: HashShard(t2.t1_id) }
+              └─BatchProject { exprs: [t2.t1_id, t2.val, 1:Int32] }
+                └─BatchFilter { predicate: IsNotNull(t2.t1_id) }
+                  └─BatchScan { table: t2, columns: [t2.t1_id, t2.val], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [id, arr], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t1.id, Coalesce(array_agg(t2.val) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1] }
+      └─StreamHashJoin { type: Inner, predicate: t1.id IS NOT DISTINCT FROM t1.id, output: all }
+        ├─StreamExchange { dist: HashShard(t1.id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.id], stream_scan_type: SnapshotBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+        └─StreamProject { exprs: [t1.id, array_agg(t2.val) filter(IsNotNull(1:Int32))] }
+          └─StreamHashAgg { group_key: [t1.id], aggs: [array_agg(t2.val) filter(IsNotNull(1:Int32)), count] }
+            └─StreamHashJoin { type: LeftOuter, predicate: t1.id IS NOT DISTINCT FROM t2.t1_id, output: [t1.id, t2.val, 1:Int32, t2.id] }
+              ├─StreamExchange { dist: HashShard(t1.id) }
+              │ └─StreamProject { exprs: [t1.id], noop_update_hint: true }
+              │   └─StreamHashAgg { group_key: [t1.id], aggs: [count] }
+              │     └─StreamTableScan { table: t1, columns: [t1.id], stream_scan_type: SnapshotBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+              └─StreamExchange { dist: HashShard(t2.t1_id) }
+                └─StreamProject { exprs: [t2.t1_id, t2.val, 1:Int32, t2.id] }
+                  └─StreamFilter { predicate: IsNotNull(t2.t1_id) }
+                    └─StreamTableScan { table: t2, columns: [t2.t1_id, t2.val, t2.id], stream_scan_type: SnapshotBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
+- name: mixing array and scalar subqueries keeps left outer join
+  sql: |
+    create table t1(id int primary key);
+    create table t2(id int primary key, t1_id int, val varchar);
+    select
+      t1.id,
+      array(select t2.val from t2 where t2.t1_id = t1.id) as arr,
+      (select max(t2.val) from t2 where t2.t1_id = t1.id) as mx
+    from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: t1.id IS NOT DISTINCT FROM t1.id, output: [t1.id, $expr1, max(t2.val)] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.id) }
+      │ └─BatchScan { table: t1, columns: [t1.id], distribution: UpstreamHashShard(t1.id) }
+      └─BatchExchange { order: [], dist: HashShard(t1.id) }
+        └─BatchHashJoin { type: FullOuter, predicate: t1.id IS NOT DISTINCT FROM t1.id, output: [t1.id, $expr1, max(t2.val)] }
+          ├─BatchProject { exprs: [t1.id, Coalesce(array_agg(t2.val) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1] }
+          │ └─BatchHashAgg { group_key: [t1.id], aggs: [array_agg(t2.val) filter(IsNotNull(1:Int32))] }
+          │   └─BatchHashJoin { type: LeftOuter, predicate: t1.id IS NOT DISTINCT FROM t2.t1_id, output: [t1.id, t2.val, 1:Int32] }
+          │     ├─BatchExchange { order: [], dist: HashShard(t1.id) }
+          │     │ └─BatchSortAgg { group_key: [t1.id], aggs: [] }
+          │     │   └─BatchScan { table: t1, columns: [t1.id], distribution: UpstreamHashShard(t1.id) }
+          │     └─BatchExchange { order: [], dist: HashShard(t2.t1_id) }
+          │       └─BatchProject { exprs: [t2.t1_id, t2.val, 1:Int32] }
+          │         └─BatchFilter { predicate: IsNotNull(t2.t1_id) }
+          │           └─BatchScan { table: t2, columns: [t2.t1_id, t2.val], distribution: SomeShard }
+          └─BatchHashAgg { group_key: [t1.id], aggs: [max(t2.val)] }
+            └─BatchHashJoin { type: LeftOuter, predicate: t1.id IS NOT DISTINCT FROM t2.t1_id, output: [t1.id, t2.val] }
+              ├─BatchExchange { order: [], dist: HashShard(t1.id) }
+              │ └─BatchSortAgg { group_key: [t1.id], aggs: [] }
+              │   └─BatchScan { table: t1, columns: [t1.id], distribution: UpstreamHashShard(t1.id) }
+              └─BatchExchange { order: [], dist: HashShard(t2.t1_id) }
+                └─BatchFilter { predicate: IsNotNull(t2.t1_id) }
+                  └─BatchScan { table: t2, columns: [t2.t1_id, t2.val], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [id, arr, mx, t1.id(hidden), t1.id#1(hidden)], stream_key: [id, t1.id#1], pk_columns: [id, t1.id#1], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.id, t1.id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.id IS NOT DISTINCT FROM t1.id, output: [t1.id, $expr1, max(t2.val), t1.id, t1.id] }
+        ├─StreamExchange { dist: HashShard(t1.id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.id], stream_scan_type: SnapshotBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+        └─StreamExchange { dist: HashShard(t1.id) }
+          └─StreamFilter { predicate: (IsNotNull(t1.id) OR IsNotNull(t1.id)) }
+            └─StreamHashJoin { type: FullOuter, predicate: t1.id IS NOT DISTINCT FROM t1.id, output: [t1.id, $expr1, max(t2.val), t1.id] }
+              ├─StreamProject { exprs: [t1.id, Coalesce(array_agg(t2.val) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1] }
+              │ └─StreamHashAgg { group_key: [t1.id], aggs: [array_agg(t2.val) filter(IsNotNull(1:Int32)), count] }
+              │   └─StreamHashJoin { type: LeftOuter, predicate: t1.id IS NOT DISTINCT FROM t2.t1_id, output: [t1.id, t2.val, 1:Int32, t2.id] }
+              │     ├─StreamExchange { dist: HashShard(t1.id) }
+              │     │ └─StreamProject { exprs: [t1.id], noop_update_hint: true }
+              │     │   └─StreamHashAgg { group_key: [t1.id], aggs: [count] }
+              │     │     └─StreamTableScan { table: t1, columns: [t1.id], stream_scan_type: SnapshotBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+              │     └─StreamExchange { dist: HashShard(t2.t1_id) }
+              │       └─StreamProject { exprs: [t2.t1_id, t2.val, 1:Int32, t2.id] }
+              │         └─StreamFilter { predicate: IsNotNull(t2.t1_id) }
+              │           └─StreamTableScan { table: t2, columns: [t2.t1_id, t2.val, t2.id], stream_scan_type: SnapshotBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
+              └─StreamProject { exprs: [t1.id, max(t2.val)] }
+                └─StreamHashAgg { group_key: [t1.id], aggs: [max(t2.val), count] }
+                  └─StreamHashJoin { type: LeftOuter, predicate: t1.id IS NOT DISTINCT FROM t2.t1_id, output: [t1.id, t2.val, t2.id] }
+                    ├─StreamExchange { dist: HashShard(t1.id) }
+                    │ └─StreamProject { exprs: [t1.id], noop_update_hint: true }
+                    │   └─StreamHashAgg { group_key: [t1.id], aggs: [count] }
+                    │     └─StreamTableScan { table: t1, columns: [t1.id], stream_scan_type: SnapshotBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+                    └─StreamExchange { dist: HashShard(t2.t1_id) }
+                      └─StreamFilter { predicate: IsNotNull(t2.t1_id) }
+                        └─StreamTableScan { table: t2, columns: [t2.t1_id, t2.val, t2.id], stream_scan_type: SnapshotBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
