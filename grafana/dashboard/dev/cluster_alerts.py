@@ -30,6 +30,11 @@ mysql_cdc_binlog_retention_risk = (
     f"{alert_when(mysql_cdc_binlog_file_lag)} and "
     f"{alert_threshold(mysql_cdc_binlog_retention_risk_margin, 0)}"
 )
+disk_cache_overflow_filter = 'op=~"buffer_overflow|channel_overflow"'
+disk_cache_overflow_rate = (
+    f"sum(rate({metric('foyer_storage_inner_op_total', disk_cache_overflow_filter)}[2m])) by (name, op, {NODE_LABEL})"
+)
+disk_cache_overflow_history = f"({disk_cache_overflow_rate})[5m:30s]"
 
 @section
 def _(outer_panels: Panels):
@@ -158,6 +163,7 @@ def _(outer_panels: Panels):
 - Abnormal Delta Log Number: the number of delta logs is too large, exceeding the expected 5000. Check `Hummock Manager` and `Compaction` section in dev dashboard and take care of the type of `Compaction Success Count`, whether the number of trivial-move tasks spiking.
 - Abnormal Pending Event Number: the number of pending events is too large, exceeding the expected 10000000. Check `Hummock Write` section in dev dashboard and take care of the `Event handle latency`, whether the time consumed exceeds the barrier latency.
 - Abnormal Object Storage Failure: object storage failures are occurring. Check `Object Storage` section in dev dashboard and take care of the `Object Storage Failure Rate`, whether the rate is too high.
+- Sustained Disk Cache Write Overflow: the 2-minute cache write overflow rate stays positive across the last 5 minutes, sampled every 30 seconds with at least 10 samples. Short bursts do not trigger this signal. Foyer is dropping cache writes because its submission queue or write buffer cannot accept them. This can leave warm-up incomplete and increase remote reads; it does not mean business data is lost. Check `Hummock Tiered Cache` > `Disk Cache Inner Ops` and disk write throughput/latency. Reduce warm-up or refill pressure before tuning cache write buffers; overflow alone does not prove the disk is saturated.
 """,
                     height=12,
                 ),
@@ -220,6 +226,14 @@ def _(outer_panels: Panels):
                                 f"sum(rate({metric('object_store_failure_count')}[$__rate_interval])) by (type)"
                             ),
                             "Abnormal Object Storage Failure ({{type}})",
+                        ),
+                        panels.target(
+                            # Require a full window so a newly appearing series cannot
+                            # trigger the signal from only a few positive samples.
+                            f"{alert_when(f'min_over_time({disk_cache_overflow_history})')} "
+                            f"and (count_over_time({disk_cache_overflow_history}) >= 10)",
+                            "Sustained Disk Cache Write Overflow ({{name}} / {{op}}) @ {{%s}}"
+                            % NODE_LABEL,
                         ),
                     ],
                     ["last"],
