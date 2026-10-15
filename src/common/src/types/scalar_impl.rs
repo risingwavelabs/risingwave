@@ -182,7 +182,7 @@ impl ScalarRef<'_> for Decimal {
         let mut hasher = RecordingHasher::default();
         self.normalize().hash(&mut hasher);
 
-        // hasher.0.reverse();
+        hasher.0.reverse();
 
         for part in hasher.0 {
             state.write(&part);
