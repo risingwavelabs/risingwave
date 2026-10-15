@@ -192,7 +192,7 @@ pub struct IcebergCommon {
     /// When set to `google`, native REST catalogs authenticate using
     /// `gcs.credential` or Google Application Default Credentials (ADC).
     /// JNI REST catalogs use Java's `GoogleAuthManager` with ADC;
-    /// `gcs.credential` only configures Rust FileIO storage credentials.
+    /// `gcs.credential` only configures Rust `FileIO` storage credentials.
     /// Vended credentials use the native Rust REST catalog.
     #[serde(rename = "catalog.security")]
     pub catalog_security: Option<String>,
