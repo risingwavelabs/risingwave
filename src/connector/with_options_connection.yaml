@@ -174,9 +174,11 @@ IcebergConnection:
     comments: |-
       Security type for REST catalog authentication.
       Supported values: `none`, `oauth2`, `google`.
-      When set to `google`, authenticates using `gcs.credential` or Google
-      Application Default Credentials (ADC). Vended credentials use the native
-      Rust REST catalog; the JNI catalog uses Iceberg's `GoogleAuthManager`.
+      When set to `google`, native REST catalogs authenticate using
+      `gcs.credential` or Google Application Default Credentials (ADC).
+      JNI REST catalogs use Java's `GoogleAuthManager` with ADC;
+      `gcs.credential` only configures Rust FileIO storage credentials.
+      Vended credentials use the native Rust REST catalog.
     required: false
   - name: gcp.auth.scopes
     field_type: String
