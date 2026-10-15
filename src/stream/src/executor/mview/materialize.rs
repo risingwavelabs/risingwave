@@ -1095,6 +1095,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             watermark_epoch,
             conflict_behavior,
             None,
+            None,
         )
         .await
     }
@@ -1120,6 +1121,40 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             watermark_epoch,
             conflict_behavior,
             Some(stream_key),
+            None,
+        )
+        .await
+    }
+
+    /// Create a TTL-ed `MaterializeExecutor` cleaned by the watermark of `ttl_column`, which
+    /// is appended to the stream key, for test purpose.
+    #[cfg(any(test, feature = "test"))]
+    #[expect(clippy::too_many_arguments)]
+    pub async fn for_test_with_ttl(
+        input: Executor,
+        store: S,
+        table_id: TableId,
+        keys: Vec<ColumnOrder>,
+        column_ids: Vec<risingwave_common::catalog::ColumnId>,
+        watermark_epoch: AtomicU64Ref,
+        conflict_behavior: ConflictBehavior,
+        ttl_column: usize,
+    ) -> Self {
+        let stream_key = keys
+            .iter()
+            .map(|k| k.column_index)
+            .chain(std::iter::once(ttl_column))
+            .collect();
+        Self::for_test_inner(
+            input,
+            store,
+            table_id,
+            keys,
+            column_ids,
+            watermark_epoch,
+            conflict_behavior,
+            Some(stream_key),
+            Some(ttl_column),
         )
         .await
     }
@@ -1135,6 +1170,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
         stream_key: Option<Vec<usize>>,
+        ttl_column: Option<usize>,
     ) -> Self {
         use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -1160,7 +1196,12 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             0,
         );
         table_catalog.stream_key = stream_key_indices.iter().map(|i| *i as i32).collect();
-        let state_table = StateTableInner::from_table_catalog(&table_catalog, store, None).await;
+        let state_table = if let Some(ttl_column) = ttl_column {
+            table_catalog.clean_watermark_indices = vec![ttl_column as u32];
+            StateTableInner::from_table_catalog_inconsistent_op(&table_catalog, store, None).await
+        } else {
+            StateTableInner::from_table_catalog(&table_catalog, store, None).await
+        };
 
         let unused = StreamingMetrics::unused();
         let metrics = unused.new_materialize_metrics(table_id, 1.into(), 2.into());
@@ -1184,7 +1225,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             ),
             toastable_column_indices: None,
             conflict_behavior,
-            cleaned_by_ttl_watermark: false,
+            cleaned_by_ttl_watermark: ttl_column.is_some(),
             version_column_indices: vec![],
             is_dummy_table: false,
             may_have_downstream: true,
@@ -2491,5 +2532,115 @@ mod tests {
     #[tokio::test]
     async fn fuzz_test_stream_consistent_ignore() {
         fuzz_test_stream_consistent_inner(ConflictBehavior::IgnoreConflict).await
+    }
+
+    /// A TTL-ed table `(k, ts, v)` with pk `k`, cleaned by `ts`, has `(25, 10, 100)` and gets
+    /// `Watermark(ts = 20)`, then `chunk` in the same epoch or after a barrier. Returns the rows
+    /// output for `chunk`.
+    async fn ttl_output_after_watermark(
+        conflict_behavior: ConflictBehavior,
+        chunk: &str,
+        barrier_between: bool,
+        cold_cache: bool,
+    ) -> Vec<(Op, OwnedRow)> {
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let mut messages = vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(StreamChunk::from_pretty(
+                " i i i
+                + 25 10 100",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Watermark(Watermark::new(1, DataType::Int32, ScalarImpl::Int32(20))),
+        ];
+        let mut last_epoch = 3;
+        if barrier_between {
+            messages.push(Message::Barrier(Barrier::new_test_barrier(test_epoch(3))));
+            last_epoch = 4;
+        }
+        messages.push(Message::Chunk(StreamChunk::from_pretty(chunk)));
+        messages.push(Message::Barrier(Barrier::new_test_barrier(test_epoch(
+            last_epoch,
+        ))));
+        let source = MockSource::with_messages(messages).into_executor(schema, vec![0, 1]);
+
+        // The maximum sequence evicts the whole cache before every message.
+        let cache_sequence = if cold_cache { u64::MAX } else { 0 };
+        let mut materialize = MaterializeExecutor::for_test_with_ttl(
+            source,
+            MemoryStateStore::new(),
+            TableId::new(1),
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            vec![0.into(), 1.into(), 2.into()],
+            Arc::new(AtomicU64::new(cache_sequence)),
+            conflict_behavior,
+            1,
+        )
+        .await
+        .boxed()
+        .execute();
+
+        let mut watermark_seen = false;
+        let mut rows = vec![];
+        while let Some(msg) = materialize.next().await.transpose().unwrap() {
+            match msg {
+                Message::Watermark(_) => watermark_seen = true,
+                Message::Chunk(chunk) if watermark_seen => {
+                    rows.extend(chunk.rows().map(|(op, row)| (op, row.into_owned_row())))
+                }
+                Message::Barrier(barrier) if barrier.epoch.curr == test_epoch(last_epoch) => break,
+                _ => {}
+            }
+        }
+        assert!(watermark_seen);
+        rows
+    }
+
+    /// The rows below the forwarded watermark are expired, even before the commit.
+    #[tokio::test]
+    async fn test_ttl_expired_by_forwarded_watermark() {
+        let new_row = OwnedRow::new(vec![
+            Some(25i32.into()),
+            Some(30i32.into()),
+            Some(300i32.into()),
+        ]);
+        let cases = [
+            // An upsert of the expired key is a new row.
+            (
+                ConflictBehavior::Overwrite,
+                " i i i\n + 25 30 300",
+                vec![(Op::Insert, new_row.clone())],
+            ),
+            // A delete of the expired key is ignored.
+            (ConflictBehavior::Overwrite, " i i i\n - 25 . .", vec![]),
+            // The expired row does not conflict with the new one.
+            (
+                ConflictBehavior::IgnoreConflict,
+                " i i i\n + 25 30 300",
+                vec![(Op::Insert, new_row)],
+            ),
+        ];
+        for (conflict_behavior, chunk, expected) in cases {
+            for barrier_between in [false, true] {
+                for cold_cache in [false, true] {
+                    assert_eq!(
+                        ttl_output_after_watermark(
+                            conflict_behavior,
+                            chunk,
+                            barrier_between,
+                            cold_cache
+                        )
+                        .await,
+                        expected,
+                        "{conflict_behavior:?}, {chunk:?}, barrier_between: {barrier_between}, \
+                         cold_cache: {cold_cache}"
+                    );
+                }
+            }
+        }
     }
 }

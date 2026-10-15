@@ -1400,7 +1400,7 @@ mod tests {
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), stream_key.clone());
 
-        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
 
         let table = gen_test_log_store_table(pk_info);
 
@@ -1503,7 +1503,7 @@ mod tests {
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), stream_key.clone());
 
-        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
 
         let table = gen_test_log_store_table(pk_info);
 
@@ -1603,7 +1603,7 @@ mod tests {
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), stream_key.clone());
 
-        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
 
         let table = gen_test_log_store_table(pk_info);
 

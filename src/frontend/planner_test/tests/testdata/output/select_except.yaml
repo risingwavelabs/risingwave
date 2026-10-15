@@ -130,4 +130,4 @@
     Failed to bind expression: v1
 
     Caused by:
-      internal error: Ambiguous column name: v1
+      Invalid reference: column reference "v1" is ambiguous

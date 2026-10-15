@@ -815,10 +815,9 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. Already deprecated.
   repeated plan_common.Field fields = 4 [deprecated = true];
-  // Allows this merge to have no upstream actors, either initially or after a MergeUpdate.
-  // When true, the merge must not use the singleton receiver optimization because a singleton
-  // receiver cannot transition to empty.
-  bool allow_empty_upstream = 5;
+  // Deprecated. Executors that need to support an empty upstream use an explicit runtime
+  // constructor instead.
+  bool allow_empty_upstream = 5 [deprecated = true];
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -1175,6 +1174,10 @@ message LocalityProviderNode {
   optional catalog.Table progress_table = 3;
   // Rate limit of the drain phase, set by `BACKFILL_RATE_LIMIT`.
   optional uint32 rate_limit = 4;
+  // Ephemeral sorted log table for buffering and re-ordering amplified input
+  // within an epoch after backfill is finished. Only present when the sort
+  // buffer feature is enabled at plan time.
+  optional catalog.Table sort_buffer_table = 5;
 }
 
 message EowcGapFillNode {
