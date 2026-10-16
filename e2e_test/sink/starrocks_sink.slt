@@ -1,5 +1,8 @@
 control substitution on
 
+system ok
+test "${STARROCKS_DATABASE_IS_DISPOSABLE}" = "true"
+
 statement ok
 DROP SINK IF EXISTS s6;
 

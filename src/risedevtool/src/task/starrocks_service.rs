@@ -12,7 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::Write;
+
+use anyhow::{Result, ensure};
+
 use super::docker_service::{DockerService, DockerServiceConfig};
+use super::{ExecuteContext, Task};
 use crate::StarrocksConfig;
 
 pub const STARROCKS_CONTAINER_HOST: &str = "127.0.0.1";
@@ -54,4 +59,22 @@ impl DockerServiceConfig for StarrocksConfig {
 }
 
 /// Docker-backed StarRocks service.
-pub type StarrocksService = DockerService<StarrocksConfig>;
+pub struct StarrocksService(DockerService<StarrocksConfig>);
+
+impl StarrocksService {
+    pub fn new(config: StarrocksConfig) -> Result<Self> {
+        ensure!(
+            config.user_managed
+                || (config.admin_user == "root" && config.admin_password.is_empty()),
+            "custom StarRocks admin credentials are only supported when `user-managed` is `true`"
+        );
+
+        Ok(Self(DockerService::new(config)))
+    }
+}
+
+impl Task for StarrocksService {
+    fn execute(&mut self, ctx: &mut ExecuteContext<impl Write>) -> Result<()> {
+        self.0.execute(ctx)
+    }
+}

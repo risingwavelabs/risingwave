@@ -1950,8 +1950,14 @@ template:
     password: "123456"
     database: demo
 
+    # The managed image uses its built-in root user with an empty password.
+    # Custom admin credentials are only supported with `user-managed: true`.
     admin-user: root
     admin-password: ""
+
+    # The StarRocks sink SLT drops this database and its test users. For a user-managed
+    # service, explicitly set this to true only when the database is disposable.
+    database-is-disposable: false
 
     image: "starrocks/allin1-ubuntu:3.5.21"
 

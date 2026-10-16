@@ -31,6 +31,7 @@ export STARROCKS_PASSWORD="123456"
 export STARROCKS_DATABASE="demo"
 export STARROCKS_ADMIN_USER="root"
 export STARROCKS_ADMIN_PASSWORD=""
+export STARROCKS_DATABASE_IS_DISPOSABLE="true"
 export RISEDEV_STARROCKS_WITH_OPTIONS_COMMON="connector='starrocks',starrocks.host='${STARROCKS_HOST}',starrocks.mysqlport='${STARROCKS_QUERY_PORT}',starrocks.httpport='${STARROCKS_HTTP_PORT}',starrocks.user='${STARROCKS_USER}',starrocks.password='${STARROCKS_PASSWORD}',starrocks.database='${STARROCKS_DATABASE}'"
 export PATH="${PWD}/e2e_test/commands:${PATH}"
 

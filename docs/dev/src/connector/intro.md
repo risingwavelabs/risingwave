@@ -191,6 +191,9 @@ To run the StarRocks sink test locally, use the Docker-backed StarRocks profile:
 ./risedev k
 ```
 
+When running this test against user-managed StarRocks, configure the endpoint and admin credentials, and set
+`database-is-disposable: true`. The test drops the configured database and its test users during setup and cleanup.
+
 ### Tips for writing `system` commands
 
 Refer to

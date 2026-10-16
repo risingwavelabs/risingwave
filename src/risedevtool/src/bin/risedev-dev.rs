@@ -330,7 +330,7 @@ fn task_main(
                     ));
                 }
                 ServiceConfig::Starrocks(c) => {
-                    let mut service = StarrocksService::new(c.clone());
+                    let mut service = StarrocksService::new(c.clone())?;
                     service.execute(&mut ctx)?;
                     let mut task = risedev::StarrocksReadyCheckTask::new(c.clone());
                     task.execute(&mut ctx)?;
