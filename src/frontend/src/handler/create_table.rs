@@ -503,6 +503,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
+    // Check the CREATE privilege before `bind_columns_from_source`, which may fetch from
+    // user-supplied URLs (schema registry, schema file).
+    session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     // TODO: omit this step if `sql_column_strategy` is `Follow`.
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -1892,8 +1895,7 @@ pub async fn generate_stream_graph_for_replace_table(
         original_catalog.associated_source_id().is_some() && format_encode.is_none();
     if is_drop_connector {
         debug_assert!(
-            source_watermarks.is_empty()
-                && include_column_options.is_empty()
+            include_column_options.is_empty()
                 && with_options
                     .iter()
                     .all(|opt| opt.name.real_value().to_lowercase() != "connector")

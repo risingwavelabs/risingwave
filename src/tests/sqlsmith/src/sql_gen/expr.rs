@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use rand::Rng;
 use rand::seq::IndexedRandom;
+use rand::{Rng, RngExt as _};
 use risingwave_common::types::{DataType, DataTypeName, StructType};
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_frontend::expr::cast_sigs;

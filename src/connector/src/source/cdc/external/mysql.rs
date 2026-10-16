@@ -666,6 +666,7 @@ impl MySqlExternalTableReader {
         // Query MySQL primary key infos for type casting.
         let upstream_mysql_pk_infos =
             Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+        Self::validate_upstream_pk_columns(&upstream_mysql_pk_infos, &rw_schema, &pk_indices)?;
         // Get MySQL version
         let (major_version, minor_version, is_mariadb) = Self::get_mysql_version(&pool).await?;
         let mysql_version = (major_version, minor_version);
@@ -709,12 +710,16 @@ impl MySqlExternalTableReader {
         let mut conn = pool.get_conn().await?;
 
         // Query primary key columns and their data types.
-        let sql = "SELECT COLUMN_NAME, COLUMN_TYPE
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = ?
-            AND TABLE_NAME = ?
-            AND COLUMN_KEY = 'PRI'
-            ORDER BY ORDINAL_POSITION";
+        let sql = "SELECT s.COLUMN_NAME, c.COLUMN_TYPE
+            FROM INFORMATION_SCHEMA.STATISTICS AS s
+            JOIN INFORMATION_SCHEMA.COLUMNS AS c
+              ON c.TABLE_SCHEMA = s.TABLE_SCHEMA
+             AND c.TABLE_NAME = s.TABLE_NAME
+             AND c.COLUMN_NAME = s.COLUMN_NAME
+            WHERE s.TABLE_SCHEMA = ?
+              AND s.TABLE_NAME = ?
+              AND s.INDEX_NAME = 'PRIMARY'
+            ORDER BY s.SEQ_IN_INDEX";
 
         let rs: Vec<mysql_async::Row> = conn.exec(sql, (database, table)).await?;
 
@@ -730,6 +735,45 @@ impl MySqlExternalTableReader {
         drop(conn);
 
         Ok(column_infos)
+    }
+
+    fn validate_upstream_pk_columns(
+        upstream_pk_infos: &[(String, ColumnType)],
+        rw_schema: &Schema,
+        pk_indices: &[usize],
+    ) -> ConnectorResult<()> {
+        let expected_pk_names = pk_indices
+            .iter()
+            .map(|&index| rw_schema.fields[index].name.as_str())
+            .collect_vec();
+        let upstream_pk_names = upstream_pk_infos
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect_vec();
+
+        if upstream_pk_names.is_empty() {
+            return Err(anyhow!(
+                "upstream MySQL primary key metadata is empty; expected columns {:?}",
+                expected_pk_names
+            )
+            .into());
+        }
+
+        if upstream_pk_names.len() != expected_pk_names.len()
+            || upstream_pk_names
+                .iter()
+                .zip_eq_fast(&expected_pk_names)
+                .any(|(upstream, expected)| !upstream.eq_ignore_ascii_case(expected))
+        {
+            return Err(anyhow!(
+                "upstream MySQL primary key columns {:?} do not match expected columns {:?}",
+                upstream_pk_names,
+                expected_pk_names
+            )
+            .into());
+        }
+
+        Ok(())
     }
 
     /// Check whether a column is `BIGINT UNSIGNED`.
@@ -1032,6 +1076,45 @@ mod tests {
                 CdcKeyComparison::Native,
             ]
         );
+    }
+
+    #[test]
+    fn test_validate_upstream_pk_columns() {
+        let rw_schema = Schema::new(vec![
+            Field::with_name(DataType::Int64, "id"),
+            Field::with_name(DataType::Varchar, "tenant"),
+        ]);
+        let int_type = || ColumnType::BigInt(Default::default());
+        let validate = |pk_infos: &[(String, ColumnType)]| {
+            MySqlExternalTableReader::validate_upstream_pk_columns(pk_infos, &rw_schema, &[0, 1])
+        };
+
+        let valid_pk_infos = vec![
+            ("id".to_owned(), int_type()),
+            ("tenant".to_owned(), int_type()),
+        ];
+        assert!(validate(&valid_pk_infos).is_ok());
+
+        for invalid_pk_infos in [
+            // incorrect order
+            vec![
+                ("tenant".to_owned(), int_type()),
+                ("id".to_owned(), int_type()),
+            ],
+            // incomplete
+            vec![("id".to_owned(), int_type())],
+            // extra index
+            vec![
+                ("id".to_owned(), int_type()),
+                ("tenant".to_owned(), int_type()),
+                ("extra".to_owned(), int_type()),
+            ],
+        ] {
+            assert!(
+                validate(&invalid_pk_infos).is_err(),
+                "unexpectedly accepted {invalid_pk_infos:?}"
+            );
+        }
     }
 
     #[test]

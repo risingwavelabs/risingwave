@@ -141,6 +141,19 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    map.try_insert(
+        std::any::type_name::<OracleCdcProperties>().to_owned(),
+        [
+            "cdc.source.wait.streaming.start.timeout".to_owned(),
+            "debezium.max.queue.size".to_owned(),
+            "debezium.queue.memory.ratio".to_owned(),
+            "debezium.heartbeat.interval.ms".to_owned(),
+            "heartbeat.table.name".to_owned(),
+            "hostname".to_owned(),
+            "port".to_owned(),
+            "password".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
 
     map.try_insert(
         std::any::type_name::<MongodbCdcProperties>().to_owned(),
@@ -271,6 +284,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "compaction.max_snapshots_num".to_owned(),
             "compaction.small_files_threshold_mb".to_owned(),
             "compaction.delete_files_count_threshold".to_owned(),
+            "compaction.delete_ratio_percent".to_owned(),
             "compaction.trigger_snapshot_count".to_owned(),
             "compaction.target_file_size_mb".to_owned(),
             "compaction.type".to_owned(),

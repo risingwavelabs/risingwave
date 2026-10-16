@@ -60,7 +60,7 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::id::JobId;
+    use risingwave_common::id::{DatabaseId, JobId};
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{
@@ -672,6 +672,8 @@ pub(super) mod handlers {
     pub struct DiagnoseParams {
         #[serde(default = "await_tree_default_format")]
         actor_traces_format: String,
+        /// Filter database-owned details; shared cluster diagnostics remain included.
+        database_id: Option<DatabaseId>,
     }
 
     pub async fn diagnose(
@@ -688,7 +690,10 @@ pub(super) mod handlers {
                 )));
             }
         };
-        Ok(srv.diagnose_command.report(actor_traces_format).await)
+        Ok(srv
+            .diagnose_command
+            .report(actor_traces_format, params.database_id)
+            .await)
     }
 
     /// NOTE(kwannoel): Although we fetch the BP for the entire graph via this API,
@@ -1029,7 +1034,7 @@ impl DashboardService {
                 get(list_heap_profile),
             )
             .route("/monitor/analyze/{worker_id}/{*path}", get(analyze_heap))
-            // /monitor/diagnose/?format={text or json}
+            // /monitor/diagnose/?actor_traces_format={text or json}&database_id={optional id}
             .route("/monitor/diagnose/", get(diagnose))
             .layer(
                 ServiceBuilder::new()

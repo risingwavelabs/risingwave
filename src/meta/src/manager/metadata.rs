@@ -19,8 +19,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
-use risingwave_meta_model::refresh_job::{self, RefreshState};
-use risingwave_meta_model::{SinkId, SourceId, WorkerId};
+use risingwave_meta_model::{SinkId, SourceId, WorkerId, refresh_job};
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -421,6 +420,15 @@ impl MetadataManager {
         self.catalog_controller.list_refresh_jobs().await
     }
 
+    pub async fn list_refreshing_jobs(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<refresh_job::Model>> {
+        self.catalog_controller
+            .list_refreshing_jobs(database_id)
+            .await
+    }
+
     pub async fn list_refreshable_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.catalog_controller.list_refreshable_table_ids().await
     }
@@ -429,21 +437,24 @@ impl MetadataManager {
         self.catalog_controller.ensure_refresh_job(table_id).await
     }
 
-    pub async fn update_refresh_job_status(
+    pub async fn begin_refresh_job(
         &self,
         table_id: TableId,
-        status: RefreshState,
-        trigger_time: Option<DateTime>,
-        is_success: bool,
-    ) -> MetaResult<()> {
+        trigger_time: DateTime,
+    ) -> MetaResult<bool> {
         self.catalog_controller
-            .update_refresh_job_status(table_id, status, trigger_time, is_success)
+            .begin_refresh_job(table_id, trigger_time)
             .await
     }
 
-    pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
+    pub async fn finish_refresh_job(
+        &self,
+        table_id: TableId,
+        trigger_time: DateTime,
+        success: bool,
+    ) -> MetaResult<bool> {
         self.catalog_controller
-            .reset_all_refresh_jobs_to_idle()
+            .finish_refresh_job(table_id, trigger_time, success)
             .await
     }
 
@@ -800,7 +811,7 @@ impl MetadataManager {
         tracing::debug!("wait_streaming_job_finished: {id:?}");
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         if mgr.streaming_job_is_finished(id).await? {
-            return Ok(self.catalog_controller.notify_frontend_trivial().await);
+            return Ok(self.catalog_controller.current_notification_version().await);
         }
         let (tx, rx) = oneshot::channel();
 

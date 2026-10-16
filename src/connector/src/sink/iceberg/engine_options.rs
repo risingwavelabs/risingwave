@@ -34,6 +34,7 @@ pub const ICEBERG_ENGINE_OPTION_KEYS: &[&str] = &[
     "compaction.max_snapshots_num",
     "compaction.small_files_threshold_mb",
     "compaction.delete_files_count_threshold",
+    "compaction.delete_ratio_percent",
     "compaction.trigger_snapshot_count",
     "compaction.target_file_size_mb",
     "compaction.type",

@@ -15,12 +15,14 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
+use chrono::NaiveDateTime;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
+use risingwave_connector::sink::iceberg::IcebergCommitResult;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
@@ -69,8 +71,8 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
-    ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState, UpstreamSinkInfo,
-    build_actor_connector_splits,
+    RefreshCycleActors, ReplaceJobSplitPlan, SourceSplitAssignment, SplitAssignment, SplitState,
+    UpstreamSinkInfo, build_actor_connector_splits,
 };
 use crate::{MetaError, MetaResult};
 
@@ -442,6 +444,7 @@ pub struct SinceEpochInfo {
 pub enum IndependentStreamingJobType {
     SnapshotBackfill { since_epoch: Option<SinceEpochInfo> },
     BatchRefresh { refresh_interval_sec: u64 },
+    IcebergV3,
 }
 
 #[derive(Debug, Clone)]
@@ -556,11 +559,14 @@ pub enum Command {
 
     ConnectorPropsChange(ConnectorPropsChange),
 
-    /// `Refresh` command generates a barrier to refresh a table by truncating state
-    /// and reloading data from source.
+    /// Starts the refresh cycle `trigger_time` of a table: the barrier's commit truncates the
+    /// staging table, which an abandoned cycle leaves dirty, and its post-collect moves the job to
+    /// `Refreshing`.
     Refresh {
         table_id: TableId,
         associated_source_id: SourceId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
     },
     ListFinish {
         table_id: TableId,
@@ -569,6 +575,14 @@ pub enum Command {
     LoadFinish {
         table_id: TableId,
         associated_source_id: SourceId,
+    },
+    /// Ends the refresh cycle `trigger_time` of a table once every materialize actor merged: the
+    /// barrier's commit truncates the staging table, which nothing reads after the merge, and its
+    /// post-collect moves the job back to `Idle`.
+    FinishRefresh {
+        table_id: TableId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
     },
 
     /// `ResetSource` command generates a barrier to reset CDC source offset to latest.
@@ -591,6 +605,22 @@ pub enum Command {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+
+    /// Apply a completed Iceberg data-file compaction to the pk-index sink graph.
+    ApplyIcebergPkIndexCompaction {
+        sink_id: SinkId,
+        task_id: risingwave_pb::id::IcebergCompactionTaskId,
+        overwrite: IcebergPkIndexCompactionOverwrite,
+    },
+}
+
+#[derive(Clone, educe::Educe)]
+#[educe(Debug)]
+pub struct IcebergPkIndexCompactionOverwrite {
+    #[educe(Debug(ignore))]
+    pub output_result: IcebergCommitResult,
+    pub input_file_paths: Vec<String>,
+    pub read_snapshot_id: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -650,10 +680,12 @@ impl std::fmt::Display for Command {
             Command::Refresh {
                 table_id,
                 associated_source_id,
+                trigger_time,
+                ..
             } => write!(
                 f,
-                "Refresh: {} (source: {})",
-                table_id, associated_source_id
+                "Refresh: {} (source: {}, cycle: {})",
+                table_id, associated_source_id, trigger_time
             ),
             Command::ListFinish {
                 table_id,
@@ -671,6 +703,11 @@ impl std::fmt::Display for Command {
                 "LoadFinish: {} (source: {})",
                 table_id, associated_source_id
             ),
+            Command::FinishRefresh {
+                table_id,
+                trigger_time,
+                ..
+            } => write!(f, "FinishRefresh: {} (cycle: {})", table_id, trigger_time),
             Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
             Command::ResumeBackfill { target } => match target {
                 ResumeBackfillTarget::Job(job_id) => {
@@ -688,6 +725,12 @@ impl std::fmt::Display for Command {
                 "InjectSourceOffsets: {} ({} splits)",
                 source_id,
                 split_offsets.len()
+            ),
+            Command::ApplyIcebergPkIndexCompaction {
+                sink_id, task_id, ..
+            } => write!(
+                f,
+                "ApplyIcebergPkIndexCompaction: sink={sink_id} task={task_id}"
             ),
         }
     }
@@ -735,6 +778,21 @@ pub enum PostCollectCommand {
     ResumeBackfill {
         target: ResumeBackfillTarget,
     },
+    /// The actors the `RefreshStart` barrier reached, so the cycle is tracked against the actor
+    /// set it actually runs on.
+    RefreshStarted {
+        table_id: TableId,
+        database_id: DatabaseId,
+        associated_source_id: SourceId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
+        actors: RefreshCycleActors,
+    },
+    FinishRefresh {
+        table_id: TableId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
+    },
 }
 
 impl PostCollectCommand {
@@ -751,7 +809,9 @@ impl PostCollectCommand {
             | PostCollectCommand::SourceChangeSplit { .. }
             | PostCollectCommand::CreateSubscription { .. }
             | PostCollectCommand::ConnectorPropsChange(_)
-            | PostCollectCommand::ResumeBackfill { .. } => true,
+            | PostCollectCommand::ResumeBackfill { .. }
+            | PostCollectCommand::RefreshStarted { .. }
+            | PostCollectCommand::FinishRefresh { .. } => true,
             PostCollectCommand::Command(_) => false,
         }
     }
@@ -767,6 +827,8 @@ impl PostCollectCommand {
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
             PostCollectCommand::ResumeBackfill { .. } => "ResumeBackfill",
+            PostCollectCommand::RefreshStarted { .. } => "Refresh",
+            PostCollectCommand::FinishRefresh { .. } => "FinishRefresh",
         }
     }
 }
@@ -848,7 +910,6 @@ impl Command {
             new_table_watermarks,
             old_value_ssts,
             vector_index_adds,
-            truncate_tables,
             iceberg_pk_index_sink_metadata,
         ) = collect_resp_info(resps);
 
@@ -914,7 +975,24 @@ impl Command {
                 )
                 .expect("non-duplicate");
         }
-        info.truncate_tables.extend(truncate_tables);
+        if let PostCollectCommand::RefreshStarted {
+            table_id,
+            staging_table_id,
+            ..
+        }
+        | PostCollectCommand::FinishRefresh {
+            table_id,
+            staging_table_id,
+            ..
+        } = &barrier_info.post_collect_command
+        {
+            // The table may have been dropped after the command was scheduled.
+            if barrier_info.table_ids_to_commit.contains(staging_table_id) {
+                info.truncate_tables.insert(*staging_table_id);
+            } else {
+                tracing::warn!(%table_id, %staging_table_id, "skip truncating the staging table of a dropped table");
+            }
+        }
         task.iceberg_pk_index_pre_commit_metadata
             .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
     }

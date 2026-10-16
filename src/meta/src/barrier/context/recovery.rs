@@ -39,6 +39,7 @@ use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
+    IcebergV3JobCheckpointControl, IcebergV3RenderResult, is_iceberg_v3_fragment_nodes,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
@@ -88,6 +89,8 @@ pub struct RenderedDatabaseRuntimeInfo {
     pub source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     /// Batch refresh jobs rendered during `render_runtime_info`.
     pub batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
+    /// Iceberg V3 jobs rendered independently from the database graph.
+    pub iceberg_v3: HashMap<JobId, IcebergV3RenderResult>,
 }
 
 pub(in crate::barrier) fn render_runtime_info(
@@ -105,18 +108,35 @@ pub(in crate::barrier) fn render_runtime_info(
 
     assert!(!per_database_context.is_empty());
 
-    // Extract batch refresh jobs before rendering via `render_actor_assignments`.
-    // They will be rendered independently using the unified `render_actors_and_build_job_info`.
+    // Closed independent jobs are rendered separately from the database graph. This keeps their
+    // placement independent from upstream actors and renders inactive Iceberg fragments up front.
     let batch_refresh_job_ids: HashSet<JobId> = per_database_context
         .job_map
         .iter()
         .filter(|(_, model)| model.refresh_interval_sec.is_some())
         .map(|(job_id, _)| *job_id)
         .collect();
+    let iceberg_v3_job_ids: HashSet<JobId> = per_database_context
+        .job_fragments
+        .iter()
+        .filter(|(_, fragments)| {
+            is_iceberg_v3_fragment_nodes(fragments.values().map(|fragment| &fragment.nodes))
+        })
+        .map(|(job_id, _)| *job_id)
+        .collect();
+    assert!(
+        batch_refresh_job_ids.is_disjoint(&iceberg_v3_job_ids),
+        "Iceberg V3 jobs cannot be batch refresh jobs"
+    );
+    let independent_job_ids: HashSet<_> = batch_refresh_job_ids
+        .union(&iceberg_v3_job_ids)
+        .copied()
+        .collect();
 
     let mut batch_refresh_logical = HashMap::new();
-    if !batch_refresh_job_ids.is_empty() {
-        let batch_refresh_fragment_ids: HashSet<FragmentId> = batch_refresh_job_ids
+    let mut iceberg_v3_logical = HashMap::new();
+    if !independent_job_ids.is_empty() {
+        let independent_fragment_ids: HashSet<FragmentId> = independent_job_ids
             .iter()
             .flat_map(|job_id| {
                 per_database_context
@@ -128,7 +148,7 @@ pub(in crate::barrier) fn render_runtime_info(
             })
             .collect();
 
-        for &job_id in &batch_refresh_job_ids {
+        for &job_id in &independent_job_ids {
             let fragments = per_database_context.job_fragments.remove(&job_id).unwrap();
             let downstreams = fragments
                 .keys()
@@ -139,20 +159,35 @@ pub(in crate::barrier) fn render_runtime_info(
                         .map(|r| (*fid, r.clone()))
                 })
                 .collect();
-            batch_refresh_logical.insert(
-                job_id,
-                BatchRefreshLogicalFragments {
-                    fragments,
-                    downstreams,
-                },
-            );
+            if batch_refresh_job_ids.contains(&job_id) {
+                batch_refresh_logical.insert(
+                    job_id,
+                    BatchRefreshLogicalFragments {
+                        fragments,
+                        downstreams,
+                    },
+                );
+            } else {
+                iceberg_v3_logical.insert(job_id, (fragments, downstreams));
+            }
         }
 
-        // Remove ensembles that only contain batch refresh fragments.
+        // Closed independent jobs cannot share a no-shuffle ensemble with another job.
         per_database_context.ensembles.retain(|ensemble| {
-            !ensemble
-                .component_fragments()
-                .all(|fid| batch_refresh_fragment_ids.contains(&fid))
+            let mut has_independent_fragment = false;
+            let mut has_database_fragment = false;
+            for fragment_id in ensemble.component_fragments() {
+                if independent_fragment_ids.contains(&fragment_id) {
+                    has_independent_fragment = true;
+                } else {
+                    has_database_fragment = true;
+                }
+            }
+            assert!(
+                !(has_independent_fragment && has_database_fragment),
+                "closed independent job cannot share a no-shuffle ensemble"
+            );
+            has_database_fragment
         });
     }
 
@@ -185,37 +220,53 @@ pub(in crate::barrier) fn render_runtime_info(
         batch_refresh.insert(job_id, render_result);
     }
 
-    // If all fragments were batch refresh, no normal rendering needed.
-    if per_database_context.ensembles.is_empty() {
-        return Ok(Some(RenderedDatabaseRuntimeInfo {
-            job_infos: HashMap::new(),
-            stream_actors: HashMap::new(),
-            source_splits: HashMap::new(),
-            batch_refresh,
-        }));
+    let mut iceberg_v3 = HashMap::new();
+    for (job_id, (fragments, downstreams)) in iceberg_v3_logical {
+        let extra = recovery_context
+            .job_extra_info
+            .get(&job_id)
+            .expect("should have extra info");
+        let streaming_job_model = per_database_context
+            .job_map
+            .get(&job_id)
+            .expect("should have streaming job model");
+        let database_model = &per_database_context.database_map[&database_id];
+        let render_result = IcebergV3JobCheckpointControl::render_actors_and_build_job_info(
+            &fragments,
+            &downstreams,
+            &extra.job_definition,
+            actor_id_generator,
+            worker_nodes.current(),
+            control_stream_manager,
+            &database_model.resource_group,
+            streaming_job_model,
+            to_partial_graph_id(database_id, Some(job_id)),
+        )?;
+        iceberg_v3.insert(job_id, render_result);
     }
 
-    let RenderedGraph { mut fragments, .. } = render_actor_assignments(
-        actor_id_generator,
-        worker_nodes.current(),
-        &per_database_context,
-    )?;
-
-    let single_database = match fragments.remove(&database_id) {
-        Some(info) => info,
-        None => return Ok(None),
+    let (job_infos, stream_actors) = if per_database_context.ensembles.is_empty() {
+        (HashMap::new(), HashMap::new())
+    } else {
+        let RenderedGraph { mut fragments, .. } = render_actor_assignments(
+            actor_id_generator,
+            worker_nodes.current(),
+            &per_database_context,
+        )?;
+        let single_database = fragments
+            .remove(&database_id)
+            .expect("non-empty database render must produce its database entry");
+        let mut database_map = HashMap::from([(database_id, single_database)]);
+        recovery_table_with_upstream_sinks(
+            &mut database_map,
+            &recovery_context.upstream_sink_recovery,
+        )?;
+        let stream_actors = build_stream_actors(&database_map, &recovery_context.job_extra_info)?;
+        let job_infos = database_map
+            .remove(&database_id)
+            .expect("database entry must exist");
+        (job_infos, stream_actors)
     };
-
-    let mut database_map = HashMap::from([(database_id, single_database)]);
-    recovery_table_with_upstream_sinks(
-        &mut database_map,
-        &recovery_context.upstream_sink_recovery,
-    )?;
-    let stream_actors = build_stream_actors(&database_map, &recovery_context.job_extra_info)?;
-
-    let job_infos = database_map
-        .remove(&database_id)
-        .expect("database entry must exist");
 
     let mut source_splits = HashMap::new();
     for fragment_infos in job_infos.values() {
@@ -231,6 +282,7 @@ pub(in crate::barrier) fn render_runtime_info(
         stream_actors,
         source_splits,
         batch_refresh,
+        iceberg_v3,
     }))
 }
 
@@ -348,7 +400,7 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(committed_epoch)
     }
 
-    async fn finish_completed_batch_refresh_background_jobs(
+    async fn finish_completed_independent_snapshot_jobs(
         &self,
         recovery_context: &LoadedRecoveryContext,
         state_table_committed_epochs: &HashMap<TableId, u64>,
@@ -359,27 +411,34 @@ impl GlobalBarrierWorkerContextImpl {
             let Some(job) = recovery_context.fragment_context.job_map.get(&job_id) else {
                 continue;
             };
-            if job.refresh_interval_sec.is_none() {
-                continue;
-            }
             let Some(fragments) = recovery_context.fragment_context.job_fragments.get(&job_id)
             else {
                 continue;
             };
+            let is_batch_refresh = job.refresh_interval_sec.is_some();
+            let is_iceberg_v3 =
+                is_iceberg_v3_fragment_nodes(fragments.values().map(|fragment| &fragment.nodes));
+            let job_type = if is_batch_refresh {
+                "batch refresh"
+            } else if is_iceberg_v3 {
+                "Iceberg V3"
+            } else {
+                continue;
+            };
 
-            let committed_epoch =
-                Self::resolve_job_committed_epoch(job_id, fragments, state_table_committed_epochs)?;
             let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
                 fragments
                     .values()
                     .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
             )?
             .0
-            .ok_or_else(|| anyhow!("batch refresh job {} has no snapshot backfill info", job_id))?;
+            .ok_or_else(|| anyhow!("independent job {} has no snapshot backfill info", job_id))?;
+            let committed_epoch =
+                Self::resolve_job_committed_epoch(job_id, fragments, state_table_committed_epochs)?;
             let snapshot_epoch = snapshot_backfill_info
                 .upstream_mv_table_id_to_backfill_epoch
                 .values()
-                .find_map(|e| *e)
+                .find_map(|epoch| *epoch)
                 .unwrap_or(committed_epoch);
             if committed_epoch < snapshot_epoch {
                 continue;
@@ -389,7 +448,8 @@ impl GlobalBarrierWorkerContextImpl {
                 %job_id,
                 committed_epoch,
                 snapshot_epoch,
-                "finish completed batch refresh background job during recovery"
+                job_type,
+                "finish completed independent snapshot job during recovery"
             );
             self.finish_creating_job(TrackingJob::recovered_from_fragment_nodes(
                 job_id,
@@ -452,10 +512,6 @@ impl GlobalBarrierWorkerContextImpl {
             )
             .await?;
         }
-        self.metadata_manager
-            .reset_all_refresh_jobs_to_idle()
-            .await?;
-
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
@@ -518,7 +574,8 @@ impl GlobalBarrierWorkerContextImpl {
                 })?;
             let manager = &self.iceberg_pk_index_sink_manager;
             futs.push(async move {
-                let partial_graph_id = to_partial_graph_id(pb_sink.database_id, None);
+                let partial_graph_id =
+                    to_partial_graph_id(pb_sink.database_id, Some(pb_sink.id.as_job_id()));
                 let result = manager
                     .register_sink(pb_sink.id, partial_graph_id, config)
                     .await;
@@ -729,7 +786,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     #[expect(clippy::type_complexity)]
     fn resolve_hummock_version_epochs(
-        creating_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
+        jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
         version: &HummockVersion,
         table_change_log: &TableChangeLogs,
     ) -> MetaResult<(
@@ -748,7 +805,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?)
         };
         let mut min_downstream_committed_epochs = HashMap::new();
-        for (job_id, fragments) in creating_jobs {
+        for (job_id, fragments) in jobs {
             let job_committed_epoch =
                 Self::resolve_job_committed_epoch(job_id, fragments, &table_committed_epoch)?;
             if let (Some(snapshot_backfill_info), _) =
@@ -797,8 +854,32 @@ impl GlobalBarrierWorkerContextImpl {
                 }
                 Ordering::Greater => {
                     if let Some(table_change_log) = table_change_log.get(&upstream_table_id) {
+                        // The downstream committed epoch may be synthetic and therefore fall
+                        // between two upstream checkpoints. Preserve the latest checkpoint group
+                        // at or before it so the job-specific recovery logic can decide whether
+                        // exact checkpoint alignment is required.
+                        //
+                        // For checkpoint epochs [100, 102], `binary_search` returns:
+                        // - `Err(0)` for 99: no preceding checkpoint exists;
+                        // - `Ok(0)` for 100: start from checkpoint 100;
+                        // - `Err(1)` for 101: start from the preceding checkpoint at index 0;
+                        // - `Ok(1)` for 102: start from checkpoint 102;
+                        // - `Err(2)` for 103: start from the preceding checkpoint at index 1.
+                        let first_checkpoint_index = match table_change_log
+                            .binary_search_by_checkpoint_epoch(downstream_committed_epoch)
+                        {
+                            Ok(index) => index,
+                            Err(0) => {
+                                bail!(
+                                    "no upstream checkpoint epoch at or before downstream committed epoch {} on table {}",
+                                    downstream_committed_epoch,
+                                    upstream_table_id
+                                );
+                            }
+                            Err(index) => index - 1,
+                        };
                         let epochs = table_change_log
-                            .filter_epoch((downstream_committed_epoch, upstream_committed_epoch))
+                            .range(first_checkpoint_index..)
                             .map(|epoch_log| {
                                 (
                                     epoch_log.non_checkpoint_epochs.clone(),
@@ -806,18 +887,6 @@ impl GlobalBarrierWorkerContextImpl {
                                 )
                             })
                             .collect_vec();
-                        let first_epochs = epochs.first();
-                        if let Some((_, first_checkpoint_epoch)) = &first_epochs
-                            && *first_checkpoint_epoch == downstream_committed_epoch
-                        {
-                        } else {
-                            bail!(
-                                "resolved first log epoch {:?} on table {} not matched with downstream committed epoch {}",
-                                epochs,
-                                upstream_table_id,
-                                downstream_committed_epoch
-                            );
-                        }
                         log_epochs
                             .try_insert(upstream_table_id, epochs)
                             .expect("non-duplicated");
@@ -871,6 +940,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .catalog_controller
                         .cleanup_dropped_tables()
                         .await;
+                    self.refresh_manager.abandon_cycles(None).await?;
 
                     let active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
@@ -946,9 +1016,11 @@ impl GlobalBarrierWorkerContextImpl {
                                     .job_fragments
                                     .iter()
                                     .filter_map(|(job_id, job)| {
-                                        initial_creating_jobs
-                                            .contains(job_id)
-                                            .then_some((*job_id, job))
+                                        (initial_creating_jobs.contains(job_id)
+                                            || is_iceberg_v3_fragment_nodes(
+                                                job.values().map(|fragment| &fragment.nodes),
+                                            ))
+                                        .then_some((*job_id, job))
                                     }),
                                 version,
                                 table_change_log,
@@ -956,7 +1028,7 @@ impl GlobalBarrierWorkerContextImpl {
                         })
                         .await?;
 
-                    self.finish_completed_batch_refresh_background_jobs(
+                    self.finish_completed_independent_snapshot_jobs(
                         &recovery_context,
                         &state_table_committed_epochs,
                         &mut initial_creating_jobs,
@@ -1063,20 +1135,24 @@ impl GlobalBarrierWorkerContextImpl {
             .hummock_manager
             .on_current_version_and_table_change_log(|version, table_change_log| {
                 Self::resolve_hummock_version_epochs(
-                    creating_jobs.iter().filter_map(|job_id| {
-                        recovery_context
-                            .fragment_context
-                            .job_fragments
-                            .get(job_id)
-                            .map(|job| (*job_id, job))
-                    }),
+                    recovery_context
+                        .fragment_context
+                        .job_fragments
+                        .iter()
+                        .filter_map(|(job_id, job)| {
+                            (creating_jobs.contains(job_id)
+                                || is_iceberg_v3_fragment_nodes(
+                                    job.values().map(|fragment| &fragment.nodes),
+                                ))
+                            .then_some((*job_id, job))
+                        }),
                     version,
                     table_change_log,
                 )
             })
             .await?;
 
-        self.finish_completed_batch_refresh_background_jobs(
+        self.finish_completed_independent_snapshot_jobs(
             &recovery_context,
             &state_table_committed_epochs,
             &mut creating_jobs,
@@ -1093,7 +1169,8 @@ impl GlobalBarrierWorkerContextImpl {
                 .await?;
 
         self.refresh_manager
-            .remove_trackers_by_database(database_id);
+            .abandon_cycles(Some(database_id))
+            .await?;
 
         Ok(DatabaseRuntimeInfoSnapshot {
             recovery_context,
@@ -1110,19 +1187,102 @@ impl GlobalBarrierWorkerContextImpl {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::FragmentTypeMask;
+    use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::id::WorkerId;
+    use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog};
+    use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_meta_model::DispatcherType;
     use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_pb::hummock::StateTableInfo;
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{
-        PbDispatchOutputMapping, PbStreamNode, UpstreamSinkUnionNode as PbUpstreamSinkUnionNode,
+        PbDispatchOutputMapping, PbStreamNode, StreamScanNode, StreamScanType,
+        UpstreamSinkUnionNode as PbUpstreamSinkUnionNode,
     };
 
     use super::*;
     use crate::controller::fragment::InflightActorInfo;
     use crate::model::DownstreamFragmentRelation;
     use crate::stream::UpstreamSinkInfo;
+
+    #[test]
+    fn test_resolve_hummock_version_epochs_keeps_checkpoint_before_synthetic_epoch() {
+        let job_id = JobId::new(10);
+        let fragment_id = FragmentId::new(100);
+        let upstream_table_id = TableId::new(200);
+        let state_table_id = TableId::new(300);
+        let fragments = HashMap::from([(
+            fragment_id,
+            LoadedFragment {
+                fragment_id,
+                job_id,
+                fragment_type_mask: FragmentTypeMask::from(
+                    FragmentTypeFlag::SnapshotBackfillStreamScan as i32,
+                ),
+                distribution_type: DistributionType::Hash,
+                vnode_count: 1,
+                nodes: PbStreamNode {
+                    node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
+                        table_id: upstream_table_id,
+                        stream_scan_type: StreamScanType::SnapshotBackfill as i32,
+                        snapshot_backfill_epoch: Some(100),
+                        ..Default::default()
+                    }))),
+                    ..Default::default()
+                },
+                state_table_ids: HashSet::from([state_table_id]),
+                parallelism: None,
+            },
+        )]);
+
+        let mut version = HummockVersion::default();
+        version.state_table_info =
+            HummockVersionStateTableInfo::from_protobuf_owned(HashMap::from([
+                (
+                    state_table_id,
+                    StateTableInfo {
+                        committed_epoch: 101,
+                        compaction_group_id: 1.into(),
+                    },
+                ),
+                (
+                    upstream_table_id,
+                    StateTableInfo {
+                        committed_epoch: 102,
+                        compaction_group_id: 1.into(),
+                    },
+                ),
+            ]));
+        let table_change_log = HashMap::from([(
+            upstream_table_id,
+            TableChangeLog::new([
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![],
+                    checkpoint_epoch: 100,
+                },
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![],
+                    checkpoint_epoch: 102,
+                },
+            ]),
+        )]);
+
+        let (_, log_epochs) = GlobalBarrierWorkerContextImpl::resolve_hummock_version_epochs(
+            std::iter::once((job_id, &fragments)),
+            &version,
+            &table_change_log,
+        )
+        .unwrap();
+
+        assert_eq!(
+            log_epochs.get(&upstream_table_id).unwrap(),
+            &vec![(vec![], 100), (vec![], 102)]
+        );
+    }
 
     #[test]
     fn test_recovery_table_with_upstream_sinks_updates_union_node() {

@@ -44,8 +44,8 @@ pub(crate) struct PkIndexCompactionResult {
     pub(crate) output_files: Vec<SerializedDataFile>,
     pub(crate) schema_id: i32,
     pub(crate) partition_spec_id: i32,
-    /// Paths of all input files (data + delete) consumed by the rewrite, taken directly from the
-    /// compaction plan's `FileGroup`. No manifest walk required.
+    /// Data files replaced by the rewrite. Shared delete files remain live; meta handles
+    /// removal of the replaced data files' file-scoped deletes.
     pub(crate) input_file_paths: Vec<String>,
     /// Snapshot the rewrite plan read from.
     pub(crate) read_snapshot_id: i64,
@@ -64,12 +64,11 @@ impl std::fmt::Debug for PkIndexCompactionResult {
 
 /// Builds the pk-index coordinated report payload from a no-commit rewrite.
 ///
-/// - Output files come from `data_files` (the rewrite's output, taken from `CompactionResult`)
+/// - Output files come from `data_files` (the rewrite's output, taken from `RewriteResult`)
 ///   and are converted to [`SerializedDataFile`] for JSON serialization, using `table`'s partition
 ///   type and format version.
-/// - `input_file_paths` and `read_snapshot_id` must be captured by the caller *before* the
-///   compaction plan is consumed by `compact_with_plan` (the plan's `FileGroup` already carries
-///   each input file's path via `FileScanTask::data_file_path` — no manifest walk needed).
+/// - `input_file_paths` and `read_snapshot_id` come from the plan carried by `RewriteResult`.
+///   Input paths include only replaced data files, never shared delete files.
 pub(crate) fn build_pk_index_compaction_result(
     table: &Table,
     data_files: Vec<DataFile>,
@@ -128,6 +127,7 @@ pub(crate) enum ReportSendResult {
 pub(crate) struct IcebergTaskTracker {
     sink_id: u32,
     admitted_plans: usize,
+    pk_index_coordinated: bool,
     fully_admitted_bounded_round: bool,
     remaining_admitted_plans: usize,
     successful_plans: usize,
@@ -142,11 +142,13 @@ impl IcebergTaskTracker {
     pub(crate) fn new(
         sink_id: u32,
         admitted_plans: usize,
+        pk_index_coordinated: bool,
         fully_admitted_bounded_round: bool,
     ) -> Self {
         Self {
             sink_id,
             admitted_plans,
+            pk_index_coordinated,
             fully_admitted_bounded_round,
             remaining_admitted_plans: admitted_plans,
             successful_plans: 0,
@@ -163,6 +165,16 @@ impl IcebergTaskTracker {
     ) {
         debug_assert!(self.remaining_admitted_plans > 0);
         self.remaining_admitted_plans -= 1;
+        let error_message =
+            error_message.or_else(|| match (self.pk_index_coordinated, &pk_index_result) {
+                (true, None) => {
+                    Some("Coordinated compaction completed without an apply payload".to_owned())
+                }
+                (false, Some(_)) => Some(
+                    "Worker-committed compaction returned a coordinated apply payload".to_owned(),
+                ),
+                _ => None,
+            });
         if let Some(error_message) = error_message {
             self.failed_plans += 1;
             if self.first_error.is_none() {
@@ -199,8 +211,11 @@ impl IcebergTaskTracker {
     }
 
     pub(crate) fn into_report(self, task_id: IcebergCompactionTaskId) -> IcebergTaskReport {
-        let is_drained =
-            self.fully_admitted_bounded_round && self.successful_plans == self.admitted_plans;
+        // A coordinated rewrite is only progress. Deletes may have arrived
+        // since planning, so only a fresh, empty scan after application can drain.
+        let is_drained = !self.pk_index_coordinated
+            && self.fully_admitted_bounded_round
+            && self.successful_plans == self.admitted_plans;
         let error_message = if self.successful_plans > 0 {
             None
         } else {
@@ -393,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_build_iceberg_task_result_partial_enqueue_is_success_if_admitted_plan_succeeds() {
-        let mut tracker = IcebergTaskTracker::new(9, 1, false);
+        let mut tracker = IcebergTaskTracker::new(9, 1, false, false);
         tracker.record_completion(None, None);
 
         let report = tracker.into_report(7.into());
@@ -407,7 +422,7 @@ mod tests {
 
     #[test]
     fn test_fully_admitted_bounded_round_reports_drained_after_success() {
-        let mut tracker = IcebergTaskTracker::new(9, 2, true);
+        let mut tracker = IcebergTaskTracker::new(9, 2, false, true);
         tracker.record_completion(None, None);
         tracker.record_completion(None, None);
 
@@ -422,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_fully_admitted_bounded_round_with_partial_failure_reports_success() {
-        let mut tracker = IcebergTaskTracker::new(9, 2, true);
+        let mut tracker = IcebergTaskTracker::new(9, 2, false, true);
         tracker.record_completion(None, None);
         tracker.record_completion(Some("failure".to_owned()), None);
 
@@ -448,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_into_report_populates_pk_index_fields_when_pk_index_result_present() {
-        let mut tracker = IcebergTaskTracker::new(9, 2, false);
+        let mut tracker = IcebergTaskTracker::new(9, 2, true, false);
         tracker.record_completion(
             None,
             Some(PkIndexCompactionResult {
@@ -482,7 +497,7 @@ mod tests {
     fn test_into_report_rejects_mismatched_pk_index_plan_metadata() {
         for (read_snapshot_id, schema_id, partition_spec_id) in [(43, 1, 2), (42, 3, 2), (42, 1, 4)]
         {
-            let mut tracker = IcebergTaskTracker::new(9, 2, false);
+            let mut tracker = IcebergTaskTracker::new(9, 2, true, false);
             tracker.record_completion(
                 None,
                 Some(PkIndexCompactionResult {
@@ -516,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_into_report_leaves_pk_index_fields_none_for_non_pk_index_task() {
-        let mut tracker = IcebergTaskTracker::new(9, 1, false);
+        let mut tracker = IcebergTaskTracker::new(9, 1, false, false);
         tracker.record_completion(None, None);
 
         let report = tracker.into_report(7.into());
@@ -526,7 +541,7 @@ mod tests {
 
     #[test]
     fn test_build_iceberg_task_result_fails_if_all_admitted_plans_fail() {
-        let mut tracker = IcebergTaskTracker::new(9, 2, false);
+        let mut tracker = IcebergTaskTracker::new(9, 2, false, false);
         tracker.record_completion(Some("first failure".to_owned()), None);
         tracker.record_completion(Some("second failure".to_owned()), None);
 

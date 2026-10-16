@@ -44,7 +44,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
             .map(|idx| *idx as usize)
             .collect();
         let table = node.get_table()?;
-        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
         let state_table = StateTableBuilder::new(table, store, vnodes)
             .enable_preload_all_rows_by_config(&params.config)
             .build()

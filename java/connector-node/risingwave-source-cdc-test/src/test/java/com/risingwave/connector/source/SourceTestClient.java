@@ -59,7 +59,7 @@ public class SourceTestClient {
         }
     }
 
-    protected static Connection connect(DataSource dataSource) {
+    public static Connection connect(DataSource dataSource) {
         Connection connection = null;
         try {
             connection = dataSource.getConnection();
@@ -69,7 +69,7 @@ public class SourceTestClient {
         return connection;
     }
 
-    protected static ResultSet performQuery(Connection connection, String sql) {
+    public static ResultSet performQuery(Connection connection, String sql) {
         ResultSet resultSet = null;
         try {
             Statement statement = connection.createStatement();
@@ -85,7 +85,7 @@ public class SourceTestClient {
         return resultSet;
     }
 
-    protected static DataSource getDataSource(
+    public static DataSource getDataSource(
             String jdbcUrl, String username, String password, String driverClassName) {
         HikariConfig hikariConfig = new HikariConfig();
         hikariConfig.setJdbcUrl(jdbcUrl);
@@ -93,6 +93,17 @@ public class SourceTestClient {
         hikariConfig.setPassword(password);
         hikariConfig.setDriverClassName(driverClassName);
         return new HikariDataSource(hikariConfig);
+    }
+
+    public ConnectorServiceProto.ValidateSourceResponse validateSource(
+            ConnectorServiceProto.SourceType sourceType, Map<String, String> properties) {
+        ConnectorServiceProto.ValidateSourceRequest req =
+                ConnectorServiceProto.ValidateSourceRequest.newBuilder()
+                        .setSourceId(0)
+                        .setSourceType(sourceType)
+                        .putAllProperties(properties)
+                        .build();
+        return blockingStub.validateSource(req);
     }
 
     protected ConnectorServiceProto.ValidateSourceResponse validateSource(
