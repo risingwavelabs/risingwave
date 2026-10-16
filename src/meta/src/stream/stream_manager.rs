@@ -168,22 +168,20 @@ pub struct CreateStreamingJobContext {
     pub since_timestamp_epoch: Option<u64>,
 }
 
+/// Receives a cancellation request for a creating streaming job. The request carries a sender
+/// used to report whether the job was actually cancelled.
+pub type CreatingJobCancelReceiver = oneshot::Receiver<oneshot::Sender<bool>>;
+
 struct StreamingJobExecution {
     id: JobId,
     shutdown_tx: Option<oneshot::Sender<oneshot::Sender<bool>>>,
-    _permit: OwnedSemaphorePermit,
 }
 
 impl StreamingJobExecution {
-    fn new(
-        id: JobId,
-        shutdown_tx: oneshot::Sender<oneshot::Sender<bool>>,
-        permit: OwnedSemaphorePermit,
-    ) -> Self {
+    fn new(id: JobId, shutdown_tx: oneshot::Sender<oneshot::Sender<bool>>) -> Self {
         Self {
             id,
             shutdown_tx: Some(shutdown_tx),
-            _permit: permit,
         }
     }
 }
@@ -363,6 +361,22 @@ impl GlobalStreamManager {
         })
     }
 
+    /// Registers a streaming job whose catalog has been created, so that it can be cancelled from
+    /// now on, including while it is still waiting for a creating streaming job permit.
+    pub async fn register_creating_job(&self, job_id: JobId) -> CreatingJobCancelReceiver {
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        self.creating_job_info
+            .add_job(StreamingJobExecution::new(job_id, cancel_tx))
+            .await;
+        cancel_rx
+    }
+
+    /// Unregisters a streaming job registered by [`Self::register_creating_job`]. This is a
+    /// no-op if the job has already been unregistered.
+    pub async fn unregister_creating_job(&self, job_id: JobId) {
+        self.creating_job_info.delete_job(job_id).await;
+    }
+
     /// Create streaming job, it works as follows:
     ///
     /// 1. Broadcast the actor info based on the scheduling result in the context, build the hanging
@@ -373,12 +387,17 @@ impl GlobalStreamManager {
     /// 4. Store related meta data.
     ///
     /// This function is a wrapper over [`Self::run_create_streaming_job_command`].
+    ///
+    /// The job must have been registered with [`Self::register_creating_job`], which returns
+    /// the `cancel_rx` passed here. The creating streaming job permit is held until this
+    /// function returns.
     #[await_tree::instrument]
     pub async fn create_streaming_job(
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
-        permit: OwnedSemaphorePermit,
+        _permit: OwnedSemaphorePermit,
+        cancel_rx: CreatingJobCancelReceiver,
         reschedule_job_lock: RwLockReadGuard<'_, ()>,
     ) -> CreateStreamingJobResult {
         let await_tree_key = format!("Create Streaming Job Worker ({})", ctx.streaming_job.id());
@@ -390,10 +409,6 @@ impl GlobalStreamManager {
 
         let job_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id();
-
-        let (cancel_tx, cancel_rx) = oneshot::channel();
-        let execution = StreamingJobExecution::new(job_id, cancel_tx, permit);
-        self.creating_job_info.add_job(execution).await;
 
         let stream_manager = self.clone();
         let fut = async move {
