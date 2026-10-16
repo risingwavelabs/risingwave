@@ -699,10 +699,7 @@ impl CatalogController {
 
                 let refresh_mode = src
                     .as_ref()
-                    .map(|source| {
-                        RefreshMode::from_proto(source.refresh_mode.as_ref())
-                            .expect("frontend should build a valid refresh mode")
-                    })
+                    .map(|source| RefreshMode::from_proto(source.refresh_mode.as_ref())?)
                     .unwrap_or_default();
 
                 if let Some(source) = src.as_ref()
