@@ -32,6 +32,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
 
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{
@@ -311,6 +312,24 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.env
             .notification_manager()
             .notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+        Ok(())
+    }
+
+    async fn apply_bounded_load_action(&self, action: BoundedLoadAction) -> MetaResult<()> {
+        match action {
+            BoundedLoadAction::SealListing {
+                database_id,
+                source_id,
+            } => {
+                self.bounded_load_manager
+                    .seal_listing(database_id, source_id);
+            }
+            BoundedLoadAction::Complete { job_id, source_id } => {
+                self.bounded_load_manager
+                    .complete(job_id, source_id)
+                    .await?;
+            }
+        }
         Ok(())
     }
 

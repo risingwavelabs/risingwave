@@ -28,7 +28,7 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::retry::exponential_backoff;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
@@ -63,6 +63,7 @@ use uuid::Uuid;
 use super::{BarrierKind, TracedEpoch};
 use crate::barrier::BackfillOrderState;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
+use crate::barrier::bounded_progress::BoundedLoadTracker;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::{
     IcebergV3JobCheckpointControl, IcebergV3RenderResult, IndependentJobControl, IndependentJobInfo,
@@ -634,6 +635,7 @@ impl PartialGraphRecoverer<'_> {
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
+        unfinished_bounded_jobs: &mut HashMap<JobId, SourceId>,
         batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
         iceberg_v3: HashMap<JobId, IcebergV3RenderResult>,
     ) -> MetaResult<DatabaseCheckpointControl> {
@@ -656,6 +658,7 @@ impl PartialGraphRecoverer<'_> {
         fn build_mutation(
             splits: &HashMap<ActorId, Vec<SplitImpl>>,
             cdc_table_snapshot_split_assignment: HashMap<ActorId, PbCdcTableSnapshotSplits>,
+            bounded_load_actors: HashSet<ActorId>,
             backfill_orders: &ExtendedFragmentBackfillOrder,
             is_paused: bool,
         ) -> Mutation {
@@ -663,8 +666,8 @@ impl PartialGraphRecoverer<'_> {
                 .into_iter()
                 .collect();
             Mutation::Add(AddMutation {
+                bounded_load_actors: bounded_load_actors.into_iter().collect(),
                 // Actors built during recovery is not treated as newly added actors.
-                bounded_load_actors: Default::default(),
                 actor_dispatchers: Default::default(),
                 added_actors: Default::default(),
                 actor_splits: build_actor_connector_splits(splits),
@@ -916,6 +919,7 @@ impl PartialGraphRecoverer<'_> {
         let mut cdc_table_snapshot_split_assignment: HashMap<ActorId, PbCdcTableSnapshotSplits> =
             HashMap::new();
 
+        let mut bounded_load_actors = HashSet::new();
         let database_jobs: HashMap<JobId, InflightStreamingJobInfo> = {
             database_jobs
                 .into_iter()
@@ -964,6 +968,19 @@ impl PartialGraphRecoverer<'_> {
                         } else {
                             None
                         };
+
+                    let bounded_load_tracker = if let Some(source_id) = unfinished_bounded_jobs.remove(&job_id) {
+                        if BoundedLoadTracker::bounded_source(&fragment_infos) != Some(source_id) {
+                            bail!("bounded job {job_id} has no matching bounded source in its graph");
+                        }
+                        let tracker = BoundedLoadTracker::new(job_id, source_id, &fragment_infos)?;
+                        bounded_load_actors.extend(tracker.actors());
+
+                        Some(tracker)
+                    } else {
+                        None
+                    };
+
                     Ok((
                         job_id,
                         InflightStreamingJobInfo {
@@ -974,6 +991,7 @@ impl PartialGraphRecoverer<'_> {
                                 .unwrap_or_default(),
                             status,
                             cdc_table_backfill_tracker,
+                            bounded_load_tracker,
                         },
                     ))
                 })
@@ -1038,6 +1056,7 @@ impl PartialGraphRecoverer<'_> {
             let mutation = build_mutation(
                 &database_job_source_splits,
                 cdc_table_snapshot_split_assignment,
+                bounded_load_actors,
                 &database_backfill_orders,
                 is_paused,
             );
@@ -1104,6 +1123,7 @@ impl PartialGraphRecoverer<'_> {
             let mutation = build_mutation(
                 &job_source_splits,
                 Default::default(), // no cdc backfill job for
+                Default::default(), // no bounded load for snapshot backfill
                 &job_backfill_orders,
                 false,
             );
@@ -1186,6 +1206,7 @@ impl PartialGraphRecoverer<'_> {
             let mutation = build_mutation(
                 &Default::default(),
                 Default::default(),
+                Default::default(),
                 &job_backfill_orders,
                 false,
             );
@@ -1263,6 +1284,7 @@ impl PartialGraphRecoverer<'_> {
             let mutation = build_mutation(
                 &Default::default(), // batch refresh has no source splits
                 Default::default(),
+                Default::default(), // batch refresh is not bounded ingestion
                 &job_backfill_orders,
                 false,
             );

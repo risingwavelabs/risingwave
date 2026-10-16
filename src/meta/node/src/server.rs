@@ -35,7 +35,7 @@ use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
-use risingwave_meta::stream::{GlobalRefreshManager, ScaleController};
+use risingwave_meta::stream::{BoundedLoadManager, GlobalRefreshManager, ScaleController};
 use risingwave_meta_service::AddressInfo;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
@@ -514,6 +514,11 @@ pub async fn start_service_as_election_leader(
     .await?;
     sub_tasks.push((refresh_handle, refresh_shutdown));
 
+    let bounded_load_manager = Arc::new(BoundedLoadManager::new(
+        env.clone(),
+        barrier_scheduler.clone(),
+    ));
+
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
@@ -526,6 +531,7 @@ pub async fn start_service_as_election_leader(
         iceberg_compaction_mgr.clone(),
         scale_controller.clone(),
         refresh_manager.clone(),
+        bounded_load_manager,
     )
     .await;
     tracing::info!("GlobalBarrierManager started");

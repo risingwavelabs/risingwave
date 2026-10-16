@@ -94,6 +94,7 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::hosted_iceberg_catalog_service_client::HostedIcebergCatalogServiceClient;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_bounded_jobs_response::BoundedJob;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
@@ -2040,6 +2041,12 @@ impl MetaClient {
         Ok(resp.states)
     }
 
+    pub async fn list_bounded_jobs(&self) -> Result<Vec<BoundedJob>> {
+        let request = ListBoundedJobsRequest {};
+        let resp = self.inner.list_bounded_jobs(request).await?;
+        Ok(resp.jobs)
+    }
+
     pub async fn list_iceberg_compaction_status(
         &self,
     ) -> Result<Vec<list_iceberg_compaction_status_response::IcebergCompactionStatus>> {
@@ -2736,6 +2743,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, list_refresh_table_states, ListRefreshTableStatesRequest, ListRefreshTableStatesResponse }
+            ,{ stream_client, list_bounded_jobs, ListBoundedJobsRequest, ListBoundedJobsResponse }
             ,{ stream_client, list_iceberg_compaction_status, ListIcebergCompactionStatusRequest, ListIcebergCompactionStatusResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, alter_source_properties_safe, AlterSourcePropertiesSafeRequest, AlterSourcePropertiesSafeResponse }
