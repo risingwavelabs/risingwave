@@ -416,6 +416,10 @@ impl MetadataManager {
             .await
     }
 
+    pub async fn list_unfinished_bounded_jobs(&self) -> MetaResult<HashMap<JobId, SourceId>> {
+        self.catalog_controller.list_unfinished_bounded_jobs().await
+    }
+
     pub async fn list_refresh_jobs(&self) -> MetaResult<Vec<refresh_job::Model>> {
         self.catalog_controller.list_refresh_jobs().await
     }

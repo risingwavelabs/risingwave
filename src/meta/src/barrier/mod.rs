@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::SourceId;
 use risingwave_pb::catalog::Database;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
@@ -28,6 +29,7 @@ use crate::notification::Notifier;
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
+pub(crate) mod bounded_progress;
 pub mod cdc_progress;
 mod checkpoint;
 mod command;
@@ -148,6 +150,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
+    unfinished_bounded_jobs: HashMap<JobId, SourceId>,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
@@ -232,4 +235,5 @@ struct DatabaseRuntimeInfoSnapshot {
     mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
     creating_jobs: HashSet<JobId>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
+    unfinished_bounded_jobs: HashMap<JobId, SourceId>,
 }

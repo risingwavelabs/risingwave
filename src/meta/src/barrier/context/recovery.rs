@@ -37,6 +37,7 @@ use tracing::{info, warn};
 use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
+use crate::barrier::bounded_progress::load_unfinished_bounded_jobs;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
     IcebergV3JobCheckpointControl, IcebergV3RenderResult, is_iceberg_v3_fragment_nodes,
@@ -1066,6 +1067,8 @@ impl GlobalBarrierWorkerContextImpl {
                         reload_cdc_table_snapshot_splits(&self.env.meta_store_ref().conn, None)
                             .await?;
 
+                    let unfinished_bounded_jobs =
+                        load_unfinished_bounded_jobs(&self.env.meta_store_ref().conn, None).await?;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         recovery_context,
@@ -1076,6 +1079,7 @@ impl GlobalBarrierWorkerContextImpl {
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
                         database_infos,
                         cdc_table_snapshot_splits,
+                        unfinished_bounded_jobs,
                     })
                 }
             }
@@ -1172,6 +1176,9 @@ impl GlobalBarrierWorkerContextImpl {
             .abandon_cycles(Some(database_id))
             .await?;
 
+        let unfinished_bounded_jobs =
+            load_unfinished_bounded_jobs(&self.env.meta_store_ref().conn, Some(database_id))
+                .await?;
         Ok(DatabaseRuntimeInfoSnapshot {
             recovery_context,
             state_table_committed_epochs,
@@ -1179,6 +1186,7 @@ impl GlobalBarrierWorkerContextImpl {
             mv_depended_subscriptions,
             creating_jobs,
             cdc_table_snapshot_splits,
+            unfinished_bounded_jobs,
         })
     }
 }

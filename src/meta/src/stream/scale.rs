@@ -35,6 +35,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
+use crate::barrier::bounded_progress::ensure_not_loading_bounded;
 use crate::barrier::{Command, Reschedule, RescheduleContext, ReschedulePlan};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble,
@@ -229,6 +230,7 @@ impl ScaleController {
         let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
         ensure_not_refreshing(&txn, policy.keys().copied()).await?;
+        ensure_not_loading_bounded(&txn, policy.keys().copied()).await?;
 
         for (table_id, target) in &policy {
             let streaming_job = StreamingJob::find_by_id(*table_id)
@@ -289,6 +291,7 @@ impl ScaleController {
 
         let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
+        ensure_not_loading_bounded(&txn, policy.keys().copied()).await?;
 
         for (table_id, policy) in &policy {
             let streaming_job = StreamingJob::find_by_id(*table_id)
@@ -442,6 +445,7 @@ impl ScaleController {
             .into_tuple()
             .all(&txn)
             .await?;
+        ensure_not_loading_bounded(&txn, job_ids.iter().copied()).await?;
         ensure_not_refreshing(&txn, job_ids).await?;
         let commands = build_reschedule_intent_for_fragments(&txn, target_fragment_ids).await?;
 
@@ -1332,6 +1336,13 @@ impl GlobalStreamManager {
                 .into_iter()
                 .filter(|job| job.current_status != RefreshState::Idle)
                 .map(|job| job.table_id.as_job_id()),
+        );
+        // Bounded loads keep their original actor set until completion.
+        blocked_jobs.extend(
+            self.metadata_manager
+                .list_unfinished_bounded_jobs()
+                .await?
+                .into_keys(),
         );
         let has_blocked_jobs = !blocked_jobs.is_empty();
 

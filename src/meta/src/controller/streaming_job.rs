@@ -78,6 +78,7 @@ use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
 use crate::barrier::Command;
+use crate::barrier::bounded_progress::ensure_not_loading_bounded;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{
     CatalogController, DropTableConnectorContext, load_object_models,
@@ -696,12 +697,28 @@ impl CatalogController {
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
 
+                let refresh_mode = src
+                    .as_ref()
+                    .map(|source| {
+                        RefreshMode::from_proto(source.refresh_mode.as_ref())
+                            .expect("frontend should build a valid refresh mode")
+                    })
+                    .unwrap_or_default();
+
+                if let Some(source) = src.as_ref()
+                    && refresh_mode.is_bounded()
+                {
+                    BoundedJob::insert(bounded_job::ActiveModel {
+                        job_id: Set(job_id),
+                        source_id: Set(source.id),
+                        completed_at: Set(None),
+                    })
+                    .exec(&txn)
+                    .await?;
+                }
+
                 if table.refreshable {
-                    let trigger_interval_secs = RefreshMode::from_proto(
-                        src.as_ref()
-                            .and_then(|source_catalog| source_catalog.refresh_mode.as_ref()),
-                    )?
-                    .refresh_interval_sec();
+                    let trigger_interval_secs = refresh_mode.refresh_interval_sec();
 
                     RefreshJob::insert(refresh_job::ActiveModel {
                         table_id: Set(table.id),
@@ -1551,6 +1568,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
+        ensure_not_loading_bounded(&txn, [id]).await?;
         // 1. check version.
         streaming_job.verify_version_for_replace(&txn).await?;
         // 2. check concurrent replace.
