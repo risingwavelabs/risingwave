@@ -832,6 +832,33 @@
     BatchProject { exprs: [GenerateSeries(1:Int32, $0)] }
     └─BatchProjectSet { select_list: [GenerateSeries(1:Int32, $0)] }
       └─BatchValues { rows: [[1:Int32]] }
+- name: an ambiguous correlated reference does not resolve to an outer query column
+  sql: |
+    create table a (a1 int);
+    create table b (b1 int);
+    select (select count(*) from (select 100 as a1) t1, (select 200 as a1) t2 where exists (select 1 from b where b1 > a1)) from a;
+  binder_error: |
+    Failed to bind expression: (SELECT count(*) FROM (SELECT 100 AS a1) AS t1, (SELECT 200 AS a1) AS t2 WHERE EXISTS (SELECT 1 FROM b WHERE b1 > a1))
+
+    Caused by these errors (recent errors listed first):
+      1: Failed to bind expression: EXISTS (SELECT 1 FROM b WHERE b1 > a1)
+      2: Failed to bind expression: b1 > a1
+      3: Invalid reference: column reference "a1" is ambiguous
+- name: correlated reference to a column merged by FULL JOIN USING
+  sql: |
+    create table t1 (x int);
+    create table t2 (x int);
+    create table t3 (y int);
+    select x from t1 full join t2 using (x) where exists (select 1 from t3 where y = x);
+  logical_plan: |-
+    LogicalProject { exprs: [Coalesce(t1.x, t2.x) as $expr1] }
+    └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+      ├─LogicalJoin { type: FullOuter, on: (t1.x = t2.x), output: all }
+      │ ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id, t1._rw_timestamp] }
+      │ └─LogicalScan { table: t2, columns: [t2.x, t2._row_id, t2._rw_timestamp] }
+      └─LogicalProject { exprs: [1:Int32] }
+        └─LogicalFilter { predicate: (t3.y = Coalesce(CorrelatedInputRef { index: 0, correlated_id: 1 }, CorrelatedInputRef { index: 3, correlated_id: 1 })) }
+          └─LogicalScan { table: t3, columns: [t3.y, t3._row_id, t3._rw_timestamp] }
 - name: array subquery
   sql: |
     select Array(select 1 union select 2);

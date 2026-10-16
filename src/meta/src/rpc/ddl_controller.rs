@@ -42,6 +42,7 @@ use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
 use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
@@ -749,11 +750,11 @@ impl DdlController {
             .run_command(database_id, Command::ResetSource { source_id })
             .await?;
 
-        // RESET SOURCE doesn't modify catalog, so return the current catalog version
+        // RESET SOURCE doesn't modify catalog, so return the current catalog version.
         let version = self
             .metadata_manager
             .catalog_controller
-            .notify_frontend_trivial()
+            .current_notification_version()
             .await;
         Ok(version)
     }
@@ -1405,7 +1406,10 @@ impl DdlController {
                     self.iceberg_pk_index_sink_manager
                         .register_sink(
                             sink.id,
-                            crate::barrier::to_partial_graph_id(sink.database_id, None),
+                            crate::barrier::to_partial_graph_id(
+                                sink.database_id,
+                                Some(sink.id.as_job_id()),
+                            ),
                             iceberg_config,
                         )
                         .await
@@ -1620,7 +1624,20 @@ impl DdlController {
 
         let job_id = streaming_job.id();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
+        if let StreamingJob::Table(_, table, _) = &streaming_job
+            && self
+                .metadata_manager
+                .catalog_controller
+                .get_refresh_job_state(table.id)
+                .await?
+                .is_some_and(|state| state != RefreshState::Idle)
+        {
+            bail!(
+                "Cannot alter table {} because it is being refreshed",
+                table.name
+            );
+        }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         // Ensure the max parallelism unchanged before replacing table.
@@ -2175,14 +2192,18 @@ impl DdlController {
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
         if let Some(to_remove_source_id) = drop_table_associated_source_id {
-            // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
-            debug_assert!(old_internal_table_ids.len() == 1);
+            let old_internal_tables = self
+                .metadata_manager
+                .get_table_catalog_by_ids(&old_internal_table_ids)
+                .await?;
+            let to_remove_state_table_ids = fragment_graph
+                .fit_internal_tables_for_drop_connector(&old_fragments, old_internal_tables)?;
 
             drop_table_connector_ctx = Some(DropTableConnectorContext {
                 // we do not remove the original table catalog as it's still needed for the streaming job
-                // just need to remove the ref to the state table
+                // just need to remove the refs to the state tables of the connector
                 to_change_streaming_job_id: id,
-                to_remove_state_table_id: old_internal_table_ids[0], // asserted before
+                to_remove_state_table_ids,
                 to_remove_source_id,
             });
         } else if stream_job.is_materialized_view() {
@@ -2468,7 +2489,7 @@ impl DdlController {
                 let catalog_version = self
                     .metadata_manager
                     .catalog_controller
-                    .notify_frontend_trivial()
+                    .current_notification_version()
                     .await;
                 let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
                 return Ok(WaitVersion {

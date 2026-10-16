@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use rand::Rng;
+use rand::{Rng, RngExt as _};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash, Deserialize)]

@@ -48,11 +48,7 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             .map(|i| *i as usize)
             .collect();
         let order_key_index = node.get_order_by()[0].get_column_index() as usize;
-        let vnodes = Some(Arc::new(
-            params
-                .vnode_bitmap
-                .expect("vnodes not set for EOWC over window"),
-        ));
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
         let state_table =
             StateTableBuilder::new(node.get_state_table()?, store.clone(), vnodes.clone())
                 .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)

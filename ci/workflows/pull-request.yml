@@ -263,7 +263,7 @@ steps:
           <<: *docker-compose
           run: source-cdc-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "end-to-end pulsar source test"

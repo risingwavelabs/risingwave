@@ -16,12 +16,43 @@
 
 package com.risingwave.connector.source.common;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import java.util.List;
 import org.junit.Test;
 
 public class MySqlValidatorTest {
+    @Test
+    public void testPrimaryKeyMismatch() {
+        for (var upstream :
+                List.of(
+                        List.<String>of(),
+                        List.of("tenant", "id"),
+                        List.of("id"),
+                        List.of("id", "tenant", "extra"),
+                        List.of("id", "other"))) {
+            var error =
+                    assertThrows(
+                            StatusRuntimeException.class,
+                            () ->
+                                    MySqlValidator.primaryKeyCheck(
+                                            List.of("id", "tenant"), upstream));
+            assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
+        }
+    }
+
+    @Test
+    public void testEmptyPrimaryKeysAreRejected() {
+        assertThrows(
+                StatusRuntimeException.class,
+                () -> MySqlValidator.primaryKeyCheck(List.of(), List.of()));
+    }
+
     @Test
     public void testBinlogMonitorSatisfiesReplicationClient() {
         assertTrue(

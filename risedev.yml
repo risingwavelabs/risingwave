@@ -901,6 +901,14 @@ profile:
         address: schemaregistry
         port: 8082
 
+  local-oracle-cdc-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: oracle
+
   ci-source-cdc-test:
     config-path: src/config/ci-recovery.toml
     steps:
@@ -922,6 +930,9 @@ profile:
         address: db
         user: postgres
         password: post\tgres
+        user-managed: true
+      - use: oracle
+        address: oracle
         user-managed: true
 
   ci-source-pulsar-test:
@@ -1910,6 +1921,25 @@ template:
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
     user-managed: false
+
+  # Oracle Database Free service backed by Docker.
+  oracle:
+    id: oracle-${port}
+
+    address: "127.0.0.1"
+    port: 1521
+
+    user: "C##RW_VALIDATOR"
+    password: "OracleTest123"
+    database: "FREE"
+    pdb: "FREEPDB1"
+
+    user-managed: false
+
+    # Keep the official Oracle image as an external test dependency.
+    image: "container-registry.oracle.com/database/free:23.9.0.0"
+
+    persist-data: false
 
   # PostgreSQL service backed by docker.
   postgres:

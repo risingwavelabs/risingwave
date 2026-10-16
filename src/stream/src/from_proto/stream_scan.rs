@@ -76,7 +76,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .map(ColumnId::from)
                     .collect_vec();
 
-                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let vnodes = Some(Arc::new(params.vnode_bitmap));
 
                 let state_table = if let Ok(table) = node.get_state_table() {
                     Some(
@@ -110,7 +110,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .map(ColumnId::from)
                     .collect_vec();
 
-                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let vnodes = Some(Arc::new(params.vnode_bitmap));
 
                 let state_table = node.get_state_table().unwrap();
                 let state_table =
@@ -168,7 +168,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .map(ColumnId::from)
                     .collect_vec();
 
-                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let vnodes = Some(Arc::new(params.vnode_bitmap));
                 let barrier_rx = params
                     .local_barrier_manager
                     .subscribe_barrier(params.actor_context.id);

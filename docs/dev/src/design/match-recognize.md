@@ -299,8 +299,10 @@ Worth stating plainly, because the two cases differ and only one of them recover
 **With `WITHIN`.** A starved partition still sheds matches, but only through window closure, and
 only matches the truncated scan reached. Each watermark visit re-derives the tail (spending the
 whole budget), then emits the head if its window has closed. Emitting a provisional match rebuilds
-the matcher under that same spent budget, which empties the tail and ends the drain — so the
-practical rate is about **one match per watermark visit**, and the deadline prune contributes
+the matcher under that same spent budget, which empties the tail and ends the drain; emitting a
+*frozen* one keeps it — the eviction rebase shifts the truncated scan's cursor and found prefix
+down with the rows instead of dropping them (see below) — so the practical rate is the frozen run
+plus about **one provisional match per watermark visit**, and the deadline prune contributes
 nothing while the matcher is incomplete. Emission latency degrades from decidability to window
 closure, and the retained set shrinks only at that rate: if arrivals per watermark interval exceed
 it, the partition still grows. This is an improvement on shedding nothing; it is not convergence.
@@ -333,8 +335,14 @@ remembered instead of re-walked:
   refresh on the next watermark visit, so an idle partition resumes it too. The executor's own
   liveness walks (the dead-prefix prune, the emission gate's gap check) skip that prefix as well.
 
-Both memories are forgotten wherever the rows a verdict was computed over can change: truncation,
-and the eviction rebase. What remains inherently per-visit is a run that stays *alive* — `a{600} b`
+Both memories are forgotten wherever the rows a verdict was computed over can change — truncation —
+and merely *shifted* by the eviction rebase: a verdict about a surviving start was computed over
+surviving rows (the binder keeps every `PREV` inside the match span, running navigation reads
+inside the match, and there is no forward navigation), so the matchless and dead prefixes, the scan
+cursor and a truncated scan's found prefix all move down with the rows. Incompleteness survives the
+rebase with them, so the next visit resumes the scan before the deadline prune may act on absence —
+clearing it there turned partial information into a completed-scan verdict and the prune deleted
+the rows of every match the truncated scan never reached (#27197). What remains inherently per-visit is a run that stays *alive* — `a{600} b`
 over an unbroken run of `a` rows keeps every start alive until a `b` arrives or its `WITHIN` window
 closes — where each rescan re-walks the live starts and the budget throttles the partition as
 described above; `WITHIN` is what bounds that.
