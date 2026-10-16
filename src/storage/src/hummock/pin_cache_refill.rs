@@ -41,6 +41,8 @@ pub(crate) struct PinCacheObjectChanges {
 /// Tracks physical object membership through pinned logical SST references.
 ///
 /// `object_ref_counts` counts references in `planning_version` under `pinned_table_ids`.
+/// Each logical SST contributes once even if several of its tables are pinned. These counts
+/// are a derived membership index, not reader counts or the backend's registered object set.
 /// The planning version may be ahead of the resident snapshots supplied by the caller.
 pub(crate) struct PinCacheRefillController {
     pinned_table_ids: HashSet<TableId>,
