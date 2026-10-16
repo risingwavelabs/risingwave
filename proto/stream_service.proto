@@ -121,6 +121,21 @@ message BarrierCompleteResponse {
     uint32 associated_source_id = 3;
   }
   repeated ListFinishedSource list_finished_sources = 16;
+  message BoundedLoadProgress {
+    // Lister actors only (iceberg, object store, files): no more work will be handed out to readers
+    message ListSealed {}
+    // All pinned input assigned to this reader has been consumed.
+    message ReaderDone {}
+
+    uint32 actor_id = 1;
+    uint32 fragment_id = 2;
+    uint64 generation = 3;
+    oneof progress {
+      ListSealed list_sealed = 4;
+      ReaderDone reader_done = 5;
+    }
+  }
+  repeated BoundedLoadProgress bounded_load_progress = 20;
   // SourceExecutor reports that CDC source has updated offset at least once.
   // Meta will mark the CDC source as created only after receiving this notification.
   message CdcSourceOffsetUpdated {
