@@ -63,45 +63,93 @@ pub struct TemporalJoinExecutor<
     is_broadcast: bool,
 }
 
-#[derive(Default)]
-pub struct JoinEntry {
-    /// pk -> row
-    cached: HashMap<OwnedRow, OwnedRow>,
-    kv_heap_size: KvSize,
+/// The right-side rows of one join key.
+pub enum JoinEntry {
+    /// All rows of the key, by stream key.
+    Cached {
+        /// pk -> row
+        cached: HashMap<OwnedRow, OwnedRow>,
+        kv_heap_size: KvSize,
+    },
+    /// The key has more rows than `entry_state_max_rows`, so they are not cached. Lookups read
+    /// them from the right table.
+    Overflow,
+}
+
+impl Default for JoinEntry {
+    fn default() -> Self {
+        Self::Cached {
+            cached: HashMap::new(),
+            kv_heap_size: KvSize::default(),
+        }
+    }
 }
 
 impl EstimateSize for JoinEntry {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: Add internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
-        self.kv_heap_size.size()
+        match self {
+            // TODO: Add internal size.
+            // https://github.com/risingwavelabs/risingwave/issues/9713
+            Self::Cached { kv_heap_size, .. } => kv_heap_size.size(),
+            Self::Overflow => 0,
+        }
     }
 }
 
 impl JoinEntry {
-    /// Insert into the cache.
+    /// Insert into the cache. No-op for an overflowed entry, whose rows are read from the right
+    /// table.
     pub fn insert(&mut self, key: OwnedRow, value: OwnedRow) {
+        let Self::Cached {
+            cached,
+            kv_heap_size,
+        } = self
+        else {
+            return;
+        };
         // Lookup might refill the cache before the `insert` messages from the temporal side
         // upstream.
-        if let Entry::Vacant(e) = self.cached.entry(key) {
-            self.kv_heap_size.add(e.key(), &value);
+        if let Entry::Vacant(e) = cached.entry(key) {
+            kv_heap_size.add(e.key(), &value);
             e.insert(value);
         } else {
             panic!("value {:?} double insert", value);
         }
     }
 
-    /// Delete from the cache.
+    /// Delete from the cache. No-op for an overflowed entry.
     pub fn remove(&mut self, key: &OwnedRow) {
-        if let Some(value) = self.cached.remove(key) {
-            self.kv_heap_size.sub(key, &value);
+        let Self::Cached {
+            cached,
+            kv_heap_size,
+        } = self
+        else {
+            return;
+        };
+        if let Some(value) = cached.remove(key) {
+            kv_heap_size.sub(key, &value);
         } else {
             panic!("key {:?} should be in the cache", key);
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.cached.is_empty()
+    /// Drops the cached rows and marks the entry as overflowed if it holds more than `max_rows`
+    /// rows. 0 means unlimited.
+    fn overflow_if_exceeds(&mut self, max_rows: usize) {
+        if max_rows > 0
+            && let Some(cached) = self.cached_rows()
+            && cached.len() > max_rows
+        {
+            *self = Self::Overflow;
+        }
+    }
+
+    /// Returns the cached rows, or `None` if the entry has overflowed.
+    fn cached_rows(&self) -> Option<&HashMap<OwnedRow, OwnedRow>> {
+        match self {
+            Self::Cached { cached, .. } => Some(cached),
+            Self::Overflow => None,
+        }
     }
 }
 
@@ -110,6 +158,9 @@ struct TemporalSide<K: HashKey, S: StateStore, SD: ValueRowSerde> {
     table_stream_key_indices: Vec<usize>,
     cache: ManagedLruCache<K, JoinEntry>,
     join_key_data_types: Vec<DataType>,
+    /// Maximum number of rows cached per join key. A key with more rows is cached as
+    /// [`JoinEntry::Overflow`]. 0 means unlimited.
+    entry_state_max_rows: usize,
 }
 
 impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
@@ -140,15 +191,32 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
                         .await?;
 
                     let mut entry = JoinEntry::default();
+                    let mut row_count = 0;
 
                     pin_mut!(iter);
                     while let Some(row) = iter.next().await {
                         let row: OwnedRow = row?;
+                        row_count += 1;
+                        if self.entry_state_max_rows > 0 && row_count > self.entry_state_max_rows {
+                            // Stop reading: lookups for this key will read the right table.
+                            entry = JoinEntry::Overflow;
+                            break;
+                        }
                         entry.insert(
                             row.as_ref()
                                 .project(&self.table_stream_key_indices)
                                 .into_owned_row(),
                             row,
+                        );
+                    }
+                    if matches!(entry, JoinEntry::Overflow) {
+                        tracing::warn!(
+                            target: "high_join_amplification",
+                            entry_state_max_rows = self.entry_state_max_rows,
+                            table_id = %self.source.table_id(),
+                            join_key = ?pk_prefix,
+                            "temporal join key has more rows than entry_state_max_rows; \
+                             its rows will be read from the right table instead of cached",
                         );
                     }
                     let key = key.clone();
@@ -170,6 +238,21 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
         self.cache.peek(key).expect("key should exist")
     }
 
+    /// Reads the rows of an overflowed key from the right table, without caching them.
+    async fn iter_overflowed_rows(
+        &self,
+        key: &K,
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<OwnedRow>> + '_> {
+        let pk_prefix = key.deserialize(&self.join_key_data_types)?;
+        self.source
+            .iter_with_prefix(
+                pk_prefix,
+                &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                PrefetchOptions::default(),
+            )
+            .await
+    }
+
     fn update(
         &mut self,
         chunks: Vec<StreamChunk>,
@@ -188,7 +271,8 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
                     let stream_key = row.project(right_stream_key_indices).into_owned_row();
                     match op {
                         Op::Insert | Op::UpdateInsert => {
-                            entry.insert(stream_key, row.into_owned_row())
+                            entry.insert(stream_key, row.into_owned_row());
+                            entry.overflow_if_exceeds(self.entry_state_max_rows);
                         }
                         Op::Delete | Op::UpdateDelete => entry.remove(&stream_key),
                     };
@@ -499,16 +583,27 @@ pub(super) mod phase1 {
 
             if APPEND_ONLY {
                 // Append-only temporal join
-                if key.null_bitmap().is_subset(null_matched)
-                    && let join_entry = right_table.force_peek(&key)
-                    && !join_entry.is_empty()
-                {
-                    matched = true;
-                    for right_row in join_entry.cached.values() {
-                        if let Some(chunk) =
-                            E::append_matched_row(op, &mut builder, left_row, right_row)
-                        {
-                            yield chunk;
+                if key.null_bitmap().is_subset(null_matched) {
+                    if let Some(cached) = right_table.force_peek(&key).cached_rows() {
+                        for right_row in cached.values() {
+                            matched = true;
+                            if let Some(chunk) =
+                                E::append_matched_row(op, &mut builder, left_row, right_row)
+                            {
+                                yield chunk;
+                            }
+                        }
+                    } else {
+                        let right_rows = right_table.iter_overflowed_rows(&key).await?;
+                        pin_mut!(right_rows);
+                        while let Some(right_row) = right_rows.next().await {
+                            let right_row = right_row?;
+                            matched = true;
+                            if let Some(chunk) =
+                                E::append_matched_row(op, &mut builder, left_row, right_row)
+                            {
+                                yield chunk;
+                            }
                         }
                     }
                 }
@@ -531,24 +626,44 @@ pub(super) mod phase1 {
                 let memo_table = memo_table.as_mut().unwrap();
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        if key.null_bitmap().is_subset(null_matched)
-                            && let join_entry = right_table.force_peek(&key)
-                            && !join_entry.is_empty()
-                        {
-                            matched = true;
-                            for right_row in join_entry.cached.values() {
-                                let right_row: OwnedRow = right_row.clone();
-                                // Insert into memo table
-                                memo_table.insert(right_row.clone().chain(
-                                    left_row.project(memo_table_lookup_prefix).into_owned_row(),
-                                ));
-                                if let Some(chunk) = E::append_matched_row(
-                                    Op::Insert,
-                                    &mut builder,
-                                    left_row,
-                                    right_row,
-                                ) {
-                                    yield chunk;
+                        if key.null_bitmap().is_subset(null_matched) {
+                            // Every matched right row is persisted to the memo table, whether it
+                            // comes from the cache or, for an overflowed key, from the right table.
+                            if let Some(cached) = right_table.force_peek(&key).cached_rows() {
+                                for right_row in cached.values() {
+                                    matched = true;
+                                    let right_row: OwnedRow = right_row.clone();
+                                    // Insert into memo table
+                                    memo_table.insert(right_row.clone().chain(
+                                        left_row.project(memo_table_lookup_prefix).into_owned_row(),
+                                    ));
+                                    if let Some(chunk) = E::append_matched_row(
+                                        Op::Insert,
+                                        &mut builder,
+                                        left_row,
+                                        right_row,
+                                    ) {
+                                        yield chunk;
+                                    }
+                                }
+                            } else {
+                                let right_rows = right_table.iter_overflowed_rows(&key).await?;
+                                pin_mut!(right_rows);
+                                while let Some(right_row) = right_rows.next().await {
+                                    let right_row = right_row?;
+                                    matched = true;
+                                    // Insert into memo table
+                                    memo_table.insert(right_row.clone().chain(
+                                        left_row.project(memo_table_lookup_prefix).into_owned_row(),
+                                    ));
+                                    if let Some(chunk) = E::append_matched_row(
+                                        Op::Insert,
+                                        &mut builder,
+                                        left_row,
+                                        right_row,
+                                    ) {
+                                        yield chunk;
+                                    }
                                 }
                             }
                         }
@@ -638,6 +753,7 @@ impl<
         let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
 
         let metrics = metrics.new_temporal_join_metrics(table.table_id(), ctx.id, ctx.fragment_id);
+        let entry_state_max_rows = ctx.config.developer.temporal_join_entry_state_max_rows;
 
         Self {
             ctx,
@@ -649,6 +765,7 @@ impl<
                 table_stream_key_indices,
                 cache,
                 join_key_data_types,
+                entry_state_max_rows,
             },
             left_join_keys,
             right_join_keys,
@@ -898,6 +1015,7 @@ mod tests {
 
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::config::StreamingConfig;
     use risingwave_common::hash::Key32;
     use risingwave_common::types::{DataType, ScalarRefImpl};
     use risingwave_common::util::epoch::{EpochPair, test_epoch};
@@ -914,6 +1032,416 @@ mod tests {
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, ExecutorInfo, JoinType};
+
+    fn i32_row(values: &[i32]) -> OwnedRow {
+        OwnedRow::new(values.iter().map(|v| Some((*v).into())).collect())
+    }
+
+    fn collect_i32_rows(chunk: &StreamChunk, rows: &mut Vec<(Op, Vec<i32>)>) {
+        for (op, row) in chunk.rows() {
+            let op = match op {
+                Op::Insert | Op::UpdateInsert => Op::Insert,
+                Op::Delete | Op::UpdateDelete => Op::Delete,
+            };
+            let row = (0..row.len())
+                .map(|i| match row.datum_at(i).unwrap() {
+                    ScalarRefImpl::Int32(v) => v,
+                    _ => panic!("expected Int32"),
+                })
+                .collect();
+            rows.push((op, row));
+        }
+    }
+
+    /// A temporal join over a right table `(key INT, seq INT, val INT)` with pk `(key, seq)`,
+    /// joined on `left.key = right.key`, with output `[left_key, left_val, key, seq, val]`.
+    /// `right_rows` are committed to the right table before the executor starts.
+    struct OverflowTest {
+        test_env: risingwave_hummock_test::test_utils::HummockTestEnv,
+        table_ids: HashSet<TableId>,
+        left_tx: crate::executor::test_utils::MessageSender,
+        right_tx: crate::executor::test_utils::MessageSender,
+        stream: BoxedMessageStream,
+        epoch: u64,
+    }
+
+    impl OverflowTest {
+        async fn new<const APPEND_ONLY: bool>(
+            right_rows: &[[i32; 3]],
+            entry_state_max_rows: usize,
+        ) -> Self {
+            let test_env = prepare_hummock_test_env().await;
+            let table_id = TableId::new(1);
+            let right_col_descs = vec![
+                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32),
+            ];
+            let pbtable = gen_pbtable(
+                table_id,
+                right_col_descs,
+                vec![OrderType::ascending(), OrderType::ascending()],
+                vec![0, 1],
+                2,
+            );
+            test_env.register_table(pbtable.clone()).await;
+
+            let memo_table_id = TableId::new(2);
+            let memo_table = if APPEND_ONLY {
+                None
+            } else {
+                // Memo table: right row (key, seq, val) + memo prefix (left_key, left_stream_key).
+                let memo_col_descs = (1..=5)
+                    .map(|i| ColumnDesc::unnamed(ColumnId::new(i), DataType::Int32))
+                    .collect();
+                let memo_pbtable = gen_pbtable(
+                    memo_table_id,
+                    memo_col_descs,
+                    vec![OrderType::ascending(); 4],
+                    vec![3, 4, 0, 1],
+                    2,
+                );
+                test_env.register_table(memo_pbtable.clone()).await;
+                Some(
+                    StateTable::<HummockStorage>::from_table_catalog(
+                        &memo_pbtable,
+                        test_env.storage.clone(),
+                        None,
+                    )
+                    .await,
+                )
+            };
+            let table_ids = if APPEND_ONLY {
+                HashSet::from_iter([table_id])
+            } else {
+                HashSet::from_iter([table_id, memo_table_id])
+            };
+
+            {
+                let mut setup_table =
+                    StateTable::<HummockStorage>::from_table_catalog_inconsistent_op(
+                        &pbtable,
+                        test_env.storage.clone(),
+                        None,
+                    )
+                    .await;
+                test_env
+                    .storage
+                    .start_epoch(test_epoch(1), table_ids.clone());
+                setup_table
+                    .init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
+                    .await
+                    .unwrap();
+                for row in right_rows {
+                    setup_table.insert(i32_row(row));
+                }
+                test_env
+                    .storage
+                    .start_epoch(test_epoch(2), table_ids.clone());
+                setup_table
+                    .commit_for_test(EpochPair::new_test_epoch(test_epoch(2)))
+                    .await
+                    .unwrap();
+                test_env.commit_epoch(test_epoch(1)).await;
+            }
+
+            let right_table = StateTableBuilder::<_, BasicSerde, true, _>::new(
+                &pbtable,
+                test_env.storage.clone(),
+                None,
+            )
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .with_output_column_ids(vec![ColumnId::new(1), ColumnId::new(2), ColumnId::new(3)])
+            .forbid_preload_all_rows()
+            .build()
+            .await;
+
+            let int32_schema =
+                |n| Schema::new((0..n).map(|_| Field::unnamed(DataType::Int32)).collect());
+            let (left_tx, left_source) = MockSource::channel();
+            let left_executor = left_source.into_executor(int32_schema(2), vec![1]);
+            let (right_tx, right_source) = MockSource::channel();
+            let right_executor = right_source.into_executor(int32_schema(3), vec![0, 1]);
+            let info =
+                ExecutorInfo::for_test(int32_schema(5), vec![], "TemporalJoinTest".to_owned(), 0);
+
+            let mut config = StreamingConfig::default();
+            config.developer.temporal_join_entry_state_max_rows = entry_state_max_rows;
+            let executor = TemporalJoinExecutor::<
+                Key32,
+                HummockStorage,
+                BasicSerde,
+                { JoinType::Inner },
+                APPEND_ONLY,
+            >::new(
+                ActorContext::for_test_with_config(0, config),
+                info,
+                left_executor,
+                right_executor,
+                right_table,
+                vec![0],
+                vec![0],
+                vec![false],
+                None,
+                vec![0, 1, 2, 3, 4],
+                vec![0, 1],
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(StreamingMetrics::unused()),
+                1024,
+                vec![DataType::Int32],
+                memo_table,
+                false,
+            );
+
+            let mut test = Self {
+                test_env,
+                table_ids,
+                left_tx,
+                right_tx,
+                stream: Box::new(executor).execute(),
+                epoch: 2,
+            };
+            test.left_tx
+                .push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+            test.right_tx.push_barrier_with_prev_epoch_for_test(
+                test_epoch(2),
+                test_epoch(1),
+                false,
+            );
+            test.stream.expect_barrier().await;
+            test
+        }
+
+        /// Sends the chunks for the current epoch, then a barrier, and returns the output rows of
+        /// the epoch sorted.
+        async fn epoch(&mut self, left: Option<&str>, right: Option<&str>) -> Vec<(Op, Vec<i32>)> {
+            if let Some(right) = right {
+                self.right_tx.push_chunk(StreamChunk::from_pretty(right));
+            }
+            if let Some(left) = left {
+                self.left_tx.push_chunk(StreamChunk::from_pretty(left));
+            }
+            let prev = self.epoch;
+            self.epoch += 1;
+            self.test_env
+                .storage
+                .start_epoch(test_epoch(self.epoch), self.table_ids.clone());
+            self.left_tx.push_barrier_with_prev_epoch_for_test(
+                test_epoch(self.epoch),
+                test_epoch(prev),
+                false,
+            );
+            self.right_tx.push_barrier_with_prev_epoch_for_test(
+                test_epoch(self.epoch),
+                test_epoch(prev),
+                false,
+            );
+            let mut rows = vec![];
+            loop {
+                match self.stream.next().await.unwrap().unwrap() {
+                    Message::Chunk(chunk) => collect_i32_rows(&chunk, &mut rows),
+                    Message::Barrier(_) => break,
+                    Message::Watermark(_) => {}
+                }
+            }
+            rows.sort();
+            rows
+        }
+    }
+
+    #[test]
+    fn test_join_entry_overflow_if_exceeds() {
+        let mut entry = JoinEntry::default();
+        for i in 0..3 {
+            entry.insert(i32_row(&[i]), i32_row(&[i]));
+            entry.overflow_if_exceeds(3);
+        }
+        assert_eq!(entry.cached_rows().unwrap().len(), 3);
+
+        // 0 means unlimited.
+        entry.insert(i32_row(&[3]), i32_row(&[3]));
+        entry.overflow_if_exceeds(0);
+        assert_eq!(entry.cached_rows().unwrap().len(), 4);
+
+        entry.overflow_if_exceeds(3);
+        assert!(matches!(entry, JoinEntry::Overflow));
+        assert_eq!(entry.estimated_heap_size(), 0);
+
+        // Inserts and removes are no-ops once overflowed.
+        entry.insert(i32_row(&[4]), i32_row(&[4]));
+        entry.remove(&i32_row(&[0]));
+        assert!(matches!(entry, JoinEntry::Overflow));
+    }
+
+    /// Right rows: key 1 has 3 rows, key 2 has 1 row.
+    const OVERFLOW_TEST_RIGHT_ROWS: &[[i32; 3]] = &[[1, 1, 10], [1, 2, 20], [1, 3, 30], [2, 1, 40]];
+
+    fn ins(row: &[i32]) -> (Op, Vec<i32>) {
+        (Op::Insert, row.to_vec())
+    }
+
+    fn del(row: &[i32]) -> (Op, Vec<i32>) {
+        (Op::Delete, row.to_vec())
+    }
+
+    /// With a limit of 2, key 1 (3 rows) overflows and key 2 (1 row) is cached. Both must join to
+    /// the same rows as without a limit, including right-side changes after the key was looked up.
+    async fn test_entry_state_max_rows<const APPEND_ONLY: bool>(entry_state_max_rows: usize) {
+        let mut t = Box::pin(OverflowTest::new::<APPEND_ONLY>(
+            OVERFLOW_TEST_RIGHT_ROWS,
+            entry_state_max_rows,
+        ))
+        .await;
+
+        // Look up both keys.
+        let rows = t
+            .epoch(
+                Some(
+                    " i   i
+                    + 1 100
+                    + 2 200",
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(
+            rows,
+            vec![
+                ins(&[1, 100, 1, 1, 10]),
+                ins(&[1, 100, 1, 2, 20]),
+                ins(&[1, 100, 1, 3, 30]),
+                ins(&[2, 200, 2, 1, 40]),
+            ]
+        );
+
+        // Change the right side of both keys after they have been looked up.
+        let rows = t
+            .epoch(
+                None,
+                Some(
+                    " i i  i
+                    + 1 4 50
+                    - 1 2 20
+                    + 2 2 60",
+                ),
+            )
+            .await;
+        assert_eq!(rows, vec![]);
+
+        // Later lookups must see the changes.
+        let rows = t
+            .epoch(
+                Some(
+                    " i   i
+                    + 1 101
+                    + 2 201",
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(
+            rows,
+            vec![
+                ins(&[1, 101, 1, 1, 10]),
+                ins(&[1, 101, 1, 3, 30]),
+                ins(&[1, 101, 1, 4, 50]),
+                ins(&[2, 201, 2, 1, 40]),
+                ins(&[2, 201, 2, 2, 60]),
+            ]
+        );
+
+        if !APPEND_ONLY {
+            // Deleting a left row retracts exactly the right rows it was joined with, read from the
+            // memo table rather than the right table.
+            let rows = t
+                .epoch(
+                    Some(
+                        " i   i
+                        - 1 100
+                        - 2 201",
+                    ),
+                    None,
+                )
+                .await;
+            assert_eq!(
+                rows,
+                vec![
+                    del(&[1, 100, 1, 1, 10]),
+                    del(&[1, 100, 1, 2, 20]),
+                    del(&[1, 100, 1, 3, 30]),
+                    del(&[2, 201, 2, 1, 40]),
+                    del(&[2, 201, 2, 2, 60]),
+                ]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_temporal_join_entry_state_max_rows_append_only() {
+        Box::pin(test_entry_state_max_rows::<true>(2)).await;
+    }
+
+    #[tokio::test]
+    async fn test_temporal_join_entry_state_max_rows_non_append_only() {
+        Box::pin(test_entry_state_max_rows::<false>(2)).await;
+    }
+
+    /// The same inputs with the limit disabled must give the same results.
+    #[tokio::test]
+    async fn test_temporal_join_entry_state_max_rows_disabled() {
+        Box::pin(test_entry_state_max_rows::<true>(0)).await;
+        Box::pin(test_entry_state_max_rows::<false>(0)).await;
+    }
+
+    /// A cached key that grows past the limit through right-side inserts becomes overflowed, and
+    /// lookups still return all of its rows.
+    #[tokio::test]
+    async fn test_temporal_join_entry_grows_past_max_rows() {
+        let mut t = Box::pin(OverflowTest::new::<true>(OVERFLOW_TEST_RIGHT_ROWS, 2)).await;
+
+        // Key 2 has 1 row, so it is cached.
+        let rows = t
+            .epoch(
+                Some(
+                    " i   i
+                    + 2 200",
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(rows, vec![ins(&[2, 200, 2, 1, 40])]);
+
+        // Grow key 2 to 3 rows.
+        let rows = t
+            .epoch(
+                None,
+                Some(
+                    " i i  i
+                    + 2 2 50
+                    + 2 3 60",
+                ),
+            )
+            .await;
+        assert_eq!(rows, vec![]);
+
+        let rows = t
+            .epoch(
+                Some(
+                    " i   i
+                    + 2 201",
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(
+            rows,
+            vec![
+                ins(&[2, 201, 2, 1, 40]),
+                ins(&[2, 201, 2, 2, 50]),
+                ins(&[2, 201, 2, 3, 60]),
+            ]
+        );
+    }
 
     /// Tests that a temporal join on a pk-prefix (join key is a strict prefix of the right table's
     /// pk) correctly merges rows committed in epoch1 with rows staged/committed during epoch2, and
