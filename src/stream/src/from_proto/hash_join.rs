@@ -43,7 +43,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let is_append_only = node.is_append_only;
-        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
+        let vnodes = Arc::new(params.vnode_bitmap);
 
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 

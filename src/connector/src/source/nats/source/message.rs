@@ -14,7 +14,6 @@
 
 use async_nats::HeaderMap;
 use async_nats::jetstream::Message;
-use itertools::Itertools;
 use risingwave_common::types::{
     Datum, DatumCow, DatumRef, ListValue, ScalarImpl, ScalarRefImpl, StructValue,
 };
@@ -41,36 +40,30 @@ impl NatsMeta {
         inner_field: &str,
         data_type: Option<&PbDataType>,
     ) -> Option<DatumCow<'a>> {
-        let target_value = self.headers.as_ref().and_then(|headers| {
-            headers
-                .iter()
-                .find(|(name, _)| AsRef::<str>::as_ref(*name) == inner_field)
-                .and_then(|(_, values)| values.first())
-        })?;
-
+        let headers = self.headers.as_ref()?;
+        let (_, values) = headers
+            .iter()
+            .find(|(name, _)| AsRef::<str>::as_ref(*name) == inner_field)?;
+        let target_value = values.first()?;
         Some(header_value_to_datum(target_value.as_str(), data_type))
     }
 
     pub fn extract_headers(&self) -> Option<Datum> {
-        self.headers.as_ref().map(|headers| {
-            let header_item: Vec<Datum> = headers
-                .iter()
-                .flat_map(|(name, values)| {
-                    let name_str: String = AsRef::<str>::as_ref(name).to_owned();
-                    values.iter().map(move |value| {
-                        let bytes: &[u8] = value.as_ref();
-                        Some(ScalarImpl::Struct(StructValue::new(vec![
-                            Some(ScalarImpl::Utf8(name_str.clone().into())),
-                            Some(ScalarImpl::Bytea(bytes.to_vec().into())),
-                        ])))
-                    })
-                })
-                .collect_vec();
-            Some(ScalarImpl::List(ListValue::from_datum_iter(
-                &get_kafka_header_item_datatype(),
-                header_item,
-            )))
-        })
+        let headers = self.headers.as_ref()?;
+        let header_items = headers.iter().flat_map(|(name, values)| {
+            let name: &str = name.as_ref();
+            values.iter().map(move |value| {
+                let bytes: &[u8] = value.as_ref();
+                Some(ScalarImpl::Struct(StructValue::new(vec![
+                    Some(ScalarImpl::Utf8(name.into())),
+                    Some(ScalarImpl::Bytea(bytes.into())),
+                ])))
+            })
+        });
+        Some(Some(ScalarImpl::List(ListValue::from_datum_iter(
+            &get_kafka_header_item_datatype(),
+            header_items,
+        ))))
     }
 }
 
@@ -130,6 +123,7 @@ impl NatsMessage {
 #[cfg(test)]
 mod tests {
     use async_nats::HeaderMap;
+    use itertools::Itertools as _;
     use risingwave_common::types::{DataType, ScalarImpl, ScalarRefImpl, ToOwnedDatum};
     use risingwave_pb::data::DataType as PbDataType;
 

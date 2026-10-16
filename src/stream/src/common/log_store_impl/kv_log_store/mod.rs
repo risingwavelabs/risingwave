@@ -509,7 +509,7 @@ pub struct KvLogStoreFactory<S: StateStore> {
 
     table_catalog: Table,
 
-    vnodes: Option<Arc<Bitmap>>,
+    vnodes: Arc<Bitmap>,
 
     max_buffer_row_count: usize,
     chunk_size: usize,
@@ -530,7 +530,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
     pub(crate) fn new(
         state_store: S,
         table_catalog: Table,
-        vnodes: Option<Arc<Bitmap>>,
+        vnodes: Arc<Bitmap>,
         max_buffer_row_count: usize,
         chunk_size: usize,
         metrics: KvLogStoreMetrics,
@@ -688,7 +688,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(Arc::new(bitmap)),
+            Arc::new(bitmap),
             max_row_count,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -811,7 +811,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap.clone()),
+            bitmap.clone(),
             max_row_count,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -908,7 +908,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap),
+            bitmap,
             max_row_count,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1005,7 +1005,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap.clone()),
+            bitmap.clone(),
             max_row_count,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1128,7 +1128,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap),
+            bitmap,
             max_row_count,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1228,7 +1228,7 @@ mod tests {
         let factory1 = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(vnodes1),
+            vnodes1,
             10 * TEST_DATA_SIZE,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1239,7 +1239,7 @@ mod tests {
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(vnodes2),
+            vnodes2,
             10 * TEST_DATA_SIZE,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1378,7 +1378,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(vnodes),
+            vnodes,
             10 * TEST_DATA_SIZE,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1451,7 +1451,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(Arc::new(bitmap)),
+            Arc::new(bitmap),
             0,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1601,7 +1601,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap.clone()),
+            bitmap.clone(),
             1024,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1721,7 +1721,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap.clone()),
+            bitmap.clone(),
             1024,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1792,7 +1792,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap.clone()),
+            bitmap.clone(),
             1024,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -1966,7 +1966,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap.clone()),
+            bitmap.clone(),
             max_row_count,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -2057,7 +2057,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap.clone()),
+            bitmap.clone(),
             max_row_count,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -2133,7 +2133,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap),
+            bitmap,
             max_row_count,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -2192,7 +2192,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap),
+            bitmap,
             1024,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -2322,7 +2322,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            Some(bitmap),
+            bitmap,
             1024,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -2409,7 +2409,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             old_table.clone(),
-            Some(old_bitmap),
+            old_bitmap,
             1024,
             1024,
             KvLogStoreMetrics::for_test(),
@@ -2551,7 +2551,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             new_table.clone(),
-            Some(new_bitmap.clone()),
+            new_bitmap.clone(),
             1024,
             1024,
             KvLogStoreMetrics::for_test(),

@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use risingwave_common::catalog::{CdcKeyComparison, Schema};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
@@ -178,9 +179,11 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             );
             Ok((params.info, exec).into())
         } else {
-            let vnodes = params.vnode_bitmap.map(Arc::new);
-            // cdc backfill should be singleton, so vnodes must be None.
-            assert_eq!(None, vnodes);
+            assert!(
+                params.vnode_bitmap.is_singleton(),
+                "cdc backfill should be singleton"
+            );
+            let vnodes = Some(Arc::new(params.vnode_bitmap));
             let state_table = StateTableBuilder::new(node.get_state_table()?, state_store, vnodes)
                 .enable_preload_all_rows_by_config(&params.config)
                 .build()

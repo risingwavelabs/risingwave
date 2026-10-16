@@ -81,7 +81,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
         let vnodes = if is_broadcast {
             Some(Arc::new(Bitmap::ones(table_desc.vnode_count())))
         } else {
-            params.vnode_bitmap.clone().map(Arc::new)
+            Some(Arc::new(params.vnode_bitmap.clone()))
         };
 
         if node.get_is_nested_loop() {
@@ -161,7 +161,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             let memo_table = node.get_memo_table();
             let memo_table = match memo_table {
                 Ok(memo_table) => {
-                    let vnodes = params.vnode_bitmap.clone().map(Arc::new);
+                    let vnodes = Some(Arc::new(params.vnode_bitmap.clone()));
                     Some(
                         StateTableBuilder::new(memo_table, store.clone(), vnodes)
                             .enable_preload_all_rows_by_config(&params.config)

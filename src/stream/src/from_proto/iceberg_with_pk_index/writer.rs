@@ -76,7 +76,7 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
         let pk_index_state_table = StateTableBuilder::new(
             node.get_pk_index_table()?,
             store,
-            params.vnode_bitmap.clone().map(Arc::new),
+            Some(Arc::new(params.vnode_bitmap.clone())),
         )
         .enable_preload_all_rows_by_config(&params.config)
         .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)

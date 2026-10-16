@@ -346,7 +346,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let factory = KvLogStoreFactory::new(
                     state_store,
                     table,
-                    params.vnode_bitmap.clone().map(Arc::new),
+                    Arc::new(params.vnode_bitmap.clone()),
                     65536,
                     params.config.developer.chunk_size,
                     metrics,
