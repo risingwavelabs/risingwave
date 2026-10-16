@@ -94,6 +94,7 @@ use crate::controller::utils::{
     list_object_dependencies_by_object_id, list_user_info_by_ids, upsert_user_privileges,
 };
 use crate::error::MetaErrorInner;
+use crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
@@ -129,6 +130,8 @@ pub struct CancelStreamingJobInfo {
 #[derive(Debug)]
 pub struct IndependentJobChangeLogInfo {
     pub job_id: JobId,
+    /// Compaction can commit between real upstream checkpoints for PK-index sinks.
+    pub is_iceberg_pk_index: bool,
     pub state_table_ids: HashSet<TableId>,
     pub upstream_table_snapshot_epochs: HashMap<TableId, Option<u64>>,
 }
@@ -268,7 +271,18 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
-        let jobs: Vec<JobId> = StreamingJobModel::find()
+        // PK-index sinks keep consuming the log store after CREATE completes.
+        let iceberg_pk_index_jobs: HashSet<_> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::Properties])
+            .into_tuple::<(SinkId, Property)>()
+            .all(&inner.db)
+            .await?
+            .into_iter()
+            .filter(|(_, properties)| is_iceberg_pk_index_sink(properties.inner_ref()))
+            .map(|(sink_id, _)| sink_id.as_job_id())
+            .collect();
+        let mut jobs: HashSet<JobId> = StreamingJobModel::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
@@ -278,7 +292,10 @@ impl CatalogController {
             )
             .into_tuple::<JobId>()
             .all(&inner.db)
-            .await?;
+            .await?
+            .into_iter()
+            .collect();
+        jobs.extend(&iceberg_pk_index_jobs);
         let mut job_info: HashMap<_, _> = jobs
             .into_iter()
             .map(|job_id| {
@@ -286,6 +303,7 @@ impl CatalogController {
                     job_id,
                     IndependentJobChangeLogInfo {
                         job_id,
+                        is_iceberg_pk_index: iceberg_pk_index_jobs.contains(&job_id),
                         state_table_ids: HashSet::new(),
                         upstream_table_snapshot_epochs: HashMap::new(),
                     },
@@ -4183,7 +4201,7 @@ mod tests {
             )),
             PbNodeBody::CompactionResolver(Box::new(CompactionResolverNode {
                 sink_id,
-                properties: sink_desc.properties.clone(),
+                properties: sink_desc.properties,
                 ..Default::default()
             })),
         ];

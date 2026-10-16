@@ -1332,6 +1332,25 @@ mod tests {
         )
         .unwrap();
         assert!(!log_epochs.contains_key(&upstream_table_id));
+
+        // Missing history is not permission to guess a replay epoch. The truncator
+        // must preserve the real checkpoint needed by this synthetic committed epoch.
+        for missing_logs in [
+            HashMap::new(),
+            HashMap::from([(upstream_table_id, TableChangeLog::new([]))]),
+        ] {
+            let error = GlobalBarrierWorkerContextImpl::resolve_hummock_version_epochs(
+                std::iter::once((job_id, &fragments)),
+                &version,
+                &missing_logs,
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("downstream epoch 101 later than upstream epoch 100")
+            );
+        }
     }
 
     #[test]

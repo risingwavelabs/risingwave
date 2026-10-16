@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, anyhow};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::change_log::TableChangeLog;
+use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::version::HummockVersion;
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
@@ -43,6 +43,7 @@ fn update_truncate_epoch(
 fn resolve_table_change_log_truncate_epochs(
     info: &TableChangeLogTruncateInfo,
     version: &HummockVersion,
+    table_change_logs: &TableChangeLogs,
     current_time_epoch: Epoch,
 ) -> anyhow::Result<HashMap<TableId, u64>> {
     let mut truncate_epochs = HashMap::new();
@@ -114,7 +115,26 @@ fn resolve_table_change_log_truncate_epochs(
 
         for (upstream_table_id, snapshot_epoch) in &job.upstream_table_snapshot_epochs {
             if let Some(snapshot_epoch) = snapshot_epoch {
-                let pinned_epoch = committed_epoch.max(*snapshot_epoch);
+                let mut pinned_epoch = committed_epoch.max(*snapshot_epoch);
+                if job.is_iceberg_pk_index {
+                    let replay_epoch = table_change_logs.get(upstream_table_id).and_then(|log| {
+                        let index = match log.binary_search_by_checkpoint_epoch(pinned_epoch) {
+                            Ok(index) => Some(index),
+                            Err(index) => index.checked_sub(1),
+                        }?;
+                        Some(log.get(index)?.checkpoint_epoch)
+                    });
+                    let Some(replay_epoch) = replay_epoch.filter(|epoch| *epoch >= *snapshot_epoch)
+                    else {
+                        // Missing history cannot justify truncating more of it. In particular,
+                        // a subscription's retention must not override this consumer's veto.
+                        untruncatable_table_ids.insert(*upstream_table_id);
+                        continue;
+                    };
+                    // Compaction may commit beyond the durable upstream head. Recovery and
+                    // snapshot-backfill still need the preceding real checkpoint to resume.
+                    pinned_epoch = replay_epoch;
+                }
                 update_truncate_epoch(&mut truncate_epochs, *upstream_table_id, pinned_epoch);
             }
         }
@@ -134,6 +154,7 @@ impl HummockManager {
         let truncate_epochs = resolve_table_change_log_truncate_epochs(
             &info,
             versioning.current_version.as_ref(),
+            &versioning.table_change_log,
             current_time_epoch,
         )
         .map_err(Error::Internal)?;
@@ -238,6 +259,7 @@ mod tests {
     use std::collections::{HashMap, HashSet};
 
     use risingwave_common::id::JobId;
+    use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
     use risingwave_pb::hummock::StateTableInfoDelta;
 
     use super::*;
@@ -261,6 +283,94 @@ mod tests {
         version
     }
 
+    fn change_log(epochs: impl IntoIterator<Item = u64>) -> TableChangeLog {
+        TableChangeLog::new(
+            epochs
+                .into_iter()
+                .map(|checkpoint_epoch| EpochNewChangeLog {
+                    checkpoint_epoch,
+                    non_checkpoint_epochs: vec![],
+                    new_value: vec![],
+                    old_value: vec![],
+                }),
+        )
+    }
+
+    #[test]
+    fn test_iceberg_pk_index_retains_real_checkpoint_for_synthetic_epoch() {
+        let upstream_table_id = TableId::new(1);
+        let state_table_id = TableId::new(2);
+        for upstream_epoch in [100, 120] {
+            for job_epoch in [100, 101] {
+                let version = version_with_committed_epochs([
+                    (upstream_table_id, upstream_epoch),
+                    (state_table_id, job_epoch),
+                ]);
+                let info = TableChangeLogTruncateInfo {
+                    subscription_retention_seconds: HashMap::from([(upstream_table_id, 0)]),
+                    independent_jobs: vec![IndependentJobChangeLogInfo {
+                        job_id: JobId::new(3),
+                        is_iceberg_pk_index: true,
+                        state_table_ids: HashSet::from([state_table_id]),
+                        upstream_table_snapshot_epochs: HashMap::from([(
+                            upstream_table_id,
+                            Some(90),
+                        )]),
+                    }],
+                };
+                let logs = TableChangeLogs::from([(
+                    upstream_table_id,
+                    change_log(
+                        [90, 100, 120]
+                            .into_iter()
+                            .filter(|epoch| *epoch <= upstream_epoch),
+                    ),
+                )]);
+                let cutoffs = resolve_table_change_log_truncate_epochs(
+                    &info,
+                    &version,
+                    &logs,
+                    Epoch::from_physical_time(100_000),
+                )
+                .unwrap();
+                assert_eq!(cutoffs[&upstream_table_id], 100);
+                let mut retained_log = logs[&upstream_table_id].clone();
+                retained_log.truncate(cutoffs[&upstream_table_id]);
+                assert_eq!(retained_log.first().unwrap().checkpoint_epoch, 100);
+            }
+        }
+    }
+
+    #[test]
+    fn test_iceberg_pk_index_missing_replay_anchor_prevents_truncation() {
+        let upstream_table_id = TableId::new(1);
+        let state_table_id = TableId::new(2);
+        let version =
+            version_with_committed_epochs([(upstream_table_id, 120), (state_table_id, 101)]);
+        let info = TableChangeLogTruncateInfo {
+            subscription_retention_seconds: HashMap::from([(upstream_table_id, 0)]),
+            independent_jobs: vec![IndependentJobChangeLogInfo {
+                job_id: JobId::new(3),
+                is_iceberg_pk_index: true,
+                state_table_ids: HashSet::from([state_table_id]),
+                upstream_table_snapshot_epochs: HashMap::from([(upstream_table_id, Some(90))]),
+            }],
+        };
+        for epochs in [None, Some(vec![]), Some(vec![80]), Some(vec![110])] {
+            let logs = epochs
+                .map(|epochs| TableChangeLogs::from([(upstream_table_id, change_log(epochs))]))
+                .unwrap_or_default();
+            let cutoffs = resolve_table_change_log_truncate_epochs(
+                &info,
+                &version,
+                &logs,
+                Epoch::from_physical_time(100_000),
+            )
+            .unwrap();
+            assert!(!cutoffs.contains_key(&upstream_table_id));
+        }
+    }
+
     #[test]
     fn test_resolve_table_change_log_truncate_epochs() {
         let upstream_table_id = TableId::new(1);
@@ -277,6 +387,7 @@ mod tests {
             subscription_retention_seconds: HashMap::from([(upstream_table_id, 10)]),
             independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
+                is_iceberg_pk_index: false,
                 state_table_ids: HashSet::from([job_state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(
                     upstream_table_id,
@@ -285,8 +396,13 @@ mod tests {
             }],
         };
 
-        let truncate_epochs =
-            resolve_table_change_log_truncate_epochs(&info, &version, current_time_epoch).unwrap();
+        let truncate_epochs = resolve_table_change_log_truncate_epochs(
+            &info,
+            &version,
+            &TableChangeLogs::new(),
+            current_time_epoch,
+        )
+        .unwrap();
         assert_eq!(truncate_epochs[&upstream_table_id], snapshot_epoch);
     }
 
@@ -304,6 +420,7 @@ mod tests {
             subscription_retention_seconds: HashMap::from([(upstream_table_id, 10)]),
             independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
+                is_iceberg_pk_index: false,
                 state_table_ids: HashSet::from([job_state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(upstream_table_id, None)]),
             }],
@@ -312,6 +429,7 @@ mod tests {
         let truncate_epochs = resolve_table_change_log_truncate_epochs(
             &info,
             &version,
+            &TableChangeLogs::new(),
             Epoch::from_physical_time(100_000),
         )
         .unwrap();
@@ -330,6 +448,7 @@ mod tests {
             subscription_retention_seconds: HashMap::new(),
             independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
+                is_iceberg_pk_index: false,
                 state_table_ids: HashSet::from([state_table_id_1, state_table_id_2]),
                 upstream_table_snapshot_epochs: HashMap::from([(
                     TableId::new(4),
@@ -342,6 +461,7 @@ mod tests {
             resolve_table_change_log_truncate_epochs(
                 &info,
                 &version,
+                &TableChangeLogs::new(),
                 Epoch::from_physical_time(100_000),
             )
             .is_err()
