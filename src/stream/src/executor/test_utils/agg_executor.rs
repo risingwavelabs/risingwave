@@ -26,7 +26,7 @@ use risingwave_storage::StateStore;
 
 use crate::common::StateTableColumnMapping;
 use crate::common::table::state_table::StateTable;
-use crate::common::table::test_utils::gen_pbtable;
+use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};
 use crate::executor::aggregate::{
     AggExecutorArgs, AggStateStorage, HashAggExecutor, HashAggExecutorExtraArgs, SimpleAggExecutor,
     SimpleAggExecutorExtraArgs,
@@ -163,13 +163,17 @@ pub async fn create_intermediate_state_table<S: StateStore>(
         add_column_desc(agg_call.return_type.clone());
     });
 
+    // Like the production catalog (`infer_intermediate_state_table`), the value columns are the agg
+    // states only, not the group key.
+    let value_indices = (group_key_indices.len()..column_descs.len()).collect();
     StateTable::from_table_catalog_inconsistent_op(
-        &gen_pbtable(
+        &gen_pbtable_with_value_indices(
             table_id,
             column_descs,
             order_types,
             (0..group_key_indices.len()).collect(),
             0,
+            value_indices,
         ),
         store,
         None,
@@ -190,6 +194,38 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     extreme_cache_size: usize,
     emit_on_window_close: bool,
     executor_id: u64,
+) -> Executor {
+    new_boxed_hash_agg_executor_with_group_cache_max_entries(
+        store,
+        input,
+        is_append_only,
+        agg_calls,
+        row_count_index,
+        group_key_indices,
+        stream_key,
+        extreme_cache_size,
+        emit_on_window_close,
+        executor_id,
+        0,
+    )
+    .await
+}
+
+/// Same as [`new_boxed_hash_agg_executor`], with a limit on the number of cached groups (0 means
+/// unlimited).
+#[expect(clippy::too_many_arguments)]
+pub async fn new_boxed_hash_agg_executor_with_group_cache_max_entries<S: StateStore>(
+    store: S,
+    input: Executor,
+    is_append_only: bool,
+    agg_calls: Vec<AggCall>,
+    row_count_index: usize,
+    group_key_indices: Vec<usize>,
+    stream_key: StreamKey,
+    extreme_cache_size: usize,
+    emit_on_window_close: bool,
+    executor_id: u64,
+    group_cache_max_entries: usize,
 ) -> Executor {
     let mut storages = Vec::with_capacity(agg_calls.iter().len());
     for (idx, agg_call) in agg_calls.iter().enumerate() {
@@ -244,6 +280,7 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
             group_key_indices,
             chunk_size: 1024,
             max_dirty_groups_heap_size: 64 << 20,
+            group_cache_max_entries,
             emit_on_window_close,
         },
     })
