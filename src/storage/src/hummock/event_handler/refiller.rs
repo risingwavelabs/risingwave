@@ -1302,6 +1302,7 @@ mod tests {
             SstDeltaInfo {
                 insert_sst_infos: vec![self.sst_info.clone()],
                 delete_sst_object_ids: vec![deleted_sst_object_id],
+                delete_sst_infos: vec![],
                 insert_sst_level,
             }
         }
@@ -1314,6 +1315,7 @@ mod tests {
             SstDeltaInfo {
                 insert_sst_infos: vec![self.sst_info.clone()],
                 delete_sst_object_ids: vec![],
+                delete_sst_infos: vec![],
                 insert_sst_level: 0,
             }
         }
@@ -1574,11 +1576,13 @@ mod tests {
         let normal_delta = |insert_sst_infos| SstDeltaInfo {
             insert_sst_infos,
             delete_sst_object_ids: vec![1.into()],
+            delete_sst_infos: vec![],
             insert_sst_level: 1,
         };
         let insert_only_delta = |insert_sst_infos| SstDeltaInfo {
             insert_sst_infos,
             delete_sst_object_ids: vec![],
+            delete_sst_infos: vec![],
             insert_sst_level: 0,
         };
 
@@ -2057,6 +2061,7 @@ mod tests {
         let deltas = [table_a_projection, table_b_projection].map(|projection| SstDeltaInfo {
             insert_sst_infos: vec![projection],
             delete_sst_object_ids: vec![],
+            delete_sst_infos: vec![],
             insert_sst_level: 0,
         });
         let normal_deltas = deltas.clone().map(|mut delta| {
@@ -2220,6 +2225,7 @@ mod tests {
                     delta: &SstDeltaInfo {
                         insert_sst_infos: vec![sst_info.clone()],
                         delete_sst_object_ids: vec![2330.into()],
+                        delete_sst_infos: vec![],
                         insert_sst_level: 0,
                     },
                     ssts: std::slice::from_ref(&sst),
