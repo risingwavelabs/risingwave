@@ -219,8 +219,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             .metrics
                             .snapshot_backfill_consume_row_count
                             .with_guarded_label_values(&[
-                                table_id_str.as_str(),
                                 actor_id_str.as_str(),
+                                table_id_str.as_str(),
                                 "consuming_snapshot",
                             ]);
                         let snapshot_stream = make_consume_snapshot_stream(
@@ -275,8 +275,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     .metrics
                     .snapshot_backfill_consume_row_count
                     .with_guarded_label_values(&[
-                        table_id_str.as_str(),
                         actor_id_str.as_str(),
+                        table_id_str.as_str(),
                         "consuming_log_store",
                     ]);
                 let mut pending_non_checkpoint_barrier: Vec<EpochPair> = vec![];

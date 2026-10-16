@@ -105,7 +105,9 @@ use crate::executor::{
 
 pub mod metrics {
     use risingwave_common::id::FragmentId;
-    use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+    #[cfg(test)]
+    use risingwave_common::metrics::GaugeAggregation;
+    use risingwave_common::metrics::{LabelGuardedIntCounter, RelabeledAggregatedIntGauge};
 
     use crate::common::log_store_impl::kv_log_store::KvLogStoreReadMetrics;
     use crate::executor::monitor::StreamingMetrics;
@@ -124,11 +126,11 @@ pub mod metrics {
         pub pause_duration_ns: LabelGuardedIntCounter,
 
         // Buffer metrics
-        pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
-        pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
-        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
-        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
-        pub buffer_memory_bytes: LabelGuardedIntGauge,
+        pub buffer_unconsumed_item_count: RelabeledAggregatedIntGauge,
+        pub buffer_unconsumed_row_count: RelabeledAggregatedIntGauge,
+        pub buffer_unconsumed_epoch_count: RelabeledAggregatedIntGauge,
+        pub buffer_unconsumed_min_epoch: RelabeledAggregatedIntGauge,
+        pub buffer_memory_bytes: RelabeledAggregatedIntGauge,
         pub buffer_read_count: LabelGuardedIntCounter,
         pub buffer_read_size: LabelGuardedIntCounter,
 
@@ -158,15 +160,15 @@ pub mod metrics {
             let labels = &[&actor_id_str, target, &fragment_id_str, name];
 
             let unclean_state = metrics.sync_kv_log_store_state.with_guarded_label_values(&[
-                "dirty",
                 &actor_id_str,
+                "dirty",
                 target,
                 &fragment_id_str,
                 name,
             ]);
             let clean_state = metrics.sync_kv_log_store_state.with_guarded_label_values(&[
-                "clean",
                 &actor_id_str,
+                "clean",
                 target,
                 &fragment_id_str,
                 name,
@@ -203,8 +205,8 @@ pub mod metrics {
             let buffer_read_count = metrics
                 .sync_kv_log_store_read_count
                 .with_guarded_label_values(&[
-                    "buffer",
                     &actor_id_str,
+                    "buffer",
                     target,
                     &fragment_id_str,
                     name,
@@ -213,8 +215,8 @@ pub mod metrics {
             let buffer_read_size = metrics
                 .sync_kv_log_store_read_size
                 .with_guarded_label_values(&[
-                    "buffer",
                     &actor_id_str,
+                    "buffer",
                     target,
                     &fragment_id_str,
                     name,
@@ -223,8 +225,8 @@ pub mod metrics {
             let total_read_count = metrics
                 .sync_kv_log_store_read_count
                 .with_guarded_label_values(&[
-                    "total",
                     &actor_id_str,
+                    "total",
                     target,
                     &fragment_id_str,
                     name,
@@ -233,8 +235,8 @@ pub mod metrics {
             let total_read_size = metrics
                 .sync_kv_log_store_read_size
                 .with_guarded_label_values(&[
-                    "total",
                     &actor_id_str,
+                    "total",
                     target,
                     &fragment_id_str,
                     name,
@@ -246,8 +248,8 @@ pub mod metrics {
             let persistent_log_read_size = metrics
                 .sync_kv_log_store_read_size
                 .with_guarded_label_values(&[
-                    READ_PERSISTENT_LOG,
                     &actor_id_str,
+                    READ_PERSISTENT_LOG,
                     target,
                     &fragment_id_str,
                     name,
@@ -256,8 +258,8 @@ pub mod metrics {
             let persistent_log_read_count = metrics
                 .sync_kv_log_store_read_count
                 .with_guarded_label_values(&[
-                    READ_PERSISTENT_LOG,
                     &actor_id_str,
+                    READ_PERSISTENT_LOG,
                     target,
                     &fragment_id_str,
                     name,
@@ -266,8 +268,8 @@ pub mod metrics {
             let flushed_buffer_read_size = metrics
                 .sync_kv_log_store_read_size
                 .with_guarded_label_values(&[
-                    READ_FLUSHED_BUFFER,
                     &actor_id_str,
+                    READ_FLUSHED_BUFFER,
                     target,
                     &fragment_id_str,
                     name,
@@ -276,8 +278,8 @@ pub mod metrics {
             let flushed_buffer_read_count = metrics
                 .sync_kv_log_store_read_count
                 .with_guarded_label_values(&[
-                    READ_FLUSHED_BUFFER,
                     &actor_id_str,
+                    READ_FLUSHED_BUFFER,
                     target,
                     &fragment_id_str,
                     name,
@@ -319,11 +321,21 @@ pub mod metrics {
                 storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
                 storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
                 pause_duration_ns: LabelGuardedIntCounter::test_int_counter::<4>(),
-                buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-                buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-                buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-                buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
-                buffer_memory_bytes: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_unconsumed_item_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Sum,
+                ),
+                buffer_unconsumed_row_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Sum,
+                ),
+                buffer_unconsumed_epoch_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Sum,
+                ),
+                buffer_unconsumed_min_epoch: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Min,
+                ),
+                buffer_memory_bytes: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Sum,
+                ),
                 buffer_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
                 buffer_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
                 total_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
@@ -1339,12 +1351,9 @@ impl SyncedLogStoreBuffer {
         self.metrics
             .buffer_unconsumed_item_count
             .set(self.buffer.len() as _);
-        self.metrics.buffer_unconsumed_min_epoch.set(
-            self.buffer
-                .front()
-                .map(|(epoch, _)| *epoch)
-                .unwrap_or_default() as _,
-        );
+        self.metrics
+            .buffer_unconsumed_min_epoch
+            .set_optional(self.buffer.front().map(|(epoch, _)| *epoch as _));
         self.metrics.buffer_memory_bytes.set(memory_bytes as _);
     }
 }

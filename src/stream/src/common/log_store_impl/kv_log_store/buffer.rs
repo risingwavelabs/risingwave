@@ -154,12 +154,9 @@ impl LogStoreBufferInner {
         self.metrics
             .buffer_unconsumed_item_count
             .set(self.unconsumed_queue.len() as _);
-        self.metrics.buffer_unconsumed_min_epoch.set(
-            self.unconsumed_queue
-                .front()
-                .map(|(epoch, _)| *epoch)
-                .unwrap_or_default() as _,
-        );
+        self.metrics
+            .buffer_unconsumed_min_epoch
+            .set_optional(self.unconsumed_queue.front().map(|(epoch, _)| *epoch as _));
         self.metrics
             .buffer_memory_bytes
             .set((self.unconsumed_stats.memory_bytes + self.consumed_stats.memory_bytes) as _);
