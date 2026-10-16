@@ -458,6 +458,12 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub delete_files_count_threshold: Option<usize>,
 
+    /// Minimum percentage of deleted physical rows for PK-index compaction.
+    #[serde(rename = "compaction.delete_ratio_percent", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub delete_ratio_percent: Option<u32>,
+
     #[serde(rename = "compaction.trigger_snapshot_count", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly, iceberg_engine)]
@@ -670,6 +676,15 @@ impl IcebergConfig {
             )));
         }
 
+        if config
+            .delete_ratio_percent
+            .is_some_and(|percent| !(1..=100).contains(&percent))
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.delete_ratio_percent` must be between 1 and 100"
+            )));
+        }
+
         if config.target_file_size_mb == Some(0) {
             return Err(SinkError::Config(anyhow!(
                 "`compaction.target_file_size_mb` must be greater than 0"
@@ -824,6 +839,10 @@ impl IcebergConfig {
 
     pub fn delete_files_count_threshold(&self) -> usize {
         self.delete_files_count_threshold.unwrap_or(256)
+    }
+
+    pub fn delete_ratio_percent(&self) -> u32 {
+        self.delete_ratio_percent.unwrap_or(30)
     }
 
     pub fn target_file_size_mb(&self) -> u64 {

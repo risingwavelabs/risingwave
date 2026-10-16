@@ -284,6 +284,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "compaction.max_snapshots_num".to_owned(),
             "compaction.small_files_threshold_mb".to_owned(),
             "compaction.delete_files_count_threshold".to_owned(),
+            "compaction.delete_ratio_percent".to_owned(),
             "compaction.trigger_snapshot_count".to_owned(),
             "compaction.target_file_size_mb".to_owned(),
             "compaction.type".to_owned(),

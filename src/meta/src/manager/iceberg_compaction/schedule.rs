@@ -1355,7 +1355,10 @@ impl IcebergCompactionManager {
                         {
                             track.finish_drained(now)
                         }
-                        IcebergReportTaskStatus::Drained
+                        IcebergReportTaskStatus::BlockedCapacity
+                        | IcebergReportTaskStatus::BlockedStatistics
+                        | IcebergReportTaskStatus::Busy
+                        | IcebergReportTaskStatus::Drained
                         | IcebergReportTaskStatus::Failed
                         | IcebergReportTaskStatus::Unspecified => {
                             tracing::warn!(
