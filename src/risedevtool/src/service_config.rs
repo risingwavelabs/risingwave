@@ -411,6 +411,7 @@ pub struct StarrocksConfig {
     pub database: String,
     pub admin_user: String,
     pub admin_password: String,
+    pub database_is_disposable: bool,
 
     pub image: String,
     pub user_managed: bool,
