@@ -684,6 +684,10 @@ for_all_wrapped_id_fields! (
             fragment_id: FragmentId,
             worker_id: WorkerId,
         }
+        ListBoundedJobsResponse.BoundedJob {
+            job_id: JobId,
+            source_id: SourceId,
+        }
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
@@ -799,6 +803,7 @@ for_all_wrapped_id_fields! (
             data: ActorId,
         }
         AddMutation {
+            bounded_load_actors: ActorId,
             new_upstream_sinks: FragmentId,
             backfill_nodes_to_pause: FragmentId,
             added_actors: ActorId,
@@ -809,6 +814,9 @@ for_all_wrapped_id_fields! (
         }
         BackfillOrder {
             order: RelationId,
+        }
+        BoundedLoadMutation {
+            source_id: SourceId,
         }
         CdcFilterNode {
             upstream_source_id: SourceId,
@@ -944,6 +952,10 @@ for_all_wrapped_id_fields! (
             list_finished_source_ids: SourceId,
             load_finished_source_ids: SourceId,
             partial_graph_id: PartialGraphId,
+        }
+        BarrierCompleteResponse.BoundedLoadProgress {
+            actor_id: ActorId,
+            fragment_id: FragmentId,
         }
         BarrierCompleteResponse.CdcSourceOffsetUpdated {
             reporter_actor_id: ActorId,

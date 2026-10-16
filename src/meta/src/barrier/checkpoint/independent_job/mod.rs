@@ -190,6 +190,7 @@ fn build_initial_add_mutation(
     actor_splits: HashMap<ActorId, ConnectorSplits>,
 ) -> Mutation {
     Mutation::Add(AddMutation {
+        bounded_load_actors: Default::default(),
         actor_dispatchers: Default::default(),
         added_actors: fragment_infos
             .values()

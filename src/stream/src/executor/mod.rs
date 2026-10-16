@@ -49,6 +49,7 @@ use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
+use risingwave_pb::stream_plan::bounded_load_mutation::Action as BoundedLoadAction;
 use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
@@ -348,6 +349,7 @@ pub struct AddMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
     pub sink_log_store_flush: HashSet<SinkId>,
+    pub bounded_load_actors: HashSet<ActorId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -392,6 +394,10 @@ pub enum Mutation {
         source_id: SourceId,
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
+    },
+    BoundedLoad {
+        source_id: SourceId,
+        action: BoundedLoadAction,
     },
 }
 
@@ -589,7 +595,8 @@ impl Barrier {
             | Mutation::ListFinish { .. }
             | Mutation::LoadFinish { .. }
             | Mutation::ResetSource { .. }
-            | Mutation::InjectSourceOffsets { .. } => false,
+            | Mutation::InjectSourceOffsets { .. }
+            | Mutation::BoundedLoad { .. } => false,
         }
     }
 
@@ -929,7 +936,9 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits,
                 new_upstream_sinks,
                 sink_log_store_flush,
+                bounded_load_actors,
             }) => PbMutation::Add(PbAddMutation {
+                bounded_load_actors: bounded_load_actors.iter().copied().collect(),
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -1051,6 +1060,12 @@ impl Mutation {
                     split_offsets: split_offsets.clone(),
                 },
             ),
+            Mutation::BoundedLoad { source_id, action } => {
+                PbMutation::BoundedLoad(risingwave_pb::stream_plan::BoundedLoadMutation {
+                    source_id: *source_id,
+                    action: Some(*action),
+                })
+            }
         }
     }
 
@@ -1114,6 +1129,7 @@ impl Mutation {
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
+                bounded_load_actors: add.bounded_load_actors.iter().copied().collect(),
                 adds: add
                     .actor_dispatchers
                     .iter()
@@ -1229,6 +1245,10 @@ impl Mutation {
             PbMutation::InjectSourceOffsets(inject) => Mutation::InjectSourceOffsets {
                 source_id: SourceId::from(inject.source_id),
                 split_offsets: inject.split_offsets.clone(),
+            },
+            PbMutation::BoundedLoad(bounded_load) => Mutation::BoundedLoad {
+                source_id: bounded_load.source_id,
+                action: bounded_load.action.unwrap(),
             },
         };
         Ok(mutation)

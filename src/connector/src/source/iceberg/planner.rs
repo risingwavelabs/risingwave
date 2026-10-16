@@ -29,6 +29,8 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::types::{JsonbRef, JsonbVal, ScalarRef};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
+use risingwave_pb::plan_common::IcebergBoundedScan as PbIcebergBoundedScan;
+use risingwave_pb::plan_common::iceberg_bounded_scan::{Scan, Snapshot as PbSnapshot};
 use serde::{Deserialize, Serialize};
 
 use super::metrics::GLOBAL_ICEBERG_SCAN_METRICS;
@@ -239,6 +241,30 @@ pub enum IcebergIncrementalScan {
     EmptyTable,
     UpToDate { current_snapshot_id: i64 },
     Planned(IcebergScanPlan),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IcebergBoundedScan {
+    Snapshot { snapshot_id: i64 },
+}
+
+impl IcebergBoundedScan {
+    pub fn from_proto(scan: PbIcebergBoundedScan) -> ConnectorResult<Self> {
+        match scan.scan {
+            Some(Scan::Snapshot(snapshot)) => Ok(Self::Snapshot {
+                snapshot_id: snapshot.snapshot_id,
+            }),
+            None => bail!("bounded Iceberg scan requires a resolved input boundary"),
+        }
+    }
+
+    pub fn to_proto(self) -> PbIcebergBoundedScan {
+        match self {
+            Self::Snapshot { snapshot_id } => PbIcebergBoundedScan {
+                scan: Some(Scan::Snapshot(PbSnapshot { snapshot_id })),
+            },
+        }
+    }
 }
 
 #[derive(Clone)]

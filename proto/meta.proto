@@ -6,6 +6,7 @@ import "backup_service.proto";
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
+import "plan_common.proto";
 import "secret.proto";
 import "source.proto";
 import "stream_plan.proto";
@@ -455,6 +456,19 @@ message ListCdcProgressResponse {
   map<uint32, CdcProgress> cdc_progress = 1;
 }
 
+message ListBoundedJobsRequest {}
+
+message ListBoundedJobsResponse {
+  message BoundedJob {
+    uint32 job_id = 1;
+    uint32 source_id = 2;
+    // The input pinned at creation, as stored in the source's refresh mode.
+    plan_common.SourceRefreshMode.SourceRefreshModeBounded input = 3;
+    optional int64 completed_at = 4;
+  }
+  repeated BoundedJob jobs = 1;
+}
+
 message ListRefreshTableStatesRequest {}
 
 message ListRefreshTableStatesResponse {
@@ -521,6 +535,7 @@ service StreamManagerService {
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
   rpc ListUnmigratedTables(ListUnmigratedTablesRequest) returns (ListUnmigratedTablesResponse);
   rpc ListRefreshTableStates(ListRefreshTableStatesRequest) returns (ListRefreshTableStatesResponse);
+  rpc ListBoundedJobs(ListBoundedJobsRequest) returns (ListBoundedJobsResponse);
   rpc ListIcebergCompactionStatus(ListIcebergCompactionStatusRequest) returns (ListIcebergCompactionStatusResponse);
 }
 

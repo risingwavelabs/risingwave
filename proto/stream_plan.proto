@@ -51,6 +51,8 @@ message AddMutation {
   repeated uint32 dropped_actors = 9;
   // Sink ids whose log store must be drained before this add barrier can be collected.
   repeated uint32 sink_log_store_flush = 10;
+  // Actors that should start a bounded load on their first barrier.
+  repeated uint32 bounded_load_actors = 11;
 }
 
 message StopMutation {
@@ -161,6 +163,18 @@ message LoadFinishMutation {
   uint32 associated_source_id = 1;
 }
 
+// Controls the bounded load of a source after it has started.
+message BoundedLoadMutation {
+  // No more file assignments will be emitted for this load.
+  message ListSealed {}
+
+  uint32 source_id = 1;
+
+  oneof action {
+    ListSealed list_sealed = 2;
+  }
+}
+
 message ResetSourceMutation {
   // Source ID to reset
   uint32 source_id = 1;
@@ -233,6 +247,8 @@ message BarrierMutation {
     ResetSourceMutation reset_source = 18;
     // Inject specific offsets into source splits (UNSAFE)
     InjectSourceOffsetsMutation inject_source_offsets = 19;
+    // Control signal for a bounded load attempt
+    BoundedLoadMutation bounded_load = 20;
   }
 }
 
