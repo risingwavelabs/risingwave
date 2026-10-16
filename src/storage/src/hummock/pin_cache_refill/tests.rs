@@ -286,9 +286,11 @@ async fn test_membership_tracks_physical_references() {
         .sub_levels
         .clear();
     let empty = PinnedVersion::new(empty, mpsc::unbounded_channel().0);
-    let (store, cache) = with_pin_cache(mock_sstable_store().await, u64::MAX).await;
-    let mut controller =
-        PinCacheRefillController::new(store, empty.clone(), Arc::new(Semaphore::new(1)));
+    let mut controller = PinCacheRefillController::new(
+        mock_sstable_store().await,
+        empty.clone(),
+        Arc::new(Semaphore::new(1)),
+    );
     let changes = controller.replace_pinned_tables(
         tables.into(),
         std::slice::from_ref(&empty),
@@ -310,10 +312,6 @@ async fn test_membership_tracks_physical_references() {
         [1001.into()].into()
     );
     assert_eq!(changes.inserted, [1001.into()].into());
-    assert!(
-        !cache.is_registered(1001.into()),
-        "planning must not register future objects"
-    );
     // A new logical reference can require refill without adding physical membership.
     let (plan, changes) = controller.apply_version_update(
         &[SstDeltaInfo {
