@@ -640,10 +640,16 @@ pub fn start_iceberg_compactor(
                                         |_| (),
                                     )
                                     .is_some()
-                                    && let Some(result) = simulated_pk_index_compaction_result()
                                 {
-                                    let mut report = build_iceberg_task_report(task_id, sink_id, None);
-                                    report.pk_index_result = Some(result);
+                                    // Consume each rewrite once. Later bounded probes report
+                                    // no remaining plans instead of reapplying stale inputs.
+                                    let result = simulated_pk_index_compaction_result();
+                                    let mut report = if result.is_none() && is_bounded_round {
+                                        build_drained_iceberg_task_report(task_id, sink_id)
+                                    } else {
+                                        build_iceberg_task_report(task_id, sink_id, None)
+                                    };
+                                    report.pk_index_result = result;
                                     if matches!(
                                         send_or_buffer_iceberg_task_report(
                                             &request_sender,

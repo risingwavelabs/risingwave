@@ -94,6 +94,20 @@ as the profile uses an in-memory meta store:
 ./risedev k
 ```
 
+### PK-index compaction regressions
+
+The pure SLT suite includes `iceberg_pk_index/compaction_*.slt`. These use V2
+Parquet position deletes and read directly from Iceberg to check compaction,
+deletion, and reinsertion. They need MinIO and connector libs, but not Spark.
+
+Simulation coverage uses V3 deletion vectors and injects failures before the
+independent job's End barrier and after its durable commit. Only the compactor
+rewrite is simulated; resolver, checkpoint, commit, and recovery paths are real:
+
+```sh
+./risedev sit-test iceberg_pk_index
+```
+
 ## Key Config Files
 
 | File | Description |
