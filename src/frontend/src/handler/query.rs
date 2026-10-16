@@ -14,7 +14,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -46,7 +46,7 @@ use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    LocalQueryExecution, LocalQueryStream,
+    LocalQueryExecution, LocalQueryStream, ReadSnapshot,
 };
 use crate::session::SessionImpl;
 
@@ -514,7 +514,7 @@ pub async fn create_stream(
     let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(session.clone(), query, can_timeout_cancel, None).await?,
+            local_execute(session.clone(), query, can_timeout_cancel, None)?,
             column_types,
             formats,
             session.clone(),
@@ -616,14 +616,29 @@ pub async fn distribute_execute(
     let query_manager = session.env().query_manager().clone();
 
     query_manager
-        .schedule(execution_context, query, is_cursor_query)
+        .schedule(execution_context, query, is_cursor_query, None)
         .await
         .map_err(|err| err.into())
 }
 
-pub async fn local_execute(
+/// Schedules cursor-owned execution with a caller-selected snapshot and no statement timeout.
+pub(crate) async fn distribute_execute_for_cursor(
     session: Arc<SessionImpl>,
-    mut query: Query,
+    query: Query,
+    snapshot: ReadSnapshot,
+) -> Result<DistributedQueryStream> {
+    let execution_context = ExecutionContext::new(session.clone(), None).into();
+    session
+        .env()
+        .query_manager()
+        .schedule(execution_context, query, true, Some(snapshot))
+        .await
+        .map_err(Into::into)
+}
+
+pub fn local_execute(
+    session: Arc<SessionImpl>,
+    query: Query,
     can_timeout_cancel: bool,
     shutdown_rx: Option<ShutdownToken>,
 ) -> Result<LocalQueryStream> {
@@ -634,10 +649,28 @@ pub async fn local_execute(
     } else {
         None
     };
-    let front_env = session.env();
-
     let snapshot = session.pinned_snapshot();
+    local_execute_inner(session, query, timeout, shutdown_rx, snapshot)
+}
 
+/// Starts cursor-owned execution with an independent token, explicit snapshot, and no timeout.
+pub(crate) fn local_execute_for_cursor(
+    session: Arc<SessionImpl>,
+    query: Query,
+    shutdown_rx: ShutdownToken,
+    snapshot: ReadSnapshot,
+) -> Result<LocalQueryStream> {
+    local_execute_inner(session, query, None, Some(shutdown_rx), snapshot)
+}
+
+fn local_execute_inner(
+    session: Arc<SessionImpl>,
+    mut query: Query,
+    timeout: Option<Duration>,
+    shutdown_rx: Option<ShutdownToken>,
+    snapshot: ReadSnapshot,
+) -> Result<LocalQueryStream> {
+    let front_env = session.env();
     snapshot.fill_batch_query_epoch(&mut query)?;
 
     let execution = LocalQueryExecution::new(

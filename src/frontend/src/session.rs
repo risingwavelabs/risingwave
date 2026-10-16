@@ -930,7 +930,6 @@ impl SessionImpl {
         peer_addr: AddressRef,
         session_config: SessionConfig,
     ) -> Self {
-        let cursor_metrics = env.cursor_metrics.clone();
         let (notice_tx, notice_rx) = mpsc::unbounded_channel();
 
         Self {
@@ -947,7 +946,7 @@ impl SessionImpl {
             notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
+            cursor_manager: Arc::new(CursorManager::default()),
             temporary_source_manager: Default::default(),
             staging_catalog_manager: Default::default(),
         }
@@ -955,7 +954,6 @@ impl SessionImpl {
 
     #[cfg(test)]
     pub fn mock() -> Self {
-        let env = FrontendEnv::mock();
         let (notice_tx, notice_rx) = mpsc::unbounded_channel();
 
         Self {
@@ -981,7 +979,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics)),
+            cursor_manager: Arc::new(CursorManager::default()),
             temporary_source_manager: Default::default(),
             staging_catalog_manager: Default::default(),
         }
@@ -2137,7 +2135,7 @@ mod cancellation_tests {
         create_query, running_query_execution_with_query_message_receiver,
     };
     use crate::scheduler::{DistributedQueryStream, QueryMessage, SchedulerError};
-    use crate::session::cursor_manager::CursorDataChunkStream;
+    use crate::session::cursor_manager::{CursorQueryStream, QueryCursor};
 
     fn session_manager_for_test() -> SessionManagerImpl {
         SessionManagerImpl {
@@ -2165,8 +2163,10 @@ mod cancellation_tests {
             .get_cursor_manager()
             .add_query_cursor(
                 "cursor".to_owned(),
-                CursorDataChunkStream::local_stream_without_executor_for_test(chunk_rx),
-                vec![],
+                QueryCursor::from_query_stream_for_test(
+                    CursorQueryStream::local_stream_without_executor_for_test(chunk_rx),
+                    vec![],
+                ),
             )
             .await
             .unwrap();
