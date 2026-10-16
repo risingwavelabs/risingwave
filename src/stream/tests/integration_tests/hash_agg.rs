@@ -14,7 +14,9 @@
 
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::aggregate::AggCall;
-use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
+use risingwave_stream::executor::test_utils::agg_executor::{
+    new_boxed_hash_agg_executor, new_boxed_hash_agg_executor_with_group_cache_max_entries,
+};
 
 use crate::prelude::*;
 
@@ -397,4 +399,105 @@ async fn test_hash_agg_emit_on_window_close() {
         SnapshotOptions::default().sort_chunk(true),
     )
     .await;
+}
+
+/// With at most one group cached, groups are evicted after every flush and reloaded from the
+/// intermediate state table when they are next updated. The output must be the same as with an
+/// unlimited cache.
+#[tokio::test]
+async fn test_hash_agg_group_cache_max_entries() {
+    async fn run(group_cache_max_entries: usize, expect: expect_test::Expect) {
+        let store = MemoryStateStore::new();
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let agg_calls = vec![
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
+            AggCall::from_pretty("(sum:int8 $2:int8)"),
+        ];
+
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, StreamKey::new());
+        let hash_agg = new_boxed_hash_agg_executor_with_group_cache_max_entries(
+            store,
+            source,
+            false,
+            agg_calls,
+            0,
+            vec![0],
+            vec![],
+            1 << 10,
+            false,
+            1,
+            group_cache_max_entries,
+        )
+        .await;
+        let mut hash_agg = hash_agg.execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I I
+            + 1 1 1
+            + 2 2 2
+            + 2 2 3
+            + 3 3 3",
+        ));
+        tx.push_barrier(test_epoch(2), false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I I
+            - 1 1 1
+            - 2 2 3
+            + 3 3 4",
+        ));
+        tx.push_barrier(test_epoch(3), false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I I
+            + 1 5 5
+            + 2 7 1",
+        ));
+        tx.push_barrier(test_epoch(4), false);
+
+        check_until_pending(
+            &mut hash_agg,
+            expect,
+            SnapshotOptions::default().sort_chunk(true),
+        );
+    }
+
+    // The same expected output with and without the limit.
+    let expected = || {
+        expect![[r#"
+        - !barrier 1
+        - !chunk |-
+          +---+---+---+---+---+
+          | + | 1 | 1 | 1 | 1 |
+          | + | 2 | 2 | 4 | 5 |
+          | + | 3 | 1 | 3 | 3 |
+          +---+---+---+---+---+
+        - !barrier 2
+        - !chunk |-
+          +----+---+---+---+---+
+          |  - | 1 | 1 | 1 | 1 |
+          | U- | 2 | 2 | 4 | 5 |
+          | U- | 3 | 1 | 3 | 3 |
+          | U+ | 2 | 1 | 2 | 2 |
+          | U+ | 3 | 2 | 6 | 7 |
+          +----+---+---+---+---+
+        - !barrier 3
+        - !chunk |-
+          +----+---+---+---+---+
+          |  + | 1 | 1 | 5 | 5 |
+          | U- | 2 | 1 | 2 | 2 |
+          | U+ | 2 | 2 | 9 | 3 |
+          +----+---+---+---+---+
+        - !barrier 4
+    "#]]
+    };
+    run(1, expected()).await;
+    run(0, expected()).await;
 }
