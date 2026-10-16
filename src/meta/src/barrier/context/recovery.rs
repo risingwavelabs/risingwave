@@ -576,12 +576,19 @@ impl GlobalBarrierWorkerContextImpl {
             futs.push(async move {
                 let partial_graph_id =
                     to_partial_graph_id(pb_sink.database_id, Some(pb_sink.id.as_job_id()));
-                let result = manager
-                    .register_sink(pb_sink.id, partial_graph_id, config)
-                    .await;
-                if result.is_ok() {
+                let result = async {
+                    let observed_snapshot = manager
+                        .register_sink(pb_sink.id, partial_graph_id, config.clone())
+                        .await?;
                     manager.advance_committed_epochs([(partial_graph_id, recovered_epoch)]);
+                    self.iceberg_compaction_manager.on_sink_registered(
+                        pb_sink.id,
+                        &config,
+                        observed_snapshot,
+                    );
+                    Ok::<_, anyhow::Error>(())
                 }
+                .await;
                 (pb_sink.id, result)
             });
         }
@@ -806,6 +813,8 @@ impl GlobalBarrierWorkerContextImpl {
         };
         let mut min_downstream_committed_epochs = HashMap::new();
         for (job_id, fragments) in jobs {
+            let iceberg_v3 =
+                is_iceberg_v3_fragment_nodes(fragments.values().map(|fragment| &fragment.nodes));
             let job_committed_epoch =
                 Self::resolve_job_committed_epoch(job_id, fragments, &table_committed_epoch)?;
             if let (Some(snapshot_backfill_info), _) =
@@ -824,7 +833,16 @@ impl GlobalBarrierWorkerContextImpl {
                             job_id, upstream_table
                         )
                     })?;
-                    let pinned_epoch = max(snapshot_epoch, job_committed_epoch);
+                    let mut pinned_epoch = max(snapshot_epoch, job_committed_epoch);
+                    if iceberg_v3
+                        && let Some(log) = table_change_log.get(&upstream_table)
+                        && let Err(index) = log.binary_search_by_checkpoint_epoch(pinned_epoch)
+                        && let Some(previous) = index.checked_sub(1).and_then(|i| log.get(i))
+                    {
+                        // Compaction may commit between two upstream checkpoints.
+                        // Keep the preceding real checkpoint as the replay anchor.
+                        pinned_epoch = previous.checkpoint_epoch;
+                    }
                     match min_downstream_committed_epochs.entry(upstream_table) {
                         Entry::Occupied(entry) => {
                             let prev_min_epoch = entry.into_mut();
@@ -1211,7 +1229,7 @@ mod tests {
         let fragment_id = FragmentId::new(100);
         let upstream_table_id = TableId::new(200);
         let state_table_id = TableId::new(300);
-        let fragments = HashMap::from([(
+        let mut fragments = HashMap::from([(
             fragment_id,
             LoadedFragment {
                 fragment_id,
@@ -1282,6 +1300,38 @@ mod tests {
             log_epochs.get(&upstream_table_id).unwrap(),
             &vec![(vec![], 100), (vec![], 102)]
         );
+
+        // A completed compaction can be just beyond the upstream's durable head.
+        let fragment = fragments.get_mut(&fragment_id).unwrap();
+        fragment.nodes = PbStreamNode {
+            node_body: Some(PbNodeBody::IcebergWithPkIndexWriter(Default::default())),
+            input: vec![std::mem::take(&mut fragment.nodes)],
+            ..Default::default()
+        };
+        version.state_table_info =
+            HummockVersionStateTableInfo::from_protobuf_owned(HashMap::from([
+                (
+                    state_table_id,
+                    StateTableInfo {
+                        committed_epoch: 101,
+                        compaction_group_id: 1.into(),
+                    },
+                ),
+                (
+                    upstream_table_id,
+                    StateTableInfo {
+                        committed_epoch: 100,
+                        compaction_group_id: 1.into(),
+                    },
+                ),
+            ]));
+        let (_, log_epochs) = GlobalBarrierWorkerContextImpl::resolve_hummock_version_epochs(
+            std::iter::once((job_id, &fragments)),
+            &version,
+            &table_change_log,
+        )
+        .unwrap();
+        assert!(!log_epochs.contains_key(&upstream_table_id));
     }
 
     #[test]

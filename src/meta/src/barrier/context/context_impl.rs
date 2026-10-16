@@ -46,11 +46,12 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
-use crate::manager::LocalNotification;
 use crate::manager::iceberg_pk_index_sink::{
-    IcebergPkIndexPreCommitMetadata, group_pre_commit_metadata,
+    IcebergPkIndexPreCommitMetadata, build_iceberg_config, group_pre_commit_metadata,
+    is_iceberg_pk_index_sink,
 };
 use crate::manager::sink_coordination::{RecoveryStart, RecoverySucceeded};
+use crate::manager::{LocalNotification, StreamingJob};
 use crate::model::FragmentDownstreamRelation;
 use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
 use crate::stream::{RefreshStage, SourceChange, cleanup_dropped_streaming_jobs};
@@ -184,6 +185,14 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
+        let sink_ids = database_job_ids.as_ref().map(|job_ids| {
+            job_ids
+                .iter()
+                .map(|job_id| job_id.as_sink_id())
+                .collect::<Vec<_>>()
+        });
+        self.iceberg_compaction_manager
+            .on_recovery_start(sink_ids.as_deref());
         self.sink_manager.start_recovery(recovery).await?;
 
         if let Some(job_ids) = database_job_ids {
@@ -675,6 +684,22 @@ impl PostCollectCommand {
                     .await?;
             }
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
+                // PK-index maintenance runs in Meta, not in the ordinary sink executor.
+                // Refresh it explicitly so an idle sink also observes ALTER immediately.
+                for object_id in obj_id_map_props.keys() {
+                    if let Some(sink) = barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .get_sink_by_id(object_id.as_sink_id())
+                        .await?
+                        && is_iceberg_pk_index_sink(&sink.properties)
+                    {
+                        let config = build_iceberg_config(&sink)?;
+                        barrier_manager_context
+                            .iceberg_compaction_manager
+                            .on_sink_config_changed(sink.id, config);
+                    }
+                }
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
                 barrier_manager_context
                     .source_manager
@@ -793,6 +818,7 @@ impl PostCollectCommand {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
                     replace_sink,
+                    streaming_job,
                     ..
                 } = info;
                 let new_job_id = stream_job_fragments.stream_job_id();
@@ -832,6 +858,21 @@ impl PostCollectCommand {
                             added_backfill_fragments,
                         })
                         .await;
+                }
+
+                // The coordinator is registered before CREATE is submitted, but its
+                // compaction results cannot be applied until the independent job is running.
+                if let StreamingJob::Sink(sink, _) = &streaming_job
+                    && is_iceberg_pk_index_sink(&sink.properties)
+                {
+                    let config = build_iceberg_config(sink)?;
+                    let observed_snapshot = barrier_manager_context
+                        .iceberg_pk_index_sink_manager
+                        .latest_observed_snapshot(sink.id)
+                        .await?;
+                    barrier_manager_context
+                        .iceberg_compaction_manager
+                        .on_sink_registered(sink.id, &config, observed_snapshot);
                 }
 
                 if let Some(old_sink_id) = replace_sink {

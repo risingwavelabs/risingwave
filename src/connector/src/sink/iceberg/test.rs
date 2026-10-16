@@ -1027,6 +1027,43 @@ fn test_alter_allows_legacy_copy_on_write_compaction_type() {
 }
 
 #[test]
+fn test_alter_pk_index_maintenance_options() {
+    use crate::sink::Sink;
+    use crate::sink::iceberg::IcebergSink;
+
+    let mut values = iceberg_compaction_alter_config("merge-on-read", "full", true);
+    values.insert("enable_pk_index".to_owned(), "true".to_owned());
+    let alter_props = BTreeMap::from([
+        ("enable_compaction".to_owned(), "true".to_owned()),
+        (
+            "compaction.trigger_snapshot_count".to_owned(),
+            "2".to_owned(),
+        ),
+        ("compaction_interval_sec".to_owned(), "120".to_owned()),
+        ("enable_snapshot_expiration".to_owned(), "false".to_owned()),
+        ("enable_manifest_rewrite".to_owned(), "true".to_owned()),
+    ]);
+    values.extend(alter_props.clone());
+    IcebergSink::validate_alter_config_change(&values, &alter_props).unwrap();
+
+    for (key, value) in [
+        ("commit_checkpoint_interval", "1"),
+        ("compaction.max_snapshots_num", "10"),
+        ("compaction.delete_files_count_threshold", "10"),
+        ("compaction.write_parquet_compression", "snappy"),
+        ("compaction.write_parquet_max_row_group_rows", "100"),
+        ("compaction.write_parquet_max_row_group_bytes", "1024"),
+    ] {
+        let alter_props = BTreeMap::from([(key.to_owned(), value.to_owned())]);
+        let mut changed = values.clone();
+        changed.extend(alter_props.clone());
+        let error = IcebergSink::validate_alter_config_change(&changed, &alter_props).unwrap_err();
+        assert!(error.to_string().contains(key), "{error}");
+        assert!(error.to_string().contains("not supported"), "{error}");
+    }
+}
+
+#[test]
 fn test_alter_merge_on_read_compaction_checks_explicit_type_license() {
     use crate::sink::Sink;
     use crate::sink::iceberg::IcebergSink;
