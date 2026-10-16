@@ -190,12 +190,12 @@
   stream_plan: |-
     StreamMaterialize { columns: [x, y, sum, max, min, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.y, t._row_id) }
-      └─StreamHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w), t._row_id, t.y] }
+      └─StreamHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, $expr1, max(t.x), min(t.w), t._row_id, t.y] }
         ├─StreamExchange { dist: HashShard(t.y) }
         │ └─StreamShare { id: 1 }
         │   └─StreamTableScan { table: t, columns: [t.x, t.y, t.w, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamProject { exprs: [t.y, sum(t.x), max(t.x), min(t.w)] }
-          └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), max(t.x), min(t.w), count] }
+        └─StreamProject { exprs: [t.y, Case((count(t.x) = 0:Int64), null:Int64, sum(t.x)) as $expr1, max(t.x), min(t.w)] }
+          └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), max(t.x), min(t.w), count(t.x), count] }
             └─StreamExchange { dist: HashShard(t.y) }
               └─StreamShare { id: 1 }
                 └─StreamTableScan { table: t, columns: [t.x, t.y, t.w, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -1181,13 +1181,14 @@
     ) WHERE rownum <= 3;
   stream_plan: |-
     StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], stream_key: [window_start, window_end, supplier_id], pk_columns: [window_start, window_end, supplier_id], pk_conflict: NoCheck }
-    └─StreamGroupTopN { order: [sum(bid.price) DESC], limit: 3, offset: 0, group_key: [$expr1, $expr2] }
+    └─StreamGroupTopN { order: [$expr3 DESC], limit: 3, offset: 0, group_key: [$expr1, $expr2] }
       └─StreamExchange { dist: HashShard($expr1, $expr2) }
-        └─StreamHashAgg { group_key: [$expr1, $expr2, bid.supplier_id], aggs: [sum(bid.price), count] }
-          └─StreamExchange { dist: HashShard($expr1, $expr2, bid.supplier_id) }
-            └─StreamProject { exprs: [$expr1, ($expr1 + '00:10:00':Interval) as $expr2, bid.supplier_id, bid.price, bid._row_id] }
-              └─StreamProject { exprs: [bid.bidtime, bid.price, bid.supplier_id, TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, bid._row_id] }
-                └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.supplier_id, bid._row_id], stream_scan_type: SnapshotBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
+        └─StreamProject { exprs: [$expr1, $expr2, bid.supplier_id, Case((count(bid.price) = 0:Int64), null:Decimal, sum(bid.price)) as $expr3, count] }
+          └─StreamHashAgg { group_key: [$expr1, $expr2, bid.supplier_id], aggs: [sum(bid.price), count, count(bid.price)] }
+            └─StreamExchange { dist: HashShard($expr1, $expr2, bid.supplier_id) }
+              └─StreamProject { exprs: [$expr1, ($expr1 + '00:10:00':Interval) as $expr2, bid.supplier_id, bid.price, bid._row_id] }
+                └─StreamProject { exprs: [bid.bidtime, bid.price, bid.supplier_id, TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, bid._row_id] }
+                  └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.supplier_id, bid._row_id], stream_scan_type: SnapshotBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
 - before:
   - create_bid
   sql: |

@@ -1151,10 +1151,10 @@
       );
   stream_plan: |-
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [(sum(sum(l_extendedprice)) / 7.0:Decimal) as $expr2] }
-      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(l_extendedprice)), count] }
+    └─StreamProject { exprs: [(Case((sum0(count(l_extendedprice)) = 0:Int64), null:Decimal, sum(sum(l_extendedprice))) / 7.0:Decimal) as $expr2] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(l_extendedprice)), sum0(count(l_extendedprice)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum(l_extendedprice)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum(l_extendedprice), count(l_extendedprice)] }
             └─StreamProject { exprs: [l_extendedprice, _row_id, _row_id, l_partkey, p_partkey, p_partkey] }
               └─StreamFilter { predicate: (l_quantity < $expr1) }
                 └─StreamHashJoin { type: Inner, predicate: p_partkey IS NOT DISTINCT FROM p_partkey, output: all }
@@ -1170,7 +1170,7 @@
                   │       └─StreamFilter { predicate: (p_brand = 'Brand#13':Varchar) AND (p_container = 'JUMBO PKG':Varchar) }
                   │         └─StreamRowIdGen { row_id_index: 12 }
                   │           └─StreamSourceScan { columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
-                  └─StreamProject { exprs: [p_partkey, (0.2:Decimal * Case((count(l_quantity) = 0:Int32), null:Decimal, (sum(l_quantity) / count(l_quantity)::Decimal))) as $expr1] }
+                  └─StreamProject { exprs: [p_partkey, (0.2:Decimal * Case((count(l_quantity) = 0:Int32), null:Decimal, (Case((count(l_quantity) = 0:Int64), null:Decimal, sum(l_quantity)) / count(l_quantity)::Decimal))) as $expr1] }
                     └─StreamHashAgg { group_key: [p_partkey], aggs: [sum(l_quantity), count(l_quantity), count] }
                       └─StreamHashJoin { type: LeftOuter, predicate: p_partkey IS NOT DISTINCT FROM l_partkey, output: [p_partkey, l_quantity, _row_id] }
                         ├─StreamProject { exprs: [p_partkey] }
@@ -1234,12 +1234,12 @@
     LIMIT 100;
   stream_plan: |-
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], pk_columns: [o_totalprice, o_orderdate, c_custkey, c_name, o_orderkey], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity)] }
+    └─StreamProject { exprs: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, $expr1] }
       └─StreamTopN { order: [o_totalprice DESC, o_orderdate ASC], limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [o_totalprice DESC, o_orderdate ASC], limit: 100, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity), Vnode(o_orderkey) as _vnode] }
-              └─StreamHashAgg { group_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], aggs: [sum(l_quantity), count] }
+            └─StreamProject { exprs: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, Case((count(l_quantity) = 0:Int64), null:Decimal, sum(l_quantity)) as $expr1, Vnode(o_orderkey) as _vnode] }
+              └─StreamHashAgg { group_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], aggs: [sum(l_quantity), count(l_quantity), count] }
                 └─StreamHashJoin { type: LeftSemi, predicate: o_orderkey = l_orderkey, output: all }
                   ├─StreamHashJoin [append_only] { type: Inner, predicate: o_orderkey = l_orderkey, output: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate, l_quantity, _row_id, _row_id, _row_id] }
                   │ ├─StreamExchange { dist: HashShard(o_orderkey) }
@@ -1497,12 +1497,12 @@
     LIMIT 1;
   stream_plan: |-
     StreamMaterialize { columns: [cntrycode, numcust, totacctbal], stream_key: [], pk_columns: [cntrycode], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr2, count, sum(c_acctbal)] }
+    └─StreamProject { exprs: [$expr2, count, $expr3] }
       └─StreamTopN { order: [$expr2 ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [$expr2 ASC], limit: 1, offset: 0, group_key: [_vnode] }
-            └─StreamProject { exprs: [$expr2, count, sum(c_acctbal), Vnode($expr2) as _vnode] }
-              └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(c_acctbal)] }
+            └─StreamProject { exprs: [$expr2, count, Case((count(c_acctbal) = 0:Int64), null:Decimal, sum(c_acctbal)) as $expr3, Vnode($expr2) as _vnode] }
+              └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(c_acctbal), count(c_acctbal)] }
                 └─StreamExchange { dist: HashShard($expr2) }
                   └─StreamProject { exprs: [Substr(c_phone, 1:Int32, 2:Int32) as $expr2, c_acctbal, _row_id, c_custkey] }
                     └─StreamDynamicFilter { predicate: (c_acctbal > $expr1), output: [c_phone, c_acctbal, _row_id, c_custkey] }
