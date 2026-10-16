@@ -191,7 +191,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         // Decode enums from raw i32 fields to handle decoupled target/type.
         let throttle_target = request.throttle_target();
-        let throttle_type = request.throttle_type();
+        let mut throttle_type = request.throttle_type();
 
         let raw_object_id: u32;
         let jobs: HashSet<JobId>;
@@ -233,8 +233,13 @@ impl StreamManagerService for StreamServiceImpl {
             }
             // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
-                self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
+                throttle_type = self
+                    .metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(
+                        request.id.into(),
+                        request.rate,
+                        throttle_type,
+                    )
                     .await?;
                 let fragment_id = request.id.into();
                 fragments = [fragment_id].into_iter().collect();
