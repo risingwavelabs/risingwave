@@ -313,6 +313,11 @@ impl IcebergCompactionManager {
 
         let active_attempt_gc_watermark_snapshot = {
             let guard = self.inner.read();
+            // The old track is discarded during recovery, but durable pending rewrites still
+            // need protection until the new coordinator has settled them.
+            if guard.is_recovering(sink_id) {
+                return Ok(());
+            }
             guard
                 .sink_schedules
                 .get(&sink_id)

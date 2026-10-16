@@ -35,6 +35,7 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::barrier::BarrierScheduler;
 use crate::controller::streaming_job::AbortCreatingJobResult;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
@@ -58,6 +59,7 @@ pub struct IcebergCompactionManager {
     inner: Arc<RwLock<IcebergCompactionManagerInner>>,
 
     metadata_manager: MetadataManager,
+    barrier_scheduler: BarrierScheduler,
     pub iceberg_compactor_manager: IcebergCompactorManagerRef,
 
     compactor_streams_change_tx: CompactorChangeTx,
@@ -69,10 +71,32 @@ pub struct IcebergCompactionManager {
 
 struct IcebergCompactionManagerInner {
     sink_schedules: HashMap<SinkId, CompactionTrack>,
+    /// Recovery isolation survives discarding a track. Generations fence async config loads.
+    sink_recovery: HashMap<SinkId, SinkRecoveryState>,
     snapshot_expiration_sink_ids: HashSet<SinkId>,
     manifest_rewrite_sink_ids: HashSet<SinkId>,
     orphan_file_cleanup_sink_ids: HashSet<SinkId>,
     manual_compaction_waiters: HashMap<SinkId, ManualCompactionWaiter>,
+}
+
+#[derive(Default)]
+struct SinkRecoveryState {
+    generation: u64,
+    recovering: bool,
+}
+
+impl IcebergCompactionManagerInner {
+    fn recovery_generation(&self, sink_id: SinkId) -> u64 {
+        self.sink_recovery
+            .get(&sink_id)
+            .map_or(0, |state| state.generation)
+    }
+
+    fn is_recovering(&self, sink_id: SinkId) -> bool {
+        self.sink_recovery
+            .get(&sink_id)
+            .is_some_and(|state| state.recovering)
+    }
 }
 
 impl IcebergCompactionManager {
@@ -89,6 +113,7 @@ impl IcebergCompactionManager {
         metadata_manager: MetadataManager,
         iceberg_compactor_manager: IcebergCompactorManagerRef,
         metrics: Arc<MetaMetrics>,
+        barrier_scheduler: BarrierScheduler,
     ) -> (Arc<Self>, CompactorChangeRx) {
         let (compactor_streams_change_tx, compactor_streams_change_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -97,12 +122,14 @@ impl IcebergCompactionManager {
                 env,
                 inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
                     sink_schedules: HashMap::default(),
+                    sink_recovery: HashMap::default(),
                     snapshot_expiration_sink_ids: HashSet::default(),
                     manifest_rewrite_sink_ids: HashSet::default(),
                     orphan_file_cleanup_sink_ids: HashSet::default(),
                     manual_compaction_waiters: HashMap::default(),
                 })),
                 metadata_manager,
+                barrier_scheduler,
                 iceberg_compactor_manager,
                 compactor_streams_change_tx,
                 orphan_file_cleanup_locks: Mutex::new(HashMap::default()),

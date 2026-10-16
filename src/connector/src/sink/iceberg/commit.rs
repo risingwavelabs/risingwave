@@ -284,6 +284,7 @@ impl IcebergSinkCommitter {
             .send(IcebergSinkCompactionUpdate {
                 sink_id: self.sink_id,
                 force_compaction,
+                has_new_data: true,
                 observed_snapshot,
             })
             .is_err()
