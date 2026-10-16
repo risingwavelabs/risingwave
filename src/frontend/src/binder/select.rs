@@ -133,7 +133,7 @@ impl BoundSelect {
         self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated_by_depth(depth),
+                Some(relation) => relation.is_from_correlated_by_depth(depth),
                 None => false,
             }
     }
@@ -161,7 +161,8 @@ impl BoundSelect {
 
         if let Some(relation) = self.from.as_mut() {
             correlated_indices.extend(
-                relation.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                relation
+                    .collect_from_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
             );
         }
 

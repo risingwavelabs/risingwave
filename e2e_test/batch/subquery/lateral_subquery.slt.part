@@ -184,3 +184,117 @@ FROM ambiguous_lateral_a;
 
 statement ok
 DROP TABLE ambiguous_lateral_a;
+
+# A lateral item after a left FROM item may reference columns of enclosing queries.
+statement ok
+CREATE TABLE lateral_outer_a(a1 INT);
+
+statement ok
+CREATE TABLE lateral_outer_b(b1 INT);
+
+statement ok
+CREATE TABLE lateral_outer_t1(x INT);
+
+statement ok
+CREATE TABLE lateral_outer_t2(y INT);
+
+statement ok
+INSERT INTO lateral_outer_a VALUES (1), (2);
+
+statement ok
+INSERT INTO lateral_outer_b VALUES (10), (11);
+
+statement ok
+INSERT INTO lateral_outer_t1 VALUES (1), (2);
+
+statement ok
+INSERT INTO lateral_outer_t2 VALUES (10), (20);
+
+query I rowsort
+SELECT (SELECT y FROM (SELECT 100 AS q) t1, LATERAL (SELECT a1 + q AS y) z) FROM lateral_outer_a;
+----
+101
+102
+
+query I rowsort
+SELECT (SELECT y FROM (SELECT 100 AS q) t1 CROSS JOIN LATERAL (SELECT a1 + q AS y) z) FROM lateral_outer_a;
+----
+101
+102
+
+query I rowsort
+SELECT (SELECT y FROM (SELECT 100 AS q) t1, LATERAL (SELECT a1 AS y) z) FROM lateral_outer_a;
+----
+1
+2
+
+query I rowsort
+SELECT (SELECT y FROM (SELECT 100 AS q) t1 LEFT JOIN LATERAL (SELECT a1 + q AS y) z ON true) FROM lateral_outer_a;
+----
+101
+102
+
+query II rowsort
+SELECT a1, y FROM lateral_outer_a,
+  LATERAL (SELECT y FROM (SELECT 100 AS q) t1, LATERAL (SELECT a1 + q AS y) z) s;
+----
+1 101
+2 102
+
+query II rowsort
+SELECT a1, y FROM lateral_outer_a,
+  LATERAL (SELECT y FROM (SELECT 100 AS q) t1, unnest(array[a1 + q]) z(y)) s;
+----
+1 101
+2 102
+
+query III rowsort
+SELECT x, y, s FROM lateral_outer_t1,
+  LATERAL (SELECT * FROM lateral_outer_t2, LATERAL (SELECT x + y AS s) iz) oz;
+----
+1 10 11
+1 20 21
+2 10 12
+2 20 22
+
+query III rowsort
+SELECT x, y, s FROM lateral_outer_t1
+  CROSS JOIN LATERAL (SELECT * FROM lateral_outer_t2 CROSS JOIN LATERAL (SELECT x + y AS s) iz) oz;
+----
+1 10 11
+1 20 21
+2 10 12
+2 20 22
+
+query I
+SELECT a1 FROM lateral_outer_a
+WHERE EXISTS (SELECT 1 FROM lateral_outer_b, LATERAL (SELECT a1 + b1 AS s) z WHERE s > 12);
+----
+2
+
+# Left inputs hidden from a non-lateral item or a join condition are not correlation scopes.
+query II rowsort
+SELECT a1, (SELECT count(*) FROM lateral_outer_t1, (lateral_outer_t2 CROSS JOIN (SELECT a1 AS v) w) WHERE v = x)
+FROM lateral_outer_a;
+----
+1 2
+2 2
+
+query II rowsort
+SELECT a1, (SELECT count(*) FROM lateral_outer_t1, lateral_outer_t2 JOIN lateral_outer_b ON b1 = a1 + 9)
+FROM lateral_outer_a;
+----
+1 4
+2 4
+
+statement ok
+DROP TABLE lateral_outer_a;
+
+statement ok
+DROP TABLE lateral_outer_b;
+
+statement ok
+DROP TABLE lateral_outer_t1;
+
+statement ok
+DROP TABLE lateral_outer_t2;
