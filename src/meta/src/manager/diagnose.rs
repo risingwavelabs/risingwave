@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BTreeMap, BinaryHeap, HashMap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
-use risingwave_common::id::ObjectId;
+use risingwave_common::id::{DatabaseId, ObjectId};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -34,6 +34,7 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
+use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use risingwave_sqlparser::parser::Parser;
@@ -87,7 +88,11 @@ impl DiagnoseCommand {
         }
     }
 
-    pub async fn report(&self, actor_traces_format: ActorTracesFormat) -> String {
+    pub async fn report(
+        &self,
+        actor_traces_format: ActorTracesFormat,
+        database_id: Option<DatabaseId>,
+    ) -> String {
         let mut report = String::new();
         let _ = writeln!(
             report,
@@ -96,9 +101,17 @@ impl DiagnoseCommand {
             risingwave_common::current_cluster_version(),
         );
         let _ = writeln!(report);
+        if let Some(database_id) = database_id {
+            let _ = writeln!(report, "database_id filter: {database_id}");
+            let _ = writeln!(
+                report,
+                "Catalog details, actors, Iceberg schedules, and events with database IDs are filtered. \
+                 Catalog counts and other shared cluster diagnostics cover the entire cluster."
+            );
+        }
         self.write_license(&mut report);
         let _ = writeln!(report);
-        self.write_catalog(&mut report).await;
+        self.write_catalog(&mut report, database_id).await;
         let _ = writeln!(report);
         self.write_worker_nodes(&mut report).await;
         let _ = writeln!(report);
@@ -106,29 +119,33 @@ impl DiagnoseCommand {
         let _ = writeln!(report);
         self.write_storage(&mut report).await;
         let _ = writeln!(report);
-        self.write_iceberg_compaction_schedule(&mut report).await;
+        self.write_iceberg_compaction_schedule(&mut report, database_id)
+            .await;
         let _ = writeln!(report);
-        self.write_event_logs(&mut report);
+        self.write_event_logs(&mut report, database_id);
         let _ = writeln!(report);
         self.write_params(&mut report).await;
         let _ = writeln!(report);
-        self.write_await_tree(&mut report, actor_traces_format)
+        self.write_await_tree(&mut report, actor_traces_format, database_id)
             .await;
 
         report
     }
 
-    async fn write_catalog(&self, s: &mut String) {
-        self.write_catalog_inner(s).await;
-        let _ = self.write_table_definition(s).await.inspect_err(|e| {
-            tracing::warn!(
-                error = e.to_report_string(),
-                "failed to display table definition"
-            )
-        });
+    async fn write_catalog(&self, s: &mut String, database_id: Option<DatabaseId>) {
+        self.write_catalog_inner(s, database_id).await;
+        let _ = self
+            .write_table_definition(s, database_id)
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(
+                    error = e.to_report_string(),
+                    "failed to display table definition"
+                )
+            });
     }
 
-    async fn write_catalog_inner(&self, s: &mut String) {
+    async fn write_catalog_inner(&self, s: &mut String, database_id: Option<DatabaseId>) {
         let stats = self.metadata_manager.catalog_controller.stats().await;
 
         let stat = match stats {
@@ -148,11 +165,11 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "number of index: {}", stat.index_num);
         let _ = writeln!(s, "number of function: {}", stat.function_num);
 
-        self.write_databases(s).await;
-        self.write_schemas(s).await;
+        self.write_databases(s, database_id).await;
+        self.write_schemas(s, database_id).await;
     }
 
-    async fn write_databases(&self, s: &mut String) {
+    async fn write_databases(&self, s: &mut String, database_id: Option<DatabaseId>) {
         let databases = match self
             .metadata_manager
             .catalog_controller
@@ -177,7 +194,10 @@ impl DiagnoseCommand {
             row.add_cell("checkpoint_frequency".into());
             row
         });
-        for db in databases {
+        for db in databases
+            .into_iter()
+            .filter(|db| database_id.is_none_or(|id| db.id == id))
+        {
             let mut row = Row::new();
             row.add_cell(db.id.into());
             row.add_cell(db.name.into());
@@ -201,7 +221,7 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
     }
 
-    async fn write_schemas(&self, s: &mut String) {
+    async fn write_schemas(&self, s: &mut String, database_id: Option<DatabaseId>) {
         let schemas = match self
             .metadata_manager
             .catalog_controller
@@ -224,7 +244,10 @@ impl DiagnoseCommand {
             row.add_cell("name".into());
             row
         });
-        for schema in schemas {
+        for schema in schemas
+            .into_iter()
+            .filter(|schema| database_id.is_none_or(|id| schema.database_id == id))
+        {
             let mut row = Row::new();
             row.add_cell(schema.id.into());
             row.add_cell(schema.database_id.into());
@@ -362,7 +385,7 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
     }
 
-    fn write_event_logs(&self, s: &mut String) {
+    fn write_event_logs(&self, s: &mut String, database_id: Option<DatabaseId>) {
         let event_logs = self
             .event_log_manager
             .list_event_logs()
@@ -383,6 +406,9 @@ impl DiagnoseCommand {
                 let Event::BarrierComplete(info) = e else {
                     return None;
                 };
+                if database_id.is_some_and(|id| info.database_id != id.as_raw_id()) {
+                    return None;
+                }
                 Some(json!(info).to_string())
             },
             Some(10),
@@ -622,12 +648,17 @@ impl DiagnoseCommand {
         self.write_storage_prometheus(s).await;
     }
 
-    async fn write_iceberg_compaction_schedule(&self, s: &mut String) {
+    async fn write_iceberg_compaction_schedule(
+        &self,
+        s: &mut String,
+        database_id: Option<DatabaseId>,
+    ) {
         use comfy_table::{Row, Table};
 
         let sink_names = match self.metadata_manager.catalog_controller.list_sinks().await {
             Ok(sinks) => sinks
                 .into_iter()
+                .filter(|sink| database_id.is_none_or(|id| sink.database_id == id))
                 .map(|sink| (sink.id.as_raw_id(), sink.name))
                 .collect::<BTreeMap<u32, String>>(),
             Err(err) => {
@@ -656,6 +687,9 @@ impl DiagnoseCommand {
         });
 
         for status in statuses {
+            if database_id.is_some() && !sink_names.contains_key(&status.sink_id.as_raw_id()) {
+                continue;
+            }
             let mut row = Row::new();
             row.add_cell(status.sink_id.as_raw_id().into());
             try_add_cell(
@@ -805,7 +839,23 @@ impl DiagnoseCommand {
         }
     }
 
-    async fn write_await_tree(&self, s: &mut String, actor_traces_format: ActorTracesFormat) {
+    async fn write_await_tree(
+        &self,
+        s: &mut String,
+        actor_traces_format: ActorTracesFormat,
+        database_id: Option<DatabaseId>,
+    ) {
+        let actor_ids = if database_id.is_some() {
+            Some(
+                self.metadata_manager
+                    .catalog_controller
+                    .list_actor_info(database_id)
+                    .await
+                    .map(|actors| actors.into_iter().map(|(id, ..)| id.as_raw_id()).collect()),
+            )
+        } else {
+            None
+        };
         let all = dump_cluster_await_tree(
             &self.metadata_manager,
             &self.await_tree_reg,
@@ -814,19 +864,24 @@ impl DiagnoseCommand {
         .await;
 
         if let Ok(all) = all {
-            write!(s, "{}", all.output()).unwrap();
+            write_await_tree_response(s, all, actor_ids);
         } else {
             tracing::warn!("failed to dump await tree");
         }
     }
 
-    async fn write_table_definition(&self, s: &mut String) -> MetaResult<()> {
+    async fn write_table_definition(
+        &self,
+        s: &mut String,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<()> {
         let sources = self
             .metadata_manager
             .catalog_controller
             .list_sources()
             .await?
             .into_iter()
+            .filter(|s| database_id.is_none_or(|id| s.database_id == id))
             .map(|s| {
                 (
                     s.id.into(),
@@ -851,6 +906,7 @@ impl DiagnoseCommand {
                 .list_all_state_tables()
                 .await?
                 .into_iter()
+                .filter(|t| database_id.is_none_or(|id| t.database_id == id))
                 .chunk_by(|t| t.table_type());
             for (table_type, tables) in &grouped {
                 let tables = tables.into_iter().map(|t| {
@@ -882,6 +938,7 @@ impl DiagnoseCommand {
             .list_sinks()
             .await?
             .into_iter()
+            .filter(|s| database_id.is_none_or(|id| s.database_id == id))
             .map(|s| {
                 (
                     s.id.into(),
@@ -901,6 +958,7 @@ impl DiagnoseCommand {
             .list_views()
             .await?
             .into_iter()
+            .filter(|v| database_id.is_none_or(|id| v.database_id == id))
             .map(|v| {
                 (
                     v.id.into(),
@@ -913,6 +971,7 @@ impl DiagnoseCommand {
             .catalog_controller
             .list_streaming_job_infos()
             .await?;
+        streaming_jobs.retain(|job| database_id.is_none_or(|id| job.database_id == id));
         streaming_jobs.sort_by_key(|info| (info.obj_type as usize, info.job_id));
         {
             use comfy_table::{Row, Table};
@@ -1004,7 +1063,7 @@ impl DiagnoseCommand {
         let actors = self
             .metadata_manager
             .catalog_controller
-            .list_actor_info()
+            .list_actor_info(database_id)
             .await?
             .into_iter()
             .map(|(actor_id, fragment_id, job_id, schema_id, obj_type)| {
@@ -1194,6 +1253,27 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "SYSTEM PARAMS");
         let _ = writeln!(s, "{table}");
     }
+}
+
+fn write_await_tree_response(
+    s: &mut String,
+    mut traces: StackTraceResponse,
+    actor_ids: Option<MetaResult<HashSet<u32>>>,
+) {
+    match actor_ids {
+        Some(Ok(actor_ids)) => traces.actor_traces.retain(|id, _| actor_ids.contains(id)),
+        Some(Err(err)) => {
+            tracing::warn!(error = ?err.as_report(), "failed to list actors for await tree filter");
+            traces.actor_traces.clear();
+            let _ = writeln!(
+                s,
+                "Actor traces omitted: failed to list actors for the database filter. \
+                 Shared cluster await-tree diagnostics are included below."
+            );
+        }
+        None => {}
+    }
+    write!(s, "{}", traces.output()).unwrap();
 }
 
 fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Option<T>) {
