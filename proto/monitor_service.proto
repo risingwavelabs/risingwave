@@ -27,6 +27,8 @@ message StackTraceResponse {
   map<uint32, string> node_errors = 8;
   // Key: batch task id in the format of "{query_id}-{stage_id}-{task_id}".
   map<string, string> batch_traces = 9;
+  // Key: frontend query id, optionally followed by "/stage/{stage_id}".
+  map<string, string> frontend_traces = 10;
 }
 
 // CPU profiling

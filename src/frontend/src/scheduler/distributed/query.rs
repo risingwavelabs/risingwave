@@ -18,6 +18,7 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::Context;
+use await_tree::InstrumentAwait;
 use futures::executor::block_on;
 use petgraph::Graph;
 use petgraph::dot::{Config, Dot};
@@ -35,6 +36,7 @@ use tracing::{Instrument, debug, error, info, warn};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
+use crate::scheduler::await_tree_key::FrontendTask;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
@@ -184,7 +186,17 @@ impl QueryExecution {
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run().instrument(span).await });
+                let runner = runner.run().instrument(span);
+                if let Some(reg) = context.session().env().await_tree_reg().cloned() {
+                    let query_id = self.query.query_id.clone();
+                    let span = await_tree::span!("Distributed Query ({})", query_id.id);
+                    tokio::spawn(
+                        reg.register(FrontendTask::Query(query_id), span)
+                            .instrument(runner),
+                    );
+                } else {
+                    tokio::spawn(runner);
+                }
 
                 let root_stage = root_stage_receiver
                     .await
@@ -307,7 +319,12 @@ impl QueryRunner {
         let has_lookup_join_stage = self.query.has_lookup_join_stage();
 
         let mut finished_stage_cnt = 0usize;
-        while let Some(msg_inner) = self.msg_receiver.recv().await {
+        while let Some(msg_inner) = self
+            .msg_receiver
+            .recv()
+            .instrument_await("wait_stage_event")
+            .await
+        {
             match msg_inner {
                 Stage(Scheduled(stage_id)) => {
                     tracing::trace!(
