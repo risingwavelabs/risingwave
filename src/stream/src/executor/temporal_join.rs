@@ -26,7 +26,7 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common_estimate_size::{EstimateSize, KvSize};
+use risingwave_common_estimate_size::{EstimateSize, KvSize, hash_table_heap_size};
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
@@ -72,9 +72,12 @@ pub struct JoinEntry {
 
 impl EstimateSize for JoinEntry {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: Add internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
-        self.kv_heap_size.size()
+        // `kv_heap_size` counts each cached row's full size, including the part stored inline
+        // in the hash table's buckets. Add the rest of the table allocation: empty slots and
+        // control bytes. Capacity is not released on removal, so this keeps counting it.
+        let table = hash_table_heap_size::<(OwnedRow, OwnedRow)>(self.cached.capacity());
+        let occupied = self.cached.len() * size_of::<(OwnedRow, OwnedRow)>();
+        self.kv_heap_size.size() + table.saturating_sub(occupied)
     }
 }
 
@@ -914,6 +917,48 @@ mod tests {
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, ExecutorInfo, JoinType};
+
+    fn int_row(v: i64) -> OwnedRow {
+        OwnedRow::new(vec![Some(ScalarImpl::Int64(v))])
+    }
+
+    #[test]
+    fn test_join_entry_estimated_size_empty() {
+        let entry = JoinEntry::default();
+        assert_eq!(entry.estimated_heap_size(), 0);
+    }
+
+    #[test]
+    fn test_join_entry_estimated_size_includes_table_overhead() {
+        let mut entry = JoinEntry::default();
+        for i in 0..100 {
+            entry.insert(int_row(i), int_row(i));
+        }
+        let rows = entry.kv_heap_size.size();
+        let table = hash_table_heap_size::<(OwnedRow, OwnedRow)>(entry.cached.capacity());
+        let occupied = entry.cached.len() * size_of::<(OwnedRow, OwnedRow)>();
+        assert!(table > occupied);
+        assert_eq!(entry.estimated_heap_size(), rows + table - occupied);
+    }
+
+    /// The hash table does not shrink on removal, so its allocation must still be counted after
+    /// every row is removed.
+    #[test]
+    fn test_join_entry_estimated_size_after_removal() {
+        let mut entry = JoinEntry::default();
+        for i in 0..100 {
+            entry.insert(int_row(i), int_row(i));
+        }
+        for i in 0..100 {
+            entry.remove(&int_row(i));
+        }
+        assert_eq!(entry.kv_heap_size.size(), 0);
+        assert_eq!(
+            entry.estimated_heap_size(),
+            hash_table_heap_size::<(OwnedRow, OwnedRow)>(entry.cached.capacity())
+        );
+        assert!(entry.estimated_heap_size() > 0);
+    }
 
     /// Tests that a temporal join on a pk-prefix (join key is a strict prefix of the right table's
     /// pk) correctly merges rows committed in epoch1 with rows staged/committed during epoch2, and
