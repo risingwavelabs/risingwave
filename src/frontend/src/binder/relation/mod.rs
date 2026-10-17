@@ -139,6 +139,22 @@ impl Relation {
         }
     }
 
+    /// Like [`Self::is_correlated_by_depth`], for the `FROM` relation of a query.
+    ///
+    /// The left spine of a query's `FROM` tree is bound in the query's own scope: the binder
+    /// counts the query boundary and the left input of an `Apply` on that spine as one boundary.
+    /// So the right side of such an `Apply` does not add one; nested `Apply`s still do.
+    pub fn is_from_correlated_by_depth(&self, depth: Depth) -> bool {
+        match self {
+            Relation::Join(join) | Relation::Apply(join) => {
+                join.cond.has_correlated_input_ref_by_depth(depth)
+                    || join.left.is_from_correlated_by_depth(depth)
+                    || join.right.is_correlated_by_depth(depth)
+            }
+            _ => self.is_correlated_by_depth(depth),
+        }
+    }
+
     pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
         match self {
             Relation::Subquery(subquery) => {
@@ -169,6 +185,35 @@ impl Relation {
                         .any(|e| e.has_correlated_input_ref_by_correlated_id(correlated_id))
             }
             _ => false,
+        }
+    }
+
+    /// Like [`Self::collect_correlated_indices_by_depth_and_assign_id`], for the `FROM` relation
+    /// of a query. See [`Self::is_from_correlated_by_depth`].
+    pub fn collect_from_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        depth: Depth,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
+        match self {
+            Relation::Join(join) | Relation::Apply(join) => {
+                let mut correlated_indices = join
+                    .cond
+                    .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
+                correlated_indices.extend(
+                    join.left
+                        .collect_from_correlated_indices_by_depth_and_assign_id(
+                            depth,
+                            correlated_id,
+                        ),
+                );
+                correlated_indices.extend(
+                    join.right
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                );
+                correlated_indices
+            }
+            _ => self.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
         }
     }
 

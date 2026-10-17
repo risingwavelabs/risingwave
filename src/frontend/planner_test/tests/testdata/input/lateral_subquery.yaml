@@ -250,3 +250,30 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: lateral after a left item references an enclosing query
+  sql: |
+    create table a (a1 int);
+    select (select y from (select 100 as q) t1, lateral (select a1 + q as y) z) from a;
+  expected_outputs:
+    - batch_plan
+- name: explicit join lateral references an enclosing query
+  sql: |
+    create table a (a1 int);
+    select (select y from (select 100 as q) t1 cross join lateral (select a1 + q as y) z) from a;
+  expected_outputs:
+    - batch_plan
+- name: nested lateral references the left input of an enclosing lateral
+  sql: |
+    create table t1 (x int);
+    create table t2 (y int);
+    select * from t1, lateral (select * from t2, lateral (select x + y as s) iz) oz;
+  expected_outputs:
+    - batch_plan
+- name: hidden left inputs do not add a correlation depth
+  sql: |
+    create table a (a1 int);
+    create table t1 (x int);
+    create table t2 (y int);
+    select a1, (select count(*) from t1, (t2 cross join (select a1 as v) w) where v = x) from a;
+  expected_outputs:
+    - batch_plan

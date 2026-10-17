@@ -178,10 +178,11 @@ impl Binder {
     /// level, so they form one scope: a name found in more than one of them is ambiguous rather
     /// than resolved to whichever context comes first.
     ///
-    /// A non-empty lateral context represents the left input of a potential `Apply`, so it adds a
-    /// depth boundary. Empty contexts are parser/binder isolation frames and do not. An upper
-    /// query or table-function context always contributes at least one boundary, even if its local
-    /// `FROM` context is empty.
+    /// A visible non-empty lateral context is the left input of the `Apply` being bound, so it
+    /// adds a depth boundary. Hidden lateral contexts (left inputs that a non-lateral factor or a
+    /// join condition cannot see) do not become an `Apply` boundary, and empty contexts are
+    /// parser/binder isolation frames, so neither adds one. An upper query or table-function
+    /// context always contributes at least one boundary, even if its local `FROM` context is empty.
     fn correlation_scopes(&self) -> Vec<Vec<(&crate::binder::BindContext, usize)>> {
         let mut scopes = vec![];
         let mut depth = 1;
@@ -190,9 +191,9 @@ impl Binder {
         for lateral_context in self.lateral_contexts.iter().rev() {
             if lateral_context.is_visible {
                 scope.push((&lateral_context.context, depth));
-            }
-            if !lateral_context.context.columns.is_empty() {
-                depth += 1;
+                if !lateral_context.context.columns.is_empty() {
+                    depth += 1;
+                }
             }
         }
         scopes.push(scope);
@@ -207,9 +208,9 @@ impl Binder {
             for lateral_context in lateral_contexts.iter().rev() {
                 if lateral_context.is_visible {
                     scope.push((&lateral_context.context, depth));
-                }
-                if !lateral_context.context.columns.is_empty() {
-                    depth += 1;
+                    if !lateral_context.context.columns.is_empty() {
+                        depth += 1;
+                    }
                 }
             }
 
