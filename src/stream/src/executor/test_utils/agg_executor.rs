@@ -191,6 +191,36 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     emit_on_window_close: bool,
     executor_id: u64,
 ) -> Executor {
+    new_boxed_hash_agg_executor_with_max_dirty_groups_heap_size(
+        store,
+        input,
+        is_append_only,
+        agg_calls,
+        row_count_index,
+        group_key_indices,
+        stream_key,
+        extreme_cache_size,
+        emit_on_window_close,
+        executor_id,
+        64 << 20,
+    )
+    .await
+}
+
+#[expect(clippy::too_many_arguments)]
+pub async fn new_boxed_hash_agg_executor_with_max_dirty_groups_heap_size<S: StateStore>(
+    store: S,
+    input: Executor,
+    is_append_only: bool,
+    agg_calls: Vec<AggCall>,
+    row_count_index: usize,
+    group_key_indices: Vec<usize>,
+    stream_key: StreamKey,
+    extreme_cache_size: usize,
+    emit_on_window_close: bool,
+    executor_id: u64,
+    max_dirty_groups_heap_size: usize,
+) -> Executor {
     let mut storages = Vec::with_capacity(agg_calls.iter().len());
     for (idx, agg_call) in agg_calls.iter().enumerate() {
         storages.push(
@@ -243,7 +273,7 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
         extra: HashAggExecutorExtraArgs {
             group_key_indices,
             chunk_size: 1024,
-            max_dirty_groups_heap_size: 64 << 20,
+            max_dirty_groups_heap_size,
             emit_on_window_close,
         },
     })
