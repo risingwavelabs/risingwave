@@ -20,7 +20,6 @@ use risingwave_common::types::{
     CheckedAdd, Date, Decimal, F64, FloatExt, Interval, IsNegative, Time, Timestamp,
 };
 use risingwave_expr::{ExprError, Result, function};
-use rust_decimal::MathematicalOps;
 
 #[function("add(*int, *int) -> auto")]
 #[function("add(decimal, decimal) -> auto")]
@@ -385,20 +384,10 @@ pub fn sqrt_f64(expr: F64) -> Result<F64> {
 
 #[function("sqrt(decimal) -> decimal")]
 pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
-    match expr {
-        Decimal::NaN | Decimal::PositiveInf => Ok(expr),
-        Decimal::Normalized(value) => match value.sqrt() {
-            Some(res) => Ok(Decimal::from(res)),
-            None => Err(ExprError::InvalidParam {
-                name: "sqrt input",
-                reason: "input cannot be negative value".into(),
-            }),
-        },
-        Decimal::NegativeInf => Err(ExprError::InvalidParam {
-            name: "sqrt input",
-            reason: "input cannot be negative value".into(),
-        }),
-    }
+    expr.checked_sqrt().ok_or_else(|| ExprError::InvalidParam {
+        name: "sqrt input",
+        reason: "input cannot be negative value".into(),
+    })
 }
 
 #[function("cbrt(float8) -> float8")]
