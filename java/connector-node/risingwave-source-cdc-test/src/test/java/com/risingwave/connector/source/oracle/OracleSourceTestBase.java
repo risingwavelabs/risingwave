@@ -20,6 +20,8 @@ import static org.junit.Assert.assertEquals;
 
 import com.risingwave.connector.source.SourceTestClient;
 import com.risingwave.proto.ConnectorServiceProto;
+import com.risingwave.proto.Data;
+import com.risingwave.proto.PlanCommon;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.HashSet;
@@ -86,8 +88,27 @@ abstract class OracleSourceTestBase {
 
     protected ConnectorServiceProto.ValidateSourceResponse validate(
             Map<String, String> properties) {
+        return validate(properties, primaryKeySchema("ID"));
+    }
+
+    protected ConnectorServiceProto.ValidateSourceResponse validate(
+            Map<String, String> properties, ConnectorServiceProto.TableSchema tableSchema) {
         return oracle().sourceTestClient()
-                .validateSource(ConnectorServiceProto.SourceType.ORACLE, properties);
+                .validateSource(ConnectorServiceProto.SourceType.ORACLE, properties, tableSchema);
+    }
+
+    protected static ConnectorServiceProto.TableSchema primaryKeySchema(String... names) {
+        var schema = ConnectorServiceProto.TableSchema.newBuilder();
+        for (var name : names) {
+            schema.addPkIndices(schema.getColumnsCount());
+            schema.addColumns(
+                    PlanCommon.ColumnDesc.newBuilder()
+                            .setName(name)
+                            .setColumnType(
+                                    Data.DataType.newBuilder()
+                                            .setTypeName(Data.DataType.TypeName.DECIMAL)));
+        }
+        return schema.build();
     }
 
     /**

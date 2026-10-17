@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod mock_external_table;
+pub mod oracle;
 pub mod postgres;
 pub mod sql_server;
 
@@ -40,6 +41,9 @@ use crate::source::cdc::CdcSourceType;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
     MySqlExternalTable, MySqlExternalTableReader, MySqlOffset,
+};
+use crate::source::cdc::external::oracle::{
+    OracleExternalTable, OracleExternalTableReader, OracleOffset,
 };
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 use crate::source::cdc::external::sql_server::{
@@ -194,6 +198,7 @@ pub enum CdcOffset {
     MySql(MySqlOffset),
     Postgres(PostgresOffset),
     SqlServer(SqlServerOffset),
+    Oracle(OracleOffset),
 }
 
 // Example debezium offset for Postgres:
@@ -288,6 +293,7 @@ pub enum ExternalTableReaderImpl {
     MySql(MySqlExternalTableReader),
     Postgres(PostgresExternalTableReader),
     SqlServer(SqlServerExternalTableReader),
+    Oracle(OracleExternalTableReader),
     Mock(MockExternalTableReader),
 }
 
@@ -304,6 +310,9 @@ pub struct ExternalTableConfig {
     pub database: String,
     #[serde(rename = "schema.name", default = "Default::default")]
     pub schema: String,
+    /// The Oracle pluggable database name. This field is only used by the Oracle CDC connector.
+    #[serde(rename = "database.pdb.name")]
+    pub pdb_name: Option<String>,
     #[serde(rename = "table.name")]
     pub table: String,
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
@@ -366,6 +375,7 @@ impl ExternalTableReader for ExternalTableReaderImpl {
             ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
             ExternalTableReaderImpl::Postgres(postgres) => postgres.current_cdc_offset().await,
             ExternalTableReaderImpl::SqlServer(sql_server) => sql_server.current_cdc_offset().await,
+            ExternalTableReaderImpl::Oracle(oracle) => oracle.current_cdc_offset().await,
             ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
         }
     }
@@ -419,6 +429,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::SqlServer(_) => {
                 SqlServerExternalTableReader::get_cdc_offset_parser()
             }
+            ExternalTableReaderImpl::Oracle(_) => {
+                OracleExternalTableReader::get_cdc_offset_parser()
+            }
             ExternalTableReaderImpl::Mock(_) => MockExternalTableReader::get_cdc_offset_parser(),
         }
     }
@@ -441,6 +454,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::SqlServer(sql_server) => {
                 sql_server.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
+            ExternalTableReaderImpl::Oracle(oracle) => {
+                oracle.snapshot_read(table_name, start_pk, primary_keys, limit)
+            }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
@@ -460,6 +476,7 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::MySql(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Postgres(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::SqlServer(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Oracle(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Mock(e) => e.get_parallel_cdc_splits(options),
         };
         pin_mut!(stream);
@@ -488,6 +505,9 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::SqlServer(sql_server) => {
                 sql_server.split_snapshot_read(table_name, left, right, split_columns)
             }
+            ExternalTableReaderImpl::Oracle(oracle) => {
+                oracle.split_snapshot_read(table_name, left, right, split_columns)
+            }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.split_snapshot_read(table_name, left, right, split_columns)
             }
@@ -506,6 +526,7 @@ pub enum ExternalTableImpl {
     MySql(MySqlExternalTable),
     Postgres(PostgresExternalTable),
     SqlServer(SqlServerExternalTable),
+    Oracle(OracleExternalTable),
 }
 
 impl ExternalTableImpl {
@@ -531,6 +552,9 @@ impl ExternalTableImpl {
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,
             )),
+            CdcSourceType::Oracle => Ok(ExternalTableImpl::Oracle(
+                OracleExternalTable::connect(config).await?,
+            )),
             _ => Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into()),
         }
     }
@@ -540,6 +564,7 @@ impl ExternalTableImpl {
             ExternalTableImpl::MySql(mysql) => mysql.column_descs(),
             ExternalTableImpl::Postgres(postgres) => postgres.column_descs(),
             ExternalTableImpl::SqlServer(sql_server) => sql_server.column_descs(),
+            ExternalTableImpl::Oracle(oracle) => oracle.column_descs(),
         }
     }
 
@@ -548,6 +573,7 @@ impl ExternalTableImpl {
             ExternalTableImpl::MySql(mysql) => mysql.pk_names(),
             ExternalTableImpl::Postgres(postgres) => postgres.pk_names(),
             ExternalTableImpl::SqlServer(sql_server) => sql_server.pk_names(),
+            ExternalTableImpl::Oracle(oracle) => oracle.pk_names(),
         }
     }
 
@@ -557,16 +583,16 @@ impl ExternalTableImpl {
     /// MySQL `BIGINT UNSIGNED` keys use `UnsignedInt64` to preserve upstream ordering
     /// when represented as signed `i64` values; other types use `Native`. MySQL names
     /// are matched case-insensitively, and missing upstream PK names return an error.
-    /// PostgreSQL and SQL Server return `Native` for every requested name.
+    /// PostgreSQL, SQL Server, and Oracle return `Native` for every requested name.
     pub fn pk_column_comparisons(
         &self,
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match self {
             ExternalTableImpl::MySql(mysql) => mysql.pk_column_comparisons(pk_names),
-            ExternalTableImpl::Postgres(_) | ExternalTableImpl::SqlServer(_) => {
-                Ok(vec![CdcKeyComparison::Native; pk_names.len()])
-            }
+            ExternalTableImpl::Postgres(_)
+            | ExternalTableImpl::SqlServer(_)
+            | ExternalTableImpl::Oracle(_) => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
         }
     }
 

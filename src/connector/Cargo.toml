@@ -44,6 +44,7 @@ adbc_core = { workspace = true, optional = true }
 adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"
 apache-avro = { workspace = true }
+arrow-58-ipc = { package = "arrow-ipc", version = "58" }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
 async-nats = { version = "0.49", features = ["websockets"] }

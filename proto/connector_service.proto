@@ -219,12 +219,36 @@ message ValidateSourceResponse {
   ValidationError error = 1;
 }
 
+// Internal request/response types used by the embedded JVM Oracle snapshot reader.
+// Oracle JDBC lives in the connector JVM, so Rust exchanges catalog and row data with it over
+// JNI using these protobuf messages rather than introducing an Oracle native-client dependency.
+message OracleConnectionProperties {
+  map<string, string> properties = 1;
+}
+
+message OracleSnapshotReadRequest {
+  string schema_name = 1;
+  string table_name = 2;
+  TableSchema table_schema = 3;
+  repeated string primary_keys = 4;
+  uint32 limit = 5;
+}
+
+message OracleSnapshotReadResponse {
+  // A complete Arrow IPC stream holding the schema and one record batch of the page.
+  bytes arrow_ipc = 1;
+}
+
 service ConnectorService {
   rpc SinkWriterStream(stream SinkWriterStreamRequest) returns (stream SinkWriterStreamResponse);
   rpc SinkCoordinatorStream(stream SinkCoordinatorStreamRequest) returns (stream SinkCoordinatorStreamResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+  // Served over JNI by the embedded JVM. Besides the request, Java receives process-local handles as
+  // separate JNI arguments: the session id, the start-key row pointer (0 for the first page; otherwise
+  // the exclusive lower bound, read through `SingletonRow`), and the response channel pointer.
+  rpc OracleSnapshotRead(OracleSnapshotReadRequest) returns (stream OracleSnapshotReadResponse);
 }
 
 message CoordinateRequest {
