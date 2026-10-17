@@ -74,6 +74,9 @@ pub struct ConnectorSourceWorker {
     metrics: Arc<MetaMetrics>,
     connector_properties: ConnectorProperties,
     fail_cnt: u32,
+    /// Set when rebuilding the enumerator after a property update failed: the enumerator still
+    /// uses the previous properties and must not be used for discovery until it is rebuilt.
+    enumerator_stale: bool,
     // Held for the worker's lifetime: dropping a guarded handle resets its series on the next scrape.
     source_is_up: LabelGuardedIntGauge,
     tick_duration: LabelGuardedHistogram,
@@ -297,6 +300,7 @@ impl ConnectorSourceWorker {
             .context("failed to create SplitEnumerator")?;
         self.enumerator = enumerator;
         self.fail_cnt = 0;
+        self.enumerator_stale = false;
         tracing::info!("refreshed source enumerator: {}", self.source_name);
         Ok(())
     }
@@ -342,6 +346,7 @@ impl ConnectorSourceWorker {
             metrics,
             connector_properties,
             fail_cnt: 0,
+            enumerator_stale: false,
             source_is_up,
             tick_duration,
             monitor_error_count,
@@ -407,6 +412,9 @@ impl ConnectorSourceWorker {
                             SourceWorkerCommand::UpdateProps(new_props) => {
                                 self.connector_properties = new_props;
                                 if let Err(e) = self.refresh().await {
+                                    // Keep retrying on the following ticks instead of silently
+                                    // discovering splits with the previous properties.
+                                    self.enumerator_stale = true;
                                     tracing::error!(error = %e.as_report(), "failed to refresh the connector source worker");
                                 }
                                 tracing::debug!("source {} worker properties updated", self.source_name);
@@ -418,7 +426,7 @@ impl ConnectorSourceWorker {
                     }
                 }
                 _ = interval.tick() => {
-                    if self.fail_cnt > MAX_FAIL_CNT
+                    if (self.enumerator_stale || self.fail_cnt > MAX_FAIL_CNT)
                         && let Err(e) = self.refresh().await {
                             tracing::error!(error = %e.as_report(), "failed to refresh the connector source worker");
                         }
@@ -442,6 +450,14 @@ impl ConnectorSourceWorker {
 
     /// Uses [`risingwave_connector::source::SplitEnumerator`] to fetch the latest split metadata from the external source service.
     async fn tick(&mut self) -> MetaResult<()> {
+        if self.enumerator_stale {
+            return Err(anyhow::anyhow!(
+                "the split enumerator of source {} still uses the previous properties",
+                self.source_name
+            )
+            .into());
+        }
+
         let source_is_up = |res: i64| {
             self.source_is_up.set(res);
         };

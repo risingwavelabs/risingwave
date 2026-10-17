@@ -42,6 +42,29 @@ pub trait WithOptions {
     fn assert_receiver_is_with_options(&self) {}
 }
 
+/// Groups of WITH option keys that are serde aliases of the same field and can be altered on the
+/// fly. Serde rejects an option map containing both the canonical key and an alias, so altering
+/// one key of a group must remove the other keys from the existing options.
+// TODO: generate this from the `alias` info in `with_options_*.yaml`.
+const ALTERABLE_ALIAS_GROUPS: &[&[&str]] = &[&[
+    crate::source::kafka::KAFKA_PROPS_BROKER_KEY,
+    crate::source::kafka::KAFKA_PROPS_BROKER_KEY_ALIAS,
+]];
+
+/// Returns the keys that must be removed from existing options when `altered_keys` are applied,
+/// because they are aliases of an altered key. See [`ALTERABLE_ALIAS_GROUPS`].
+pub fn aliases_of_altered_keys<'a>(
+    altered_keys: impl IntoIterator<Item = &'a str>,
+) -> Vec<&'static str> {
+    let altered_keys: BTreeSet<&str> = altered_keys.into_iter().collect();
+    ALTERABLE_ALIAS_GROUPS
+        .iter()
+        .filter(|group| group.iter().any(|key| altered_keys.contains(key)))
+        .flat_map(|group| group.iter().copied())
+        .filter(|key| !altered_keys.contains(key))
+        .collect()
+}
+
 // Currently CDC properties are handled specially.
 // - It simply passes HashMap to Java DBZ.
 // - It's not handled by serde.
@@ -303,6 +326,19 @@ impl WithOptionsSecResolved {
             self.inner.remove(k);
         }
 
+        // Altering a key must also remove its aliases (e.g. `kafka.brokers` when
+        // `properties.bootstrap.server` is altered), otherwise deserialization fails on the
+        // duplicate field.
+        for k in aliases_of_altered_keys(
+            update_alter_props
+                .keys()
+                .chain(update_alter_secret_refs.keys())
+                .map(String::as_str),
+        ) {
+            self.inner.remove(k);
+            self.secret_ref.remove(k);
+        }
+
         self.inner.extend(update_alter_props);
         self.secret_ref.extend(update_alter_secret_refs);
 
@@ -404,5 +440,78 @@ mod tests {
                 "{connector} should not support FULL_RELOAD refresh"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+
+    #[test]
+    fn test_aliases_of_altered_keys() {
+        assert_eq!(
+            aliases_of_altered_keys(["properties.bootstrap.server"]),
+            vec!["kafka.brokers"]
+        );
+        assert_eq!(
+            aliases_of_altered_keys(["kafka.brokers", "topic"]),
+            vec!["properties.bootstrap.server"]
+        );
+        // Altering both keys of a group removes nothing: the collision is reported by serde.
+        assert!(
+            aliases_of_altered_keys(["kafka.brokers", "properties.bootstrap.server"]).is_empty()
+        );
+        assert!(aliases_of_altered_keys(["properties.sasl.username"]).is_empty());
+    }
+
+    #[test]
+    fn test_handle_update_removes_aliases_of_altered_keys() {
+        let mut options = WithOptionsSecResolved::without_secrets(BTreeMap::from([
+            ("connector".to_owned(), "kafka".to_owned()),
+            ("kafka.brokers".to_owned(), "old:9092".to_owned()),
+        ]));
+        options
+            .handle_update(
+                BTreeMap::from([(
+                    "properties.bootstrap.server".to_owned(),
+                    "new:9092".to_owned(),
+                )]),
+                BTreeMap::new(),
+            )
+            .unwrap();
+        assert_eq!(
+            options.as_plaintext(),
+            &BTreeMap::from([
+                ("connector".to_owned(), "kafka".to_owned()),
+                (
+                    "properties.bootstrap.server".to_owned(),
+                    "new:9092".to_owned()
+                ),
+            ])
+        );
+
+        // The alias stored as a secret is removed as well.
+        let mut options = WithOptionsSecResolved::new(
+            BTreeMap::from([("connector".to_owned(), "kafka".to_owned())]),
+            BTreeMap::from([(
+                "properties.bootstrap.server".to_owned(),
+                PbSecretRef {
+                    secret_id: 1.into(),
+                    ref_as: 0,
+                },
+            )]),
+        );
+        let (_, to_remove) = options
+            .handle_update(
+                BTreeMap::from([("kafka.brokers".to_owned(), "new:9092".to_owned())]),
+                BTreeMap::new(),
+            )
+            .unwrap();
+        assert_eq!(to_remove, vec![SecretId::from(1)]);
+        assert!(options.as_secret().is_empty());
+        assert_eq!(
+            options.as_plaintext().get("kafka.brokers").unwrap(),
+            "new:9092"
+        );
     }
 }

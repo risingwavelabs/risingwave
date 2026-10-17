@@ -451,9 +451,17 @@ KafkaProperties:
     allow_alter_on_fly: true
   - name: properties.bootstrap.server
     field_type: String
+    comments: |-
+      Comma-separated list of Kafka bootstrap servers.
+
+      Altering it on the fly is meant for address changes of the *same* logical cluster (broker
+      migration, DNS rename, endpoint change). The split state (topic partitions and offsets) of
+      a source is kept as-is, so pointing to a different cluster whose offsets are not
+      compatible leads to skipped or re-read messages.
     required: true
     alias:
     - kafka.brokers
+    allow_alter_on_fly: true
   - name: properties.security.protocol
     field_type: String
     comments: |-

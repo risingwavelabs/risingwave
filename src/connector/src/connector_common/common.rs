@@ -199,7 +199,14 @@ impl AwsAuthProps {
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
 pub struct KafkaConnectionProps {
+    /// Comma-separated list of Kafka bootstrap servers.
+    ///
+    /// Altering it on the fly is meant for address changes of the *same* logical cluster (broker
+    /// migration, DNS rename, endpoint change). The split state (topic partitions and offsets) of
+    /// a source is kept as-is, so pointing to a different cluster whose offsets are not
+    /// compatible leads to skipped or re-read messages.
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
+    #[with_option(allow_alter_on_fly)]
     pub brokers: String,
 
     /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be
