@@ -17,7 +17,10 @@
 use std::fmt::Write;
 use std::process::Command;
 
-use crate::{Application, HummockInMemoryStrategy, ServiceConfig, add_hummock_backend};
+use crate::{
+    Application, HummockInMemoryStrategy, STARROCKS_CONTAINER_HOST, STARROCKS_CONTAINER_QUERY_PORT,
+    ServiceConfig, add_hummock_backend,
+};
 
 /// Generate environment variables (put in file `.risingwave/config/risedev-env`)
 /// from the given service configurations to be used by future
@@ -137,6 +140,49 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(
                     env,
                     r#"RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON="connector='clickhouse',clickhouse.url='{url}',clickhouse.user='{user}',clickhouse.password='{password}',clickhouse.database='{database}'""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::Starrocks(c) => {
+                let host = &c.address;
+                let http_port = &c.http_port;
+                let query_port = &c.query_port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                let admin_user = &c.admin_user;
+                let admin_password = &c.admin_password;
+                let database_is_disposable = !c.user_managed || c.database_is_disposable;
+
+                writeln!(env, r#"STARROCKS_HOST="{host}""#).unwrap();
+                writeln!(env, r#"STARROCKS_HTTP_PORT="{http_port}""#).unwrap();
+                writeln!(env, r#"STARROCKS_QUERY_PORT="{query_port}""#).unwrap();
+                writeln!(env, r#"STARROCKS_USER="{user}""#).unwrap();
+                writeln!(env, r#"STARROCKS_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"STARROCKS_DATABASE="{database}""#).unwrap();
+                writeln!(env, r#"STARROCKS_ADMIN_USER="{admin_user}""#).unwrap();
+                writeln!(env, r#"STARROCKS_ADMIN_PASSWORD="{admin_password}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"STARROCKS_DATABASE_IS_DISPOSABLE="{database_is_disposable}""#
+                )
+                .unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"STARROCKS_CONTAINER="risedev-{}""#, c.id).unwrap();
+                    writeln!(
+                        env,
+                        r#"STARROCKS_CONTAINER_HOST="{STARROCKS_CONTAINER_HOST}""#
+                    )
+                    .unwrap();
+                    writeln!(
+                        env,
+                        r#"STARROCKS_CONTAINER_QUERY_PORT="{STARROCKS_CONTAINER_QUERY_PORT}""#
+                    )
+                    .unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_STARROCKS_WITH_OPTIONS_COMMON="connector='starrocks',starrocks.host='{host}',starrocks.mysqlport='{query_port}',starrocks.httpport='{http_port}',starrocks.user='{user}',starrocks.password='{password}',starrocks.database='{database}'""#,
                 )
                 .unwrap();
             }
@@ -389,4 +435,47 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
         }
     }
     env
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StarrocksConfig;
+
+    fn starrocks_config(user_managed: bool, database_is_disposable: bool) -> ServiceConfig {
+        let config = serde_yaml::from_str::<StarrocksConfig>(&format!(
+            r#"
+use: starrocks
+id: starrocks-test
+address: 127.0.0.1
+http-port: 28030
+query-port: 29030
+user: users
+password: "123456"
+database: demo
+admin-user: root
+admin-password: ""
+database-is-disposable: {database_is_disposable}
+image: starrocks/allin1-ubuntu:3.5.21
+user-managed: {user_managed}
+"#
+        ))
+        .unwrap();
+        ServiceConfig::Starrocks(config)
+    }
+
+    #[test]
+    fn managed_starrocks_database_is_disposable() {
+        let env = generate_risedev_env(&vec![starrocks_config(false, false)]);
+        assert!(env.contains(r#"STARROCKS_DATABASE_IS_DISPOSABLE="true""#));
+    }
+
+    #[test]
+    fn user_managed_starrocks_database_requires_opt_in() {
+        let env = generate_risedev_env(&vec![starrocks_config(true, false)]);
+        assert!(env.contains(r#"STARROCKS_DATABASE_IS_DISPOSABLE="false""#));
+
+        let env = generate_risedev_env(&vec![starrocks_config(true, true)]);
+        assert!(env.contains(r#"STARROCKS_DATABASE_IS_DISPOSABLE="true""#));
+    }
 }
