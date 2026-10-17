@@ -23,7 +23,8 @@ mod tests {
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::subscription::SubscriptionState;
     use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
-    use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
+    use risingwave_pb::common::{HostAddress, PbObjectType, WorkerNode, WorkerType, worker_node};
+    use risingwave_pb::ddl_service::TypeCount;
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::plan_common::ExternalTableDesc;
@@ -1586,6 +1587,156 @@ mod tests {
                 .one(&mgr.inner.read().await.db)
                 .await?
                 .is_none()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_table_cascade_objects() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let table_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        insert_test_table(
+            &txn,
+            table_obj.oid.as_table_id(),
+            "t",
+            TableType::Table,
+            None,
+            "CREATE TABLE t (v INT)",
+        )
+        .await?;
+
+        for (name, table_type) in [
+            ("__internal_t", TableType::Internal),
+            ("mv", TableType::MaterializedView),
+            ("dependent_table", TableType::Table),
+        ] {
+            let dependent_obj = CatalogController::create_object(
+                &txn,
+                ObjectType::Table,
+                TEST_OWNER_ID,
+                Some(TEST_SCHEMA_ID.as_object_id()),
+            )
+            .await?;
+            insert_test_table(
+                &txn,
+                dependent_obj.oid.as_table_id(),
+                name,
+                table_type,
+                None,
+                "",
+            )
+            .await?;
+            ObjectDependency::insert(object_dependency::ActiveModel {
+                oid: Set(table_obj.oid),
+                used_by: Set(dependent_obj.oid),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        for name in ["v", "v_other"] {
+            mgr.create_view(
+                PbView {
+                    schema_id: TEST_SCHEMA_ID,
+                    database_id: TEST_DATABASE_ID,
+                    name: name.to_owned(),
+                    owner: TEST_OWNER_ID as _,
+                    sql: format!("CREATE VIEW {name} AS SELECT * FROM t"),
+                    ..Default::default()
+                },
+                HashSet::from([table_obj.oid]),
+            )
+            .await?;
+        }
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let sink_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        Sink::insert(sink::ActiveModel::from(PbSink {
+            id: sink_obj.oid.as_sink_id(),
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "sink_into_t".to_owned(),
+            sink_type: PbSinkType::AppendOnly as _,
+            target_table: Some(table_obj.oid.as_table_id()),
+            ..Default::default()
+        }))
+        .exec(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let result = mgr
+            .drop_object(ObjectType::Table, table_obj.oid, DropMode::Cascade)
+            .await?;
+
+        let drop_result = result.drop_result.unwrap();
+        assert_eq!(drop_result.total_count, 5);
+        assert_eq!(
+            drop_result.counts_by_type,
+            [
+                TypeCount {
+                    object_type: PbObjectType::Table as _,
+                    count: 1,
+                },
+                TypeCount {
+                    object_type: PbObjectType::Mview as _,
+                    count: 1,
+                },
+                TypeCount {
+                    object_type: PbObjectType::Sink as _,
+                    count: 1,
+                },
+                TypeCount {
+                    object_type: PbObjectType::View as _,
+                    count: 2,
+                },
+            ]
+        );
+        assert_eq!(
+            drop_result
+                .counts_by_type
+                .iter()
+                .map(|entry| entry.count)
+                .sum::<u64>(),
+            drop_result.total_count
+        );
+        let cascade_objects = drop_result.cascade_objects;
+        assert_eq!(cascade_objects.len() as u64, drop_result.total_count);
+        assert!(
+            cascade_objects.iter().any(|object| {
+                object.object_type() == PbObjectType::Sink
+                    && object.schema_name.as_deref() == Some("public")
+                    && object.object_name == "sink_into_t"
+            }),
+            "sink discovered through Sink::TargetTable should be included"
+        );
+        assert!(
+            cascade_objects.iter().any(|object| {
+                object.object_type() == PbObjectType::View
+                    && object.schema_name.as_deref() == Some("public")
+                    && object.object_name == "v"
+            }),
+            "dependent view should be included"
         );
 
         Ok(())
