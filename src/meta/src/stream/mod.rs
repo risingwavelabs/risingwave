@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod bounded_load_manager;
 pub(crate) mod cdc;
 mod refresh_manager;
 mod scale;
@@ -22,6 +23,7 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 
+pub use bounded_load_manager::*;
 pub use refresh_manager::*;
 pub use scale::*;
 pub use sink::*;

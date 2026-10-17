@@ -415,6 +415,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut mv_depended_subscriptions,
             mut creating_jobs,
             mut cdc_table_snapshot_splits,
+            mut unfinished_bounded_jobs,
         } = runtime_info;
         let fragment_relations = &recovery_context.fragment_relations;
         let RenderedDatabaseRuntimeInfo {
@@ -440,6 +441,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 false,
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_splits,
+                &mut unfinished_bounded_jobs,
                 batch_refresh,
                 iceberg_v3,
             )?

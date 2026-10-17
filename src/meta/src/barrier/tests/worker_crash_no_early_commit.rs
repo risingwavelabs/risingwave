@@ -43,6 +43,7 @@ use tokio::task::yield_now;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::MetaResult;
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::context::recovery::LoadedRecoveryContext;
@@ -156,6 +157,10 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
             risingwave_pb::stream_service::barrier_complete_response::PbLoadFinishedSource,
         >,
     ) -> MetaResult<()> {
+        unimplemented!()
+    }
+
+    async fn apply_bounded_load_action(&self, _action: BoundedLoadAction) -> MetaResult<()> {
         unimplemented!()
     }
 
@@ -373,6 +378,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             checkpoint_frequency: None,
         }],
         cdc_table_snapshot_splits: HashMap::new(),
+        unfinished_bounded_jobs: HashMap::new(),
     })
     .unwrap();
     let make_control_stream_handle = || {
