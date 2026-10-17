@@ -978,6 +978,11 @@ for_all_wrapped_id_fields! (
             reporter_actor_id: ActorId,
             table_id: TableId,
         }
+        BarrierCompleteResponse.TableChangeLogProgress {
+            fragment_id: FragmentId,
+            upstream_table_id: TableId,
+            progress_table_id: TableId,
+        }
         GetMinUncommittedObjectIdResponse {
             min_uncommitted_object_id: HummockRawObjectId,
         }

@@ -22,7 +22,7 @@ mod tests {
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::subscription::SubscriptionState;
-    use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
+    use risingwave_pb::catalog::{PbSinkType, PbTable, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
@@ -2805,6 +2805,62 @@ mod tests {
         }
         .insert(&txn)
         .await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(103)),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(0),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode::default())),
+            state_table_ids: Set(vec![TableId::new(9999)].into()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+
+        let (iceberg_job_id, _, progress_table_id) =
+            insert_test_streaming_job(&txn, "iceberg_v3_sink", false, None).await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(101)),
+            job_id: Set(iceberg_job_id),
+            fragment_type_mask: Set(FragmentTypeFlag::IcebergWithPkIndexWriter as i32),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode {
+                node_body: Some(PbNodeBody::IcebergWithPkIndexWriter(Default::default())),
+                ..Default::default()
+            })),
+            state_table_ids: Set(Default::default()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(102)),
+            job_id: Set(iceberg_job_id),
+            fragment_type_mask: Set(FragmentTypeFlag::SnapshotBackfillStreamScan as i32),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode {
+                node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
+                    table_id: upstream_table_id,
+                    stream_scan_type: StreamScanType::SnapshotBackfill as i32,
+                    state_table: Some(PbTable {
+                        id: progress_table_id,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            })),
+            state_table_ids: Set(vec![progress_table_id].into()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
         txn.commit().await?;
         drop(inner);
 
@@ -2813,17 +2869,22 @@ mod tests {
             truncate_info.subscription_retention_seconds,
             HashMap::from([(upstream_table_id, 123)])
         );
-        assert_eq!(truncate_info.independent_jobs.len(), 1);
-        let independent_job = &truncate_info.independent_jobs[0];
-        assert_eq!(independent_job.job_id, job_id);
+        assert_eq!(truncate_info.committed_epoch_truncate_jobs.len(), 1);
+        let committed_epoch_truncate_job = &truncate_info.committed_epoch_truncate_jobs[0];
+        assert_eq!(committed_epoch_truncate_job.job_id, job_id);
         assert_eq!(
-            independent_job.state_table_ids,
+            committed_epoch_truncate_job.state_table_ids,
             HashSet::from([state_table_id])
         );
         assert_eq!(
-            independent_job.upstream_table_snapshot_epochs,
+            committed_epoch_truncate_job.upstream_table_snapshot_epochs,
             HashMap::from([(upstream_table_id, None)])
         );
+        assert_eq!(truncate_info.progress_table_subscribers.len(), 1);
+        let progress_subscriber = truncate_info.progress_table_subscribers.first().unwrap();
+        assert_eq!(progress_subscriber.subscriber_job_id, iceberg_job_id);
+        assert_eq!(progress_subscriber.upstream_table_id, upstream_table_id);
+        assert_eq!(progress_subscriber.progress_table_id, progress_table_id);
 
         Ok(())
     }
