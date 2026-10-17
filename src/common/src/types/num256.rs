@@ -329,6 +329,15 @@ impl EstimateSize for Int256 {
     }
 }
 
+impl Int256Ref<'_> {
+    /// Transmute a reference to the inner words representation `[i128; 2]` into `Int256Ref`.
+    pub fn from_words(words: &[i128; 2]) -> Self {
+        // SAFETY: `i256` is repr(transparent) over `[i128; 2]`.
+        let inner: &i256 = unsafe { std::mem::transmute(words) };
+        Self(inner)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
