@@ -42,6 +42,9 @@ pub mod backup_reader;
 pub mod event_handler;
 pub mod local_version;
 pub mod observer_manager;
+// The backend is exercised by component tests before production wiring in the final stack layer.
+#[allow(dead_code)]
+pub(crate) mod pin_cache;
 pub mod store;
 pub use store::*;
 mod validator;
