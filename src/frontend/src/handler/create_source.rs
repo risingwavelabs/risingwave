@@ -42,11 +42,11 @@ use risingwave_connector::parser::additional_columns::{
 use risingwave_connector::parser::{
     AvroParserConfig, DEBEZIUM_IGNORE_KEY, DebeziumAvroParserConfig, ProtobufParserConfig,
     SchemaLocation, SpecificParserConfig, TimestamptzHandling,
-    fetch_json_schema_and_map_to_columns,
+    fetch_json_schema_and_map_to_columns, fetch_pulsar_json_schema_and_map_to_columns,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::pulsar_schema::{
-    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY,
+    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY, PulsarSchemaConfig,
 };
 use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
@@ -165,6 +165,15 @@ fn try_consume_schema_registry_config_from_options(
     .for_each(|key| {
         try_consume_string_from_options(format_encode_options, key);
     });
+}
+
+/// Returns whether the Pulsar schema is used, with `schema.pulsar.url` set directly or as a secret.
+pub(crate) fn uses_pulsar_schema<V>(
+    format_encode_options: &BTreeMap<String, String>,
+    format_encode_secret_refs: &BTreeMap<String, V>,
+) -> bool {
+    format_encode_options.contains_key(PULSAR_SCHEMA_URL_KEY)
+        || format_encode_secret_refs.contains_key(PULSAR_SCHEMA_URL_KEY)
 }
 
 fn try_consume_pulsar_schema_config_from_options(
