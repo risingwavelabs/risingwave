@@ -145,9 +145,11 @@ pub enum CdcTableType {
     #[sea_orm(string_value = "MYSQL")]
     Mysql,
     #[sea_orm(string_value = "SQLSERVER")]
-    Sqlserver,
+    #[serde(rename = "Sqlserver")] // keep the serde name used in meta backup snapshots
+    SqlServer,
     #[sea_orm(string_value = "MONGO")]
-    Mongo,
+    #[serde(rename = "Mongo")] // keep the serde name used in meta backup snapshots
+    Mongodb,
     #[sea_orm(string_value = "CITUS")]
     Citus,
 }
@@ -157,8 +159,8 @@ impl From<CdcTableType> for PbCdcTableType {
         match cdc_table_type {
             CdcTableType::Postgres => Self::Postgres,
             CdcTableType::Mysql => Self::Mysql,
-            CdcTableType::Sqlserver => Self::Sqlserver,
-            CdcTableType::Mongo => Self::Mongo,
+            CdcTableType::SqlServer => Self::SqlServer,
+            CdcTableType::Mongodb => Self::Mongodb,
             CdcTableType::Citus => Self::Citus,
             CdcTableType::Unspecified => Self::Unspecified,
         }
@@ -170,8 +172,8 @@ impl From<PbCdcTableType> for CdcTableType {
         match cdc_table_type {
             PbCdcTableType::Postgres => Self::Postgres,
             PbCdcTableType::Mysql => Self::Mysql,
-            PbCdcTableType::Sqlserver => Self::Sqlserver,
-            PbCdcTableType::Mongo => Self::Mongo,
+            PbCdcTableType::SqlServer => Self::SqlServer,
+            PbCdcTableType::Mongodb => Self::Mongodb,
             PbCdcTableType::Citus => Self::Citus,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
@@ -390,8 +392,9 @@ impl From<PbTable> for ActiveModel {
                     0 => CdcTableType::Postgres, // Map Unspecified to Postgres as default
                     1 => CdcTableType::Postgres,
                     2 => CdcTableType::Mysql,
-                    3 => CdcTableType::Sqlserver,
-                    4 => CdcTableType::Mongo,
+                    3 => CdcTableType::SqlServer,
+                    4 => CdcTableType::Mongodb,
+                    5 => CdcTableType::Citus,
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),
