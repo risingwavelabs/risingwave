@@ -3930,6 +3930,8 @@ pub enum AsOf {
     /// actors. It stays on the lookup relation so optimizer rewrites cannot detach the strategy
     /// from that relation; [`crate::ast::Join`]'s `Display` renders the modifier in join position.
     ProcessTimeBroadcast,
+    /// Used by event-time temporal join.
+    EventTime(Expr),
     // used by time travel
     ProcessTimeWithInterval((String, DateTimeField)),
     // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
@@ -3946,6 +3948,7 @@ impl fmt::Display for AsOf {
             ProcessTime | ProcessTimeBroadcast => {
                 write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")
             }
+            EventTime(expr) => write!(f, " FOR SYSTEM_TIME AS OF {}", expr),
             ProcessTimeWithInterval((value, leading_field)) => write!(
                 f,
                 " FOR SYSTEM_TIME AS OF NOW() - '{}' {}",
