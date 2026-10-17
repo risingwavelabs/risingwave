@@ -132,6 +132,10 @@ impl CdcTableBackfillTracker {
         self.cdc_scan_fragment_id
     }
 
+    pub fn set_cdc_scan_fragment_id(&mut self, cdc_scan_fragment_id: FragmentId) {
+        self.cdc_scan_fragment_id = cdc_scan_fragment_id;
+    }
+
     pub fn update_split_progress(&mut self, progress: &PbCdcTableBackfillProgress) {
         tracing::debug!(?progress, "Complete split.");
         let current_progress = match &mut self.status {
