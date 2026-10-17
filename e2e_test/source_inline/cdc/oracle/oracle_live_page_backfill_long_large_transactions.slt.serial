@@ -1,0 +1,168 @@
+include oracle_test_env.slt.part
+
+statement ok
+DROP TABLE IF EXISTS oracle_live_long;
+
+statement ok
+DROP TABLE IF EXISTS oracle_live_large;
+
+statement ok
+DROP SOURCE IF EXISTS oracle_live_transactions_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE (ID NUMBER PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_LIVE_PAGE (ID, VALUE) "
+    "SELECT LEVEL, 'initial-' || TO_CHAR(LEVEL) FROM DUAL CONNECT BY LEVEL <= 1000",
+])
+PY
+
+statement ok
+CREATE SOURCE oracle_live_transactions_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    heartbeat.table.auto.initialize = 'true',
+    -- Keep periodic heartbeat writes outside the transaction scenarios.
+    debezium.heartbeat.interval.ms = '3600000'
+) FORMAT PLAIN ENCODE JSON;
+
+# Update ID 1 before creating the table. Commit only after its original value has
+# been scanned, with an internal-state check that the table's lower SCN follows the update.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx
+begin_tx("oracle_long_tx", [
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'long-committed' WHERE ID = 1",
+])
+PY
+
+statement ok
+SET backfill_rate_limit = 2;
+
+statement ok
+CREATE TABLE oracle_live_long (
+    "ID" INT PRIMARY KEY, "VALUE" VARCHAR
+) WITH (snapshot.batch_size = 5)
+FROM oracle_live_transactions_source TABLE 'APP.RW_LIVE_PAGE';
+
+# Scope the creation rate to this table, not subsequent SQL in the SLT session.
+statement ok
+SET backfill_rate_limit = DEFAULT;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_backfills
+from oracle_test_hooks import check_backfill_prefix, check_paused_backfill
+begin_backfills(
+    ["oracle_live_long"],
+    before_backfill_pause_hook=check_backfill_prefix,
+    before_backfill_pause_hook_kwargs={"min_pk": 5},
+    after_backfill_pause_hook=check_paused_backfill,
+    after_backfill_pause_hook_kwargs={"min_pk": 5, "max_pk": 35, "transaction": "oracle_long_tx"},
+)
+PY
+
+query T
+SELECT "VALUE" FROM oracle_live_long WHERE "ID" = 1;
+----
+initial-1
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import end_tx, end_backfills
+from oracle_test_hooks import check_backfill_finished
+end_tx("oracle_long_tx")
+end_backfills(
+    ["oracle_live_long"],
+    after_backfill_resume_hook=check_backfill_finished,
+)
+PY
+
+query I retry 60 backoff 1s
+SELECT count(*) FROM oracle_live_long;
+----
+1000
+
+query T retry 30 backoff 1s
+SELECT "VALUE" FROM oracle_live_long WHERE "ID" = 1;
+----
+long-committed
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM oracle_live_long
+WHERE "VALUE" IS DISTINCT FROM CASE WHEN "ID" = 1 THEN 'long-committed'
+                                   ELSE 'initial-' || "ID"::VARCHAR END;
+----
+0
+
+statement ok
+DROP TABLE oracle_live_long;
+
+# Scan at least 300 rows, then pause. Update 600 rows and insert 600 more in one
+# transaction. Its scanned-prefix changes alone exceed the default 256-row chunk capacity.
+statement ok
+SET backfill_rate_limit = 100;
+
+statement ok
+CREATE TABLE oracle_live_large (
+    "ID" INT PRIMARY KEY, "VALUE" VARCHAR
+) WITH (snapshot.batch_size = 5)
+FROM oracle_live_transactions_source TABLE 'APP.RW_LIVE_PAGE';
+
+statement ok
+SET backfill_rate_limit = DEFAULT;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_backfills, begin_tx, end_tx, end_backfills
+from oracle_test_hooks import check_backfill_prefix, check_paused_backfill, check_backfill_finished
+begin_backfills(
+    ["oracle_live_large"],
+    before_backfill_pause_hook=check_backfill_prefix,
+    before_backfill_pause_hook_kwargs={"min_pk": 300},
+    after_backfill_pause_hook=check_paused_backfill,
+    after_backfill_pause_hook_kwargs={"min_pk": 300, "max_pk": 800},
+)
+begin_tx("oracle_large_tx", [
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'large-' || TO_CHAR(ID) WHERE ID <= 600",
+    ("INSERT INTO APP.RW_LIVE_PAGE VALUES (:1, :2)", [(i, f"large-{i}") for i in range(1001, 1601)]),
+])
+end_tx("oracle_large_tx")
+end_backfills(
+    ["oracle_live_large"],
+    after_backfill_resume_hook=check_backfill_finished,
+)
+PY
+
+query I retry 60 backoff 1s
+SELECT count(*) FROM oracle_live_large;
+----
+1600
+
+# Every key must survive the same-commit-SCN chunk boundaries with its expected value.
+query I retry 30 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id <= 600 OR id > 1000 THEN 'large-' || id::VARCHAR
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1600) AS rows(id)
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_live_large t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+statement ok
+DROP TABLE oracle_live_large;
+
+statement ok
+DROP SOURCE oracle_live_transactions_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

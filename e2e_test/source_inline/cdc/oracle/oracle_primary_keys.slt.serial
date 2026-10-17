@@ -1,0 +1,212 @@
+include oracle_test_env.slt.part
+
+statement ok
+DROP SOURCE IF EXISTS oracle_pk_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NONE (ID NUMBER(9), VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NONE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_UNBOUNDED (ID NUMBER PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_UNBOUNDED ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_WIDE (ID NUMBER(29) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_WIDE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP (ID TIMESTAMP(9) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_TIMESTAMP ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    # NATIONAL exercises Oracle's national-character type, NVARCHAR2.
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NATIONAL (ID NVARCHAR2(20) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NATIONAL ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE "
+    "(TENANT_ID NUMBER(9) NOT NULL, ORDER_ID NUMBER(9) NOT NULL, "
+    "OTHER_COLUMN NUMBER, VALUE VARCHAR2(100), PRIMARY KEY (TENANT_ID, ORDER_ID))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE "
+    "(TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) VALUES (1, 42, 7, 'first')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE "
+    "(TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) VALUES (2, 42, 8, 'second')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE "
+    "(TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) VALUES (1, 43, 10, 'sibling')",
+])
+PY
+
+statement ok
+CREATE SOURCE oracle_pk_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    heartbeat.table.auto.initialize = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+# invalid primary key (missing TENANT_ID)
+statement error (?s).*Primary key mismatch.*
+CREATE TABLE oracle_pk_count_mismatch (
+    "TENANT_ID" INT,
+    "ORDER_ID" INT,
+    "OTHER_COLUMN" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("ORDER_ID")
+) WITH (snapshot = 'false')
+FROM oracle_pk_source TABLE 'APP.RW_PK_NORMAL_COMPOSITE';
+
+# invalid primary key (OTHER_COLUMN is not an upstream key column)
+statement error (?s).*Primary key mismatch.*
+CREATE TABLE oracle_pk_name_mismatch (
+    "TENANT_ID" INT,
+    "ORDER_ID" INT,
+    "OTHER_COLUMN" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("TENANT_ID", "OTHER_COLUMN")
+) WITH (snapshot = 'false')
+FROM oracle_pk_source TABLE 'APP.RW_PK_NORMAL_COMPOSITE';
+
+# invalid primary key column names (Oracle stores these names in uppercase)
+statement error (?s).*preserve the upstream column name.*
+CREATE TABLE oracle_pk_case_mismatch (
+    tenant_id INT,
+    order_id INT,
+    other_column INT,
+    value VARCHAR,
+    PRIMARY KEY (tenant_id, order_id)
+) WITH (snapshot = 'false')
+FROM oracle_pk_source TABLE 'APP.RW_PK_NORMAL_COMPOSITE';
+
+# Matching the upstream key allows two rows with the same ORDER_ID but different TENANT_ID.
+statement ok
+CREATE TABLE oracle_pk_normal_composite (
+    "TENANT_ID" INT,
+    "ORDER_ID" INT,
+    "OTHER_COLUMN" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("TENANT_ID", "ORDER_ID")
+) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NORMAL_COMPOSITE';
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM oracle_pk_normal_composite;
+----
+3
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_normal_composite;
+----
+1 42 first
+1 43 sibling
+2 42 second
+
+# Discover the same key automatically. One-row pages must keep rows that share TENANT_ID.
+statement ok
+CREATE TABLE oracle_pk_discovered (*) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NORMAL_COMPOSITE';
+
+# The declared key may use a different order without changing row identity.
+statement ok
+CREATE TABLE oracle_pk_reversed (
+    "TENANT_ID" INT,
+    "ORDER_ID" INT,
+    "OTHER_COLUMN" INT,
+    "VALUE" VARCHAR,
+    PRIMARY KEY ("ORDER_ID", "TENANT_ID")
+) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NORMAL_COMPOSITE';
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_discovered;
+----
+1 42 first
+1 43 sibling
+2 42 second
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_reversed;
+----
+1 42 first
+1 43 sibling
+2 42 second
+
+# CDC must distinguish the full (TENANT_ID, ORDER_ID) key: update (1, 42),
+# delete (2, 42), keep (1, 43), and insert (3, 42) without conflating rows.
+# This checks row identity, not which columns a DML WHERE clause must include.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx, end_tx
+begin_tx("oracle_pk_dml", [
+    "UPDATE APP.RW_PK_NORMAL_COMPOSITE SET VALUE = 'updated' WHERE TENANT_ID = 1 AND ORDER_ID = 42",
+    "INSERT INTO APP.RW_PK_NORMAL_COMPOSITE (TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) VALUES (3, 42, 9, 'inserted')",
+    "DELETE FROM APP.RW_PK_NORMAL_COMPOSITE WHERE TENANT_ID = 2 AND ORDER_ID = 42",
+])
+end_tx("oracle_pk_dml")
+PY
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_normal_composite;
+----
+1 42 updated
+1 43 sibling
+3 42 inserted
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_discovered;
+----
+1 42 updated
+1 43 sibling
+3 42 inserted
+
+query T rowsort retry 30 backoff 1s
+SELECT "TENANT_ID", "ORDER_ID", "VALUE" FROM oracle_pk_reversed;
+----
+1 42 updated
+1 43 sibling
+3 42 inserted
+
+# invalid upstream primary key (no declared primary key)
+statement error (?s).*primary key.*
+CREATE TABLE oracle_pk_missing (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NONE';
+
+# invalid upstream primary key (NUMBER has no declared precision)
+statement error (?s).*requires a declared NUMBER precision.*
+CREATE TABLE oracle_pk_unbounded (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_UNBOUNDED';
+
+# invalid upstream primary key (NUMBER precision exceeds 28 digits)
+statement error (?s).*requires a declared NUMBER precision.*
+CREATE TABLE oracle_pk_wide (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_WIDE';
+
+# invalid upstream primary key (timestamp precision exceeds microseconds)
+statement error (?s).*unsupported type TIMESTAMP.*
+CREATE TABLE oracle_pk_timestamp (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_TIMESTAMP';
+
+# invalid upstream primary key (national character ordering is unsupported)
+statement error (?s).*unsupported type NVARCHAR2.*
+CREATE TABLE oracle_pk_national (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NATIONAL';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations
+WHERE name IN ('oracle_pk_count_mismatch', 'oracle_pk_name_mismatch',
+               'oracle_pk_case_mismatch', 'oracle_pk_missing', 'oracle_pk_unbounded',
+               'oracle_pk_wide', 'oracle_pk_timestamp', 'oracle_pk_national');
+----
+0
+
+statement ok
+DROP TABLE oracle_pk_reversed;
+
+statement ok
+DROP TABLE oracle_pk_discovered;
+
+statement ok
+DROP TABLE oracle_pk_normal_composite;
+
+statement ok
+DROP SOURCE oracle_pk_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

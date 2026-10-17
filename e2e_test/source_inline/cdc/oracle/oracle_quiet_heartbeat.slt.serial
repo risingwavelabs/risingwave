@@ -1,0 +1,230 @@
+include oracle_test_env.slt.part
+
+let TEST_ORACLE_HOT_PDB
+SELECT 'RW_TEST_HOT_PDB';
+
+statement ok
+DROP TABLE IF EXISTS oracle_quiet_customers;
+
+statement ok
+DROP SOURCE IF EXISTS oracle_quiet_source CASCADE;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import prepare
+from oracle_test_hooks import no_op
+prepare(create_heartbeat_tables_hook=no_op)
+PY
+
+# Create a second, test-owned PDB in the same CDB: both PDBs share redo logs.
+# Remove leftovers from failed runs and derive the OMF destination from this
+# fixture's existing datafiles rather than assuming a container filesystem path.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+assert "$TEST_ORACLE_HOT_PDB" != "$TEST_ORACLE_PDB"
+execute_oracle_sqls([
+    "ALTER SESSION SET CONTAINER = CDB$ROOT",
+    """BEGIN
+        FOR pdb IN (SELECT OPEN_MODE FROM V$PDBS WHERE NAME = '$TEST_ORACLE_HOT_PDB') LOOP
+            IF pdb.OPEN_MODE <> 'MOUNTED' THEN
+                EXECUTE IMMEDIATE 'ALTER PLUGGABLE DATABASE $TEST_ORACLE_HOT_PDB CLOSE IMMEDIATE';
+            END IF;
+            EXECUTE IMMEDIATE 'DROP PLUGGABLE DATABASE $TEST_ORACLE_HOT_PDB INCLUDING DATAFILES';
+        END LOOP;
+    END;""",
+    """DECLARE
+        datafile_dir VARCHAR2(4000);
+    BEGIN
+        SELECT REGEXP_REPLACE(NAME, '/[^/]+$', '') INTO datafile_dir
+        FROM V$DATAFILE WHERE CON_ID = 1 AND ROWNUM = 1;
+        EXECUTE IMMEDIATE 'CREATE PLUGGABLE DATABASE $TEST_ORACLE_HOT_PDB '
+            || 'ADMIN USER $TEST_ORACLE_SOURCE_SCHEMA IDENTIFIED BY "rw_hot_test_password" '
+            || 'CREATE_FILE_DEST = ' || DBMS_ASSERT.ENQUOTE_LITERAL(datafile_dir);
+    END;""",
+    "ALTER PLUGGABLE DATABASE $TEST_ORACLE_HOT_PDB OPEN",
+    "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
+    "CREATE TABLESPACE USERS DATAFILE SIZE 10M AUTOEXTEND ON MAXSIZE 100M",
+    "ALTER USER $TEST_ORACLE_SOURCE_SCHEMA DEFAULT TABLESPACE USERS QUOTA UNLIMITED ON USERS",
+    "GRANT CREATE SESSION TO $TEST_ORACLE_SOURCE_SCHEMA",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS VALUES (1, 'hot-0')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS (WRITES NUMBER, CHECKED_WRITES NUMBER)",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS VALUES (0, 0)",
+])
+# Commit the seed rows before starting the independent scheduler session.
+execute_oracle_sqls([
+    "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
+    """BEGIN
+        DBMS_SCHEDULER.CREATE_JOB(
+            job_name => '$TEST_ORACLE_SOURCE_SCHEMA.RW_HOT_WRITES',
+            job_type => 'PLSQL_BLOCK',
+            job_action => q'[BEGIN
+                FOR i IN 1..6000 LOOP
+                    UPDATE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS SET NAME = 'hot-' || TO_CHAR(i) WHERE ID = 1;
+                    UPDATE $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS SET WRITES = i;
+                    COMMIT;
+                    DBMS_SESSION.SLEEP(0.1);
+                END LOOP;
+            END;]',
+            enabled => TRUE, auto_drop => TRUE);
+    END;""",
+    """DECLARE
+        writes NUMBER;
+    BEGIN
+        FOR attempt IN 1..300 LOOP
+            SELECT WRITES INTO writes FROM $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS;
+            IF writes >= 10 THEN
+                RETURN;
+            END IF;
+            DBMS_SESSION.SLEEP(0.1);
+        END LOOP;
+        RAISE_APPLICATION_ERROR(-20000, 'Hot PDB writer did not start');
+    END;""",
+])
+PY
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
+])
+PY
+
+# The fixture seeds CUSTOMERS before source creation. No subsequent user-table DML
+# is issued in this PDB: only the connector's heartbeat action generates activity.
+# The hot PDB keeps committing to the same schema/table/key, but has no RW source.
+# Its writes must neither appear in this table nor stall quiet-source heartbeats.
+statement ok
+CREATE SOURCE oracle_quiet_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    heartbeat.table.auto.initialize = 'true',
+    debezium.heartbeat.interval.ms = '1000',
+    debezium.table.exclude.list = '${TEST_ORACLE_USER}[.]${TEST_ORACLE_HEARTBEAT_TABLE}'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE oracle_quiet_customers (
+    "ID" INT,
+    "NAME" VARCHAR,
+    PRIMARY KEY ("ID")
+) FROM oracle_quiet_source TABLE 'APP.CUSTOMERS';
+
+query T retry 30 backoff 1s
+SELECT "ID", "NAME" FROM oracle_quiet_customers;
+----
+1 RisingWave
+
+# Read checkpoint-visible split state repeatedly. A single startup heartbeat is
+# insufficient: require three advances.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+from oracle_test_hooks import check_heartbeat_progress
+execute_oracle_sqls([
+    "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
+    "UPDATE $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS SET CHECKED_WRITES = WRITES",
+],
+    after_oracle_sqls_hook=check_heartbeat_progress,
+    after_oracle_sqls_hook_kwargs={"source": "oracle_quiet_source", "checkpoint": "oracle_quiet_source"},
+)
+PY
+
+# Prove the other PDB was actively committing during the heartbeat observation,
+# rather than merely having seeded rows before it. Keep writing across RECOVER.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
+    """DECLARE
+        running NUMBER;
+    BEGIN
+        SELECT COUNT(*) INTO running FROM DBA_SCHEDULER_RUNNING_JOBS
+        WHERE OWNER = '$TEST_ORACLE_SOURCE_SCHEMA' AND JOB_NAME = 'RW_HOT_WRITES';
+        IF running <> 1 THEN
+            RAISE_APPLICATION_ERROR(-20000, 'Hot PDB writer is not running');
+        END IF;
+        UPDATE $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS SET CHECKED_WRITES = WRITES
+        WHERE WRITES >= CHECKED_WRITES + 10;
+        IF SQL%ROWCOUNT <> 1 THEN
+            RAISE_APPLICATION_ERROR(-20000, 'Hot PDB writes did not advance');
+        END IF;
+    END;""",
+])
+PY
+
+# Hot-PDB writes and quiet heartbeat activity must not change the quiet table.
+query T
+SELECT "ID", "NAME" FROM oracle_quiet_customers;
+----
+1 RisingWave
+
+# Recover from durable heartbeat state, not a user-table DATA event. The hook
+# requires three further native SCN advances without resetting the native snapshot
+# boundary; merely initializing a fresh source must not pass.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_progress
+execute_sqls(
+    ["RECOVER;"],
+    after_sqls_hook=check_heartbeat_progress,
+    after_sqls_hook_kwargs={"source": "oracle_quiet_source", "previous_checkpoint": "oracle_quiet_source"},
+)
+PY
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
+    """DECLARE
+        running NUMBER;
+    BEGIN
+        SELECT COUNT(*) INTO running FROM DBA_SCHEDULER_RUNNING_JOBS
+        WHERE OWNER = '$TEST_ORACLE_SOURCE_SCHEMA' AND JOB_NAME = 'RW_HOT_WRITES';
+        IF running <> 1 THEN
+            RAISE_APPLICATION_ERROR(-20000, 'Hot PDB writer is not running');
+        END IF;
+        UPDATE $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS SET CHECKED_WRITES = WRITES
+        WHERE WRITES >= CHECKED_WRITES + 10;
+        IF SQL%ROWCOUNT <> 1 THEN
+            RAISE_APPLICATION_ERROR(-20000, 'Hot PDB writes did not advance');
+        END IF;
+    END;""",
+])
+PY
+
+# Heartbeat progress and recovery must not leak same-named hot-PDB table changes.
+query T
+SELECT "ID", "NAME" FROM oracle_quiet_customers;
+----
+1 RisingWave
+
+statement ok
+DROP TABLE oracle_quiet_customers;
+
+statement ok
+DROP SOURCE oracle_quiet_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
+
+# Closing the PDB stops the writer; dropping it also removes its job and files.
+# The job is bounded (~10 minutes) so an aborted SLT cannot write indefinitely.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "ALTER SESSION SET CONTAINER = CDB$ROOT",
+    "ALTER PLUGGABLE DATABASE $TEST_ORACLE_HOT_PDB CLOSE IMMEDIATE",
+    "DROP PLUGGABLE DATABASE $TEST_ORACLE_HOT_PDB INCLUDING DATAFILES",
+])
+PY
