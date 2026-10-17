@@ -22,7 +22,7 @@ use tonic::async_trait;
 use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
 use super::super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchSinkWriter;
-use super::elasticsearch_opensearch_config::{ElasticSearchOpenSearchConfig, OpenSearchConfig};
+use super::elasticsearch_opensearch_config::OpenSearchConfig;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
 
@@ -30,7 +30,7 @@ pub const OPENSEARCH_SINK: &str = "opensearch";
 
 #[derive(Debug)]
 pub struct OpenSearchSink {
-    config: ElasticSearchOpenSearchConfig,
+    config: OpenSearchConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
@@ -41,7 +41,7 @@ impl EnforceSecret for OpenSearchSink {
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
-            ElasticSearchOpenSearchConfig::enforce_one(prop)?;
+            OpenSearchConfig::enforce_one(prop)?;
         }
         Ok(())
     }
@@ -53,7 +53,7 @@ impl TryFrom<SinkParam> for OpenSearchSink {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let pk_indices = param.downstream_pk_or_empty();
-        let config = OpenSearchConfig::from_btreemap(param.properties)?.inner;
+        let config = OpenSearchConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -76,26 +76,28 @@ impl Sink for OpenSearchSink {
         risingwave_common::license::Feature::OpenSearchSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
-        self.config.validate_config(&self.schema)?;
-        let client = self.config.build_client(Self::SINK_NAME)?;
+        self.config.inner.validate_config(&self.schema)?;
+        self.config.validate_auth_config()?;
+        let client = self.config.build_client().await?;
         client.ping().await?;
         Ok(())
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        OpenSearchConfig::from_btreemap(config.clone())?;
+        let config = OpenSearchConfig::from_btreemap(config.clone())?;
+        config.validate_auth_config()?;
         Ok(())
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(ElasticSearchOpenSearchSinkWriter::new(
-            self.config.clone(),
+            self.config.inner.clone(),
+            self.config.build_client().await?,
             self.schema.clone(),
             self.pk_indices.clone(),
-            Self::SINK_NAME,
             self.is_append_only,
         )?
-        .into_log_sinker(self.config.concurrent_requests))
+        .into_log_sinker(self.config.inner.concurrent_requests))
     }
 
     fn set_default_commit_checkpoint_interval(
