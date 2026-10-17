@@ -499,7 +499,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
+        let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let catalog_reader =
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
@@ -728,7 +728,7 @@ pub(crate) mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
-        let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
+        let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone());
         let mapping = WorkerSlotMapping::new_uniform(
             std::iter::once(WorkerSlotId::new(0.into(), 0)),
             vnode_count,

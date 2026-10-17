@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::{RwLock, RwLockReadGuard};
+use parking_lot::RwLock;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{HummockEpoch, HummockRawObjectId};
@@ -252,25 +252,6 @@ pub type LocalInstanceId = u64;
 pub const TEST_LOCAL_INSTANCE_ID: LocalInstanceId = 233;
 pub type HummockReadVersionRef = Arc<RwLock<HummockReadVersion>>;
 pub type ReadVersionMappingType = HashMap<TableId, HashMap<LocalInstanceId, HummockReadVersionRef>>;
-pub type ReadOnlyReadVersionMapping = ReadOnlyRwLockRef<ReadVersionMappingType>;
-
-pub struct ReadOnlyRwLockRef<T>(Arc<RwLock<T>>);
-
-impl<T> Clone for ReadOnlyRwLockRef<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<T> ReadOnlyRwLockRef<T> {
-    pub fn new(inner: Arc<RwLock<T>>) -> Self {
-        Self(inner)
-    }
-
-    pub fn read(&self) -> RwLockReadGuard<'_, T> {
-        self.0.read()
-    }
-}
 
 pub struct LocalInstanceGuard {
     pub table_id: TableId,

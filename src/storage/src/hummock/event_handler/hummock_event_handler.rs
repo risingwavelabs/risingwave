@@ -51,7 +51,6 @@ use crate::hummock::event_handler::uploader::{
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockObserverEvent, HummockReadVersionRef, HummockVersionUpdate,
-    ReadOnlyReadVersionMapping, ReadOnlyRwLockRef,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
@@ -525,10 +524,6 @@ impl HummockEventHandler {
 
     pub fn recent_versions(&self) -> Arc<ArcSwap<RecentVersions>> {
         self.recent_versions.clone()
-    }
-
-    pub fn read_version_mapping(&self) -> ReadOnlyReadVersionMapping {
-        ReadOnlyRwLockRef::new(self.read_version_mapping.clone())
     }
 
     pub fn event_sender(&self) -> HummockEventSender {
