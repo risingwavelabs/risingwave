@@ -384,6 +384,61 @@ async fn reload_table_for_pre_commit_observes_v2_to_v3_upgrade() -> Result<()> {
 }
 
 #[tokio::test]
+async fn compaction_observation_uses_committed_target_branch() -> Result<()> {
+    use iceberg::spec::{Operation, Snapshot, Summary};
+
+    let temp_dir = tempfile::tempdir()?;
+    let table = coalesce_test_table(&temp_dir, FormatVersion::V3)?;
+    let timestamp_ms = table.metadata().last_updated_ms();
+    let snapshot = |snapshot_id, sequence_number| {
+        Snapshot::builder()
+            .with_snapshot_id(snapshot_id)
+            .with_sequence_number(sequence_number)
+            .with_timestamp_ms(timestamp_ms + sequence_number)
+            .with_row_range(0, 0)
+            .with_manifest_list(format!("/snap-{snapshot_id}.avro"))
+            .with_summary(Summary {
+                operation: Operation::Append,
+                additional_properties: HashMap::new(),
+            })
+            .with_schema_id(0)
+            .build()
+    };
+    let metadata = table
+        .metadata()
+        .clone()
+        .into_builder(None)
+        .set_branch_snapshot(snapshot(10, 7), "main")?
+        .build()?
+        .metadata
+        .into_builder(None)
+        .set_branch_snapshot(snapshot(11, 8), "audit")?
+        .build()?
+        .metadata;
+    let table = Table::builder()
+        .identifier(table.identifier().clone())
+        .file_io(table.file_io().clone())
+        .runtime(Runtime::try_current()?)
+        .metadata(metadata)
+        .build()?;
+    let mut coordinator = test_coordinator(
+        table.clone(),
+        Arc::new(ReloadingTestCatalog::new(table)),
+        coalesce_test_config(),
+        DatabaseConnection::Disconnected,
+    );
+    let observed = coordinator.latest_observed_snapshot().unwrap();
+    assert_eq!(observed.branch, "main");
+    assert_eq!(observed.snapshot_id, 10);
+    assert_eq!(observed.timestamp_ms, timestamp_ms + 7);
+    assert_eq!(observed.max_file_sequence_number, Some(7));
+
+    // Empty checkpoints must not count the existing snapshot as a new commit.
+    assert!(coordinator.commit().await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
 async fn compactor_output_ids_are_validated_before_physical_rewrite() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let table = coalesce_test_table(&temp_dir, FormatVersion::V3)?;

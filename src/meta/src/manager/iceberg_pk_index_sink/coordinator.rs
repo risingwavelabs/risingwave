@@ -53,6 +53,7 @@ use iceberg::writer::file_writer::location_generator::{
     DefaultLocationGenerator, FileNameGenerator, LocationGenerator,
 };
 use prost::Message;
+use risingwave_connector::connector_common::IcebergCommittedSnapshot;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError, CommitRetryLogContext};
 use risingwave_connector::sink::iceberg::{
@@ -406,9 +407,9 @@ impl IcebergPkIndexSinkCoordinator {
             .map_err(Into::into)
     }
 
-    pub async fn commit(&mut self) -> Result<()> {
+    pub async fn commit(&mut self) -> Result<Option<IcebergCommittedSnapshot>> {
         let Some(commit) = self.waiting_commit.take() else {
-            return Ok(());
+            return Ok(None);
         };
 
         let refreshed_table = commit_one_epoch(
@@ -446,7 +447,20 @@ impl IcebergPkIndexSinkCoordinator {
         })?;
 
         self.prev_committed_epoch = Some(commit.epoch);
-        Ok(())
+        Ok(self.latest_observed_snapshot())
+    }
+
+    pub fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
+        let metadata = self.table.metadata();
+        metadata
+            .snapshot_for_ref(&self.target_branch)
+            .map(|snapshot| IcebergCommittedSnapshot {
+                branch: self.target_branch.clone(),
+                snapshot_id: snapshot.snapshot_id(),
+                timestamp_ms: snapshot.timestamp_ms(),
+                max_file_sequence_number: (metadata.format_version() >= FormatVersion::V2)
+                    .then_some(snapshot.sequence_number()),
+            })
     }
 
     pub fn current_snapshot_id(&self) -> Option<i64> {
