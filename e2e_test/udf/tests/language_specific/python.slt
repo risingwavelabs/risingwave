@@ -1,14 +1,16 @@
 statement ok
-create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language python as $$
-import json
-def to_string(a, b, c, d, e, f, g, h, i, j):
-    return str(a) + str(b) + str(c) + str(d) + str(e) + str(f) + str(g) + str(h) + str(i) + json.dumps(j)
-$$;
+create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language python as $$def to_string(a, b, c, d, e, f, g, h, i, j): return str(a) + str(b) + str(c) + str(d) + str(e) + str(f) + str(g) + str(h) + str(i) + str(j)$$;
+
+query TT
+show create function to_string;
+----
+public.to_string CREATE FUNCTION to_string(a boolean, b smallint, c integer, d bigint, e real, f double precision, g numeric, h character varying, i bytea, j jsonb) RETURNS character varying LANGUAGE python AS $$def to_string(a, b, c, d, e, f, g, h, i, j): return str(a) + str(b) + str(c) + str(d) + str(e) + str(f) + str(g) + str(h) + str(i) + str(j)$$
+
 
 query T
 select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
 ----
-False1234.56.78.9abcb'\x01\x02\x03'{"key": 1}
+False1234.56.78.9abcb'\x01\x02\x03'{'key': 1}
 
 statement ok
 drop function to_string;
