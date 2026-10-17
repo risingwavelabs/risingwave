@@ -1,0 +1,15 @@
+services:
+  nats-nkey:
+    image: nats:2.11.3
+    command: ["-c", "/etc/nats/auth.conf"]
+    volumes:
+      - ./nkey.conf:/etc/nats/auth.conf:ro
+    ports:
+      - "127.0.0.1:4223:4222"
+  nats-jwt:
+    image: nats:2.11.3
+    command: ["-c", "/etc/nats/auth.conf"]
+    volumes:
+      - ./jwt.conf:/etc/nats/auth.conf:ro
+    ports:
+      - "127.0.0.1:4224:4222"
