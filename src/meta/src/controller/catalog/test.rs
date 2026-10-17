@@ -2738,6 +2738,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_created_iceberg_pk_index_sink_retains_change_log() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let upstream_table_id = TableId::new(1000);
+        let mut expected_job = None;
+        for (index, (connector, enable_pk_index)) in
+            [("iceberg", "true"), ("iceberg", "false"), ("jdbc", "true")]
+                .into_iter()
+                .enumerate()
+        {
+            let name = format!("created_sink_{index}");
+            let (job_id, _, state_table_id) =
+                insert_test_streaming_job(&txn, &name, false, None).await?;
+            Sink::insert(sink::ActiveModel::from(PbSink {
+                id: job_id.as_sink_id(),
+                name,
+                sink_type: PbSinkType::AppendOnly as i32,
+                properties: BTreeMap::from([
+                    ("connector".to_owned(), connector.to_owned()),
+                    ("enable_pk_index".to_owned(), enable_pk_index.to_owned()),
+                ]),
+                ..Default::default()
+            }))
+            .exec(&txn)
+            .await?;
+            fragment::ActiveModel {
+                fragment_id: Set(FragmentId::new(100 + index as u32)),
+                job_id: Set(job_id),
+                fragment_type_mask: Set(FragmentTypeFlag::SnapshotBackfillStreamScan as i32),
+                distribution_type: Set(fragment::DistributionType::Hash),
+                stream_node: Set(StreamNode::from(&PbStreamNode {
+                    node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
+                        table_id: upstream_table_id,
+                        stream_scan_type: StreamScanType::SnapshotBackfill as i32,
+                        snapshot_backfill_epoch: Some(100),
+                        ..Default::default()
+                    }))),
+                    ..Default::default()
+                })),
+                state_table_ids: Set(vec![state_table_id].into()),
+                upstream_fragment_id: Set(I32Array::default()),
+                vnode_count: Set(1),
+                parallelism: Set(None),
+            }
+            .insert(&txn)
+            .await?;
+            if index == 0 {
+                expected_job = Some((job_id, state_table_id));
+            }
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let info = mgr.get_table_change_log_truncate_info().await?;
+        assert_eq!(info.independent_jobs.len(), 1);
+        let job = &info.independent_jobs[0];
+        let (job_id, state_table_id) = expected_job.unwrap();
+        assert_eq!(job.job_id, job_id);
+        assert!(job.is_iceberg_pk_index);
+        assert_eq!(job.state_table_ids, HashSet::from([state_table_id]));
+        assert_eq!(
+            job.upstream_table_snapshot_epochs,
+            HashMap::from([(upstream_table_id, Some(100))])
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_get_table_change_log_truncate_info() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_view = PbView {

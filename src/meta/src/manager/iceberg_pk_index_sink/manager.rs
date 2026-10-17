@@ -18,10 +18,14 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use parking_lot::RwLock;
 use risingwave_common::id::{JobId, PartialGraphId};
+use risingwave_connector::connector_common::{
+    IcebergCommittedSnapshot, IcebergSinkCompactionUpdate,
+};
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
 
 use super::IcebergPkIndexPreCommitMetadata;
@@ -50,15 +54,20 @@ struct ManagerInner {
     /// every checkpoint completion via `advance_committed_epochs` (a no-op for partial graphs with no
     /// registered sink).
     committed_epochs: PartialGraphCommittedEpochs,
+    compaction_stat_tx: UnboundedSender<IcebergSinkCompactionUpdate>,
 }
 
 impl IcebergPkIndexSinkManager {
-    pub fn new(db: DatabaseConnection) -> Self {
+    pub fn new(
+        db: DatabaseConnection,
+        compaction_stat_tx: UnboundedSender<IcebergSinkCompactionUpdate>,
+    ) -> Self {
         IcebergPkIndexSinkManager {
             inner: Arc::new(ManagerInner {
                 db,
                 coordinators: RwLock::new(HashMap::new()),
                 committed_epochs: PartialGraphCommittedEpochs::default(),
+                compaction_stat_tx,
             }),
         }
     }
@@ -66,17 +75,19 @@ impl IcebergPkIndexSinkManager {
     /// Register an Iceberg pk-index sink so its commit coordinator is ready to receive epoch reports. Builds and
     /// fully initializes the coordinator (loading the iceberg table and draining any recovered pending
     /// commits) BEFORE inserting it, so a successful return means the sink is ready to serve. Idempotent:
-    /// registering the same `sink_id` replaces the existing coordinator.
+    /// registering the same `sink_id` replaces the existing coordinator. Returns the settled snapshot
+    /// so the caller can rebuild compaction scheduling, including for a table without snapshots.
     pub async fn register_sink(
         &self,
         sink_id: SinkId,
         partial_graph_id: PartialGraphId,
         iceberg_config: IcebergConfig,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<IcebergCommittedSnapshot>> {
         // Initialize (load + recover + drain) outside the map lock; this is the slow, fallible part.
         let coordinator =
             IcebergPkIndexSinkCoordinator::init(sink_id, iceberg_config, self.inner.db.clone())
                 .await?;
+        let observed_snapshot = coordinator.latest_observed_snapshot();
 
         let prev = {
             let mut coordinators = self.inner.coordinators.write();
@@ -91,11 +102,19 @@ impl IcebergPkIndexSinkManager {
             prev
         };
         if prev.is_some() {
-            // Replacing an existing coordinator. Any in-flight commit on the old one keeps it alive via its
-            // own `Arc` until it finishes; the snapshot_id idempotency check guards against double-commit.
             warn!(%sink_id, "iceberg pk-index sink coordinator re-registered; replacing previous instance");
         }
-        Ok(())
+        Ok(observed_snapshot)
+    }
+
+    /// Read the settled head when the independent job is ready for compaction.
+    /// Registration itself happens earlier so the first barrier can commit.
+    pub async fn latest_observed_snapshot(
+        &self,
+        sink_id: SinkId,
+    ) -> anyhow::Result<Option<IcebergCommittedSnapshot>> {
+        let coordinator = self.coordinator(sink_id)?;
+        Ok(coordinator.lock().await.latest_observed_snapshot())
     }
 
     /// Pre-commit one epoch, with an optional compaction overwrite folded into the same pending row.
@@ -116,7 +135,34 @@ impl IcebergPkIndexSinkManager {
     /// committed. The barrier-complete path awaits this AFTER hummock `commit_epoch`.
     pub async fn commit_epoch(&self, sink_id: SinkId) -> anyhow::Result<()> {
         let coordinator = self.coordinator(sink_id)?;
-        coordinator.lock().await.commit().await
+        if let Some((observed_snapshot, has_new_data)) = coordinator.lock().await.commit().await? {
+            self.notify_compaction_scheduler(sink_id, Some(observed_snapshot), has_new_data);
+        }
+        Ok(())
+    }
+
+    fn notify_compaction_scheduler(
+        &self,
+        sink_id: SinkId,
+        observed_snapshot: Option<IcebergCommittedSnapshot>,
+        has_new_data: bool,
+    ) {
+        let Some(observed_snapshot) = observed_snapshot else {
+            return;
+        };
+        if self
+            .inner
+            .compaction_stat_tx
+            .send(IcebergSinkCompactionUpdate {
+                sink_id,
+                force_compaction: false,
+                has_new_data,
+                observed_snapshot,
+            })
+            .is_err()
+        {
+            warn!(%sink_id, "failed to notify iceberg compaction scheduler");
+        }
     }
 
     /// Advance the per-partial-graph committed epoch after a checkpoint completion.

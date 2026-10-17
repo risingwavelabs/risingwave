@@ -683,6 +683,9 @@ impl DiagnoseCommand {
             row.add_cell("pending_snapshot_count".into());
             row.add_cell("next_compaction_after_sec".into());
             row.add_cell("is_triggerable".into());
+            row.add_cell("wait_reason".into());
+            row.add_cell("retry_after_sec".into());
+            row.add_cell("blocked_age_sec".into());
             row
         });
 
@@ -706,6 +709,9 @@ impl DiagnoseCommand {
             );
             try_add_cell(&mut row, status.next_compaction_after_sec);
             row.add_cell(status.is_triggerable.into());
+            row.add_cell(status.wait_reason.into());
+            try_add_cell(&mut row, status.retry_after_sec);
+            try_add_cell(&mut row, status.blocked_age_sec);
             table.add_row(row);
         }
 

@@ -198,6 +198,15 @@ async fn test_get_table_change_logs_with_inverted_epoch_range() {
 
 #[tokio::test]
 async fn test_truncate_table_change_log_persisted_and_in_memory() {
+    check_truncate_table_change_log_persisted_and_in_memory(false).await;
+}
+
+#[tokio::test]
+async fn test_iceberg_pk_index_truncate_table_change_log_preserves_replay_anchor() {
+    check_truncate_table_change_log_persisted_and_in_memory(true).await;
+}
+
+async fn check_truncate_table_change_log_persisted_and_in_memory(is_iceberg_pk_index: bool) {
     let (env, hummock_manager, _, _) = setup_compute_env(80).await;
     let table_id = TableId::new(1);
     let state_table_id = TableId::new(2);
@@ -242,7 +251,11 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
         delta.state_table_info_delta.insert(
             state_table_id,
             risingwave_pb::hummock::StateTableInfoDelta {
-                committed_epoch: truncate_epoch,
+                committed_epoch: if is_iceberg_pk_index {
+                    committed_epoch + 1
+                } else {
+                    truncate_epoch
+                },
                 compaction_group_id: 1.into(),
             },
         );
@@ -263,9 +276,14 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
 
     hummock_manager
         .truncate_table_change_log(TableChangeLogTruncateInfo {
-            subscription_retention_seconds: HashMap::new(),
+            subscription_retention_seconds: if is_iceberg_pk_index {
+                HashMap::from([(table_id, 0)])
+            } else {
+                HashMap::new()
+            },
             independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
+                is_iceberg_pk_index,
                 state_table_ids: HashSet::from([state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(table_id, Some(truncate_epoch))]),
             }],
@@ -283,27 +301,73 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
             .all(&env.meta_store_ref().conn)
             .await
             .unwrap();
+    let expected_epochs = if is_iceberg_pk_index {
+        vec![committed_epoch]
+    } else {
+        vec![truncate_epoch, committed_epoch]
+    };
     assert_eq!(
         persisted_epochs,
-        vec![
-            truncate_epoch as risingwave_meta_model::Epoch,
-            committed_epoch as risingwave_meta_model::Epoch,
-        ]
+        expected_epochs
+            .iter()
+            .map(|epoch| *epoch as risingwave_meta_model::Epoch)
+            .collect_vec()
     );
     let in_memory_epochs = hummock_manager.versioning.read().await.table_change_log[&table_id]
         .epochs()
         .collect_vec();
-    assert_eq!(in_memory_epochs, vec![truncate_epoch, committed_epoch]);
+    assert_eq!(in_memory_epochs, expected_epochs);
     assert_eq!(
         hummock_manager
             .gc_manager
             .try_take_may_delete_object_ids(1)
             .unwrap(),
-        HashSet::from([
-            HummockObjectId::Sstable(1.into()),
-            HummockObjectId::Sstable(2.into()),
-        ])
+        if is_iceberg_pk_index {
+            HashSet::from([
+                HummockObjectId::Sstable(1.into()),
+                HummockObjectId::Sstable(2.into()),
+                HummockObjectId::Sstable(3.into()),
+                HummockObjectId::Sstable(4.into()),
+            ])
+        } else {
+            HashSet::from([
+                HummockObjectId::Sstable(1.into()),
+                HummockObjectId::Sstable(2.into()),
+            ])
+        }
     );
+    if is_iceberg_pk_index {
+        let next_epoch = test_epoch(40_000);
+        let next_log = EpochNewChangeLog {
+            checkpoint_epoch: next_epoch,
+            non_checkpoint_epochs: vec![],
+            new_value: vec![],
+            old_value: vec![],
+        };
+        risingwave_meta_model::hummock_table_change_log::Entity::insert(
+            to_table_change_log_meta_store_model(table_id, &next_log),
+        )
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+        let mut versioning = hummock_manager.versioning.write().await;
+        let mut version = versioning.current_version.as_ref().clone();
+        let mut delta = version.version_delta_after();
+        delta.state_table_info_delta.insert(
+            table_id,
+            risingwave_pb::hummock::StateTableInfoDelta {
+                committed_epoch: next_epoch,
+                compaction_group_id: 1.into(),
+            },
+        );
+        version.apply_version_delta(&delta);
+        versioning.current_version = Arc::new(version);
+        let log = versioning.table_change_log.get_mut(&table_id).unwrap();
+        assert_eq!(log.next_epoch(committed_epoch), Ok(None));
+        log.add_change_log(next_log);
+        // Snapshot-backfill can resume at the real checkpoint, then consume new data.
+        assert_eq!(log.next_epoch(committed_epoch), Ok(Some(next_epoch)));
+    }
 }
 fn get_compaction_group_object_ids(
     version: &HummockVersion,
