@@ -80,6 +80,45 @@ impl DorisCommon {
     }
 }
 
+fn partial_update_enabled(partial_update: Option<&str>) -> bool {
+    partial_update
+        .map(|value| value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Build Doris Stream Load headers for JSON row loads.
+///
+/// When `doris.partial_update` is enabled, Doris requires both `partial_columns: true` and a
+/// `columns` header listing every column to update. For upsert sinks, `__DORIS_DELETE_SIGN__` must
+/// appear in `columns` because `hidden_columns` is ignored once `columns` is set.
+pub(crate) fn build_doris_stream_load_header(
+    schema: &Schema,
+    user: &str,
+    password: &str,
+    partial_update: Option<&str>,
+    is_append_only: bool,
+) -> HashMap<String, String> {
+    let partial_update = partial_update.map(ToOwned::to_owned);
+    let mut header_builder = HeaderBuilder::new()
+        .add_common_header()
+        .set_user_password(user.to_owned(), password.to_owned())
+        .add_json_format()
+        .set_partial_columns(partial_update.clone())
+        .add_read_json_by_line();
+
+    if partial_update_enabled(partial_update.as_deref()) {
+        let mut columns = schema.names_str();
+        if !is_append_only {
+            columns.push(DORIS_DELETE_SIGN);
+        }
+        header_builder = header_builder.set_columns_name(columns);
+    } else if !is_append_only {
+        header_builder = header_builder.add_hidden_column();
+    }
+
+    header_builder.build()
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct DorisConfig {
@@ -335,17 +374,13 @@ impl DorisSinkWriter {
             }
         }
 
-        let header_builder = HeaderBuilder::new()
-            .add_common_header()
-            .set_user_password(config.common.user.clone(), config.common.password.clone())
-            .add_json_format()
-            .set_partial_columns(config.common.partial_update.clone())
-            .add_read_json_by_line();
-        let header = if !is_append_only {
-            header_builder.add_hidden_column().build()
-        } else {
-            header_builder.build()
-        };
+        let header = build_doris_stream_load_header(
+            &schema,
+            &config.common.user,
+            &config.common.password,
+            config.common.partial_update.as_deref(),
+            is_append_only,
+        );
 
         let doris_insert_builder = InserterInnerBuilder::new(
             config.common.url.clone(),
@@ -575,9 +610,58 @@ impl DorisField {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
-    use super::DorisSink;
+    use super::{DorisSink, build_doris_stream_load_header};
+    use crate::sink::doris_starrocks_connector::DORIS_DELETE_SIGN;
+
+    #[test]
+    fn partial_update_upsert_sets_columns_and_skips_hidden_columns() {
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "k"),
+            Field::with_name(DataType::Varchar, "a"),
+        ]);
+        let header = build_doris_stream_load_header(
+            &schema,
+            "root",
+            "",
+            Some("true"),
+            false,
+        );
+        assert_eq!(header.get("partial_columns"), Some(&"true".to_owned()));
+        assert_eq!(header.get("columns"), Some(&"k,a,__DORIS_DELETE_SIGN__".to_owned()));
+        assert!(!header.contains_key("hidden_columns"));
+    }
+
+    #[test]
+    fn partial_update_append_only_sets_columns_without_delete_sign() {
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "k"),
+            Field::with_name(DataType::Varchar, "a"),
+        ]);
+        let header = build_doris_stream_load_header(
+            &schema,
+            "root",
+            "",
+            Some("true"),
+            true,
+        );
+        assert_eq!(header.get("columns"), Some(&"k,a".to_owned()));
+        assert!(!header.contains_key("hidden_columns"));
+    }
+
+    #[test]
+    fn without_partial_update_upsert_uses_hidden_columns() {
+        let schema = Schema::new(vec![Field::with_name(DataType::Int32, "k")]);
+        let header = build_doris_stream_load_header(&schema, "root", "", None, false);
+        assert_eq!(header.get("partial_columns"), Some(&"false".to_owned()));
+        assert_eq!(
+            header.get("hidden_columns"),
+            Some(&DORIS_DELETE_SIGN.to_owned())
+        );
+        assert!(!header.contains_key("columns"));
+    }
 
     #[test]
     fn test_jsonb_can_write_to_variant() {
