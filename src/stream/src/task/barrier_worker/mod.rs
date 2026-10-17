@@ -27,9 +27,9 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
-    PbRefreshFinishedActor,
+    BoundedLoadProgress, PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress,
+    PbCreateMviewProgress, PbIcebergPkIndexSinkMetadata, PbListFinishedSource,
+    PbLoadFinishedSource, PbLocalSstableInfo, PbRefreshFinishedActor,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -94,6 +94,7 @@ pub struct BarrierCompleteResult {
 
     /// The source IDs that have finished loading data for refreshable batch sources.
     pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
+    pub bounded_load_progress: Vec<BoundedLoadProgress>,
 
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
 
@@ -629,9 +630,9 @@ mod await_epoch_completed_future {
     use futures::future::BoxFuture;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::{
-        PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-        PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
-        PbRefreshFinishedActor,
+        BoundedLoadProgress, PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress,
+        PbCreateMviewProgress, PbIcebergPkIndexSinkMetadata, PbListFinishedSource,
+        PbLoadFinishedSource, PbRefreshFinishedActor,
     };
 
     use crate::error::StreamResult;
@@ -650,6 +651,7 @@ mod await_epoch_completed_future {
         create_mview_progress: Vec<PbCreateMviewProgress>,
         list_finished_source_ids: Vec<PbListFinishedSource>,
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
+        bounded_load_progress: Vec<BoundedLoadProgress>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
         iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
@@ -672,6 +674,7 @@ mod await_epoch_completed_future {
                     create_mview_progress,
                     list_finished_source_ids,
                     load_finished_source_ids,
+                    bounded_load_progress,
                     cdc_table_backfill_progress,
                     cdc_source_offset_updated,
                     iceberg_pk_index_sink_metadata,
@@ -749,6 +752,7 @@ impl LocalBarrierWorker {
                 create_mview_progress,
                 list_finished_source_ids,
                 load_finished_source_ids,
+                bounded_load_progress,
                 cdc_table_backfill_progress,
                 cdc_source_offset_updated,
                 iceberg_pk_index_sink_metadata,
@@ -785,6 +789,7 @@ impl LocalBarrierWorker {
                         create_mview_progress,
                         list_finished_source_ids,
                         load_finished_source_ids,
+                        bounded_load_progress,
                         cdc_table_backfill_progress,
                         cdc_source_offset_updated,
                         iceberg_pk_index_sink_metadata,
@@ -805,6 +810,7 @@ impl LocalBarrierWorker {
             sync_result,
             list_finished_source_ids,
             load_finished_source_ids,
+            bounded_load_progress,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
             iceberg_pk_index_sink_metadata,
@@ -854,7 +860,7 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(|sst| sst.sst_info.into())
                             .collect(),
-                        bounded_load_progress: Default::default(),
+                        bounded_load_progress,
                         list_finished_sources: list_finished_source_ids,
                         load_finished_sources: load_finished_source_ids,
                         cdc_source_offset_updated,

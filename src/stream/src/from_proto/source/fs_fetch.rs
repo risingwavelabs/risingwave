@@ -20,6 +20,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
+use risingwave_connector::source::refresh_mode::RefreshMode;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 
@@ -31,7 +32,6 @@ use crate::executor::source::{
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
-use crate::from_proto::source::is_full_reload_refresh;
 use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
@@ -49,8 +49,10 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
-        let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
-
+        let refresh_mode = RefreshMode::from_proto(source.refresh_mode.as_ref())?;
+        let is_full_reload_refresh = refresh_mode.is_full_reload();
+        let bounded_scan = refresh_mode.iceberg_bounded_scan();
+        let is_bounded = bounded_scan.is_some();
         let source_id = source.source_id;
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
@@ -132,7 +134,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                 }
             }
             risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
-                if is_full_reload_refresh {
+                if is_full_reload_refresh || is_bounded {
                     BatchIcebergFetchExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
@@ -140,6 +142,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         params.local_barrier_manager.clone(),
                         params.config.clone(),
                         source.associated_table_id,
+                        is_bounded,
                     )
                     .boxed()
                 } else {
