@@ -26,9 +26,8 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::source::cdc::split::{
-    extract_postgres_lsn_from_offset_str, extract_sql_server_commit_lsn_from_offset_str,
-};
+use risingwave_connector::source::cdc::postgres::extract_postgres_lsn_from_offset_str;
+use risingwave_connector::source::cdc::sql_server::extract_sql_server_commit_lsn_from_offset_str;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -881,68 +880,24 @@ impl<S: StateStore> SourceExecutor<S> {
                                     );
 
                                     // Step 1: Collect all current splits and clear their offsets
-                                    let splits_with_cleared_offset: Vec<SplitImpl> = self.stream_source_core
+                                    let splits_with_cleared_offset: Vec<SplitImpl> = self
+                                        .stream_source_core
                                         .latest_split_info
                                         .values()
                                         .map(|split| {
                                             // Clone the split and clear its offset
                                             let mut new_split = split.clone();
-                                            match &mut new_split {
-                                                SplitImpl::MysqlCdc(debezium_split) => {
-                                                    if let Some(mysql_split) = debezium_split.mysql_split.as_mut() {
-                                                        tracing::info!(
-                                                            split_id = ?mysql_split.inner.split_id,
-                                                            old_offset = ?mysql_split.inner.start_offset,
-                                                            "Clearing MySQL CDC offset"
-                                                        );
-                                                        mysql_split.inner.start_offset = None;
-                                                    }
-                                                }
-                                                SplitImpl::PostgresCdc(debezium_split) => {
-                                                    if let Some(pg_split) = debezium_split.postgres_split.as_mut() {
-                                                        tracing::info!(
-                                                            split_id = ?pg_split.inner.split_id,
-                                                            old_offset = ?pg_split.inner.start_offset,
-                                                            "Clearing PostgreSQL CDC offset"
-                                                        );
-                                                        pg_split.inner.start_offset = None;
-                                                    }
-                                                }
-                                                SplitImpl::MongodbCdc(debezium_split) => {
-                                                    if let Some(mongo_split) = debezium_split.mongodb_split.as_mut() {
-                                                        tracing::info!(
-                                                            split_id = ?mongo_split.inner.split_id,
-                                                            old_offset = ?mongo_split.inner.start_offset,
-                                                            "Clearing MongoDB CDC offset"
-                                                        );
-                                                        mongo_split.inner.start_offset = None;
-                                                    }
-                                                }
-                                                SplitImpl::CitusCdc(debezium_split) => {
-                                                    if let Some(citus_split) = debezium_split.citus_split.as_mut() {
-                                                        tracing::info!(
-                                                            split_id = ?citus_split.inner.split_id,
-                                                            old_offset = ?citus_split.inner.start_offset,
-                                                            "Clearing Citus CDC offset"
-                                                        );
-                                                        citus_split.inner.start_offset = None;
-                                                    }
-                                                }
-                                                SplitImpl::SqlServerCdc(debezium_split) => {
-                                                    if let Some(sqlserver_split) = debezium_split.sql_server_split.as_mut() {
-                                                        tracing::info!(
-                                                            split_id = ?sqlserver_split.inner.split_id,
-                                                            old_offset = ?sqlserver_split.inner.start_offset,
-                                                            "Clearing SQL Server CDC offset"
-                                                        );
-                                                        sqlserver_split.inner.start_offset = None;
-                                                    }
-                                                }
-                                                _ => {
-                                                    tracing::warn!(
-                                                        "RESET SOURCE called on non-CDC split type"
-                                                    );
-                                                }
+                                            if new_split.is_cdc_split() {
+                                                tracing::info!(
+                                                    split_id = %new_split.id(),
+                                                    old_offset = %new_split.get_cdc_split_offset(),
+                                                    "Clearing CDC offset"
+                                                );
+                                            }
+                                            if !new_split.reset_cdc_offset() {
+                                                tracing::warn!(
+                                                    "RESET SOURCE called on non-CDC split type"
+                                                );
                                             }
                                             new_split
                                         })
@@ -1426,10 +1381,8 @@ mod tests {
         let persisted_split = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
             1001,
             Some(offset.to_owned()),
-            None,
         ));
-        let uninitialized_split =
-            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+        let uninitialized_split = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None));
         let epoch_1 = EpochPair::new_test_epoch(test_epoch(1));
         let epoch_2 = EpochPair::new_test_epoch(test_epoch(2));
         let epoch_3 = EpochPair::new_test_epoch(test_epoch(3));
@@ -1487,10 +1440,8 @@ mod tests {
         let split_with_offset = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
             1001,
             Some(r#"{"sourceOffset":{"file":"binlog.000123","pos":45678}}"#.to_owned()),
-            None,
         ));
-        let split_without_offset =
-            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+        let split_without_offset = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None));
 
         update_mysql_cdc_state_file_seq_metric(
             &mut metric_guard,

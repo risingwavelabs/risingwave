@@ -49,9 +49,6 @@ use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
-use crate::source::SplitImpl::{
-    CitusCdc, MongodbCdc, MysqlCdc, OracleCdc, PostgresCdc, SqlServerCdc,
-};
 use crate::source::batch::BatchSourceSplitImpl;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
@@ -777,6 +774,46 @@ impl ConnectorProperties {
 for_all_sources!(impl_split);
 for_all_connections!(impl_connection);
 
+/// Generates the CDC-only methods of [`SplitImpl`], one arm per CDC connector in the registry.
+macro_rules! impl_split_impl_cdc_methods {
+    ({$({$cdc_source_type:ident}),*}, {$($_ignore:tt),*}) => {
+        $crate::paste! {
+            impl SplitImpl {
+                pub fn is_cdc_split(&self) -> bool {
+                    matches!(self, $(SplitImpl::[<$cdc_source_type Cdc>](_))|*)
+                }
+
+                /// Get the current split offset.
+                pub fn get_cdc_split_offset(&self) -> String {
+                    match self {
+                        $(
+                            SplitImpl::[<$cdc_source_type Cdc>](split) => {
+                                split.start_offset().clone().unwrap_or_default()
+                            }
+                        )*
+                        _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
+                    }
+                }
+
+                /// Clear the offset of a CDC split (`RESET SOURCE`). Returns `false` for a non-CDC split.
+                pub fn reset_cdc_offset(&mut self) -> bool {
+                    match self {
+                        $(
+                            SplitImpl::[<$cdc_source_type Cdc>](split) => {
+                                split.reset_start_offset();
+                                true
+                            }
+                        )*
+                        _ => false,
+                    }
+                }
+            }
+        }
+    };
+}
+
+crate::for_all_classified_sources!(impl_split_impl_cdc_methods);
+
 impl From<&SplitImpl> for ConnectorSplit {
     fn from(split: &SplitImpl) -> Self {
         dispatch_split_impl!(split, |inner| {
@@ -816,31 +853,6 @@ impl SplitImpl {
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
             |other| bail!("connector '{}' is not supported", other)
         )
-    }
-
-    pub fn is_cdc_split(&self) -> bool {
-        matches!(
-            self,
-            MysqlCdc(_)
-                | PostgresCdc(_)
-                | MongodbCdc(_)
-                | CitusCdc(_)
-                | SqlServerCdc(_)
-                | OracleCdc(_)
-        )
-    }
-
-    /// Get the current split offset.
-    pub fn get_cdc_split_offset(&self) -> String {
-        match self {
-            MysqlCdc(split) => split.start_offset().clone().unwrap_or_default(),
-            PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
-            MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
-            CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
-            SqlServerCdc(split) => split.start_offset().clone().unwrap_or_default(),
-            OracleCdc(split) => split.start_offset().clone().unwrap_or_default(),
-            _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
-        }
     }
 
     pub fn into_batch_split(self) -> Option<BatchSourceSplitImpl> {
@@ -1012,7 +1024,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_owned()), None);
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_owned()));
         let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
