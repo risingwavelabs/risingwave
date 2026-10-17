@@ -29,3 +29,20 @@
     explain create table t (v int, w int as v+1, watermark for w as w) append only
   expected_outputs:
   - explain_output
+- name: NOT NULL on a generated column is checked on its computed value
+  sql: |
+    explain create table t (v int, g int not null as v + 1);
+  expected_outputs:
+  - explain_output
+- name: NOT NULL on a column after a generated column checks that column
+  sql: |
+    explain create table t (g int as null::int, v int not null);
+  expected_outputs:
+  - explain_output
+- name: sink into a table without a column list matches the columns after a generated column
+  sql: |
+    create table t (id int primary key, g int as id + 1, v int);
+    create table s (id int primary key, v int);
+    explain create sink sk into t as select id, v from s;
+  expected_outputs:
+  - explain_output
