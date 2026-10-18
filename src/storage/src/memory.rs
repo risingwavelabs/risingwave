@@ -262,6 +262,7 @@ pub mod sled {
                 inner: SledRangeKv::new(path),
                 tables: Default::default(),
                 vectors: Default::default(),
+                table_watermarks: Default::default(),
             }
         }
 
@@ -270,6 +271,7 @@ pub mod sled {
                 inner: SledRangeKv::new_temp(),
                 tables: Default::default(),
                 vectors: Default::default(),
+                table_watermarks: Default::default(),
             }
         }
     }
@@ -583,6 +585,7 @@ pub struct RangeKvStateStore<R: RangeKv> {
     tables: Arc<parking_lot::Mutex<HashMap<TableId, TableState>>>,
 
     vectors: InMemVectorStore,
+    table_watermarks: Arc<parking_lot::Mutex<HashMap<VirtualNode, Bytes>>>,
 }
 
 fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> BytesFullKeyRange
@@ -986,7 +989,7 @@ pub struct RangeKvLocalStateStore<R: RangeKv> {
     table_id: TableId,
     op_consistency_level: OpConsistencyLevel,
     vnodes: Arc<Bitmap>,
-    watermarks: HashMap<VirtualNode, Bytes>,
+    watermarks: Arc<parking_lot::Mutex<HashMap<VirtualNode, Bytes>>>,
 }
 
 impl<R: RangeKv> RangeKvLocalStateStore<R> {
@@ -999,7 +1002,7 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
             op_consistency_level: option.op_consistency_level,
             vnodes: option.vnodes,
             vectors: vec![],
-            watermarks: HashMap::new(),
+            watermarks: inner.table_watermarks.clone(),
         }
     }
 
@@ -1104,7 +1107,7 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     }
 
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
-        self.watermarks.get(&vnode).cloned()
+        self.watermarks.lock().get(&vnode).cloned()
     }
 
     fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
@@ -1247,10 +1250,10 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
         }
 
         if let Some((direction, watermarks, watermark_type)) = opts.table_watermarks {
+            let mut table_watermarks = self.watermarks.lock();
             for vnode_watermark in &watermarks {
                 for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
-                    self.watermarks
-                        .insert(vnode, vnode_watermark.watermark().clone());
+                    table_watermarks.insert(vnode, vnode_watermark.watermark().clone());
                 }
             }
             if watermark_type == WatermarkSerdeType::PkPrefix {
@@ -1844,5 +1847,52 @@ mod tests {
             }
             assert!(iter.try_next().await.unwrap().is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn test_table_watermark_survives_local_store_recreation() {
+        use risingwave_common::catalog::TableOption;
+        use risingwave_hummock_sdk::table_watermark::VnodeWatermark;
+        use crate::store::{
+            InitOptions, NewLocalOptions, OpConsistencyLevel, SealCurrentEpochOptions,
+        };
+
+        let state_store = MemoryStateStore::new();
+        let table_id = TableId::new(42);
+        let vnodes = Arc::new(Bitmap::from_bool_slice(&[true]));
+        let vnode = VirtualNode::from_index(0);
+        let watermark = Bytes::from_static(b"wm");
+        let new_local_options = NewLocalOptions {
+            table_id,
+            fragment_id: FragmentId::default(),
+            op_consistency_level: OpConsistencyLevel::Inconsistent,
+            table_option: TableOption::default(),
+            is_replicated: false,
+            vnodes: vnodes.clone(),
+            upload_on_flush: true,
+        };
+
+        let mut local = state_store.new_local(new_local_options.clone()).await;
+        local
+            .init(InitOptions {
+                epoch: EpochPair::new(test_epoch(1), test_epoch(2)),
+            })
+            .await
+            .unwrap();
+        local.seal_current_epoch(
+            test_epoch(3),
+            SealCurrentEpochOptions {
+                table_watermarks: Some((
+                    WatermarkDirection::Ascending,
+                    vec![VnodeWatermark::new(vnodes.clone(), watermark.clone())],
+                    WatermarkSerdeType::Value,
+                )),
+                switch_op_consistency_level: None,
+            },
+        );
+        assert_eq!(local.get_table_watermark(vnode), Some(watermark.clone()));
+
+        let recreated = state_store.new_local(new_local_options).await;
+        assert_eq!(recreated.get_table_watermark(vnode), Some(watermark));
     }
 }
