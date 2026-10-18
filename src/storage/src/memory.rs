@@ -33,7 +33,7 @@ use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{
     FullKey, TableKey, TableKeyRange, UserKey, prefixed_range_with_vnode,
 };
-use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
+use risingwave_hummock_sdk::table_watermark::{WatermarkDirection, WatermarkSerdeType};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use thiserror_ext::AsReport;
 use tokio::task::yield_now;
@@ -986,6 +986,7 @@ pub struct RangeKvLocalStateStore<R: RangeKv> {
     table_id: TableId,
     op_consistency_level: OpConsistencyLevel,
     vnodes: Arc<Bitmap>,
+    watermarks: HashMap<VirtualNode, Bytes>,
 }
 
 impl<R: RangeKv> RangeKvLocalStateStore<R> {
@@ -998,6 +999,7 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
             op_consistency_level: option.op_consistency_level,
             vnodes: option.vnodes,
             vectors: vec![],
+            watermarks: HashMap::new(),
         }
     }
 
@@ -1101,9 +1103,8 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
         Ok(std::mem::replace(&mut self.vnodes, vnodes))
     }
 
-    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
-        // TODO: may store the written table watermark and have a correct implementation
-        None
+    fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
+        self.watermarks.get(&vnode).cloned()
     }
 
     fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
@@ -1245,33 +1246,41 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
             }
         }
 
-        if let Some((direction, watermarks, _watermark_type)) = opts.table_watermarks {
-            let delete_ranges = watermarks
-                .iter()
-                .flat_map(|vnode_watermark| {
-                    let inner_range = match direction {
-                        WatermarkDirection::Ascending => {
-                            (Unbounded, Excluded(vnode_watermark.watermark().clone()))
-                        }
-                        WatermarkDirection::Descending => {
-                            (Excluded(vnode_watermark.watermark().clone()), Unbounded)
-                        }
-                    };
-                    vnode_watermark
-                        .vnode_bitmap()
-                        .iter_vnodes()
-                        .map(move |vnode| {
-                            let (start, end) =
-                                prefixed_range_with_vnode(inner_range.clone(), vnode);
-                            (start.map(|key| key.0), end.map(|key| key.0))
-                        })
-                })
-                .collect_vec();
-            if let Err(e) =
-                self.inner
-                    .ingest_batch(Vec::new(), delete_ranges, self.epoch(), self.table_id)
-            {
-                error!(error = %e.as_report(), "failed to write delete ranges of table watermark");
+        if let Some((direction, watermarks, watermark_type)) = opts.table_watermarks {
+            for vnode_watermark in &watermarks {
+                for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
+                    self.watermarks
+                        .insert(vnode, vnode_watermark.watermark().clone());
+                }
+            }
+            if watermark_type == WatermarkSerdeType::PkPrefix {
+                let delete_ranges = watermarks
+                    .iter()
+                    .flat_map(|vnode_watermark| {
+                        let inner_range = match direction {
+                            WatermarkDirection::Ascending => {
+                                (Unbounded, Excluded(vnode_watermark.watermark().clone()))
+                            }
+                            WatermarkDirection::Descending => {
+                                (Excluded(vnode_watermark.watermark().clone()), Unbounded)
+                            }
+                        };
+                        vnode_watermark
+                            .vnode_bitmap()
+                            .iter_vnodes()
+                            .map(move |vnode| {
+                                let (start, end) =
+                                    prefixed_range_with_vnode(inner_range.clone(), vnode);
+                                (start.map(|key| key.0), end.map(|key| key.0))
+                            })
+                    })
+                    .collect_vec();
+                if let Err(e) =
+                    self.inner
+                        .ingest_batch(Vec::new(), delete_ranges, self.epoch(), self.table_id)
+                {
+                    error!(error = %e.as_report(), "failed to write delete ranges of table watermark");
+                }
             }
         }
     }
