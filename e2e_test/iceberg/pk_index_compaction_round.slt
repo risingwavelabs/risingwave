@@ -188,11 +188,26 @@ SELECT count(id) FROM pk_compaction_round;
 ----
 0
 
+# Manual Full waits for one task, not an entire round. With one partition plan per
+# task, issue one request per partition to clear all old files before inserting again.
+statement ok
+VACUUM FULL pk_compaction_round;
+
+statement ok
+VACUUM FULL pk_compaction_round;
+
 statement ok
 VACUUM FULL pk_compaction_round;
 
 query I
 SELECT count(id) FROM pk_compaction_round;
+----
+0
+
+query I
+SELECT count(*)
+FROM rw_iceberg_files
+WHERE source_name = '__iceberg_source_pk_compaction_round' AND content = 'Data';
 ----
 0
 
