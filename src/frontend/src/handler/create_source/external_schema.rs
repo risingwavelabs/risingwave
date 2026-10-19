@@ -25,6 +25,7 @@ use avro::extract_avro_table_schema;
 pub mod debezium;
 pub mod iceberg;
 use iceberg::extract_iceberg_columns;
+use risingwave_connector::source::refresh_mode::BoundedInput;
 mod protobuf;
 use protobuf::extract_protobuf_table_schema;
 pub mod nexmark;
@@ -74,13 +75,16 @@ pub async fn bind_columns_from_source(
     format_encode: &FormatEncodeOptions,
     with_properties: Either<&WithOptions, &WithOptionsSecResolved>,
     create_source_type: CreateSourceType,
+    bounded_input: Option<BoundedInput>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
-    let (columns_from_resolve_source, mut source_info) =
-        if create_source_type == CreateSourceType::SharedCdc {
-            bind_columns_from_source_for_cdc(session, format_encode)?
-        } else {
-            bind_columns_from_source_for_non_cdc(session, format_encode, with_properties).await?
-        };
+    let (columns_from_resolve_source, mut source_info) = if create_source_type
+        == CreateSourceType::SharedCdc
+    {
+        bind_columns_from_source_for_cdc(session, format_encode)?
+    } else {
+        bind_columns_from_source_for_non_cdc(session, format_encode, with_properties, bounded_input)
+            .await?
+    };
     if create_source_type.is_shared() {
         // Note: this field should be called is_shared. Check field doc for more details.
         source_info.cdc_source_job = true;
@@ -93,6 +97,7 @@ async fn bind_columns_from_source_for_non_cdc(
     session: &SessionImpl,
     format_encode: &FormatEncodeOptions,
     with_properties: Either<&WithOptions, &WithOptionsSecResolved>,
+    bounded_input: Option<BoundedInput>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
@@ -322,7 +327,7 @@ async fn bind_columns_from_source_for_non_cdc(
         (Format::None, Encode::None) => {
             if options_with_secret.is_iceberg_connector() {
                 Some(
-                    extract_iceberg_columns(&options_with_secret)
+                    extract_iceberg_columns(&options_with_secret, bounded_input)
                         .await
                         .map_err(|err| ProtocolError(err.to_report_string()))?,
                 )

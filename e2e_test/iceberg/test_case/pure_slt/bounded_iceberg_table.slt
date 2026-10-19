@@ -124,7 +124,19 @@ CREATE TABLE bounded_invalid (PRIMARY KEY (id)) WITH (
     scan.bounded.snapshot.id = '1'
 );
 
-statement error Bounded tables must have a PRIMARY KEY
+statement error `scan.bounded.mode` is only supported for the iceberg connector
+CREATE TABLE bounded_invalid (v INT) WITH (
+    connector = 'datagen',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '1'
+);
+
+system ok
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT snapshot_id FROM rw_iceberg_snapshots
+    WHERE source_name = 'bounded_upstream_src'
+    ORDER BY timestamp_ms LIMIT 1
+") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -c "
 CREATE TABLE bounded_invalid WITH (
     connector = 'iceberg',
     warehouse.path = 's3://hummock001/bounded_iceberg',
@@ -136,15 +148,8 @@ CREATE TABLE bounded_invalid WITH (
     database.name = 'bounded_db',
     table.name = 'bounded_t',
     scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '1'
-);
-
-statement error `scan.bounded.mode` is only supported for the iceberg connector
-CREATE TABLE bounded_invalid (v INT) WITH (
-    connector = 'datagen',
-    scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '1'
-);
+    scan.bounded.snapshot.id = '$snapshot_id'
+)" 2>&1 | grep -q "Bounded tables must have a PRIMARY KEY"
 
 # ==== load pinned snapshots
 

@@ -63,7 +63,7 @@ use risingwave_connector::source::cdc::{
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{EventType, get_event_data_types_with_names};
-use risingwave_connector::source::refresh_mode::{BoundedInput, RefreshMode};
+use risingwave_connector::source::refresh_mode::RefreshMode;
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 pub use risingwave_connector::source::{
     ADBC_SNOWFLAKE_CONNECTOR, UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR,
@@ -765,7 +765,8 @@ pub fn bind_connector_props(
 
         if is_create_source && refresh_mode.is_some() {
             return Err(RwError::from(ProtocolError(
-                "`refresh_mode` only supported for CREATE TABLE".to_owned(),
+                "`refresh_mode` and `scan.bounded.mode` are only supported for CREATE TABLE"
+                    .to_owned(),
             )));
         }
 
@@ -1107,17 +1108,13 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     let (mut columns, pk_col_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
-    if let Some(bounded) = refresh_mode.bounded_input() {
-        // A bounded load restarts from scratch on recovery, so rows must be deduplicated by key.
-        if row_id_index.is_some() {
-            return Err(ErrorCode::BindError(
-                "Bounded tables must have a PRIMARY KEY. Please define a primary key for the table."
-                    .to_owned(),
-            )
-            .into());
-        }
-
-        check_bounded_snapshot(&with_properties, bounded).await?;
+    // A bounded load restarts from scratch on recovery, so rows must be deduplicated by key.
+    if refresh_mode.is_bounded() && row_id_index.is_some() {
+        return Err(ErrorCode::BindError(
+            "Bounded tables must have a PRIMARY KEY. Please define a primary key for the table."
+                .to_owned(),
+        )
+        .into());
     }
 
     let watermark_descs =
@@ -1186,33 +1183,6 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     Ok(source)
 }
 
-/// Checks that the snapshot pinned by a bounded load exists in the Iceberg table.
-async fn check_bounded_snapshot(
-    with_properties: &WithOptionsSecResolved,
-    bounded: BoundedInput,
-) -> Result<()> {
-    let ConnectorProperties::Iceberg(properties) =
-        ConnectorProperties::extract(with_properties.clone(), true)?
-    else {
-        return Err(ErrorCode::BindError(
-            "`scan.bounded.mode` is only supported for the iceberg connector".to_owned(),
-        )
-        .into());
-    };
-
-    let table = properties.load_table().await?;
-
-    let snapshot_id = bounded.iceberg_snapshot_id();
-
-    if table.metadata().snapshot_by_id(snapshot_id).is_none() {
-        return Err(ErrorCode::InvalidParameterValue(format!(
-            "snapshot {snapshot_id} does not exist in the Iceberg table"
-        ))
-        .into());
-    }
-    Ok(())
-}
-
 pub async fn handle_create_source(
     mut handler_args: HandlerArgs,
     stmt: CreateSourceStatement,
@@ -1272,6 +1242,7 @@ pub async fn handle_create_source(
         &format_encode,
         Either::Left(&with_properties),
         create_source_type,
+        refresh_mode.bounded_input(),
     )
     .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();

@@ -167,6 +167,7 @@ pub async fn refresh_sr_and_get_columns_diff(
         format_encode,
         Either::Right(&with_properties),
         CreateSourceType::for_replace(original_source),
+        None,
     )
     .await?
     else {

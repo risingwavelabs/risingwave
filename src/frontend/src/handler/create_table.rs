@@ -510,6 +510,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &format_encode,
         Either::Left(&with_properties),
         CreateSourceType::Table,
+        refresh_mode.bounded_input(),
     )
     .await?;
 
@@ -1724,6 +1725,7 @@ pub async fn create_iceberg_engine_table(
         &format_encode,
         Either::Left(&with_properties),
         create_source_type,
+        refresh_mode.bounded_input(),
     )
     .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
