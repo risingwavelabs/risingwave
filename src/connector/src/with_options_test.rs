@@ -691,63 +691,21 @@ mod sink_properties {{
 pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
     use source_properties::*;
     let mut map = HashMap::new();
-    // CDC Properties - added for schema.change.failure.policy
-    map.try_insert(
-        std::any::type_name::<MysqlCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<PostgresCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "debezium.heartbeat.interval.ms".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<SqlServerCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<OracleCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-            "debezium.heartbeat.interval.ms".to_owned(),
-            "heartbeat.table.name".to_owned(),
-            "hostname".to_owned(),
-            "port".to_owned(),
-            "password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-
-    map.try_insert(
-        std::any::type_name::<MongodbCdcProperties>().to_owned(),
-        [
-            "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "debezium.max.queue.size".to_owned(),
-            "debezium.queue.memory.ratio".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();{source_entries}
+    // CDC properties, from each connector's `CdcSourceFrontendValidator::ALLOW_ALTER_ON_FLY_FIELDS`
+    macro_rules! insert_cdc_allow_alter_on_fly_fields {{
+        ({{ $({{ $cdc_source_type:ident }}),* }}, {{ $($_ignore:tt),* }}, $map:ident) => {{
+            $(
+                $map.try_insert(
+                    std::any::type_name::<crate::source::cdc::CdcProperties<crate::source::cdc::$cdc_source_type>>().to_owned(),
+                    <crate::source::cdc::$cdc_source_type as crate::source::cdc::CdcSourceFrontendValidator>::ALLOW_ALTER_ON_FLY_FIELDS
+                        .iter()
+                        .map(|field| field.to_string())
+                        .collect(),
+                ).unwrap();
+            )*
+        }};
+    }}
+    crate::for_all_classified_sources!(insert_cdc_allow_alter_on_fly_fields, map);{source_entries}
     map
 }});
 

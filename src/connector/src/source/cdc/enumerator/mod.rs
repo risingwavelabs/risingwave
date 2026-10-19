@@ -38,10 +38,11 @@ use crate::connector_common::{SslMode, create_pg_client, pg_connection_config_fr
 use crate::error::ConnectorResult;
 use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::mysql::build_mysql_connection_pool;
-use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
+use crate::source::cdc::mysql::extract_binlog_file_seq;
+use crate::source::cdc::sql_server::parse_sql_server_lsn_str;
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Oracle, Postgres,
-    SqlServer, table_schema_exclude_additional_columns,
+    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mysql, Postgres, SqlServer,
+    table_schema_exclude_additional_columns,
 };
 use crate::source::monitor::metrics::EnumeratorMetrics;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
@@ -562,16 +563,24 @@ impl DebeziumSplitEnumerator<Mysql> {
     }
 }
 
-impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
-    type CdcSourceType = Mysql;
+impl<T: CdcSourceTypeTrait> ListCdcSplits for DebeziumSplitEnumerator<T> {
+    type CdcSourceType = T;
 
-    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        // CDC source only supports single split
-        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id.as_raw_id(),
-            None,
-            None,
-        )]
+    /// CDC source only supports single split.
+    default fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<T>> {
+        vec![DebeziumCdcSplit::<T>::new(self.source_id.as_raw_id(), None)]
+    }
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Citus>> {
+        self.worker_node_addrs
+            .iter()
+            .enumerate()
+            .map(|(id, addr)| {
+                DebeziumCdcSplit::<Citus>::new_with_server_addr(id as u32, addr.to_string())
+            })
+            .collect_vec()
     }
 }
 
@@ -584,79 +593,12 @@ impl CdcMonitor for DebeziumSplitEnumerator<Mysql> {
     }
 }
 
-impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
-    type CdcSourceType = Postgres;
-
-    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        // CDC source only supports single split
-        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id.as_raw_id(),
-            None,
-            None,
-        )]
-    }
-}
-
 #[async_trait]
 impl CdcMonitor for DebeziumSplitEnumerator<Postgres> {
     async fn monitor_cdc(&mut self) -> ConnectorResult<()> {
         // For PostgreSQL CDC, query the upstream Postgres confirmed flush lsn and monitor it.
         self.monitor_postgres_confirmed_flush_lsn().await?;
         Ok(())
-    }
-}
-
-impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
-    type CdcSourceType = Citus;
-
-    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        self.worker_node_addrs
-            .iter()
-            .enumerate()
-            .map(|(id, addr)| {
-                DebeziumCdcSplit::<Self::CdcSourceType>::new(
-                    id as u32,
-                    None,
-                    Some(addr.to_string()),
-                )
-            })
-            .collect_vec()
-    }
-}
-impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
-    type CdcSourceType = Mongodb;
-
-    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        // CDC source only supports single split
-        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id.as_raw_id(),
-            None,
-            None,
-        )]
-    }
-}
-
-impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
-    type CdcSourceType = SqlServer;
-
-    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id.as_raw_id(),
-            None,
-            None,
-        )]
-    }
-}
-
-impl ListCdcSplits for DebeziumSplitEnumerator<Oracle> {
-    type CdcSourceType = Oracle;
-
-    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id.as_raw_id(),
-            None,
-            None,
-        )]
     }
 }
 

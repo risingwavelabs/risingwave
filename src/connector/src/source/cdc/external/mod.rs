@@ -46,30 +46,72 @@ use crate::source::cdc::external::sql_server::{
     SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ExternalCdcTableType {
-    Unspecified,
-    Mock,
-    Mysql,
-    Postgres,
-    SqlServer,
-    Citus,
-    Mongodb,
+/// Maps a registry connector to its `PbCdcTableType` variant of the same name.
+// TODO(oracle): `PbCdcTableType` has no Oracle value yet; remove the `Oracle` arm once the proto
+// adds `CDC_TABLE_TYPE_ORACLE`.
+macro_rules! pb_cdc_table_type {
+    (Oracle) => {
+        PbCdcTableType::Unspecified
+    };
+    ($cdc_source_type:ident) => {
+        PbCdcTableType::$cdc_source_type
+    };
 }
 
-impl ExternalCdcTableType {
-    pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
-        let connector = with_properties.get_connector().unwrap_or_default();
-        match connector.as_str() {
-            "mysql-cdc" => Self::Mysql,
-            "postgres-cdc" => Self::Postgres,
-            "citus-cdc" => Self::Citus,
-            "sqlserver-cdc" => Self::SqlServer,
-            "mongodb-cdc" => Self::Mongodb,
-            _ => Self::Unspecified,
+/// Generates [`ExternalCdcTableType`] with one variant per CDC connector in the registry plus the
+/// hardcoded `Unspecified` and `Mock`, together with `from_properties` and the `PbCdcTableType`
+/// conversions.
+macro_rules! impl_external_cdc_table_type {
+    ({$({$cdc_source_type:ident}),*}, {$($_ignore:tt),*}) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        pub enum ExternalCdcTableType {
+            Unspecified,
+            Mock,
+            $(
+                $cdc_source_type,
+            )*
         }
-    }
 
+        impl ExternalCdcTableType {
+            pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
+                let connector = with_properties.get_connector().unwrap_or_default();
+                match CdcSourceType::from(connector.as_str()) {
+                    $(
+                        CdcSourceType::$cdc_source_type => Self::$cdc_source_type,
+                    )*
+                    CdcSourceType::Unspecified => Self::Unspecified,
+                }
+            }
+        }
+
+        impl From<ExternalCdcTableType> for PbCdcTableType {
+            fn from(cdc_table_type: ExternalCdcTableType) -> Self {
+                match cdc_table_type {
+                    $(
+                        ExternalCdcTableType::$cdc_source_type => pb_cdc_table_type!($cdc_source_type),
+                    )*
+                    ExternalCdcTableType::Unspecified | ExternalCdcTableType::Mock => Self::Unspecified,
+                }
+            }
+        }
+
+        impl From<PbCdcTableType> for ExternalCdcTableType {
+            fn from(cdc_table_type: PbCdcTableType) -> Self {
+                #[allow(unreachable_patterns)]
+                match cdc_table_type {
+                    PbCdcTableType::Unspecified => Self::Unspecified,
+                    $(
+                        pb_cdc_table_type!($cdc_source_type) => Self::$cdc_source_type,
+                    )*
+                }
+            }
+        }
+    };
+}
+
+crate::for_all_classified_sources!(impl_external_cdc_table_type);
+
+impl ExternalCdcTableType {
     pub fn can_backfill(&self) -> bool {
         matches!(self, Self::Mysql | Self::Postgres | Self::SqlServer)
     }
@@ -87,7 +129,7 @@ impl ExternalCdcTableType {
             Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
             Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
             Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
-            Self::Unspecified | Self::Citus | Self::Mongodb => {
+            Self::Unspecified | Self::Citus | Self::Mongodb | Self::Oracle => {
                 bail!("invalid external table type: {:?}", *self)
             }
         }
@@ -120,36 +162,9 @@ impl ExternalCdcTableType {
             )),
             // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
-            Self::Unspecified | Self::Citus | Self::Mongodb => {
+            Self::Unspecified | Self::Citus | Self::Mongodb | Self::Oracle => {
                 bail!("invalid external table type: {:?}", *self)
             }
-        }
-    }
-}
-
-impl From<ExternalCdcTableType> for PbCdcTableType {
-    fn from(cdc_table_type: ExternalCdcTableType) -> Self {
-        match cdc_table_type {
-            ExternalCdcTableType::Postgres => Self::Postgres,
-            ExternalCdcTableType::Mysql => Self::Mysql,
-            ExternalCdcTableType::SqlServer => Self::SqlServer,
-
-            ExternalCdcTableType::Citus => Self::Citus,
-            ExternalCdcTableType::Mongodb => Self::Mongodb,
-            ExternalCdcTableType::Unspecified | ExternalCdcTableType::Mock => Self::Unspecified,
-        }
-    }
-}
-
-impl From<PbCdcTableType> for ExternalCdcTableType {
-    fn from(cdc_table_type: PbCdcTableType) -> Self {
-        match cdc_table_type {
-            PbCdcTableType::Postgres => Self::Postgres,
-            PbCdcTableType::Mysql => Self::Mysql,
-            PbCdcTableType::SqlServer => Self::SqlServer,
-            PbCdcTableType::Mongodb => Self::Mongodb,
-            PbCdcTableType::Citus => Self::Citus,
-            PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
 }
@@ -183,7 +198,8 @@ impl SchemaTableName {
             }
             ExternalCdcTableType::Unspecified
             | ExternalCdcTableType::Mock
-            | ExternalCdcTableType::Mongodb => {
+            | ExternalCdcTableType::Mongodb
+            | ExternalCdcTableType::Oracle => {
                 unreachable!("invalid external table type: {:?}", table_type);
             }
         };

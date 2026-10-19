@@ -12,11 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod citus;
 pub mod enumerator;
 pub mod external;
 pub mod jni_source;
+pub mod mongodb;
+pub mod mysql;
+pub mod oracle;
+pub mod postgres;
 pub mod source;
 pub mod split;
+pub mod sql_server;
 
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
@@ -24,10 +30,11 @@ use std::marker::PhantomData;
 pub use enumerator::*;
 use itertools::Itertools;
 use risingwave_common::id::{ActorId, SourceId};
+use risingwave_common::license::Feature;
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
-use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::{ExternalTableDesc, PbEncodeType, PbFormatType};
 use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
@@ -58,13 +65,6 @@ pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
 pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
 
-pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
-pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
-pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
-pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
-pub const SQL_SERVER_CDC_CONNECTOR: &str = SqlServer::CDC_CONNECTOR_NAME;
-pub const ORACLE_CDC_CONNECTOR: &str = Oracle::CDC_CONNECTOR_NAME;
-
 /// Build a unique CDC table identifier from a source ID and external table name
 pub fn build_cdc_table_id(source_id: SourceId, external_table_name: &str) -> String {
     format!("{}.{}", source_id, external_table_name)
@@ -86,40 +86,47 @@ pub fn normalize_simple_postgres_quoted_table_name(table_name: &str) -> Option<S
     Some(format!("{schema_name}.{table_name}"))
 }
 
+/// Marker type of a CDC connector. Implemented for each entry of the CDC block in
+/// `for_all_classified_sources!` by `impl_cdc_source_type!`.
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
+    /// Value of the `connector` option, e.g. `mysql-cdc`.
     const CDC_CONNECTOR_NAME: &'static str;
+    /// Field name of this connector's split inside the serialized `DebeziumCdcSplit`, derived
+    /// from the connector name. Overridable via `CdcSerializedFieldNames`.
+    const DEFAULT_DEBEZIUM_CDC_SPLIT_SPLIT_FIELD: &'static str;
     fn source_type() -> CdcSourceType;
 }
 
+/// Names written into persisted state (checkpointed splits, state tables).
+///
+/// Defaults are derived from the connector name by `impl_cdc_source_type!`. A connector whose
+/// shipped name differs from the derived one overrides the constant in its own module.
+/// Constants are named after the struct and field they belong to, without the connector tag,
+/// e.g. `DebeziumCdcSplit.postgres_split` -> `DEBEZIUM_CDC_SPLIT_SPLIT_FIELD`. Never change a
+/// value once shipped, for backward compatibility with state persisted by older versions.
+pub trait CdcSerializedFieldNames: CdcSourceTypeTrait {
+    const DEBEZIUM_CDC_SPLIT_SPLIT_FIELD: &'static str =
+        Self::DEFAULT_DEBEZIUM_CDC_SPLIT_SPLIT_FIELD;
+}
+
+/// What the frontend checks or fills in for a CDC connector on `CREATE SOURCE` and
+/// `ALTER SOURCE`. Implemented per connector in its own module; the frontend reaches the right
+/// impl through `dispatch_cdc_source_type!`.
+pub trait CdcSourceFrontendValidator: CdcSourceTypeTrait {
+    /// `(format, encodes)` pairs accepted by `FORMAT ... ENCODE ...`.
+    const COMPATIBLE_FORMATS: &'static [(PbFormatType, &'static [PbEncodeType])];
+    /// WITH options that `ALTER SOURCE ... CONNECTOR WITH (...)` may change on the fly.
+    const ALLOW_ALTER_ON_FLY_FIELDS: &'static [&'static str];
+    /// License feature required to create a source with this connector, if any.
+    const LICENSE_FEATURE: Option<Feature> = None;
+
+    /// Fills defaults into, and validates, the connector-specific WITH options.
+    fn fill_and_validate_props(_props: &mut BTreeMap<String, String>) -> ConnectorResult<()> {
+        Ok(())
+    }
+}
+
 for_all_classified_sources!(impl_cdc_source_type);
-
-impl<'a> From<&'a str> for CdcSourceType {
-    fn from(name: &'a str) -> Self {
-        match name {
-            MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
-            POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
-            CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
-            MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
-            SQL_SERVER_CDC_CONNECTOR => CdcSourceType::SqlServer,
-            ORACLE_CDC_CONNECTOR => CdcSourceType::Oracle,
-            _ => CdcSourceType::Unspecified,
-        }
-    }
-}
-
-impl CdcSourceType {
-    pub fn as_str_name(&self) -> &str {
-        match self {
-            CdcSourceType::Mysql => "MySQL",
-            CdcSourceType::Postgres => "Postgres",
-            CdcSourceType::Citus => "Citus",
-            CdcSourceType::Mongodb => "MongoDB",
-            CdcSourceType::SqlServer => "SQL Server",
-            CdcSourceType::Oracle => "Oracle",
-            CdcSourceType::Unspecified => "Unspecified",
-        }
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
