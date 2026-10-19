@@ -156,7 +156,11 @@ public class DbzConnectorConfig {
 
     public static String normalizeMariaDbSslMode(String sslMode) {
         return switch (sslMode) {
-            case "disabled", "preferred" -> "disable";
+            case "disabled" -> "disable";
+            case "preferred" ->
+                    throw new IllegalArgumentException(
+                            "MariaDB CDC does not support ssl.mode 'preferred'; use 'required',"
+                                    + " 'verify-ca', or 'verify-full'");
             case "required" -> "trust";
             default -> sslMode;
         };

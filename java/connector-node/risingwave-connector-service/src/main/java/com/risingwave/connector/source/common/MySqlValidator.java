@@ -31,6 +31,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     private static final String BINLOG_MONITOR = "BINLOG MONITOR";
     private final Map<String, String> userProps;
     private final String databaseTypeName;
+    private final boolean isMariaDb;
     private final int cdcTableType;
 
     private final TableSchema tableSchema;
@@ -51,7 +52,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
-        boolean isMariaDb = sourceType == SourceTypeE.MARIADB;
+        this.isMariaDb = sourceType == SourceTypeE.MARIADB;
         this.databaseTypeName = isMariaDb ? "MariaDB" : "MySQL";
         this.cdcTableType =
                 (isMariaDb
@@ -122,6 +123,21 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     private void validateBinlogConfig() throws SQLException {
+        if (isMariaDb) {
+            // MariaDB 11.4 introduced this variable; older versions return no rows.
+            // Debezium needs legacy event positions to resume reliably after a restart.
+            try (var stmt = jdbcConnection.createStatement();
+                    var res =
+                            stmt.executeQuery(
+                                    "SHOW GLOBAL VARIABLES LIKE 'binlog_legacy_event_pos'")) {
+                if (res.next() && !res.getString(2).equalsIgnoreCase("ON")) {
+                    throw ValidatorUtils.invalidArgument(
+                            "MariaDB binlog_legacy_event_pos must be ON for reliable CDC recovery. "
+                                    + "Set GLOBAL binlog_legacy_event_pos = ON and persist it in the server configuration.");
+                }
+            }
+        }
+
         // check whether source db has enabled binlog
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.bin_log"));

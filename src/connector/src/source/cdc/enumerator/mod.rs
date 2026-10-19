@@ -523,12 +523,25 @@ impl DebeziumSplitEnumerator<Mysql> {
         let ssl_mode = self
             .properties
             .get("ssl.mode")
+            .or_else(|| self.properties.get("debezium.database.sslmode"))
             .and_then(|s| s.parse().ok())
             .unwrap_or(SslMode::Preferred);
+        let ssl_root_cert = self
+            .properties
+            .get("ssl.root.cert")
+            .or_else(|| self.properties.get("debezium.database.sslrootcert"))
+            .map(String::as_str);
 
         // Build MySQL connection pool with proper SSL configuration
-        let pool =
-            build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
+        let pool = build_mysql_connection_pool(
+            hostname,
+            port,
+            username,
+            password,
+            database,
+            ssl_mode,
+            ssl_root_cert,
+        );
         let mut conn = pool
             .get_conn()
             .await
@@ -659,9 +672,22 @@ async fn query_mariadb_binlog_files(
         .ok_or_else(|| anyhow!("missing `database.name` in CDC properties"))?;
     let ssl_mode = properties
         .get("ssl.mode")
+        .or_else(|| properties.get("debezium.database.sslmode"))
         .and_then(|s| s.parse().ok())
         .unwrap_or(SslMode::Preferred);
-    let pool = build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
+    let ssl_root_cert = properties
+        .get("ssl.root.cert")
+        .or_else(|| properties.get("debezium.database.sslrootcert"))
+        .map(String::as_str);
+    let pool = build_mysql_connection_pool(
+        hostname,
+        port,
+        username,
+        password,
+        database,
+        ssl_mode,
+        ssl_root_cert,
+    );
     let mut conn = pool
         .get_conn()
         .await

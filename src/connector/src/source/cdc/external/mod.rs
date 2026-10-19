@@ -313,13 +313,14 @@ pub struct ExternalTableConfig {
     pub schema: String,
     #[serde(rename = "table.name")]
     pub table: String,
-    /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
-    /// Choices include `disabled`, `preferred`, and `required`.
+    /// `ssl.mode` specifies the SSL/TLS encryption level for secure CDC connections.
+    /// Choices include `disabled`, `preferred`, `required`, `verify-ca`, and `verify-full`.
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "postgres_ssl_mode_default")]
     #[serde(alias = "debezium.database.sslmode")]
     pub ssl_mode: SslMode,
 
+    /// Optional path to a trusted root CA certificate for verified SSL modes.
     #[serde(rename = "ssl.root.cert")]
     #[serde(alias = "debezium.database.sslrootcert")]
     pub ssl_root_cert: Option<String>,

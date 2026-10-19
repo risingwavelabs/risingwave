@@ -9,10 +9,6 @@ compute_batch_total_mem	gauge		Total number of memory usage for batch tasks.		sr
 user_compute_error_cnt	counter	error_type,executor_name,fragment_id	Compute errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
 user_sink_error_cnt	counter	error_type,sink_id,sink_name,fragment_id	Sink errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
 user_source_error_cnt	counter	error_type,source_id,source_name,fragment_id	Source errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
-test	counter		test		src/common/metrics/src/guarded_metrics.rs
-test	gauge		test		src/common/metrics/src/guarded_metrics.rs
-test	gauge		test		src/common/metrics/src/guarded_metrics.rs
-test	histogram		test		src/common/metrics/src/guarded_metrics.rs
 aws_sdk_retry_counts	counter		Total number of aws sdk retry happens		src/common/metrics/src/lib.rs
 connection_count	gauge	connection_type,uri	The number of current existing connection		src/common/metrics/src/monitor/connection.rs
 connection_create_rate	counter	connection_type,uri	Rate on creating new connection		src/common/metrics/src/monitor/connection.rs

@@ -5,7 +5,13 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package com.risingwave.connector.source;
@@ -101,6 +107,25 @@ public class MariaDBSourceTest {
                             .addColumns(column("customer", Data.DataType.TypeName.VARCHAR))
                             .addPkIndices(0)
                             .build();
+            SourceTestClient.performQuery(connection, "SET GLOBAL binlog_legacy_event_pos = OFF");
+            try {
+                var invalidConfiguration =
+                        testClient.validateSource(
+                                MARIADB.getJdbcUrl(),
+                                MARIADB.getHost(),
+                                MARIADB.getUsername(),
+                                MARIADB.getPassword(),
+                                SourceType.MARIADB,
+                                schema,
+                                "test",
+                                "orders");
+                assertThat(invalidConfiguration.getError().getErrorMessage())
+                        .contains("binlog_legacy_event_pos must be ON");
+            } finally {
+                SourceTestClient.performQuery(
+                        connection, "SET GLOBAL binlog_legacy_event_pos = ON");
+            }
+
             var validation =
                     testClient.validateSource(
                             MARIADB.getJdbcUrl(),

@@ -13,8 +13,12 @@ run_mariadb() {
 wait_for_count() {
   local sql=$1
   local expected=$2
+  local success_marker="__RW_EXPECTED_COUNT__"
+  local output
   for _ in {1..30}; do
-    if [[ $(risedev psql -tAc "${sql}") == "${expected}" ]]; then
+    if output=$(risedev psql -tAc \
+      "SELECT '${success_marker}' WHERE (${sql}) = ${expected}") \
+      && grep -Fxq "${success_marker}" <<< "${output}"; then
       return 0
     fi
     sleep 1

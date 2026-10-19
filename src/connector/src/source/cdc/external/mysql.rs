@@ -63,6 +63,7 @@ use crate::source::cdc::external::{
 /// * `password` - MySQL password
 /// * `database` - Database name
 /// * `ssl_mode` - SSL mode configuration (disabled, preferred, required, verify-ca, verify-full)
+/// * `ssl_root_cert` - Optional path to a trusted root CA certificate
 ///
 /// # Returns
 /// Returns a configured `mysql_async::Pool` ready for use
@@ -73,6 +74,7 @@ pub fn build_mysql_connection_pool(
     password: &str,
     database: &str,
     ssl_mode: SslMode,
+    ssl_root_cert: Option<&str>,
 ) -> mysql_async::Pool {
     let mut opts_builder = mysql_async::OptsBuilder::default()
         .user(Some(username))
@@ -81,18 +83,31 @@ pub fn build_mysql_connection_pool(
         .tcp_port(port)
         .db_name(Some(database));
 
-    opts_builder = match ssl_mode {
-        SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-        // verify-ca and verify-full are same as required for mysql now
-        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-            let ssl_without_verify = mysql_async::SslOpts::default()
-                .with_danger_accept_invalid_certs(true)
-                .with_danger_skip_domain_validation(true);
-            opts_builder.ssl_opts(Some(ssl_without_verify))
-        }
-    };
+    opts_builder = opts_builder.ssl_opts(mysql_ssl_opts(ssl_mode, ssl_root_cert));
 
     mysql_async::Pool::new(opts_builder)
+}
+
+fn mysql_ssl_opts(ssl_mode: SslMode, ssl_root_cert: Option<&str>) -> Option<mysql_async::SslOpts> {
+    match ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => None,
+        SslMode::Required => Some(
+            mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true),
+        ),
+        SslMode::VerifyCa | SslMode::VerifyFull => {
+            let mut ssl_opts = mysql_async::SslOpts::default();
+            if let Some(root_cert) = ssl_root_cert {
+                ssl_opts =
+                    ssl_opts.with_root_certs(vec![std::path::PathBuf::from(root_cert).into()]);
+            }
+            if matches!(ssl_mode, SslMode::VerifyCa) {
+                ssl_opts = ssl_opts.with_danger_skip_domain_validation(true);
+            }
+            Some(ssl_opts)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -134,7 +149,7 @@ pub struct MySqlExternalTable {
 impl MySqlExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         tracing::debug!("connect to mysql");
-        let options = MySqlConnectOptions::new()
+        let mut options = MySqlConnectOptions::new()
             .username(&config.username)
             .password(&config.password)
             .host(&config.host)
@@ -144,10 +159,15 @@ impl MySqlExternalTable {
                 SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
                 SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
-                _ => {
-                    return Err(anyhow!("unsupported SSL mode").into());
-                }
+                SslMode::VerifyCa => sqlx::mysql::MySqlSslMode::VerifyCa,
+                SslMode::VerifyFull => sqlx::mysql::MySqlSslMode::VerifyIdentity,
             });
+
+        if matches!(config.ssl_mode, SslMode::VerifyCa | SslMode::VerifyFull)
+            && let Some(root_cert) = &config.ssl_root_cert
+        {
+            options = options.ssl_ca(root_cert);
+        }
 
         let connection = MySqlPool::connect_with(options).await?;
         let mut schema_discovery = SchemaDiscovery::new(connection, config.database.as_str());
@@ -255,6 +275,7 @@ impl MySqlExternalTable {
             &config.password,
             &config.database,
             config.ssl_mode.clone(),
+            config.ssl_root_cert.as_deref(),
         );
         let pk_infos = MySqlExternalTableReader::query_upstream_pk_infos(
             &pool,
@@ -654,6 +675,7 @@ impl MySqlExternalTableReader {
             &config.password,
             &config.database,
             config.ssl_mode,
+            config.ssl_root_cert.as_deref(),
         );
 
         let field_names = rw_schema
@@ -944,14 +966,34 @@ mod tests {
     use sea_schema::mysql::def::{ColumnType, IndexInfo, IndexOrder, IndexPart, IndexType};
 
     use super::{
-        mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, pk_column_comparisons_from_infos,
-        primary_key_names, type_name_to_mysql_type,
+        mysql_ssl_opts, mysql_type_is_unsigned_bigint, mysql_type_to_rw_type,
+        pk_column_comparisons_from_infos, primary_key_names, type_name_to_mysql_type,
     };
+    use crate::connector_common::SslMode;
     use crate::source::cdc::external::mysql::MySqlExternalTable;
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
         SchemaTableName,
     };
+
+    #[test]
+    fn test_mysql_ssl_modes() {
+        assert!(mysql_ssl_opts(SslMode::Disabled, None).is_none());
+        assert!(mysql_ssl_opts(SslMode::Preferred, None).is_none());
+
+        let required = mysql_ssl_opts(SslMode::Required, None).unwrap();
+        assert!(required.accept_invalid_certs());
+        assert!(required.skip_domain_validation());
+
+        let verify_ca = mysql_ssl_opts(SslMode::VerifyCa, Some("/tmp/ca.pem")).unwrap();
+        assert!(!verify_ca.accept_invalid_certs());
+        assert!(verify_ca.skip_domain_validation());
+        assert_eq!(verify_ca.root_certs().len(), 1);
+
+        let verify_full = mysql_ssl_opts(SslMode::VerifyFull, None).unwrap();
+        assert!(!verify_full.accept_invalid_certs());
+        assert!(!verify_full.skip_domain_validation());
+    }
 
     fn parse_mysql_type_name(ty_name: &str) -> ColumnType {
         type_name_to_mysql_type(ty_name).unwrap()

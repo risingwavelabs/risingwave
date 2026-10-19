@@ -17,6 +17,7 @@
 package com.risingwave.connector.source.common;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
@@ -57,5 +58,18 @@ public class DbzConnectorConfigTest {
         assertEquals(
                 OpendalSchemaHistory.class.getName(),
                 config.getResolvedDebeziumProps().getProperty("schema.history.internal"));
+    }
+
+    @Test
+    public void rejectsUnsupportedMariaDbPreferredSslMode() {
+        var exception =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> DbzConnectorConfig.normalizeMariaDbSslMode("preferred"));
+
+        assertEquals(
+                "MariaDB CDC does not support ssl.mode 'preferred'; use 'required', 'verify-ca', or"
+                        + " 'verify-full'",
+                exception.getMessage());
     }
 }
