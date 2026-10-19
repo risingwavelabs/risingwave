@@ -13,13 +13,49 @@
 // limitations under the License.
 
 use anyhow::Context;
+use apache_avro::Schema;
+use risingwave_common::bail;
 use serde::Deserialize;
+
+use crate::error::ConnectorResult;
+use crate::source::pulsar::topic::{Topic, parse_topic};
 
 #[derive(Debug, Deserialize)]
 pub struct PulsarSchemaInfo {
     pub version: i64,
     pub r#type: String,
     pub data: String,
+}
+
+/// A Pulsar schema by type. Pulsar stores both `AVRO` and `JSON` schemas as Avro record
+/// definitions, but their payloads are Avro binary and plain JSON respectively.
+#[derive(Debug)]
+pub enum PulsarSchema {
+    Avro(Schema),
+    Json(Schema),
+}
+
+impl PulsarSchemaInfo {
+    /// Parses the schema definition according to its type.
+    pub fn parse(&self) -> ConnectorResult<PulsarSchema> {
+        let wrap = match self.r#type.to_ascii_uppercase().as_str() {
+            "AVRO" => PulsarSchema::Avro,
+            "JSON" => PulsarSchema::Json,
+            _ => bail!("unsupported Pulsar schema type {}", self.r#type),
+        };
+        let schema = Schema::parse_str(&self.data)
+            .with_context(|| format!("failed to parse Pulsar {} schema", self.r#type))?;
+        Ok(wrap(schema))
+    }
+}
+
+/// Returns the partitioned topic, i.e. the topic without partition suffix, as schemas are shared
+/// by all partitions.
+pub fn parse_partitioned_topic(topic: &str) -> ConnectorResult<Topic> {
+    let mut topic = parse_topic(topic)?;
+    topic.topic = topic.topic_str_without_partition()?;
+    topic.partition_index = None;
+    Ok(topic)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +84,30 @@ mod tests {
         let schema: PulsarSchemaInfo =
             serde_json::from_str(r#"{"version":0,"type":"AVRO","data":"{}"}"#).unwrap();
         assert_eq!(schema.r#type, "AVRO");
+    }
+
+    #[test]
+    fn json_schema_definition_is_parsed_as_avro() {
+        let schema: PulsarSchemaInfo = serde_json::from_value(serde_json::json!({
+            "version": 0,
+            "type": "JSON",
+            "data": r#"{"type":"record","name":"Event","fields":[{"name":"id","type":"int"}]}"#,
+        }))
+        .unwrap();
+        assert!(matches!(
+            schema.parse().unwrap(),
+            PulsarSchema::Json(Schema::Record(_))
+        ));
+    }
+
+    #[test]
+    fn unsupported_schema_type_is_rejected() {
+        let schema: PulsarSchemaInfo =
+            serde_json::from_str(r#"{"version":0,"type":"PROTOBUF","data":"{}"}"#).unwrap();
+        assert_eq!(
+            schema.parse().unwrap_err().to_string(),
+            "unsupported Pulsar schema type PROTOBUF"
+        );
     }
 
     #[test]
