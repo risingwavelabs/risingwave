@@ -1310,14 +1310,6 @@ mod tests {
             self.normal_delta(0, self.deleted_sst_object_id)
         }
 
-        fn l0_insert_only_delta(&self) -> SstDeltaInfo {
-            SstDeltaInfo {
-                insert_sst_infos: vec![self.sst_info.clone()],
-                delete_sst_object_ids: vec![],
-                insert_sst_level: 0,
-            }
-        }
-
         async fn generate(
             &self,
             context: &CacheRefillContext,
@@ -1955,8 +1947,94 @@ mod tests {
 
     #[tokio::test]
     async fn test_l0_insert_only_refill_policy_uses_serving_ownership() {
+        use risingwave_hummock_sdk::level::Levels;
+        use risingwave_hummock_sdk::version::{
+            GroupDelta, GroupDeltas, HummockVersionStateTableInfo,
+        };
+        use risingwave_pb::hummock::{StateTableInfo, StateTableInfoDelta};
+
         let fixture = DataRefillGeneratorTestFixture::new(None).await;
-        let delta = fixture.l0_insert_only_delta();
+        let group = 1.into();
+        let staging_table = TableId::new(234);
+        let mut version = HummockVersion::default();
+        version.levels.insert(
+            group,
+            Levels {
+                group_id: group,
+                ..Default::default()
+            },
+        );
+        version.state_table_info = HummockVersionStateTableInfo::from_protobuf_owned(
+            [fixture.table_id, staging_table]
+                .map(|table_id| {
+                    (
+                        table_id,
+                        StateTableInfo {
+                            compaction_group_id: group,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .into(),
+        );
+        let mut raw = version.version_delta_after();
+        for table_id in [fixture.table_id, staging_table] {
+            raw.state_table_info_delta.insert(
+                table_id,
+                StateTableInfoDelta {
+                    committed_epoch: test_epoch(233),
+                    compaction_group_id: group,
+                },
+            );
+        }
+        raw.group_deltas.insert(
+            group,
+            GroupDeltas {
+                group_deltas: vec![
+                    GroupDelta::NewL0SubLevel(vec![fixture.sst_info.clone()]),
+                    GroupDelta::PruneTableIdsFromSsts([staging_table].into()),
+                ],
+            },
+        );
+        let infos = version.build_sst_delta_infos(&raw);
+        let before = PinnedVersion::new(version.clone(), unbounded_channel().0);
+        version.apply_version_delta(&raw);
+        let after = before.new_with_local_version(version).unwrap();
+        let mut config = test_refill_config(CacheRefillPolicy::Serving);
+        config.data_refill_levels.insert(0);
+        let mut refiller = CacheRefiller::new(
+            Role::Serving,
+            config,
+            fixture.sstable_store.clone(),
+            CacheRefiller::default_spawn_refill_task(),
+        );
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(
+            fixture.table_id,
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+        )]));
+        fixture.sstable_store.clear_block_cache().await.unwrap();
+        refiller.start_cache_refill(infos.clone(), before, after);
+        let events = tokio::time::timeout(Duration::from_secs(5), refiller.next_events())
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        for block_idx in 0..fixture.sst.block_count() {
+            let key = super::SstableBlockIndex {
+                sst_id: fixture.sst.id,
+                block_idx: block_idx as u64,
+            };
+            assert!(
+                fixture
+                    .sstable_store
+                    .block_cache()
+                    .get(&key)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "a staging-table truncation must not hide another table's L0 refill"
+            );
+        }
+        let delta = infos.into_iter().next().unwrap();
         let cases = [
             (
                 "Enabled + serving overlap",

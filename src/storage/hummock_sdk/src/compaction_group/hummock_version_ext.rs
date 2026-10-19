@@ -405,11 +405,13 @@ impl HummockVersionCommon<SstableInfo> {
             let mut removed_l0_ssts: BTreeSet<HummockSstableId> = BTreeSet::new();
             let mut removed_ssts: BTreeMap<u32, BTreeSet<HummockSstableId>> = BTreeMap::new();
 
-            // Build only if all deltas are intra level deltas.
+            // Group rewrites cannot be represented by an SST refill summary.
             if !group_deltas.group_deltas.iter().all(|delta| {
                 matches!(
                     delta,
-                    GroupDelta::IntraLevel(_) | GroupDelta::NewL0SubLevel(_)
+                    GroupDelta::IntraLevel(_)
+                        | GroupDelta::NewL0SubLevel(_)
+                        | GroupDelta::PruneTableIdsFromSsts(_)
                 )
             }) {
                 continue;
@@ -446,10 +448,21 @@ impl HummockVersionCommon<SstableInfo> {
                             }
                         }
                     }
+                    GroupDeltaCommon::PruneTableIdsFromSsts(table_ids) => {
+                        // Follow delta order, as version application does: a commit can append
+                        // SSTs and then truncate a refresh staging table in the same group.
+                        info.insert_sst_infos.retain_mut(|sst| {
+                            if sst.table_ids.iter().any(|id| table_ids.contains(id)) {
+                                let mut inner = sst.get_inner();
+                                inner.table_ids.retain(|id| !table_ids.contains(id));
+                                sst.set_inner(inner);
+                            }
+                            !sst.table_ids.is_empty()
+                        });
+                    }
                     GroupDeltaCommon::GroupConstruct(_)
                     | GroupDeltaCommon::GroupDestroy(_)
-                    | GroupDeltaCommon::GroupMerge(_)
-                    | GroupDeltaCommon::PruneTableIdsFromSsts(_) => {}
+                    | GroupDeltaCommon::GroupMerge(_) => {}
                 }
             }
 
@@ -490,7 +503,9 @@ impl HummockVersionCommon<SstableInfo> {
             debug_assert!(removed_l0_ssts.is_empty());
             debug_assert!(removed_ssts.is_empty());
 
-            infos.push(info);
+            if !info.insert_sst_infos.is_empty() || !info.delete_sst_object_ids.is_empty() {
+                infos.push(info);
+            }
         }
 
         infos
@@ -2990,6 +3005,94 @@ mod tests {
         assert_eq!(levels.levels[0].uncompressed_file_size, 800);
 
         assert_eq!(levels.compaction_group_version_id, 1);
+    }
+
+    #[test]
+    fn test_refill_summary_keeps_live_inserts_when_committing_a_table_truncation() {
+        let group = 1.into();
+        let mut version = HummockVersion::default();
+        version.levels.insert(
+            group,
+            Levels {
+                group_id: group,
+                ..Default::default()
+            },
+        );
+        version.state_table_info = HummockVersionStateTableInfo::from_protobuf_owned(
+            [100, 200]
+                .map(TableId::new)
+                .map(|table_id| {
+                    (
+                        table_id,
+                        StateTableInfo {
+                            compaction_group_id: group,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .into(),
+        );
+        let mut delta = version.version_delta_after();
+        for table_id in [100, 200].map(TableId::new) {
+            delta.state_table_info_delta.insert(
+                table_id,
+                risingwave_pb::hummock::StateTableInfoDelta {
+                    committed_epoch: test_epoch(1),
+                    compaction_group_id: group,
+                },
+            );
+        }
+        // Meta appends committed L0 SSTs before pruning the refresh staging table.
+        delta.group_deltas.insert(
+            group,
+            GroupDeltas {
+                group_deltas: vec![
+                    GroupDelta::NewL0SubLevel(vec![
+                        make_sst(1, vec![200], 10),
+                        make_sst(2, vec![100], 20),
+                        make_sst(3, vec![100, 200], 30),
+                    ]),
+                    GroupDelta::PruneTableIdsFromSsts([TableId::new(100)].into()),
+                ],
+            },
+        );
+        let infos = version.build_sst_delta_infos(&delta);
+        version.apply_version_delta(&delta);
+        let live = &version.levels[&group].l0.sub_levels[0].table_infos;
+        assert_eq!(
+            live.iter()
+                .map(|sst| sst.sst_id.as_raw_id())
+                .collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        assert!(
+            live.iter()
+                .all(|sst| sst.table_ids == vec![TableId::new(200)])
+        );
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].insert_sst_level, 0);
+        assert_eq!(&infos[0].insert_sst_infos, live);
+        assert!(infos[0].delete_sst_object_ids.is_empty());
+
+        let mut prune_only = version.version_delta_after();
+        prune_only.state_table_info_delta.insert(
+            TableId::new(200),
+            risingwave_pb::hummock::StateTableInfoDelta {
+                committed_epoch: test_epoch(2),
+                compaction_group_id: group,
+            },
+        );
+        prune_only.group_deltas.insert(
+            group,
+            GroupDeltas {
+                group_deltas: vec![GroupDelta::PruneTableIdsFromSsts(
+                    [TableId::new(200)].into(),
+                )],
+            },
+        );
+        assert!(version.build_sst_delta_infos(&prune_only).is_empty());
+        version.apply_version_delta(&prune_only);
+        assert!(version.levels[&group].l0.sub_levels.is_empty());
     }
 
     #[test]
