@@ -656,7 +656,29 @@ impl IcebergCommon {
         Ok(CatalogBuildPlan::Storage(config))
     }
 
+    fn validate_native_rest_catalog_auth(
+        &self,
+        disable_default_credential: bool,
+    ) -> ConnectorResult<()> {
+        if disable_default_credential
+            && self
+                .catalog_security
+                .as_deref()
+                .is_some_and(|security| security.eq_ignore_ascii_case("google"))
+            && self.gcs_credential.is_none()
+        {
+            // Google token refresh uses ADC without a GCS credential, even when
+            // a catalog token or OAuth credential was explicitly provided.
+            bail!(
+                "`catalog.security=google` requires `gcs.credential` when `DISABLE_DEFAULT_CREDENTIAL=true`"
+            );
+        }
+        Ok(())
+    }
+
     fn build_native_rest_catalog_props(&self) -> ConnectorResult<CatalogBuildPlan> {
+        self.validate_native_rest_catalog_auth(env_var_is_true(DISABLE_DEFAULT_CREDENTIAL))?;
+
         let mut iceberg_configs = HashMap::new();
         iceberg_configs.extend(self.adls_file_io_props()?);
 
@@ -1367,6 +1389,50 @@ mod tests {
         assert_eq!(props["rest.auth.type"], "google");
         assert!(!props.contains_key(GCS_CREDENTIALS_JSON));
         assert!(!props.contains_key("gcp.auth.scopes"));
+    }
+
+    #[test]
+    fn test_native_google_catalog_rejects_adc_when_default_credentials_disabled() {
+        for security in ["google", "GoOgLe"] {
+            for (credential, token) in [
+                (None, None),
+                (Some("client:secret"), None),
+                (None, Some("catalog-token")),
+                (Some("client:secret"), Some("catalog-token")),
+            ] {
+                let common = IcebergCommon {
+                    catalog_security: Some(security.to_owned()),
+                    catalog_credential: credential.map(str::to_owned),
+                    catalog_token: token.map(str::to_owned),
+                    ..test_common("rest_rust")
+                };
+                assert_eq!(
+                    common
+                        .validate_native_rest_catalog_auth(true)
+                        .unwrap_err()
+                        .to_string(),
+                    "`catalog.security=google` requires `gcs.credential` when `DISABLE_DEFAULT_CREDENTIAL=true`"
+                );
+                common.validate_native_rest_catalog_auth(false).unwrap();
+
+                let common = IcebergCommon {
+                    gcs_credential: Some("service-account-json".to_owned()),
+                    ..common
+                };
+                common.validate_native_rest_catalog_auth(true).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_native_non_google_catalog_auth_does_not_require_gcs_credentials() {
+        for security in [None, Some("none"), Some("oauth2")] {
+            let common = IcebergCommon {
+                catalog_security: security.map(str::to_owned),
+                ..test_common("rest_rust")
+            };
+            common.validate_native_rest_catalog_auth(true).unwrap();
+        }
     }
 
     #[test]
