@@ -95,15 +95,15 @@ impl IcebergCompactionManager {
                 task_id: *task_id,
                 attempt: attempt.clone(),
             };
-            if let Some(waiter) = guard.manual_compaction_waiters.remove(&report.sink_id) {
-                let _ = waiter.send(Err(anyhow!(
-                    "pk-index compaction application outcome is unknown; recovery required: {}",
-                    error.as_report()
-                )
-                .into()));
-            }
             tracing::warn!(sink_id = %report.sink_id, task_id = %report.task_id,
                 error = %error.as_report(), "pk-index compaction requires recovery settlement");
+            if let Some(waiter) = guard.manual_compaction_waiters.remove(&report.sink_id) {
+                let _ = waiter.send(Err(anyhow!(error)
+                    .context(
+                        "pk-index compaction application outcome is unknown; recovery required",
+                    )
+                    .into()));
+            }
         }
     }
 

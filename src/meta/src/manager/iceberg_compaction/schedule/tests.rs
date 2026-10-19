@@ -2878,7 +2878,26 @@ async fn test_pk_index_unknown_is_discarded_by_recovery_without_blocking_other_s
     let apply = manager
         .prepare_report_task(pk_index_report(IcebergReportTaskStatus::Success))
         .unwrap();
+    let (tx, rx) = oneshot::channel();
+    manager
+        .inner
+        .write()
+        .manual_compaction_waiters
+        .insert(sink_id, tx);
     manager.mark_apply_unknown(apply.report.clone(), anyhow!("lost collection").into());
+    let error = rx.await.unwrap().unwrap_err();
+    let crate::error::MetaErrorInner::Internal(error) = error.inner() else {
+        panic!("expected an internal error");
+    };
+    assert_eq!(
+        error.to_string(),
+        "pk-index compaction application outcome is unknown; recovery required"
+    );
+    assert!(
+        error
+            .chain()
+            .any(|source| source.downcast_ref::<crate::MetaError>().is_some())
+    );
     {
         let guard = manager.inner.read();
         let track = &guard.sink_schedules[&sink_id];
@@ -3123,6 +3142,9 @@ async fn test_pk_index_config_change_refreshes_idle_sink_without_a_commit() {
         recovery_generation: manager.inner.read().recovery_generation(sink_id),
         loaded_config: Some(config.clone()),
     };
+    // Model an older catalog load preceding ALTER. Synchronous work alone does not
+    // advance the simulation clock.
+    tokio::time::sleep(Duration::from_millis(1)).await;
     config.enable_compaction = true;
     config.trigger_snapshot_count = Some(2);
     config.compaction_interval_sec = Some(120);
@@ -3131,6 +3153,7 @@ async fn test_pk_index_config_change_refreshes_idle_sink_without_a_commit() {
     manager.on_sink_config_changed(sink_id, config.clone());
     {
         let mut guard = manager.inner.write();
+        assert!(stale_update.now < guard.sink_schedules[&sink_id].config.refreshed_at);
         assert!(manager.apply_sink_update(&mut guard, stale_update));
         let track = &guard.sink_schedules[&sink_id];
         assert!(track.config.automatic_enabled);
