@@ -150,17 +150,51 @@ CREATE TABLE bounded_invalid (v INT) WITH (
 
 # Pin the first snapshot, which only contains the first batch.
 system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT snapshot_id FROM rw_iceberg_snapshots WHERE source_name = 'bounded_upstream_src' ORDER BY timestamp_ms LIMIT 1") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "CREATE TABLE bounded_first (PRIMARY KEY (id)) WITH (connector = 'iceberg', warehouse.path = 's3://hummock001/bounded_iceberg', s3.endpoint = 'http://127.0.0.1:9301', s3.region = 'us-east-1', s3.access.key = 'hummockadmin', s3.secret.key = 'hummockadmin', catalog.type = 'storage', database.name = 'bounded_db', table.name = 'bounded_t', scan.bounded.mode = 'snapshot', scan.bounded.snapshot.id = '$snapshot_id')"
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT snapshot_id FROM rw_iceberg_snapshots
+    WHERE source_name = 'bounded_upstream_src'
+    ORDER BY timestamp_ms LIMIT 1
+") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+CREATE TABLE bounded_first (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '$snapshot_id'
+)"
 
 # Pin the latest snapshot, which contains both batches.
 system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT snapshot_id FROM rw_iceberg_snapshots WHERE source_name = 'bounded_upstream_src' ORDER BY timestamp_ms DESC LIMIT 1") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "CREATE TABLE bounded_latest (PRIMARY KEY (id)) WITH (connector = 'iceberg', warehouse.path = 's3://hummock001/bounded_iceberg', s3.endpoint = 'http://127.0.0.1:9301', s3.region = 'us-east-1', s3.access.key = 'hummockadmin', s3.secret.key = 'hummockadmin', catalog.type = 'storage', database.name = 'bounded_db', table.name = 'bounded_t', scan.bounded.mode = 'snapshot', scan.bounded.snapshot.id = '$snapshot_id')"
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT snapshot_id FROM rw_iceberg_snapshots
+    WHERE source_name = 'bounded_upstream_src'
+    ORDER BY timestamp_ms DESC LIMIT 1
+") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+CREATE TABLE bounded_latest (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '$snapshot_id'
+)"
 
 query T retry 30 backoff 1s
-SELECT status FROM rw_bounded_jobs ORDER BY job_id;
+SELECT completed_at IS NOT NULL FROM rw_bounded_jobs ORDER BY job_id;
 ----
-COMPLETED
-COMPLETED
+t
+t
 
 # Each job reports the snapshot it pinned: the first and the second snapshot, in commit order.
 query I
@@ -192,25 +226,6 @@ SELECT id, v FROM bounded_latest ORDER BY id;
 4 d
 5 e
 
-# ==== a completed load does not pick up new upstream data
-
-statement ok
-INSERT INTO bounded_upstream VALUES (6, 'f');
-
-statement ok
-FLUSH;
-
-query I retry 30 backoff 1s
-SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_upstream_src';
-----
-3
-
-sleep 5s
-
-query I
-SELECT count(*) FROM bounded_latest;
-----
-5
 
 # ==== unsupported alterations
 

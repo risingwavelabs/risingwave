@@ -15,8 +15,9 @@
 use anyhow::anyhow;
 use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
+use risingwave_connector::source::iceberg::IcebergBoundedScan;
+use risingwave_connector::source::refresh_mode::BoundedInput;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::meta::list_bounded_jobs_response::bounded_job::PinnedInput;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -27,9 +28,6 @@ use crate::error::Result;
 struct RwBoundedJob {
     job_id: JobId,
     source_id: SourceId,
-    /// `LOADING` or `COMPLETED`
-    status: String,
-    /// The input fixed at creation, keyed by its kind, e.g. `{"iceberg_snapshot": {"snapshot_id": 1}}`
     pinned_input: JsonbVal,
     completed_at: Option<Timestamptz>,
 }
@@ -39,20 +37,19 @@ async fn read_rw_bounded_jobs(reader: &SysCatalogReaderImpl) -> Result<Vec<RwBou
     let jobs = reader.meta_client.list_bounded_jobs().await?;
     jobs.into_iter()
         .map(|job| {
-            let pinned_input = match job.pinned_input {
-                Some(PinnedInput::IcebergSnapshot(snapshot)) => json!({
-                    "iceberg_snapshot": { "snapshot_id": snapshot.snapshot_id }
+            let input = job
+                .input
+                .ok_or_else(|| anyhow!("bounded job {} has no pinned input", job.job_id))?;
+            let pinned_input = match BoundedInput::from_proto(&input)? {
+                BoundedInput::Iceberg(IcebergBoundedScan::Snapshot { snapshot_id }) => json!({
+                    "iceberg_snapshot": { "snapshot_id": snapshot_id }
                 })
                 .into(),
-                None => {
-                    return Err(anyhow!("bounded job {} has no pinned input", job.job_id).into());
-                }
             };
 
             Ok(RwBoundedJob {
                 job_id: job.job_id,
                 source_id: job.source_id,
-                status: job.status,
                 pinned_input,
                 completed_at: job.completed_at.and_then(Timestamptz::from_millis),
             })

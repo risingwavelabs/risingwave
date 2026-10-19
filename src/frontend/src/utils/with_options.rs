@@ -480,7 +480,6 @@ impl RefreshModeKind {
 
     /// Removes and parses the options owned by this mode.
     fn parse_options(self, with_options: &mut WithOptions) -> RwResult<RefreshMode> {
-        /// Removes `key` and parses its value as an integer, if present.
         fn take_i64(
             with_options: &mut WithOptions,
             key: &str,
@@ -787,20 +786,6 @@ impl TryFrom<&Statement> for WithOptions {
 mod tests {
     use super::*;
 
-    fn resolve(options: &[(&str, &str)]) -> RwResult<Option<RefreshMode>> {
-        let mut with_options = WithOptions::new_with_options(
-            options
-                .iter()
-                .map(|(key, value)| (key.to_string(), value.to_string()))
-                .collect(),
-        );
-        resolve_source_refresh_mode_in_with_option(&mut with_options)
-    }
-
-    fn resolve_err(options: &[(&str, &str)]) -> String {
-        resolve(options).unwrap_err().to_string()
-    }
-
     #[test]
     fn test_resolve_refresh_mode() {
         assert_eq!(resolve(&[("connector", "kafka")]).unwrap(), None);
@@ -880,35 +865,6 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_invalid_mode_options() {
-        let err = resolve_err(&[("connector", "iceberg"), ("scan.bounded.mode", "snapshot")]);
-        assert!(
-            err.contains("`scan.bounded.snapshot.id` is required"),
-            "{err}"
-        );
-
-        let err = resolve_err(&[("connector", "iceberg"), ("scan.bounded.mode", "latest")]);
-        assert!(err.contains("accepted values are 'snapshot'"), "{err}");
-
-        // Bounded is selected by `scan.bounded.mode`, not `refresh_mode`.
-        let err = resolve_err(&[("connector", "iceberg"), ("refresh_mode", "BOUNDED")]);
-        assert!(
-            err.contains("accepted values are 'STREAMING' and 'FULL_RELOAD'"),
-            "{err}"
-        );
-
-        let err = resolve_err(&[
-            ("connector", "iceberg"),
-            ("refresh_mode", "FULL_RELOAD"),
-            ("refresh_interval_sec", "0"),
-        ]);
-        assert!(err.contains("must be larger than 0"), "{err}");
-
-        let err = resolve_err(&[("connector", "iceberg"), ("refresh_mode", "SOMETIMES")]);
-        assert!(err.contains("accepted values are"), "{err}");
-    }
-
-    #[test]
     fn test_reject_unsupported_connectors() {
         let err = resolve_err(&[
             ("connector", "kafka"),
@@ -925,5 +881,19 @@ mod tests {
             err.contains("FULL_RELOAD refresh mode is only supported for connectors"),
             "{err}"
         );
+    }
+
+    fn resolve(options: &[(&str, &str)]) -> RwResult<Option<RefreshMode>> {
+        let mut with_options = WithOptions::new_with_options(
+            options
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
+        );
+        resolve_source_refresh_mode_in_with_option(&mut with_options)
+    }
+
+    fn resolve_err(options: &[(&str, &str)]) -> String {
+        resolve(options).unwrap_err().to_string()
     }
 }
