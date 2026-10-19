@@ -326,3 +326,193 @@ pub(crate) async fn ensure_not_loading_bounded(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::FragmentTypeMask;
+    use risingwave_common::id::WorkerId;
+    use risingwave_connector::source::iceberg::IcebergBoundedScan;
+    use risingwave_connector::source::refresh_mode::BoundedInput;
+    use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_pb::plan_common::PbSourceRefreshMode;
+    use risingwave_pb::stream_plan::{
+        PbStreamNode, SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
+    };
+    use risingwave_pb::stream_service::barrier_complete_response::bounded_load_progress::{
+        ListSealed, ReaderDone,
+    };
+
+    use super::*;
+    use crate::controller::fragment::InflightActorInfo;
+
+    const SOURCE_ID: SourceId = SourceId::new(10);
+    const JOB_ID: JobId = JobId::new(100);
+
+    /// A source fragment with a fetch fragment yields listers and readers, starting in `Listing`.
+    #[test]
+    fn test_two_phase_roles() {
+        let tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &two_phase()).unwrap();
+
+        assert!(tracker.is_listing());
+        assert_eq!(
+            tracker.listers,
+            HashMap::from([(1.into(), 1.into()), (2.into(), 1.into())])
+        );
+        assert_eq!(
+            tracker.readers,
+            HashMap::from([(3.into(), 2.into()), (4.into(), 2.into())])
+        );
+        assert_eq!(
+            tracker.actors().collect::<HashSet<_>>(),
+            HashSet::from([1.into(), 2.into(), 3.into(), 4.into()])
+        );
+    }
+
+    /// A source fragment without a fetch fragment becomes the readers, starting in `Reading`.
+    #[test]
+    fn test_one_phase_roles() {
+        let tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &one_phase()).unwrap();
+
+        assert!(tracker.is_reading());
+        assert!(tracker.listers.is_empty());
+        assert_eq!(
+            tracker.readers,
+            HashMap::from([(1.into(), 1.into()), (2.into(), 1.into())])
+        );
+    }
+
+    /// Seal fires once after every lister seals, then completion fires once after every reader is done.
+    #[test]
+    fn test_two_phase_lifecycle() {
+        let mut tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &two_phase()).unwrap();
+
+        assert!(tracker.is_listing());
+
+        tracker.apply_progress(&list_sealed(1, 1));
+        assert!(!tracker.take_seal());
+
+        tracker.apply_progress(&list_sealed(2, 1));
+        assert!(tracker.take_seal());
+        assert!(!tracker.take_seal());
+        assert!(tracker.is_reading());
+
+        tracker.apply_progress(&reader_done(3, 2));
+        assert!(!tracker.take_completed());
+
+        tracker.apply_progress(&reader_done(4, 2));
+        assert!(tracker.take_completed());
+        assert!(!tracker.take_completed());
+        assert!(tracker.is_completed());
+    }
+
+    /// Seal never fires, and completion fires once after every reader is done.
+    #[test]
+    fn test_one_phase_lifecycle() {
+        let mut tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &one_phase()).unwrap();
+
+        assert!(!tracker.take_seal());
+
+        tracker.apply_progress(&reader_done(1, 1));
+        assert!(!tracker.take_completed());
+
+        tracker.apply_progress(&reader_done(2, 1));
+        assert!(!tracker.take_seal());
+        assert!(tracker.take_completed());
+        assert!(!tracker.take_completed());
+    }
+
+    fn bounded_mode() -> PbSourceRefreshMode {
+        RefreshMode::Bounded(BoundedInput::Iceberg(IcebergBoundedScan::Snapshot {
+            snapshot_id: 1,
+        }))
+        .to_proto()
+    }
+
+    fn source_node(source_id: SourceId) -> PbStreamNode {
+        PbStreamNode {
+            node_body: Some(NodeBody::Source(Box::new(SourceNode {
+                source_inner: Some(StreamSource {
+                    source_id,
+                    refresh_mode: Some(bounded_mode()),
+                    ..Default::default()
+                }),
+            }))),
+            ..Default::default()
+        }
+    }
+
+    fn fetch_node(source_id: SourceId) -> PbStreamNode {
+        PbStreamNode {
+            node_body: Some(NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
+                node_inner: Some(StreamFsFetch {
+                    source_id,
+                    refresh_mode: Some(bounded_mode()),
+                    ..Default::default()
+                }),
+            }))),
+            ..Default::default()
+        }
+    }
+
+    fn fragment(fragment_id: u32, actor_ids: &[u32], nodes: PbStreamNode) -> InflightFragmentInfo {
+        InflightFragmentInfo {
+            fragment_id: fragment_id.into(),
+            distribution_type: DistributionType::Hash,
+            fragment_type_mask: FragmentTypeMask::empty(),
+            vnode_count: 0,
+            nodes,
+            actors: actor_ids
+                .iter()
+                .map(|actor_id| {
+                    (
+                        (*actor_id).into(),
+                        InflightActorInfo {
+                            worker_id: WorkerId::new(1),
+                            vnode_bitmap: None,
+                            splits: vec![],
+                        },
+                    )
+                })
+                .collect(),
+            state_table_ids: HashSet::new(),
+        }
+    }
+
+    fn fragments(
+        fragments: impl IntoIterator<Item = InflightFragmentInfo>,
+    ) -> HashMap<FragmentId, InflightFragmentInfo> {
+        fragments
+            .into_iter()
+            .map(|fragment| (fragment.fragment_id, fragment))
+            .collect()
+    }
+
+    /// Fragment 1 lists with actors 1-2, fragment 2 reads with actors 3-4.
+    fn two_phase() -> HashMap<FragmentId, InflightFragmentInfo> {
+        fragments([
+            fragment(1, &[1, 2], source_node(SOURCE_ID)),
+            fragment(2, &[3, 4], fetch_node(SOURCE_ID)),
+        ])
+    }
+
+    /// Fragment 1 reads with actors 1-2.
+    fn one_phase() -> HashMap<FragmentId, InflightFragmentInfo> {
+        fragments([fragment(1, &[1, 2], source_node(SOURCE_ID))])
+    }
+
+    fn list_sealed(actor_id: u32, fragment_id: u32) -> BoundedLoadProgress {
+        BoundedLoadProgress {
+            actor_id: actor_id.into(),
+            fragment_id: fragment_id.into(),
+            progress: Some(Progress::ListSealed(ListSealed {})),
+        }
+    }
+
+    fn reader_done(actor_id: u32, fragment_id: u32) -> BoundedLoadProgress {
+        BoundedLoadProgress {
+            actor_id: actor_id.into(),
+            fragment_id: fragment_id.into(),
+            progress: Some(Progress::ReaderDone(ReaderDone {})),
+        }
+    }
+}
