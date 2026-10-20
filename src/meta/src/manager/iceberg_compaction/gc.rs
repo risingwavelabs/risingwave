@@ -42,6 +42,14 @@ async fn remove_orphan_files_from_table(
             "Cannot remove orphan files when gc.enabled=false: files may be shared with other tables"
         )));
     }
+    // The action keeps the current metadata file only when the table carries its
+    // location; without it, cleanup would delete the file the catalog points to.
+    if table.metadata_location().is_none() {
+        return Err(SinkError::Config(anyhow!(
+            "Cannot remove orphan files: current metadata location of table {} is unknown",
+            table.identifier()
+        )));
+    }
 
     Ok(RemoveOrphanFilesAction::new(table)
         .older_than(min_age)
@@ -820,7 +828,11 @@ mod orphan_file_tests {
 
     use super::remove_orphan_files_from_table;
 
-    async fn check_orphan_file_cleanup(gc_enabled: Option<&str>, should_delete: bool) {
+    async fn check_orphan_file_cleanup(
+        gc_enabled: Option<&str>,
+        with_metadata_location: bool,
+        expected_error: Option<&str>,
+    ) {
         let directory = tempfile::tempdir().unwrap();
         let location = format!("file://{}", directory.path().display());
         let properties = gc_enabled
@@ -856,45 +868,45 @@ mod orphan_file_tests {
                 .set_modified(SystemTime::now() - Duration::from_secs(8 * 24 * 3600))
                 .unwrap();
         }
-        let table = Table::builder()
+        let mut builder = Table::builder()
             .metadata(metadata)
-            .metadata_location(format!("{location}/metadata.json"))
             .identifier(TableIdent::from_strs(["ns", "table"]).unwrap())
             .file_io(FileIO::new_with_fs())
-            .runtime(Runtime::current())
-            .build()
-            .unwrap();
+            .runtime(Runtime::current());
+        if with_metadata_location {
+            builder = builder.metadata_location(format!("{location}/metadata.json"));
+        }
+        let table = builder.build().unwrap();
 
         let result =
             remove_orphan_files_from_table(table, Duration::from_secs(7 * 24 * 3600)).await;
-        if should_delete {
-            assert_eq!(result.unwrap(), vec![format!("{location}/old.parquet")]);
-        } else {
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_report_string()
-                    .contains("gc.enabled")
-            );
+        match expected_error {
+            None => assert_eq!(result.unwrap(), vec![format!("{location}/old.parquet")]),
+            Some(error) => assert!(result.unwrap_err().to_report_string().contains(error)),
         }
-        assert_eq!(old_path.exists(), !should_delete);
+        assert_eq!(old_path.exists(), expected_error.is_some());
         assert!(recent_path.exists());
         assert!(metadata_path.exists());
     }
 
     #[tokio::test]
     async fn test_orphan_file_cleanup_respects_disabled_gc() {
-        check_orphan_file_cleanup(Some("false"), false).await;
+        check_orphan_file_cleanup(Some("false"), true, Some("gc.enabled")).await;
     }
 
     #[tokio::test]
     async fn test_orphan_file_cleanup_rejects_invalid_gc_property() {
-        check_orphan_file_cleanup(Some("invalid"), false).await;
+        check_orphan_file_cleanup(Some("invalid"), true, Some("gc.enabled")).await;
+    }
+
+    #[tokio::test]
+    async fn test_orphan_file_cleanup_requires_metadata_location() {
+        check_orphan_file_cleanup(Some("true"), false, Some("metadata location")).await;
     }
 
     #[tokio::test]
     async fn test_orphan_file_cleanup_preserves_reachable_and_recent_files() {
-        check_orphan_file_cleanup(Some("true"), true).await;
-        check_orphan_file_cleanup(None, true).await;
+        check_orphan_file_cleanup(Some("true"), true, None).await;
+        check_orphan_file_cleanup(None, true, None).await;
     }
 }
