@@ -306,8 +306,8 @@ pub struct ExternalTableConfig {
     pub schema: String,
     #[serde(rename = "table.name")]
     pub table: String,
-    /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
-    /// Choices include `disabled`, `preferred`, and `required`.
+    /// SSL/TLS mode for Postgres and MySQL upstream connections.
+    /// MySQL supports disabled, required, verify-ca, and verify-full.
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "postgres_ssl_mode_default")]
     #[serde(alias = "debezium.database.sslmode")]
@@ -335,6 +335,12 @@ impl ExternalTableConfig {
     ) -> ConnectorResult<Self> {
         let options_with_secret =
             LocalSecretManager::global().fill_secrets(connect_properties, secret_refs)?;
+        if options_with_secret
+            .get("connector")
+            .is_some_and(|c| c == "mysql-cdc")
+        {
+            mysql::mysql_ssl_config(&options_with_secret)?;
+        }
         let json_value = serde_json::to_value(options_with_secret)?;
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
         Ok(config)

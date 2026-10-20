@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
@@ -50,22 +51,68 @@ use crate::source::cdc::external::{
     ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
-/// Build MySQL connection pool with proper SSL configuration.
-///
-/// This helper function creates a `mysql_async::Pool` with all necessary configurations
-/// including SSL settings. Use this function to ensure consistent MySQL connection setup
-/// across the codebase.
-///
-/// # Arguments
-/// * `host` - MySQL server hostname or IP address
-/// * `port` - MySQL server port
-/// * `username` - MySQL username
-/// * `password` - MySQL password
-/// * `database` - Database name
-/// * `ssl_mode` - SSL mode configuration (disabled, preferred, required, verify-ca, verify-full)
-///
-/// # Returns
-/// Returns a configured `mysql_async::Pool` ready for use
+/// Resolve the same SSL contract used by Java validation and Debezium. Reject raw
+/// driver overrides: they would otherwise affect only some upstream connections.
+pub fn mysql_ssl_config(
+    properties: &BTreeMap<String, String>,
+) -> ConnectorResult<(SslMode, Option<String>)> {
+    for key in properties.keys() {
+        if key.starts_with("database.ssl.") || key.starts_with("debezium.database.ssl.") {
+            bail!("unsupported MySQL SSL option `{key}`; use `ssl.mode` and `ssl.root.cert`");
+        }
+    }
+    let option = |name: &str, alias: &str| -> ConnectorResult<Option<String>> {
+        if properties.contains_key(name) && properties.contains_key(alias) {
+            bail!("conflicting MySQL SSL options `{name}` and `{alias}`; specify only one");
+        }
+        Ok(properties
+            .get(name)
+            .or_else(|| properties.get(alias))
+            .cloned())
+    };
+    let mode = option("ssl.mode", "debezium.database.sslmode")?
+        .map(|mode| mode.parse::<SslMode>())
+        .transpose()
+        .context("invalid MySQL ssl.mode; expected disabled, required, verify-ca, or verify-full")?
+        .unwrap_or(SslMode::Disabled);
+    let root_cert = option("ssl.root.cert", "debezium.database.sslrootcert")?;
+    validate_mysql_ssl(&mode, root_cert.as_deref())?;
+    Ok((mode, root_cert))
+}
+
+fn validate_mysql_ssl(mode: &SslMode, root_cert: Option<&str>) -> ConnectorResult<()> {
+    if *mode == SslMode::Preferred {
+        bail!("MySQL ssl.mode=preferred is unsupported; use disabled or required explicitly");
+    }
+    if let Some(path) = root_cert {
+        if path.is_empty() {
+            bail!("MySQL ssl.root.cert must not be empty");
+        }
+        if !matches!(mode, SslMode::VerifyCa | SslMode::VerifyFull) {
+            bail!("MySQL ssl.root.cert requires ssl.mode=verify-ca or verify-full");
+        }
+    }
+    Ok(())
+}
+
+fn mysql_ssl_opts(
+    mode: &SslMode,
+    root_cert: Option<&str>,
+) -> ConnectorResult<Option<mysql_async::SslOpts>> {
+    validate_mysql_ssl(mode, root_cert)?;
+    if *mode == SslMode::Disabled {
+        return Ok(None);
+    }
+    let mut opts = mysql_async::SslOpts::default()
+        .with_danger_accept_invalid_certs(*mode == SslMode::Required)
+        .with_danger_skip_domain_validation(*mode != SslMode::VerifyFull);
+    if let Some(path) = root_cert {
+        opts = opts.with_root_certs(vec![PathBuf::from(path).into()]);
+    }
+    Ok(Some(opts))
+}
+
+/// Build the pool used for backfill, primary key discovery, and binlog monitoring.
 pub fn build_mysql_connection_pool(
     host: &str,
     port: u16,
@@ -73,26 +120,37 @@ pub fn build_mysql_connection_pool(
     password: &str,
     database: &str,
     ssl_mode: SslMode,
-) -> mysql_async::Pool {
-    let mut opts_builder = mysql_async::OptsBuilder::default()
+    ssl_root_cert: Option<&str>,
+) -> ConnectorResult<mysql_async::Pool> {
+    let opts = mysql_async::OptsBuilder::default()
         .user(Some(username))
         .pass(Some(password))
         .ip_or_hostname(host)
         .tcp_port(port)
-        .db_name(Some(database));
+        .db_name(Some(database))
+        .ssl_opts(mysql_ssl_opts(&ssl_mode, ssl_root_cert)?);
+    Ok(mysql_async::Pool::new(opts))
+}
 
-    opts_builder = match ssl_mode {
-        SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-        // verify-ca and verify-full are same as required for mysql now
-        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-            let ssl_without_verify = mysql_async::SslOpts::default()
-                .with_danger_accept_invalid_certs(true)
-                .with_danger_skip_domain_validation(true);
-            opts_builder.ssl_opts(Some(ssl_without_verify))
-        }
-    };
-
-    mysql_async::Pool::new(opts_builder)
+fn mysql_connect_options(config: &ExternalTableConfig) -> ConnectorResult<MySqlConnectOptions> {
+    validate_mysql_ssl(&config.ssl_mode, config.ssl_root_cert.as_deref())?;
+    let mut options = MySqlConnectOptions::new()
+        .username(&config.username)
+        .password(&config.password)
+        .host(&config.host)
+        .port(config.port.parse::<u16>().context("invalid MySQL port")?)
+        .database(&config.database)
+        .ssl_mode(match config.ssl_mode {
+            SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
+            SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
+            SslMode::VerifyCa => sqlx::mysql::MySqlSslMode::VerifyCa,
+            SslMode::VerifyFull => sqlx::mysql::MySqlSslMode::VerifyIdentity,
+            SslMode::Preferred => unreachable!("validated above"),
+        });
+    if let Some(path) = &config.ssl_root_cert {
+        options = options.ssl_ca(path);
+    }
+    Ok(options)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -134,20 +192,7 @@ pub struct MySqlExternalTable {
 impl MySqlExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         tracing::debug!("connect to mysql");
-        let options = MySqlConnectOptions::new()
-            .username(&config.username)
-            .password(&config.password)
-            .host(&config.host)
-            .port(config.port.parse::<u16>().unwrap())
-            .database(&config.database)
-            .ssl_mode(match config.ssl_mode {
-                SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
-                SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
-                SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
-                _ => {
-                    return Err(anyhow!("unsupported SSL mode").into());
-                }
-            });
+        let options = mysql_connect_options(&config)?;
 
         let connection = MySqlPool::connect_with(options).await?;
         let mut schema_discovery = SchemaDiscovery::new(connection, config.database.as_str());
@@ -255,7 +300,8 @@ impl MySqlExternalTable {
             &config.password,
             &config.database,
             config.ssl_mode.clone(),
-        );
+            config.ssl_root_cert.as_deref(),
+        )?;
         let pk_infos = MySqlExternalTableReader::query_upstream_pk_infos(
             &pool,
             &config.database,
@@ -654,7 +700,8 @@ impl MySqlExternalTableReader {
             &config.password,
             &config.database,
             config.ssl_mode,
-        );
+            config.ssl_root_cert.as_deref(),
+        )?;
 
         let field_names = rw_schema
             .fields
@@ -978,7 +1025,8 @@ impl MySqlExternalTableReader {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
+    use std::path::PathBuf;
 
     use futures::pin_mut;
     use futures_async_stream::for_await;
@@ -988,6 +1036,7 @@ mod tests {
     use sea_schema::mysql::def::{ColumnType, IndexInfo, IndexOrder, IndexPart, IndexType};
 
     use super::{
+        SslMode, mysql_connect_options, mysql_ssl_config, mysql_ssl_opts,
         mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, pk_column_comparisons_from_infos,
         primary_key_names, type_name_to_mysql_type,
     };
@@ -996,6 +1045,186 @@ mod tests {
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
         SchemaTableName,
     };
+
+    #[tokio::test]
+    #[ignore = "requires the ci/mysql-tls fixture"]
+    async fn test_mysql_tls_connections() {
+        use mysql_async::prelude::Queryable;
+
+        let host = std::env::var("MYSQL_TLS_HOST").unwrap_or_else(|_| "mysql-tls".into());
+        let wrong_host =
+            std::env::var("MYSQL_TLS_WRONG_HOST").unwrap_or_else(|_| "mysql-tls-wrong-host".into());
+        let port = std::env::var("MYSQL_TLS_PORT").unwrap_or_else(|_| "3306".into());
+        let cert_dir = std::env::var("MYSQL_TLS_CERT_DIR").unwrap_or_else(|_| "/mysql-tls".into());
+        for (mode, hostname, ca, succeeds) in [
+            (SslMode::Disabled, &host, None, false),
+            (SslMode::Required, &host, None, true),
+            (SslMode::VerifyCa, &host, Some("ca.pem"), true),
+            (SslMode::VerifyCa, &wrong_host, Some("ca.pem"), true),
+            (SslMode::VerifyFull, &host, Some("ca.pem"), true),
+            (SslMode::VerifyFull, &wrong_host, Some("ca.pem"), false),
+            (SslMode::VerifyCa, &host, Some("untrusted-ca.pem"), false),
+            (SslMode::VerifyFull, &host, Some("untrusted-ca.pem"), false),
+        ] {
+            let config = ExternalTableConfig {
+                host: hostname.clone(),
+                port: port.clone(),
+                username: "root".into(),
+                password: "123456".into(),
+                database: "mysql".into(),
+                ssl_mode: mode.clone(),
+                ssl_root_cert: ca.map(|name| format!("{cert_dir}/{name}")),
+                ..Default::default()
+            };
+            let result =
+                sqlx::MySqlPool::connect_with(mysql_connect_options(&config).unwrap()).await;
+            assert_eq!(
+                result.is_ok(),
+                succeeds,
+                "SQLx {mode:?} {hostname} {ca:?}: {result:?}"
+            );
+            if let Ok(pool) = result {
+                let (_, cipher): (String, String) =
+                    sqlx::query_as("SHOW SESSION STATUS LIKE 'Ssl_cipher'")
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                assert!(!cipher.is_empty());
+                pool.close().await;
+            }
+            let pool = super::build_mysql_connection_pool(
+                hostname,
+                port.parse().unwrap(),
+                "root",
+                "123456",
+                "mysql",
+                mode.clone(),
+                config.ssl_root_cert.as_deref(),
+            )
+            .unwrap();
+            let result = pool.get_conn().await;
+            assert_eq!(
+                result.is_ok(),
+                succeeds,
+                "mysql_async {mode:?} {hostname} {ca:?}: {result:?}"
+            );
+            if let Ok(mut conn) = result {
+                let (_, cipher): (String, String) = conn
+                    .query_first("SHOW SESSION STATUS LIKE 'Ssl_cipher'")
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(!cipher.is_empty());
+            }
+            pool.disconnect().await.unwrap();
+        }
+    }
+
+    #[test]
+    fn test_mysql_ssl_schema_modes() {
+        for (mode, expected) in [
+            (SslMode::Disabled, sqlx::mysql::MySqlSslMode::Disabled),
+            (SslMode::Required, sqlx::mysql::MySqlSslMode::Required),
+            (SslMode::VerifyCa, sqlx::mysql::MySqlSslMode::VerifyCa),
+            (
+                SslMode::VerifyFull,
+                sqlx::mysql::MySqlSslMode::VerifyIdentity,
+            ),
+        ] {
+            let config = ExternalTableConfig {
+                port: "3306".into(),
+                ssl_mode: mode,
+                ..Default::default()
+            };
+            assert_eq!(
+                std::mem::discriminant(&mysql_connect_options(&config).unwrap().get_ssl_mode()),
+                std::mem::discriminant(&expected)
+            );
+        }
+    }
+
+    #[test]
+    fn test_mysql_ssl_config() {
+        for (value, expected) in [
+            ("disabled", SslMode::Disabled),
+            ("disable", SslMode::Disabled),
+            ("required", SslMode::Required),
+            ("require", SslMode::Required),
+            ("verify-ca", SslMode::VerifyCa),
+            ("verifyca", SslMode::VerifyCa),
+            ("verify-full", SslMode::VerifyFull),
+            ("verifyfull", SslMode::VerifyFull),
+        ] {
+            for key in ["ssl.mode", "debezium.database.sslmode"] {
+                let properties = BTreeMap::from([(key.to_owned(), value.to_owned())]);
+                assert_eq!(
+                    mysql_ssl_config(&properties).unwrap(),
+                    (expected.clone(), None)
+                );
+            }
+        }
+        assert_eq!(
+            mysql_ssl_config(&BTreeMap::new()).unwrap(),
+            (SslMode::Disabled, None)
+        );
+        for value in [
+            "preferred",
+            "prefer",
+            "verify_ca",
+            "verify_identity",
+            "REQUIRED",
+            "bogus",
+        ] {
+            assert!(
+                mysql_ssl_config(&BTreeMap::from([("ssl.mode".into(), value.into())])).is_err()
+            );
+        }
+        for key in [
+            "database.ssl.mode",
+            "debezium.database.ssl.mode",
+            "debezium.database.ssl.truststore",
+        ] {
+            assert!(mysql_ssl_config(&BTreeMap::from([(key.into(), "required".into())])).is_err());
+        }
+        let mut properties = BTreeMap::from([
+            ("ssl.mode".into(), "verify-full".into()),
+            ("debezium.database.sslrootcert".into(), "/ca.pem".into()),
+        ]);
+        assert_eq!(
+            mysql_ssl_config(&properties).unwrap(),
+            (SslMode::VerifyFull, Some("/ca.pem".into()))
+        );
+        properties.insert("ssl.root.cert".into(), "/ca.pem".into());
+        assert!(mysql_ssl_config(&properties).is_err());
+        properties.remove("ssl.root.cert");
+        properties.insert("debezium.database.sslmode".into(), "required".into());
+        assert!(mysql_ssl_config(&properties).is_err());
+    }
+
+    #[test]
+    fn test_mysql_ssl_verification() {
+        assert!(mysql_ssl_opts(&SslMode::Disabled, None).unwrap().is_none());
+        for (mode, accept_invalid, skip_hostname) in [
+            (SslMode::Required, true, true),
+            (SslMode::VerifyCa, false, true),
+            (SslMode::VerifyFull, false, false),
+        ] {
+            let opts = mysql_ssl_opts(&mode, None).unwrap().unwrap();
+            assert_eq!(opts.accept_invalid_certs(), accept_invalid);
+            assert_eq!(opts.skip_domain_validation(), skip_hostname);
+        }
+        for mode in [SslMode::VerifyCa, SslMode::VerifyFull] {
+            let opts = mysql_ssl_opts(&mode, Some("/ca.pem")).unwrap().unwrap();
+            assert!(!opts.accept_invalid_certs());
+            assert!(!opts.disable_built_in_roots());
+            assert_eq!(opts.root_certs(), &[PathBuf::from("/ca.pem").into()]);
+        }
+        for mode in [SslMode::Disabled, SslMode::Required, SslMode::Preferred] {
+            assert!(mysql_ssl_opts(&mode, Some("/ca.pem")).is_err());
+        }
+        assert!(mysql_ssl_opts(&SslMode::Preferred, None).is_err());
+        assert!(mysql_ssl_opts(&SslMode::VerifyCa, Some("")).is_err());
+    }
 
     fn parse_mysql_type_name(ty_name: &str) -> ColumnType {
         type_name_to_mysql_type(ty_name).unwrap()
@@ -1215,7 +1444,7 @@ mod tests {
             database: "mydb".to_owned(),
             schema: "".to_owned(),
             table: "part".to_owned(),
-            ssl_mode: Default::default(),
+            ssl_mode: SslMode::Disabled,
             ssl_root_cert: None,
             encrypt: "false".to_owned(),
         };

@@ -60,7 +60,6 @@ public class DbzConnectorConfig {
 
     /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
-    public static final String MYSQL_SSL_MODE = "ssl.mode";
 
     /* Postgres configs */
     public static final String PG_SLOT_NAME = "slot.name";
@@ -187,6 +186,7 @@ public class DbzConnectorConfig {
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
+            MySqlSslConfig.fromProperties(userProps).configureDebezium(mysqlProps);
 
             // Enable schema history for all MySQL CDC modes to handle schema changes properly
             mysqlProps.setProperty(OpendalSchemaHistory.SOURCE_ID, String.valueOf(sourceId));

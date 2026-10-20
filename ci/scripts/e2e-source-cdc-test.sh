@@ -29,6 +29,10 @@ echo "--- Install mongosh"
 wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb
 dpkg -i mongodb-mongosh_2.5.8_amd64.deb
 
+# TLS fixture shared by the SLT and the direct Rust driver tests.
+export MYSQL_TLS_HOST=mysql-tls MYSQL_TLS_WRONG_HOST=mysql-tls-wrong-host
+export MYSQL_TLS_PORT=3306 MYSQL_TLS_CERT_DIR=/mysql-tls
+
 echo "--- Run inline CDC source tests"
 risedev slt './e2e_test/source_inline/cdc/**/*.slt' --skip 'cron_only' -j1 --label "can-use-recover"
 risedev slt './e2e_test/source_inline/cdc/**/*.slt.serial' --skip 'cron_only' --label "can-use-recover"
@@ -60,6 +64,9 @@ mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/m
 
 echo "--- Run mysql-async integration test"
 cargo test --package risingwave_mysql_test -- --ignored
+
+echo "--- Verify SQLx and mysql_async TLS connections"
+cargo test -p risingwave_connector --lib test_mysql_tls_connections -- --ignored
 
 export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD='post\tgres' PGDATABASE=cdc_test
 createdb

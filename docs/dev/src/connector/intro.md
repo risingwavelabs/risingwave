@@ -3,6 +3,7 @@
 This page describes the development workflow to develop connectors. For design docs, see
 
 - [Source](./source.md)
+- [MySQL CDC TLS configuration and regression tests](./mysql-cdc-tls.md)
 
 RisingWave supports a lot of connectors (sources and sinks).
 However, developing connectors is tricky because it involves external systems:
