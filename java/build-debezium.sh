@@ -60,7 +60,8 @@ trap 'restore_poms "$@"' EXIT
   -DgenerateBackupPoms=true
 
 ./mvnw -B -ntp "$@" -pl "${MODULES}" -am install \
-  -Dmaven.test.skip=true \
+  -DskipTests \
+  -DskipITs \
   -Dformat.skip=true \
   -Dcheckstyle.skip=true \
   -Drevapi.skip=true \
