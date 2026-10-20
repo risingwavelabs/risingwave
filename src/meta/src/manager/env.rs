@@ -28,7 +28,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
-use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
+use risingwave_sqlparser::ast::SqlOptionRedactionRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
@@ -302,7 +302,7 @@ pub struct MetaOpts {
     pub compute_client_config: RpcClientConfig,
     pub stream_client_config: RpcClientConfig,
     pub frontend_client_config: RpcClientConfig,
-    pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+    pub sql_option_redaction: SqlOptionRedactionRef,
 
     pub cdc_table_split_init_sleep_interval_splits: u64,
     pub cdc_table_split_init_sleep_duration_millis: u64,
@@ -411,7 +411,7 @@ impl MetaOpts {
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),
             frontend_client_config: RpcClientConfig::default(),
-            redact_sql_option_keywords: Arc::new(Default::default()),
+            sql_option_redaction: Arc::new(Default::default()),
             cdc_table_split_init_sleep_interval_splits: 1000,
             cdc_table_split_init_sleep_duration_millis: 10,
             cdc_table_split_init_insert_batch_size: 1000,

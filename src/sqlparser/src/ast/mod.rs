@@ -59,10 +59,29 @@ use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrEr
 pub use crate::quote_ident::QuoteIdent;
 use crate::tokenizer::Tokenizer;
 
-pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
+/// Case-insensitive SQL option redaction with exact-name exemptions.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct SqlOptionRedaction {
+    pub keywords: HashSet<String>,
+    pub allowlist: HashSet<String>,
+}
+
+impl SqlOptionRedaction {
+    pub fn new(
+        keywords: impl IntoIterator<Item = String>,
+        allowlist: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self {
+            keywords: keywords.into_iter().map(|s| s.to_lowercase()).collect(),
+            allowlist: allowlist.into_iter().map(|s| s.to_lowercase()).collect(),
+        }
+    }
+}
+
+pub type SqlOptionRedactionRef = Arc<SqlOptionRedaction>;
 
 task_local::task_local! {
-    pub static REDACT_SQL_OPTION_KEYWORDS: RedactSqlOptionKeywordsRef;
+    pub static SQL_OPTION_REDACTION: SqlOptionRedactionRef;
 }
 
 pub struct DisplaySeparated<'a, T>
@@ -3336,10 +3355,14 @@ impl SqlOption {
 
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let should_redact = REDACT_SQL_OPTION_KEYWORDS
-            .try_with(|keywords| {
+        let should_redact = SQL_OPTION_REDACTION
+            .try_with(|redaction| {
                 let sql_option_name = self.name.real_value().to_lowercase();
-                keywords.iter().any(|k| sql_option_name.contains(k))
+                !redaction.allowlist.contains(&sql_option_name)
+                    && redaction
+                        .keywords
+                        .iter()
+                        .any(|k| sql_option_name.contains(k))
             })
             .unwrap_or(false);
         if should_redact {
@@ -4007,8 +4030,8 @@ impl fmt::Display for BackfillOrderStrategy {
 }
 
 impl Statement {
-    pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
-        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string_unchecked())
+    pub fn to_redacted_string(&self, redaction: SqlOptionRedactionRef) -> String {
+        SQL_OPTION_REDACTION.sync_scope(redaction, || self.to_string_unchecked())
     }
 
     /// Create a new `CREATE TABLE` statement with the given `name` and empty fields.
@@ -4039,6 +4062,62 @@ impl Statement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sql_option_redaction_preserves_primary_key() {
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            [
+                "credential".into(),
+                "key".into(),
+                "password".into(),
+                "private".into(),
+                "secret".into(),
+                "token".into(),
+            ],
+            ["primary_key".into()],
+        ));
+        for (name, expected_value) in [
+            ("primary_key", "'id'"),
+            ("\"primary_key\"", "'id'"),
+            ("\"PRIMARY_KEY\"", "'id'"),
+            ("api_key", "[REDACTED]"),
+            ("access_key", "[REDACTED]"),
+            ("password", "[REDACTED]"),
+            ("token", "[REDACTED]"),
+            ("primary_key_password", "[REDACTED]"),
+            ("my_primary_key", "[REDACTED]"),
+            ("aws.secret_access_key", "[REDACTED]"),
+            ("connector", "'id'"),
+        ] {
+            let sql = format!("CREATE SINK s FROM t WITH ({name} = 'id')");
+            let statement = Parser::parse_sql(&sql).unwrap().remove(0);
+            assert_eq!(
+                statement.to_redacted_string(redaction.clone()),
+                format!("CREATE SINK s FROM t WITH ({name} = {expected_value})"),
+                "option: {name}",
+            );
+            assert_eq!(statement.to_string_unchecked(), sql);
+        }
+    }
+
+    #[test]
+    fn test_sql_option_redaction_custom_allowlist() {
+        let sql = "CREATE SINK s FROM t WITH (primary_key = 'id', partition_key = 'region', partition_key_password = 'secret')";
+        let statement = Parser::parse_sql(sql).unwrap().remove(0);
+        for (allowlist, expected) in [
+            (
+                vec![],
+                "CREATE SINK s FROM t WITH (primary_key = [REDACTED], partition_key = [REDACTED], partition_key_password = [REDACTED])",
+            ),
+            (
+                vec!["PARTITION_KEY".into()],
+                "CREATE SINK s FROM t WITH (primary_key = [REDACTED], partition_key = 'region', partition_key_password = [REDACTED])",
+            ),
+        ] {
+            let redaction = Arc::new(SqlOptionRedaction::new(["KEY".into()], allowlist));
+            assert_eq!(statement.to_redacted_string(redaction), expected);
+        }
+    }
 
     #[test]
     fn test_grouping_sets_display() {
