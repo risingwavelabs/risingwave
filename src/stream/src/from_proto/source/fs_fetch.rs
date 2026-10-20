@@ -19,8 +19,8 @@ use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::refresh_mode::RefreshMode;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_storage::StateStore;
 
@@ -49,9 +49,9 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
-        let refresh_mode = RefreshMode::from_proto(source.refresh_mode.as_ref())?;
-        let is_full_reload_refresh = refresh_mode.is_full_reload();
-        let is_bounded = refresh_mode.iceberg_bounded_scan().is_some();
+        let ingest_mode = IngestMode::from_proto(source.ingest_mode.as_ref())?;
+        let is_full_reload_refresh = ingest_mode.is_full_reload();
+        let is_bounded = ingest_mode.iceberg_bounded_scan().is_some();
         let source_id = source.source_id;
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;

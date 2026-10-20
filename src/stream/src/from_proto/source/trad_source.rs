@@ -16,8 +16,8 @@ use risingwave_common::catalog::{
     KAFKA_TIMESTAMP_COLUMN_NAME, default_key_column_name_version_mapping,
 };
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::refresh_mode::RefreshMode;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_expr::bail;
@@ -147,9 +147,9 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let refresh_mode = RefreshMode::from_proto(source.refresh_mode.as_ref())?;
-            let is_full_reload_refresh = refresh_mode.is_full_reload();
-            let bounded_scan = refresh_mode.iceberg_bounded_scan();
+            let ingest_mode = IngestMode::from_proto(source.ingest_mode.as_ref())?;
+            let is_full_reload_refresh = ingest_mode.is_full_reload();
+            let bounded_scan = ingest_mode.iceberg_bounded_scan();
             let is_bounded = bounded_scan.is_some();
 
             let exec = {
