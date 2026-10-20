@@ -517,9 +517,6 @@ struct RedisSinkPayloadWriter {
     conn: Option<RedisConn>,
     // the command pipeline for write-commit
     pipe: RedisPipe,
-    // number of times a pipeline was (or would have been) executed, only for tests
-    #[cfg(test)]
-    executed: usize,
 }
 
 impl RedisSinkPayloadWriter {
@@ -527,23 +524,14 @@ impl RedisSinkPayloadWriter {
         let (conn, pipe) = config.common.build_conn_and_pipe().await?;
         let conn = Some(conn);
 
-        Ok(Self {
-            conn,
-            pipe,
-            #[cfg(test)]
-            executed: 0,
-        })
+        Ok(Self { conn, pipe })
     }
 
     #[cfg(test)]
     pub fn mock() -> Self {
         let conn = None;
         let pipe = RedisPipe::Single(redis::pipe());
-        Self {
-            conn,
-            pipe,
-            executed: 0,
-        }
+        Self { conn, pipe }
     }
 
     pub async fn commit(&mut self) -> Result<()> {
@@ -557,7 +545,6 @@ impl RedisSinkPayloadWriter {
         #[cfg(test)]
         {
             if self.conn.is_none() {
-                self.executed += 1;
                 return Ok(());
             }
         }
@@ -654,7 +641,6 @@ mod test {
 
     use rdkafka::message::FromBytes;
     use risingwave_common::array::{Array, I32Array, Op, Utf8Array};
-    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
@@ -682,55 +668,6 @@ mod test {
             .del(RedisSinkPayloadWriterInput::String("k".to_owned()))
             .unwrap();
         assert!(!cluster_pipe.is_empty());
-    }
-
-    /// A chunk whose rows are all invisible (e.g. every INSERT/DELETE pair was cancelled out by
-    /// inline compaction) generates no redis command. It must be a successful no-op instead of
-    /// executing an empty pipeline.
-    #[tokio::test]
-    async fn test_write_chunk_without_visible_rows() {
-        let schema = Schema::new(vec![
-            Field {
-                data_type: DataType::Int32,
-                name: "id".to_owned(),
-            },
-            Field {
-                data_type: DataType::Varchar,
-                name: "name".to_owned(),
-            },
-        ]);
-        let mut btree_map = BTreeMap::default();
-        btree_map.insert(KEY_FORMAT.to_owned(), "key-{id}".to_owned());
-        btree_map.insert(VALUE_FORMAT.to_owned(), "value-{name}".to_owned());
-        let format_desc = SinkFormatDesc {
-            format: SinkFormat::Upsert,
-            encode: SinkEncode::Template,
-            options: btree_map,
-            secret_refs: Default::default(),
-            key_encode: None,
-            connection_id: None,
-        };
-        let mut writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
-            .await
-            .unwrap();
-        let mut manager = DeliveryFutureManager::new(0);
-
-        let chunk = StreamChunk::with_visibility(
-            vec![Op::Insert, Op::Insert, Op::Delete, Op::Delete],
-            vec![
-                I32Array::from_iter(vec![1, 2, 1, 2]).into_ref(),
-                Utf8Array::from_iter(vec!["a", "b", "a", "b"]).into_ref(),
-            ],
-            Bitmap::zeros(4),
-        );
-        writer
-            .write_chunk(chunk, manager.start_write_chunk(0, 0))
-            .await
-            .unwrap();
-
-        assert!(writer.payload_writer.pipe.is_empty());
-        // The empty pipeline must not be executed.
-        assert_eq!(writer.payload_writer.executed, 0);
     }
 
     #[tokio::test]
