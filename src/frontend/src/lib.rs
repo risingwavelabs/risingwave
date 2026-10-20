@@ -58,6 +58,7 @@ use risingwave_common::config::{MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_sqlparser::ast::SqlOptionRedaction;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::data_type::DataTypeToAst;
@@ -237,15 +238,11 @@ pub fn start(
 
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
         SESSION_MANAGER.get_or_init(|| session_mgr.clone());
-        let redact_sql_option_keywords = Arc::new(
-            session_mgr
-                .env()
-                .batch_config()
-                .redact_sql_option_keywords
-                .iter()
-                .map(|s| s.to_lowercase())
-                .collect::<HashSet<_>>(),
-        );
+        let batch_config = session_mgr.env().batch_config();
+        let sql_option_redaction = Arc::new(SqlOptionRedaction::new(
+            batch_config.redact_sql_option_keywords.clone(),
+            batch_config.redact_sql_option_allowlist.clone(),
+        ));
         let frontend_config = &session_mgr.env().frontend_config();
         let message_memory_manager = Arc::new(MessageMemoryManager::new(
             frontend_config.max_total_query_size_bytes,
@@ -262,7 +259,7 @@ pub fn start(
             session_mgr.clone(),
             ConnectionContext {
                 tls_config,
-                redact_sql_option_keywords: Some(redact_sql_option_keywords),
+                sql_option_redaction: Some(sql_option_redaction),
                 message_memory_manager,
                 stream_flush_threshold_bytes: frontend_config.stream_flush_threshold_bytes,
             },

@@ -33,6 +33,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
+use risingwave_sqlparser::ast::SqlOptionRedaction;
 pub use rpc::{ElectionClient, ElectionMember};
 use server::rpc_serve;
 pub use server::started::get as is_server_started;
@@ -577,13 +578,10 @@ pub fn start(
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
                 frontend_client_config: config.meta.developer.frontend_client_config.clone(),
-                redact_sql_option_keywords: Arc::new(
-                    config
-                        .batch
-                        .redact_sql_option_keywords
-                        .into_iter()
-                        .collect(),
-                ),
+                sql_option_redaction: Arc::new(SqlOptionRedaction::new(
+                    config.batch.redact_sql_option_keywords,
+                    config.batch.redact_sql_option_allowlist,
+                )),
                 cdc_table_split_init_sleep_interval_splits: config
                     .meta
                     .cdc_table_split_init_sleep_interval_splits,
