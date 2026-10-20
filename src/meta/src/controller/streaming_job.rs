@@ -78,7 +78,9 @@ use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
 use crate::barrier::Command;
-use crate::barrier::bounded_progress::ensure_not_loading_bounded;
+use crate::barrier::bounded_progress::{
+    ensure_not_loading_bounded, ensure_replace_reads_no_bounded_source, register_bounded_job,
+};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{
     CatalogController, DropTableConnectorContext, load_object_models,
@@ -703,19 +705,6 @@ impl CatalogController {
                     .transpose()?
                     .unwrap_or_default();
 
-                if let Some(source) = src.as_ref()
-                    && ingest_mode.is_bounded()
-                {
-                    BoundedJob::insert(bounded_job::ActiveModel {
-                        job_id: Set(job_id),
-                        source_id: Set(source.id),
-                        status: Set(bounded_job::BoundedJobStatus::Loading),
-                        completed_at: Set(None),
-                    })
-                    .exec(&txn)
-                    .await?;
-                }
-
                 if table.refreshable {
                     let trigger_interval_secs = ingest_mode.refresh_interval_sec();
 
@@ -929,6 +918,12 @@ impl CatalogController {
         creating_streaming_job: Option<&'a StreamingJob>,
         backfill_orders: Option<BackfillOrders>,
     ) -> MetaResult<()> {
+        if for_replace {
+            ensure_replace_reads_no_bounded_source(
+                get_fragments().map(|fragment| &fragment.nodes),
+                creating_streaming_job,
+            )?;
+        }
         let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
 
         let inner = self.inner.write().await;
@@ -994,6 +989,13 @@ impl CatalogController {
         insert_fragment_relations(&txn, downstreams).await?;
 
         if !for_replace {
+            register_bounded_job(
+                &txn,
+                job_id,
+                get_fragments().map(|fragment| &fragment.nodes),
+            )
+            .await?;
+
             // Update dml fragment id.
             if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
                 Table::update(table::ActiveModel {

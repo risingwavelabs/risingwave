@@ -13,18 +13,24 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
+use std::ops::Bound;
 use std::time::Duration;
 
 use either::Either;
 use futures::stream;
 use iceberg::scan::FileScanTask;
 use itertools::Itertools;
-use risingwave_common::array::Op;
-use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME};
+use risingwave_common::array::{DataChunk, Op, SerialArray};
+use risingwave_common::bail;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::{
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
+};
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
+use risingwave_common::types::{JsonbVal, Scalar, ScalarRef, Serial};
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::{
     GLOBAL_ICEBERG_SCAN_METRICS, IcebergFileScanMetrics, IcebergScanMetricsLabels, IcebergScanOpts,
@@ -35,13 +41,16 @@ use risingwave_pb::stream_plan::bounded_load_mutation::Action as BoundedLoadActi
 use risingwave_pb::stream_service::barrier_complete_response::bounded_load_progress::{
     LoadFailed, Progress, ReaderDone,
 };
+use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
 use super::load_mode::{Backoff, LoadMode};
 use crate::executor::prelude::*;
-use crate::executor::source::{ChunksWithState, StreamSourceCore, prune_additional_cols};
+use crate::executor::source::{
+    ChunksWithState, SourceStateTableHandler, StreamSourceCore, prune_additional_cols,
+};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::LocalBarrierManager;
+use crate::task::{ActorId, LocalBarrierManager};
 
 /// Type alias for file entries in the queue: (`file_name`, `scan_task_json`)
 type FileEntry = (String, JsonbVal);
@@ -133,16 +142,28 @@ impl FetchState {
         self.phase == FetchPhase::Failed
     }
 
+    fn is_loading(&self) -> bool {
+        matches!(self.phase, FetchPhase::Loading | FetchPhase::Draining)
+    }
+
     /// Check if we should start a new batch reader.
     fn should_start_batch_reader(&self, need_rebuild: bool) -> bool {
         matches!(self.phase, FetchPhase::Loading | FetchPhase::Draining)
             && (need_rebuild || (self.splits_on_fetch == 0 && !self.file_queue.is_empty()))
     }
 
-    /// Mark one file as successfully fetched and resets the backoff
-    fn mark_file_fetched(&mut self) {
+    /// Mark one file as successfully fetched and resets the backoff.
+    /// The file leaves `in_flight_files`, so a later error does not read it again.
+    fn mark_file_fetched(&mut self, file_name: &str) {
         self.splits_on_fetch -= 1;
         self.backoff = self.mode.backoff();
+        if let Some(idx) = self
+            .in_flight_files
+            .iter()
+            .position(|(name, _)| name == file_name)
+        {
+            self.in_flight_files.remove(idx);
+        }
 
         // When all files in the current batch complete successfully, clear in-flight tracking.
         if self.splits_on_fetch == 0 {
@@ -173,10 +194,13 @@ impl FetchState {
 // Column Indices Helper
 // ============================================================================
 
-/// Indices of special columns that need to be pruned from output.
+/// Indices of special columns that need to be pruned from or padded into the output.
 struct ColumnIndices {
     file_path_idx: usize,
     file_pos_idx: usize,
+    /// The hidden row id column, present when the source has no primary key. Iceberg files do
+    /// not carry it, so it is padded with nulls for the downstream row id generator to fill.
+    row_id_idx: Option<usize>,
 }
 
 impl ColumnIndices {
@@ -191,9 +215,14 @@ impl ColumnIndices {
             .iter()
             .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
             .expect("file pos column not found");
+        let row_id_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ROW_ID_COLUMN_NAME);
         Self {
             file_path_idx,
             file_pos_idx,
+            row_id_idx,
         }
     }
 
@@ -217,10 +246,14 @@ impl ColumnIndices {
 /// 4. Receives `ListFinish` mutation - marks listing as complete
 /// 5. When all files processed, reports load finished
 ///
-/// # At-Least-Once Semantics
+/// # Delivery
 ///
-/// On fetch errors, in-flight files are re-queued to ensure no file is skipped.
-/// This may cause duplicate reads, but guarantees data completeness.
+/// On fetch errors, files not yet emitted are re-queued, so no file is skipped or emitted twice.
+///
+/// A refreshable table keeps its queue in memory and restarts its load after recovery.
+/// A bounded load also records each assigned file in the state table, and deletes it in the
+/// epoch that emits the file's rows. After recovery it reads only the recorded files, so every
+/// file reaches downstream exactly once.
 pub struct BatchIcebergFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -235,8 +268,7 @@ pub struct BatchIcebergFetchExecutor<S: StateStore> {
 
     streaming_config: Arc<StreamingConfig>,
 
-    associated_table_id: TableId,
-    is_bounded: bool,
+    mode: LoadMode,
 
     scan_metrics: Option<IcebergScanMetricsLabels>,
     file_scan_metrics: Option<IcebergFileScanMetrics>,
@@ -251,19 +283,17 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         streaming_config: Arc<StreamingConfig>,
         associated_table_id: Option<TableId>,
         is_bounded: bool,
-    ) -> Self {
-        assert!(associated_table_id.is_some());
-        Self {
+    ) -> StreamResult<Self> {
+        Ok(Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             barrier_manager,
             streaming_config,
-            associated_table_id: associated_table_id.unwrap(),
-            is_bounded,
+            mode: LoadMode::new(is_bounded, associated_table_id)?,
             scan_metrics: None,
             file_scan_metrics: None,
-        }
+        })
     }
 }
 
@@ -273,17 +303,17 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         // Initialize upstream and wait for first barrier
         let mut upstream = self.upstream.take().unwrap().execute();
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        let mode = if self.is_bounded {
-            LoadMode::Bounded
-        } else {
-            LoadMode::FullReload
-        };
+        let mode = self.mode;
         let starts_on_creation = mode.starts_on_creation(&first_barrier, self.actor_ctx.id);
         let pause_on_startup = first_barrier.is_pause_on_startup();
+        let first_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier);
 
         // Initialize source description
         let mut core = self.stream_source_core.take().unwrap();
+        if mode.is_bounded() {
+            core.split_state_store.init_epoch(first_epoch).await?;
+        }
         let source_desc = core
             .source_desc_builder
             .take()
@@ -331,6 +361,15 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
         if starts_on_creation {
             state.start_load();
+            if mode.is_bounded() {
+                let pending = Self::pending_files(&core.split_state_store).await?;
+                tracing::info!(
+                    actor_id = %self.actor_ctx.id,
+                    pending = pending.len(),
+                    "restored pending bounded files"
+                );
+                state.enqueue_files(pending);
+            }
         }
 
         // Main processing loop
@@ -344,7 +383,9 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                         e.variant_name().to_owned(),
                         core.source_id.to_string(),
                         self.actor_ctx.fragment_id.to_string(),
-                        self.associated_table_id.to_string(),
+                        mode.associated_table_id()
+                            .map(|id| id.to_string())
+                            .unwrap_or_default(),
                     ]);
 
                     scan_metrics.record_fetch_error();
@@ -352,7 +393,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     let Some(delay) = state.backoff.next() else {
                         tracing::error!(
                             source_id = %core.source_id,
-                            table_id = %self.associated_table_id,
+                            table_id = ?mode.associated_table_id(),
                             error = %e.as_report(),
                             "bounded load failed after repeated fetch errors"
                         );
@@ -367,15 +408,15 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     if in_flight_count > 0 {
                         tracing::info!(
                             source_id = %core.source_id,
-                            table_id = %self.associated_table_id,
+                            table_id = ?mode.associated_table_id(),
                             in_flight_count = %in_flight_count,
-                            "re-queued in-flight files for retry to ensure at-least-once semantics"
+                            "re-queued in-flight files that were not emitted yet for retry"
                         );
                     }
 
                     tracing::info!(
                         source_id = %core.source_id,
-                        table_id = %self.associated_table_id,
+                        table_id = ?mode.associated_table_id(),
                         remaining_files = %state.file_queue.len(),
                         ?delay,
                         "attempting to recover from fetch error, will retry after the delay"
@@ -400,6 +441,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                         let need_rebuild = Self::handle_barrier_mutations(
                             &barrier,
                             core.source_id,
+                            self.actor_ctx.id,
                             &mut state,
                             &mut stream,
                             &mode,
@@ -420,19 +462,21 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                 ?barrier.epoch,
                                 actor_id = %self.actor_ctx.id,
                                 source_id = %core.source_id,
-                                table_id = %self.associated_table_id,
+                                table_id = ?mode.associated_table_id(),
                                 "Reporting load finished"
                             );
                             match mode {
-                                LoadMode::FullReload => {
+                                LoadMode::FullReload {
+                                    associated_table_id,
+                                } => {
                                     self.barrier_manager.report_source_load_finished(
                                         barrier.epoch,
                                         self.actor_ctx.id,
-                                        self.associated_table_id,
+                                        associated_table_id,
                                         core.source_id,
                                     );
                                 }
-                                LoadMode::Bounded => {
+                                LoadMode::Bounded { .. } => {
                                     self.barrier_manager.report_bounded_load_progress(
                                         barrier.epoch,
                                         self.actor_ctx.id,
@@ -444,7 +488,29 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             state.mark_idle();
                         }
 
-                        yield Message::Barrier(barrier);
+                        if mode.is_bounded() {
+                            let update_vnode_bitmap =
+                                barrier.as_update_vnode_bitmap(self.actor_ctx.id);
+                            let post_commit = core
+                                .split_state_store
+                                .commit_may_update_vnode_bitmap(barrier.epoch)
+                                .await?;
+                            let is_loading = state.is_loading();
+                            yield Message::Barrier(barrier);
+                            // Meta blocks rescheduling while a bounded load runs. A load that
+                            // still sees its vnodes move fails here and restarts from the state
+                            // table after recovery.
+                            if post_commit
+                                .post_yield_barrier(update_vnode_bitmap)
+                                .await?
+                                .is_some()
+                                && is_loading
+                            {
+                                bail!("vnodes of a bounded fetch changed while it was loading");
+                            }
+                        } else {
+                            yield Message::Barrier(barrier);
+                        }
 
                         if state.should_start_batch_reader(need_rebuild) {
                             Self::start_batch_reader(
@@ -463,6 +529,12 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     Message::Chunk(chunk) => {
                         let files = Self::parse_file_assignments(&chunk);
                         tracing::debug!("Received {} file assignments from upstream", files.len());
+                        if mode.is_bounded() {
+                            core.split_state_store
+                                .set_states_json(files.iter().cloned())
+                                .await?;
+                            core.split_state_store.try_flush().await?;
+                        }
                         state.enqueue_files(files);
                     }
 
@@ -470,8 +542,16 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 },
 
                 // ----- Fetched Data from Iceberg Files -----
-                Ok(Either::Right(ChunksWithState { chunks, .. })) => {
-                    state.mark_file_fetched();
+                Ok(Either::Right(ChunksWithState {
+                    chunks,
+                    data_file_path,
+                    ..
+                })) => {
+                    state.mark_file_fetched(&data_file_path);
+                    // The file's rows are emitted below in this same epoch.
+                    if mode.is_bounded() {
+                        core.split_state_store.delete(&data_file_path).await?;
+                    }
 
                     scan_metrics.set_inflight_file_count(state.splits_on_fetch);
 
@@ -481,7 +561,10 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             &column_indices.to_prune(),
                             &source_desc.columns,
                         );
-                        yield Message::Chunk(pruned);
+                        yield Message::Chunk(match column_indices.row_id_idx {
+                            Some(row_id_idx) => pad_row_id(pruned, row_id_idx),
+                            None => pruned,
+                        });
                     }
                 }
             }
@@ -492,6 +575,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
     fn handle_barrier_mutations(
         barrier: &Barrier,
         source_id: SourceId,
+        actor_id: ActorId,
         state: &mut FetchState,
         stream: &mut StreamReaderWithPause<true, ChunksWithState>,
         mode: &LoadMode,
@@ -535,10 +619,10 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 false
             }
             Mutation::BoundedLoad {
-                source_id: target_source_id,
+                reader_actor_ids,
                 action,
-            } if target_source_id == &source_id && mode.accepts_bounded_mutations() => match action
-            {
+                ..
+            } if mode.accepts_bounded_mutation(reader_actor_ids, actor_id) => match action {
                 BoundedLoadAction::ListSealed(_) => {
                     tracing::info!(
                         ?barrier.epoch,
@@ -552,6 +636,31 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             },
             _ => false,
         }
+    }
+
+    /// Reads the files recorded as pending in the vnodes this actor owns.
+    async fn pending_files(
+        state_store: &SourceStateTableHandler<S>,
+    ) -> StreamExecutorResult<Vec<FileEntry>> {
+        let state_table = state_store.state_table();
+        let mut files = vec![];
+        for vnode in state_table.vnodes().iter_vnodes() {
+            let rows = state_table
+                .iter_with_vnode(
+                    vnode,
+                    &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                    PrefetchOptions::prefetch_for_small_range_scan(),
+                )
+                .await?;
+            pin_mut!(rows);
+            while let Some(row) = rows.next().await {
+                let row = row?;
+                let file_name = row.datum_at(0).unwrap().into_utf8().to_owned();
+                let scan_task = row.datum_at(1).unwrap().into_jsonb().to_owned_scalar();
+                files.push((file_name, scan_task));
+            }
+        }
+        Ok(files)
     }
 
     /// Parse file assignments from an upstream chunk.
@@ -632,6 +741,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         let table = properties.load_table().await?;
 
         for task in tasks {
+            let data_file_path = task.data_file_path.clone();
             let mut chunks = vec![];
             #[for_await]
             for chunk_result in scan_task_to_chunk_with_deletes(
@@ -647,11 +757,29 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
             yield ChunksWithState {
                 chunks,
-                data_file_path: String::new(), // Not needed for refreshable iceberg fetch
+                data_file_path,
                 last_read_pos: None,
             };
         }
     }
+}
+
+/// Inserts an all-null row id column at `row_id_idx`.
+fn pad_row_id(chunk: StreamChunk, row_id_idx: usize) -> StreamChunk {
+    let (chunk, ops) = chunk.into_parts();
+    let (mut columns, visibility) = chunk.into_parts();
+    let len = visibility.len();
+    columns.insert(
+        row_id_idx,
+        Arc::new(
+            SerialArray::from_iter_bitmap(
+                itertools::repeat_n(Serial::from(0), len),
+                Bitmap::zeros(len),
+            )
+            .into(),
+        ),
+    );
+    StreamChunk::from_parts(ops, DataChunk::from_parts(columns.into(), visibility))
 }
 
 impl<S: StateStore> Execute for BatchIcebergFetchExecutor<S> {

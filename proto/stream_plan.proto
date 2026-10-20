@@ -173,6 +173,10 @@ message BoundedLoadMutation {
   oneof action {
     ListSealed list_sealed = 2;
   }
+
+  // The reader actors of the load. Several jobs can read the same source, so only these actors
+  // apply the action.
+  repeated uint32 reader_actor_ids = 3;
 }
 
 message ResetSourceMutation {

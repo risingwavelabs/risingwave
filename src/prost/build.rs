@@ -817,6 +817,7 @@ for_all_wrapped_id_fields! (
         }
         BoundedLoadMutation {
             source_id: SourceId,
+            reader_actor_ids: ActorId,
         }
         CdcFilterNode {
             upstream_source_id: SourceId,

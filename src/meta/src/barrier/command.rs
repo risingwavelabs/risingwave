@@ -616,6 +616,8 @@ pub enum Command {
 
     BoundedLoad {
         source_id: SourceId,
+        /// The reader actors of one job's load. Other jobs reading the same source ignore it.
+        reader_actor_ids: Vec<ActorId>,
         action: PbBoundedLoadAction,
     },
 }
@@ -739,7 +741,9 @@ impl std::fmt::Display for Command {
                 f,
                 "ApplyIcebergPkIndexCompaction: sink={sink_id} task={task_id}"
             ),
-            Command::BoundedLoad { source_id, action } => write!(
+            Command::BoundedLoad {
+                source_id, action, ..
+            } => write!(
                 f,
                 "BoundedLoad: source_id: {}, action: {:?}",
                 source_id, action
@@ -1485,11 +1489,13 @@ impl Command {
     /// Build the `BoundedLoad` mutation.
     pub(super) fn bounded_load_to_mutation(
         source_id: SourceId,
+        reader_actor_ids: Vec<ActorId>,
         action: PbBoundedLoadAction,
     ) -> Mutation {
         Mutation::BoundedLoad(BoundedLoadMutation {
             source_id,
             action: Some(action),
+            reader_actor_ids,
         })
     }
 

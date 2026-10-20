@@ -33,6 +33,7 @@ use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_internal_tables;
 use risingwave_connector::source::cdc::CdcScanOptions;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
@@ -78,6 +79,7 @@ pub struct BuildFragmentGraphState {
     share_stream_node_mapping: HashMap<StreamNodeLocalOperatorId, StreamNode>,
 
     has_source_backfill: bool,
+    has_bounded_source: bool,
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
     has_any_backfill: bool,
@@ -190,6 +192,17 @@ pub fn build_graph_with_strategy(
             "`SET streaming_use_shared_source = false` to disable shared source backfill, or \
                     `SET streaming_use_snapshot_backfill = false` to disable snapshot backfill"
                 .to_owned(),
+        )));
+    }
+    // A bounded load starts with the job's first barrier, which snapshot backfill jobs do not
+    // receive on the normal path. The optimizer already avoids snapshot backfill for bounded
+    // sources, so this only rejects plans that cannot avoid it, such as cross-database scans.
+    if state.has_bounded_source
+        && (state.has_snapshot_backfill || state.has_cross_db_snapshot_backfill)
+    {
+        return Err(RwError::from(NotSupported(
+            "Snapshot backfill with a bounded source is not supported".to_owned(),
+            "`SET streaming_use_snapshot_backfill = false` to disable snapshot backfill".to_owned(),
         )));
     }
     if state.has_cross_db_snapshot_backfill
@@ -434,6 +447,13 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::Source);
+
+                if let Some(source) = node.source_inner.as_ref()
+                    && IngestMode::from_proto(source.ingest_mode.as_ref())
+                        .is_ok_and(|mode| mode.is_bounded())
+                {
+                    state.has_bounded_source = true;
+                }
 
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()

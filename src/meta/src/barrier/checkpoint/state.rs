@@ -1741,8 +1741,16 @@ impl DatabaseCheckpointControl {
                 skip_forward_to_iceberg_job = Some(job_id);
                 self.apply_simple_command(None, "ApplyIcebergPkIndexCompaction")
             }
-            Some(Command::BoundedLoad { source_id, action }) => {
-                let mutation = Some(Command::bounded_load_to_mutation(source_id, action));
+            Some(Command::BoundedLoad {
+                source_id,
+                reader_actor_ids,
+                action,
+            }) => {
+                let mutation = Some(Command::bounded_load_to_mutation(
+                    source_id,
+                    reader_actor_ids,
+                    action,
+                ));
                 self.apply_simple_command(mutation, "BoundedLoad")
             }
         };

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use risingwave_common::bail;
 use risingwave_common::id::{ActorId, DatabaseId, FragmentId, JobId, SourceId};
@@ -20,9 +20,11 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_meta_model::bounded_job::BoundedJobStatus;
 use risingwave_meta_model::{bounded_job, object};
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::barrier_complete_response::BoundedLoadProgress;
 use risingwave_pb::stream_service::barrier_complete_response::bounded_load_progress::Progress;
+use sea_orm::ActiveValue::Set;
 use sea_orm::prelude::Expr;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
@@ -30,6 +32,7 @@ use sea_orm::{
 
 use crate::MetaResult;
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::manager::StreamingJob;
 
 /// Lifecycle actions applied only after the checkpoint carrying their progress commits.
 #[derive(Debug)]
@@ -37,6 +40,7 @@ pub(super) enum BoundedLoadAction {
     SealListing {
         database_id: DatabaseId,
         source_id: SourceId,
+        reader_actor_ids: Vec<ActorId>,
     },
     Complete {
         job_id: JobId,
@@ -125,31 +129,23 @@ impl BoundedLoadTracker {
     }
 
     /// Returns the id of the bounded source in the job's fragments, or `None` if the job is not a
-    /// bounded load. Source nodes without `source_inner` (such as the DML input) are skipped.
+    /// bounded load.
     pub fn bounded_source(
         fragments: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Option<SourceId> {
-        let mut source_id = None;
-
-        for fragment in fragments.values() {
-            visit_stream_node_body(&fragment.nodes, |body| {
-                if let NodeBody::Source(source) = body
-                    && let Some(source) = &source.source_inner
-                    && IngestMode::from_proto(source.ingest_mode.as_ref())
-                        .is_ok_and(|mode| mode.is_bounded())
-                {
-                    source_id = Some(source.source_id);
-                }
-            });
-        }
-
-        source_id
+        bounded_source_of(fragments.values().map(|fragment| &fragment.nodes))
+            .ok()
+            .flatten()
     }
 
     /// Returns every lister and reader, to be sent in an `AddMutation` so each actor starts
     /// loading on its first barrier.
     pub fn actors(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.listers.keys().chain(self.readers.keys()).copied()
+    }
+
+    pub fn reader_actors(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.readers.keys().copied()
     }
 
     /// Records a progress report from a lister or reader.
@@ -311,6 +307,74 @@ pub(crate) async fn load_unfinished_bounded_jobs(
         .collect())
 }
 
+/// Registers the bounded load of a new job, such as a bounded table or a materialized view or
+/// sink over a bounded source. Uses the same fragments that [`BoundedLoadTracker`] tracks, so a
+/// registered load always has a tracker.
+///
+/// Each job tracks one bounded load, so a job may read at most one bounded source.
+pub(crate) async fn register_bounded_job<'a>(
+    txn: &impl ConnectionTrait,
+    job_id: JobId,
+    nodes: impl IntoIterator<Item = &'a StreamNode>,
+) -> MetaResult<()> {
+    let Some(source_id) = bounded_source_of(nodes)? else {
+        return Ok(());
+    };
+
+    bounded_job::Entity::insert(bounded_job::ActiveModel {
+        job_id: Set(job_id),
+        source_id: Set(source_id),
+        status: Set(BoundedJobStatus::Loading),
+        completed_at: Set(None),
+    })
+    .exec(txn)
+    .await?;
+
+    Ok(())
+}
+
+/// Fails if a replacement plan reads a bounded source. Replaced actors never start a bounded load,
+/// so they would read nothing. A bounded table may still replace itself, since its own source
+/// already loaded into the table, and replacing is blocked while it loads.
+pub(crate) fn ensure_replace_reads_no_bounded_source<'a>(
+    nodes: impl IntoIterator<Item = &'a StreamNode>,
+    streaming_job: Option<&StreamingJob>,
+) -> MetaResult<()> {
+    let Some(source_id) = bounded_source_of(nodes)? else {
+        return Ok(());
+    };
+    if let Some(StreamingJob::Table(Some(source), _, _)) = streaming_job
+        && source.id == source_id
+    {
+        return Ok(());
+    }
+    bail!("replacing a streaming job that reads bounded source {source_id} is not supported")
+}
+
+/// Returns the bounded source read by `nodes`, if any. Source nodes without `source_inner` (such
+/// as the DML input) are skipped.
+fn bounded_source_of<'a>(
+    nodes: impl IntoIterator<Item = &'a StreamNode>,
+) -> MetaResult<Option<SourceId>> {
+    let mut sources = BTreeSet::new();
+    for node in nodes {
+        visit_stream_node_body(node, |body| {
+            if let NodeBody::Source(source) = body
+                && let Some(source) = &source.source_inner
+                && IngestMode::from_proto(source.ingest_mode.as_ref())
+                    .is_ok_and(|mode| mode.is_bounded())
+            {
+                sources.insert(source.source_id);
+            }
+        });
+    }
+
+    match sources.len() {
+        0 | 1 => Ok(sources.pop_first()),
+        _ => bail!("a streaming job can read at most one bounded source, found {sources:?}"),
+    }
+}
+
 /// Marks the bounded load of `job_id` as complete.
 ///
 /// Call only after the checkpoint carrying the final `ReaderDone` reports has committed, so a
@@ -391,6 +455,8 @@ mod tests {
     use risingwave_connector::source::iceberg::IcebergBoundedScan;
     use risingwave_connector::source::ingest_mode::BoundedInput;
     use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_pb::catalog::PbSource;
+    use risingwave_pb::ddl_service::TableJobType;
     use risingwave_pb::plan_common::PbSourceIngestMode;
     use risingwave_pb::stream_plan::{
         PbStreamNode, SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
@@ -498,6 +564,44 @@ mod tests {
         tracker.apply_progress(&load_failed(2, 1));
         assert!(tracker.take_failed());
         assert!(!tracker.take_completed());
+    }
+
+    /// A job reads at most one bounded source, found in any of its fragments.
+    #[test]
+    fn test_bounded_source_of() {
+        let one = two_phase();
+        assert_eq!(
+            bounded_source_of(one.values().map(|fragment| &fragment.nodes)).unwrap(),
+            Some(SOURCE_ID)
+        );
+
+        let none = [fetch_node(SOURCE_ID)];
+        assert_eq!(bounded_source_of(&none).unwrap(), None);
+
+        let two = [source_node(SOURCE_ID), source_node(SourceId::new(11))];
+        assert!(bounded_source_of(&two).is_err());
+    }
+
+    /// Only a bounded table replacing itself may keep a bounded source in its new plan.
+    #[test]
+    fn test_ensure_replace_reads_no_bounded_source() {
+        let nodes = [source_node(SOURCE_ID)];
+        let own_table = StreamingJob::Table(
+            Some(PbSource {
+                id: SOURCE_ID,
+                ..Default::default()
+            }),
+            Default::default(),
+            TableJobType::General,
+        );
+        let mv = StreamingJob::MaterializedView(Default::default());
+
+        assert!(ensure_replace_reads_no_bounded_source(&nodes, Some(&own_table)).is_ok());
+        assert!(ensure_replace_reads_no_bounded_source(&nodes, Some(&mv)).is_err());
+        assert!(ensure_replace_reads_no_bounded_source(&nodes, None).is_err());
+        assert!(
+            ensure_replace_reads_no_bounded_source(&[fetch_node(SOURCE_ID)], Some(&mv)).is_ok()
+        );
     }
 
     fn bounded_mode() -> PbSourceIngestMode {

@@ -320,9 +320,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             BoundedLoadAction::SealListing {
                 database_id,
                 source_id,
+                reader_actor_ids,
             } => {
                 self.bounded_load_manager
-                    .seal_listing(database_id, source_id);
+                    .seal_listing(database_id, source_id, reader_actor_ids);
             }
             BoundedLoadAction::Complete { job_id, source_id } => {
                 self.bounded_load_manager

@@ -397,6 +397,7 @@ pub enum Mutation {
     },
     BoundedLoad {
         source_id: SourceId,
+        reader_actor_ids: Vec<ActorId>,
         action: BoundedLoadAction,
     },
 }
@@ -1060,12 +1061,15 @@ impl Mutation {
                     split_offsets: split_offsets.clone(),
                 },
             ),
-            Mutation::BoundedLoad { source_id, action } => {
-                PbMutation::BoundedLoad(risingwave_pb::stream_plan::BoundedLoadMutation {
-                    source_id: *source_id,
-                    action: Some(*action),
-                })
-            }
+            Mutation::BoundedLoad {
+                source_id,
+                reader_actor_ids,
+                action,
+            } => PbMutation::BoundedLoad(risingwave_pb::stream_plan::BoundedLoadMutation {
+                source_id: *source_id,
+                action: Some(*action),
+                reader_actor_ids: reader_actor_ids.clone(),
+            }),
         }
     }
 
@@ -1248,6 +1252,7 @@ impl Mutation {
             },
             PbMutation::BoundedLoad(bounded_load) => Mutation::BoundedLoad {
                 source_id: bounded_load.source_id,
+                reader_actor_ids: bounded_load.reader_actor_ids.clone(),
                 action: bounded_load.action.unwrap(),
             },
         };

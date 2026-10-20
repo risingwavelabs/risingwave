@@ -32,7 +32,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
+use risingwave_connector::source::iceberg::{IcebergBoundedScan, IcebergTimeTravelInfo};
 use risingwave_sqlparser::ast::AsOf;
 use thiserror_ext::AsReport;
 
@@ -799,6 +799,30 @@ source: {:?}",
         table_column_type_mapping: HashMap<String, DataType>,
         source_to_table_mapping: ColIndexMapping,
     ) -> Result<PlanRef> {
+        // A bounded source always reads the snapshot it pinned.
+        let pinned_scan = source
+            .core
+            .catalog
+            .as_ref()
+            .and_then(|catalog| catalog.ingest_mode.iceberg_bounded_scan());
+        if let Some(IcebergBoundedScan::Snapshot { snapshot_id }) = pinned_scan {
+            if source.core.as_of.is_some() {
+                return Err(ErrorCode::NotSupported(
+                    "FOR SYSTEM_TIME AS OF on a bounded source".to_owned(),
+                    "A bounded source always reads the snapshot pinned by `scan.bounded.snapshot.id`."
+                        .to_owned(),
+                )
+                .into());
+            }
+            let intermediate_scan = LogicalIcebergIntermediateScan::new(
+                source,
+                IcebergTimeTravelInfo::Version(snapshot_id),
+                table_column_type_mapping,
+                source_to_table_mapping,
+            );
+            return Ok(intermediate_scan.into());
+        }
+
         // If time travel is not specified, we use current timestamp to get the latest snapshot
         let timezone = self.ctx().get_session_timezone();
         let mut time_travel_info = to_iceberg_time_travel_as_of(&source.core.as_of, &timezone)?;

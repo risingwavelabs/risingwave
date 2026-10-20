@@ -271,7 +271,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             params.local_barrier_manager.clone(),
                             associated_table_id,
                             bounded_scan,
-                        )
+                            params.config.developer.chunk_size,
+                        )?
                         .boxed()
                     } else {
                         IcebergListExecutor::new(
