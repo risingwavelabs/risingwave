@@ -195,11 +195,11 @@ CREATE TABLE bounded_latest (PRIMARY KEY (id)) WITH (
     scan.bounded.snapshot.id = '$snapshot_id'
 )"
 
-query T retry 30 backoff 1s
-SELECT completed_at IS NOT NULL FROM rw_bounded_jobs ORDER BY job_id;
+query TT retry 30 backoff 1s
+SELECT status, completed_at IS NOT NULL FROM rw_bounded_jobs ORDER BY job_id;
 ----
-t
-t
+COMPLETED t
+COMPLETED t
 
 # Each job reports the snapshot it pinned: the first and the second snapshot, in commit order.
 query I

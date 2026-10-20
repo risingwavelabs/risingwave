@@ -18,6 +18,7 @@ use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::source::iceberg::IcebergBoundedScan;
 use risingwave_connector::source::ingest_mode::BoundedInput;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::meta::list_bounded_jobs_response::Status;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -29,6 +30,8 @@ struct RwBoundedJob {
     job_id: JobId,
     source_id: SourceId,
     pinned_input: JsonbVal,
+    /// `LOADING`, `COMPLETED` or `FAILED`.
+    status: String,
     completed_at: Option<Timestamptz>,
 }
 
@@ -47,10 +50,20 @@ async fn read_rw_bounded_jobs(reader: &SysCatalogReaderImpl) -> Result<Vec<RwBou
                 .into(),
             };
 
+            let status = match job.status() {
+                Status::Loading => "LOADING",
+                Status::Completed => "COMPLETED",
+                Status::Failed => "FAILED",
+                Status::Unspecified => {
+                    return Err(anyhow!("bounded job {} has no status", job.job_id).into());
+                }
+            };
+
             Ok(RwBoundedJob {
                 job_id: job.job_id,
                 source_id: job.source_id,
                 pinned_input,
+                status: status.to_owned(),
                 completed_at: job.completed_at.and_then(Timestamptz::from_millis),
             })
         })
