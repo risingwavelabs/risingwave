@@ -42,7 +42,7 @@ working_tree_stamp() {
   index_dir="$(mktemp -d)"
   if GIT_INDEX_FILE="${index_dir}/index" git -c safe.directory='*' add --all &&
     tree="$(GIT_INDEX_FILE="${index_dir}/index" git -c safe.directory='*' write-tree)"; then
-    echo "${DEBEZIUM_VERSION} ${tree}"
+    echo "${DEBEZIUM_VERSION} ${tree} $(git hash-object "${JAVA_DIR}/build-debezium.sh")"
   fi
   rm -rf "${index_dir}"
 }
