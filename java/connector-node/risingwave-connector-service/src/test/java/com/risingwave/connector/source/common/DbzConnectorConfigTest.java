@@ -21,6 +21,7 @@ import static org.junit.Assert.assertThrows;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
+import io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource;
 import java.util.HashMap;
 import org.junit.Test;
 
@@ -71,5 +72,26 @@ public class DbzConnectorConfigTest {
                 "MariaDB CDC does not support ssl.mode 'preferred'; use 'required', 'verify-ca', or"
                         + " 'verify-full'",
                 exception.getMessage());
+    }
+
+    @Test
+    public void forwardsMariaDbRootCertificateAndLegacyAlias() {
+        var userProps = new HashMap<String, String>();
+        userProps.put("ssl.mode", "verify-full");
+        userProps.put("debezium.database.sslrootcert", "/etc/mariadb/legacy-ca.pem");
+        var config = new DbzConnectorConfig(SourceTypeE.MARIADB, 44, null, userProps, false, false);
+        assertEquals(
+                "/etc/mariadb/legacy-ca.pem",
+                config.getResolvedDebeziumProps().getProperty("driver.serverSslCert"));
+
+        userProps.put("ssl.root.cert", "/etc/mariadb/ca.pem");
+        config = new DbzConnectorConfig(SourceTypeE.MARIADB, 44, null, userProps, false, false);
+        assertEquals(
+                "/etc/mariadb/ca.pem",
+                config.getResolvedDebeziumProps().getProperty("driver.serverSslCert"));
+        assertEquals(
+                "/etc/mariadb/ca.pem",
+                config.getResolvedDebeziumProps()
+                        .getProperty(MariaDbStreamingChangeEventSource.SSL_ROOT_CERT_CONFIG));
     }
 }

@@ -23,7 +23,9 @@ import com.github.shyiko.mysql.binlog.event.Event;
 import com.github.shyiko.mysql.binlog.event.EventData;
 import com.github.shyiko.mysql.binlog.event.EventType;
 import com.github.shyiko.mysql.binlog.event.MariadbGtidEventData;
+import com.github.shyiko.mysql.binlog.network.DefaultSSLSocketFactory;
 import com.github.shyiko.mysql.binlog.network.SSLMode;
+import io.debezium.DebeziumException;
 import io.debezium.connector.binlog.BinlogConnectorConfig;
 import io.debezium.connector.binlog.BinlogStreamingChangeEventSource;
 import io.debezium.connector.binlog.BinlogTaskContext;
@@ -35,10 +37,20 @@ import io.debezium.relational.TableId;
 import io.debezium.snapshot.SnapshotterService;
 import io.debezium.util.Clock;
 import io.debezium.util.Strings;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +58,8 @@ import org.slf4j.LoggerFactory;
 /** MariaDB streaming source with RisingWave's post-binlog-connect readiness callback. */
 public class MariaDbStreamingChangeEventSource
         extends BinlogStreamingChangeEventSource<MariaDbPartition, MariaDbOffsetContext> {
+
+    public static final String SSL_ROOT_CERT_CONFIG = "risingwave.ssl.root.cert";
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(MariaDbStreamingChangeEventSource.class);
@@ -92,6 +106,12 @@ public class MariaDbStreamingChangeEventSource
         BinaryLogClient client =
                 super.createBinaryLogClient(
                         taskContext, connectorConfig, clientThreads, connection);
+        var rootCert = connectorConfig.getConfig().getString(SSL_ROOT_CERT_CONFIG);
+        var sslMode = sslModeFor(connectorConfig.getSslMode());
+        if (rootCert != null
+                && (sslMode == SSLMode.VERIFY_CA || sslMode == SSLMode.VERIFY_IDENTITY)) {
+            configureRootCertificate(client, connection, rootCert);
+        }
         if (connectorConfig.isSqlQueryIncluded()) {
             client.setUseSendAnnotateRowsEvent(true);
         }
@@ -106,6 +126,50 @@ public class MariaDbStreamingChangeEventSource
                     }
                 });
         return client;
+    }
+
+    private static void configureRootCertificate(
+            BinaryLogClient client, BinlogConnectorConnection connection, String rootCert) {
+        // JDBC accepts PEM certificates, but the binlog client needs its own trust managers.
+        try (var input = Files.newInputStream(Path.of(rootCert))) {
+            var certificates = CertificateFactory.getInstance("X.509").generateCertificates(input);
+            if (certificates.isEmpty()) {
+                throw new DebeziumException("No certificates found in MariaDB ssl.root.cert");
+            }
+            var trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            trustStore.load(null, null);
+            int index = 0;
+            for (var certificate : certificates) {
+                trustStore.setCertificateEntry("mariadb-ca-" + index++, certificate);
+            }
+            var trustManagerFactory =
+                    TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            trustManagerFactory.init(trustStore);
+
+            KeyManager[] keyManagers = null;
+            var connectionConfig = connection.connectionConfig();
+            if (connectionConfig.sslKeyStore() != null) {
+                var keyStore =
+                        connection.loadKeyStore(
+                                connectionConfig.sslKeyStore(),
+                                connectionConfig.sslKeyStorePassword());
+                var keyManagerFactory = KeyManagerFactory.getInstance("NewSunX509");
+                keyManagerFactory.init(keyStore, connectionConfig.sslKeyStorePassword());
+                keyManagers = keyManagerFactory.getKeyManagers();
+            }
+            var finalKeyManagers = keyManagers;
+            client.setSslSocketFactory(
+                    new DefaultSSLSocketFactory(connection.getSessionVariableForSslVersion()) {
+                        @Override
+                        protected void initSSLContext(SSLContext context)
+                                throws GeneralSecurityException {
+                            context.init(
+                                    finalKeyManagers, trustManagerFactory.getTrustManagers(), null);
+                        }
+                    });
+        } catch (IOException | GeneralSecurityException e) {
+            throw new DebeziumException("Could not load MariaDB ssl.root.cert: " + rootCert, e);
+        }
     }
 
     @Override

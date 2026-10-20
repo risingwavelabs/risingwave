@@ -20,6 +20,7 @@ import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
+import io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource;
 import io.debezium.connector.mongodb.MongoDbConnectorConfig;
 import io.debezium.heartbeat.DatabaseHeartbeatImpl;
 import java.io.IOException;
@@ -166,6 +167,11 @@ public class DbzConnectorConfig {
         };
     }
 
+    public static String mariaDbSslRootCert(Map<String, String> userProps) {
+        return userProps.getOrDefault(
+                "ssl.root.cert", userProps.get("debezium.database.sslrootcert"));
+    }
+
     public DbzConnectorConfig(
             SourceTypeE source,
             long sourceId,
@@ -206,6 +212,12 @@ public class DbzConnectorConfig {
                 var sslMode =
                         normalizeMariaDbSslMode(userProps.getOrDefault(MYSQL_SSL_MODE, "disabled"));
                 mysqlProps.setProperty("database.ssl.mode", sslMode);
+                var rootCert = mariaDbSslRootCert(userProps);
+                if (rootCert != null) {
+                    mysqlProps.setProperty("driver.serverSslCert", rootCert);
+                    mysqlProps.setProperty(
+                            MariaDbStreamingChangeEventSource.SSL_ROOT_CERT_CONFIG, rootCert);
+                }
             }
 
             // Enable schema history for all MySQL CDC modes to handle schema changes properly

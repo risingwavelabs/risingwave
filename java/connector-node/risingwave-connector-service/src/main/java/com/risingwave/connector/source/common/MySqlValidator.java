@@ -71,6 +71,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         String sslMode = userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "disabled");
         if (isMariaDb) {
             sslMode = DbzConnectorConfig.normalizeMariaDbSslMode(sslMode);
+            var rootCert = DbzConnectorConfig.mariaDbSslRootCert(userProps);
+            if (rootCert != null) {
+                properties.setProperty("serverSslCert", rootCert);
+            }
         }
         properties.setProperty("sslMode", sslMode);
         if (!isMariaDb) {
