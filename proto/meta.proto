@@ -459,12 +459,21 @@ message ListCdcProgressResponse {
 message ListBoundedJobsRequest {}
 
 message ListBoundedJobsResponse {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_LOADING = 1;
+    STATUS_COMPLETED = 2;
+    STATUS_FAILED = 3;
+  }
+
   message BoundedJob {
     uint32 job_id = 1;
     uint32 source_id = 2;
     // The input pinned at creation, as stored in the source's ingest mode.
     plan_common.SourceIngestMode.SourceIngestModeBounded input = 3;
+    // Set only when the load completed.
     optional int64 completed_at = 4;
+    Status status = 5;
   }
   repeated BoundedJob jobs = 1;
 }

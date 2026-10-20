@@ -126,12 +126,15 @@ message BarrierCompleteResponse {
     message ListSealed {}
     // All pinned input assigned to this reader has been consumed.
     message ReaderDone {}
+    // The actor gave up on the load after repeated errors. The error is logged by the actor.
+    message LoadFailed {}
 
     uint32 actor_id = 1;
     uint32 fragment_id = 2;
     oneof progress {
       ListSealed list_sealed = 3;
       ReaderDone reader_done = 4;
+      LoadFailed load_failed = 5;
     }
   }
   repeated BoundedLoadProgress bounded_load_progress = 20;
