@@ -86,7 +86,7 @@ pub fn build_mysql_connection_pool(
     mysql_async::Pool::new(opts_builder)
 }
 
-/// Build a MariaDB pool with certificate verification for `verify-ca` and `verify-full`.
+/// Build a `MariaDB` pool with certificate verification for `verify-ca` and `verify-full`.
 pub fn build_mariadb_connection_pool(
     host: &str,
     port: u16,
