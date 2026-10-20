@@ -985,18 +985,18 @@ impl InflightDatabaseInfo {
         );
     }
 
-    pub(super) fn start_bounded_load(&mut self, job_id: JobId) -> MetaResult<HashSet<ActorId>> {
+    pub(super) fn start_bounded_load(&mut self, job_id: JobId) -> HashSet<ActorId> {
         let job = self.jobs.get_mut(&job_id).expect("new job must exist");
 
         let Some(source_id) = BoundedLoadTracker::bounded_source(&job.fragment_infos) else {
-            return Ok(HashSet::new());
+            return HashSet::new();
         };
 
-        let tracker = BoundedLoadTracker::new(job_id, source_id, &job.fragment_infos)?;
+        let tracker = BoundedLoadTracker::new(source_id, &job.fragment_infos);
         let actors = tracker.actors().collect();
         job.bounded_load_tracker = Some(tracker);
 
-        Ok(actors)
+        actors
     }
 
     /// Register a new streaming job entry (with empty `fragment_infos`).

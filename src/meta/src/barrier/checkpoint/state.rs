@@ -1135,7 +1135,7 @@ impl DatabaseCheckpointControl {
 
                 let bounded_load_actors = self
                     .database_info
-                    .start_bounded_load(info.streaming_job.id())?;
+                    .start_bounded_load(info.streaming_job.id());
 
                 // Mutation
                 let is_currently_paused = self.state.is_paused();

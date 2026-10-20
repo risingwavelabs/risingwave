@@ -969,22 +969,10 @@ impl PartialGraphRecoverer<'_> {
                             None
                         };
 
-                    let bounded_load_tracker = unfinished_bounded_jobs.remove(&job_id).and_then(|source_id| {
-                        let tracker = match BoundedLoadTracker::bounded_source(&fragment_infos) {
-                            Some(found) if found == source_id => BoundedLoadTracker::new(job_id, source_id, &fragment_infos),
-                            _ => Err(anyhow!("no matching bounded source in its graph").into()),
-                        };
-
-                        match tracker {
-                            Ok(tracker) => {
-                                bounded_load_actors.extend(tracker.actors());
-                                Some(tracker)
-                            }
-                            Err(e) => {
-                                tracing::error!(%job_id, error = %e.as_report(), "skip bounded load tracking");
-                                None
-                            }
-                        }
+                    let bounded_load_tracker = unfinished_bounded_jobs.remove(&job_id).map(|source_id| {
+                        let tracker = BoundedLoadTracker::new(source_id, &fragment_infos);
+                        bounded_load_actors.extend(tracker.actors());
+                        tracker
                     });
 
                     Ok((

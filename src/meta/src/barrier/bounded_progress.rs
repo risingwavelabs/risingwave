@@ -83,11 +83,8 @@ pub(super) struct BoundedLoadTracker {
 }
 
 impl BoundedLoadTracker {
-    pub fn new(
-        job_id: JobId,
-        source_id: SourceId,
-        fragments: &HashMap<FragmentId, InflightFragmentInfo>,
-    ) -> MetaResult<Self> {
+    /// Builds the tracker for the load of `source_id`. `fragments` must contain the source.
+    pub fn new(source_id: SourceId, fragments: &HashMap<FragmentId, InflightFragmentInfo>) -> Self {
         let mut listers = HashMap::new();
         let mut readers = HashMap::new();
 
@@ -105,9 +102,10 @@ impl BoundedLoadTracker {
             );
         }
 
-        if readers.is_empty() {
-            bail!("bounded job {job_id} requires reader actors");
-        }
+        assert!(
+            !readers.is_empty(),
+            "bounded source {source_id} has no reader actors"
+        );
 
         let phase = if listers.is_empty() {
             Phase::Reading
@@ -115,7 +113,7 @@ impl BoundedLoadTracker {
             Phase::Listing
         };
 
-        Ok(Self {
+        Self {
             source_id,
             listers,
             readers,
@@ -123,7 +121,7 @@ impl BoundedLoadTracker {
             done: HashSet::new(),
             failed: false,
             phase,
-        })
+        }
     }
 
     /// Returns the id of the bounded source in the job's fragments, or `None` if the job is not a
@@ -405,12 +403,11 @@ mod tests {
     use crate::controller::fragment::InflightActorInfo;
 
     const SOURCE_ID: SourceId = SourceId::new(10);
-    const JOB_ID: JobId = JobId::new(100);
 
     /// A source fragment with a fetch fragment yields listers and readers, starting in `Listing`.
     #[test]
     fn test_two_phase_roles() {
-        let tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &two_phase()).unwrap();
+        let tracker = BoundedLoadTracker::new(SOURCE_ID, &two_phase());
 
         assert!(tracker.is_listing());
         assert_eq!(
@@ -430,7 +427,7 @@ mod tests {
     /// A source fragment without a fetch fragment becomes the readers, starting in `Reading`.
     #[test]
     fn test_one_phase_roles() {
-        let tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &one_phase()).unwrap();
+        let tracker = BoundedLoadTracker::new(SOURCE_ID, &one_phase());
 
         assert!(tracker.is_reading());
         assert!(tracker.listers.is_empty());
@@ -443,7 +440,7 @@ mod tests {
     /// Seal fires once after every lister seals, then completion fires once after every reader is done.
     #[test]
     fn test_two_phase_lifecycle() {
-        let mut tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &two_phase()).unwrap();
+        let mut tracker = BoundedLoadTracker::new(SOURCE_ID, &two_phase());
 
         assert!(tracker.is_listing());
 
@@ -467,7 +464,7 @@ mod tests {
     /// Seal never fires, and completion fires once after every reader is done.
     #[test]
     fn test_one_phase_lifecycle() {
-        let mut tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &one_phase()).unwrap();
+        let mut tracker = BoundedLoadTracker::new(SOURCE_ID, &one_phase());
 
         assert!(!tracker.take_seal());
 
@@ -483,7 +480,7 @@ mod tests {
     /// A failure from any lister or reader fails the load once, and blocks seal and completion.
     #[test]
     fn test_failed_lifecycle() {
-        let mut tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &two_phase()).unwrap();
+        let mut tracker = BoundedLoadTracker::new(SOURCE_ID, &two_phase());
 
         tracker.apply_progress(&load_failed(1, 1));
         assert!(tracker.take_failed());
@@ -494,7 +491,7 @@ mod tests {
         tracker.apply_progress(&list_sealed(2, 1));
         assert!(!tracker.take_seal());
 
-        let mut tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &one_phase()).unwrap();
+        let mut tracker = BoundedLoadTracker::new(SOURCE_ID, &one_phase());
 
         tracker.apply_progress(&reader_done(1, 1));
         tracker.apply_progress(&reader_done(2, 1));
