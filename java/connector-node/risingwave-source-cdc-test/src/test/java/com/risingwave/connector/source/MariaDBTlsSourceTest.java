@@ -135,7 +135,10 @@ public class MariaDBTlsSourceTest {
                     properties.put("database.name", "test");
                     properties.put("table.name", table);
                     properties.put("server.id", mode.equals("verify-ca") ? "4302" : "4303");
-                    properties.put("ssl.mode", mode);
+                    // Exercise the canonical SSL mode and its alias through validation and CDC.
+                    properties.put(
+                            mode.equals("verify-ca") ? "ssl.mode" : "debezium.database.sslmode",
+                            mode);
                     properties.put("debezium.poll.interval.ms", "100");
                     // Exercise both the canonical option and the alias accepted by Rust.
                     String certOption =

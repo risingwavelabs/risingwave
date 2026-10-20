@@ -167,6 +167,13 @@ public class DbzConnectorConfig {
         };
     }
 
+    public static String mariaDbSslMode(Map<String, String> userProps) {
+        return normalizeMariaDbSslMode(
+                userProps.getOrDefault(
+                        MYSQL_SSL_MODE,
+                        userProps.getOrDefault("debezium.database.sslmode", "disabled")));
+    }
+
     public static String mariaDbSslRootCert(Map<String, String> userProps) {
         return userProps.getOrDefault(
                 "ssl.root.cert", userProps.get("debezium.database.sslrootcert"));
@@ -209,9 +216,7 @@ public class DbzConnectorConfig {
                             substitutor);
 
             if (source == SourceTypeE.MARIADB) {
-                var sslMode =
-                        normalizeMariaDbSslMode(userProps.getOrDefault(MYSQL_SSL_MODE, "disabled"));
-                mysqlProps.setProperty("database.ssl.mode", sslMode);
+                mysqlProps.setProperty("database.ssl.mode", mariaDbSslMode(userProps));
                 var rootCert = mariaDbSslRootCert(userProps);
                 if (rootCert != null) {
                     mysqlProps.setProperty("driver.serverSslCert", rootCert);

@@ -62,6 +62,43 @@ public class DbzConnectorConfigTest {
     }
 
     @Test
+    public void resolvesMariaDbSslModeAlias() {
+        var userProps = new HashMap<String, String>();
+        for (var mode : new String[] {"disabled", "required", "verify-ca", "verify-full"}) {
+            userProps.put("debezium.database.sslmode", mode);
+            var config =
+                    new DbzConnectorConfig(SourceTypeE.MARIADB, 43, null, userProps, false, false);
+            assertEquals(
+                    DbzConnectorConfig.normalizeMariaDbSslMode(mode),
+                    config.getResolvedDebeziumProps().getProperty("database.ssl.mode"));
+        }
+    }
+
+    @Test
+    public void prefersCanonicalMariaDbSslModeAndDefaultsToDisabled() {
+        var userProps = new HashMap<String, String>();
+        var config = new DbzConnectorConfig(SourceTypeE.MARIADB, 43, null, userProps, false, false);
+        assertEquals("disable", config.getResolvedDebeziumProps().getProperty("database.ssl.mode"));
+
+        userProps.put("debezium.database.sslmode", "disabled");
+        userProps.put("ssl.mode", "verify-full");
+        config = new DbzConnectorConfig(SourceTypeE.MARIADB, 43, null, userProps, false, false);
+        assertEquals(
+                "verify-full", config.getResolvedDebeziumProps().getProperty("database.ssl.mode"));
+    }
+
+    @Test
+    public void rejectsUnsupportedMariaDbPreferredSslModeAlias() {
+        var userProps = new HashMap<String, String>();
+        userProps.put("debezium.database.sslmode", "preferred");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new DbzConnectorConfig(
+                                SourceTypeE.MARIADB, 43, null, userProps, false, false));
+    }
+
+    @Test
     public void rejectsUnsupportedMariaDbPreferredSslMode() {
         var exception =
                 assertThrows(
