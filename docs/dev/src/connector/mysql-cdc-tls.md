@@ -54,35 +54,17 @@ truststores. A future custom-CA feature needs a separate compatibility design.
 
 ## Regression tests
 
-`ci/mysql-tls/generate-certs.sh` creates disposable certificates. The `mysql-tls`
-Compose service requires TLS; `mysql-no-tls` disables TLS. The CDC CI lane runs
+The `mysql-tls` Compose service requires TLS using MySQL's generated certificates;
+`mysql-no-tls` disables TLS. The CDC CI lane runs
 `e2e_test/source_inline/cdc/mysql/mysql_tls.slt.serial`, covering inferred schemas,
-backfill, streaming, monitoring, recovery, both `preferred` connection paths,
-canonical/alias precedence, and previously ignored options.
+backfill, streaming, monitoring, and recovery for `required` and both `preferred`
+connection paths. It also checks that verification modes reject the untrusted
+server certificate. Rust and Java unit tests cover mode aliases, option precedence,
+ignored root-cert options, and driver configuration.
 
-The ignored Rust `test_mysql_tls_connections` and optional Java
-`MySqlTlsIntegrationTest` exercise SQLx, mysql_async, JDBC validation, and Debezium
-JDBC against these servers. They check that empty/unusable CA settings cannot
-break non-verifying connections or cause a private CA to become trusted in a
-verification mode. Java configuration tests also protect legacy Debezium
-truststore/keystore pass-through and mode precedence.
-
-For local fixtures, set `MYSQL_TLS_HOST`, `MYSQL_TLS_WRONG_HOST`, `MYSQL_TLS_PORT`,
-`MYSQL_TLS_CERT_DIR`, `MYSQL_NO_TLS_HOST`, and `MYSQL_NO_TLS_PORT` and run:
-
-```sh
-cargo test -p risingwave_connector --lib test_mysql_tls_connections -- --ignored
-mvn -f java/pom.xml -pl connector-node/risingwave-connector-service -am test \
-  -Dno-build-rust -Dtest=MySqlSslConfigTest,MySqlTlsIntegrationTest \
-  -Dsurefire.failIfNoSpecifiedTests=false
-```
-
-The SLT uses those six variables plus the regular RiseDev MySQL variables for
-its default-mode fixture. With RisingWave and the three MySQL fixtures running:
+With RisingWave and the two MySQL fixtures running, set `MYSQL_TLS_HOST`,
+`MYSQL_TLS_PORT`, `MYSQL_NO_TLS_HOST`, and `MYSQL_NO_TLS_PORT`, then run:
 
 ```sh
 ./risedev slt e2e_test/source_inline/cdc/mysql/mysql_tls.slt.serial
 ```
-
-On locally published Docker ports, use `localhost` as the matching TLS host and
-`127.0.0.1` as the mismatching host.
