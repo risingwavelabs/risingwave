@@ -27,7 +27,9 @@ import java.util.HashMap;
 import java.util.Map;
 import org.junit.Test;
 
-/** Run with MYSQL_TLS_HOST, MYSQL_TLS_WRONG_HOST, MYSQL_TLS_PORT, and MYSQL_TLS_CERT_DIR. */
+/**
+ * Run against the ci/mysql-tls and mysql-no-tls fixtures using their MYSQL_* environment variables.
+ */
 public class MySqlTlsIntegrationTest {
     @Test
     public void validatesJdbcAndDebeziumConnections() throws Exception {
@@ -35,16 +37,26 @@ public class MySqlTlsIntegrationTest {
         assumeTrue("requires the ci/mysql-tls fixture", host != null);
         String wrongHost = System.getenv("MYSQL_TLS_WRONG_HOST");
         String certDir = System.getenv("MYSQL_TLS_CERT_DIR");
+        String tlsPort = System.getenv("MYSQL_TLS_PORT");
+        String noTlsHost = System.getenv("MYSQL_NO_TLS_HOST");
+        String noTlsPort = System.getenv("MYSQL_NO_TLS_PORT");
         for (String[] test :
                 new String[][] {
-                    {"disabled", host, null, "false"},
-                    {"required", host, null, "true"},
-                    {"verify-ca", host, "ca.pem", "true"},
-                    {"verify-ca", wrongHost, "ca.pem", "true"},
-                    {"verify-full", host, "ca.pem", "true"},
-                    {"verify-full", wrongHost, "ca.pem", "false"},
-                    {"verify-ca", host, "untrusted-ca.pem", "false"},
-                    {"verify-full", host, "untrusted-ca.pem", "false"},
+                    {"disabled", host, null, "false", tlsPort, "false"},
+                    {"preferred", host, null, "true", tlsPort, "true"},
+                    {"prefer", wrongHost, null, "true", tlsPort, "true"},
+                    {"required", host, null, "true", tlsPort, "true"},
+                    {"verify-ca", host, "ca.pem", "true", tlsPort, "true"},
+                    {"verify-ca", wrongHost, "ca.pem", "true", tlsPort, "true"},
+                    {"verify-full", host, "ca.pem", "true", tlsPort, "true"},
+                    {"verify-full", wrongHost, "ca.pem", "false", tlsPort, "false"},
+                    {"verify-ca", host, "untrusted-ca.pem", "false", tlsPort, "false"},
+                    {"verify-full", host, "untrusted-ca.pem", "false", tlsPort, "false"},
+                    {"disabled", noTlsHost, null, "true", noTlsPort, "false"},
+                    {"preferred", noTlsHost, null, "true", noTlsPort, "false"},
+                    {"required", noTlsHost, null, "false", noTlsPort, "false"},
+                    {"verify-ca", noTlsHost, "ca.pem", "false", noTlsPort, "false"},
+                    {"verify-full", noTlsHost, "ca.pem", "false", noTlsPort, "false"},
                 }) {
             var options =
                     new HashMap<>(
@@ -54,7 +66,7 @@ public class MySqlTlsIntegrationTest {
                                     "hostname",
                                     test[1],
                                     "port",
-                                    System.getenv("MYSQL_TLS_PORT"),
+                                    test[4],
                                     "username",
                                     "root",
                                     "password",
@@ -83,7 +95,10 @@ public class MySqlTlsIntegrationTest {
                         "SHOW SESSION STATUS LIKE 'Ssl_cipher'",
                         rows -> {
                             assertTrue(rows.next());
-                            assertFalse(rows.getString(2).isEmpty());
+                            assertEquals(
+                                    description,
+                                    Boolean.parseBoolean(test[5]),
+                                    !rows.getString(2).isEmpty());
                         });
                 assertTrue(description, succeeds);
             } catch (Exception e) {

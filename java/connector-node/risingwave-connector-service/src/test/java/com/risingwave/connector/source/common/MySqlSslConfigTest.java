@@ -34,6 +34,10 @@ public class MySqlSslConfigTest {
                                 "disabled",
                                 "disable",
                                 "disabled",
+                                "preferred",
+                                "preferred",
+                                "prefer",
+                                "preferred",
                                 "required",
                                 "required",
                                 "require",
@@ -75,10 +79,7 @@ public class MySqlSslConfigTest {
 
     @Test
     public void rejectsAmbiguousOrUnsupportedOptions() {
-        for (String mode :
-                new String[] {
-                    "preferred", "prefer", "verify_ca", "verify_identity", "REQUIRED", "bogus"
-                }) {
+        for (String mode : new String[] {"verify_ca", "verify_identity", "REQUIRED", "bogus"}) {
             assertThrows(
                     IllegalArgumentException.class,
                     () -> MySqlSslConfig.fromProperties(Map.of("ssl.mode", mode)));

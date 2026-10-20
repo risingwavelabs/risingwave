@@ -14,10 +14,11 @@ source_ids = subprocess.check_output(
         "-d", os.environ["SLT_DB"], "-U", "root", "-Atc",
         "SELECT id FROM rw_catalog.rw_sources WHERE name IN "
         "('s_mysql_tls_required', 's_mysql_tls_verify_ca', "
-        "'s_mysql_tls_verify_full', 's_mysql_tls_alias')",
+        "'s_mysql_tls_verify_full', 's_mysql_tls_alias', "
+        "'s_mysql_tls_preferred', 's_mysql_tls_preferred_fallback')",
     ], text=True,
 ).splitlines()
-assert len(source_ids) == 4, source_ids
+assert len(source_ids) == 6, source_ids
 deadline = time.monotonic() + 90
 last_error = None
 while time.monotonic() < deadline:

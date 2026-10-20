@@ -63,12 +63,10 @@ public final class MySqlSslConfig {
                     case "required", "require" -> "required";
                     case "verify-ca", "verifyca" -> "verify_ca";
                     case "verify-full", "verifyfull" -> "verify_identity";
-                    case "preferred", "prefer" ->
-                            throw new IllegalArgumentException(
-                                    "MySQL ssl.mode=preferred is unsupported; use disabled or required explicitly");
+                    case "preferred", "prefer" -> "preferred";
                     default ->
                             throw new IllegalArgumentException(
-                                    "invalid MySQL ssl.mode; expected disabled, required, verify-ca, or verify-full");
+                                    "invalid MySQL ssl.mode; expected disabled, preferred, required, verify-ca, or verify-full");
                 };
         String rootCert = option(properties, "ssl.root.cert", "debezium.database.sslrootcert");
         if (rootCert != null) {

@@ -32,6 +32,7 @@ dpkg -i mongodb-mongosh_2.5.8_amd64.deb
 # TLS fixture shared by the SLT and the direct Rust driver tests.
 export MYSQL_TLS_HOST=mysql-tls MYSQL_TLS_WRONG_HOST=mysql-tls-wrong-host
 export MYSQL_TLS_PORT=3306 MYSQL_TLS_CERT_DIR=/mysql-tls
+export MYSQL_NO_TLS_HOST=mysql-no-tls MYSQL_NO_TLS_PORT=3306
 
 echo "--- Run inline CDC source tests"
 risedev slt './e2e_test/source_inline/cdc/**/*.slt' --skip 'cron_only' -j1 --label "can-use-recover"

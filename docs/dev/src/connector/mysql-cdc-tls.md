@@ -7,12 +7,19 @@ binlog monitoring. Configure them on the shared CDC source; its tables inherit t
 | `ssl.mode` | Encryption | Verify CA | Verify hostname |
 | --- | --- | --- | --- |
 | `disabled` (default) | No | No | No |
+| `preferred` | When the server supports TLS | No | No |
 | `required` | Required | No | No |
 | `verify-ca` | Required | Yes | No |
 | `verify-full` | Required | Yes | Yes |
 
-`preferred` is rejected because the Rust backfill/monitoring driver cannot provide
-TLS-first, plaintext-fallback behavior. Use `disabled` or `required` explicitly.
+`preferred` (also `prefer`) remains supported: connect with TLS when the server
+advertises TLS support, otherwise connect in plaintext. It does not verify the CA
+or hostname. The Rust pool retries without TLS only when the server lacks the
+MySQL `CLIENT_SSL` capability, never on TLS handshake, authentication, or network
+errors. It checks again on each acquisition rather than permanently selecting
+plaintext after one fallback. Previously this pool always used plaintext for
+`preferred`; backfill, primary key discovery, and monitoring now also work with
+TLS-required servers.
 An invalid mode is an error, including during monitoring; it never falls back to
 plaintext.
 
@@ -28,8 +35,8 @@ client would verify it while the other drivers would not.
 For compatibility, `debezium.database.sslmode` aliases `ssl.mode`, and
 `debezium.database.sslrootcert` aliases `ssl.root.cert`. Specify either the
 canonical name or its alias; specifying both is an error, even if their values
-match. The older values `disable`, `require`, `verifyca`, and `verifyfull` are also
-accepted. Values are case sensitive. Use the canonical hyphenated verification
+match. The older values `disable`, `prefer`, `require`, `verifyca`, and `verifyfull`
+are also accepted. Values are case sensitive. Use the canonical hyphenated verification
 names, not Java's `verify_ca` or `verify_identity`.
 
 Raw `database.ssl.*` and `debezium.database.ssl.*` options (including
@@ -48,18 +55,21 @@ is constructed. Existing connections must be restarted to pick up rotated CAs.
 ## Regression tests
 
 `ci/mysql-tls/generate-certs.sh` creates disposable test certificates. The
-`mysql-tls` Compose service requires TLS. Its `mysql-tls-wrong-host` alias points
-to the same server but is absent from the certificate's SANs. The CDC CI lane
+`mysql-tls` Compose service requires TLS; its `mysql-tls-wrong-host` alias points
+to the same server but is absent from the certificate's SANs. The `mysql-no-tls`
+service disables TLS. The CDC CI lane
 mounts the CA volume into RisingWave and runs
 `e2e_test/source_inline/cdc/mysql/mysql_tls.slt.serial`. That test covers schema
 inference, backfill, streaming, recovery, aliases, rejection cases, and successful
-binlog monitoring for every TLS mode.
+binlog monitoring for every TLS mode, including `preferred` with TLS and its
+plaintext fallback on a server without TLS.
 
 The CDC CI script also runs the ignored Rust `test_mysql_tls_connections` test.
 It tests both SQLx and the shared mysql_async pool against the real TLS server,
-including untrusted CAs and hostname mismatches. For a local fixture, set
-`MYSQL_TLS_HOST`, `MYSQL_TLS_WRONG_HOST`, `MYSQL_TLS_PORT`, and
-`MYSQL_TLS_CERT_DIR` and run:
+including untrusted CAs, hostname mismatches, repeated pool acquisitions, and
+plaintext fallback only for `preferred` (strict TLS modes still fail without TLS).
+For local fixtures, set `MYSQL_TLS_HOST`, `MYSQL_TLS_WRONG_HOST`, `MYSQL_TLS_PORT`,
+`MYSQL_TLS_CERT_DIR`, `MYSQL_NO_TLS_HOST`, and `MYSQL_NO_TLS_PORT` and run:
 
 ```sh
 cargo test -p risingwave_connector --lib test_mysql_tls_connections -- --ignored
@@ -68,8 +78,8 @@ mvn -f java/pom.xml -pl connector-node/risingwave-connector-service -am test \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-The SLT uses the same four TLS environment variables, plus the regular RiseDev
-MySQL variables for its plaintext fixture. With RisingWave and both MySQL
+The SLT uses the same six environment variables, plus the regular RiseDev
+MySQL variables for its `disabled` fixture. With RisingWave and all three MySQL
 fixtures running, execute it with:
 
 ```sh

@@ -307,7 +307,7 @@ pub struct ExternalTableConfig {
     #[serde(rename = "table.name")]
     pub table: String,
     /// SSL/TLS mode for Postgres and MySQL upstream connections.
-    /// MySQL supports disabled, required, verify-ca, and verify-full.
+    /// MySQL supports disabled, preferred, required, verify-ca, and verify-full.
     /// This field is optional.
     #[serde(rename = "ssl.mode", default = "postgres_ssl_mode_default")]
     #[serde(alias = "debezium.database.sslmode")]
