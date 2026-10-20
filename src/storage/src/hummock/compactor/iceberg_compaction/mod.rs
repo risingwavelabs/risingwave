@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use self::iceberg_compactor_runner::create_task_execution;
+pub(crate) use self::iceberg_compactor_runner::{IcebergTaskExecution, create_task_execution};
 #[cfg(madsim)]
 pub use self::report::set_simulated_pk_index_compaction_result;
 #[cfg(madsim)]

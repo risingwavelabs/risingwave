@@ -60,7 +60,8 @@ message BarrierCompleteResponse {
     uint64 consumed_epoch = 3;
     // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
-    uint64 pending_epoch_lag = 5;
+    reserved 5;
+    reserved "pending_epoch_lag";
     // Buffered rows that are yet to be consumed (used by locality backfill to report precise progress)
     uint64 buffered_rows = 6;
     uint32 fragment_id = 7;
@@ -212,9 +213,22 @@ message GetMinUncommittedObjectIdResponse {
   uint64 min_uncommitted_object_id = 1;
 }
 
+message WarmUpTableCacheRequest {
+  uint32 table_id = 1;
+  common.Buffer vnode_bitmap = 2;
+  uint64 committed_epoch = 3;
+  // Maximum number of vnodes scanned concurrently on this compute node.
+  uint32 concurrency = 4;
+}
+
+message WarmUpTableCacheResponse {
+  uint64 key_count = 1;
+}
+
 service StreamService {
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
   rpc GetMinUncommittedObjectId(GetMinUncommittedObjectIdRequest) returns (GetMinUncommittedObjectIdResponse);
+  rpc WarmUpTableCache(WarmUpTableCacheRequest) returns (WarmUpTableCacheResponse);
 }
 
 // TODO: Lifecycle management for actors.

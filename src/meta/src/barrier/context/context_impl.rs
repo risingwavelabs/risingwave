@@ -275,16 +275,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         let (serving_workers, fragment_serving_infos) =
             fetch_serving_infos(&self.metadata_manager).await?;
 
-        self.env
-            .notification_manager()
-            .notify_hummock(
-                Operation::Update,
-                Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
-                    table_cache_refill_policies: Some(policies),
-                    ..Default::default()
-                }),
-            )
-            .await;
+        self.env.notification_manager().notify_hummock(
+            Operation::Update,
+            Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                table_cache_refill_policies: Some(policies),
+                ..Default::default()
+            }),
+        );
         sync_serving_table_vnode_mappings_to_hummock(
             &self.env.notification_manager_ref(),
             &self.serving_vnode_mapping,

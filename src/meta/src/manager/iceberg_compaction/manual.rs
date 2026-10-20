@@ -29,7 +29,10 @@ impl IcebergCompactionManager {
             .unwrap_or(IcebergReportTaskStatus::Unspecified);
         let result = match status {
             IcebergReportTaskStatus::Success => Ok(report.task_id),
-            IcebergReportTaskStatus::Drained
+            IcebergReportTaskStatus::BlockedCapacity
+            | IcebergReportTaskStatus::BlockedStatistics
+            | IcebergReportTaskStatus::Busy
+            | IcebergReportTaskStatus::Drained
             | IcebergReportTaskStatus::Failed
             | IcebergReportTaskStatus::Unspecified => {
                 let message = report

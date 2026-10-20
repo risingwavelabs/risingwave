@@ -38,7 +38,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
         // This assert is to make sure AsOf join can use `JoinChunkBuilder` as Hash join.
         assert_eq!(AsOfJoinType::Inner, JoinType::Inner);
         assert_eq!(AsOfJoinType::LeftOuter, JoinType::LeftOuter);
-        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for AsOf join"));
+        let vnodes = Arc::new(params.vnode_bitmap);
 
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 

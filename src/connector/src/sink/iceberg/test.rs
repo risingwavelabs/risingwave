@@ -395,6 +395,7 @@ fn test_parse_iceberg_config() {
             max_snapshots_num_before_compaction: Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM),
             small_files_threshold_mb: None,
             delete_files_count_threshold: None,
+            delete_ratio_percent: None,
             trigger_snapshot_count: None,
             target_file_size_mb: None,
             compaction_type: None,

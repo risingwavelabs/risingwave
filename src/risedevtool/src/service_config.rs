@@ -467,6 +467,27 @@ pub struct PostgresConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct OracleConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+    pub pdb: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct SqlServerConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -629,6 +650,7 @@ pub enum ServiceConfig {
     MySql(MySqlConfig),
     MariaDb(MariaDbConfig),
     Postgres(PostgresConfig),
+    Oracle(OracleConfig),
     SqlServer(SqlServerConfig),
     MongoDb(MongoDbConfig),
     ElasticSearch(ElasticSearchConfig),
@@ -649,6 +671,7 @@ pub enum TaskGroup {
     MySql,
     MariaDb,
     Postgres,
+    Oracle,
     SqlServer,
     MongoDb,
     ElasticSearch,
@@ -684,6 +707,7 @@ impl ServiceConfig {
             Self::MySql(c) => &c.id,
             Self::MariaDb(c) => &c.id,
             Self::Postgres(c) => &c.id,
+            Self::Oracle(c) => &c.id,
             Self::SqlServer(c) => &c.id,
             Self::MongoDb(c) => &c.id,
             Self::ElasticSearch(c) => &c.id,
@@ -719,6 +743,7 @@ impl ServiceConfig {
             Self::MySql(c) => Some(c.port),
             Self::MariaDb(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
+            Self::Oracle(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
             Self::MongoDb(c) => Some(c.port),
             Self::ElasticSearch(c) => Some(c.port),
@@ -753,6 +778,7 @@ impl ServiceConfig {
             Self::MySql(c) => c.user_managed,
             Self::MariaDb(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
+            Self::Oracle(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
             Self::MongoDb(c) => c.user_managed,
             Self::ElasticSearch(c) => c.user_managed,
@@ -799,6 +825,7 @@ impl ServiceConfig {
                     Postgres
                 }
             }
+            ServiceConfig::Oracle(_) => Oracle,
             ServiceConfig::SqlServer(_) => SqlServer,
             ServiceConfig::MongoDb(_) => MongoDb,
             ServiceConfig::ElasticSearch(_) => ElasticSearch,

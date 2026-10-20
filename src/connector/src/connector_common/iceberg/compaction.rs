@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use ::iceberg::spec::{FormatVersion, TableMetadata};
+
 use crate::sink::catalog::SinkId;
 
 #[derive(Debug, Clone)]
@@ -22,6 +24,19 @@ pub struct IcebergCommittedSnapshot {
     /// Inclusive file sequence number boundary for this snapshot. Iceberg V1
     /// does not support file sequence numbers.
     pub max_file_sequence_number: Option<i64>,
+}
+
+impl IcebergCommittedSnapshot {
+    /// Describes the head snapshot of `branch`, or returns `None` if the branch has no snapshot.
+    pub fn from_branch_head(metadata: &TableMetadata, branch: &str) -> Option<Self> {
+        metadata.snapshot_for_ref(branch).map(|snapshot| Self {
+            branch: branch.to_owned(),
+            snapshot_id: snapshot.snapshot_id(),
+            timestamp_ms: snapshot.timestamp_ms(),
+            max_file_sequence_number: (metadata.format_version() >= FormatVersion::V2)
+                .then_some(snapshot.sequence_number()),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]

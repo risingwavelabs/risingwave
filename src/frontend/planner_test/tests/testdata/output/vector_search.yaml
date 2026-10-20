@@ -707,3 +707,33 @@
                       └─BatchExchange { order: [], dist: Single }
                         └─BatchScan { table: items, columns: [items.name, items.embedding], scan_ranges: [items.id > Int32(0)], distribution: SomeShard }
   stream_error: LogicalVectorSearchLookupJoin should use proper vector index in streaming job
+- id: create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    create table da (id int, tag varchar, v vector(3)) append only;
+    create materialized view dma as select * from da order by tag;
+    create index via on dma using hnsw (v) include (id) with (distance_type = 'l2');
+- name: vector index that does not store the primary key of an ORDER BY mv serves covered queries
+  before:
+  - create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    select id from dma order by v <-> '[1, 2, 3]' limit 5;
+  batch_plan: |-
+    BatchProject { exprs: [$expr1] }
+    └─BatchExchange { order: [$expr2 ASC], dist: Single }
+      └─BatchSort { order: [$expr2 ASC] }
+        └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 2:Int32) as $expr2] }
+          └─BatchProjectSet { select_list: [Unnest($1)] }
+            └─BatchVectorSearch { top_n: 5, distance_type: L2Sqr, index_name: "via", vector: query_vector, lookup_output: [("id", Int32), ("dma.da._row_id", Serial)], include_distance: true, hnsw_ef_search: 40 }
+              └─BatchValues { rows: [['[1,2,3]':Vector(3)]] }
+- name: vector index that does not store the primary key of an ORDER BY mv is not used to look up the mv
+  before:
+  - create_vector_index_without_order_key_on_order_by_mv
+  sql: |
+    select id, tag from dma order by v <-> '[1, 2, 3]' limit 5;
+  batch_plan: |-
+    BatchProject { exprs: [dma.id, dma.tag] }
+    └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+          └─BatchProject { exprs: [dma.id, dma.tag, L2Distance(dma.v, '[1,2,3]':Vector(3)) as $expr1] }
+            └─BatchScan { table: dma, columns: [dma.id, dma.tag, dma.v], distribution: SomeShard }

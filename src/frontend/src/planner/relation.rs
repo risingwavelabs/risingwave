@@ -107,8 +107,37 @@ impl Planner {
         Ok(LogicalIcebergMetadataScan::new(core).into())
     }
 
+    /// Rejects time travel in a streaming job. A streaming job keeps following its upstream, so it
+    /// can't read a fixed snapshot, and its plan would silently read the latest data instead.
+    /// `FOR SYSTEM_TIME AS OF PROCTIME()` stays allowed: it marks the lookup side of a temporal join.
+    fn check_no_time_travel_in_stream(&self, as_of: Option<&AsOf>) -> Result<()> {
+        let is_stream = matches!(
+            self.plan_for(),
+            PlanFor::Stream | PlanFor::StreamIcebergEngineInternal
+        );
+        let is_time_travel = matches!(
+            as_of,
+            Some(
+                AsOf::ProcessTimeWithInterval(_)
+                    | AsOf::TimestampNum(_)
+                    | AsOf::TimestampString(_)
+                    | AsOf::VersionNum(_)
+                    | AsOf::VersionString(_)
+            )
+        );
+        if is_stream && is_time_travel {
+            return Err(ErrorCode::NotSupported(
+                "time travel in a streaming job".to_owned(),
+                "`FOR SYSTEM_TIME AS OF` and `FOR SYSTEM_VERSION AS OF` are only supported in batch queries. Remove the clause, or use `FOR SYSTEM_TIME AS OF PROCTIME()` for a temporal join.".to_owned(),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
+        self.check_no_time_travel_in_stream(as_of.as_ref())?;
         let scan = LogicalScan::from_base_table(base_table, self.ctx(), as_of.clone());
 
         match base_table.table_catalog.engine {
@@ -396,6 +425,7 @@ impl Planner {
             .into())
         } else {
             let as_of = source.as_of.clone();
+            self.check_no_time_travel_in_stream(as_of.as_ref())?;
             match as_of {
                 None
                 | Some(AsOf::VersionNum(_))
@@ -1001,25 +1031,22 @@ source: {:?}",
     }
 }
 
-/// Find the latest known RisingWave commit boundary. Iceberg compaction produces `replace`
-/// snapshots without changing table contents, so the marker is inherited across a chain of those
-/// snapshots. We deliberately stop at any other unmarked operation: an external or legacy append
-/// cannot be assigned a safe log-store boundary.
+/// Find the latest known RisingWave commit boundary. A `replace` snapshot never changes table
+/// contents, so its boundary is always its parent's. Any marker on it is ignored: compaction copies
+/// the marker of the snapshot it planned against, but commits on top of the latest head, so a sink
+/// commit that lands in between makes the copied marker stale. We deliberately stop at any other
+/// unmarked operation: an external or legacy append cannot be assigned a safe log-store boundary.
 fn risingwave_iceberg_commit_epoch(metadata: &TableMetadata, snapshot_id: i64) -> Option<u64> {
     let mut snapshot = metadata.snapshot_by_id(snapshot_id)?;
-    loop {
-        if let Some(epoch) = snapshot
-            .summary()
-            .additional_properties
-            .get(RISINGWAVE_ICEBERG_COMMIT_EPOCH)
-        {
-            return epoch.parse().ok();
-        }
-        if snapshot.summary().operation != Operation::Replace {
-            return None;
-        }
+    while snapshot.summary().operation == Operation::Replace {
         snapshot = metadata.snapshot_by_id(snapshot.parent_snapshot_id()?)?;
     }
+    snapshot
+        .summary()
+        .additional_properties
+        .get(RISINGWAVE_ICEBERG_COMMIT_EPOCH)?
+        .parse()
+        .ok()
 }
 
 fn resolve_current_cdc_table_desc(
@@ -1070,6 +1097,30 @@ mod tests {
             external_append,
         ]);
         assert_eq!(risingwave_iceberg_commit_epoch(&metadata, 3), None);
+
+        // Compaction planned at epoch 41 but committed after the sink commit of epoch 42, so the
+        // marker it copied from the planned snapshot is stale.
+        let metadata = metadata_with_current(vec![
+            snapshot(
+                1,
+                None,
+                Operation::Append,
+                HashMap::from([(RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "41".to_owned())]),
+            ),
+            snapshot(
+                2,
+                Some(1),
+                Operation::Append,
+                HashMap::from([(RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "42".to_owned())]),
+            ),
+            snapshot(
+                3,
+                Some(2),
+                Operation::Replace,
+                HashMap::from([(RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(), "41".to_owned())]),
+            ),
+        ]);
+        assert_eq!(risingwave_iceberg_commit_epoch(&metadata, 3), Some(42));
     }
 
     fn metadata_with_current(mut snapshots: Vec<Snapshot>) -> TableMetadata {

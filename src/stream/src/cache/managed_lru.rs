@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use risingwave_common::lru::{LruCache, RandomState};
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::RelabeledAggregatedIntGauge;
 use risingwave_common::sequence::AtomicSequence;
 use risingwave_common_estimate_size::EstimateSize;
 
@@ -228,14 +228,14 @@ impl<V: EstimateSize> DerefMut for MutGuard<'_, V> {
 }
 
 struct HeapSizeReporter {
-    metrics: LabelGuardedIntGauge,
+    metrics: RelabeledAggregatedIntGauge,
     heap_size: usize,
     last_reported: usize,
 }
 
 impl HeapSizeReporter {
     fn new(
-        heap_size_metrics: LabelGuardedIntGauge,
+        heap_size_metrics: RelabeledAggregatedIntGauge,
         heap_size: usize,
         last_reported: usize,
     ) -> Self {
