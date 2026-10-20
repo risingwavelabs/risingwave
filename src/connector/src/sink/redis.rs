@@ -95,6 +95,15 @@ impl RedisPipe {
         }
     }
 
+    /// Whether no command has been queued. Executing an empty pipeline fails on the client side
+    /// with `empty command`, so callers must not `query` in this case.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            RedisPipe::Cluster(pipe) => pipe.cmd_iter().next().is_none(),
+            RedisPipe::Single(pipe) => pipe.is_empty(),
+        }
+    }
+
     pub fn set(
         &mut self,
         k: RedisSinkPayloadWriterInput,
@@ -526,6 +535,13 @@ impl RedisSinkPayloadWriter {
     }
 
     pub async fn commit(&mut self) -> Result<()> {
+        // A chunk may have no visible rows left (e.g. all INSERT/DELETE pairs were cancelled out
+        // by inline compaction after a log store replay). Sending an empty pipeline makes the
+        // redis client fail with `empty command` and the sink would retry forever.
+        if self.pipe.is_empty() {
+            return Ok(());
+        }
+
         #[cfg(test)]
         {
             if self.conn.is_none() {
@@ -625,6 +641,7 @@ mod test {
 
     use rdkafka::message::FromBytes;
     use risingwave_common::array::{Array, I32Array, Op, Utf8Array};
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
@@ -632,6 +649,74 @@ mod test {
     use super::*;
     use crate::sink::catalog::{SinkEncode, SinkFormat};
     use crate::sink::log_store::DeliveryFutureManager;
+
+    #[test]
+    fn test_pipe_is_empty() {
+        let mut pipe = RedisPipe::Single(redis::pipe());
+        assert!(pipe.is_empty());
+        pipe.set(
+            RedisSinkPayloadWriterInput::String("k".to_owned()),
+            RedisSinkPayloadWriterInput::String("v".to_owned()),
+        )
+        .unwrap();
+        assert!(!pipe.is_empty());
+        pipe.clear();
+        assert!(pipe.is_empty());
+
+        let mut cluster_pipe = RedisPipe::Cluster(redis::cluster::cluster_pipe());
+        assert!(cluster_pipe.is_empty());
+        cluster_pipe
+            .del(RedisSinkPayloadWriterInput::String("k".to_owned()))
+            .unwrap();
+        assert!(!cluster_pipe.is_empty());
+    }
+
+    /// A chunk whose rows are all invisible (e.g. every INSERT/DELETE pair was cancelled out by
+    /// inline compaction) generates no redis command. It must be a successful no-op instead of
+    /// executing an empty pipeline.
+    #[tokio::test]
+    async fn test_write_chunk_without_visible_rows() {
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".to_owned(),
+            },
+        ]);
+        let mut btree_map = BTreeMap::default();
+        btree_map.insert(KEY_FORMAT.to_owned(), "key-{id}".to_owned());
+        btree_map.insert(VALUE_FORMAT.to_owned(), "value-{name}".to_owned());
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::Upsert,
+            encode: SinkEncode::Template,
+            options: btree_map,
+            secret_refs: Default::default(),
+            key_encode: None,
+            connection_id: None,
+        };
+        let mut writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
+            .await
+            .unwrap();
+        let mut manager = DeliveryFutureManager::new(0);
+
+        let chunk = StreamChunk::with_visibility(
+            vec![Op::Insert, Op::Insert, Op::Delete, Op::Delete],
+            vec![
+                I32Array::from_iter(vec![1, 2, 1, 2]).into_ref(),
+                Utf8Array::from_iter(vec!["a", "b", "a", "b"]).into_ref(),
+            ],
+            Bitmap::zeros(4),
+        );
+        writer
+            .write_chunk(chunk, manager.start_write_chunk(0, 0))
+            .await
+            .unwrap();
+
+        assert!(writer.payload_writer.pipe.is_empty());
+    }
 
     #[tokio::test]
     async fn test_write() {
