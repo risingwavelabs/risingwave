@@ -333,6 +333,9 @@ for_all_wrapped_id_fields! (
         GetTablesResponse {
             tables: TableId,
         }
+        RemoveIcebergTableOrphanFilesRequest {
+            sink_id: SinkId,
+        }
         ReplaceJobPlan.ReplaceSink {
             old_sink_id: SinkId,
             dependencies: ObjectId,
@@ -977,6 +980,11 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.RefreshFinishedActor {
             reporter_actor_id: ActorId,
             table_id: TableId,
+        }
+        BarrierCompleteResponse.TableChangeLogProgress {
+            fragment_id: FragmentId,
+            upstream_table_id: TableId,
+            progress_table_id: TableId,
         }
         GetMinUncommittedObjectIdResponse {
             min_uncommitted_object_id: HummockRawObjectId,

@@ -62,7 +62,7 @@ use crate::source::cdc::external::{
 /// * `port` - MySQL server port
 /// * `username` - MySQL username
 /// * `password` - MySQL password
-/// * `database` - Database name
+/// * `database` - Optional default database; omit for server-wide queries
 /// * `ssl_mode` - SSL mode configuration (disabled, preferred, required, verify-ca, verify-full)
 ///
 /// # Returns
@@ -72,7 +72,7 @@ pub fn build_mysql_connection_pool(
     port: u16,
     username: &str,
     password: &str,
-    database: &str,
+    database: Option<&str>,
     ssl_mode: SslMode,
 ) -> mysql_async::Pool {
     let opts_builder = mysql_async::OptsBuilder::default()
@@ -80,7 +80,7 @@ pub fn build_mysql_connection_pool(
         .pass(Some(password))
         .ip_or_hostname(host)
         .tcp_port(port)
-        .db_name(Some(database))
+        .db_name(database)
         .ssl_opts(mysql_ssl_opts(ssl_mode));
 
     mysql_async::Pool::new(opts_builder)
@@ -161,7 +161,7 @@ fn build_external_table_connection_pool(config: &ExternalTableConfig) -> mysql_a
             config.port.parse::<u16>().unwrap(),
             &config.username,
             &config.password,
-            &config.database,
+            Some(&config.database),
             config.ssl_mode.clone(),
         )
     }

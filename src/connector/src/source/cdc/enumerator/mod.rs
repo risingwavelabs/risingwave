@@ -516,11 +516,6 @@ impl DebeziumSplitEnumerator<Mysql> {
             .properties
             .get("password")
             .ok_or_else(|| anyhow::anyhow!("missing `password` in CDC properties"))?;
-        let database = self
-            .properties
-            .get("database.name")
-            .ok_or_else(|| anyhow::anyhow!("missing `database.name` in CDC properties"))?;
-
         // Get SSL mode configuration (default to Disabled if not specified)
         let ssl_mode = self
             .properties
@@ -528,9 +523,9 @@ impl DebeziumSplitEnumerator<Mysql> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(SslMode::Preferred);
 
-        // Build MySQL connection pool with proper SSL configuration
-        let pool =
-            build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
+        // SHOW BINARY LOGS is server-wide. Do not select a default database: database.name
+        // can be a comma-separated list for a shared source.
+        let pool = build_mysql_connection_pool(hostname, port, username, password, None, ssl_mode);
         let mut conn = pool
             .get_conn()
             .await

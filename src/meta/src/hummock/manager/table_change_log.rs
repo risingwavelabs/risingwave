@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use risingwave_common::catalog::TableId;
@@ -23,11 +24,21 @@ use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
     QueryTrait, TransactionTrait,
 };
+use tracing::warn;
 
-use crate::controller::streaming_job::TableChangeLogTruncateInfo;
+use crate::controller::streaming_job::{
+    ProgressTableChangeLogSubscriber, TableChangeLogTruncateInfo,
+};
 use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::model::ext::to_table_change_log;
+
+#[derive(Clone, Debug)]
+pub struct CommittedTableChangeLogProgress {
+    pub upstream_table_id: TableId,
+    pub progress_table_id: TableId,
+    pub truncate_epoch: u64,
+}
 
 fn update_truncate_epoch(
     truncate_epochs: &mut HashMap<TableId, u64>,
@@ -38,6 +49,41 @@ fn update_truncate_epoch(
         .entry(table_id)
         .and_modify(|epoch| *epoch = (*epoch).min(truncate_epoch))
         .or_insert(truncate_epoch);
+}
+
+fn resolve_progress_table_truncate_epochs(
+    subscribers: &[ProgressTableChangeLogSubscriber],
+    progress: &HashMap<TableId, (TableId, u64)>,
+) -> (HashMap<TableId, u64>, HashSet<TableId>) {
+    let mut truncate_epochs = HashMap::new();
+    let mut untruncatable_table_ids = HashSet::new();
+    for subscriber in subscribers {
+        match progress.get(&subscriber.progress_table_id) {
+            Some((upstream_table_id, truncate_epoch))
+                if *upstream_table_id == subscriber.upstream_table_id =>
+            {
+                update_truncate_epoch(&mut truncate_epochs, *upstream_table_id, *truncate_epoch);
+            }
+            Some((upstream_table_id, _)) => {
+                debug_assert_eq!(
+                    *upstream_table_id, subscriber.upstream_table_id,
+                    "progress table {} changed upstream table",
+                    subscriber.progress_table_id
+                );
+                warn!(
+                    progress_table_id = %subscriber.progress_table_id,
+                    expected_upstream_table_id = %subscriber.upstream_table_id,
+                    actual_upstream_table_id = %upstream_table_id,
+                    "progress table changed upstream table; veto table change log truncation"
+                );
+                untruncatable_table_ids.insert(subscriber.upstream_table_id);
+            }
+            None => {
+                untruncatable_table_ids.insert(subscriber.upstream_table_id);
+            }
+        }
+    }
+    (truncate_epochs, untruncatable_table_ids)
 }
 
 fn resolve_table_change_log_truncate_epochs(
@@ -62,14 +108,14 @@ fn resolve_table_change_log_truncate_epochs(
         update_truncate_epoch(&mut truncate_epochs, *table_id, truncate_epoch);
     }
 
-    for job in &info.independent_jobs {
+    for job in &info.committed_epoch_truncate_jobs {
         let mut all_snapshot_epochs_none = true;
         for (upstream_table_id, snapshot_epoch) in &job.upstream_table_snapshot_epochs {
             match snapshot_epoch {
                 Some(_) => all_snapshot_epochs_none = false,
                 None => {
-                    // The independent job has not fixed a safe snapshot epoch yet. This vetoes
-                    // truncation even when another consumer provides a concrete cutoff.
+                    // The job has not fixed a safe snapshot epoch yet. This vetoes truncation
+                    // even when another subscriber provides a concrete cutoff.
                     untruncatable_table_ids.insert(*upstream_table_id);
                 }
             }
@@ -79,14 +125,17 @@ fn resolve_table_change_log_truncate_epochs(
         }
 
         let mut state_table_ids = job.state_table_ids.iter();
-        let first_table_id = state_table_ids
-            .next()
-            .ok_or_else(|| anyhow!("independent job {} has no state table", job.job_id))?;
+        let first_table_id = state_table_ids.next().ok_or_else(|| {
+            anyhow!(
+                "committed epoch truncate job {} has no state table",
+                job.job_id
+            )
+        })?;
         let committed_epoch = version
             .table_committed_epoch(*first_table_id)
             .ok_or_else(|| {
                 anyhow!(
-                    "cannot get committed epoch of state table {} in independent job {}",
+                    "cannot get committed epoch of state table {} in committed epoch truncate job {}",
                     first_table_id,
                     job.job_id
                 )
@@ -95,14 +144,14 @@ fn resolve_table_change_log_truncate_epochs(
             let table_committed_epoch =
                 version.table_committed_epoch(*table_id).ok_or_else(|| {
                     anyhow!(
-                        "cannot get committed epoch of state table {} in independent job {}",
+                        "cannot get committed epoch of state table {} in committed epoch truncate job {}",
                         table_id,
                         job.job_id
                     )
                 })?;
             if table_committed_epoch != committed_epoch {
                 return Err(anyhow!(
-                    "state tables {} and {} in independent job {} have different committed epochs {} and {}",
+                    "state tables {} and {} in committed epoch truncate job {} have different committed epochs {} and {}",
                     first_table_id,
                     table_id,
                     job.job_id,
@@ -124,8 +173,46 @@ fn resolve_table_change_log_truncate_epochs(
 }
 
 impl HummockManager {
+    pub(super) fn update_table_change_log_progress(
+        &self,
+        updates: impl IntoIterator<Item = CommittedTableChangeLogProgress>,
+    ) {
+        let mut progress = self.table_change_log_progress.write();
+        for update in updates {
+            let key = update.progress_table_id;
+            progress
+                .entry(key)
+                .and_modify(|(upstream_table_id, truncate_epoch)| {
+                    assert_eq!(*upstream_table_id, update.upstream_table_id);
+                    if update.truncate_epoch < *truncate_epoch {
+                        debug_assert!(
+                            update.truncate_epoch >= *truncate_epoch,
+                            "table change log progress regressed from {} to {} for progress table {}",
+                            *truncate_epoch,
+                            update.truncate_epoch,
+                            update.progress_table_id,
+                        );
+                        warn!(
+                            progress_table_id = %update.progress_table_id,
+                            previous_epoch = *truncate_epoch,
+                            reported_epoch = update.truncate_epoch,
+                            "table change log progress regressed"
+                        );
+                    } else {
+                        *truncate_epoch = update.truncate_epoch;
+                    }
+                })
+                .or_insert((update.upstream_table_id, update.truncate_epoch));
+        }
+    }
+
     pub async fn truncate_table_change_log(&self, info: TableChangeLogTruncateInfo) -> Result<()> {
         let _timer = self.metrics.table_change_log_truncate_latency.start_timer();
+        let resolution_started_at = Instant::now();
+        let (progress_table_truncate_epochs, progress_table_untruncatable_table_ids) = {
+            let progress = self.table_change_log_progress.read();
+            resolve_progress_table_truncate_epochs(&info.progress_table_subscribers, &progress)
+        };
         let mut versioning = self
             .versioning
             .write_with_process_name("truncate_table_change_log")
@@ -137,14 +224,31 @@ impl HummockManager {
             current_time_epoch,
         )
         .map_err(Error::Internal)?;
+        let mut truncate_epochs = truncate_epochs;
+        for (table_id, truncate_epoch) in progress_table_truncate_epochs {
+            update_truncate_epoch(&mut truncate_epochs, table_id, truncate_epoch);
+        }
+        truncate_epochs
+            .retain(|table_id, _| !progress_table_untruncatable_table_ids.contains(table_id));
         let truncate_epochs: Vec<_> = truncate_epochs
             .into_iter()
             .filter(|(table_id, _)| versioning.table_change_log.contains_key(table_id))
             .collect();
+        let resolution_time = resolution_started_at.elapsed();
+        let table_count = truncate_epochs.len();
         if truncate_epochs.is_empty() {
+            tracing::info!(
+                resolution_time = ?resolution_time,
+                truncation_time = ?std::time::Duration::ZERO,
+                table_count,
+                rows_affected = 0,
+                may_delete_object_count = 0,
+                "table change log truncation finished"
+            );
             return Ok(());
         }
 
+        let truncation_started_at = Instant::now();
         let sql_store = self.env.meta_store_ref();
         let txn = sql_store.conn.begin().await?;
         let batch_size = self.env.opts.table_change_log_delete_batch_size as usize;
@@ -224,7 +328,11 @@ impl HummockManager {
         let may_delete_object_count = may_delete_object_ids.len();
         self.gc_manager
             .add_may_delete_object_ids(may_delete_object_ids.into_iter());
+        let truncation_time = truncation_started_at.elapsed();
         tracing::info!(
+            resolution_time = ?resolution_time,
+            truncation_time = ?truncation_time,
+            table_count,
             rows_affected,
             may_delete_object_count,
             "truncated table change logs"
@@ -241,7 +349,41 @@ mod tests {
     use risingwave_pb::hummock::StateTableInfoDelta;
 
     use super::*;
-    use crate::controller::streaming_job::IndependentJobChangeLogInfo;
+    use crate::controller::streaming_job::{
+        CommittedEpochTruncateJob, ProgressTableChangeLogSubscriber,
+    };
+
+    #[test]
+    fn test_resolve_progress_table_truncate_epochs() {
+        let upstream_table_id = TableId::new(1);
+        let subscribers = vec![
+            ProgressTableChangeLogSubscriber {
+                subscriber_job_id: JobId::new(2),
+                upstream_table_id,
+                progress_table_id: TableId::new(3),
+            },
+            ProgressTableChangeLogSubscriber {
+                subscriber_job_id: JobId::new(4),
+                upstream_table_id,
+                progress_table_id: TableId::new(5),
+            },
+        ];
+        let progress = HashMap::from([
+            (TableId::new(3), (upstream_table_id, 100)),
+            (TableId::new(5), (upstream_table_id, 80)),
+        ]);
+
+        let (truncate_epochs, untruncatable) =
+            resolve_progress_table_truncate_epochs(&subscribers, &progress);
+        assert_eq!(truncate_epochs, HashMap::from([(upstream_table_id, 80)]));
+        assert!(untruncatable.is_empty());
+
+        let partial_progress = HashMap::from([(TableId::new(3), (upstream_table_id, 100))]);
+        let (truncate_epochs, untruncatable) =
+            resolve_progress_table_truncate_epochs(&subscribers, &partial_progress);
+        assert_eq!(truncate_epochs, HashMap::from([(upstream_table_id, 100)]));
+        assert_eq!(untruncatable, HashSet::from([upstream_table_id]));
+    }
 
     fn version_with_committed_epochs(
         committed_epochs: impl IntoIterator<Item = (TableId, u64)>,
@@ -275,7 +417,8 @@ mod tests {
         ]);
         let info = TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::from([(upstream_table_id, 10)]),
-            independent_jobs: vec![IndependentJobChangeLogInfo {
+            progress_table_subscribers: vec![],
+            committed_epoch_truncate_jobs: vec![CommittedEpochTruncateJob {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([job_state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(
@@ -302,7 +445,8 @@ mod tests {
         ]);
         let info = TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::from([(upstream_table_id, 10)]),
-            independent_jobs: vec![IndependentJobChangeLogInfo {
+            progress_table_subscribers: vec![],
+            committed_epoch_truncate_jobs: vec![CommittedEpochTruncateJob {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([job_state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(upstream_table_id, None)]),
@@ -328,7 +472,8 @@ mod tests {
         ]);
         let info = TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::new(),
-            independent_jobs: vec![IndependentJobChangeLogInfo {
+            progress_table_subscribers: vec![],
+            committed_epoch_truncate_jobs: vec![CommittedEpochTruncateJob {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([state_table_id_1, state_table_id_2]),
                 upstream_table_snapshot_epochs: HashMap::from([(

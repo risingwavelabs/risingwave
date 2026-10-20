@@ -501,6 +501,10 @@ pub async fn start_service_as_election_leader(
         iceberg_compaction_mgr.clone(),
         env.opts.iceberg_gc_interval_sec,
     ));
+    sub_tasks.push(IcebergCompactionManager::orphan_file_cleanup_loop(
+        iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_orphan_file_cleanup_interval_sec,
+    ));
 
     if env.opts.iceberg_compaction_schedule_on_startup {
         sub_tasks.push(IcebergCompactionManager::schedule_on_startup_task(
@@ -644,7 +648,7 @@ pub async fn start_service_as_election_leader(
         env.event_log_manager_ref(),
         prometheus_client.clone(),
         prometheus_selector.clone(),
-        opts.redact_sql_option_keywords.clone(),
+        opts.sql_option_redaction.clone(),
         env.system_params_manager_impl_ref(),
     ));
 
