@@ -105,6 +105,37 @@ SELECT * FROM mysql_tls_required ORDER BY id;
 1 snapshot
 2 streaming
 
+# Rebuild running readers with the new mode and keep ignoring MySQL root-cert paths.
+statement ok
+ALTER SOURCE s_mysql_tls_preferred CONNECTOR WITH (
+  ssl.mode = 'required', ssl.root.cert = '/nonexistent/altered.pem'
+);
+
+statement ok
+ALTER SOURCE s_mysql_tls_preferred_fallback CONNECTOR WITH (
+  ssl.mode = 'disabled', ssl.root.cert = '/nonexistent/altered.pem'
+);
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_TLS_HOST}" --port="${MYSQL_TLS_PORT}" --user=root --password=123456 --ssl-mode=REQUIRED -e "INSERT INTO rw_mysql_tls.t VALUES (3, 'altered');"
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_NO_TLS_HOST}" --port="${MYSQL_NO_TLS_PORT}" --user=root --password=123456 --ssl-mode=DISABLED --get-server-public-key -e "INSERT INTO rw_mysql_tls_fallback.t VALUES (3, 'altered');"
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_preferred ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 altered
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_preferred_fallback ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 altered
+
 statement ok
 FLUSH;
 
@@ -112,31 +143,34 @@ statement ok
 RECOVER;
 
 system ok
-mysql --protocol=tcp --host="${MYSQL_TLS_HOST}" --port="${MYSQL_TLS_PORT}" --user=root --password=123456 --ssl-mode=REQUIRED -e "INSERT INTO rw_mysql_tls.t VALUES (3, 'resumed');"
+mysql --protocol=tcp --host="${MYSQL_TLS_HOST}" --port="${MYSQL_TLS_PORT}" --user=root --password=123456 --ssl-mode=REQUIRED -e "INSERT INTO rw_mysql_tls.t VALUES (4, 'resumed');"
 
 system ok
-mysql --protocol=tcp --host="${MYSQL_NO_TLS_HOST}" --port="${MYSQL_NO_TLS_PORT}" --user=root --password=123456 --ssl-mode=DISABLED --get-server-public-key -e "INSERT INTO rw_mysql_tls_fallback.t VALUES (3, 'resumed');"
+mysql --protocol=tcp --host="${MYSQL_NO_TLS_HOST}" --port="${MYSQL_NO_TLS_PORT}" --user=root --password=123456 --ssl-mode=DISABLED --get-server-public-key -e "INSERT INTO rw_mysql_tls_fallback.t VALUES (4, 'resumed');"
 
 query IT retry 60 backoff 1s
 SELECT * FROM mysql_tls_preferred ORDER BY id;
 ----
 1 snapshot
 2 streaming
-3 resumed
+3 altered
+4 resumed
 
 query IT retry 60 backoff 1s
 SELECT * FROM mysql_tls_preferred_fallback ORDER BY id;
 ----
 1 snapshot
 2 streaming
-3 resumed
+3 altered
+4 resumed
 
 query IT retry 60 backoff 1s
 SELECT * FROM mysql_tls_required ORDER BY id;
 ----
 1 snapshot
 2 streaming
-3 resumed
+3 altered
+4 resumed
 
 statement ok
 DROP SOURCE s_mysql_tls_preferred CASCADE;

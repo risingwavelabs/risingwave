@@ -1,0 +1,92 @@
+# The CI Postgres fixture enables TLS with a self-signed certificate.
+control substitution on
+
+statement ok
+DROP SOURCE IF EXISTS s_pg_alter_ssl CASCADE;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = 'pg_alter_ssl_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = 'pg_alter_ssl_slot';
+    DROP PUBLICATION IF EXISTS pg_alter_ssl_publication;
+    DROP TABLE IF EXISTS pg_alter_ssl;
+    CREATE TABLE pg_alter_ssl (id INT PRIMARY KEY);
+    INSERT INTO pg_alter_ssl VALUES (1);
+"
+
+# Put the fixture's public certificate where both Rust and Java readers can load it.
+system ok
+psql -Atc "SELECT pg_read_file(current_setting('ssl_cert_file'))" > /tmp/rw_pg_alter_ssl_ca.pem
+
+statement ok
+CREATE SOURCE s_pg_alter_ssl WITH (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    slot.name = 'pg_alter_ssl_slot',
+    publication.name = 'pg_alter_ssl_publication',
+    ssl.mode = 'disabled'
+);
+
+statement ok
+CREATE TABLE pg_alter_ssl (*) FROM s_pg_alter_ssl TABLE 'public.pg_alter_ssl';
+
+query I retry 30 backoff 1s
+SELECT * FROM pg_alter_ssl ORDER BY id;
+----
+1
+
+statement ok
+ALTER SOURCE s_pg_alter_ssl CONNECTOR WITH (
+    ssl.mode = 'verify-ca', ssl.root.cert = '/tmp/rw_pg_alter_ssl_ca.pem'
+);
+
+# Check the actual replication connection, not just the catalog properties.
+system ok
+for attempt in $(seq 1 30); do
+    if psql -Atc "SELECT ssl FROM pg_stat_ssl JOIN pg_replication_slots ON pid = active_pid WHERE slot_name = 'pg_alter_ssl_slot'" | grep -qx t; then
+        exit 0
+    fi
+    sleep 1
+done
+exit 1
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "INSERT INTO pg_alter_ssl VALUES (2);"
+
+query I retry 30 backoff 1s
+SELECT * FROM pg_alter_ssl ORDER BY id;
+----
+1
+2
+
+# Snapshots of new tables must also use the updated CA.
+statement ok
+CREATE TABLE pg_alter_ssl_snapshot (id INT PRIMARY KEY)
+FROM s_pg_alter_ssl TABLE 'public.pg_alter_ssl';
+
+query I retry 30 backoff 1s
+SELECT * FROM pg_alter_ssl_snapshot ORDER BY id;
+----
+1
+2
+
+statement ok
+DROP SOURCE s_pg_alter_ssl CASCADE;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = 'pg_alter_ssl_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = 'pg_alter_ssl_slot';
+    DROP PUBLICATION IF EXISTS pg_alter_ssl_publication;
+    DROP TABLE pg_alter_ssl;
+"
+
+system ok
+rm /tmp/rw_pg_alter_ssl_ca.pem

@@ -32,7 +32,7 @@ The shared Rust configuration previously parsed these fields but neither MySQL
 Rust driver used them, and the Java handling of `ssl.root.cert` was PostgreSQL
 specific. Empty paths, missing files, malformed files, and certificate bundles
 are not loaded or validated. Supplying a CA this way does not make a private CA
-trusted and does not enable verification. PostgreSQL behavior is unchanged.
+trusted and does not enable verification. PostgreSQL CA-file handling is unchanged.
 
 `debezium.database.sslmode` aliases `ssl.mode`; the canonical `ssl.mode` takes
 precedence when both are supplied. Mode values are case insensitive, preserving
@@ -52,15 +52,33 @@ Raw options retain their existing behavior rather than being newly rejected:
 This change does not introduce a MySQL PEM CA-file option or generate Java
 truststores. A future custom-CA feature needs a separate compatibility design.
 
+## Altering a running source
+
+MySQL and PostgreSQL CDC sources allow changing `ssl.mode` and `ssl.root.cert`
+with `ALTER SOURCE ... CONNECTOR WITH (...)`. The streaming reader reconnects
+with the updated options and resumes from its saved offset:
+
+```sql
+ALTER SOURCE my_mysql_source CONNECTOR WITH (ssl.mode = 'required');
+```
+
+For MySQL, changing `ssl.root.cert` remains a no-op: the option is still ignored.
+Use the canonical option names when altering; the Debezium aliases are not
+included in the alter allowlist.
+
 ## Regression tests
 
 The `mysql-tls` Compose service requires TLS using MySQL's generated certificates;
 `mysql-no-tls` disables TLS. The CDC CI lane runs
 `e2e_test/source_inline/cdc/mysql/mysql_tls.slt.serial`, covering inferred schemas,
-backfill, streaming, monitoring, and recovery for `required` and both `preferred`
-connection paths. It also checks that verification modes reject the untrusted
-server certificate. Rust and Java unit tests cover mode aliases, option precedence,
-ignored root-cert options, and driver configuration.
+backfill, streaming, monitoring, live SSL option changes, and recovery for
+`required` and both `preferred` connection paths. It also checks that verification
+modes reject the untrusted server certificate. Rust and Java unit tests cover mode
+aliases, option precedence, ignored root-cert options, and driver configuration.
+
+`e2e_test/source_inline/cdc/postgres/postgres_alter_ssl.slt` checks switching a
+running PostgreSQL replication connection from plaintext to CA-verified TLS and
+using the updated CA for new table snapshots.
 
 With RisingWave and the two MySQL fixtures running, set `MYSQL_TLS_HOST`,
 `MYSQL_TLS_PORT`, `MYSQL_NO_TLS_HOST`, and `MYSQL_NO_TLS_PORT`, then run:
