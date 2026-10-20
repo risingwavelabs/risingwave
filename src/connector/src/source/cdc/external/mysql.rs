@@ -87,12 +87,13 @@ pub fn build_mysql_connection_pool(
 }
 
 /// Build a `MariaDB` pool with certificate verification for `verify-ca` and `verify-full`.
+/// Use `None` for server-wide queries and a concrete database for table access.
 pub fn build_mariadb_connection_pool(
     host: &str,
     port: u16,
     username: &str,
     password: &str,
-    database: &str,
+    database: Option<&str>,
     ssl_mode: SslMode,
     ssl_root_cert: Option<&str>,
 ) -> mysql_async::Pool {
@@ -101,7 +102,7 @@ pub fn build_mariadb_connection_pool(
         .pass(Some(password))
         .ip_or_hostname(host)
         .tcp_port(port)
-        .db_name(Some(database))
+        .db_name(database)
         .ssl_opts(mariadb_ssl_opts(ssl_mode, ssl_root_cert));
     mysql_async::Pool::new(opts_builder)
 }
@@ -150,7 +151,7 @@ fn build_external_table_connection_pool(config: &ExternalTableConfig) -> mysql_a
             config.port.parse::<u16>().unwrap(),
             &config.username,
             &config.password,
-            &config.database,
+            Some(&config.database),
             config.ssl_mode.clone(),
             config.ssl_root_cert.as_deref(),
         )

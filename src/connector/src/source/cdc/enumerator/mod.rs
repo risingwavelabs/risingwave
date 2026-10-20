@@ -656,9 +656,6 @@ async fn query_mariadb_binlog_files(
     let password = properties
         .get("password")
         .ok_or_else(|| anyhow!("missing `password` in CDC properties"))?;
-    let database = properties
-        .get("database.name")
-        .ok_or_else(|| anyhow!("missing `database.name` in CDC properties"))?;
     let ssl_mode = properties
         .get("ssl.mode")
         .or_else(|| properties.get("debezium.database.sslmode"))
@@ -668,12 +665,13 @@ async fn query_mariadb_binlog_files(
         .get("ssl.root.cert")
         .or_else(|| properties.get("debezium.database.sslrootcert"))
         .map(String::as_str);
+    // SHOW BINARY LOGS is server-wide. `database.name` can contain multiple databases.
     let pool = build_mariadb_connection_pool(
         hostname,
         port,
         username,
         password,
-        database,
+        None,
         ssl_mode,
         ssl_root_cert,
     );

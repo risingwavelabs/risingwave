@@ -6,6 +6,7 @@ DROP SOURCE IF EXISTS s_mariadb_cdc CASCADE;
 system ok
 mariadb -e "
     CREATE DATABASE IF NOT EXISTS rw_mariadb_cdc;
+    CREATE DATABASE IF NOT EXISTS rw_mariadb_cdc_second;
     DROP USER IF EXISTS 'rw_mariadb_cdc'@'%';
     CREATE USER 'rw_mariadb_cdc'@'%' IDENTIFIED BY 'abcdef';
     GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, BINLOG MONITOR
@@ -18,6 +19,9 @@ mariadb -e "
         amount DECIMAL(10, 2) NOT NULL
     ) ENGINE=InnoDB;
     INSERT INTO orders VALUES (1, 'alice', 10.50), (2, 'bob', 20.00);
+    DROP TABLE IF EXISTS rw_mariadb_cdc_second.orders;
+    CREATE TABLE rw_mariadb_cdc_second.orders LIKE orders;
+    INSERT INTO rw_mariadb_cdc_second.orders VALUES (10, 'eve', 50.00);
 "
 
 statement ok
@@ -25,7 +29,7 @@ CREATE SOURCE s_mariadb_cdc WITH (
     ${RISEDEV_MARIADB_WITH_OPTIONS_COMMON},
     username = 'rw_mariadb_cdc',
     password = 'abcdef',
-    database.name = 'rw_mariadb_cdc',
+    database.name = 'rw_mariadb_cdc,rw_mariadb_cdc_second',
     auto.schema.change = 'true',
     server.id = '4102'
 );
@@ -34,6 +38,11 @@ statement ok
 CREATE TABLE mariadb_orders (*)
 WITH (snapshot = 'true', snapshot.batch_size = 1)
 FROM s_mariadb_cdc TABLE 'rw_mariadb_cdc.orders';
+
+statement ok
+CREATE TABLE mariadb_orders_second (*)
+WITH (snapshot = 'true', snapshot.batch_size = 1)
+FROM s_mariadb_cdc TABLE 'rw_mariadb_cdc_second.orders';
 
 statement ok
 CREATE MATERIALIZED VIEW mariadb_orders_upper AS
@@ -51,6 +60,18 @@ SELECT id, customer, amount FROM mariadb_orders_upper ORDER BY id;
 1 ALICE 10.50
 2 BOB 20.00
 
+query ITT retry 20 backoff 1s
+SELECT id, customer, amount FROM mariadb_orders_second ORDER BY id;
+----
+10 eve 50.00
+
+# Ingestion can succeed even if the server-wide binlog monitor selects the
+# database list as a literal database name. Check health and both upstream gauges.
+system ok
+python3 e2e_test/source_inline/cdc/mariadb/wait_mariadb_cdc_metrics.py \
+    --source-id "$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -Atc \
+        "SELECT id FROM rw_catalog.rw_sources WHERE name = 's_mariadb_cdc'")"
+
 system ok
 mariadb -e "
     USE rw_mariadb_cdc;
@@ -58,6 +79,7 @@ mariadb -e "
     UPDATE orders SET amount = 11.25 WHERE id = 1;
     DELETE FROM orders WHERE id = 2;
     INSERT INTO orders VALUES (3, 'carol', 30.75);
+    UPDATE rw_mariadb_cdc_second.orders SET amount = 51.25 WHERE id = 10;
     COMMIT;
 "
 
@@ -66,6 +88,11 @@ SELECT id, customer, amount FROM mariadb_orders ORDER BY id;
 ----
 1 alice 11.25
 3 carol 30.75
+
+query ITT retry 20 backoff 1s
+SELECT id, customer, amount FROM mariadb_orders_second ORDER BY id;
+----
+10 eve 51.25
 
 onlyif can-use-recover
 statement ok
@@ -93,10 +120,14 @@ statement ok
 DROP TABLE mariadb_orders;
 
 statement ok
+DROP TABLE mariadb_orders_second;
+
+statement ok
 DROP SOURCE s_mariadb_cdc CASCADE;
 
 system ok
 mariadb -e "
     DROP DATABASE IF EXISTS rw_mariadb_cdc;
+    DROP DATABASE IF EXISTS rw_mariadb_cdc_second;
     DROP USER IF EXISTS 'rw_mariadb_cdc'@'%';
 "
