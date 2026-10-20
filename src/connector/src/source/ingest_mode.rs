@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use risingwave_common::bail;
-use risingwave_pb::plan_common::PbSourceRefreshMode;
-use risingwave_pb::plan_common::source_refresh_mode::source_refresh_mode_bounded::Input as PbBoundedInput;
-use risingwave_pb::plan_common::source_refresh_mode::{
-    PbRefreshMode, SourceRefreshModeBounded as PbBounded,
-    SourceRefreshModeFullReload as PbFullReload, SourceRefreshModeStreaming as PbStreaming,
+use risingwave_pb::plan_common::PbSourceIngestMode;
+use risingwave_pb::plan_common::source_ingest_mode::source_ingest_mode_bounded::Input as PbBoundedInput;
+use risingwave_pb::plan_common::source_ingest_mode::{
+    PbIngestMode, SourceIngestModeBounded as PbBounded, SourceIngestModeFullReload as PbFullReload,
+    SourceIngestModeStreaming as PbStreaming,
 };
 
 use crate::error::ConnectorResult;
 use crate::source::iceberg::IcebergBoundedScan;
 
-/// How a source table ingests data. Decoded from [`PbSourceRefreshMode`]
+/// How a source table ingests data. Decoded from [`PbSourceIngestMode`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum RefreshMode {
+pub enum IngestMode {
     /// Ingests continuously.
     #[default]
     Streaming,
@@ -41,34 +41,34 @@ pub enum BoundedInput {
     Iceberg(IcebergBoundedScan),
 }
 
-impl RefreshMode {
-    pub fn from_proto(mode: Option<&PbSourceRefreshMode>) -> ConnectorResult<Self> {
+impl IngestMode {
+    pub fn from_proto(mode: Option<&PbSourceIngestMode>) -> ConnectorResult<Self> {
         let Some(mode) = mode else {
             return Ok(Self::Streaming);
         };
 
-        Ok(match &mode.refresh_mode {
-            None | Some(PbRefreshMode::Streaming(_)) => Self::Streaming,
-            Some(PbRefreshMode::FullReload(full_reload)) => Self::FullReload {
+        Ok(match &mode.ingest_mode {
+            None | Some(PbIngestMode::Streaming(_)) => Self::Streaming,
+            Some(PbIngestMode::FullReload(full_reload)) => Self::FullReload {
                 interval_sec: full_reload.refresh_interval_sec,
             },
-            Some(PbRefreshMode::Bounded(bounded)) => {
+            Some(PbIngestMode::Bounded(bounded)) => {
                 Self::Bounded(BoundedInput::from_proto(bounded)?)
             }
         })
     }
 
-    pub fn to_proto(self) -> PbSourceRefreshMode {
-        let refresh_mode = match self {
-            Self::Streaming => PbRefreshMode::Streaming(PbStreaming {}),
-            Self::FullReload { interval_sec } => PbRefreshMode::FullReload(PbFullReload {
+    pub fn to_proto(self) -> PbSourceIngestMode {
+        let ingest_mode = match self {
+            Self::Streaming => PbIngestMode::Streaming(PbStreaming {}),
+            Self::FullReload { interval_sec } => PbIngestMode::FullReload(PbFullReload {
                 refresh_interval_sec: interval_sec,
             }),
-            Self::Bounded(input) => PbRefreshMode::Bounded(input.to_proto()),
+            Self::Bounded(input) => PbIngestMode::Bounded(input.to_proto()),
         };
 
-        PbSourceRefreshMode {
-            refresh_mode: Some(refresh_mode),
+        PbSourceIngestMode {
+            ingest_mode: Some(ingest_mode),
         }
     }
 
@@ -106,7 +106,7 @@ impl BoundedInput {
             Some(PbBoundedInput::Iceberg(scan)) => {
                 Ok(Self::Iceberg(IcebergBoundedScan::from_proto(scan)?))
             }
-            None => bail!("bounded refresh mode requires a pinned input"),
+            None => bail!("bounded ingest mode requires a pinned input"),
         }
     }
 

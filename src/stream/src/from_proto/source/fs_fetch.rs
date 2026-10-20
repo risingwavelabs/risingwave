@@ -49,7 +49,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
-        let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
+        let is_full_reload_refresh = is_full_reload_refresh(&source.ingest_mode);
 
         let source_id = source.source_id;
         let source_name = source.source_name.clone();

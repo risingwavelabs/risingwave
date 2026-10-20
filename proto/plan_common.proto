@@ -331,21 +331,21 @@ message IcebergBoundedScan {
   }
 }
 
-message SourceRefreshMode {
-  message SourceRefreshModeStreaming {}
-  message SourceRefreshModeFullReload {
+message SourceIngestMode {
+  message SourceIngestModeStreaming {}
+  message SourceIngestModeFullReload {
     optional int64 refresh_interval_sec = 1;
   }
 
-  message SourceRefreshModeBounded {
+  message SourceIngestModeBounded {
     oneof input {
       IcebergBoundedScan iceberg = 1;
     }
   }
 
-  oneof refresh_mode {
-    SourceRefreshModeStreaming streaming = 1;
-    SourceRefreshModeFullReload full_reload = 2;
-    SourceRefreshModeBounded bounded = 3;
+  oneof ingest_mode {
+    SourceIngestModeStreaming streaming = 1;
+    SourceIngestModeFullReload full_reload = 2;
+    SourceIngestModeBounded bounded = 3;
   }
 }

@@ -462,8 +462,8 @@ message ListBoundedJobsResponse {
   message BoundedJob {
     uint32 job_id = 1;
     uint32 source_id = 2;
-    // The input pinned at creation, as stored in the source's refresh mode.
-    plan_common.SourceRefreshMode.SourceRefreshModeBounded input = 3;
+    // The input pinned at creation, as stored in the source's ingest mode.
+    plan_common.SourceIngestMode.SourceIngestModeBounded input = 3;
     optional int64 completed_at = 4;
   }
   repeated BoundedJob jobs = 1;

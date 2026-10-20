@@ -76,8 +76,8 @@ use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
-use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
+use risingwave_pb::plan_common::source_ingest_mode::{IngestMode, SourceIngestModeStreaming};
+use risingwave_pb::plan_common::{EncodeType, FormatType, SourceIngestMode};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
@@ -115,7 +115,7 @@ use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::utils::{
     OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
-    resolve_secret_ref_in_with_options, resolve_source_refresh_mode_in_with_option,
+    resolve_secret_ref_in_with_options, resolve_source_ingest_mode_in_with_option,
 };
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
@@ -757,19 +757,19 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     format_encode: &FormatEncodeOptions,
     is_create_source: bool,
-) -> Result<(WithOptions, SourceRefreshMode)> {
+) -> Result<(WithOptions, SourceIngestMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(format_encode, &mut with_properties)?;
-    let refresh_mode = {
-        let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
-        if is_create_source && refresh_mode.is_some() {
+    let ingest_mode = {
+        let ingest_mode = resolve_source_ingest_mode_in_with_option(&mut with_properties)?;
+        if is_create_source && ingest_mode.is_some() {
             return Err(RwError::from(ProtocolError(
                 "`refresh_mode` only supported for CREATE TABLE".to_owned(),
             )));
         }
 
-        refresh_mode.unwrap_or(SourceRefreshMode {
-            refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+        ingest_mode.unwrap_or(SourceIngestMode {
+            ingest_mode: Some(IngestMode::Streaming(SourceIngestModeStreaming {})),
         })
     };
 
@@ -823,7 +823,7 @@ pub fn bind_connector_props(
             .entry("server.id".to_owned())
             .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
-    Ok((with_properties, refresh_mode))
+    Ok((with_properties, ingest_mode))
 }
 
 fn must_wait_cdc_offset_before_report(with_properties: &WithOptions) -> bool {
@@ -909,7 +909,7 @@ pub async fn bind_create_source_or_table_with_connector(
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
-    refresh_mode: SourceRefreshMode,
+    ingest_mode: SourceIngestMode,
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
@@ -1169,7 +1169,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
-        refresh_mode: Some(refresh_mode),
+        ingest_mode: Some(ingest_mode),
     };
     Ok(source)
 }
@@ -1221,8 +1221,7 @@ pub async fn handle_create_source(
     }
 
     let format_encode = stmt.format_encode.into_v2_with_warning();
-    let (with_properties, refresh_mode) =
-        bind_connector_props(&handler_args, &format_encode, true)?;
+    let (with_properties, ingest_mode) = bind_connector_props(&handler_args, &format_encode, true)?;
     if let Some(connector) = with_properties.get_connector() {
         ensure_local_fs_connector_allowed(&session, &connector)?;
     }
@@ -1263,7 +1262,7 @@ pub async fn handle_create_source(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
-        refresh_mode,
+        ingest_mode,
     )
     .await?;
 
@@ -1513,7 +1512,7 @@ async fn handle_create_cdc_table_source(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: None,
-        refresh_mode: upstream_source.refresh_mode,
+        ingest_mode: upstream_source.ingest_mode,
     };
 
     session

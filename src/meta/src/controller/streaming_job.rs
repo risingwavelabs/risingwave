@@ -38,7 +38,7 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::refresh_mode::RefreshMode;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
 };
@@ -697,9 +697,9 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
 
                 if table.refreshable {
-                    let trigger_interval_secs = RefreshMode::from_proto(
+                    let trigger_interval_secs = IngestMode::from_proto(
                         src.as_ref()
-                            .and_then(|source_catalog| source_catalog.refresh_mode.as_ref()),
+                            .and_then(|source_catalog| source_catalog.ingest_mode.as_ref()),
                     )?
                     .refresh_interval_sec();
 

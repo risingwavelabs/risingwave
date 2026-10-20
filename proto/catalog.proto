@@ -151,8 +151,8 @@ message Source {
   // Used for secret connect options.
   map<string, secret.SecretRef> secret_refs = 19;
 
-  // Source refresh mode
-  plan_common.SourceRefreshMode refresh_mode = 20;
+  // How the source ingests data: streaming, full reload, or bounded.
+  plan_common.SourceIngestMode ingest_mode = 20;
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
