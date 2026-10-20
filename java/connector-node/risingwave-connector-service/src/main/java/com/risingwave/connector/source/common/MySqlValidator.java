@@ -20,6 +20,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.Catalog;
 import com.risingwave.proto.Data;
+import java.security.cert.CertificateException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -57,11 +58,25 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         var properties = new Properties();
         properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
         properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
-        properties.setProperty(
-                "sslMode", userProps.getOrDefault(DbzConnectorConfig.MYSQL_SSL_MODE, "DISABLED"));
+        MySqlSslConfig.fromProperties(userProps).configureJdbc(properties);
         properties.setProperty("allowPublicKeyRetrieval", "true");
 
-        this.jdbcConnection = DriverManager.getConnection(jdbcUrl, properties);
+        try {
+            this.jdbcConnection = DriverManager.getConnection(jdbcUrl, properties);
+        } catch (SQLException e) {
+            // Source validation returns only the exception message. Preserve certificate
+            // failures that Connector/J wraps as a generic communications error.
+            for (Throwable cause = e.getCause(); cause != null; cause = cause.getCause()) {
+                if (cause instanceof CertificateException) {
+                    throw new SQLException(
+                            "MySQL TLS certificate verification failed: " + cause.getMessage(),
+                            e.getSQLState(),
+                            e.getErrorCode(),
+                            e);
+                }
+            }
+            throw e;
+        }
         this.isCdcSourceJob = isCdcSourceJob;
         this.isBackfillTable = isBackfillTable;
     }

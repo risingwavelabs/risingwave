@@ -1,0 +1,188 @@
+# MySQL TLS and plaintext fixtures: ci/docker-compose.yml.
+# RECOVER requires serial execution. Every positive case tests snapshot, live rows, and resume.
+control substitution on
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_TLS_HOST}" --port="${MYSQL_TLS_PORT}" --user=root --password=123456 --ssl-mode=REQUIRED -e "DROP DATABASE IF EXISTS rw_mysql_tls; CREATE DATABASE rw_mysql_tls; CREATE TABLE rw_mysql_tls.t (id INT PRIMARY KEY, phase VARCHAR(20)); INSERT INTO rw_mysql_tls.t VALUES (1, 'snapshot');"
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_NO_TLS_HOST}" --port="${MYSQL_NO_TLS_PORT}" --user=root --password=123456 --ssl-mode=DISABLED --get-server-public-key -e "DROP DATABASE IF EXISTS rw_mysql_tls_fallback; CREATE DATABASE rw_mysql_tls_fallback; CREATE TABLE rw_mysql_tls_fallback.t (id INT PRIMARY KEY, phase VARCHAR(20)); INSERT INTO rw_mysql_tls_fallback.t VALUES (1, 'snapshot');"
+
+statement ok
+CREATE SOURCE s_mysql_tls_preferred WITH (
+  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
+  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
+  ssl.mode = 'preferred', ssl.root.cert = '/nonexistent/ignored.pem'
+);
+
+statement ok
+CREATE TABLE mysql_tls_preferred (*) FROM s_mysql_tls_preferred TABLE 'rw_mysql_tls.t';
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_preferred;
+----
+1 snapshot
+
+statement ok
+CREATE SOURCE s_mysql_tls_preferred_fallback WITH (
+  connector = 'mysql-cdc', hostname = '${MYSQL_NO_TLS_HOST}', port = '${MYSQL_NO_TLS_PORT}',
+  username = 'root', password = '123456', database.name = 'rw_mysql_tls_fallback',
+  debezium.database.sslmode = 'prefer', debezium.database.sslrootcert = '/nonexistent/ignored.pem'
+);
+
+statement ok
+CREATE TABLE mysql_tls_preferred_fallback (*) FROM s_mysql_tls_preferred_fallback TABLE 'rw_mysql_tls_fallback.t';
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_preferred_fallback;
+----
+1 snapshot
+
+statement ok
+CREATE SOURCE s_mysql_tls_required WITH (
+  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
+  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
+  ssl.mode = 'REQUIRED', debezium.database.sslmode = 'disabled',
+  ssl.root.cert = '/nonexistent/ignored.pem', debezium.database.sslrootcert = '',
+  debezium.database.ssl.mode = 'disabled', database.ssl.mode = 'disabled'
+);
+
+# Inferred schema uses SQLx; backfill and primary key discovery use mysql_async.
+statement ok
+CREATE TABLE mysql_tls_required (*) FROM s_mysql_tls_required TABLE 'rw_mysql_tls.t';
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_required;
+----
+1 snapshot
+
+statement error Connections using insecure transport are prohibited
+CREATE SOURCE s_mysql_tls_bad_disabled WITH (
+  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
+  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
+  ssl.mode = 'disabled'
+);
+
+statement error (?i)MySQL TLS certificate verification failed: .*(trust anchor|PKIX|certificate chain)
+CREATE SOURCE s_mysql_tls_bad_ignored_ca WITH (
+  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
+  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
+  ssl.mode = 'verify-ca', ssl.root.cert = '/nonexistent/ignored.pem'
+);
+
+statement error (?i)MySQL TLS certificate verification failed: .*(trust anchor|PKIX|certificate chain)
+CREATE SOURCE s_mysql_tls_bad_ignored_ca_full WITH (
+  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
+  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
+  ssl.mode = 'verify-full', ssl.root.cert = '/nonexistent/ignored.pem'
+);
+
+# Monitoring must use the same mode while ignoring the legacy CA options.
+system ok
+python3 e2e_test/source_inline/cdc/mysql/check_tls_monitor.py
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_TLS_HOST}" --port="${MYSQL_TLS_PORT}" --user=root --password=123456 --ssl-mode=REQUIRED -e "INSERT INTO rw_mysql_tls.t VALUES (2, 'streaming');"
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_NO_TLS_HOST}" --port="${MYSQL_NO_TLS_PORT}" --user=root --password=123456 --ssl-mode=DISABLED --get-server-public-key -e "INSERT INTO rw_mysql_tls_fallback.t VALUES (2, 'streaming');"
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_preferred ORDER BY id;
+----
+1 snapshot
+2 streaming
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_preferred_fallback ORDER BY id;
+----
+1 snapshot
+2 streaming
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_required ORDER BY id;
+----
+1 snapshot
+2 streaming
+
+# Rebuild running readers with the new mode and keep ignoring MySQL root-cert paths.
+statement ok
+ALTER SOURCE s_mysql_tls_preferred CONNECTOR WITH (
+  ssl.mode = 'required', ssl.root.cert = '/nonexistent/altered.pem'
+);
+
+statement ok
+ALTER SOURCE s_mysql_tls_preferred_fallback CONNECTOR WITH (
+  ssl.mode = 'disabled', ssl.root.cert = '/nonexistent/altered.pem'
+);
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_TLS_HOST}" --port="${MYSQL_TLS_PORT}" --user=root --password=123456 --ssl-mode=REQUIRED -e "INSERT INTO rw_mysql_tls.t VALUES (3, 'altered');"
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_NO_TLS_HOST}" --port="${MYSQL_NO_TLS_PORT}" --user=root --password=123456 --ssl-mode=DISABLED --get-server-public-key -e "INSERT INTO rw_mysql_tls_fallback.t VALUES (3, 'altered');"
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_preferred ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 altered
+
+query IT retry 30 backoff 1s
+SELECT * FROM mysql_tls_preferred_fallback ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 altered
+
+statement ok
+FLUSH;
+
+statement ok
+RECOVER;
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_TLS_HOST}" --port="${MYSQL_TLS_PORT}" --user=root --password=123456 --ssl-mode=REQUIRED -e "INSERT INTO rw_mysql_tls.t VALUES (4, 'resumed');"
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_NO_TLS_HOST}" --port="${MYSQL_NO_TLS_PORT}" --user=root --password=123456 --ssl-mode=DISABLED --get-server-public-key -e "INSERT INTO rw_mysql_tls_fallback.t VALUES (4, 'resumed');"
+
+query IT retry 60 backoff 1s
+SELECT * FROM mysql_tls_preferred ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 altered
+4 resumed
+
+query IT retry 60 backoff 1s
+SELECT * FROM mysql_tls_preferred_fallback ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 altered
+4 resumed
+
+query IT retry 60 backoff 1s
+SELECT * FROM mysql_tls_required ORDER BY id;
+----
+1 snapshot
+2 streaming
+3 altered
+4 resumed
+
+statement ok
+DROP SOURCE s_mysql_tls_preferred CASCADE;
+
+statement ok
+DROP SOURCE s_mysql_tls_preferred_fallback CASCADE;
+
+statement ok
+DROP SOURCE s_mysql_tls_required CASCADE;
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_TLS_HOST}" --port="${MYSQL_TLS_PORT}" --user=root --password=123456 --ssl-mode=REQUIRED -e "DROP DATABASE rw_mysql_tls;"
+
+system ok
+mysql --protocol=tcp --host="${MYSQL_NO_TLS_HOST}" --port="${MYSQL_NO_TLS_PORT}" --user=root --password=123456 --ssl-mode=DISABLED --get-server-public-key -e "DROP DATABASE rw_mysql_tls_fallback;"

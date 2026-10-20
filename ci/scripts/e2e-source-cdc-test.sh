@@ -29,6 +29,10 @@ echo "--- Install mongosh"
 wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb
 dpkg -i mongodb-mongosh_2.5.8_amd64.deb
 
+# MySQL TLS and plaintext fixtures for the CDC regression test.
+export MYSQL_TLS_HOST=mysql-tls MYSQL_TLS_PORT=3306
+export MYSQL_NO_TLS_HOST=mysql-no-tls MYSQL_NO_TLS_PORT=3306
+
 echo "--- Run inline CDC source tests"
 risedev slt './e2e_test/source_inline/cdc/**/*.slt' --skip 'cron_only' -j1 --label "can-use-recover"
 risedev slt './e2e_test/source_inline/cdc/**/*.slt.serial' --skip 'cron_only' --label "can-use-recover"

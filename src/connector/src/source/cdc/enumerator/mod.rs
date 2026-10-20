@@ -34,10 +34,10 @@ use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, Valida
 use tiberius::Config;
 use tokio_postgres::types::PgLsn;
 
-use crate::connector_common::{SslMode, create_pg_client, pg_connection_config_from_properties};
+use crate::connector_common::{create_pg_client, pg_connection_config_from_properties};
 use crate::error::ConnectorResult;
 use crate::sink::sqlserver::SqlServerClient;
-use crate::source::cdc::external::mysql::build_mysql_connection_pool;
+use crate::source::cdc::external::mysql::{build_mysql_connection_pool, mysql_ssl_mode};
 use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Oracle, Postgres,
@@ -515,14 +515,7 @@ impl DebeziumSplitEnumerator<Mysql> {
             .get("database.name")
             .ok_or_else(|| anyhow::anyhow!("missing `database.name` in CDC properties"))?;
 
-        // Get SSL mode configuration (default to Disabled if not specified)
-        let ssl_mode = self
-            .properties
-            .get("ssl.mode")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(SslMode::Preferred);
-
-        // Build MySQL connection pool with proper SSL configuration
+        let ssl_mode = mysql_ssl_mode(&self.properties)?.parse()?;
         let pool =
             build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
         let mut conn = pool

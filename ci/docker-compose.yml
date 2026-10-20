@@ -37,6 +37,42 @@ services:
       timeout: 5s
       retries: 5
 
+  mysql-no-tls:
+    image: mysql:8.0
+    ports:
+      - 3306
+    command:
+      - --skip-ssl
+      - --server-id=27564
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_ROOT_HOST: "%"
+    healthcheck:
+      test: ["CMD-SHELL", "mysql --host=localhost --protocol=tcp --ssl-mode=DISABLED --get-server-public-key -uroot -p123456 -e 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mysql-tls:
+    image: mysql:8.0
+    ports:
+      - 3306
+    command:
+      - --require-secure-transport=ON
+      - --server-id=27563
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_ROOT_HOST: "%"
+    healthcheck:
+      test: ["CMD-SHELL", "mysql --host=localhost --protocol=tcp --ssl-mode=REQUIRED -uroot -p123456 -e 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   moto:
     image: motoserver/moto:5.0.3
     ports:
@@ -239,6 +275,10 @@ services:
         condition: service_started
       mysql:
         condition: service_started
+      mysql-tls:
+        condition: service_healthy
+      mysql-no-tls:
+        condition: service_healthy
       sqlserver-server:
         condition: service_started
       db:
