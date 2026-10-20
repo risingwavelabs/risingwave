@@ -697,14 +697,14 @@ impl CatalogController {
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
 
-                let refresh_mode = src
+                let ingest_mode = src
                     .as_ref()
-                    .map(|source| RefreshMode::from_proto(source.refresh_mode.as_ref()))
+                    .map(|source| IngestMode::from_proto(source.ingest_mode.as_ref()))
                     .transpose()?
                     .unwrap_or_default();
 
                 if let Some(source) = src.as_ref()
-                    && refresh_mode.is_bounded()
+                    && ingest_mode.is_bounded()
                 {
                     BoundedJob::insert(bounded_job::ActiveModel {
                         job_id: Set(job_id),
@@ -716,7 +716,7 @@ impl CatalogController {
                 }
 
                 if table.refreshable {
-                    let trigger_interval_secs = refresh_mode.refresh_interval_sec();
+                    let trigger_interval_secs = ingest_mode.refresh_interval_sec();
 
                     RefreshJob::insert(refresh_job::ActiveModel {
                         table_id: Set(table.id),

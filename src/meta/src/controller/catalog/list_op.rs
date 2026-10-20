@@ -15,9 +15,9 @@
 use risingwave_common::bail;
 use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_common::id::JobId;
-use risingwave_connector::source::refresh_mode::RefreshMode;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
-use risingwave_meta_model::{SourceId, SourceRefreshMode, bounded_job};
+use risingwave_meta_model::{SourceId, SourceIngestMode, bounded_job};
 use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
 use risingwave_pb::meta::list_bounded_jobs_response::BoundedJob as PbBoundedJob;
 use sea_orm::prelude::DateTime;
@@ -34,7 +34,7 @@ impl CatalogController {
 
     pub async fn list_bounded_jobs(&self) -> MetaResult<Vec<PbBoundedJob>> {
         let inner = self.inner.read().await;
-        let jobs: Vec<(JobId, SourceId, Option<i64>, Option<SourceRefreshMode>)> =
+        let jobs: Vec<(JobId, SourceId, Option<i64>, Option<SourceIngestMode>)> =
             bounded_job::Entity::find()
                 .select_only()
                 .columns([
@@ -42,7 +42,7 @@ impl CatalogController {
                     bounded_job::Column::SourceId,
                     bounded_job::Column::CompletedAt,
                 ])
-                .column(source::Column::RefreshMode)
+                .column(source::Column::IngestMode)
                 .join(JoinType::InnerJoin, bounded_job::Relation::Source.def())
                 .join(JoinType::InnerJoin, object::Relation::Source.def())
                 .into_tuple()
@@ -50,9 +50,9 @@ impl CatalogController {
                 .await?;
 
         jobs.into_iter()
-            .map(|(job_id, source_id, completed_at, refresh_mode)| {
-                let mode = refresh_mode.as_ref().map(|mode| mode.to_protobuf());
-                let Some(input) = RefreshMode::from_proto(mode.as_ref())?.bounded_input() else {
+            .map(|(job_id, source_id, completed_at, ingest_mode)| {
+                let mode = ingest_mode.as_ref().map(|mode| mode.to_protobuf());
+                let Some(input) = IngestMode::from_proto(mode.as_ref())?.bounded_input() else {
                     bail!("bounded source {source_id} has no pinned input");
                 };
 

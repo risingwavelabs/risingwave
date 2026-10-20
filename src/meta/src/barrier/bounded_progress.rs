@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::bail;
 use risingwave_common::id::{ActorId, DatabaseId, FragmentId, JobId, SourceId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
-use risingwave_connector::source::refresh_mode::RefreshMode;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_meta_model::{bounded_job, object};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::barrier_complete_response::BoundedLoadProgress;
@@ -124,7 +124,7 @@ impl BoundedLoadTracker {
             visit_stream_node_body(&fragment.nodes, |body| {
                 if let NodeBody::Source(source) = body
                     && let Some(source) = &source.source_inner
-                    && RefreshMode::from_proto(source.refresh_mode.as_ref())
+                    && IngestMode::from_proto(source.ingest_mode.as_ref())
                         .is_ok_and(|mode| mode.is_bounded())
                 {
                     source_id = Some(source.source_id);
@@ -332,9 +332,9 @@ mod tests {
     use risingwave_common::catalog::FragmentTypeMask;
     use risingwave_common::id::WorkerId;
     use risingwave_connector::source::iceberg::IcebergBoundedScan;
-    use risingwave_connector::source::refresh_mode::BoundedInput;
+    use risingwave_connector::source::ingest_mode::BoundedInput;
     use risingwave_meta_model::fragment::DistributionType;
-    use risingwave_pb::plan_common::PbSourceRefreshMode;
+    use risingwave_pb::plan_common::PbSourceIngestMode;
     use risingwave_pb::stream_plan::{
         PbStreamNode, SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
     };
@@ -421,8 +421,8 @@ mod tests {
         assert!(!tracker.take_completed());
     }
 
-    fn bounded_mode() -> PbSourceRefreshMode {
-        RefreshMode::Bounded(BoundedInput::Iceberg(IcebergBoundedScan::Snapshot {
+    fn bounded_mode() -> PbSourceIngestMode {
+        IngestMode::Bounded(BoundedInput::Iceberg(IcebergBoundedScan::Snapshot {
             snapshot_id: 1,
         }))
         .to_proto()
@@ -433,7 +433,7 @@ mod tests {
             node_body: Some(NodeBody::Source(Box::new(SourceNode {
                 source_inner: Some(StreamSource {
                     source_id,
-                    refresh_mode: Some(bounded_mode()),
+                    ingest_mode: Some(bounded_mode()),
                     ..Default::default()
                 }),
             }))),
@@ -446,7 +446,7 @@ mod tests {
             node_body: Some(NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
                 node_inner: Some(StreamFsFetch {
                     source_id,
-                    refresh_mode: Some(bounded_mode()),
+                    ingest_mode: Some(bounded_mode()),
                     ..Default::default()
                 }),
             }))),
