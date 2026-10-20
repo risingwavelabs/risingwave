@@ -124,8 +124,8 @@ pub fn build_mysql_connection_pool(
 
 /// A MySQL pool with TLS-first connection acquisition for `preferred` mode.
 ///
-/// mysql_async requires TLS whenever SSL options are set. Only retry without TLS
-/// when the server explicitly lacks CLIENT_SSL; never downgrade on handshake,
+/// `mysql_async` requires TLS whenever SSL options are set. Only retry without TLS
+/// when the server explicitly lacks `CLIENT_SSL`; never downgrade on handshake,
 /// certificate, authentication, or network errors. Check on every acquisition so
 /// reconnects do not permanently inherit a previous server's TLS capability.
 pub struct MySqlConnectionPool {
