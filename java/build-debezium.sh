@@ -5,7 +5,7 @@ set -euo pipefail
 JAVA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "${JAVA_DIR}")"
 DEBEZIUM_DIR="${JAVA_DIR}/debezium"
-MODULES="debezium-embedded,debezium-connector-mysql,debezium-connector-postgres,debezium-connector-mongodb,debezium-connector-sqlserver,debezium-connector-oracle"
+MODULES="debezium-bom,debezium-embedded,debezium-connector-mysql,debezium-connector-postgres,debezium-connector-mongodb,debezium-connector-sqlserver,debezium-connector-oracle"
 VERSIONS_PLUGIN="org.codehaus.mojo:versions-maven-plugin:2.18.0"
 
 DEBEZIUM_VERSION="$(sed -n 's|.*<debezium.version>\(.*\)</debezium.version>.*|\1|p' "${JAVA_DIR}/pom.xml")"
