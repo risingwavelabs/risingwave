@@ -3073,26 +3073,6 @@ mod tests {
         assert_eq!(infos[0].insert_sst_level, 0);
         assert_eq!(&infos[0].insert_sst_infos, live);
         assert!(infos[0].delete_sst_object_ids.is_empty());
-
-        let mut prune_only = version.version_delta_after();
-        prune_only.state_table_info_delta.insert(
-            TableId::new(200),
-            risingwave_pb::hummock::StateTableInfoDelta {
-                committed_epoch: test_epoch(2),
-                compaction_group_id: group,
-            },
-        );
-        prune_only.group_deltas.insert(
-            group,
-            GroupDeltas {
-                group_deltas: vec![GroupDelta::PruneTableIdsFromSsts(
-                    [TableId::new(200)].into(),
-                )],
-            },
-        );
-        assert!(version.build_sst_delta_infos(&prune_only).is_empty());
-        version.apply_version_delta(&prune_only);
-        assert!(version.levels[&group].l0.sub_levels.is_empty());
     }
 
     #[test]
@@ -3165,6 +3145,10 @@ mod tests {
             ..Default::default()
         };
 
+        assert!(
+            version.build_sst_delta_infos(&version_delta).is_empty(),
+            "prune-only deltas must not create SST refill work"
+        );
         version.apply_version_delta(&version_delta);
 
         let cg = version.get_compaction_group_levels(1.into());

@@ -1946,7 +1946,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_l0_insert_only_refill_policy_uses_serving_ownership() {
+    async fn test_l0_refill_after_truncation_uses_serving_ownership() {
         use risingwave_hummock_sdk::level::Levels;
         use risingwave_hummock_sdk::version::{
             GroupDelta, GroupDeltas, HummockVersionStateTableInfo,
