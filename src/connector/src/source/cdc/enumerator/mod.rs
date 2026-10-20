@@ -37,7 +37,9 @@ use tokio_postgres::types::PgLsn;
 use crate::connector_common::{SslMode, create_pg_client, pg_connection_config_from_properties};
 use crate::error::ConnectorResult;
 use crate::sink::sqlserver::SqlServerClient;
-use crate::source::cdc::external::mysql::build_mysql_connection_pool;
+use crate::source::cdc::external::mysql::{
+    build_mariadb_connection_pool, build_mysql_connection_pool,
+};
 use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mariadb, Mongodb, Mysql, Oracle,
@@ -523,25 +525,12 @@ impl DebeziumSplitEnumerator<Mysql> {
         let ssl_mode = self
             .properties
             .get("ssl.mode")
-            .or_else(|| self.properties.get("debezium.database.sslmode"))
             .and_then(|s| s.parse().ok())
             .unwrap_or(SslMode::Preferred);
-        let ssl_root_cert = self
-            .properties
-            .get("ssl.root.cert")
-            .or_else(|| self.properties.get("debezium.database.sslrootcert"))
-            .map(String::as_str);
 
         // Build MySQL connection pool with proper SSL configuration
-        let pool = build_mysql_connection_pool(
-            hostname,
-            port,
-            username,
-            password,
-            database,
-            ssl_mode,
-            ssl_root_cert,
-        );
+        let pool =
+            build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
         let mut conn = pool
             .get_conn()
             .await
@@ -679,7 +668,7 @@ async fn query_mariadb_binlog_files(
         .get("ssl.root.cert")
         .or_else(|| properties.get("debezium.database.sslrootcert"))
         .map(String::as_str);
-    let pool = build_mysql_connection_pool(
+    let pool = build_mariadb_connection_pool(
         hostname,
         port,
         username,

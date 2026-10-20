@@ -199,7 +199,6 @@ public class SourceValidateHandler {
         validateHeartbeatInterval(props);
         validateHeartbeatTableAutoInitialize(props, request.getSourceType());
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
-        SourceTypeE sourceType = SourceTypeE.valueOf(request.getSourceType());
         switch (request.getSourceType()) {
             case POSTGRES:
                 ensureRequiredProps(props, isCdcSourceJob);
@@ -250,7 +249,11 @@ public class SourceValidateHandler {
                 validateQueueMemoryRatio(props);
                 try (var validator =
                         new MySqlValidator(
-                                sourceType, props, tableSchema, isCdcSourceJob, isBackfillTable)) {
+                                SourceTypeE.valueOf(request.getSourceType()),
+                                props,
+                                tableSchema,
+                                isCdcSourceJob,
+                                isBackfillTable)) {
                     validator.validateAll();
                 }
                 break;
