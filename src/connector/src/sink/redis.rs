@@ -95,6 +95,13 @@ impl RedisPipe {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        match self {
+            RedisPipe::Cluster(pipe) => pipe.cmd_iter().next().is_none(),
+            RedisPipe::Single(pipe) => pipe.is_empty(),
+        }
+    }
+
     pub fn set(
         &mut self,
         k: RedisSinkPayloadWriterInput,
@@ -531,6 +538,11 @@ impl RedisSinkPayloadWriter {
             if self.conn.is_none() {
                 return Ok(());
             }
+        }
+        // A chunk can have no visible rows (e.g. the log store compacted an insert/delete pair
+        // of the same key away), and redis-rs rejects an empty pipeline with "empty command".
+        if self.pipe.is_empty() {
+            return Ok(());
         }
         self.pipe.query::<()>(self.conn.as_mut().unwrap()).await?;
         self.pipe.clear();
