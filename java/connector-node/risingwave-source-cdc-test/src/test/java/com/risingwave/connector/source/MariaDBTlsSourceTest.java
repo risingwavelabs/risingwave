@@ -53,6 +53,7 @@ import org.bouncycastle.asn1.x509.GeneralNames;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.util.IPAddress;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -71,13 +72,6 @@ public class MariaDBTlsSourceTest {
         var caName = new X500Name("CN=RisingWave MariaDB test CA");
         writeCertificate(directory.resolve("ca.pem"), ca, caName, caName, ca.getPrivate(), true);
         var serverKey = generator.generateKeyPair();
-        writeCertificate(
-                directory.resolve("server.pem"),
-                serverKey,
-                new X500Name("CN=localhost"),
-                caName,
-                ca.getPrivate(),
-                false);
         writePem(directory.resolve("server-key.pem"), serverKey.getPrivate());
         var wrongCa = generator.generateKeyPair();
         var wrongName = new X500Name("CN=Untrusted MariaDB test CA");
@@ -102,9 +96,6 @@ public class MariaDBTlsSourceTest {
                                 MountableFile.forHostPath(directory.resolve("ca.pem")),
                                 "/tls/ca.pem")
                         .withCopyFileToContainer(
-                                MountableFile.forHostPath(directory.resolve("server.pem")),
-                                "/tls/server.pem")
-                        .withCopyFileToContainer(
                                 MountableFile.forHostPath(directory.resolve("server-key.pem")),
                                 "/tls/server-key.pem")
                         .withCommand(
@@ -116,6 +107,21 @@ public class MariaDBTlsSourceTest {
                                 "--ssl-ca=/tls/ca.pem",
                                 "--ssl-cert=/tls/server.pem",
                                 "--ssl-key=/tls/server-key.pem")) {
+            String host = database.getHost();
+            writeCertificate(
+                    directory.resolve("server.pem"),
+                    serverKey,
+                    new X500Name("CN=localhost"),
+                    caName,
+                    ca.getPrivate(),
+                    false,
+                    new GeneralName(GeneralName.dNSName, "localhost"),
+                    new GeneralName(GeneralName.iPAddress, "127.0.0.1"),
+                    new GeneralName(
+                            IPAddress.isValid(host) ? GeneralName.iPAddress : GeneralName.dNSName,
+                            host));
+            database.withCopyFileToContainer(
+                    MountableFile.forHostPath(directory.resolve("server.pem")), "/tls/server.pem");
             database.start();
             try (var connection =
                             DriverManager.getConnection(database.getJdbcUrl(), "root", "test");
@@ -228,7 +234,8 @@ public class MariaDBTlsSourceTest {
             X500Name subject,
             X500Name issuer,
             PrivateKey issuerKey,
-            boolean ca)
+            boolean ca,
+            GeneralName... subjectAlternativeNames)
             throws Exception {
         var now = Instant.now();
         var builder =
@@ -244,11 +251,7 @@ public class MariaDBTlsSourceTest {
             builder.addExtension(
                     Extension.subjectAlternativeName,
                     false,
-                    new GeneralNames(
-                            new GeneralName[] {
-                                new GeneralName(GeneralName.dNSName, "localhost"),
-                                new GeneralName(GeneralName.iPAddress, "127.0.0.1")
-                            }));
+                    new GeneralNames(subjectAlternativeNames));
         }
         writePem(
                 path, builder.build(new JcaContentSignerBuilder("SHA256withRSA").build(issuerKey)));

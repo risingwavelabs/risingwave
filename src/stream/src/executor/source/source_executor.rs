@@ -95,8 +95,8 @@ fn clear_mysql_cdc_state_file_seq_metric_if_unassigned(
     }
 }
 
-fn update_mariadb_cdc_state_file_seq_metric(
-    metric_guard: &mut Option<LabelGuardedIntGauge>,
+fn update_mariadb_cdc_state_metrics(
+    metric_guards: &mut Option<(LabelGuardedIntGauge, LabelGuardedIntGauge)>,
     metrics: &StreamingMetrics,
     source_id: &str,
     split_impl: &SplitImpl,
@@ -105,28 +105,33 @@ fn update_mariadb_cdc_state_file_seq_metric(
         return;
     };
 
-    if let Some((file_seq, _)) = mariadb_split.mariadb_binlog_offset() {
-        metric_guard
-            .get_or_insert_with(|| {
+    if let Some((file_seq, position)) = mariadb_split.mariadb_binlog_offset() {
+        let (file_seq_guard, position_guard) = metric_guards.get_or_insert_with(|| {
+            (
                 metrics
                     .mariadb_cdc_state_binlog_file_seq
-                    .with_guarded_label_values(&[source_id])
-            })
-            .set(file_seq as i64);
+                    .with_guarded_label_values(&[source_id]),
+                metrics
+                    .mariadb_cdc_state_binlog_position
+                    .with_guarded_label_values(&[source_id]),
+            )
+        });
+        file_seq_guard.set(file_seq as i64);
+        position_guard.set(position as i64);
     } else {
-        *metric_guard = None;
+        *metric_guards = None;
     }
 }
 
-fn clear_mariadb_cdc_state_file_seq_metric_if_unassigned(
-    metric_guard: &mut Option<LabelGuardedIntGauge>,
+fn clear_mariadb_cdc_state_metrics_if_unassigned(
+    metric_guards: &mut Option<(LabelGuardedIntGauge, LabelGuardedIntGauge)>,
     target_state: &HashMap<SplitId, SplitImpl>,
 ) {
     if !target_state
         .values()
         .any(|split| matches!(split, SplitImpl::MariadbCdc(_)))
     {
-        *metric_guard = None;
+        *metric_guards = None;
     }
 }
 
@@ -141,8 +146,8 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Keep the MySQL CDC state file sequence metric alive while this executor owns the split.
     mysql_cdc_state_binlog_file_seq_guard: Option<LabelGuardedIntGauge>,
-    /// Keep the `MariaDB` CDC state file sequence metric alive while this executor owns the split.
-    mariadb_cdc_state_binlog_file_seq_guard: Option<LabelGuardedIntGauge>,
+    /// Keep the `MariaDB` CDC state metrics alive while this executor owns the split.
+    mariadb_cdc_state_metric_guards: Option<(LabelGuardedIntGauge, LabelGuardedIntGauge)>,
 
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
@@ -176,7 +181,7 @@ impl<S: StateStore> SourceExecutor<S> {
             stream_source_core,
             metrics,
             mysql_cdc_state_binlog_file_seq_guard: None,
-            mariadb_cdc_state_binlog_file_seq_guard: None,
+            mariadb_cdc_state_metric_guards: None,
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
@@ -288,7 +293,7 @@ impl<S: StateStore> SourceExecutor<S> {
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
         let mysql_file_seq_metric_guard = &mut self.mysql_cdc_state_binlog_file_seq_guard;
-        let mariadb_file_seq_metric_guard = &mut self.mariadb_cdc_state_binlog_file_seq_guard;
+        let mariadb_metric_guards = &mut self.mariadb_cdc_state_metric_guards;
         let core = &mut self.stream_source_core;
 
         let target_splits: HashMap<_, _> = target_splits
@@ -369,8 +374,8 @@ impl<S: StateStore> SourceExecutor<S> {
             mysql_file_seq_metric_guard,
             &core.latest_split_info,
         );
-        clear_mariadb_cdc_state_file_seq_metric_if_unassigned(
-            mariadb_file_seq_metric_guard,
+        clear_mariadb_cdc_state_metrics_if_unassigned(
+            mariadb_metric_guards,
             &core.latest_split_info,
         );
 
@@ -531,7 +536,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = &mut self.stream_source_core;
         let mysql_file_seq_metric_guard = &mut self.mysql_cdc_state_binlog_file_seq_guard;
-        let mariadb_file_seq_metric_guard = &mut self.mariadb_cdc_state_binlog_file_seq_guard;
+        let mariadb_metric_guards = &mut self.mariadb_cdc_state_metric_guards;
 
         let cache = core
             .updated_splits_in_epoch
@@ -569,19 +574,13 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .set(position as i64);
                         }
                     }
-                    SplitImpl::MariadbCdc(mariadb_split) => {
-                        update_mariadb_cdc_state_file_seq_metric(
-                            mariadb_file_seq_metric_guard,
+                    SplitImpl::MariadbCdc(_) => {
+                        update_mariadb_cdc_state_metrics(
+                            mariadb_metric_guards,
                             &self.metrics,
                             &source_id,
                             split_impl,
                         );
-                        if let Some((_, position)) = mariadb_split.mariadb_binlog_offset() {
-                            self.metrics
-                                .mariadb_cdc_state_binlog_position
-                                .with_guarded_label_values(&[&source_id])
-                                .set(position as i64);
-                        }
                     }
                     SplitImpl::SqlServerCdc(sqlserver_split) => {
                         if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
@@ -757,8 +756,8 @@ impl<S: StateStore> SourceExecutor<S> {
                         &source_id,
                         ele,
                     );
-                    update_mariadb_cdc_state_file_seq_metric(
-                        &mut self.mariadb_cdc_state_binlog_file_seq_guard,
+                    update_mariadb_cdc_state_metrics(
+                        &mut self.mariadb_cdc_state_metric_guards,
                         &self.metrics,
                         &source_id,
                         ele,
@@ -1425,7 +1424,7 @@ mod tests {
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
-    use risingwave_connector::source::cdc::{DebeziumCdcSplit, Mysql};
+    use risingwave_connector::source::cdc::{DebeziumCdcSplit, Mariadb, Mysql};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -1557,6 +1556,108 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_recovered_mariadb_cdc_state_metrics_are_initialized() -> StreamExecutorResult<()>
+    {
+        let mut state_table_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            MemoryStateStore::new(),
+        )
+        .await;
+        let offset = r#"{"sourceOffset":{"file":"binlog.000123","pos":45678}}"#;
+        let persisted_split = SplitImpl::MariadbCdc(DebeziumCdcSplit::<Mariadb>::new(
+            1001,
+            Some(offset.to_owned()),
+            None,
+        ));
+        let uninitialized_split =
+            SplitImpl::MariadbCdc(DebeziumCdcSplit::<Mariadb>::new(1001, None, None));
+        let epoch_1 = EpochPair::new_test_epoch(test_epoch(1));
+        let epoch_2 = EpochPair::new_test_epoch(test_epoch(2));
+        let epoch_3 = EpochPair::new_test_epoch(test_epoch(3));
+
+        state_table_handler.init_epoch(epoch_1).await?;
+        state_table_handler
+            .set_states(vec![persisted_split.clone()])
+            .await?;
+        state_table_handler
+            .state_table_mut()
+            .commit_for_test(epoch_2)
+            .await?;
+        state_table_handler
+            .state_table_mut()
+            .commit_for_test(epoch_3)
+            .await?;
+
+        let recovered_split = state_table_handler
+            .new_committed_reader(epoch_3)
+            .await?
+            .try_recover_from_state_store(&uninitialized_split)
+            .await?
+            .unwrap();
+        assert_eq!(recovered_split, persisted_split);
+
+        let registry = Registry::new();
+        let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug);
+        let mut metric_guard = None;
+        update_mariadb_cdc_state_metrics(&mut metric_guard, &metrics, "1", &recovered_split);
+
+        // Both series must survive repeated scrapes without another offset update.
+        for _ in 0..3 {
+            for (metric, expected) in [
+                (&metrics.mariadb_cdc_state_binlog_file_seq, 123.0),
+                (&metrics.mariadb_cdc_state_binlog_position, 45678.0),
+            ] {
+                let family = metric.collect().pop().unwrap();
+                assert_eq!(family.get_metric().len(), 1);
+                assert_eq!(
+                    family.get_metric()[0].get_gauge().as_ref().unwrap().value(),
+                    expected
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_mariadb_cdc_state_metrics_are_cleared() {
+        let registry = Registry::new();
+        let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug);
+        let mut metric_guards = None;
+        let split_with_offset = SplitImpl::MariadbCdc(DebeziumCdcSplit::<Mariadb>::new(
+            1001,
+            Some(r#"{"sourceOffset":{"file":"binlog.000123","pos":45678}}"#.to_owned()),
+            None,
+        ));
+        let assigned = hashmap! { split_with_offset.id() => split_with_offset.clone() };
+        for offset in [None, Some("invalid".to_owned())] {
+            update_mariadb_cdc_state_metrics(&mut metric_guards, &metrics, "1", &split_with_offset);
+            clear_mariadb_cdc_state_metrics_if_unassigned(&mut metric_guards, &assigned);
+            assert!(metric_guards.is_some());
+            let split = SplitImpl::MariadbCdc(DebeziumCdcSplit::<Mariadb>::new(1001, offset, None));
+            update_mariadb_cdc_state_metrics(&mut metric_guards, &metrics, "1", &split);
+            assert!(metric_guards.is_none());
+            for metric in [
+                &metrics.mariadb_cdc_state_binlog_file_seq,
+                &metrics.mariadb_cdc_state_binlog_position,
+            ] {
+                drop(metric.collect());
+                assert!(metric.collect().pop().unwrap().get_metric().is_empty());
+            }
+        }
+        update_mariadb_cdc_state_metrics(&mut metric_guards, &metrics, "1", &split_with_offset);
+        clear_mariadb_cdc_state_metrics_if_unassigned(&mut metric_guards, &HashMap::new());
+        assert!(metric_guards.is_none());
+        for metric in [
+            &metrics.mariadb_cdc_state_binlog_file_seq,
+            &metrics.mariadb_cdc_state_binlog_position,
+        ] {
+            drop(metric.collect());
+            assert!(metric.collect().pop().unwrap().get_metric().is_empty());
+        }
     }
 
     #[test]

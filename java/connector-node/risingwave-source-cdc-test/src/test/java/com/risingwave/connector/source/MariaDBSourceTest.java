@@ -145,37 +145,41 @@ public class MariaDBSourceTest {
                     testClient.getEventStream(SourceType.MARIADB, 1005, properties);
             CountDownLatch snapshotSeen = new CountDownLatch(1);
             ExecutorService reader = Executors.newSingleThreadExecutor();
-            Future<StreamResult> changes =
-                    reader.submit(() -> readSnapshotAndTransaction(stream, snapshotSeen));
+            try {
+                Future<StreamResult> changes =
+                        reader.submit(() -> readSnapshotAndTransaction(stream, snapshotSeen));
 
-            assertThat(snapshotSeen.await(30, TimeUnit.SECONDS)).isTrue();
-            try (Statement statement = connection.createStatement()) {
-                connection.setAutoCommit(false);
-                statement.executeUpdate("INSERT INTO orders VALUES (2, 'inserted')");
-                statement.executeUpdate("UPDATE orders SET customer = 'updated' WHERE id = 1");
-                statement.executeUpdate("DELETE FROM orders WHERE id = 2");
-                connection.commit();
-                connection.setAutoCommit(true);
+                assertThat(snapshotSeen.await(30, TimeUnit.SECONDS)).isTrue();
+                try (Statement statement = connection.createStatement()) {
+                    connection.setAutoCommit(false);
+                    statement.executeUpdate("INSERT INTO orders VALUES (2, 'inserted')");
+                    statement.executeUpdate("UPDATE orders SET customer = 'updated' WHERE id = 1");
+                    statement.executeUpdate("DELETE FROM orders WHERE id = 2");
+                    connection.commit();
+                    connection.setAutoCommit(true);
+                }
+
+                StreamResult result = changes.get(30, TimeUnit.SECONDS);
+                assertThat(result.operations()).containsExactlyInAnyOrder("r", "c", "u", "d");
+                assertThat(result.transactionStatuses()).contains("BEGIN", "END");
+                assertThat(result.checkpoint()).isNotBlank();
+
+                connectorChannel.shutdownNow().awaitTermination(10, TimeUnit.SECONDS);
+                awaitMariaDbConnectorStopped();
+                SourceTestClient.performQuery(
+                        connection, "INSERT INTO orders VALUES (3, 'resumed')");
+                restartClient();
+
+                Iterator<GetEventStreamResponse> resumedStream =
+                        testClient.getEventStream(
+                                SourceType.MARIADB, 1005, properties, result.checkpoint(), true);
+                Future<CdcMessage> resumed = reader.submit(() -> readResumedInsert(resumedStream));
+                CdcMessage resumedInsert = resumed.get(30, TimeUnit.SECONDS);
+                assertThat(resumedInsert.getPayload()).contains("\"id\":3", "\"op\":\"c\"");
+                assertThat(resumedInsert.getOffset()).isNotBlank();
+            } finally {
+                reader.shutdownNow();
             }
-
-            StreamResult result = changes.get(30, TimeUnit.SECONDS);
-            assertThat(result.operations()).containsExactlyInAnyOrder("r", "c", "u", "d");
-            assertThat(result.transactionStatuses()).contains("BEGIN", "END");
-            assertThat(result.checkpoint()).isNotBlank();
-
-            connectorChannel.shutdownNow().awaitTermination(10, TimeUnit.SECONDS);
-            awaitMariaDbConnectorStopped();
-            SourceTestClient.performQuery(connection, "INSERT INTO orders VALUES (3, 'resumed')");
-            restartClient();
-
-            Iterator<GetEventStreamResponse> resumedStream =
-                    testClient.getEventStream(
-                            SourceType.MARIADB, 1005, properties, result.checkpoint(), true);
-            Future<CdcMessage> resumed = reader.submit(() -> readResumedInsert(resumedStream));
-            CdcMessage resumedInsert = resumed.get(30, TimeUnit.SECONDS);
-            assertThat(resumedInsert.getPayload()).contains("\"id\":3", "\"op\":\"c\"");
-            assertThat(resumedInsert.getOffset()).isNotBlank();
-            reader.shutdownNow();
         }
     }
 

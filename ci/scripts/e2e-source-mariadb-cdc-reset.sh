@@ -33,9 +33,10 @@ wait_for_count() {
 }
 
 wait_for_binlog_reader() {
+  local previous_max_id=$1
   for _ in {1..30}; do
     if [[ $(run_mariadb -sN -e \
-      "SELECT count(*) FROM information_schema.PROCESSLIST WHERE COMMAND = 'Binlog Dump'") -gt 0 ]]; then
+      "SELECT count(*) FROM information_schema.PROCESSLIST WHERE COMMAND = 'Binlog Dump' AND ID > ${previous_max_id}") -gt 0 ]]; then
       return 0
     fi
     sleep 1
@@ -122,11 +123,13 @@ sleep 5
 wait_for_count "SELECT count(*) FROM mariadb_reset_table" 2
 risedev psql -c "ALTER SOURCE mariadb_reset_source RESET;"
 
+# Ignore sessions from before the restart, even if MariaDB has not removed them yet.
+previous_max_id=$(run_mariadb -sN -e "SELECT COALESCE(MAX(ID), 0) FROM information_schema.PROCESSLIST")
 risedev kill
 risedev ci-resume "${mariadb_risedev_profile}"
 # RESET starts at the latest offset. Wait until it has chosen that offset before
 # writing the row that must be consumed; frontend readiness alone is insufficient.
-wait_for_binlog_reader
+wait_for_binlog_reader "${previous_max_id}"
 run_mariadb -e "INSERT INTO mariadb_reset_test.test_table VALUES (100, 'after-reset');"
 wait_for_count "SELECT count(*) FROM mariadb_reset_table WHERE id = 100" 1
 wait_for_count "SELECT count(*) FROM mariadb_reset_table" 3
