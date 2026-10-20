@@ -69,6 +69,12 @@ impl EnforceSecret for DorisCommon {
 }
 
 impl DorisCommon {
+    fn partial_update_enabled(&self) -> bool {
+        self.partial_update
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+    }
+
     pub(crate) fn build_get_client(&self) -> DorisSchemaClient {
         DorisSchemaClient::new(
             self.url.clone(),
@@ -110,6 +116,34 @@ impl EnforceSecret for DorisConfig {
 }
 
 impl DorisConfig {
+    fn stream_load_headers(
+        &self,
+        schema: &Schema,
+        is_append_only: bool,
+    ) -> HashMap<String, String> {
+        let mut builder = HeaderBuilder::new()
+            .add_common_header()
+            .set_user_password(self.common.user.clone(), self.common.password.clone())
+            .add_json_format()
+            .set_partial_columns(self.common.partial_update.clone())
+            .add_read_json_by_line();
+        if self.common.partial_update_enabled() {
+            let mut columns: Vec<_> = schema
+                .fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect();
+            if !is_append_only {
+                // Doris ignores hidden_columns when an explicit columns header is present.
+                columns.push(DORIS_DELETE_SIGN);
+            }
+            builder = builder.set_columns_name(columns);
+        } else if !is_append_only {
+            builder = builder.add_hidden_column();
+        }
+        builder.build()
+    }
+
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<DorisConfig>(serde_json::to_value(properties).unwrap())
@@ -171,7 +205,8 @@ impl DorisSink {
         let rw_fields_name = self.schema.fields();
         if rw_fields_name.len() > doris_columns_desc.len() {
             return Err(SinkError::Doris(
-                "The columns of the sink must be equal to or a superset of the target table's columns.".to_owned(),
+                "The sink output columns must be a subset of the target table's columns."
+                    .to_owned(),
             ));
         }
 
@@ -188,6 +223,27 @@ impl DorisSink {
                     i.name, value, i.data_type
                 )));
             }
+        }
+        Ok(())
+    }
+
+    fn check_partial_update_keys(&self, key_columns: &[String]) -> Result<()> {
+        let columns: HashSet<_> = self
+            .schema
+            .fields()
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect();
+        let missing_keys: Vec<_> = key_columns
+            .iter()
+            .filter(|name| !columns.contains(name.as_str()))
+            .map(String::as_str)
+            .collect();
+        if !missing_keys.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "Doris partial update requires all target key columns in the sink output. Missing key columns: {}.",
+                missing_keys.join(", ")
+            )));
         }
         Ok(())
     }
@@ -285,6 +341,9 @@ impl Sink for DorisSink {
             )));
         }
         self.check_column_name_and_type(doris_schema.properties)?;
+        if self.config.common.partial_update_enabled() {
+            self.check_partial_update_keys(&client.get_key_columns().await?)?;
+        }
         Ok(())
     }
 }
@@ -335,17 +394,7 @@ impl DorisSinkWriter {
             }
         }
 
-        let header_builder = HeaderBuilder::new()
-            .add_common_header()
-            .set_user_password(config.common.user.clone(), config.common.password.clone())
-            .add_json_format()
-            .set_partial_columns(config.common.partial_update.clone())
-            .add_read_json_by_line();
-        let header = if !is_append_only {
-            header_builder.add_hidden_column().build()
-        } else {
-            header_builder.build()
-        };
+        let header = config.stream_load_headers(&schema, is_append_only);
 
         let doris_insert_builder = InserterInnerBuilder::new(
             config.common.url.clone(),
@@ -489,7 +538,42 @@ impl DorisSchemaClient {
 
     pub async fn get_schema_from_doris(&self) -> Result<DorisSchema> {
         let uri = format!("{}/api/{}/{}/_schema", self.url, self.db, self.table);
+        let json_data = self.get_metadata(&uri).await?;
+        serde_json::from_value(json_data)
+            .context("Can't get schema from json")
+            .map_err(SinkError::DorisStarrocksConnect)
+    }
 
+    async fn get_key_columns(&self) -> Result<Vec<String>> {
+        let uri = format!(
+            "{}/api/meta/namespaces/default_cluster/databases/{}/tables/{}/schema",
+            self.url, self.db, self.table
+        );
+        let json_data = self.get_metadata(&uri).await?;
+        Self::parse_key_columns(json_data, &self.table)
+    }
+
+    fn parse_key_columns(json_data: Value, table: &str) -> Result<Vec<String>> {
+        let mut schemas: HashMap<String, DorisTableKeySchema> = serde_json::from_value(json_data)
+            .context("Can't get Doris key-column metadata")
+            .map_err(SinkError::DorisStarrocksConnect)?;
+        let schema = schemas
+            .remove(table)
+            .filter(|schema| schema.is_base)
+            .ok_or_else(|| {
+                SinkError::Doris(format!(
+                    "Can't find base-table key metadata for Doris table {table}"
+                ))
+            })?;
+        Ok(schema
+            .schema
+            .into_iter()
+            .filter(|column| column.is_key)
+            .map(|column| column.name)
+            .collect())
+    }
+
+    async fn get_metadata(&self, uri: &str) -> Result<Value> {
         let client = reqwest::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build()
@@ -506,6 +590,7 @@ impl DorisSchemaClient {
             )
             .send()
             .await
+            .and_then(reqwest::Response::error_for_status)
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
         let json: Value = response
@@ -513,6 +598,12 @@ impl DorisSchemaClient {
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
         let json_data = if json.get("code").is_some() && json.get("msg").is_some() {
+            if json["code"].as_i64() != Some(0) {
+                return Err(SinkError::Doris(format!(
+                    "Doris metadata request failed: {}",
+                    json["msg"]
+                )));
+            }
             json.get("data")
                 .ok_or_else(|| {
                     SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't find data"))
@@ -521,12 +612,26 @@ impl DorisSchemaClient {
         } else {
             json
         };
-        let schema: DorisSchema = serde_json::from_value(json_data)
-            .context("Can't get schema from json")
-            .map_err(SinkError::DorisStarrocksConnect)?;
-        Ok(schema)
+        Ok(json_data)
     }
 }
+
+#[derive(Deserialize)]
+struct DorisTableKeySchema {
+    is_base: bool,
+    schema: Vec<DorisColumnKey>,
+}
+
+#[serde_as]
+#[derive(Deserialize)]
+struct DorisColumnKey {
+    #[serde(rename = "Field")]
+    name: String,
+    #[serde(rename = "Key")]
+    #[serde_as(as = "DisplayFromStr")]
+    is_key: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DorisSchema {
     status: i32,
