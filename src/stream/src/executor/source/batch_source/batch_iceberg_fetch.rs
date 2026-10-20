@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
+use std::time::Duration;
 
 use either::Either;
 use futures::stream;
@@ -32,11 +33,11 @@ use risingwave_connector::source::iceberg::{
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_pb::stream_plan::bounded_load_mutation::Action as BoundedLoadAction;
 use risingwave_pb::stream_service::barrier_complete_response::bounded_load_progress::{
-    Progress, ReaderDone,
+    LoadFailed, Progress, ReaderDone,
 };
 use thiserror_ext::AsReport;
 
-use super::load_mode::LoadMode;
+use super::load_mode::{Backoff, LoadMode};
 use crate::executor::prelude::*;
 use crate::executor::source::{ChunksWithState, StreamSourceCore, prune_additional_cols};
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -52,9 +53,12 @@ enum FetchPhase {
     Loading,
     /// Listing is sealed; finish the remaining files.
     Draining,
+    /// The load gave up after repeated errors.
+    Failed,
 }
 
 struct FetchState {
+    mode: LoadMode,
     phase: FetchPhase,
 
     /// Number of files currently being fetched in the active batch reader
@@ -66,15 +70,20 @@ struct FetchState {
     /// Files currently being fetched by the batch reader.
     /// Used for at-least-once recovery: on error, these files are re-queued.
     in_flight_files: Vec<FileEntry>,
+
+    /// Delays the retries of the current load; once a bounded load's backoff runs out, it fails.
+    backoff: Backoff,
 }
 
 impl FetchState {
-    fn new() -> Self {
+    fn new(mode: LoadMode) -> Self {
         Self {
+            mode,
             phase: FetchPhase::Idle,
             splits_on_fetch: 0,
             file_queue: VecDeque::new(),
             in_flight_files: Vec::new(),
+            backoff: mode.backoff(),
         }
     }
 
@@ -89,6 +98,7 @@ impl FetchState {
         self.file_queue.clear();
         self.in_flight_files.clear();
         self.splits_on_fetch = 0;
+        self.backoff = self.mode.backoff();
         self.phase = FetchPhase::Loading;
     }
 
@@ -106,14 +116,26 @@ impl FetchState {
             && self.phase == FetchPhase::Draining
     }
 
-    /// Mark the load as complete after reporting completion.
-    fn mark_complete(&mut self) {
+    /// Return to idle once the load has reported its outcome.
+    fn mark_idle(&mut self) {
         self.phase = FetchPhase::Idle;
+    }
+
+    /// Stop the load after repeated errors and drop the remaining files.
+    fn mark_failed(&mut self) {
+        self.file_queue.clear();
+        self.in_flight_files.clear();
+        self.splits_on_fetch = 0;
+        self.phase = FetchPhase::Failed;
+    }
+
+    fn is_failed(&self) -> bool {
+        self.phase == FetchPhase::Failed
     }
 
     /// Check if we should start a new batch reader.
     fn should_start_batch_reader(&self, need_rebuild: bool) -> bool {
-        self.phase != FetchPhase::Idle
+        matches!(self.phase, FetchPhase::Loading | FetchPhase::Draining)
             && (need_rebuild || (self.splits_on_fetch == 0 && !self.file_queue.is_empty()))
     }
 
@@ -296,7 +318,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             .clone();
 
         // Initialize state and stream reader
-        let mut state = FetchState::new();
+        let mut state = FetchState::new(mode);
         let mut stream = StreamReaderWithPause::<true, ChunksWithState>::new(
             upstream,
             stream::pending().boxed(),
@@ -326,6 +348,18 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
                     scan_metrics.record_fetch_error();
 
+                    let Some(delay) = state.backoff.next() else {
+                        tracing::error!(
+                            source_id = %core.source_id,
+                            table_id = %self.associated_table_id,
+                            error = %e.as_report(),
+                            "bounded load failed after repeated fetch errors"
+                        );
+                        state.mark_failed();
+                        stream.replace_data_stream(stream::pending().boxed());
+                        continue;
+                    };
+
                     let in_flight_count = state.in_flight_files.len();
                     state.handle_error_recovery();
 
@@ -338,14 +372,23 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                         );
                     }
 
-                    stream.replace_data_stream(stream::pending().boxed());
-
                     tracing::info!(
                         source_id = %core.source_id,
                         table_id = %self.associated_table_id,
                         remaining_files = %state.file_queue.len(),
-                        "attempting to recover from fetch error, will retry on next barrier"
+                        ?delay,
+                        "attempting to recover from fetch error, will retry after the delay"
                     );
+
+                    Self::start_batch_reader(
+                        &mut state,
+                        &mut stream,
+                        source_desc.clone(),
+                        &self.streaming_config,
+                        file_scan_metrics.clone(),
+                        Some(delay),
+                    )?;
+                    scan_metrics.set_inflight_file_count(state.splits_on_fetch);
 
                     continue;
                 }
@@ -360,6 +403,16 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             &mut stream,
                             &mode,
                         );
+
+                        if barrier.is_checkpoint() && state.is_failed() {
+                            self.barrier_manager.report_bounded_load_progress(
+                                barrier.epoch,
+                                self.actor_ctx.id,
+                                self.actor_ctx.fragment_id,
+                                Progress::LoadFailed(LoadFailed {}),
+                            );
+                            state.mark_idle();
+                        }
 
                         if barrier.is_checkpoint() && state.should_report_finished() {
                             tracing::info!(
@@ -387,7 +440,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                     );
                                 }
                             }
-                            state.mark_complete();
+                            state.mark_idle();
                         }
 
                         yield Message::Barrier(barrier);
@@ -399,6 +452,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                 source_desc.clone(),
                                 &self.streaming_config,
                                 file_scan_metrics.clone(),
+                                None,
                             )?;
 
                             scan_metrics.set_inflight_file_count(state.splits_on_fetch);
@@ -519,6 +573,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         source_desc: SourceDesc,
         streaming_config: &StreamingConfig,
         file_scan_metrics: IcebergFileScanMetrics,
+        delay: Option<Duration>,
     ) -> StreamExecutorResult<()> {
         // Clear previous in-flight files (should already be empty on success, re-queued on error)
         state.in_flight_files.clear();
@@ -546,6 +601,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             let batch_reader = Self::build_batched_stream_reader(
                 source_desc,
                 batch,
+                delay,
                 streaming_config.developer.chunk_size,
                 file_scan_metrics,
             );
@@ -555,14 +611,19 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         Ok(())
     }
 
-    /// Build a stream reader that reads multiple Iceberg files in sequence.
+    /// Build a stream reader that reads multiple Iceberg files in sequence, after `delay` if set.
     #[try_stream(ok = ChunksWithState, error = StreamExecutorError)]
     async fn build_batched_stream_reader(
         source_desc: SourceDesc,
         tasks: Vec<FileScanTask>,
+        delay: Option<Duration>,
         chunk_size: usize,
         file_scan_metrics: IcebergFileScanMetrics,
     ) {
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+
         let properties = match source_desc.source.config.clone() {
             ConnectorProperties::Iceberg(props) => props,
             _ => unreachable!("Expected Iceberg connector properties"),
