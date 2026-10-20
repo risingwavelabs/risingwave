@@ -71,7 +71,7 @@ struct FetchState {
     /// Used for at-least-once recovery: on error, these files are re-queued.
     in_flight_files: Vec<FileEntry>,
 
-    /// Delays the retries of the current load; once a bounded load's backoff runs out, it fails.
+    /// Delays retries after consecutive errors; once a bounded load's backoff runs out, it fails.
     backoff: Backoff,
 }
 
@@ -139,9 +139,10 @@ impl FetchState {
             && (need_rebuild || (self.splits_on_fetch == 0 && !self.file_queue.is_empty()))
     }
 
-    /// Mark one file as successfully fetched.
+    /// Mark one file as successfully fetched and resets the backoff
     fn mark_file_fetched(&mut self) {
         self.splits_on_fetch -= 1;
+        self.backoff = self.mode.backoff();
 
         // When all files in the current batch complete successfully, clear in-flight tracking.
         if self.splits_on_fetch == 0 {
