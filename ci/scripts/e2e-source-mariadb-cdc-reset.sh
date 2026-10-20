@@ -134,3 +134,6 @@ wait_for_count "SELECT count(*) FROM mariadb_reset_table WHERE id IN (3, 50)" 0
 
 risedev psql -c "DROP TABLE mariadb_reset_table; DROP SOURCE mariadb_reset_source CASCADE;"
 run_mariadb -e "DROP DATABASE mariadb_reset_test;"
+
+# Stop the cluster before the next CI stage cleans data and starts a new one.
+risedev kill && risedev clean-data
