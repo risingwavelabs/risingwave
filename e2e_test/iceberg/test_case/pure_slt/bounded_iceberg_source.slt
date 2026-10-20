@@ -1,0 +1,405 @@
+# Bounded Iceberg sources pin one snapshot. Every streaming job reading the source loads that
+# snapshot exactly once, including across recovery, and then stops.
+#
+# The upstream Iceberg table is written by a Rust Iceberg sink. A plain Iceberg source on the same
+# table exposes its snapshot ids through `rw_iceberg_snapshots`.
+
+statement ok
+DROP SINK IF EXISTS bounded_src_sink;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS bounded_src_joined;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS bounded_src_recovered;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS bounded_src_count;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS bounded_src_rows;
+
+statement ok
+DROP SOURCE IF EXISTS bounded_src_first;
+
+statement ok
+DROP SOURCE IF EXISTS bounded_src;
+
+statement ok
+DROP SOURCE IF EXISTS bounded_src_upstream_src;
+
+statement ok
+DROP SINK IF EXISTS bounded_src_upstream_sink;
+
+statement ok
+DROP TABLE IF EXISTS bounded_src_upstream;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_source/
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_source_parked/
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+CREATE TABLE bounded_src_upstream (id INT, v VARCHAR) APPEND ONLY;
+
+statement ok
+CREATE SINK bounded_src_upstream_sink FROM bounded_src_upstream WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_src_db',
+    table.name = 'bounded_src_t',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true'
+);
+
+statement ok
+CREATE SOURCE bounded_src_upstream_src WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_src_db',
+    table.name = 'bounded_src_t'
+);
+
+# Commit three batches, one snapshot each, so the pinned snapshot spans several data files.
+
+statement ok
+INSERT INTO bounded_src_upstream SELECT g, 'a' || g FROM generate_series(1, 100) g;
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_src_upstream_src';
+----
+1
+
+# Record the data files of each batch, so the recovery test below can hold back the second one.
+system ok
+psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT file_path FROM rw_iceberg_files
+    WHERE source_name = 'bounded_src_upstream_src' AND content = 'Data'
+" | sort > /tmp/bounded_iceberg_source_files_1
+
+statement ok
+INSERT INTO bounded_src_upstream SELECT g, 'b' || g FROM generate_series(101, 200) g;
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_src_upstream_src';
+----
+2
+
+system ok
+psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT file_path FROM rw_iceberg_files
+    WHERE source_name = 'bounded_src_upstream_src' AND content = 'Data'
+" | sort > /tmp/bounded_iceberg_source_files_2 && comm -13 /tmp/bounded_iceberg_source_files_1 /tmp/bounded_iceberg_source_files_2 > /tmp/bounded_iceberg_source_batch_2 && test -s /tmp/bounded_iceberg_source_batch_2
+
+statement ok
+INSERT INTO bounded_src_upstream SELECT g, 'c' || g FROM generate_series(201, 300) g;
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_src_upstream_src';
+----
+3
+
+# ==== option validation
+
+statement error `refresh_mode` is only supported for CREATE TABLE
+CREATE SOURCE bounded_src_invalid WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_src_db',
+    table.name = 'bounded_src_t',
+    refresh_mode = 'FULL_RELOAD'
+);
+
+statement error `scan.bounded.mode` is only supported for the iceberg connector
+CREATE SOURCE bounded_src_invalid (v INT) WITH (
+    connector = 'datagen',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement error snapshot 1 does not exist in the Iceberg table
+CREATE SOURCE bounded_src_invalid WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_src_db',
+    table.name = 'bounded_src_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '1'
+);
+
+statement error PRIMARY KEY is not supported for Iceberg CREATE SOURCE
+CREATE SOURCE bounded_src_invalid (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_src_db',
+    table.name = 'bounded_src_t'
+);
+
+# ==== create bounded sources
+
+# Pin the second snapshot, which contains the first two batches.
+system ok
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT snapshot_id FROM rw_iceberg_snapshots
+    WHERE source_name = 'bounded_src_upstream_src'
+    ORDER BY timestamp_ms LIMIT 1 OFFSET 1
+") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+CREATE SOURCE bounded_src WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_src_db',
+    table.name = 'bounded_src_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '$snapshot_id'
+)"
+
+# Pin the first snapshot, which contains only the first batch.
+system ok
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT snapshot_id FROM rw_iceberg_snapshots
+    WHERE source_name = 'bounded_src_upstream_src'
+    ORDER BY timestamp_ms LIMIT 1
+") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+CREATE SOURCE bounded_src_first WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_src_db',
+    table.name = 'bounded_src_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '$snapshot_id'
+)"
+
+# A bounded source has no bounded load of its own. Its readers do.
+query I
+SELECT count(*) FROM rw_bounded_jobs;
+----
+0
+
+# ==== batch queries read the pinned snapshot
+
+query II
+SELECT count(*), max(id) FROM bounded_src;
+----
+200 200
+
+query II
+SELECT count(*), max(id) FROM bounded_src_first;
+----
+100 100
+
+statement error FOR SYSTEM_TIME AS OF on a bounded source
+SELECT count(*) FROM bounded_src FOR SYSTEM_TIME AS OF '2100-01-01 00:00:00+00:00';
+
+# ==== streaming jobs load the pinned snapshot once
+
+# Two materialized views and a sink read the same source, so each of their loads is sealed and
+# completed on its own.
+
+statement ok
+CREATE MATERIALIZED VIEW bounded_src_count AS SELECT count(*) AS cnt, sum(id) AS total FROM bounded_src;
+
+statement ok
+CREATE MATERIALIZED VIEW bounded_src_rows AS SELECT id, v FROM bounded_src;
+
+statement ok
+CREATE SINK bounded_src_sink AS SELECT id FROM bounded_src WITH (connector = 'blackhole');
+
+query TT retry 30 backoff 1s
+SELECT status, completed_at IS NOT NULL FROM rw_bounded_jobs ORDER BY job_id;
+----
+COMPLETED t
+COMPLETED t
+COMPLETED t
+
+query II
+SELECT cnt, total FROM bounded_src_count;
+----
+200 20100
+
+query IIT
+SELECT count(*), count(DISTINCT id), min(v) FROM bounded_src_rows;
+----
+200 200 a1
+
+# Data committed after the pinned snapshot is never loaded.
+statement ok
+INSERT INTO bounded_src_upstream VALUES (301, 'd301');
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_src_upstream_src';
+----
+4
+
+# The upstream sink is no longer needed. Drop it so recovery below does not wait on its coordinator.
+statement ok
+DROP SINK bounded_src_upstream_sink;
+
+# A completed load stays idle after recovery and emits nothing again.
+statement ok
+RECOVER;
+
+query I retry 30 backoff 1s
+SELECT cnt FROM bounded_src_count;
+----
+200
+
+query I
+SELECT count(*) FROM bounded_src_rows;
+----
+200
+
+# ==== recovery during a load keeps the count exact
+
+# Hold back the second batch's data files. The load lists every file, emits the first batch, and
+# keeps retrying the rest. Recovery then finds the listing sealed and must read only the files
+# still pending, or the first batch would be counted twice.
+system ok
+sed 's#^s3://#hummock-minio/#' /tmp/bounded_iceberg_source_batch_2 | while read -r f; do ./risedev mc mv "$f" "hummock-minio/hummock001/bounded_iceberg_source_parked/$(basename "$f")" || exit 1; done
+
+statement ok
+CREATE MATERIALIZED VIEW bounded_src_recovered AS SELECT count(*) AS cnt, sum(id) AS total FROM bounded_src;
+
+query II retry 30 backoff 1s
+SELECT cnt, total FROM bounded_src_recovered;
+----
+100 5050
+
+statement ok
+RECOVER;
+
+system ok
+sed 's#^s3://#hummock-minio/#' /tmp/bounded_iceberg_source_batch_2 | while read -r f; do ./risedev mc mv "hummock-minio/hummock001/bounded_iceberg_source_parked/$(basename "$f")" "$f" || exit 1; done
+
+query TT retry 60 backoff 2s
+SELECT status, completed_at IS NOT NULL FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_materialized_views WHERE name = 'bounded_src_recovered');
+----
+COMPLETED t
+
+query II
+SELECT cnt, total FROM bounded_src_recovered;
+----
+200 20100
+
+# ==== unsupported jobs
+
+statement error a streaming job can read at most one bounded source
+CREATE MATERIALIZED VIEW bounded_src_two AS
+SELECT a.id FROM bounded_src a JOIN bounded_src_first b ON a.id = b.id;
+
+# Snapshot backfill is on by default. A job joining a bounded source with a table falls back to
+# regular backfill, so the bounded load still starts.
+statement ok
+SET streaming_use_snapshot_backfill = true;
+
+statement ok
+CREATE MATERIALIZED VIEW bounded_src_joined AS
+SELECT s.id, u.v FROM bounded_src s JOIN bounded_src_upstream u ON s.id = u.id;
+
+query TT retry 30 backoff 1s
+SELECT status, completed_at IS NOT NULL FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_materialized_views WHERE name = 'bounded_src_joined');
+----
+COMPLETED t
+
+query I
+SELECT count(*) FROM bounded_src_joined;
+----
+200
+
+statement ok
+DROP MATERIALIZED VIEW bounded_src_joined;
+
+# ==== unsupported alterations
+
+statement error altering connector properties of a bounded source is not supported
+ALTER SOURCE bounded_src CONNECTOR WITH (s3.region = 'us-west-2');
+
+# ==== cleanup
+
+statement ok
+DROP SINK bounded_src_sink;
+
+statement ok
+DROP MATERIALIZED VIEW bounded_src_recovered;
+
+statement ok
+DROP MATERIALIZED VIEW bounded_src_count;
+
+statement ok
+DROP MATERIALIZED VIEW bounded_src_rows;
+
+query I
+SELECT count(*) FROM rw_bounded_jobs;
+----
+0
+
+statement ok
+DROP SOURCE bounded_src_first;
+
+statement ok
+DROP SOURCE bounded_src;
+
+statement ok
+DROP SOURCE bounded_src_upstream_src;
+
+statement ok
+DROP TABLE bounded_src_upstream;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_source/
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_source_parked/

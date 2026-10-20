@@ -763,10 +763,13 @@ pub fn bind_connector_props(
     let ingest_mode = {
         let ingest_mode = resolve_source_ingest_mode_in_with_option(&mut with_properties)?;
 
-        if is_create_source && ingest_mode.is_some() {
+        if is_create_source
+            && ingest_mode
+                .as_ref()
+                .is_some_and(|mode| mode.is_full_reload())
+        {
             return Err(RwError::from(ProtocolError(
-                "`refresh_mode` and `scan.bounded.mode` are only supported for CREATE TABLE"
-                    .to_owned(),
+                "`refresh_mode` is only supported for CREATE TABLE".to_owned(),
             )));
         }
 
@@ -955,10 +958,8 @@ pub async fn bind_create_source_or_table_with_connector(
     if with_properties.is_iceberg_connector() {
         if is_create_source && !sql_pk_names.is_empty() {
             return Err(ErrorCode::NotSupported(
-                "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
-                    .to_owned(),
-                "Iceberg streaming ingestion only supports append-only sources. Remove the PRIMARY KEY clause."
-                    .to_owned(),
+                "PRIMARY KEY is not supported for Iceberg CREATE SOURCE.".to_owned(),
+                "Iceberg sources are append-only. Remove the PRIMARY KEY clause.".to_owned(),
             )
             .into());
         }
@@ -1108,8 +1109,8 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     let (mut columns, pk_col_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
-    // A bounded load restarts from scratch on recovery, so rows must be deduplicated by key.
-    if ingest_mode.is_bounded() && row_id_index.is_some() {
+    // Bounded sources are append-only and have no key, like other Iceberg sources.
+    if !is_create_source && ingest_mode.is_bounded() && row_id_index.is_some() {
         return Err(ErrorCode::BindError(
             "Bounded tables must have a PRIMARY KEY. Please define a primary key for the table."
                 .to_owned(),

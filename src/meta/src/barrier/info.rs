@@ -816,6 +816,7 @@ impl InflightDatabaseInfo {
                     bounded_load_actions.push(BoundedLoadAction::SealListing {
                         database_id: self.database_id,
                         source_id: tracker.source_id,
+                        reader_actor_ids: tracker.reader_actors().collect(),
                     });
                 }
 

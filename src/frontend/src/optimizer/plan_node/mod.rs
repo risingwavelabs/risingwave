@@ -570,6 +570,17 @@ impl LogicalPlanRef {
                         plan.core.catalog.as_ref().map(|c| &c.name)
                     ));
                 }
+                // A bounded load starts with the job's first barrier, which jobs created
+                // through snapshot backfill do not receive.
+                if self.warning_msg.is_none()
+                    && let Some(catalog) = &plan.core.catalog
+                    && catalog.is_bounded()
+                {
+                    self.warning_msg = Some(format!(
+                        "snapshot backfill disabled due to using bounded source {:?}",
+                        catalog.name
+                    ));
+                }
             }
         }
         let mut forbid_snapshot = ForbidSnapshotBackfill { warning_msg: None };

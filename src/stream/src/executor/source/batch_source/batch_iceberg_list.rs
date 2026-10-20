@@ -104,10 +104,18 @@ pub struct BatchIcebergListExecutor<S: StateStore> {
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
     /// Local barrier manager for reporting list finished
     barrier_manager: LocalBarrierManager,
-    associated_table_id: TableId,
+    mode: LoadMode,
     bounded_scan: Option<IcebergBoundedScan>,
+    chunk_size: usize,
     /// Metrics for monitor.
     _metrics: Arc<StreamingMetrics>,
+}
+
+/// File tasks yielded by the listing stream.
+struct ListedTasks {
+    tasks: Vec<FileScanTask>,
+    /// No more tasks follow.
+    is_last: bool,
 }
 
 impl<S: StateStore> BatchIcebergListExecutor<S> {
@@ -121,18 +129,19 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         barrier_manager: LocalBarrierManager,
         associated_table_id: Option<TableId>,
         bounded_scan: Option<IcebergBoundedScan>,
-    ) -> Self {
-        assert!(associated_table_id.is_some());
-        Self {
+        chunk_size: usize,
+    ) -> StreamResult<Self> {
+        Ok(Self {
             actor_ctx,
             stream_source_core,
             downstream_columns,
             barrier_receiver: Some(barrier_receiver),
             barrier_manager,
-            associated_table_id: associated_table_id.unwrap(),
+            mode: LoadMode::new(bounded_scan.is_some(), associated_table_id)?,
             bounded_scan,
+            chunk_size,
             _metrics: metrics,
-        }
+        })
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -171,14 +180,21 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
             Some(scan_metrics.clone()),
         );
 
-        let mode = if self.bounded_scan.is_some() {
-            LoadMode::Bounded
-        } else {
-            LoadMode::FullReload
-        };
+        let mode = self.mode;
         let starts_on_creation = mode.starts_on_creation(&first_barrier, self.actor_ctx.id);
         let pause_on_startup = first_barrier.is_pause_on_startup();
+        let first_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier);
+
+        // A bounded list records in its state table that it sent every file task. The tasks and
+        // the record commit in the same epoch, so after recovery the list either finds the record
+        // and only reports the seal again, or finds nothing and lists from scratch.
+        let mut sealed = false;
+        if mode.is_bounded() {
+            let state_table = self.stream_source_core.split_state_store.state_table_mut();
+            state_table.init_epoch(first_epoch).await?;
+            sealed = state_table.get_from_one_value_table().await?.is_some();
+        }
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
 
         let mut stream = StreamReaderWithPause::<true, _>::new(
@@ -192,10 +208,19 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         }
 
         if starts_on_creation {
-            state.start_load(mode);
-            stream.replace_data_stream(
-                Self::list_iceberg_scan_task(scan_planner.clone(), self.bounded_scan, None).boxed(),
-            );
+            if sealed {
+                tracing::info!(
+                    source_id = %self.stream_source_core.source_id,
+                    "bounded listing already sealed, reporting the seal again"
+                );
+                state = ListState::Exhausted;
+            } else {
+                state.start_load(mode);
+                stream.replace_data_stream(
+                    Self::list_iceberg_scan_task(scan_planner.clone(), self.bounded_scan, None)
+                        .boxed(),
+                );
+            }
         }
 
         while let Some(msg) = stream.next().await {
@@ -207,7 +232,9 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                         e.variant_name().to_owned(),
                         self.stream_source_core.source_id.to_string(),
                         self.actor_ctx.fragment_id.to_string(),
-                        self.associated_table_id.to_string(),
+                        mode.associated_table_id()
+                            .map(|id| id.to_string())
+                            .unwrap_or_default(),
                     ]);
 
                     scan_metrics.record_scan_error("list_error");
@@ -219,7 +246,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                     let Some(delay) = state.next_retry_delay() else {
                         tracing::error!(
                             source_id = %self.stream_source_core.source_id,
-                            table_id = %self.associated_table_id,
+                            table_id = ?mode.associated_table_id(),
                             error = %e.as_report(),
                             "bounded load failed after repeated list errors"
                         );
@@ -230,7 +257,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
 
                     tracing::info!(
                         source_id = %self.stream_source_core.source_id,
-                        table_id = %self.associated_table_id,
+                        table_id = ?mode.associated_table_id(),
                         ?delay,
                         "re-listing iceberg scan tasks due to error"
                     );
@@ -262,7 +289,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
                                             source_id = %self.stream_source_core.source_id,
-                                            table_id = %self.associated_table_id,
+                                            table_id = ?mode.associated_table_id(),
                                             "RefreshStart triggered file re-listing"
                                         );
                                         state.start_load(mode);
@@ -294,19 +321,21 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                 tracing::info!(
                                     ?barrier.epoch,
                                     source_id = %self.stream_source_core.source_id,
-                                    table_id = %self.associated_table_id,
+                                    table_id = ?mode.associated_table_id(),
                                     "reporting batch iceberg list finished"
                                 );
                                 match mode {
-                                    LoadMode::FullReload => {
+                                    LoadMode::FullReload {
+                                        associated_table_id,
+                                    } => {
                                         self.barrier_manager.report_source_list_finished(
                                             barrier.epoch,
                                             self.actor_ctx.id,
-                                            self.associated_table_id,
+                                            associated_table_id,
                                             self.stream_source_core.source_id,
                                         );
                                     }
-                                    LoadMode::Bounded => {
+                                    LoadMode::Bounded { .. } => {
                                         self.barrier_manager.report_bounded_load_progress(
                                             barrier.epoch,
                                             self.actor_ctx.id,
@@ -318,35 +347,65 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                 state.mark_idle();
                             }
 
+                            if mode.is_bounded() {
+                                self.stream_source_core
+                                    .split_state_store
+                                    .commit(barrier.epoch)
+                                    .await?;
+                            }
+
                             yield Message::Barrier(barrier);
                         }
                         _ => unreachable!(),
                     },
-                    Either::Right(None) => state.mark_exhausted(),
-                    Either::Right(Some(file_scan_task)) => {
-                        let data_file_path = file_scan_task.data_file_path.clone();
-                        let persisted_task = PersistedFileScanTask::encode(file_scan_task)?;
-                        let chunk = StreamChunk::from_rows(
-                            &[(
+                    Either::Right(ListedTasks { tasks, is_last }) => {
+                        // No barrier is read until this arm finishes, so the tasks and the seal
+                        // record below land in the same epoch.
+                        let mut chunk_builder = StreamChunkBuilder::new(
+                            self.chunk_size,
+                            vec![DataType::Varchar, DataType::Jsonb],
+                        );
+                        for task in tasks {
+                            let data_file_path = task.data_file_path.clone();
+                            let persisted_task = PersistedFileScanTask::encode(task)?;
+                            if let Some(chunk) = chunk_builder.append_row(
                                 Op::Insert,
-                                OwnedRow::new(vec![
+                                &[
                                     Some(ScalarImpl::Utf8(data_file_path.into())),
                                     Some(ScalarImpl::Jsonb(persisted_task)),
-                                ]),
-                            )],
-                            &[DataType::Varchar, DataType::Jsonb],
-                        );
+                                ],
+                            ) {
+                                yield Message::Chunk(chunk);
+                            }
+                        }
+                        if let Some(chunk) = chunk_builder.take() {
+                            yield Message::Chunk(chunk);
+                        }
 
-                        yield Message::Chunk(chunk);
+                        if is_last {
+                            if let Some(IcebergBoundedScan::Snapshot { snapshot_id }) =
+                                self.bounded_scan
+                            {
+                                self.stream_source_core
+                                    .split_state_store
+                                    .state_table_mut()
+                                    .insert(OwnedRow::new(vec![Some(ScalarImpl::Int64(
+                                        snapshot_id,
+                                    ))]));
+                            }
+                            state.mark_exhausted();
+                        }
                     }
                 },
             }
         }
     }
 
-    /// Waits for `delay` if set, then yields `Some(task)` for each file task, then `None` once
-    /// every task has been yielded.
-    #[try_stream(ok = Option<FileScanTask>, error = StreamExecutorError)]
+    /// Waits for `delay` if set, then yields the file tasks, the last batch marked `is_last`.
+    ///
+    /// A refreshable table streams one task at a time. A bounded load plans the whole snapshot
+    /// first and yields it as one batch, so it sends either every task or none.
+    #[try_stream(ok = ListedTasks, error = StreamExecutorError)]
     async fn list_iceberg_scan_task(
         scan_planner: IcebergScanPlanner,
         bounded_scan: Option<IcebergBoundedScan>,
@@ -361,6 +420,8 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
             None => scan_planner.plan_current_snapshot().await?,
         };
 
+        let is_bounded = bounded_scan.is_some();
+        let mut planned = vec![];
         if let Some(snapshot_plan) = snapshot_plan {
             #[for_await]
             for scan_task in snapshot_plan.tasks {
@@ -370,10 +431,20 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                     scan_task.data_file_path,
                     scan_task
                 );
-                yield Some(scan_task);
+                if is_bounded {
+                    planned.push(scan_task);
+                } else {
+                    yield ListedTasks {
+                        tasks: vec![scan_task],
+                        is_last: false,
+                    };
+                }
             }
         }
-        yield None;
+        yield ListedTasks {
+            tasks: planned,
+            is_last: true,
+        };
     }
 }
 

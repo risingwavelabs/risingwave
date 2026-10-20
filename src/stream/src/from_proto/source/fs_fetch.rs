@@ -146,7 +146,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         params.config.clone(),
                         source.associated_table_id,
                         is_bounded,
-                    )
+                    )?
                     .boxed()
                 } else {
                     IcebergFetchExecutor::new(

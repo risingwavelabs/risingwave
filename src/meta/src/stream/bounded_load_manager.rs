@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::id::{DatabaseId, JobId, SourceId};
+use risingwave_common::id::{ActorId, DatabaseId, JobId, SourceId};
 use risingwave_pb::stream_plan::bounded_load_mutation::{
     Action as PbBoundedLoadAction, ListSealed,
 };
@@ -43,13 +43,19 @@ impl BoundedLoadManager {
         }
     }
 
-    /// Schedules the seal of the load of `source_id` once every list actor has reported
-    /// `ListSealed`.
-    pub fn seal_listing(&self, database_id: DatabaseId, source_id: SourceId) {
+    /// Schedules the seal of a load once every list actor has reported `ListSealed`.
+    /// Only `reader_actor_ids` apply it.
+    pub fn seal_listing(
+        &self,
+        database_id: DatabaseId,
+        source_id: SourceId,
+        reader_actor_ids: Vec<ActorId>,
+    ) {
         if let Err(error) = self.barrier_scheduler.run_command_no_wait(
             database_id,
             Command::BoundedLoad {
                 source_id,
+                reader_actor_ids,
                 action: PbBoundedLoadAction::ListSealed(ListSealed {}),
             },
         ) {
