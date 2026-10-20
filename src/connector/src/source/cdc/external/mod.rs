@@ -333,13 +333,13 @@ impl ExternalTableConfig {
         connect_properties: BTreeMap<String, String>,
         secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<Self> {
-        let options_with_secret =
+        let mut options_with_secret =
             LocalSecretManager::global().fill_secrets(connect_properties, secret_refs)?;
         if options_with_secret
             .get("connector")
             .is_some_and(|c| c == "mysql-cdc")
         {
-            mysql::mysql_ssl_config(&options_with_secret)?;
+            mysql::normalize_mysql_ssl_options(&mut options_with_secret)?;
         }
         let json_value = serde_json::to_value(options_with_secret)?;
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;

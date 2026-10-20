@@ -28,36 +28,28 @@ import org.junit.Test;
 public class MySqlSslConfigTest {
     @Test
     public void translatesModesForValidationAndStreamingIncludingResume() {
-        for (var entry :
-                Map.of(
-                                "disabled",
-                                "disabled",
-                                "disable",
-                                "disabled",
-                                "preferred",
-                                "preferred",
-                                "prefer",
-                                "preferred",
-                                "required",
-                                "required",
-                                "require",
-                                "required",
-                                "verify-ca",
-                                "verify_ca",
-                                "verifyca",
-                                "verify_ca",
-                                "verify-full",
-                                "verify_identity",
-                                "verifyfull",
-                                "verify_identity")
-                        .entrySet()) {
+        for (String[] entry :
+                new String[][] {
+                    {"disabled", "disabled"},
+                    {"disable", "disabled"},
+                    {"preferred", "preferred"},
+                    {"prefer", "preferred"},
+                    {"required", "required"},
+                    {"require", "required"},
+                    {"REQUIRED", "required"},
+                    {"verify-ca", "verify_ca"},
+                    {"verifyca", "verify_ca"},
+                    {"VERIFY_CA", "verify_ca"},
+                    {"verify-full", "verify_identity"},
+                    {"verifyfull", "verify_identity"},
+                    {"VERIFY_IDENTITY", "verify_identity"},
+                }) {
             for (String key : new String[] {"ssl.mode", "debezium.database.sslmode"}) {
-                var userProps = new HashMap<>(Map.of(key, entry.getKey()));
+                var userProps = new HashMap<>(Map.of(key, entry[0]));
                 var jdbc = new Properties();
                 MySqlSslConfig.fromProperties(userProps).configureJdbc(jdbc);
                 assertEquals(
-                        entry.getValue().toUpperCase(java.util.Locale.ROOT),
-                        jdbc.getProperty("sslMode"));
+                        entry[1].toUpperCase(java.util.Locale.ROOT), jdbc.getProperty("sslMode"));
                 for (String offset : new String[] {null, "saved-offset"}) {
                     for (boolean backfill : new boolean[] {false, true}) {
                         userProps.put(
@@ -66,7 +58,7 @@ public class MySqlSslConfigTest {
                                 new DbzConnectorConfig(
                                         SourceTypeE.MYSQL, 42, offset, userProps, true, false);
                         assertEquals(
-                                entry.getValue(),
+                                entry[1],
                                 config.getResolvedDebeziumProps().getProperty("database.ssl.mode"));
                     }
                 }
@@ -75,125 +67,89 @@ public class MySqlSslConfigTest {
         var jdbc = new Properties();
         MySqlSslConfig.fromProperties(Map.of()).configureJdbc(jdbc);
         assertEquals("DISABLED", jdbc.getProperty("sslMode"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> MySqlSslConfig.fromProperties(Map.of("ssl.mode", "bogus")));
     }
 
     @Test
-    public void rejectsAmbiguousOrUnsupportedOptions() {
-        for (String mode : new String[] {"verify_ca", "verify_identity", "REQUIRED", "bogus"}) {
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> MySqlSslConfig.fromProperties(Map.of("ssl.mode", mode)));
-        }
-        for (String key :
-                new String[] {
-                    "database.ssl.mode",
-                    "debezium.database.ssl.mode",
-                    "debezium.database.ssl.truststore"
-                }) {
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> MySqlSslConfig.fromProperties(Map.of(key, "required")));
-        }
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        MySqlSslConfig.fromProperties(
+    public void preservesCanonicalPrecedenceAndDebeziumPassThrough() {
+        var options =
+                Map.of(
+                        "ssl.mode",
+                        "required",
+                        "debezium.database.sslmode",
+                        "bogus",
+                        "database.ssl.mode",
+                        "disabled",
+                        "debezium.database.ssl.mode",
+                        "disabled",
+                        "debezium.database.ssl.truststore",
+                        "/legacy/truststore.jks",
+                        "debezium.database.ssl.truststore.password",
+                        "legacy-password",
+                        "debezium.database.ssl.keystore",
+                        "/legacy/keystore.jks");
+        var jdbc = new Properties();
+        MySqlSslConfig.fromProperties(options).configureJdbc(jdbc);
+        assertEquals("REQUIRED", jdbc.getProperty("sslMode"));
+        assertEquals(1, jdbc.size());
+        var dbz =
+                new DbzConnectorConfig(SourceTypeE.MYSQL, 42, null, options, false, true)
+                        .getResolvedDebeziumProps();
+        assertEquals("required", dbz.getProperty("database.ssl.mode"));
+        assertEquals("/legacy/truststore.jks", dbz.getProperty("database.ssl.truststore"));
+        assertEquals("legacy-password", dbz.getProperty("database.ssl.truststore.password"));
+        assertEquals("/legacy/keystore.jks", dbz.getProperty("database.ssl.keystore"));
+        // Generated defaults also continue to win over raw pass-through mode overrides.
+        dbz =
+                new DbzConnectorConfig(
+                                SourceTypeE.MYSQL,
+                                42,
+                                null,
                                 Map.of(
-                                        "ssl.mode",
+                                        "database.ssl.mode",
                                         "required",
-                                        "debezium.database.sslmode",
-                                        "required")));
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        MySqlSslConfig.fromProperties(
-                                Map.of(
-                                        "ssl.root.cert",
-                                        "/ca.pem",
-                                        "debezium.database.sslrootcert",
-                                        "/ca.pem")));
-        for (String mode : new String[] {"disabled", "required"}) {
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () ->
-                            MySqlSslConfig.fromProperties(
-                                    Map.of("ssl.mode", mode, "ssl.root.cert", "/ca.pem")));
-        }
+                                        "debezium.database.ssl.mode",
+                                        "required"),
+                                false,
+                                true)
+                        .getResolvedDebeziumProps();
+        assertEquals("disabled", dbz.getProperty("database.ssl.mode"));
     }
 
     @Test
-    public void sharesPemTrustAcrossJdbcAndDebeziumAndRejectsBundles() throws Exception {
-        var path = Files.createTempFile("mysql-test-ca-", ".pem");
+    public void ignoresRootCertOptionsForEveryMode() throws Exception {
+        var path = Files.createTempFile("mysql-ignored-ca-", ".pem");
         try {
-            byte[] pem;
-            try (var input = getClass().getResourceAsStream("/mysql-tls/ca.pem")) {
-                assertNotNull(input);
-                pem = input.readAllBytes();
-            }
-            Files.write(path, pem);
-            var options =
-                    Map.of(
-                            "ssl.mode",
-                            "verify-full",
-                            "debezium.database.sslrootcert",
-                            path.toString());
-            var jdbc = new Properties();
-            MySqlSslConfig.fromProperties(options).configureJdbc(jdbc);
-            var dbz =
-                    new DbzConnectorConfig(
-                                    SourceTypeE.MYSQL, 42, "saved-offset", options, true, false)
-                            .getResolvedDebeziumProps();
-            var storePath = java.nio.file.Path.of(dbz.getProperty("database.ssl.truststore"));
-            assertEquals(
-                    storePath.toUri().toString(), jdbc.getProperty("trustCertificateKeyStoreUrl"));
-            assertEquals("false", jdbc.getProperty("fallbackToSystemTrustStore"));
-            var store = java.security.KeyStore.getInstance("JKS");
-            try (var input = Files.newInputStream(storePath)) {
-                store.load(
-                        input, jdbc.getProperty("trustCertificateKeyStorePassword").toCharArray());
-            }
-            assertTrue(store.size() > 1);
-            var certificate =
-                    java.security.cert.CertificateFactory.getInstance("X.509")
-                            .generateCertificate(new java.io.ByteArrayInputStream(pem));
-            assertEquals(certificate, store.getCertificate("ca"));
-            // SQLx native TLS loads a single certificate. Reject bundles in source validation.
-            Files.write(path, pem, java.nio.file.StandardOpenOption.APPEND);
-            assertThrows(
-                    IllegalArgumentException.class, () -> MySqlSslConfig.fromProperties(options));
-        } finally {
-            Files.deleteIfExists(path);
-        }
-    }
-
-    @Test
-    public void rejectsMissingEmptyAndInvalidCertificates() throws Exception {
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        MySqlSslConfig.fromProperties(
-                                Map.of("ssl.mode", "verify-ca", "ssl.root.cert", "")));
-        var path = Files.createTempFile("mysql-invalid-ca-", ".pem");
-        try {
-            for (String contents : new String[] {"", "not a certificate"}) {
-                Files.writeString(path, contents);
-                assertThrows(
-                        IllegalArgumentException.class,
-                        () ->
-                                MySqlSslConfig.fromProperties(
-                                        Map.of(
-                                                "ssl.mode",
-                                                "verify-ca",
-                                                "ssl.root.cert",
-                                                path.toString())));
+            Files.writeString(path, "not a certificate");
+            for (String mode :
+                    new String[] {
+                        "disabled", "preferred", "required", "verify-ca", "verify-full"
+                    }) {
+                for (String value :
+                        new String[] {"", "/nonexistent/mysql-ca.pem", path.toString()}) {
+                    var options =
+                            Map.of(
+                                    "ssl.mode",
+                                    mode,
+                                    "ssl.root.cert",
+                                    value,
+                                    "debezium.database.sslrootcert",
+                                    "/another/ignored.pem");
+                    var jdbc = new Properties();
+                    MySqlSslConfig.fromProperties(options).configureJdbc(jdbc);
+                    assertEquals(1, jdbc.size());
+                    var dbz =
+                            new DbzConnectorConfig(
+                                            SourceTypeE.MYSQL, 42, null, options, false, true)
+                                    .getResolvedDebeziumProps();
+                    assertNull(dbz.getProperty("database.ssl.truststore"));
+                    assertNull(dbz.getProperty("database.ssl.truststore.password"));
+                }
             }
         } finally {
             Files.delete(path);
         }
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        MySqlSslConfig.fromProperties(
-                                Map.of("ssl.mode", "verify-ca", "ssl.root.cert", path.toString())));
     }
 }

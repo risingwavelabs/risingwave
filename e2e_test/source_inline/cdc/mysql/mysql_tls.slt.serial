@@ -15,7 +15,8 @@ statement ok
 CREATE SOURCE s_mysql_tls_disabled WITH (
   ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
   username = '${RISEDEV_MYSQL_USER}', password = '${MYSQL_PWD}',
-  database.name = 'rw_mysql_tls_plain', ssl.mode = 'disabled'
+  database.name = 'rw_mysql_tls_plain', ssl.root.cert = '',
+  database.ssl.mode = 'required', debezium.database.ssl.mode = 'required'
 );
 
 statement ok
@@ -30,7 +31,7 @@ statement ok
 CREATE SOURCE s_mysql_tls_preferred WITH (
   connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
   username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  ssl.mode = 'preferred'
+  ssl.mode = 'preferred', ssl.root.cert = '/nonexistent/ignored.pem'
 );
 
 statement ok
@@ -45,7 +46,7 @@ statement ok
 CREATE SOURCE s_mysql_tls_preferred_fallback WITH (
   connector = 'mysql-cdc', hostname = '${MYSQL_NO_TLS_HOST}', port = '${MYSQL_NO_TLS_PORT}',
   username = 'root', password = '123456', database.name = 'rw_mysql_tls_fallback',
-  debezium.database.sslmode = 'prefer'
+  debezium.database.sslmode = 'prefer', debezium.database.sslrootcert = '/nonexistent/ignored.pem'
 );
 
 statement ok
@@ -60,7 +61,9 @@ statement ok
 CREATE SOURCE s_mysql_tls_required WITH (
   connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
   username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  ssl.mode = 'required'
+  ssl.mode = 'REQUIRED', debezium.database.sslmode = 'disabled',
+  ssl.root.cert = '${MYSQL_TLS_CERT_DIR}/untrusted-ca.pem', debezium.database.sslrootcert = '',
+  debezium.database.ssl.mode = 'disabled', database.ssl.mode = 'disabled'
 );
 
 # Inferred schema uses SQLx; backfill and primary key discovery use mysql_async.
@@ -73,42 +76,10 @@ SELECT * FROM mysql_tls_required;
 1 snapshot
 
 statement ok
-CREATE SOURCE s_mysql_tls_verify_ca WITH (
-  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_WRONG_HOST}', port = '${MYSQL_TLS_PORT}',
-  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  ssl.mode = 'verify-ca', ssl.root.cert = '${MYSQL_TLS_CERT_DIR}/ca.pem'
-);
-
-# Inferred schema uses SQLx; backfill and primary key discovery use mysql_async.
-statement ok
-CREATE TABLE mysql_tls_verify_ca (*) FROM s_mysql_tls_verify_ca TABLE 'rw_mysql_tls.t';
-
-query IT retry 30 backoff 1s
-SELECT * FROM mysql_tls_verify_ca;
-----
-1 snapshot
-
-statement ok
-CREATE SOURCE s_mysql_tls_verify_full WITH (
-  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
-  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  ssl.mode = 'verify-full', ssl.root.cert = '${MYSQL_TLS_CERT_DIR}/ca.pem'
-);
-
-# Inferred schema uses SQLx; backfill and primary key discovery use mysql_async.
-statement ok
-CREATE TABLE mysql_tls_verify_full (*) FROM s_mysql_tls_verify_full TABLE 'rw_mysql_tls.t';
-
-query IT retry 30 backoff 1s
-SELECT * FROM mysql_tls_verify_full;
-----
-1 snapshot
-
-statement ok
 CREATE SOURCE s_mysql_tls_alias WITH (
   connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
   username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  debezium.database.sslmode = 'verify-full', debezium.database.sslrootcert = '${MYSQL_TLS_CERT_DIR}/ca.pem'
+  debezium.database.sslmode = 'require', debezium.database.sslrootcert = '${MYSQL_TLS_CERT_DIR}/ca.pem'
 );
 
 # Inferred schema uses SQLx; backfill and primary key discovery use mysql_async.
@@ -128,10 +99,10 @@ CREATE SOURCE s_mysql_tls_bad_disabled WITH (
 );
 
 statement error
-CREATE SOURCE s_mysql_tls_bad_untrusted WITH (
+CREATE SOURCE s_mysql_tls_bad_ignored_ca WITH (
   connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
   username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  ssl.mode = 'verify-ca', ssl.root.cert = '${MYSQL_TLS_CERT_DIR}/untrusted-ca.pem'
+  ssl.mode = 'verify-ca', ssl.root.cert = '${MYSQL_TLS_CERT_DIR}/ca.pem'
 );
 
 statement error
@@ -142,48 +113,20 @@ CREATE SOURCE s_mysql_tls_bad_untrusted_full WITH (
 );
 
 statement error
-CREATE SOURCE s_mysql_tls_bad_hostname WITH (
-  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_WRONG_HOST}', port = '${MYSQL_TLS_PORT}',
+CREATE SOURCE s_mysql_tls_bad_ignored_ca_full WITH (
+  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
   username = 'root', password = '123456', database.name = 'rw_mysql_tls',
   ssl.mode = 'verify-full', ssl.root.cert = '${MYSQL_TLS_CERT_DIR}/ca.pem'
-);
-
-statement error conflicting MySQL SSL options
-CREATE SOURCE s_mysql_tls_bad_conflict WITH (
-  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
-  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  ssl.mode = 'required', debezium.database.sslmode = 'disabled'
-);
-
-statement error conflicting MySQL SSL options
-CREATE SOURCE s_mysql_tls_bad_ca_conflict WITH (
-  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
-  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  ssl.mode = 'verify-full', ssl.root.cert = '${MYSQL_TLS_CERT_DIR}/ca.pem', debezium.database.sslrootcert = '${MYSQL_TLS_CERT_DIR}/untrusted-ca.pem'
-);
-
-statement error unsupported MySQL SSL option
-CREATE SOURCE s_mysql_tls_bad_raw WITH (
-  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
-  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  debezium.database.ssl.mode = 'required'
-);
-
-statement error unsupported MySQL SSL option
-CREATE SOURCE s_mysql_tls_bad_raw_direct WITH (
-  connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
-  username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  database.ssl.mode = 'required'
 );
 
 statement error invalid MySQL ssl.mode
 CREATE SOURCE s_mysql_tls_bad_spelling WITH (
   connector = 'mysql-cdc', hostname = '${MYSQL_TLS_HOST}', port = '${MYSQL_TLS_PORT}',
   username = 'root', password = '123456', database.name = 'rw_mysql_tls',
-  ssl.mode = 'verify_identity'
+  ssl.mode = 'bogus'
 );
 
-# Monitoring must also connect using the configured TLS mode and CA.
+# Monitoring must use the same mode while ignoring the legacy CA options.
 system ok
 python3 e2e_test/source_inline/cdc/mysql/check_tls_monitor.py
 
@@ -216,18 +159,6 @@ SELECT * FROM mysql_tls_disabled ORDER BY id;
 
 query IT retry 30 backoff 1s
 SELECT * FROM mysql_tls_required ORDER BY id;
-----
-1 snapshot
-2 streaming
-
-query IT retry 30 backoff 1s
-SELECT * FROM mysql_tls_verify_ca ORDER BY id;
-----
-1 snapshot
-2 streaming
-
-query IT retry 30 backoff 1s
-SELECT * FROM mysql_tls_verify_full ORDER BY id;
 ----
 1 snapshot
 2 streaming
@@ -282,20 +213,6 @@ SELECT * FROM mysql_tls_required ORDER BY id;
 3 resumed
 
 query IT retry 60 backoff 1s
-SELECT * FROM mysql_tls_verify_ca ORDER BY id;
-----
-1 snapshot
-2 streaming
-3 resumed
-
-query IT retry 60 backoff 1s
-SELECT * FROM mysql_tls_verify_full ORDER BY id;
-----
-1 snapshot
-2 streaming
-3 resumed
-
-query IT retry 60 backoff 1s
 SELECT * FROM mysql_tls_alias ORDER BY id;
 ----
 1 snapshot
@@ -310,12 +227,6 @@ DROP SOURCE s_mysql_tls_preferred_fallback CASCADE;
 
 statement ok
 DROP SOURCE s_mysql_tls_required CASCADE;
-
-statement ok
-DROP SOURCE s_mysql_tls_verify_ca CASCADE;
-
-statement ok
-DROP SOURCE s_mysql_tls_verify_full CASCADE;
 
 statement ok
 DROP SOURCE s_mysql_tls_alias CASCADE;
