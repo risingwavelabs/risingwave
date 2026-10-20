@@ -91,7 +91,7 @@ See `docs/dev/src/connector/intro.md`.
   - `git -C java/debezium fetch --depth 1 origin pull/<fork-pr-number>/head`
   - `git -C java/debezium checkout FETCH_HEAD`
   - `git add java/debezium`
-- After the fork PR merges, point the submodule at the merge commit on the fork's branch before merging the RisingWave PR.
+- After the fork PR merges, point the submodule at the merge commit on the fork's branch before merging the RisingWave PR: `git submodule update --remote --depth 1 java/debezium` moves it to the tip of the branch set in `.gitmodules`. The `Debezium Submodule Check` workflow fails until the submodule commit is on that branch.
 - While iterating locally, you can also edit files under `java/debezium` directly. The next build picks up uncommitted changes.
 - The fork builds with JDK 21. Set `JAVA_HOME` to JDK 21 if your default JDK is newer, since JDK 23+ skips annotation processors that the Oracle connector needs. The build script forces annotation processing on to guard against this.
 
