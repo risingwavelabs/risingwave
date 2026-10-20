@@ -474,6 +474,7 @@ impl GlobalBarrierWorkerContextImpl {
             &self.refresh_manager,
             &self.hummock_manager,
             &self.metadata_manager,
+            &self.iceberg_pk_index_sink_manager,
             drop_cancel.streaming_job_ids,
             drop_cancel.dropped_state_table_ids,
             "drop_streaming_jobs",
@@ -495,10 +496,8 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
-        for sink_id in &cleaned_dirty_jobs.sink_ids {
-            self.iceberg_compaction_manager
-                .clear_iceberg_maintenance_by_sink_id(*sink_id);
-        }
+        self.iceberg_pk_index_sink_manager
+            .retire_sinks(cleaned_dirty_jobs.sink_ids.iter().copied());
         if database_id.is_some() {
             // Per-database recovery does not run the global Hummock purge below. Unregister the
             // dirty jobs cleaned in this database through the normal dropped-table cleanup path.
@@ -506,6 +505,7 @@ impl GlobalBarrierWorkerContextImpl {
                 &self.refresh_manager,
                 &self.hummock_manager,
                 &self.metadata_manager,
+                &self.iceberg_pk_index_sink_manager,
                 cleaned_dirty_jobs.streaming_job_ids,
                 cleaned_dirty_jobs.dropped_table_ids,
                 "clean_dirty_creating_jobs",
@@ -541,13 +541,6 @@ impl GlobalBarrierWorkerContextImpl {
             {
                 continue;
             }
-            let config = crate::manager::iceberg_pk_index_sink::build_iceberg_config(&pb_sink)
-                .with_context(|| {
-                    format!(
-                        "build iceberg config while re-registering v3 sink {}",
-                        pb_sink.id
-                    )
-                })?;
             let state_table_id = self
                 .metadata_manager
                 .catalog_controller
@@ -577,15 +570,8 @@ impl GlobalBarrierWorkerContextImpl {
                 let partial_graph_id =
                     to_partial_graph_id(pb_sink.database_id, Some(pb_sink.id.as_job_id()));
                 let result = async {
-                    let observed_snapshot = manager
-                        .register_sink(pb_sink.id, partial_graph_id, config.clone())
-                        .await?;
+                    manager.register_sink(pb_sink.id, partial_graph_id).await?;
                     manager.advance_committed_epochs([(partial_graph_id, recovered_epoch)]);
-                    self.iceberg_compaction_manager.on_sink_registered(
-                        pb_sink.id,
-                        &config,
-                        observed_snapshot,
-                    );
                     Ok::<_, anyhow::Error>(())
                 }
                 .await;

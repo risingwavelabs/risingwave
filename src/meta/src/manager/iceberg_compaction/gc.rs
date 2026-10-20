@@ -301,10 +301,37 @@ impl IcebergCompactionManager {
         Ok(())
     }
 
+    async fn load_maintenance_config(&self, sink_id: SinkId) -> MetaResult<Option<IcebergConfig>> {
+        {
+            let guard = self.inner.read();
+            if guard.is_recovering(sink_id)
+                || guard
+                    .sink_schedules
+                    .get(&sink_id)
+                    .is_some_and(|track| !track.source_is_ready())
+            {
+                return Ok(None);
+            }
+        }
+        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        if iceberg_config.enable_pk_index
+            && !self
+                .inner
+                .read()
+                .sink_schedules
+                .get(&sink_id)
+                .is_some_and(|track| track.source_is_ready())
+        {
+            return Ok(None);
+        }
+        Ok(Some(iceberg_config))
+    }
+
     pub async fn check_and_expire_snapshots(&self, sink_id: SinkId) -> MetaResult<()> {
         let now = chrono::Utc::now().timestamp_millis();
-
-        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        let Some(iceberg_config) = self.load_maintenance_config(sink_id).await? else {
+            return Ok(());
+        };
         if !iceberg_config.enable_snapshot_expiration {
             let mut guard = self.inner.write();
             guard.snapshot_expiration_sink_ids.remove(&sink_id);
@@ -510,7 +537,9 @@ impl IcebergCompactionManager {
     }
 
     pub async fn check_and_rewrite_manifests(&self, sink_id: SinkId) -> MetaResult<()> {
-        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        let Some(iceberg_config) = self.load_maintenance_config(sink_id).await? else {
+            return Ok(());
+        };
         if !iceberg_config.enable_manifest_rewrite {
             self.inner
                 .write()

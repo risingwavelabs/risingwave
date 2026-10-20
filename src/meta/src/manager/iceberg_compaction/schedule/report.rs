@@ -116,7 +116,7 @@ impl IcebergCompactionManager {
         let Some(track) = guard
             .sink_schedules
             .get_mut(&sink_id)
-            .filter(|track| track.is_in_flight_task(report.task_id))
+            .filter(|track| track.source_is_ready() && track.is_in_flight_task(report.task_id))
         else {
             // In particular, duplicate reports cannot re-apply an Applying task
             // or complete its manual waiter before the barrier has committed.
@@ -191,7 +191,8 @@ impl IcebergCompactionManager {
                 .sink_schedules
                 .get(&report.sink_id)
                 .is_some_and(|track| {
-                    matches!(&track.state,
+                    track.source_is_ready()
+                        && matches!(&track.state,
                     CompactionTrackState::Applying { task_id, .. } if *task_id == report.task_id)
                 })
             {

@@ -52,7 +52,7 @@ use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::error::bail_invalid_parameter;
 use crate::hummock::HummockManagerRef;
-use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
@@ -81,10 +81,13 @@ pub(crate) async fn cleanup_dropped_streaming_jobs(
     refresh_manager: &GlobalRefreshManagerRef,
     hummock_manager: &HummockManagerRef,
     metadata_manager: &MetadataManager,
+    iceberg_pk_index_sink_manager: &IcebergPkIndexSinkManager,
     streaming_job_ids: impl IntoIterator<Item = JobId>,
     state_table_ids: Vec<TableId>,
     progress_status: &str,
 ) -> MetaResult<()> {
+    let streaming_job_ids = streaming_job_ids.into_iter().collect::<Vec<_>>();
+    iceberg_pk_index_sink_manager.retire_sinks(streaming_job_ids.iter().map(|id| id.as_sink_id()));
     for job_id in streaming_job_ids {
         refresh_manager.remove_progress_tracker(job_id.as_mv_table_id(), progress_status);
     }
@@ -331,7 +334,7 @@ pub struct GlobalStreamManager {
 
     pub refresh_manager: GlobalRefreshManagerRef,
 
-    pub iceberg_compaction_manager: IcebergCompactionManagerRef,
+    pub iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
@@ -347,7 +350,7 @@ impl GlobalStreamManager {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         refresh_manager: GlobalRefreshManagerRef,
-        iceberg_compaction_manager: IcebergCompactionManagerRef,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
         scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
         Ok(Self {
@@ -357,7 +360,7 @@ impl GlobalStreamManager {
             hummock_manager,
             source_manager,
             refresh_manager,
-            iceberg_compaction_manager,
+            iceberg_pk_index_sink_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             scale_controller,
         })
@@ -864,6 +867,7 @@ impl GlobalStreamManager {
                         &self.refresh_manager,
                         &self.hummock_manager,
                         &self.metadata_manager,
+                        &self.iceberg_pk_index_sink_manager,
                         cleanup_streaming_job_ids,
                         cleanup_state_table_ids,
                         "drop_streaming_jobs",
@@ -916,8 +920,8 @@ impl GlobalStreamManager {
                 .catalog_controller
                 .try_abort_creating_streaming_job(id, true)
                 .await?;
-            self.iceberg_compaction_manager
-                .clear_maintenance_for_aborted_job(&abort_result);
+            self.iceberg_pk_index_sink_manager
+                .retire_sinks(abort_result.aborted_sink_ids);
             let Some(cancel_info) = abort_result.cancel_info else {
                 return Ok(None);
             };
@@ -930,6 +934,7 @@ impl GlobalStreamManager {
                     &self.refresh_manager,
                     &self.hummock_manager,
                     &self.metadata_manager,
+                    &self.iceberg_pk_index_sink_manager,
                     cancel_info.streaming_job_ids,
                     cancel_info.state_table_ids,
                     "cancel_streaming_job",

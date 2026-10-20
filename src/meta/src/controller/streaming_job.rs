@@ -109,7 +109,7 @@ pub struct AbortCreatingJobResult {
     /// The database of the job, if the job was found.
     pub database_id: Option<DatabaseId>,
     /// The aborted sinks; the caller should clear their iceberg maintenance state via
-    /// `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
+    /// `IcebergPkIndexSinkManager::retire_sinks`, using only sinks actually removed.
     pub aborted_sink_ids: Vec<SinkId>,
     /// Runtime and state cleanup information captured before deleting the catalog rows.
     /// This is returned only when handling an explicit cancellation.

@@ -15,49 +15,26 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use prometheus::Registry;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 use risingwave_pb::id::IcebergCompactionTaskId;
 
 use super::*;
-use crate::barrier::BarrierScheduler;
-use crate::controller::catalog::CatalogController;
-use crate::controller::cluster::ClusterController;
-use crate::hummock::{CompactorManager, HummockManager, IcebergCompactorManager};
-use crate::manager::MetaOpts;
-use crate::rpc::metrics::MetaMetrics;
 
 async fn build_test_manager() -> Arc<IcebergCompactionManager> {
-    let mut opts = MetaOpts::test(false);
-    opts.iceberg_compaction_report_timeout_sec = 30 * 60;
-    let env = MetaSrvEnv::for_test_opts(opts, |_| ()).await;
-    let cluster_ctl = Arc::new(
-        ClusterController::new(env.clone(), Duration::from_secs(1))
-            .await
-            .unwrap(),
-    );
-    let catalog_ctl = Arc::new(CatalogController::new(env.clone()).await.unwrap());
-    let metadata_manager = MetadataManager::new(cluster_ctl, catalog_ctl);
-    let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
-    let metrics = Arc::new(MetaMetrics::for_test(&Registry::new()));
-    let hummock_manager = HummockManager::new(
-        env.clone(),
-        metadata_manager.clone(),
-        metrics.clone(),
-        Arc::new(CompactorManager::for_test()),
-        tokio::sync::mpsc::unbounded_channel().0,
-    )
-    .await
-    .unwrap();
-    let (barrier_scheduler, _) = BarrierScheduler::new_pair(hummock_manager);
-    let (manager, _) = IcebergCompactionManager::build(
-        env,
-        metadata_manager,
-        iceberg_compactor_manager,
-        metrics,
-        barrier_scheduler,
-    );
-    manager
+    crate::manager::iceberg_compaction::test_utils::test_managers()
+        .await
+        .0
+}
+
+fn register_sink_ready(
+    manager: &IcebergCompactionManager,
+    sink_id: SinkId,
+    config: &IcebergConfig,
+    observed_snapshot: Option<IcebergCommittedSnapshot>,
+) -> Arc<IcebergPkIndexSinkRegistration> {
+    let registration = IcebergPkIndexSinkRegistration::for_test(config.clone());
+    assert!(manager.on_sink_ready(sink_id, registration.clone(), observed_snapshot));
+    registration
 }
 
 /// Builds a single-task track. Tests for sequence-bounded rounds must use
@@ -107,6 +84,14 @@ fn new_round_track(
         pending_commit_count,
     );
     track.config.write_mode = IcebergWriteMode::MergeOnRead;
+    let mut config = new_test_iceberg_config(
+        trigger_interval_sec,
+        trigger_snapshot_count,
+        CompactionType::Full,
+    );
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    track.registration = Some(IcebergPkIndexSinkRegistration::for_test(config));
     track
 }
 
@@ -159,6 +144,7 @@ fn empty_inner() -> IcebergCompactionManagerInner {
     IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
         sink_recovery: HashMap::new(),
+        next_recovery_generation: 0,
         snapshot_expiration_sink_ids: HashSet::new(),
         manifest_rewrite_sink_ids: HashSet::new(),
         orphan_file_cleanup_sink_ids: HashSet::new(),
@@ -2471,6 +2457,7 @@ async fn test_pk_index_empty_manual_full_waits_for_observed_snapshot() {
     config.enable_pk_index = true;
     config.write_mode = IcebergWriteMode::MergeOnRead;
     let mut track = manager.create_compaction_track(&config, now);
+    track.registration = Some(IcebergPkIndexSinkRegistration::for_test(config));
     assert!(track.latest_observed_snapshot.is_none());
     SinkUpdateKind::ManualForceCompaction {
         task_type: TaskType::Full,
@@ -2638,7 +2625,12 @@ async fn test_disabling_pending_compaction_allows_manual_full_after_dispatch_fai
     let mut config = new_test_iceberg_config(120, 10, CompactionType::Auto);
     config.enable_pk_index = true;
     config.write_mode = IcebergWriteMode::MergeOnRead;
-    manager.on_sink_registered(sink_id, &config, Some(committed_snapshot(10, 1000)));
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
     let mut handle = manager.get_top_n_iceberg_commit_sink_ids(1).pop().unwrap();
 
     config.enable_compaction = false;
@@ -2938,7 +2930,12 @@ async fn test_pk_index_unknown_is_discarded_by_recovery_without_blocking_other_s
     let mut config = new_test_iceberg_config(120, 10, CompactionType::Auto);
     config.enable_pk_index = true;
     config.write_mode = IcebergWriteMode::MergeOnRead;
-    manager.on_sink_registered(sink_id, &config, Some(committed_snapshot(11, 2000)));
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(11, 2000)),
+    );
     manager.finish_report_task(apply.report, true);
     assert!(!manager.inner.read().is_recovering(sink_id));
     assert!(matches!(
@@ -3060,6 +3057,314 @@ async fn test_pk_index_recovery_scope_preserves_other_sinks_and_legacy_compactio
 }
 
 #[tokio::test]
+async fn test_pk_index_recovered_registration_waits_for_database_ready() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let mut config = new_test_iceberg_config(3600, 10, CompactionType::Full);
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    config.enable_snapshot_expiration = true;
+    config.enable_manifest_rewrite = true;
+
+    // A coordinator which has not published graph readiness cannot initialize scheduling.
+    let unpublished = IcebergPkIndexSinkRegistration::for_test(config.clone());
+    unpublished.retire_for_test();
+    assert!(!manager.on_sink_ready(sink_id, unpublished, Some(committed_snapshot(10, 1000))));
+    {
+        let guard = manager.inner.read();
+        assert!(!guard.sink_recovery.contains_key(&sink_id));
+        assert!(!guard.sink_schedules.contains_key(&sink_id));
+        assert!(!guard.snapshot_expiration_sink_ids.contains(&sink_id));
+        assert!(!guard.manifest_rewrite_sink_ids.contains(&sink_id));
+    }
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(10).is_empty());
+    assert!(manager.start_manual_compaction(sink_id).await.is_err());
+
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
+    {
+        let guard = manager.inner.read();
+        assert!(!guard.is_recovering(sink_id));
+        assert!(guard.snapshot_expiration_sink_ids.contains(&sink_id));
+        assert!(guard.manifest_rewrite_sink_ids.contains(&sink_id));
+        assert!(guard.sink_schedules[&sink_id].demand.reconciliation_pending);
+    }
+    let handles = manager.get_top_n_iceberg_commit_sink_ids(10);
+    assert_eq!(handles.len(), 1);
+    assert_eq!(handles[0].sink_id, sink_id);
+    assert_eq!(handles[0].attempt.max_file_sequence_number, Some(10));
+}
+
+#[tokio::test]
+async fn test_pk_index_recovery_keeps_unpublished_sinks_fenced() {
+    let manager = build_test_manager().await;
+    let ready_sink_id = SinkId::new(41);
+    let failed_sink_ids = [SinkId::new(42), SinkId::new(43)];
+    let mut config = new_test_iceberg_config(3600, 10, CompactionType::Full);
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    for sink_id in [ready_sink_id, failed_sink_ids[0], failed_sink_ids[1]] {
+        register_sink_ready(
+            &manager,
+            sink_id,
+            &config,
+            Some(committed_snapshot(10, 1000)),
+        );
+    }
+    manager.on_recovery_start(None);
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(10).is_empty());
+
+    // Barrier publishes only the successful database's schedules.
+    register_sink_ready(
+        &manager,
+        ready_sink_id,
+        &config,
+        Some(committed_snapshot(11, 2000)),
+    );
+    let ready_handles = manager.get_top_n_iceberg_commit_sink_ids(10);
+    assert_eq!(ready_handles.len(), 1);
+    assert_eq!(ready_handles[0].sink_id, ready_sink_id);
+    for _ in 0..3 {
+        assert!(manager.get_top_n_iceberg_commit_sink_ids(10).is_empty());
+        let guard = manager.inner.read();
+        for sink_id in failed_sink_ids {
+            assert!(guard.is_recovering(sink_id));
+            assert!(!guard.sink_schedules.contains_key(&sink_id));
+        }
+    }
+
+    // A later successful per-database recovery enables both sinks without new ingestion.
+    manager.on_recovery_start(Some(&failed_sink_ids));
+    for sink_id in failed_sink_ids {
+        register_sink_ready(
+            &manager,
+            sink_id,
+            &config,
+            Some(committed_snapshot(12, 3000)),
+        );
+    }
+    let handles = manager.get_top_n_iceberg_commit_sink_ids(10);
+    assert_eq!(handles.len(), 2);
+    for sink_id in failed_sink_ids {
+        assert!(!manager.inner.read().is_recovering(sink_id));
+        let handle = handles
+            .iter()
+            .find(|handle| handle.sink_id == sink_id)
+            .unwrap();
+        assert_eq!(handle.attempt.max_file_sequence_number, Some(12));
+    }
+}
+
+#[tokio::test]
+async fn test_pk_index_recovery_retry_rejects_retired_registration() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let mut config = new_test_iceberg_config(3600, 10, CompactionType::Full);
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    let old_registration = register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
+    let old_generation = manager.inner.read().recovery_generation(sink_id);
+    old_registration.retire_for_test();
+    manager.on_recovery_start(None);
+    assert!(!manager.on_sink_ready(
+        sink_id,
+        old_registration.clone(),
+        Some(committed_snapshot(10, 1000))
+    ));
+    {
+        let guard = manager.inner.read();
+        assert!(guard.is_recovering(sink_id));
+        assert!(guard.recovery_generation(sink_id) > old_generation);
+    }
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(10).is_empty());
+
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(12, 3000)),
+    );
+    let handles = manager.get_top_n_iceberg_commit_sink_ids(10);
+    assert_eq!(handles.len(), 1);
+    assert_eq!(handles[0].attempt.max_file_sequence_number, Some(12));
+    assert!(!manager.on_sink_ready(
+        sink_id,
+        old_registration,
+        Some(committed_snapshot(12, 3000))
+    ));
+}
+
+#[tokio::test]
+async fn test_pk_index_dropped_recovered_registration_cannot_be_published() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let mut config = new_test_iceberg_config(3600, 10, CompactionType::Full);
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    let old_registration = register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
+    old_registration.retire_for_test();
+    manager.clear_iceberg_maintenance_by_sink_id(sink_id);
+    assert!(!manager.on_sink_ready(
+        sink_id,
+        old_registration.clone(),
+        Some(committed_snapshot(10, 1000))
+    ));
+    assert!(!manager.inner.read().sink_recovery.contains_key(&sink_id));
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(10).is_empty());
+
+    // A new live coordinator for the same ID cannot reactivate an older registration.
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(12, 3000)),
+    );
+    assert!(!manager.on_sink_ready(
+        sink_id,
+        old_registration,
+        Some(committed_snapshot(12, 3000))
+    ));
+    let handles = manager.get_top_n_iceberg_commit_sink_ids(10);
+    assert_eq!(handles.len(), 1);
+    assert_eq!(handles[0].attempt.max_file_sequence_number, Some(12));
+}
+
+#[tokio::test]
+async fn test_pk_index_recovered_empty_table_waits_for_ingestion() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let mut config = new_test_iceberg_config(3600, 2, CompactionType::Full);
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    register_sink_ready(&manager, sink_id, &config, None);
+    assert!(!manager.inner.read().is_recovering(sink_id));
+    assert!(
+        !manager.inner.read().sink_schedules[&sink_id]
+            .demand
+            .reconciliation_pending
+    );
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(10).is_empty());
+}
+
+#[tokio::test]
+async fn test_pk_index_updates_cannot_bypass_registration_readiness() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let mut config = new_test_iceberg_config(3600, 10, CompactionType::Full);
+    config.enable_pk_index = true;
+    config.enable_snapshot_expiration = true;
+    config.enable_manifest_rewrite = true;
+    for kind in [
+        commit_update(10, 1000),
+        SinkUpdateKind::Maintenance {
+            observed_snapshot: committed_snapshot(11, 2000),
+        },
+        SinkUpdateKind::ManualForceCompaction {
+            task_type: TaskType::Full,
+        },
+        SinkUpdateKind::ConfigChange,
+    ] {
+        let mut guard = manager.inner.write();
+        assert!(!manager.apply_sink_update(
+            &mut guard,
+            PreparedSinkUpdate {
+                sink_id,
+                kind,
+                now: Instant::now(),
+                allow_track_initialization: true,
+                recovery_generation: 0,
+                loaded_config: Some(config.clone()),
+            }
+        ));
+        assert!(guard.sink_schedules.is_empty());
+        assert!(guard.snapshot_expiration_sink_ids.is_empty());
+        assert!(guard.manifest_rewrite_sink_ids.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn test_pk_index_retired_source_blocks_selection_dispatch_and_reports() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let mut config = new_test_iceberg_config(3600, 10, CompactionType::Full);
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    let registration = register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
+    registration.retire_for_test();
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(1).is_empty());
+    assert!(manager.start_manual_compaction(sink_id).await.is_err());
+    let recovery_generation = manager.inner.read().recovery_generation(sink_id);
+    assert!(!manager.apply_sink_update(
+        &mut manager.inner.write(),
+        PreparedSinkUpdate {
+            sink_id,
+            kind: commit_update(11, 2000),
+            now: Instant::now(),
+            allow_track_initialization: false,
+            recovery_generation,
+            loaded_config: Some(config.clone()),
+        }
+    ));
+
+    let registration = register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
+    let mut handles = manager.get_top_n_iceberg_commit_sink_ids(1);
+    assert_eq!(handles.len(), 1);
+    let mut handle = handles.pop().unwrap();
+    let mut event_rx = manager.iceberg_compactor_manager.add_compactor(1.into());
+    let compactor = manager
+        .iceberg_compactor_manager
+        .get_compactor(1.into())
+        .unwrap();
+    registration.retire_for_test();
+    handle
+        .try_dispatch_task(
+            &compactor,
+            IcebergCompactionTask {
+                task_id: 9.into(),
+                sink_id: sink_id.as_raw_id(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(event_rx.try_recv().is_err());
+    assert!(!handle.dispatched);
+    drop(handle);
+
+    let track = pk_index_track(Instant::now(), true);
+    track.registration.as_ref().unwrap().retire_for_test();
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+    assert!(
+        manager
+            .prepare_report_task(pk_index_report(IcebergReportTaskStatus::Success))
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn test_pk_index_ready_registration_reconciles_existing_snapshot_without_new_commits() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(42);
@@ -3069,7 +3374,12 @@ async fn test_pk_index_ready_registration_reconciles_existing_snapshot_without_n
 
     assert!(manager.get_top_n_iceberg_commit_sink_ids(1).is_empty());
     // CREATE's post-collect phase publishes scheduling only after the job is ready.
-    manager.on_sink_registered(sink_id, &config, Some(committed_snapshot(10, 1000)));
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
     {
         let guard = manager.inner.read();
         let track = &guard.sink_schedules[&sink_id];
@@ -3098,7 +3408,7 @@ async fn test_pk_index_empty_registration_waits_for_commit_threshold() {
     let mut config = new_test_iceberg_config(120, 2, CompactionType::Full);
     config.enable_pk_index = true;
     config.write_mode = IcebergWriteMode::MergeOnRead;
-    manager.on_sink_registered(sink_id, &config, None);
+    register_sink_ready(&manager, sink_id, &config, None);
 
     let first_commit_at = Instant::now();
     {
@@ -3132,7 +3442,12 @@ async fn test_pk_index_config_change_refreshes_idle_sink_without_a_commit() {
     config.enable_compaction = false;
     config.write_mode = IcebergWriteMode::MergeOnRead;
     config.enable_snapshot_expiration = false;
-    manager.on_sink_registered(sink_id, &config, Some(committed_snapshot(10, 1000)));
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
     // Save an older config load that completes after ALTER.
     let stale_update = PreparedSinkUpdate {
         sink_id,
@@ -3188,7 +3503,7 @@ async fn test_pk_index_config_change_preserves_empty_registration_and_recovery()
     config.enable_pk_index = true;
     config.enable_compaction = false;
     config.write_mode = IcebergWriteMode::MergeOnRead;
-    manager.on_sink_registered(sink_id, &config, None);
+    register_sink_ready(&manager, sink_id, &config, None);
     config.enable_compaction = true;
     manager.on_sink_config_changed(sink_id, config.clone());
     {
@@ -3215,7 +3530,12 @@ async fn test_pk_index_config_change_keeps_active_attempt() {
     config.enable_pk_index = true;
     config.write_mode = IcebergWriteMode::MergeOnRead;
     config.target_file_size_mb = Some(128);
-    manager.on_sink_registered(sink_id, &config, Some(committed_snapshot(10, 1000)));
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
     {
         let mut guard = manager.inner.write();
         start_in_flight(guard.sink_schedules.get_mut(&sink_id).unwrap(), 7, now);
@@ -3247,9 +3567,9 @@ async fn test_pk_index_registration_rebuilds_empty_and_recovered_tables() {
     config.write_mode = IcebergWriteMode::MergeOnRead;
     config.enable_snapshot_expiration = true;
     config.enable_manifest_rewrite = true;
-    manager.on_sink_registered(sink_id, &config, None);
+    register_sink_ready(&manager, sink_id, &config, None);
     manager.on_recovery_start(Some(&[sink_id]));
-    manager.on_sink_registered(sink_id, &config, None);
+    register_sink_ready(&manager, sink_id, &config, None);
     {
         let guard = manager.inner.read();
         assert!(!guard.is_recovering(sink_id));
@@ -3261,7 +3581,12 @@ async fn test_pk_index_registration_rebuilds_empty_and_recovered_tables() {
         assert!(!track.should_trigger(Instant::now() + Duration::from_secs(3600)));
     }
     manager.on_recovery_start(Some(&[sink_id]));
-    manager.on_sink_registered(sink_id, &config, Some(committed_snapshot(20, 2000)));
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(20, 2000)),
+    );
     {
         let guard = manager.inner.read();
         let track = &guard.sink_schedules[&sink_id];
@@ -3296,7 +3621,12 @@ async fn test_pk_index_recovery_fences_prepared_updates_across_track_replacement
     let mut config = new_test_iceberg_config(120, 10, CompactionType::Auto);
     config.enable_pk_index = true;
     config.write_mode = IcebergWriteMode::MergeOnRead;
-    manager.on_sink_registered(sink_id, &config, Some(committed_snapshot(10, 1000)));
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
     let before_recovery = manager
         .prepare_sink_update(sink_id, commit_update(30, 3000), Instant::now())
         .await;
@@ -3317,7 +3647,12 @@ async fn test_pk_index_recovery_fences_prepared_updates_across_track_replacement
         assert!(!manager.apply_sink_update(&mut guard, before_recovery));
         assert!(!guard.sink_schedules.contains_key(&sink_id));
     }
-    manager.on_sink_registered(sink_id, &config, Some(committed_snapshot(20, 2000)));
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(20, 2000)),
+    );
     let mut guard = manager.inner.write();
     assert!(!manager.apply_sink_update(&mut guard, before_recovery_after));
     assert!(!manager.apply_sink_update(&mut guard, during_recovery));

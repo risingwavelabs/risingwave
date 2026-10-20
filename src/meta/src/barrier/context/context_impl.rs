@@ -185,25 +185,17 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
-        let sink_ids = database_job_ids.as_ref().map(|job_ids| {
-            job_ids
-                .iter()
-                .map(|job_id| job_id.as_sink_id())
-                .collect::<Vec<_>>()
-        });
-        self.iceberg_compaction_manager
-            .on_recovery_start(sink_ids.as_deref());
+        self.iceberg_pk_index_sink_manager
+            .start_recovery(database_job_ids.as_ref());
         self.sink_manager.start_recovery(recovery).await?;
-
-        if let Some(job_ids) = database_job_ids {
-            self.iceberg_pk_index_sink_manager.unregister_jobs(job_ids);
-        } else {
-            self.iceberg_pk_index_sink_manager.reset();
-        }
         Ok(())
     }
 
-    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()> {
+    async fn mark_ready(
+        &self,
+        options: MarkReadyOptions,
+        running_job_ids: HashSet<JobId>,
+    ) -> MetaResult<()> {
         let recovery = match &options {
             MarkReadyOptions::Database(database_id) => RecoverySucceeded::Database(*database_id),
             MarkReadyOptions::Global { failed_databases } => RecoverySucceeded::Global {
@@ -213,6 +205,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.sink_manager.recovery_succeeded(recovery).await?;
         let is_global = matches!(&options, MarkReadyOptions::Global { .. });
         self.scheduled_barriers.mark_ready(options);
+        // Compaction reads settled coordinator state only after the queues are ready.
+        self.iceberg_pk_index_sink_manager
+            .on_jobs_ready(&running_job_ids)
+            .await;
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
@@ -696,7 +692,7 @@ impl PostCollectCommand {
                     {
                         let config = build_iceberg_config(&sink)?;
                         barrier_manager_context
-                            .iceberg_compaction_manager
+                            .iceberg_pk_index_sink_manager
                             .on_sink_config_changed(sink.id, config);
                     }
                 }
@@ -865,17 +861,16 @@ impl PostCollectCommand {
                 if let StreamingJob::Sink(sink, _) = &streaming_job
                     && is_iceberg_pk_index_sink(&sink.properties)
                 {
-                    let config = build_iceberg_config(sink)?;
-                    let observed_snapshot = barrier_manager_context
-                        .iceberg_pk_index_sink_manager
-                        .latest_observed_snapshot(sink.id)
-                        .await?;
                     barrier_manager_context
-                        .iceberg_compaction_manager
-                        .on_sink_registered(sink.id, &config, observed_snapshot);
+                        .iceberg_pk_index_sink_manager
+                        .on_jobs_ready(&HashSet::from([sink.id.as_job_id()]))
+                        .await;
                 }
 
                 if let Some(old_sink_id) = replace_sink {
+                    barrier_manager_context
+                        .iceberg_pk_index_sink_manager
+                        .retire_sinks([old_sink_id]);
                     barrier_manager_context
                         .sink_manager
                         .stop_sink_coordinators_for_jobs(vec![old_sink_id.as_job_id()])
@@ -884,6 +879,7 @@ impl PostCollectCommand {
                         &barrier_manager_context.refresh_manager,
                         &barrier_manager_context.hummock_manager,
                         &barrier_manager_context.metadata_manager,
+                        &barrier_manager_context.iceberg_pk_index_sink_manager,
                         [old_sink_id.as_job_id()],
                         old_state_table_ids.expect("replace sink should return old state tables"),
                         "replace_sink",
@@ -961,6 +957,7 @@ impl PostCollectCommand {
                     &barrier_manager_context.refresh_manager,
                     &barrier_manager_context.hummock_manager,
                     &barrier_manager_context.metadata_manager,
+                    &barrier_manager_context.iceberg_pk_index_sink_manager,
                     [],
                     to_drop_state_table_ids.clone(),
                     "replace_streaming_job",

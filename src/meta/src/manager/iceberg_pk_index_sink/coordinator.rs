@@ -113,6 +113,27 @@ pub struct IcebergPkIndexSinkCoordinator {
 }
 
 impl IcebergPkIndexSinkCoordinator {
+    #[cfg(all(test, not(madsim)))]
+    pub(super) fn for_test(
+        sink_id: SinkId,
+        table: Table,
+        catalog: Arc<dyn Catalog>,
+        iceberg_config: IcebergConfig,
+        db: DatabaseConnection,
+    ) -> Self {
+        Self {
+            sink_id,
+            db,
+            catalog,
+            table,
+            iceberg_config,
+            target_branch: "main".to_owned(),
+            retry_num: 0,
+            waiting_commit: None,
+            prev_committed_epoch: None,
+        }
+    }
+
     /// Build a ready-to-serve coordinator: load the iceberg catalog/table, recover any persisted pending
     /// state, and drain recovered pending epochs to iceberg. Returns only once recovery is complete, so a
     /// successful return means the sink is ready to accept live pre-commit/commit calls.

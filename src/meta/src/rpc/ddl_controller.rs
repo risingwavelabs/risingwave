@@ -76,7 +76,6 @@ use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
-use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -288,7 +287,6 @@ pub struct DdlController {
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
-    iceberg_compaction_manager: IcebergCompactionManagerRef,
     iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
@@ -411,7 +409,6 @@ impl DdlController {
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
-        iceberg_compaction_manager: IcebergCompactionManagerRef,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
@@ -422,7 +419,6 @@ impl DdlController {
             source_manager,
             barrier_manager,
             sink_manager,
-            iceberg_compaction_manager,
             iceberg_pk_index_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
@@ -1282,8 +1278,8 @@ impl DdlController {
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
-                self.iceberg_compaction_manager
-                    .clear_maintenance_for_aborted_job(&abort_result);
+                self.iceberg_pk_index_sink_manager
+                    .retire_sinks(abort_result.aborted_sink_ids.iter().copied());
                 if let Some(cancel_info) = abort_result.cancel_info {
                     self.stream_manager
                         .barrier_scheduler
@@ -1293,6 +1289,7 @@ impl DdlController {
                         &self.stream_manager.refresh_manager,
                         &self.stream_manager.hummock_manager,
                         &self.stream_manager.metadata_manager,
+                        &self.iceberg_pk_index_sink_manager,
                         cancel_info.streaming_job_ids,
                         cancel_info.state_table_ids,
                         "cancel_streaming_job",
@@ -1401,8 +1398,6 @@ impl DdlController {
                 // commit.
                 if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
                 {
-                    let iceberg_config =
-                        crate::manager::iceberg_pk_index_sink::build_iceberg_config(sink)?;
                     self.iceberg_pk_index_sink_manager
                         .register_sink(
                             sink.id,
@@ -1410,7 +1405,6 @@ impl DdlController {
                                 sink.database_id,
                                 Some(sink.id.as_job_id()),
                             ),
-                            iceberg_config,
                         )
                         .await
                         .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
@@ -1504,8 +1498,9 @@ impl DdlController {
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
             removed_iceberg_sink_ids,
-            removed_iceberg_pk_index_sink_ids,
         } = release_ctx;
+        self.iceberg_pk_index_sink_manager
+            .retire_sinks(removed_iceberg_sink_ids);
         let removed_job_ids_for_sink_coordinators = removed_streaming_job_ids.clone();
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1579,24 +1574,6 @@ impl DdlController {
             self.sink_manager
                 .stop_sink_coordinators_for_jobs(removed_job_ids_for_sink_coordinators)
                 .await;
-        }
-
-        // Covers user-created iceberg sinks dropped via CASCADE, which are not in
-        // `removed_iceberg_table_sinks` above.
-        for sink_id in removed_iceberg_sink_ids {
-            self.iceberg_compaction_manager
-                .clear_iceberg_maintenance_by_sink_id(sink_id);
-        }
-
-        // Unregister per-sink commit coordinators for any dropped pk-index iceberg sink,
-        // including user-created sinks with arbitrary names (not just the
-        // `__iceberg_sink_%` auto-created ones above).
-        if !removed_iceberg_pk_index_sink_ids.is_empty() {
-            self.iceberg_pk_index_sink_manager.unregister_jobs(
-                removed_iceberg_pk_index_sink_ids
-                    .into_iter()
-                    .map(|sink_id| sink_id.as_job_id()),
-            );
         }
 
         // remove secrets.
@@ -1936,8 +1913,8 @@ impl DdlController {
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
-                self.iceberg_compaction_manager
-                    .clear_maintenance_for_aborted_job(&abort_result);
+                self.iceberg_pk_index_sink_manager
+                    .retire_sinks(abort_result.aborted_sink_ids);
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {

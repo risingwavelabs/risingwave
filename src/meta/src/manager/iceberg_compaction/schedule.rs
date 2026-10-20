@@ -41,6 +41,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::*;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkRegistration;
 
 mod report;
 
@@ -286,6 +287,7 @@ impl CompactionRetry {
 #[derive(Debug, Clone)]
 pub(super) struct CompactionTrack {
     config: CompactionScheduleConfig,
+    pub(super) registration: Option<Arc<IcebergPkIndexSinkRegistration>>,
     demand: CompactionDemand,
     round: Option<CompactionRound>,
     retry: CompactionRetry,
@@ -303,6 +305,7 @@ impl CompactionTrack {
         let next_compaction_time = now + Duration::from_secs(config.trigger_interval_sec);
         Self {
             config,
+            registration: None,
             demand: CompactionDemand::default(),
             round: None,
             retry: CompactionRetry::default(),
@@ -315,6 +318,20 @@ impl CompactionTrack {
             },
             health: CompactionHealth::default(),
         }
+    }
+
+    pub(super) fn source_is_ready(&self) -> bool {
+        !self.config.pk_index_coordinated
+            || self
+                .registration
+                .as_ref()
+                .is_some_and(|registration| registration.is_ready())
+    }
+
+    pub(super) fn pk_index_registration(&self) -> Option<&Arc<IcebergPkIndexSinkRegistration>> {
+        self.registration
+            .as_ref()
+            .filter(|_| self.config.pk_index_coordinated)
     }
 
     /// Determines if compaction should be triggered.
@@ -836,11 +853,12 @@ impl IcebergCompactionHandle {
         // dispatch a task after the sink has been removed.
         let mut guard = self.inner.write();
         let Some(track) = guard.sink_schedules.get_mut(&self.sink_id).filter(|track| {
-            matches!(
-                &track.state,
-                CompactionTrackState::PendingDispatch { attempt }
-                    if Arc::ptr_eq(attempt, &self.attempt)
-            )
+            track.source_is_ready()
+                && matches!(
+                    &track.state,
+                    CompactionTrackState::PendingDispatch { attempt }
+                        if Arc::ptr_eq(attempt, &self.attempt)
+                )
         }) else {
             tracing::warn!(
                 iceberg_component = "compaction_scheduler",
@@ -1134,7 +1152,7 @@ impl IcebergCompactionManager {
     }
 
     /// Apply maintenance-only ALTER options to a registered PK-index sink, even when
-    /// ingestion is idle. Coordinator registration remains the only initialization path.
+    /// ingestion is idle. Readiness publication remains the only initialization path.
     pub fn on_sink_config_changed(&self, sink_id: SinkId, config: IcebergConfig) {
         debug_assert!(config.enable_pk_index);
         let mut guard = self.inner.write();
@@ -1177,8 +1195,9 @@ impl IcebergCompactionManager {
         affected.dedup();
         let mut cancel = Vec::new();
         for sink_id in affected {
+            let generation = guard.next_recovery_generation();
             let state = guard.sink_recovery.entry(sink_id).or_default();
-            state.generation += 1;
+            state.generation = generation;
             state.recovering = true;
             if let Some(task) = Self::remove_sink_schedule(&mut guard, sink_id) {
                 cancel.push((sink_id, task));
@@ -1197,32 +1216,37 @@ impl IcebergCompactionManager {
         }
     }
 
-    /// Rebuild scheduling after the independent job is ready and its coordinator has drained
-    /// durable pending commits. Initial creation calls this from CREATE's post-collect phase,
-    /// not from the earlier coordinator registration.
-    /// This is synchronous so an old queued update cannot act as a recovery-completion signal.
-    pub fn on_sink_registered(
+    /// Publish only after CREATE post-collect or successful database recovery unblocks its queue.
+    /// The coordinator registry serializes publication with retirement. Keeping its registration
+    /// also prevents updates/dispatch from using a retired instance before schedule cleanup.
+    pub(crate) fn on_sink_ready(
         &self,
         sink_id: SinkId,
-        config: &IcebergConfig,
+        registration: Arc<IcebergPkIndexSinkRegistration>,
         observed_snapshot: Option<IcebergCommittedSnapshot>,
-    ) {
+    ) -> bool {
+        let mut guard = self.inner.write();
+        if !registration.is_ready() {
+            return false;
+        }
+        let config = registration.config();
         debug_assert!(config.enable_pk_index);
         let now = Instant::now();
-        let mut track = self.create_compaction_track(config, now);
+        let mut track = self.create_compaction_track(&config, now);
         // Reconcile existing data, but let an empty table's future ingestion follow
         // the normal commit threshold and interval.
         if let Some(snapshot) = observed_snapshot {
             track.record_observed_snapshot(snapshot);
             track.demand.reconciliation_pending = true;
         }
+        track.registration = Some(registration);
         track.state = CompactionTrackState::Idle {
             next_compaction_time: now,
             manual_task_type: None,
         };
-        let mut guard = self.inner.write();
+        let generation = guard.next_recovery_generation();
         let state = guard.sink_recovery.entry(sink_id).or_default();
-        state.generation += 1;
+        state.generation = generation;
         state.recovering = false;
         if config.enable_snapshot_expiration {
             guard.snapshot_expiration_sink_ids.insert(sink_id);
@@ -1245,6 +1269,7 @@ impl IcebergCompactionManager {
         }
         drop(guard);
         self.cancel_scheduled_task_if_any(sink_id, task);
+        true
     }
 
     async fn prepare_sink_update(
@@ -1319,6 +1344,19 @@ impl IcebergCompactionManager {
                 .get(&sink_id)
                 .is_none_or(|track| track.config.refreshed_at <= now)
         });
+        // Commit/manual/maintenance updates must never create PK-index scheduling or enable
+        // metadata maintenance before the authoritative coordinator registration is ready.
+        let track = guard.sink_schedules.get(&sink_id);
+        if track.is_some_and(|track| !track.source_is_ready())
+            || (loaded_config
+                .as_ref()
+                .is_some_and(|config| config.enable_pk_index)
+                && !track.is_some_and(|track| {
+                    track.config.pk_index_coordinated && track.source_is_ready()
+                }))
+        {
+            return false;
+        }
         let refresh_interval = self.config_refresh_interval();
 
         if let Some(config) = loaded_config.as_ref() {
@@ -1618,7 +1656,9 @@ impl IcebergCompactionManager {
 
             let mut candidates = Vec::new();
             for (sink_id, track) in &guard.sink_schedules {
-                if track.should_trigger(now)
+                if !guard.is_recovering(*sink_id)
+                    && track.source_is_ready()
+                    && track.should_trigger(now)
                     && let CompactionTrackState::Idle {
                         next_compaction_time,
                         ..
