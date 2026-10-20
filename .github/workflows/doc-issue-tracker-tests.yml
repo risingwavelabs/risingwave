@@ -26,6 +26,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Run documentation issue tracker tests
         run: python3 .github/scripts/test_doc_issue_tracker.py
