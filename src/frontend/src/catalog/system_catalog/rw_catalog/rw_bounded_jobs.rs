@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::source::iceberg::IcebergBoundedScan;
-use risingwave_connector::source::refresh_mode::BoundedInput;
+use risingwave_connector::source::ingest_mode::BoundedInput;
 use risingwave_frontend_macro::system_catalog;
 use serde_json::json;
 

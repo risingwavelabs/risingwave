@@ -25,7 +25,7 @@ use avro::extract_avro_table_schema;
 pub mod debezium;
 pub mod iceberg;
 use iceberg::extract_iceberg_columns;
-use risingwave_connector::source::refresh_mode::BoundedInput;
+use risingwave_connector::source::ingest_mode::BoundedInput;
 mod protobuf;
 use protobuf::extract_protobuf_table_schema;
 pub mod nexmark;

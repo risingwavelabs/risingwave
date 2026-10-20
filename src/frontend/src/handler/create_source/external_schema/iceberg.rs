@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
-use risingwave_connector::source::refresh_mode::BoundedInput;
+use risingwave_connector::source::ingest_mode::BoundedInput;
 
 use super::*;
 

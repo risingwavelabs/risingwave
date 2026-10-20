@@ -21,10 +21,10 @@ use risingwave_connector::connector_common::{
     PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
 use risingwave_connector::source::iceberg::IcebergBoundedScan;
+use risingwave_connector::source::ingest_mode::{BoundedInput, IngestMode};
 use risingwave_connector::source::kafka::private_link::{
     PRIVATELINK_ENDPOINT_KEY, insert_privatelink_broker_rewrite_map,
 };
-use risingwave_connector::source::refresh_mode::{BoundedInput, RefreshMode};
 use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
@@ -434,16 +434,16 @@ fn resolve_secret_refs_inner(
     Ok(resolved_secret_refs)
 }
 
-/// The refresh modes of a source. `Bounded` is selected by `scan.bounded.mode`, the others by
+/// The ingest modes of a source. `Bounded` is selected by `scan.bounded.mode`, the others by
 /// `refresh_mode`.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RefreshModeKind {
+enum IngestModeKind {
     Streaming,
     FullReload,
     Bounded,
 }
 
-impl RefreshModeKind {
+impl IngestModeKind {
     const ALL: [Self; 3] = [Self::Streaming, Self::FullReload, Self::Bounded];
     /// The modes selected by `refresh_mode`.
     const REFRESH_MODE_VALUES: [Self; 2] = [Self::Streaming, Self::FullReload];
@@ -479,7 +479,7 @@ impl RefreshModeKind {
     }
 
     /// Removes and parses the options owned by this mode.
-    fn parse_options(self, with_options: &mut WithOptions) -> RwResult<RefreshMode> {
+    fn parse_options(self, with_options: &mut WithOptions) -> RwResult<IngestMode> {
         fn take_i64(
             with_options: &mut WithOptions,
             key: &str,
@@ -502,7 +502,7 @@ impl RefreshModeKind {
         }
 
         Ok(match self {
-            Self::Streaming => RefreshMode::Streaming,
+            Self::Streaming => IngestMode::Streaming,
             Self::FullReload => {
                 let interval_sec = take_i64(
                     with_options,
@@ -519,7 +519,7 @@ impl RefreshModeKind {
                     )));
                 }
 
-                RefreshMode::FullReload { interval_sec }
+                IngestMode::FullReload { interval_sec }
             }
             Self::Bounded => {
                 let snapshot_id = take_i64(
@@ -536,7 +536,7 @@ impl RefreshModeKind {
                     ))
                 })?;
 
-                RefreshMode::Bounded(BoundedInput::Iceberg(IcebergBoundedScan::Snapshot {
+                IngestMode::Bounded(BoundedInput::Iceberg(IcebergBoundedScan::Snapshot {
                     snapshot_id,
                 }))
             }
@@ -546,9 +546,9 @@ impl RefreshModeKind {
 
 /// Resolves the `refresh_mode` and `scan.bounded.mode` options and the options owned by each mode.
 /// Returns `None` if neither is set.
-pub(crate) fn resolve_source_refresh_mode_in_with_option(
+pub(crate) fn resolve_source_ingest_mode_in_with_option(
     with_options: &mut WithOptions,
-) -> RwResult<Option<RefreshMode>> {
+) -> RwResult<Option<IngestMode>> {
     let kind = match (
         with_options.remove(SOURCE_REFRESH_MODE_KEY),
         with_options.remove(SOURCE_SCAN_BOUNDED_MODE_KEY),
@@ -560,7 +560,7 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             )));
         }
         (Some(value), None) => Some(
-            RefreshModeKind::REFRESH_MODE_VALUES
+            IngestModeKind::REFRESH_MODE_VALUES
                 .into_iter()
                 .find(|kind| kind.name().eq_ignore_ascii_case(&value))
                 .ok_or_else(|| {
@@ -578,13 +578,13 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
                 )));
             }
 
-            Some(RefreshModeKind::Bounded)
+            Some(IngestModeKind::Bounded)
         }
         (None, None) => None,
     };
 
     // Options owned by a mode other than the chosen one are not allowed.
-    for other in RefreshModeKind::ALL
+    for other in IngestModeKind::ALL
         .into_iter()
         .filter(|other| Some(*other) != kind)
     {
@@ -601,17 +601,17 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
         }
     }
 
-    let refresh_mode = kind
+    let ingest_mode = kind
         .map(|kind| kind.parse_options(with_options))
         .transpose()?;
 
-    check_connector_supports_refresh_mode(kind, with_options)?;
+    check_connector_supports_ingest_mode(kind, with_options)?;
 
-    Ok(refresh_mode)
+    Ok(ingest_mode)
 }
 
-fn check_connector_supports_refresh_mode(
-    kind: Option<RefreshModeKind>,
+fn check_connector_supports_ingest_mode(
+    kind: Option<IngestModeKind>,
     with_options: &WithOptions,
 ) -> RwResult<()> {
     let connector = with_options
@@ -619,20 +619,20 @@ fn check_connector_supports_refresh_mode(
         .unwrap_or_else(|| "<missing>".to_owned());
 
     match kind {
-        Some(RefreshModeKind::Bounded) if !with_options.is_iceberg_connector() => {
+        Some(IngestModeKind::Bounded) if !with_options.is_iceberg_connector() => {
             Err(invalid_parameter(format!(
                 "`{}` is only supported for the iceberg connector, but got: {}",
                 SOURCE_SCAN_BOUNDED_MODE_KEY, connector
             )))
         }
-        Some(RefreshModeKind::FullReload) if !with_options.supports_full_reload_refresh() => {
+        Some(IngestModeKind::FullReload) if !with_options.supports_full_reload_refresh() => {
             Err(invalid_parameter(format!(
                 "FULL_RELOAD refresh mode is only supported for connectors: s3, gcs, __for_testing_only_batch_posix_fs, iceberg, adbc_snowflake, but got: {}",
                 connector
             )))
         }
         // Batch connectors require FULL_RELOAD mode.
-        kind if with_options.is_batch_connector() && kind != Some(RefreshModeKind::FullReload) => {
+        kind if with_options.is_batch_connector() && kind != Some(IngestModeKind::FullReload) => {
             Err(invalid_parameter(format!(
                 "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
                 connector
@@ -787,11 +787,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_resolve_refresh_mode() {
+    fn test_resolve_ingest_mode() {
         assert_eq!(resolve(&[("connector", "kafka")]).unwrap(), None);
         assert_eq!(
             resolve(&[("connector", "kafka"), ("refresh_mode", "streaming")]).unwrap(),
-            Some(RefreshMode::Streaming)
+            Some(IngestMode::Streaming)
         );
         assert_eq!(
             resolve(&[
@@ -800,7 +800,7 @@ mod tests {
                 ("refresh_interval_sec", "10"),
             ])
             .unwrap(),
-            Some(RefreshMode::FullReload {
+            Some(IngestMode::FullReload {
                 interval_sec: Some(10)
             })
         );
@@ -811,7 +811,7 @@ mod tests {
                 ("scan.bounded.snapshot.id", "42"),
             ])
             .unwrap(),
-            Some(RefreshMode::Bounded(BoundedInput::Iceberg(
+            Some(IngestMode::Bounded(BoundedInput::Iceberg(
                 IcebergBoundedScan::Snapshot { snapshot_id: 42 }
             )))
         );
@@ -883,14 +883,14 @@ mod tests {
         );
     }
 
-    fn resolve(options: &[(&str, &str)]) -> RwResult<Option<RefreshMode>> {
+    fn resolve(options: &[(&str, &str)]) -> RwResult<Option<IngestMode>> {
         let mut with_options = WithOptions::new_with_options(
             options
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect(),
         );
-        resolve_source_refresh_mode_in_with_option(&mut with_options)
+        resolve_source_ingest_mode_in_with_option(&mut with_options)
     }
 
     fn resolve_err(options: &[(&str, &str)]) -> String {

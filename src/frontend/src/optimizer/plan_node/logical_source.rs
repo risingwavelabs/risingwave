@@ -201,7 +201,7 @@ impl LogicalSource {
     fn is_full_reload_refresh(core: &generic::Source) -> bool {
         core.catalog
             .as_ref()
-            .is_some_and(|catalog| catalog.refresh_mode.is_full_reload())
+            .is_some_and(|catalog| catalog.ingest_mode.is_full_reload())
     }
 
     fn is_bounded(core: &generic::Source) -> bool {

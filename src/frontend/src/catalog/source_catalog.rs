@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SOURCE_PREFIX, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::source::refresh_mode::RefreshMode;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_sqlparser::ast;
@@ -53,7 +53,7 @@ pub struct SourceCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub rate_limit: Option<u32>,
-    pub refresh_mode: RefreshMode,
+    pub ingest_mode: IngestMode,
 }
 
 impl SourceCatalog {
@@ -93,7 +93,7 @@ impl SourceCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
             rate_limit: self.rate_limit,
-            refresh_mode: Some(self.refresh_mode.to_proto()),
+            ingest_mode: Some(self.ingest_mode.to_proto()),
         }
     }
 
@@ -119,7 +119,7 @@ impl SourceCatalog {
 
     /// Whether this source loads a bounded input once instead of streaming continuously.
     pub fn is_bounded(&self) -> bool {
-        self.refresh_mode.is_bounded()
+        self.ingest_mode.is_bounded()
     }
 
     /// If this source is an iceberg source, returns the corresponding iceberg table name.
@@ -203,8 +203,8 @@ impl From<&PbSource> for SourceCatalog {
 
         let connection_id = prost.connection_id;
         let rate_limit = prost.rate_limit;
-        let refresh_mode = RefreshMode::from_proto(prost.refresh_mode.as_ref())
-            .expect("stored refresh mode should be valid");
+        let ingest_mode = IngestMode::from_proto(prost.ingest_mode.as_ref())
+            .expect("stored ingest mode should be valid");
 
         Self {
             id,
@@ -228,7 +228,7 @@ impl From<&PbSource> for SourceCatalog {
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
             rate_limit,
-            refresh_mode,
+            ingest_mode,
         }
     }
 }

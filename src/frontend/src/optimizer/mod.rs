@@ -1127,7 +1127,7 @@ impl LogicalPlanRoot {
             .as_ref()
             .map(|catalog| {
                 catalog.with_properties.supports_full_reload_refresh()
-                    && catalog.refresh_mode.is_full_reload()
+                    && catalog.ingest_mode.is_full_reload()
             })
             .unwrap_or(false);
 
