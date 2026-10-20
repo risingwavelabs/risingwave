@@ -396,6 +396,7 @@ impl From<PbTable> for ActiveModel {
                     2 => CdcTableType::Mysql,
                     3 => CdcTableType::Sqlserver,
                     4 => CdcTableType::Mongo,
+                    5 => CdcTableType::Citus,
                     6 => CdcTableType::Mariadb,
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
