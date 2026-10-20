@@ -343,7 +343,8 @@ macro_rules! for_all_fragment_type_flags {
                 StreamCdcScan,
                 VectorIndexWrite,
                 UpstreamSinkUnion,
-                LocalityProvider
+                LocalityProvider,
+                IcebergWithPkIndexWriter
             },
             {},
             0
@@ -608,6 +609,11 @@ mod tests {
                     LocalityProvider,
                     131072,
                     "LOCALITY_PROVIDER",
+                ),
+                (
+                    IcebergWithPkIndexWriter,
+                    262144,
+                    "ICEBERG_WITH_PK_INDEX_WRITER",
                 ),
             ]
         "#]]

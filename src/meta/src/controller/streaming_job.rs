@@ -127,7 +127,7 @@ pub struct CancelStreamingJobInfo {
 }
 
 #[derive(Debug)]
-pub struct IndependentJobChangeLogInfo {
+pub struct CommittedEpochTruncateJob {
     pub job_id: JobId,
     pub state_table_ids: HashSet<TableId>,
     pub upstream_table_snapshot_epochs: HashMap<TableId, Option<u64>>,
@@ -136,7 +136,15 @@ pub struct IndependentJobChangeLogInfo {
 #[derive(Debug)]
 pub struct TableChangeLogTruncateInfo {
     pub subscription_retention_seconds: HashMap<TableId, u64>,
-    pub independent_jobs: Vec<IndependentJobChangeLogInfo>,
+    pub progress_table_subscribers: Vec<ProgressTableChangeLogSubscriber>,
+    pub committed_epoch_truncate_jobs: Vec<CommittedEpochTruncateJob>,
+}
+
+#[derive(Debug)]
+pub struct ProgressTableChangeLogSubscriber {
+    pub subscriber_job_id: JobId,
+    pub upstream_table_id: TableId,
+    pub progress_table_id: TableId,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -268,7 +276,7 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
-        let jobs: Vec<JobId> = StreamingJobModel::find()
+        let committed_epoch_truncate_job_ids: HashSet<JobId> = StreamingJobModel::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
@@ -278,13 +286,40 @@ impl CatalogController {
             )
             .into_tuple::<JobId>()
             .all(&inner.db)
-            .await?;
-        let mut job_info: HashMap<_, _> = jobs
+            .await?
             .into_iter()
+            .collect();
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode, TableIdArray)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+                fragment::Column::StateTableIds,
+            ])
+            .filter(FragmentTypeMask::intersects_any([
+                FragmentTypeFlag::IcebergWithPkIndexWriter,
+                FragmentTypeFlag::SnapshotBackfillStreamScan,
+            ]))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let iceberg_job_ids: HashSet<_> = fragments
+            .iter()
+            .filter(|(_, _, fragment_type_mask, _, _)| {
+                FragmentTypeMask::from(*fragment_type_mask)
+                    .contains(FragmentTypeFlag::IcebergWithPkIndexWriter)
+            })
+            .map(|(_, job_id, _, _, _)| *job_id)
+            .collect();
+        let mut committed_epoch_truncate_job_info: HashMap<_, _> = committed_epoch_truncate_job_ids
+            .into_iter()
+            .filter(|job_id| !iceberg_job_ids.contains(job_id))
             .map(|job_id| {
                 (
                     job_id,
-                    IndependentJobChangeLogInfo {
+                    CommittedEpochTruncateJob {
                         job_id,
                         state_table_ids: HashSet::new(),
                         upstream_table_snapshot_epochs: HashMap::new(),
@@ -292,25 +327,55 @@ impl CatalogController {
                 )
             })
             .collect();
-        if !job_info.is_empty() {
-            let fragments = Fragment::find()
-                .filter(fragment::Column::JobId.is_in(job_info.keys().copied()))
-                .all(&inner.db)
-                .await?;
-            for fragment in fragments {
-                let info = job_info
-                    .get_mut(&fragment.job_id)
-                    .expect("job should exist");
-                info.state_table_ids
-                    .extend(fragment.state_table_ids.inner_ref().iter().copied());
+        let mut progress_table_subscribers = Vec::new();
+        for (fragment_id, job_id, fragment_type_mask, stream_node, state_table_ids) in fragments {
+            let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
+            if iceberg_job_ids.contains(&job_id) {
+                if !fragment_type_mask.contains(FragmentTypeFlag::SnapshotBackfillStreamScan) {
+                    continue;
+                }
                 let mut collection_error = None;
-                visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+                visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
                     let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
                         Ok(scan_type) => scan_type,
                         Err(err) => {
                             collection_error = Some(anyhow::Error::new(err).context(format!(
                                 "invalid persisted stream scan type {} in job {} fragment {}",
-                                stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
+                                stream_scan.stream_scan_type, job_id, fragment_id
+                            )));
+                            return;
+                        }
+                    };
+                    if scan_type != StreamScanType::SnapshotBackfill {
+                        return;
+                    }
+                    let Some(progress_table) = stream_scan.state_table.as_ref() else {
+                        collection_error = Some(anyhow!(
+                            "snapshot backfill in Iceberg V3 job {} has no progress table",
+                            job_id
+                        ));
+                        return;
+                    };
+                    progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
+                        subscriber_job_id: job_id,
+                        upstream_table_id: stream_scan.table_id,
+                        progress_table_id: progress_table.id,
+                    });
+                });
+                if let Some(err) = collection_error {
+                    return Err(err.into());
+                }
+            } else if let Some(info) = committed_epoch_truncate_job_info.get_mut(&job_id) {
+                info.state_table_ids
+                    .extend(state_table_ids.inner_ref().iter().copied());
+                let mut collection_error = None;
+                visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
+                    let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                        Ok(scan_type) => scan_type,
+                        Err(err) => {
+                            collection_error = Some(anyhow::Error::new(err).context(format!(
+                                "invalid persisted stream scan type {} in job {} fragment {}",
+                                stream_scan.stream_scan_type, job_id, fragment_id
                             )));
                             return;
                         }
@@ -326,7 +391,7 @@ impl CatalogController {
                             if entry.get() != &stream_scan.snapshot_backfill_epoch {
                                 collection_error = Some(anyhow!(
                                     "job {} has inconsistent snapshot epochs for upstream table {}",
-                                    fragment.job_id,
+                                    job_id,
                                     stream_scan.table_id
                                 ));
                             }
@@ -341,13 +406,14 @@ impl CatalogController {
                 }
             }
         }
-        let independent_jobs = job_info
+        let committed_epoch_truncate_jobs = committed_epoch_truncate_job_info
             .into_values()
             .filter(|info| !info.upstream_table_snapshot_epochs.is_empty())
             .collect();
         Ok(TableChangeLogTruncateInfo {
             subscription_retention_seconds,
-            independent_jobs,
+            progress_table_subscribers,
+            committed_epoch_truncate_jobs,
         })
     }
 
