@@ -36,7 +36,6 @@ risingwave_batch_executors::enable!();
 #[macro_use]
 mod catalog;
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 pub use catalog::TableCatalog;
