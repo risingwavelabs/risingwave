@@ -14,14 +14,15 @@
 
 use std::sync::Arc;
 
-use anyhow::Context;
 use apache_avro::Schema;
 use moka::future::Cache;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
-use crate::schema::pulsar_schema::{Client, PulsarSchemaInfo};
-use crate::source::pulsar::topic::{Topic, parse_topic};
+use crate::schema::pulsar_schema::{
+    Client, PulsarSchema, PulsarSchemaInfo, parse_partitioned_topic,
+};
+use crate::source::pulsar::topic::Topic;
 
 /// Fetch schemas of a single Pulsar topic and cache writer schemas by version.
 /// Each parser configuration owns a resolver and shares it with its clones through `Arc`.
@@ -35,30 +36,27 @@ pub struct PulsarSchemaCache {
 
 impl PulsarSchemaCache {
     pub fn new(pulsar_client: Client, topic: &str) -> ConnectorResult<Self> {
-        let mut topic = parse_topic(topic)?;
-        topic.topic = topic.topic_str_without_partition()?;
-        topic.partition_index = None;
         Ok(Self {
-            topic,
+            topic: parse_partitioned_topic(topic)?,
             writer_schemas: Cache::new(u64::MAX),
             pulsar_client,
         })
     }
 
-    fn parse_schema(raw_schema: PulsarSchemaInfo) -> ConnectorResult<Arc<Schema>> {
-        if !raw_schema.r#type.eq_ignore_ascii_case("AVRO") {
-            bail!("expected Pulsar AVRO schema, got {}", raw_schema.r#type);
+    /// Only `AVRO` schemas can be used, as payloads are decoded as Avro binary. A `JSON` schema
+    /// carries the same Avro definition, but its payloads are JSON text.
+    fn parse_avro_schema(raw_schema: PulsarSchemaInfo) -> ConnectorResult<Arc<Schema>> {
+        match raw_schema.parse()? {
+            PulsarSchema::Avro(schema) => Ok(Arc::new(schema)),
+            PulsarSchema::Json(_) => bail!("expected Pulsar AVRO schema, got JSON"),
         }
-        let schema =
-            Schema::parse_str(&raw_schema.data).context("failed to parse Pulsar Avro schema")?;
-        Ok(Arc::new(schema))
     }
 
     /// Fetches the current latest schema for a parser's reader schema and caches its version.
     pub async fn get_latest(&self) -> ConnectorResult<Arc<Schema>> {
         let raw_schema = self.pulsar_client.get_schema(&self.topic, None).await?;
         let version = raw_schema.version;
-        let schema = Self::parse_schema(raw_schema)?;
+        let schema = Self::parse_avro_schema(raw_schema)?;
         self.writer_schemas
             .insert(version, Arc::clone(&schema))
             .await;
@@ -80,7 +78,7 @@ impl PulsarSchemaCache {
                         raw_schema.version
                     );
                 }
-                Self::parse_schema(raw_schema)
+                Self::parse_avro_schema(raw_schema)
             })
             .await
             .map_err(Into::into)
