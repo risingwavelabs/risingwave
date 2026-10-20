@@ -709,6 +709,7 @@ impl CatalogController {
                     BoundedJob::insert(bounded_job::ActiveModel {
                         job_id: Set(job_id),
                         source_id: Set(source.id),
+                        status: Set(bounded_job::BoundedJobStatus::Loading),
                         completed_at: Set(None),
                     })
                     .exec(&txn)

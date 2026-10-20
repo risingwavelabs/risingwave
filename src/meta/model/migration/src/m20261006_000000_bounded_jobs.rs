@@ -12,6 +12,7 @@ impl MigrationTrait for Migration {
                     .table(BoundedJob::Table)
                     .col(ColumnDef::new(BoundedJob::JobId).integer().not_null())
                     .col(ColumnDef::new(BoundedJob::SourceId).integer().not_null())
+                    .col(ColumnDef::new(BoundedJob::Status).string().not_null())
                     .col(ColumnDef::new(BoundedJob::CompletedAt).big_integer())
                     .primary_key(
                         Index::create()
@@ -49,6 +50,7 @@ enum BoundedJob {
     Table,
     JobId,
     SourceId,
+    Status,
     CompletedAt,
 }
 

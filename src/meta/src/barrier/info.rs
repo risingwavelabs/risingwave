@@ -805,6 +805,13 @@ impl InflightDatabaseInfo {
             }
 
             if let Some(tracker) = &mut job.bounded_load_tracker {
+                if tracker.take_failed() {
+                    bounded_load_actions.push(BoundedLoadAction::Fail {
+                        job_id: *job_id,
+                        source_id: tracker.source_id,
+                    });
+                }
+
                 if tracker.take_seal() {
                     bounded_load_actions.push(BoundedLoadAction::SealListing {
                         database_id: self.database_id,

@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::bounded_load_mutation::{
 use thiserror_ext::AsReport;
 
 use crate::MetaResult;
-use crate::barrier::bounded_progress::mark_bounded_job_complete;
+use crate::barrier::bounded_progress::{mark_bounded_job_complete, mark_bounded_job_failed};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::MetaSrvEnv;
 
@@ -29,7 +29,7 @@ pub type BoundedLoadManagerRef = Arc<BoundedLoadManager>;
 
 /// Applies the lifecycle steps of bounded loads that the barrier worker decides after a
 /// checkpoint commits. Progress is tracked inside the barrier worker; this manager only
-/// schedules the follow-up commands and persists completion.
+/// schedules the follow-up commands and persists completion or failure.
 pub struct BoundedLoadManager {
     env: MetaSrvEnv,
     barrier_scheduler: BarrierScheduler,
@@ -65,5 +65,11 @@ impl BoundedLoadManager {
     /// Persists completion once every reader actor has reported `ReaderDone`.
     pub async fn complete(&self, job_id: JobId, source_id: SourceId) -> MetaResult<()> {
         mark_bounded_job_complete(&self.env.meta_store_ref().conn, job_id, source_id).await
+    }
+
+    /// Persists the failure once any actor has reported `LoadFailed`.
+    pub async fn fail(&self, job_id: JobId, source_id: SourceId) -> MetaResult<()> {
+        tracing::warn!(%job_id, %source_id, "bounded load failed, see compute logs for the error");
+        mark_bounded_job_failed(&self.env.meta_store_ref().conn, job_id, source_id).await
     }
 }

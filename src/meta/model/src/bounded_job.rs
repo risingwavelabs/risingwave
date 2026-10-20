@@ -17,6 +17,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::{JobId, SourceId};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum BoundedJobStatus {
+    #[sea_orm(string_value = "LOADING")]
+    Loading,
+    #[sea_orm(string_value = "COMPLETED")]
+    Completed,
+    #[sea_orm(string_value = "FAILED")]
+    Failed,
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "bounded_job")]
 pub struct Model {
@@ -24,7 +35,8 @@ pub struct Model {
     pub job_id: JobId,
     #[sea_orm(primary_key, auto_increment = false)]
     pub source_id: SourceId,
-    /// Unix timestamp in milliseconds; None while loading.
+    pub status: BoundedJobStatus,
+    /// Unix timestamp in milliseconds; set only when the load completed.
     pub completed_at: Option<i64>,
 }
 

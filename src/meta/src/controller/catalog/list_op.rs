@@ -16,10 +16,13 @@ use risingwave_common::bail;
 use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_common::id::JobId;
 use risingwave_connector::source::ingest_mode::IngestMode;
+use risingwave_meta_model::bounded_job::BoundedJobStatus;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_meta_model::{SourceId, SourceIngestMode, bounded_job};
 use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
-use risingwave_pb::meta::list_bounded_jobs_response::BoundedJob as PbBoundedJob;
+use risingwave_pb::meta::list_bounded_jobs_response::{
+    BoundedJob as PbBoundedJob, Status as PbBoundedJobStatus,
+};
 use sea_orm::prelude::DateTime;
 
 use super::*;
@@ -34,23 +37,29 @@ impl CatalogController {
 
     pub async fn list_bounded_jobs(&self) -> MetaResult<Vec<PbBoundedJob>> {
         let inner = self.inner.read().await;
-        let jobs: Vec<(JobId, SourceId, Option<i64>, Option<SourceIngestMode>)> =
-            bounded_job::Entity::find()
-                .select_only()
-                .columns([
-                    bounded_job::Column::JobId,
-                    bounded_job::Column::SourceId,
-                    bounded_job::Column::CompletedAt,
-                ])
-                .column(source::Column::IngestMode)
-                .join(JoinType::InnerJoin, bounded_job::Relation::Source.def())
-                .join(JoinType::InnerJoin, object::Relation::Source.def())
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
+        let jobs = bounded_job::Entity::find()
+            .select_only()
+            .columns([
+                bounded_job::Column::JobId,
+                bounded_job::Column::SourceId,
+                bounded_job::Column::Status,
+                bounded_job::Column::CompletedAt,
+            ])
+            .column(source::Column::IngestMode)
+            .join(JoinType::InnerJoin, bounded_job::Relation::Source.def())
+            .join(JoinType::InnerJoin, object::Relation::Source.def())
+            .into_tuple::<(
+                JobId,
+                SourceId,
+                BoundedJobStatus,
+                Option<i64>,
+                Option<SourceIngestMode>,
+            )>()
+            .all(&inner.db)
+            .await?;
 
         jobs.into_iter()
-            .map(|(job_id, source_id, completed_at, ingest_mode)| {
+            .map(|(job_id, source_id, status, completed_at, ingest_mode)| {
                 let mode = ingest_mode.as_ref().map(|mode| mode.to_protobuf());
                 let Some(input) = IngestMode::from_proto(mode.as_ref())?.bounded_input() else {
                     bail!("bounded source {source_id} has no pinned input");
@@ -61,6 +70,12 @@ impl CatalogController {
                     source_id,
                     input: Some(input.to_proto()),
                     completed_at,
+                    status: match status {
+                        BoundedJobStatus::Loading => PbBoundedJobStatus::Loading,
+                        BoundedJobStatus::Completed => PbBoundedJobStatus::Completed,
+                        BoundedJobStatus::Failed => PbBoundedJobStatus::Failed,
+                    }
+                    .into(),
                 })
             })
             .collect()

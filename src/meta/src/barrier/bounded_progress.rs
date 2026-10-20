@@ -18,6 +18,7 @@ use risingwave_common::bail;
 use risingwave_common::id::{ActorId, DatabaseId, FragmentId, JobId, SourceId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::ingest_mode::IngestMode;
+use risingwave_meta_model::bounded_job::BoundedJobStatus;
 use risingwave_meta_model::{bounded_job, object};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::barrier_complete_response::BoundedLoadProgress;
@@ -41,6 +42,10 @@ pub(super) enum BoundedLoadAction {
         job_id: JobId,
         source_id: SourceId,
     },
+    Fail {
+        job_id: JobId,
+        source_id: SourceId,
+    },
 }
 
 /// two-phase source (iceberg, object store, files)
@@ -50,11 +55,16 @@ pub(super) enum BoundedLoadAction {
 /// one-phase source (postgres, kafka, etc)
 ///
 ///   Reading -> Completed
+///
+/// Any actor may fail the load before it completes:
+///
+///   Listing | Reading -> Failed
 #[derive(Debug, Clone, Copy)]
 enum Phase {
     Listing,
     Reading,
     Completed,
+    Failed,
 }
 
 #[derive(Debug)]
@@ -67,6 +77,8 @@ pub(super) struct BoundedLoadTracker {
     readers: HashMap<ActorId, FragmentId>,
     sealed: HashSet<ActorId>,
     done: HashSet<ActorId>,
+    /// Set once any lister or reader reports `LoadFailed`.
+    failed: bool,
     phase: Phase,
 }
 
@@ -109,6 +121,7 @@ impl BoundedLoadTracker {
             readers,
             sealed: HashSet::new(),
             done: HashSet::new(),
+            failed: false,
             phase,
         })
     }
@@ -143,9 +156,9 @@ impl BoundedLoadTracker {
 
     /// Records a progress report from a lister or reader.
     ///
-    /// Reports are ignored after completion.
+    /// Reports are ignored once the load has completed or failed.
     pub fn apply_progress(&mut self, report: &BoundedLoadProgress) {
-        if self.is_completed() {
+        if self.is_completed() || self.is_failed() {
             return;
         }
 
@@ -162,7 +175,24 @@ impl BoundedLoadTracker {
             {
                 self.done.insert(report.actor_id);
             }
+            Some(Progress::LoadFailed(_))
+                if self.listers.get(&report.actor_id) == Some(&report.fragment_id)
+                    || self.readers.get(&report.actor_id) == Some(&report.fragment_id) =>
+            {
+                self.failed = true;
+            }
             _ => tracing::warn!(?report, "ignore unexpected bounded load progress"),
+        }
+    }
+
+    /// Returns `true` once any actor has reported `LoadFailed`.
+    /// Returns `true` at most once per load.
+    pub fn take_failed(&mut self) -> bool {
+        if self.failed && !self.is_failed() {
+            self.phase = Phase::Failed;
+            true
+        } else {
+            false
         }
     }
 
@@ -198,6 +228,10 @@ impl BoundedLoadTracker {
 
     fn is_completed(&self) -> bool {
         matches!(self.phase, Phase::Completed)
+    }
+
+    fn is_failed(&self) -> bool {
+        matches!(self.phase, Phase::Failed)
     }
 }
 
@@ -263,7 +297,7 @@ pub(crate) async fn load_unfinished_bounded_jobs(
         .select_only()
         .column(bounded_job::Column::JobId)
         .column(bounded_job::Column::SourceId)
-        .filter(bounded_job::Column::CompletedAt.is_null());
+        .filter(bounded_job::Column::Status.eq(BoundedJobStatus::Loading));
 
     if let Some(database_id) = database_id {
         query = query
@@ -290,12 +324,37 @@ pub(crate) async fn mark_bounded_job_complete(
 ) -> MetaResult<()> {
     bounded_job::Entity::update_many()
         .col_expr(
+            bounded_job::Column::Status,
+            Expr::value(BoundedJobStatus::Completed),
+        )
+        .col_expr(
             bounded_job::Column::CompletedAt,
             Expr::value(chrono::Utc::now().timestamp_millis()),
         )
         .filter(bounded_job::Column::JobId.eq(job_id))
         .filter(bounded_job::Column::SourceId.eq(source_id))
-        .filter(bounded_job::Column::CompletedAt.is_null())
+        .filter(bounded_job::Column::Status.eq(BoundedJobStatus::Loading))
+        .exec(conn)
+        .await?;
+
+    Ok(())
+}
+
+/// Marks the bounded load of `job_id` as failed. A failed load is not restarted on recovery and no
+/// longer blocks changes to the job.
+pub(crate) async fn mark_bounded_job_failed(
+    conn: &impl ConnectionTrait,
+    job_id: JobId,
+    source_id: SourceId,
+) -> MetaResult<()> {
+    bounded_job::Entity::update_many()
+        .col_expr(
+            bounded_job::Column::Status,
+            Expr::value(BoundedJobStatus::Failed),
+        )
+        .filter(bounded_job::Column::JobId.eq(job_id))
+        .filter(bounded_job::Column::SourceId.eq(source_id))
+        .filter(bounded_job::Column::Status.eq(BoundedJobStatus::Loading))
         .exec(conn)
         .await?;
 
@@ -313,7 +372,7 @@ pub(crate) async fn ensure_not_loading_bounded(
 ) -> MetaResult<()> {
     let loading = bounded_job::Entity::find()
         .filter(bounded_job::Column::JobId.is_in(job_ids))
-        .filter(bounded_job::Column::CompletedAt.is_null())
+        .filter(bounded_job::Column::Status.eq(BoundedJobStatus::Loading))
         .one(conn)
         .await?;
 
@@ -339,7 +398,7 @@ mod tests {
         PbStreamNode, SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
     };
     use risingwave_pb::stream_service::barrier_complete_response::bounded_load_progress::{
-        ListSealed, ReaderDone,
+        ListSealed, LoadFailed, ReaderDone,
     };
 
     use super::*;
@@ -418,6 +477,29 @@ mod tests {
         tracker.apply_progress(&reader_done(2, 1));
         assert!(!tracker.take_seal());
         assert!(tracker.take_completed());
+        assert!(!tracker.take_completed());
+    }
+
+    /// A failure from any lister or reader fails the load once, and blocks seal and completion.
+    #[test]
+    fn test_failed_lifecycle() {
+        let mut tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &two_phase()).unwrap();
+
+        tracker.apply_progress(&load_failed(1, 1));
+        assert!(tracker.take_failed());
+        assert!(!tracker.take_failed());
+        assert!(tracker.is_failed());
+
+        tracker.apply_progress(&list_sealed(1, 1));
+        tracker.apply_progress(&list_sealed(2, 1));
+        assert!(!tracker.take_seal());
+
+        let mut tracker = BoundedLoadTracker::new(JOB_ID, SOURCE_ID, &one_phase()).unwrap();
+
+        tracker.apply_progress(&reader_done(1, 1));
+        tracker.apply_progress(&reader_done(2, 1));
+        tracker.apply_progress(&load_failed(2, 1));
+        assert!(tracker.take_failed());
         assert!(!tracker.take_completed());
     }
 
@@ -513,6 +595,14 @@ mod tests {
             actor_id: actor_id.into(),
             fragment_id: fragment_id.into(),
             progress: Some(Progress::ReaderDone(ReaderDone {})),
+        }
+    }
+
+    fn load_failed(actor_id: u32, fragment_id: u32) -> BoundedLoadProgress {
+        BoundedLoadProgress {
+            actor_id: actor_id.into(),
+            fragment_id: fragment_id.into(),
+            progress: Some(Progress::LoadFailed(LoadFailed {})),
         }
     }
 }

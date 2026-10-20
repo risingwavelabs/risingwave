@@ -329,6 +329,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     .complete(job_id, source_id)
                     .await?;
             }
+            BoundedLoadAction::Fail { job_id, source_id } => {
+                self.bounded_load_manager.fail(job_id, source_id).await?;
+            }
         }
         Ok(())
     }
