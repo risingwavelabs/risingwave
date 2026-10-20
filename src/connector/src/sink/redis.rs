@@ -517,6 +517,9 @@ struct RedisSinkPayloadWriter {
     conn: Option<RedisConn>,
     // the command pipeline for write-commit
     pipe: RedisPipe,
+    // number of times a pipeline was (or would have been) executed, only for tests
+    #[cfg(test)]
+    executed: usize,
 }
 
 impl RedisSinkPayloadWriter {
@@ -524,14 +527,23 @@ impl RedisSinkPayloadWriter {
         let (conn, pipe) = config.common.build_conn_and_pipe().await?;
         let conn = Some(conn);
 
-        Ok(Self { conn, pipe })
+        Ok(Self {
+            conn,
+            pipe,
+            #[cfg(test)]
+            executed: 0,
+        })
     }
 
     #[cfg(test)]
     pub fn mock() -> Self {
         let conn = None;
         let pipe = RedisPipe::Single(redis::pipe());
-        Self { conn, pipe }
+        Self {
+            conn,
+            pipe,
+            executed: 0,
+        }
     }
 
     pub async fn commit(&mut self) -> Result<()> {
@@ -545,6 +557,7 @@ impl RedisSinkPayloadWriter {
         #[cfg(test)]
         {
             if self.conn.is_none() {
+                self.executed += 1;
                 return Ok(());
             }
         }
@@ -716,6 +729,8 @@ mod test {
             .unwrap();
 
         assert!(writer.payload_writer.pipe.is_empty());
+        // The empty pipeline must not be executed.
+        assert_eq!(writer.payload_writer.executed, 0);
     }
 
     #[tokio::test]
