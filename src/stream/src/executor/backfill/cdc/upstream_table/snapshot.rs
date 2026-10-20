@@ -365,10 +365,10 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_connector::source::cdc::external::mysql::MysqlExternalTableReader;
     use risingwave_connector::source::cdc::external::{
         ExternalTableConfig, ExternalTableReader, SchemaTableName,
     };
+    use risingwave_connector::source::cdc::mysql::MysqlExternalTableReader;
 
     use crate::executor::backfill::utils::{get_new_pos, iter_chunks};
 

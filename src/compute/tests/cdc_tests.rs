@@ -35,9 +35,9 @@ use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::{
-    DebeziumOffset, DebeziumSourceOffset, ExternalCdcTableType, ExternalTableConfig,
-    SchemaTableName,
+    DebeziumOffset, ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
 };
+use risingwave_connector::source::cdc::mysql::MysqlSourceOffset;
 use risingwave_connector::source::cdc::{
     CdcScanOptions, CdcTableSnapshotSplitAssignmentWithGeneration, DebeziumCdcSplit,
 };
@@ -77,18 +77,10 @@ impl MockOffsetGenExecutor {
         let start_offset = self.start_offset;
         let dbz_offset = DebeziumOffset {
             source_partition: Default::default(),
-            source_offset: DebeziumSourceOffset {
-                last_snapshot_record: None,
+            source_offset: MysqlSourceOffset {
                 snapshot: None,
                 file: Some("1.binlog".to_owned()),
                 pos: Some(start_offset as _),
-                lsn: None,
-                lsn_commit: None,
-                lsn_proc: None,
-                txid: None,
-                tx_usec: None,
-                change_lsn: None,
-                commit_lsn: None,
             },
             is_heartbeat: false,
         };

@@ -375,7 +375,6 @@ macro_rules! impl_cdc_source_type {
                 pub struct $cdc_source_type;
                 impl CdcSourceTypeTrait for $cdc_source_type {
                     const CDC_CONNECTOR_NAME: &'static str = concat!(stringify!([<$cdc_source_type:lower>]), "-cdc");
-                    const DEFAULT_DEBEZIUM_CDC_SPLIT_SPLIT_FIELD: &'static str = stringify!([<$cdc_source_type:snake _split>]);
                     fn source_type() -> CdcSourceType {
                         CdcSourceType::$cdc_source_type
                     }

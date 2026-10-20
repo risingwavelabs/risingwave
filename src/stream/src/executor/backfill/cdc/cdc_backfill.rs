@@ -33,7 +33,7 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
-    CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
+    CdcOffset, ExternalCdcTableType, ExternalTableReader, ExternalTableReaderImpl,
 };
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use risingwave_pb::common::ThrottleType;
@@ -1228,11 +1228,11 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_connector::source::cdc::CdcScanOptions;
     use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
-    use risingwave_connector::source::cdc::external::mysql::MysqlOffset;
     use risingwave_connector::source::cdc::external::{
         CdcOffset, ExternalCdcTableType, ExternalTableConfig, ExternalTableReaderImpl,
         SchemaTableName,
     };
+    use risingwave_connector::source::cdc::mysql::MysqlOffset;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::{

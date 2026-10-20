@@ -24,9 +24,11 @@ use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, ExternalTableReader, MysqlOffset,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, ExternalTableReader,
     SchemaTableName,
 };
+use crate::source::cdc::mysql::MysqlOffset;
+use crate::source::cdc::{Mysql, parse_debezium_offset};
 #[derive(Debug)]
 pub struct MockExternalTableReader {
     binlog_watermarks: Vec<MysqlOffset>,
@@ -118,11 +120,7 @@ impl MockExternalTableReader {
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
-        Box::new(move |offset| {
-            Ok(CdcOffset::Mysql(MysqlOffset::parse_debezium_offset(
-                offset,
-            )?))
-        })
+        Box::new(move |offset| Ok(CdcOffset::Mysql(parse_debezium_offset::<Mysql>(offset)?)))
     }
 
     /// The snapshot will emit to downstream all in once, because it is too small.

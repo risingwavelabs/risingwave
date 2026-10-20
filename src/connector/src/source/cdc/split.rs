@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::external::DebeziumOffset;
-use crate::source::cdc::{CdcSerializedFieldNames, CdcSourceType, CdcSourceTypeTrait};
+use crate::source::cdc::{
+    CdcDebeziumOffsetInterpreter, CdcSerializedNames, CdcSourceType, CdcSourceTypeTrait,
+};
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.
@@ -48,6 +50,8 @@ impl CdcSplitBase {
 /// through [`Self::inner`] and [`Self::inner_mut`]. A connector overrides a method only when its
 /// Debezium offset format needs special handling. Connector-specific fields beyond the base are
 /// initialized by the connector's own constructor in its own module, not through this trait.
+/// Reading the offset itself is the job of `CdcDebeziumOffsetInterpreter`; the wrapper
+/// interprets it and hands the result to [`Self::update_offset`].
 pub trait CdcSplitTrait: Send + Sync + Default {
     fn new(split_id: u32, start_offset: Option<String>) -> Self {
         let mut split = Self::default();
@@ -76,45 +80,46 @@ pub trait CdcSplitTrait: Send + Sync + Default {
         self.inner_mut().start_offset = None;
     }
 
-    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        // if snapshot_done is already true, it won't be updated
-        let snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
+    /// Stores `last_seen_offset` and the `snapshot_done` flag the wrapper derived from it.
+    fn update_offset(
+        &mut self,
+        last_seen_offset: String,
+        snapshot_done: bool,
+    ) -> ConnectorResult<()> {
         let inner = self.inner_mut();
         inner.snapshot_done = snapshot_done;
         inner.start_offset = Some(last_seen_offset);
         Ok(())
     }
+}
 
-    fn extract_snapshot_flag(&self, start_offset: &str) -> ConnectorResult<bool> {
-        // if snapshot_done is already true, it won't be changed
-        let mut snapshot_done = self.is_snapshot_done();
-        if snapshot_done {
-            return Ok(snapshot_done);
-        }
-
-        let dbz_offset: DebeziumOffset = serde_json::from_str(start_offset).with_context(|| {
+/// The `snapshot_done` flag of a split after seeing `offset`. Once set it stays set; heartbeats
+/// carry no snapshot information and leave it unchanged.
+fn snapshot_done_after_offset<T: CdcDebeziumOffsetInterpreter>(
+    split: &impl CdcSplitTrait,
+    offset: &str,
+) -> ConnectorResult<bool> {
+    if split.is_snapshot_done() {
+        return Ok(true);
+    }
+    let dbz_offset: DebeziumOffset<T::SourceOffset> =
+        serde_json::from_str(offset).with_context(|| {
             format!(
                 "invalid cdc offset: {}, split: {}",
-                start_offset,
-                self.split_id()
+                offset,
+                split.split_id()
             )
         })?;
-
-        // heartbeat event should not update the `snapshot_done` flag
-        if !dbz_offset.is_heartbeat {
-            snapshot_done = match dbz_offset.source_offset.snapshot {
-                Some(val) => !val,
-                None => true,
-            };
-        }
-        Ok(snapshot_done)
+    if dbz_offset.is_heartbeat {
+        return Ok(false);
     }
+    Ok(T::snapshot_done_from_debezium_offset(&dbz_offset))
 }
 
 /// Generates [`DebeziumCdcSplit`] from the CDC block of `for_all_classified_sources!`: one
 /// `Option<XxxCdcSplit>` field named `xxx_split` per connector, its constructor, and its serde
 /// impls. `XxxCdcSplit` is expected at `crate::source::cdc::xxx::XxxCdcSplit`. Serde is
-/// hand-written because the persisted key of each field comes from `CdcSerializedFieldNames`,
+/// hand-written because the persisted key of each field comes from `CdcSerializedNames`,
 /// which `#[serde(rename)]` cannot read.
 macro_rules! impl_debezium_cdc_split {
     ({$({$cdc_source_type:ident}),*}, {$($_ignore:tt),*}) => {
@@ -160,7 +165,7 @@ macro_rules! impl_debezium_cdc_split {
 
             const DEBEZIUM_CDC_SPLIT_FIELDS: &[&str] = &[
                 $(
-                    <$crate::source::cdc::$cdc_source_type as CdcSerializedFieldNames>::DEBEZIUM_CDC_SPLIT_SPLIT_FIELD,
+                    <$crate::source::cdc::$cdc_source_type as CdcSerializedNames>::DEBEZIUM_CDC_SPLIT_SPLIT_FIELD,
                 )*
             ];
 
@@ -171,7 +176,7 @@ macro_rules! impl_debezium_cdc_split {
                         .serialize_struct("DebeziumCdcSplit", DEBEZIUM_CDC_SPLIT_FIELDS.len())?;
                     $(
                         state.serialize_field(
-                            <$crate::source::cdc::$cdc_source_type as CdcSerializedFieldNames>::DEBEZIUM_CDC_SPLIT_SPLIT_FIELD,
+                            <$crate::source::cdc::$cdc_source_type as CdcSerializedNames>::DEBEZIUM_CDC_SPLIT_SPLIT_FIELD,
                             &self.[<$cdc_source_type:snake _split>],
                         )?;
                     )*
@@ -198,7 +203,7 @@ macro_rules! impl_debezium_cdc_split {
                             while let Some(key) = map.next_key::<String>()? {
                                 match key.as_str() {
                                     $(
-                                        key if key == <$crate::source::cdc::$cdc_source_type as CdcSerializedFieldNames>::DEBEZIUM_CDC_SPLIT_SPLIT_FIELD => {
+                                        key if key == <$crate::source::cdc::$cdc_source_type as CdcSerializedNames>::DEBEZIUM_CDC_SPLIT_SPLIT_FIELD => {
                                             split.[<$cdc_source_type:snake _split>] = map.next_value()?;
                                         }
                                     )*
@@ -231,12 +236,14 @@ macro_rules! dispatch_cdc_split_inner {
         $dbz_split:tt,
         $as_type:tt,
         $split:ident,
+        $connector:ident,
         $body:expr
     ) => {
         $crate::paste! {
             match T::source_type() {
                 $(
                     CdcSourceType::$cdc_source_type => {
+                        type $connector = $crate::source::cdc::$cdc_source_type;
                         let $split = $dbz_split.[<$cdc_source_type:snake _split>]
                             .[<as_ $as_type>]()
                             .expect(concat!(stringify!([<$cdc_source_type:lower>]), " split must exist"));
@@ -253,14 +260,20 @@ macro_rules! dispatch_cdc_split_inner {
     };
 }
 
-/// Runs `$body` on the split of the connector `T`, bound as `$split` (`ref` or `mut`).
+/// Runs `$body` on the split of the connector `T`, bound as `$split` (`ref` or `mut`). The form
+/// with `$connector` also binds the connector marker type under that name, so the body can call
+/// its trait items.
 macro_rules! dispatch_cdc_split {
-    ($dbz_split:expr, $as_type:tt, $split:ident, $body:expr) => {{
+    ($dbz_split:expr, $as_type:tt, $split:ident, $body:expr) => {
+        dispatch_cdc_split!($dbz_split, $as_type, $split, _Connector, $body)
+    };
+    ($dbz_split:expr, $as_type:tt, $split:ident, $connector:ident, $body:expr) => {{
         crate::for_all_classified_sources! {
             dispatch_cdc_split_inner,
             { $dbz_split },
             $as_type,
             $split,
+            $connector,
             { $body }
         }
     }};
@@ -303,7 +316,10 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
     }
 
     pub fn update_offset_inner(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        dispatch_cdc_split!(self, mut, split, split.update_offset(last_seen_offset))
+        dispatch_cdc_split!(self, mut, split, C, {
+            let snapshot_done = snapshot_done_after_offset::<C>(split, &last_seen_offset)?;
+            split.update_offset(last_seen_offset, snapshot_done)
+        })
     }
 }
 

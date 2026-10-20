@@ -16,9 +16,9 @@ use anyhow::{Context, anyhow};
 use fancy_regex::Regex;
 use itertools::Itertools;
 use risingwave_common::catalog::{CdcKeyComparison, ColumnCatalog};
-use risingwave_connector::source::cdc::CdcExternalTableNameParser;
-use risingwave_connector::source::cdc::external::{
-    ExternalTableConfig, ExternalTableImpl, SchemaTableName,
+use risingwave_connector::source::cdc::external::{ExternalTableConfig, SchemaTableName};
+use risingwave_connector::source::cdc::{
+    CdcExternalTableHandler, CdcExternalTableNameParser, CdcSourceType,
 };
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type};
 use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
@@ -267,11 +267,15 @@ pub(crate) async fn bind_cdc_table_schema_externally(
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
         .context("failed to extract external table config")?;
 
-    let table = ExternalTableImpl::connect(config)
-        .await
-        .context("failed to auto derive table schema")?;
+    let table = dispatch_cdc_source_type!(
+        CdcSourceType::from(config.connector.as_str()),
+        T,
+        T::connect_external_table(config).await,
+        Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into())
+    )
+    .context("failed to auto derive table schema")?;
 
-    let pk_names = table.pk_names().clone();
+    let pk_names = table.pk_names().to_vec();
     let pk_comparisons = table.pk_column_comparisons(&pk_names)?;
     Ok((
         table
@@ -297,7 +301,12 @@ pub(crate) async fn bind_cdc_pk_comparisons_externally(
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
         .context("failed to extract external table config")?;
-    Ok(ExternalTableImpl::discover_pk_column_comparisons(&config, pk_names).await?)
+    Ok(dispatch_cdc_source_type!(
+        CdcSourceType::from(config.connector.as_str()),
+        T,
+        T::discover_pk_column_comparisons(&config, pk_names).await?,
+        vec![CdcKeyComparison::Native; pk_names.len()]
+    ))
 }
 
 /// Derive the schema of a CDC table from explicit SQL columns and constraints.

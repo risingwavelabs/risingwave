@@ -14,21 +14,33 @@
 
 use std::collections::BTreeMap;
 
+use futures::stream::BoxStream;
+use risingwave_common::catalog::Field;
+use risingwave_common::row::OwnedRow;
 use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
-use crate::source::cdc::external::SchemaTableName;
-use crate::source::cdc::postgres::fill_and_validate_postgres_props;
+use crate::source::CdcTableSnapshotSplit;
+use crate::source::cdc::external::{
+    CdcOffset, CdcTableSnapshotSplitOption, DebeziumOffset, ExternalTableReader, SchemaTableName,
+};
+use crate::source::cdc::postgres::{PostgresSourceOffset, fill_and_validate_postgres_props};
 use crate::source::cdc::split::{CdcSplitBase, CdcSplitTrait, DebeziumCdcSplit};
 use crate::source::cdc::{
-    CdcDebeziumPayloadInterpreter, CdcExternalTableNameParser, CdcSerializedFieldNames,
-    CdcSourceFrontendValidator, CdcSourceRuntimeFlags, Citus, Postgres,
+    CdcDebeziumOffsetInterpreter, CdcDebeziumPayloadInterpreter, CdcExternalTableHandler,
+    CdcExternalTableNameParser, CdcSerializedNames, CdcSourceFrontendValidator,
+    CdcSourceRuntimeFlags, Citus, Postgres, derived_cdc_offset_variant,
+    derived_debezium_cdc_split_split_field,
 };
 
 // ------- Persisted names -------
 
-impl CdcSerializedFieldNames for Citus {}
+impl CdcSerializedNames for Citus {
+    const CDC_OFFSET_VARIANT: &'static str = derived_cdc_offset_variant!(Citus);
+    const DEBEZIUM_CDC_SPLIT_SPLIT_FIELD: &'static str =
+        derived_debezium_cdc_split_split_field!(Citus);
+}
 
 // ------- Frontend validation -------
 
@@ -64,6 +76,59 @@ impl CdcExternalTableNameParser for Citus {
 // ------- Debezium payload -------
 
 impl CdcDebeziumPayloadInterpreter for Citus {}
+
+// ------- Debezium offset -------
+
+/// Citus offsets come from Debezium's Postgres connector.
+impl CdcDebeziumOffsetInterpreter for Citus {
+    type SourceOffset = PostgresSourceOffset;
+
+    fn snapshot_done_from_debezium_offset(offset: &DebeziumOffset<PostgresSourceOffset>) -> bool {
+        Postgres::snapshot_done_from_debezium_offset(offset)
+    }
+}
+
+// ------- External table -------
+
+/// Citus has no CDC backfill, so this reader is never constructed.
+pub struct CitusExternalTableReader;
+
+impl ExternalTableReader for CitusExternalTableReader {
+    async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
+        unreachable!("cdc backfill is not supported for citus-cdc")
+    }
+
+    fn snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _start_pk: Option<OwnedRow>,
+        _primary_keys: Vec<String>,
+        _limit: u32,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        unreachable!("cdc backfill is not supported for citus-cdc")
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        unreachable!("cdc backfill is not supported for citus-cdc")
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        unreachable!("cdc backfill is not supported for citus-cdc")
+    }
+}
+
+impl CdcExternalTableHandler for Citus {
+    type TableReader = CitusExternalTableReader;
+}
 
 // ------- Split -------
 

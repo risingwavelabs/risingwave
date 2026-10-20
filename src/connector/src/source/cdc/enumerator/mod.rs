@@ -37,8 +37,7 @@ use tokio_postgres::types::PgLsn;
 use crate::connector_common::{SslMode, create_pg_client, pg_connection_config_from_properties};
 use crate::error::ConnectorResult;
 use crate::sink::sqlserver::SqlServerClient;
-use crate::source::cdc::external::mysql::build_mysql_connection_pool;
-use crate::source::cdc::mysql::extract_binlog_file_seq;
+use crate::source::cdc::mysql::{build_mysql_connection_pool, extract_binlog_file_seq};
 use crate::source::cdc::sql_server::parse_sql_server_lsn_str;
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mysql, Postgres, SqlServer,

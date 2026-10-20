@@ -27,8 +27,10 @@ pub mod sql_server;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
+use anyhow::Context;
 pub use enumerator::*;
 use itertools::Itertools;
+use risingwave_common::catalog::{CdcKeyComparison, Schema};
 use risingwave_common::id::{ActorId, SourceId};
 use risingwave_common::license::Feature;
 use risingwave_pb::catalog::PbSource;
@@ -37,6 +39,8 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ExternalTableDesc, PbEncodeType, PbFormatType};
 use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
@@ -44,7 +48,9 @@ use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::parser::schema_change::{TableChangeColumn, TableChangeContext};
 use crate::parser::{AccessError, AccessResult, DebeziumTransactionStatus, TransactionControl};
-use crate::source::cdc::external::SchemaTableName;
+use crate::source::cdc::external::{
+    DebeziumOffset, ExternalTable, ExternalTableConfig, ExternalTableReader, SchemaTableName,
+};
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
@@ -78,23 +84,39 @@ pub fn build_cdc_table_id(source_id: SourceId, external_table_name: &str) -> Str
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
     /// Value of the `connector` option, e.g. `mysql-cdc`.
     const CDC_CONNECTOR_NAME: &'static str;
-    /// Field name of this connector's split inside the serialized `DebeziumCdcSplit`, derived
-    /// from the connector name. Overridable via `CdcSerializedFieldNames`.
-    const DEFAULT_DEBEZIUM_CDC_SPLIT_SPLIT_FIELD: &'static str;
     fn source_type() -> CdcSourceType;
 }
 
 /// Names written into persisted state (checkpointed splits, state tables).
 ///
-/// Defaults are derived from the connector name by `impl_cdc_source_type!`. A connector whose
-/// shipped name differs from the derived one overrides the constant in its own module.
-/// Constants are named after the struct and field they belong to, without the connector tag,
-/// e.g. `DebeziumCdcSplit.postgres_split` -> `DEBEZIUM_CDC_SPLIT_SPLIT_FIELD`. Never change a
-/// value once shipped, for backward compatibility with state persisted by older versions.
-pub trait CdcSerializedFieldNames: CdcSourceTypeTrait {
-    const DEBEZIUM_CDC_SPLIT_SPLIT_FIELD: &'static str =
-        Self::DEFAULT_DEBEZIUM_CDC_SPLIT_SPLIT_FIELD;
+/// Implemented per connector in its own module. A connector whose names follow its identifier
+/// assigns [`derived_debezium_cdc_split_split_field!`] and [`derived_cdc_offset_variant!`]; a
+/// connector whose shipped names differ writes the literal. Constants are named after the
+/// struct and field or variant they belong to, without the connector tag, e.g.
+/// `DebeziumCdcSplit.postgres_split` -> `DEBEZIUM_CDC_SPLIT_SPLIT_FIELD`. Never change a value
+/// once shipped, for backward compatibility with state persisted by older versions.
+pub trait CdcSerializedNames: CdcSourceTypeTrait {
+    /// Key of this connector's split inside the serialized `DebeziumCdcSplit`.
+    const DEBEZIUM_CDC_SPLIT_SPLIT_FIELD: &'static str;
+    /// Tag of this connector's variant inside the serialized `CdcOffset`.
+    const CDC_OFFSET_VARIANT: &'static str;
 }
+
+/// The split field name derived from a connector identifier: `SqlServer` -> `"sql_server_split"`.
+macro_rules! derived_debezium_cdc_split_split_field {
+    ($connector:ident) => {
+        $crate::paste! { stringify!([<$connector:snake _split>]) }
+    };
+}
+pub(crate) use derived_debezium_cdc_split_split_field;
+
+/// The offset variant tag derived from a connector identifier: `SqlServer` -> `"SqlServer"`.
+macro_rules! derived_cdc_offset_variant {
+    ($connector:ident) => {
+        stringify!($connector)
+    };
+}
+pub(crate) use derived_cdc_offset_variant;
 
 /// What the frontend checks or fills in for a CDC connector on `CREATE SOURCE` and
 /// `ALTER SOURCE`. Implemented per connector in its own module; the frontend reaches the right
@@ -137,6 +159,9 @@ pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
     /// Whether the consumed offset is committed back to the upstream database on each checkpoint
     /// (`WaitCheckpointTask::CommitCdcOffset`).
     const COMMIT_OFFSET_ON_CHECKPOINT: bool = false;
+    /// Whether the external table reader implements `get_parallel_cdc_splits` and
+    /// `split_snapshot_read`, so the planner may choose parallelized backfill.
+    const SUPPORTS_PARALLEL_BACKFILL: bool = false;
 }
 
 /// Parses the upstream table identifier in the three forms a CDC connector meets it: the
@@ -200,6 +225,96 @@ pub trait CdcDebeziumPayloadInterpreter: CdcSourceTypeTrait {
                 Self::CDC_CONNECTOR_NAME
             ),
         })
+    }
+}
+
+/// How to read the connector-specific part of a Debezium offset, the `sourceOffset` object of
+/// [`DebeziumOffset`]: whether the offset lies after the initial snapshot, and the comparable
+/// upstream position that CDC backfill persists as one variant of `CdcOffset`.
+///
+/// Implemented per connector in its own module, which also defines the `sourceOffset` struct.
+/// Connectors without backfill keep the defaults of [`Self::Offset`] and
+/// [`Self::offset_from_debezium_offset`].
+pub trait CdcDebeziumOffsetInterpreter: CdcSourceTypeTrait {
+    /// Shape of `sourceOffset` in this connector's Debezium offset JSON.
+    type SourceOffset: DeserializeOwned + Send + Sync + 'static;
+    /// Upstream position compared during CDC backfill, e.g. a binlog file and position or an
+    /// LSN. Becomes the `CdcOffset` variant of this connector.
+    type Offset: std::fmt::Debug
+        + Clone
+        + PartialEq
+        + PartialOrd
+        + Serialize
+        + DeserializeOwned
+        + Send
+        + Sync
+        + 'static = ();
+
+    /// Whether `offset` lies after the initial snapshot. Called for non-heartbeat offsets while
+    /// the split still has `snapshot_done == false`.
+    fn snapshot_done_from_debezium_offset(offset: &DebeziumOffset<Self::SourceOffset>) -> bool;
+
+    /// Converts a Debezium offset into the backfill position.
+    fn offset_from_debezium_offset(
+        _offset: DebeziumOffset<Self::SourceOffset>,
+    ) -> ConnectorResult<Self::Offset> {
+        risingwave_common::bail!(
+            "cdc backfill is not supported for connector {}",
+            Self::CDC_CONNECTOR_NAME
+        )
+    }
+}
+
+/// Parses a Debezium offset JSON string into the backfill position of connector `T`.
+pub fn parse_debezium_offset<T: CdcDebeziumOffsetInterpreter>(
+    offset: &str,
+) -> ConnectorResult<T::Offset> {
+    let dbz_offset: DebeziumOffset<T::SourceOffset> = serde_json::from_str(offset)
+        .with_context(|| format!("invalid upstream offset: {}", offset))?;
+    T::offset_from_debezium_offset(dbz_offset)
+}
+
+/// How RisingWave reaches the upstream table of a CDC table directly, outside Debezium: the
+/// frontend connects once at `CREATE TABLE ... FROM <source>` to discover columns and primary
+/// keys, and the backfill executor opens a reader for snapshot reads and the current offset.
+///
+/// Implemented per connector in its own module. A connector without CDC backfill keeps the
+/// method defaults and declares a reader type that is never constructed.
+pub trait CdcExternalTableHandler: CdcSourceTypeTrait {
+    /// Reader used by the backfill executor; one variant of `ExternalTableReaderImpl`.
+    type TableReader: ExternalTableReader + Send + Sync;
+
+    /// Opens the reader for the table named by `config` and `schema_table_name`.
+    async fn create_table_reader(
+        _config: ExternalTableConfig,
+        _schema: Schema,
+        _pk_indices: Vec<usize>,
+        _schema_table_name: SchemaTableName,
+        _table_id: u32,
+    ) -> ConnectorResult<Self::TableReader> {
+        risingwave_common::bail!(
+            "cdc backfill is not supported for connector {}",
+            Self::CDC_CONNECTOR_NAME
+        )
+    }
+
+    /// Connects upstream and loads the table's columns and primary key names.
+    async fn connect_external_table(
+        _config: ExternalTableConfig,
+    ) -> ConnectorResult<Box<dyn ExternalTable>> {
+        risingwave_common::bail!(
+            "cdc backfill is not supported for connector {}",
+            Self::CDC_CONNECTOR_NAME
+        )
+    }
+
+    /// Comparison semantics of the given primary key columns, for `CREATE TABLE` with explicit
+    /// columns where no [`ExternalTable`] is loaded. The default needs no upstream access.
+    async fn discover_pk_column_comparisons(
+        _config: &ExternalTableConfig,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        Ok(vec![CdcKeyComparison::Native; pk_names.len()])
     }
 }
 
