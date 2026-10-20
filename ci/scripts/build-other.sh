@@ -17,6 +17,7 @@ cd ../../..
 
 echo "--- Build Java packages"
 cd java
+./build-debezium.sh -Dmaven.repo.local="${MAVEN_REPO_LOCAL}"
 "${MVN_CMD[@]}" -B package -Dmaven.test.skip=true
 "${MVN_CMD[@]}" -B install -Dmaven.test.skip=true --pl java-binding-integration-test --am
 "${MVN_CMD[@]}" dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test

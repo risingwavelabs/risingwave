@@ -24,6 +24,8 @@ jobs:
       ORACLE_TEST_IMAGE: container-registry.oracle.com/database/free:23.9.0.0
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: true
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -65,6 +67,7 @@ jobs:
 
           echo "--- build connector node with Rust native library"
           cd ${RISINGWAVE_ROOT}/java
+          ./build-debezium.sh
           # Build with Rust to support OpendalSchemaHistory in MySQL CDC integration tests
           mvn --batch-mode --update-snapshots clean package -Dapi.version=1.44 \
             -Doracle.test.image="$ORACLE_TEST_IMAGE"

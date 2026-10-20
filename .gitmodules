@@ -1,0 +1,5 @@
+[submodule "java/debezium"]
+	path = java/debezium
+	url = https://github.com/anlowee/debezium.git
+	branch = fix-build-and-add-ci
+	shallow = true
