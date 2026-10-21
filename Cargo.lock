@@ -9676,9 +9676,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.18.1"
+version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b6180140927ee907000b0aa540091f6ea512ead4447c92b8fc35bc72788a5a6"
+checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -14322,7 +14322,7 @@ dependencies = [
  "jni 0.21.1",
  "jsonbb",
  "linkme",
- "lru 0.18.1",
+ "lru 0.18.5",
  "madsim-tokio",
  "memcomparable",
  "more-asserts",
@@ -15581,7 +15581,7 @@ dependencies = [
  "either",
  "futures",
  "http 1.5.0",
- "lru 0.18.1",
+ "lru 0.18.5",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
