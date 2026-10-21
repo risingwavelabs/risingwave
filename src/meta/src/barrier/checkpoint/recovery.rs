@@ -521,7 +521,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
 pub(crate) struct EnterRunning;
 
 impl DatabaseStatusAction<'_, EnterRunning> {
-    pub(crate) fn enter(self) {
+    pub(crate) fn enter(self) -> HashSet<JobId> {
         info!(database_id = ?self.database_id, "database enter running");
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         event_log_manager_ref.add_event_logs(vec![Event::Recovery(
@@ -564,9 +564,16 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                     DatabaseRecoveringStage::Initializing {
                         initial_barrier_collector,
                     } => {
-                        *database_status = DatabaseCheckpointControlStatus::Running(
-                            initial_barrier_collector.finish(),
-                        );
+                        let database = initial_barrier_collector.finish();
+                        let running_job_ids = database
+                            .independent_checkpoint_job_controls
+                            .iter()
+                            .filter_map(|(job_id, control)| {
+                                control.running().is_some().then_some(*job_id)
+                            })
+                            .collect();
+                        *database_status = DatabaseCheckpointControlStatus::Running(database);
+                        running_job_ids
                     }
                 }
             }

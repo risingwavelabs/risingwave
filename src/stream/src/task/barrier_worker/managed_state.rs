@@ -33,8 +33,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata, PbCdcSourceOffsetUpdated,
-    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
-    PbRefreshFinishedActor,
+    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
 };
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc;
@@ -44,7 +43,7 @@ use tokio::task::JoinHandle;
 use crate::error::{StreamError, StreamResult};
 use crate::executor::Barrier;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::progress::BackfillState;
+use crate::task::progress::{BackfillState, TableChangeLogProgress};
 use crate::task::{
     ActorId, LocalBarrierEvent, LocalBarrierManager, NewOutputRequest, PartialGraphId,
     StreamActorManager, UpDownActorIds,
@@ -72,15 +71,7 @@ enum ManagedBarrierStateInner {
     Issued(IssuedState),
 
     /// The barrier has been collected by all remaining actors
-    AllCollected {
-        create_mview_progress: Vec<PbCreateMviewProgress>,
-        list_finished_source_ids: Vec<PbListFinishedSource>,
-        load_finished_source_ids: Vec<PbLoadFinishedSource>,
-        cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
-        cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
-        iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
-        refresh_finished_actors: Vec<PbRefreshFinishedActor>,
-    },
+    AllCollected(EpochBarrierEvent),
 }
 
 #[derive(Debug)]
@@ -161,7 +152,7 @@ impl Display for &'_ PartialGraphManagedBarrierState {
                     }
                     write!(f, "]")?;
                 }
-                ManagedBarrierStateInner::AllCollected { .. } => {
+                ManagedBarrierStateInner::AllCollected(_) => {
                     write!(f, "AllCollected")?;
                 }
             }
@@ -169,11 +160,19 @@ impl Display for &'_ PartialGraphManagedBarrierState {
             writeln!(f)?;
         }
 
-        if !self.create_mview_progress.is_empty() {
+        if self
+            .barrier_events
+            .values()
+            .any(|event| !event.create_mview_progress.is_empty())
+        {
             writeln!(f, "Create MView Progress:")?;
-            for (epoch, progress) in &self.create_mview_progress {
+            for (epoch, event) in self
+                .barrier_events
+                .iter()
+                .filter(|(_, event)| !event.create_mview_progress.is_empty())
+            {
                 write!(f, "> Epoch {}:", epoch)?;
-                for (actor_id, (_, state)) in progress {
+                for (actor_id, (_, state)) in &event.create_mview_progress {
                     write!(f, ">> Actor {}: {}, ", actor_id, state)?;
                 }
             }
@@ -290,6 +289,45 @@ impl InflightActorState {
 }
 
 /// Part of [`PartialGraphState`]
+#[derive(Debug)]
+pub(crate) struct EpochBarrierEvent {
+    /// The full epoch pair is retained while the map is keyed by `epoch.curr`, so callers that
+    /// report an event for the same current epoch can be checked for a matching previous epoch.
+    pub(crate) epoch: EpochPair,
+    /// Creation progress reported by each backfill actor.
+    pub(crate) create_mview_progress: HashMap<ActorId, (FragmentId, BackfillState)>,
+    /// Change-log retention progress reported by snapshot-backfill actors.
+    pub(crate) table_change_log_progress: Vec<TableChangeLogProgress>,
+    /// Source-list completion reports for refreshable batch sources.
+    pub(crate) list_finished_source_ids: Vec<PbListFinishedSource>,
+    /// Source-load completion reports for refreshable batch sources.
+    pub(crate) load_finished_source_ids: Vec<PbLoadFinishedSource>,
+    /// CDC table-backfill progress reported by each actor.
+    pub(crate) cdc_table_backfill_progress: HashMap<ActorId, CdcTableBackfillState>,
+    /// Reports that a CDC source has updated its offset at least once.
+    pub(crate) cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+    /// Iceberg pk-index sink metadata reports.
+    pub(crate) iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
+    /// Materialize actors that have finished their part of a table refresh.
+    pub(crate) refresh_finished_actors: Vec<PbRefreshFinishedActor>,
+}
+
+impl EpochBarrierEvent {
+    fn new(epoch: EpochPair) -> Self {
+        Self {
+            epoch,
+            create_mview_progress: Default::default(),
+            table_change_log_progress: Default::default(),
+            list_finished_source_ids: Default::default(),
+            load_finished_source_ids: Default::default(),
+            cdc_table_backfill_progress: Default::default(),
+            cdc_source_offset_updated: Default::default(),
+            iceberg_pk_index_sink_metadata: Default::default(),
+            refresh_finished_actors: Default::default(),
+        }
+    }
+}
+
 pub(crate) struct PartialGraphManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
@@ -298,36 +336,14 @@ pub(crate) struct PartialGraphManagedBarrierState {
 
     prev_barrier_table_ids: Option<(EpochPair, HashSet<TableId>)>,
 
-    /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
+    /// Reports emitted by actors while processing each epoch of concurrent checkpoints.
     ///
-    /// The process of progress reporting is as follows:
-    /// 1. updated by [`crate::task::barrier_manager::CreateMviewProgressReporter::update`]
+    /// The process of reporting is as follows:
+    /// 1. updated by local barrier events from actors
     /// 2. converted to [`ManagedBarrierStateInner`] in [`Self::may_have_collected_all`]
     /// 3. handled by [`Self::pop_barrier_to_complete`]
     /// 4. put in [`crate::task::barrier_worker::BarrierCompleteResult`] and reported to meta.
-    pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, (FragmentId, BackfillState)>>,
-
-    /// Record the source list finished reports for each epoch of concurrent checkpoints.
-    /// Used for refreshable batch source. The map key is epoch and the value is
-    /// a list of pb messages reported by actors.
-    pub(crate) list_finished_source_ids: HashMap<u64, Vec<PbListFinishedSource>>,
-
-    /// Record the source load finished reports for each epoch of concurrent checkpoints.
-    /// Used for refreshable batch source. The map key is epoch and the value is
-    /// a list of pb messages reported by actors.
-    pub(crate) load_finished_source_ids: HashMap<u64, Vec<PbLoadFinishedSource>>,
-
-    pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
-
-    /// Record CDC source offset updated reports for each epoch of concurrent checkpoints.
-    /// Used to track when CDC sources have updated their offset at least once.
-    pub(crate) cdc_source_offset_updated: HashMap<u64, Vec<PbCdcSourceOffsetUpdated>>,
-
-    /// Record Iceberg pk-index sink metadata reports per epoch for concurrent checkpoints.
-    pub(crate) iceberg_pk_index_sink_metadata: HashMap<u64, Vec<PbIcebergPkIndexSinkMetadata>>,
-
-    /// Record the materialize actors that have finished refresh for each epoch of concurrent checkpoints.
-    pub(crate) refresh_finished_actors: HashMap<u64, Vec<PbRefreshFinishedActor>>,
+    barrier_events: HashMap<u64, EpochBarrierEvent>,
 
     state_store: StateStoreImpl,
 
@@ -379,13 +395,7 @@ impl PartialGraphManagedBarrierState {
         Self {
             epoch_barrier_state_map: Default::default(),
             prev_barrier_table_ids: None,
-            create_mview_progress: Default::default(),
-            list_finished_source_ids: Default::default(),
-            load_finished_source_ids: Default::default(),
-            cdc_table_backfill_progress: Default::default(),
-            cdc_source_offset_updated: Default::default(),
-            iceberg_pk_index_sink_metadata: Default::default(),
-            refresh_finished_actors: Default::default(),
+            barrier_events: Default::default(),
             state_store,
             barrier_inflight_latency,
             barrier_sync_latency,
@@ -400,6 +410,18 @@ impl PartialGraphManagedBarrierState {
             Arc::new(StreamingMetrics::unused()),
             PartialGraphId::new(0),
         )
+    }
+
+    pub(crate) fn event_mut(&mut self, epoch: EpochPair) -> &mut EpochBarrierEvent {
+        let event = self
+            .barrier_events
+            .entry(epoch.curr)
+            .or_insert_with(|| EpochBarrierEvent::new(epoch));
+        assert_eq!(
+            event.epoch, epoch,
+            "events for the same current epoch must have the same previous epoch"
+        );
+        event
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -918,6 +940,9 @@ impl PartialGraphState {
                 } => {
                     self.update_create_mview_progress(epoch, fragment_id, actor, state);
                 }
+                LocalBarrierEvent::ReportTableChangeLogProgress { epoch, progress } => {
+                    self.update_table_change_log_progress(epoch, progress);
+                }
                 LocalBarrierEvent::ReportSourceListFinished {
                     epoch,
                     actor_id,
@@ -1077,9 +1102,8 @@ impl PartialGraphState {
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
             self.graph_state
+                .event_mut(epoch)
                 .list_finished_source_ids
-                .entry(epoch.curr)
-                .or_default()
                 .push(PbListFinishedSource {
                     reporter_actor_id: actor_id,
                     table_id,
@@ -1106,9 +1130,8 @@ impl PartialGraphState {
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
             self.graph_state
+                .event_mut(epoch)
                 .load_finished_source_ids
-                .entry(epoch.curr)
-                .or_default()
                 .push(PbLoadFinishedSource {
                     reporter_actor_id: actor_id,
                     table_id,
@@ -1133,9 +1156,8 @@ impl PartialGraphState {
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
             self.graph_state
+                .event_mut(epoch)
                 .cdc_source_offset_updated
-                .entry(epoch.curr)
-                .or_default()
                 .push(PbCdcSourceOffsetUpdated {
                     reporter_actor_id: actor_id,
                     source_id,
@@ -1161,9 +1183,8 @@ impl PartialGraphState {
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
             self.graph_state
+                .event_mut(epoch)
                 .iceberg_pk_index_sink_metadata
-                .entry(epoch.curr)
-                .or_default()
                 .push(PbIcebergPkIndexSinkMetadata {
                     sink_id,
                     reporter_actor_id: actor_id,
@@ -1193,9 +1214,8 @@ impl PartialGraphState {
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
             self.graph_state
+                .event_mut(epoch)
                 .refresh_finished_actors
-                .entry(epoch.curr)
-                .or_default()
                 .push(PbRefreshFinishedActor {
                     reporter_actor_id: actor_id,
                     table_id,
@@ -1218,7 +1238,7 @@ impl PartialGraphManagedBarrierState {
                 ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors, ..
                 }) if remaining_actors.is_empty() => {}
-                ManagedBarrierStateInner::AllCollected { .. } => {
+                ManagedBarrierStateInner::AllCollected(_) => {
                     continue;
                 }
                 ManagedBarrierStateInner::Issued(_) => {
@@ -1228,57 +1248,14 @@ impl PartialGraphManagedBarrierState {
 
             self.barrier_manager_progress.inc();
 
-            let create_mview_progress = self
-                .create_mview_progress
+            let event = self
+                .barrier_events
                 .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(actor, (fragment_id, state))| state.to_pb(fragment_id, actor))
-                .collect();
-
-            let list_finished_source_ids = self
-                .list_finished_source_ids
-                .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default();
-
-            let load_finished_source_ids = self
-                .load_finished_source_ids
-                .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default();
-
-            let cdc_table_backfill_progress = self
-                .cdc_table_backfill_progress
-                .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(actor, state)| state.to_pb(actor, barrier_state.barrier.epoch.curr))
-                .collect();
-
-            let cdc_source_offset_updated = self
-                .cdc_source_offset_updated
-                .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default();
-
-            let iceberg_pk_index_sink_metadata = self
-                .iceberg_pk_index_sink_metadata
-                .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default();
-
-            let refresh_finished_actors = self
-                .refresh_finished_actors
-                .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default();
+                .unwrap_or_else(|| EpochBarrierEvent::new(barrier_state.barrier.epoch));
+            assert_eq!(event.epoch, barrier_state.barrier.epoch);
             let prev_state = replace(
                 &mut barrier_state.inner,
-                ManagedBarrierStateInner::AllCollected {
-                    create_mview_progress,
-                    list_finished_source_ids,
-                    load_finished_source_ids,
-                    refresh_finished_actors,
-                    cdc_table_backfill_progress,
-                    cdc_source_offset_updated,
-                    iceberg_pk_index_sink_metadata,
-                },
+                ManagedBarrierStateInner::AllCollected(event),
             );
 
             must_match!(prev_state, ManagedBarrierStateInner::Issued(IssuedState {
@@ -1301,35 +1278,12 @@ impl PartialGraphManagedBarrierState {
 
         assert_eq!(prev_epoch, popped_prev_epoch);
 
-        let (
-            create_mview_progress,
-            list_finished_source_ids,
-            load_finished_source_ids,
-            cdc_table_backfill_progress,
-            cdc_source_offset_updated,
-            iceberg_pk_index_sink_metadata,
-            refresh_finished_actors,
-        ) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected {
-            create_mview_progress,
-            list_finished_source_ids,
-            load_finished_source_ids,
-            refresh_finished_actors,
-            cdc_table_backfill_progress,
-            cdc_source_offset_updated,
-            iceberg_pk_index_sink_metadata,
-        } => {
-            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, cdc_source_offset_updated, iceberg_pk_index_sink_metadata, refresh_finished_actors)
-        });
+        let event = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected(event) => event);
+        assert_eq!(event.epoch, barrier_state.barrier.epoch);
         BarrierToComplete {
             barrier: barrier_state.barrier,
             table_ids: barrier_state.table_ids,
-            create_mview_progress,
-            list_finished_source_ids,
-            load_finished_source_ids,
-            refresh_finished_actors,
-            cdc_table_backfill_progress,
-            cdc_source_offset_updated,
-            iceberg_pk_index_sink_metadata,
+            event,
         }
     }
 
@@ -1341,13 +1295,7 @@ impl PartialGraphManagedBarrierState {
 pub(crate) struct BarrierToComplete {
     pub barrier: Barrier,
     pub table_ids: Option<HashSet<TableId>>,
-    pub create_mview_progress: Vec<PbCreateMviewProgress>,
-    pub list_finished_source_ids: Vec<PbListFinishedSource>,
-    pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
-    pub refresh_finished_actors: Vec<PbRefreshFinishedActor>,
-    pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
-    pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
-    pub iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
+    pub event: EpochBarrierEvent,
 }
 
 impl PartialGraphManagedBarrierState {

@@ -543,6 +543,19 @@ pub mod tests {
     }
 
     #[test]
+    fn test_sql_option_redaction_allowlist_config() {
+        let config: RwConfig = toml::from_str("").unwrap();
+        assert_eq!(config.batch.redact_sql_option_allowlist, ["primary_key"]);
+
+        let config: RwConfig = toml::from_str("[batch]\nredact_sql_option_allowlist = []").unwrap();
+        assert!(config.batch.redact_sql_option_allowlist.is_empty());
+
+        let config: RwConfig =
+            toml::from_str("[batch]\nredact_sql_option_allowlist = ['partition_key']").unwrap();
+        assert_eq!(config.batch.redact_sql_option_allowlist, ["partition_key"]);
+    }
+
+    #[test]
     fn test_session_init_entries_distinguishes_omitted_from_default() {
         let config: RwConfig = toml::from_str(
             r#"

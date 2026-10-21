@@ -42,11 +42,11 @@ use risingwave_connector::parser::additional_columns::{
 use risingwave_connector::parser::{
     AvroParserConfig, DEBEZIUM_IGNORE_KEY, DebeziumAvroParserConfig, ProtobufParserConfig,
     SchemaLocation, SpecificParserConfig, TimestamptzHandling,
-    fetch_json_schema_and_map_to_columns,
+    fetch_json_schema_and_map_to_columns, fetch_pulsar_json_schema_and_map_to_columns,
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::pulsar_schema::{
-    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY,
+    PULSAR_SCHEMA_AUTH_TOKEN_KEY, PULSAR_SCHEMA_URL_KEY, PulsarSchemaConfig,
 };
 use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
@@ -165,6 +165,15 @@ fn try_consume_schema_registry_config_from_options(
     .for_each(|key| {
         try_consume_string_from_options(format_encode_options, key);
     });
+}
+
+/// Returns whether the Pulsar schema is used, with `schema.pulsar.url` set directly or as a secret.
+pub(crate) fn uses_pulsar_schema<V>(
+    format_encode_options: &BTreeMap<String, String>,
+    format_encode_secret_refs: &BTreeMap<String, V>,
+) -> bool {
+    format_encode_options.contains_key(PULSAR_SCHEMA_URL_KEY)
+        || format_encode_secret_refs.contains_key(PULSAR_SCHEMA_URL_KEY)
 }
 
 fn try_consume_pulsar_schema_config_from_options(
@@ -1227,6 +1236,12 @@ pub async fn handle_create_source(
         ensure_local_fs_connector_allowed(&session, &connector)?;
     }
 
+    // Check the CREATE privilege before `bind_columns_from_source`, which may fetch from
+    // user-supplied URLs (schema registry, schema file).
+    let (schema_name, _) =
+        Binder::resolve_schema_qualified_name(&session.database(), &stmt.source_name)?;
+    session.get_database_and_schema_id_for_create(schema_name)?;
+
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         &session,
@@ -2029,6 +2044,50 @@ pub mod tests {
                 )
             }
             _ => unreachable!(),
+        }
+    }
+
+    /// The CREATE privilege must be checked before the schema is fetched from a user-supplied
+    /// URL (schema registry or schema file). Otherwise a user without CREATE on the schema can
+    /// still make the frontend send the request, and only then get "permission denied".
+    #[tokio::test]
+    async fn test_create_privilege_checked_before_schema_fetch() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("CREATE USER no_create_user")
+            .await
+            .unwrap();
+        let user_id = frontend
+            .session_ref()
+            .env()
+            .user_info_reader()
+            .read_guard()
+            .get_user_by_name("no_create_user")
+            .unwrap()
+            .id;
+        let user_session = frontend.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_owned(),
+            "no_create_user".to_owned(),
+            user_id,
+        );
+
+        // Nothing listens on this port, so if the request is sent at all it fails with a
+        // connection error instead of "permission denied".
+        let with_and_format = "WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:1', topic = 't') \
+             FORMAT PLAIN ENCODE AVRO (schema.registry = 'http://127.0.0.1:1')";
+        let create_source = format!("CREATE SOURCE s {with_and_format}");
+        let create_table = format!("CREATE TABLE t {with_and_format}");
+
+        for sql in [create_source, create_table] {
+            let err = frontend
+                .run_sql_with_session(user_session.clone(), sql)
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("permission denied for schema \"public\": \"CREATE\""),
+                "{err:?}"
+            );
         }
     }
 }

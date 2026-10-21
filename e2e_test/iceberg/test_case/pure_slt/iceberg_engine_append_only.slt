@@ -182,7 +182,8 @@ select * from t_without_pk;
 ----
 xxx
 
-query ?
+# The scan above can read pending log-store rows before the first Iceberg snapshot exists.
+query ? retry 6 backoff 1s
 select count(_row_id) from t_without_pk;
 ----
 1

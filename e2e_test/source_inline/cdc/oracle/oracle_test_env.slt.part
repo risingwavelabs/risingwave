@@ -1,0 +1,13 @@
+# Contract: keep these TEST_ mappings and fixture constants synchronized with
+# oracle_test_utils.py and TEST_ORACLE_HEARTBEAT_TABLE in oracle_test_hooks.py.
+control substitution on
+
+let TEST_ORACLE_HOST, TEST_ORACLE_PORT, TEST_ORACLE_USER, TEST_ORACLE_PASSWORD, TEST_ORACLE_DATABASE, TEST_ORACLE_PDB, TEST_ORACLE_SOURCE_SCHEMA, TEST_ORACLE_HEARTBEAT_TABLE, TEST_ORACLE_WITH_OPTIONS_COMMON
+SELECT \$config\$${ORACLE_HOST}\$config\$,
+       \$config\$${ORACLE_PORT}\$config\$,
+       upper(\$config\$${ORACLE_USER}\$config\$),
+       \$config\$${ORACLE_PASSWORD}\$config\$,
+       upper(\$config\$${ORACLE_DATABASE}\$config\$),
+       upper(\$config\$${ORACLE_PDB}\$config\$),
+       'APP', 'RW_HEARTBEAT',
+       \$config\$${RISEDEV_ORACLE_WITH_OPTIONS_COMMON}\$config\$;

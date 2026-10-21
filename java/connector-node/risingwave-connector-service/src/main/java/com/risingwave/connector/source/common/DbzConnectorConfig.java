@@ -92,6 +92,8 @@ public class DbzConnectorConfig {
 
     public static final String HEARTBEAT_ACTION_QUERY_KEY =
             DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
+    public static final String HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY =
+            "heartbeat.table.auto.initialize";
 
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";

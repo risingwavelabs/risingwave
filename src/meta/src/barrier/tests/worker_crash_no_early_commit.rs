@@ -91,11 +91,16 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         Ok(())
     }
 
-    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()> {
+    async fn mark_ready(
+        &self,
+        options: MarkReadyOptions,
+        running_job_ids: HashSet<JobId>,
+    ) -> MetaResult<()> {
         let MarkReadyOptions::Global { failed_databases } = options else {
             unreachable!()
         };
         assert!(failed_databases.is_empty());
+        assert!(running_job_ids.is_empty()); // Test jobs belong to the main graph.
         self.0.send(ContextRequest::MarkReady).unwrap();
         Ok(())
     }
@@ -438,6 +443,13 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
 
     let (partial_graph_id, initial_epoch) =
         handle_initial_barrier(&mut request_rx1, &response_tx1, &worker1).await;
+    for _ in 0..10 {
+        yield_now().await;
+    }
+    assert!(matches!(
+        rx.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
     assert_eq!(
         handle_initial_barrier(&mut request_rx2, &response_tx2, &worker2).await,
         (partial_graph_id, initial_epoch)
