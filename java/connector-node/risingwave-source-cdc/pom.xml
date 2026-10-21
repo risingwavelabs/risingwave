@@ -88,3 +88,4 @@
         </dependency>
     </dependencies>
 </project>
+<!-- Bust the setup-java Maven cache key. -->
