@@ -30,6 +30,15 @@ for arg in "$@"; do
   esac
 done
 STAMP_FILE="${LOCAL_REPO}/io/debezium/.risingwave-fork-stamp"
+LOCK_FILE="${LOCAL_REPO}/io/debezium/.risingwave-fork.lock"
+
+if ! command -v flock >/dev/null; then
+  echo "flock is not installed. Install it first, e.g. 'brew install flock' on macOS." >&2
+  exit 1
+fi
+mkdir -p "$(dirname "${LOCK_FILE}")"
+exec 9>"${LOCK_FILE}"
+flock 9
 
 cd "${DEBEZIUM_DIR}"
 
