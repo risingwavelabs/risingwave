@@ -95,7 +95,7 @@ use crate::stream::{
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
     ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
     StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    cleanup_dropped_streaming_jobs, create_source_worker, first_variant_column,
+    cleanup_dropped_sink_runtimes, create_source_worker, first_variant_column,
     rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
@@ -1235,7 +1235,6 @@ impl DdlController {
 
         let name = streaming_job.name();
         let definition = streaming_job.definition();
-        let database_id = streaming_job.database_id();
         let source_id = match &streaming_job {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
@@ -1278,30 +1277,16 @@ impl DdlController {
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
-                self.iceberg_pk_index_sink_manager
-                    .retire_sinks(abort_result.aborted_sink_ids.iter().copied());
-                if let Some(cancel_info) = abort_result.cancel_info {
-                    self.stream_manager
-                        .barrier_scheduler
-                        .run_command(database_id, cancel_info.command)
-                        .await?;
-                    cleanup_dropped_streaming_jobs(
-                        &self.stream_manager.refresh_manager,
-                        &self.stream_manager.hummock_manager,
-                        &self.stream_manager.metadata_manager,
-                        &self.iceberg_pk_index_sink_manager,
-                        cancel_info.streaming_job_ids,
-                        cancel_info.state_table_ids,
-                        "cancel_streaming_job",
-                    )
+                let aborted = abort_result.aborted;
+                self.stream_manager
+                    .cleanup_aborted_streaming_job(abort_result)
                     .await?;
-                }
                 if let Some(cancel_notifier) = cancel_notifier {
                     let _ = cancel_notifier.send(true).inspect_err(|err| {
                         tracing::warn!("failed to notify cancellation result: {err}")
                     });
                 }
-                if abort_result.aborted {
+                if aborted {
                     tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
@@ -1501,7 +1486,6 @@ impl DdlController {
         } = release_ctx;
         self.iceberg_pk_index_sink_manager
             .retire_sinks(removed_iceberg_sink_ids);
-        let removed_job_ids_for_sink_coordinators = removed_streaming_job_ids.clone();
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
         // This is driven by the fragment model deletion (cascade from Object::delete_many),
@@ -1567,13 +1551,6 @@ impl DdlController {
                         );
                     });
             }
-        }
-
-        // stop sink coordinators for dropped streaming jobs
-        if !removed_job_ids_for_sink_coordinators.is_empty() {
-            self.sink_manager
-                .stop_sink_coordinators_for_jobs(removed_job_ids_for_sink_coordinators)
-                .await;
         }
 
         // remove secrets.
@@ -1913,8 +1890,15 @@ impl DdlController {
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
-                self.iceberg_pk_index_sink_manager
-                    .retire_sinks(abort_result.aborted_sink_ids);
+                cleanup_dropped_sink_runtimes(
+                    &self.sink_manager,
+                    &self.iceberg_pk_index_sink_manager,
+                    abort_result
+                        .aborted_sink_ids
+                        .iter()
+                        .map(|id| id.as_job_id()),
+                )
+                .await;
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {

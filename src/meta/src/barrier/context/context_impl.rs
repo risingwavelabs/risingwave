@@ -868,17 +868,11 @@ impl PostCollectCommand {
                 }
 
                 if let Some(old_sink_id) = replace_sink {
-                    barrier_manager_context
-                        .iceberg_pk_index_sink_manager
-                        .retire_sinks([old_sink_id]);
-                    barrier_manager_context
-                        .sink_manager
-                        .stop_sink_coordinators_for_jobs(vec![old_sink_id.as_job_id()])
-                        .await;
                     cleanup_dropped_streaming_jobs(
                         &barrier_manager_context.refresh_manager,
                         &barrier_manager_context.hummock_manager,
                         &barrier_manager_context.metadata_manager,
+                        &barrier_manager_context.sink_manager,
                         &barrier_manager_context.iceberg_pk_index_sink_manager,
                         [old_sink_id.as_job_id()],
                         old_state_table_ids.expect("replace sink should return old state tables"),
@@ -957,6 +951,7 @@ impl PostCollectCommand {
                     &barrier_manager_context.refresh_manager,
                     &barrier_manager_context.hummock_manager,
                     &barrier_manager_context.metadata_manager,
+                    &barrier_manager_context.sink_manager,
                     &barrier_manager_context.iceberg_pk_index_sink_manager,
                     [],
                     to_drop_state_table_ids.clone(),
