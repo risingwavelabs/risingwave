@@ -177,6 +177,7 @@ impl IcebergCompactionManager {
         let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties)?;
         Ok(iceberg_config)
     }
+
     fn orphan_file_cleanup_lock(&self, sink_id: SinkId) -> Arc<tokio::sync::Mutex<()>> {
         self.orphan_file_cleanup_locks
             .lock()
@@ -184,7 +185,6 @@ impl IcebergCompactionManager {
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone()
     }
-
 }
 
 /// User-created iceberg sinks have arbitrary names, so identify them by the

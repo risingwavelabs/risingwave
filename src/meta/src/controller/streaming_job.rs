@@ -4249,7 +4249,7 @@ mod tests {
             )),
             PbNodeBody::CompactionResolver(Box::new(CompactionResolverNode {
                 sink_id,
-                properties: sink_desc.properties.clone(),
+                properties: sink_desc.properties,
                 ..Default::default()
             })),
         ];

@@ -454,7 +454,9 @@ impl IcebergCompactionManager {
     }
 
     pub async fn check_and_remove_orphan_files(&self, sink_id: SinkId) -> MetaResult<()> {
-        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        let Some(iceberg_config) = self.load_maintenance_config(sink_id).await? else {
+            return Ok(());
+        };
         if !iceberg_config.enable_orphan_file_cleanup {
             self.inner
                 .write()
@@ -470,7 +472,10 @@ impl IcebergCompactionManager {
 
     /// Remove orphan files immediately, independently of the periodic cleanup switch.
     pub async fn remove_orphan_files(&self, sink_id: SinkId) -> MetaResult<u64> {
-        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        let iceberg_config = self
+            .load_maintenance_config(sink_id)
+            .await?
+            .ok_or_else(|| anyhow!("iceberg sink {} is not ready for orphan cleanup", sink_id))?;
         self.remove_orphan_files_with_config(sink_id, iceberg_config)
             .await
     }

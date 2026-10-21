@@ -3065,6 +3065,7 @@ async fn test_pk_index_recovered_registration_waits_for_database_ready() {
     config.write_mode = IcebergWriteMode::MergeOnRead;
     config.enable_snapshot_expiration = true;
     config.enable_manifest_rewrite = true;
+    config.enable_orphan_file_cleanup = true;
 
     // A coordinator which has not published graph readiness cannot initialize scheduling.
     let unpublished = IcebergPkIndexSinkRegistration::for_test(config.clone());
@@ -3076,6 +3077,7 @@ async fn test_pk_index_recovered_registration_waits_for_database_ready() {
         assert!(!guard.sink_schedules.contains_key(&sink_id));
         assert!(!guard.snapshot_expiration_sink_ids.contains(&sink_id));
         assert!(!guard.manifest_rewrite_sink_ids.contains(&sink_id));
+        assert!(!guard.orphan_file_cleanup_sink_ids.contains(&sink_id));
     }
     assert!(manager.get_top_n_iceberg_commit_sink_ids(10).is_empty());
     assert!(manager.start_manual_compaction(sink_id).await.is_err());
@@ -3091,6 +3093,7 @@ async fn test_pk_index_recovered_registration_waits_for_database_ready() {
         assert!(!guard.is_recovering(sink_id));
         assert!(guard.snapshot_expiration_sink_ids.contains(&sink_id));
         assert!(guard.manifest_rewrite_sink_ids.contains(&sink_id));
+        assert!(guard.orphan_file_cleanup_sink_ids.contains(&sink_id));
         assert!(guard.sink_schedules[&sink_id].demand.reconciliation_pending);
     }
     let handles = manager.get_top_n_iceberg_commit_sink_ids(10);
@@ -3268,6 +3271,7 @@ async fn test_pk_index_updates_cannot_bypass_registration_readiness() {
     config.enable_pk_index = true;
     config.enable_snapshot_expiration = true;
     config.enable_manifest_rewrite = true;
+    config.enable_orphan_file_cleanup = true;
     for kind in [
         commit_update(10, 1000),
         SinkUpdateKind::Maintenance {
@@ -3293,6 +3297,7 @@ async fn test_pk_index_updates_cannot_bypass_registration_readiness() {
         assert!(guard.sink_schedules.is_empty());
         assert!(guard.snapshot_expiration_sink_ids.is_empty());
         assert!(guard.manifest_rewrite_sink_ids.is_empty());
+        assert!(guard.orphan_file_cleanup_sink_ids.is_empty());
     }
 }
 
@@ -3312,6 +3317,18 @@ async fn test_pk_index_retired_source_blocks_selection_dispatch_and_reports() {
     registration.retire_for_test();
     assert!(manager.get_top_n_iceberg_commit_sink_ids(1).is_empty());
     assert!(manager.start_manual_compaction(sink_id).await.is_err());
+    manager
+        .check_and_remove_orphan_files(sink_id)
+        .await
+        .unwrap();
+    assert!(
+        manager
+            .remove_orphan_files(sink_id)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("not ready")
+    );
     let recovery_generation = manager.inner.read().recovery_generation(sink_id);
     assert!(!manager.apply_sink_update(
         &mut manager.inner.write(),

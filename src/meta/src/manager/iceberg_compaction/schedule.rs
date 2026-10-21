@@ -1258,6 +1258,11 @@ impl IcebergCompactionManager {
         } else {
             guard.manifest_rewrite_sink_ids.remove(&sink_id);
         }
+        if config.enable_orphan_file_cleanup {
+            guard.orphan_file_cleanup_sink_ids.insert(sink_id);
+        } else {
+            guard.orphan_file_cleanup_sink_ids.remove(&sink_id);
+        }
         let task = Self::remove_sink_schedule(&mut guard, sink_id);
         guard.sink_schedules.insert(sink_id, track);
         if let Some(waiter) = guard.manual_compaction_waiters.remove(&sink_id) {
