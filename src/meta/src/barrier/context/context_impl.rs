@@ -46,11 +46,12 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
-use crate::manager::LocalNotification;
 use crate::manager::iceberg_pk_index_sink::{
-    IcebergPkIndexPreCommitMetadata, group_pre_commit_metadata,
+    IcebergPkIndexPreCommitMetadata, build_iceberg_config, group_pre_commit_metadata,
+    is_iceberg_pk_index_sink,
 };
 use crate::manager::sink_coordination::{RecoveryStart, RecoverySucceeded};
+use crate::manager::{LocalNotification, StreamingJob};
 use crate::model::FragmentDownstreamRelation;
 use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
 use crate::stream::{RefreshStage, SourceChange, cleanup_dropped_streaming_jobs};
@@ -184,17 +185,17 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
+        self.iceberg_pk_index_sink_manager
+            .start_recovery(database_job_ids.as_ref());
         self.sink_manager.start_recovery(recovery).await?;
-
-        if let Some(job_ids) = database_job_ids {
-            self.iceberg_pk_index_sink_manager.unregister_jobs(job_ids);
-        } else {
-            self.iceberg_pk_index_sink_manager.reset();
-        }
         Ok(())
     }
 
-    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()> {
+    async fn mark_ready(
+        &self,
+        options: MarkReadyOptions,
+        running_job_ids: HashSet<JobId>,
+    ) -> MetaResult<()> {
         let recovery = match &options {
             MarkReadyOptions::Database(database_id) => RecoverySucceeded::Database(*database_id),
             MarkReadyOptions::Global { failed_databases } => RecoverySucceeded::Global {
@@ -204,6 +205,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.sink_manager.recovery_succeeded(recovery).await?;
         let is_global = matches!(&options, MarkReadyOptions::Global { .. });
         self.scheduled_barriers.mark_ready(options);
+        // Compaction reads settled coordinator state only after the queues are ready.
+        self.iceberg_pk_index_sink_manager
+            .on_jobs_ready(&running_job_ids)
+            .await;
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
@@ -675,6 +680,22 @@ impl PostCollectCommand {
                     .await?;
             }
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
+                // PK-index maintenance runs in Meta, not in the ordinary sink executor.
+                // Refresh it explicitly so an idle sink also observes ALTER immediately.
+                for object_id in obj_id_map_props.keys() {
+                    if let Some(sink) = barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .get_sink_by_id(object_id.as_sink_id())
+                        .await?
+                        && is_iceberg_pk_index_sink(&sink.properties)
+                    {
+                        let config = build_iceberg_config(&sink)?;
+                        barrier_manager_context
+                            .iceberg_pk_index_sink_manager
+                            .on_sink_config_changed(sink.id, config);
+                    }
+                }
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
                 barrier_manager_context
                     .source_manager
@@ -793,6 +814,7 @@ impl PostCollectCommand {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
                     replace_sink,
+                    streaming_job,
                     ..
                 } = info;
                 let new_job_id = stream_job_fragments.stream_job_id();
@@ -834,15 +856,24 @@ impl PostCollectCommand {
                         .await;
                 }
 
-                if let Some(old_sink_id) = replace_sink {
+                // The coordinator is registered before CREATE is submitted, but its
+                // compaction results cannot be applied until the independent job is running.
+                if let StreamingJob::Sink(sink, _) = &streaming_job
+                    && is_iceberg_pk_index_sink(&sink.properties)
+                {
                     barrier_manager_context
-                        .sink_manager
-                        .stop_sink_coordinators_for_jobs(vec![old_sink_id.as_job_id()])
+                        .iceberg_pk_index_sink_manager
+                        .on_jobs_ready(&HashSet::from([sink.id.as_job_id()]))
                         .await;
+                }
+
+                if let Some(old_sink_id) = replace_sink {
                     cleanup_dropped_streaming_jobs(
                         &barrier_manager_context.refresh_manager,
                         &barrier_manager_context.hummock_manager,
                         &barrier_manager_context.metadata_manager,
+                        &barrier_manager_context.sink_manager,
+                        &barrier_manager_context.iceberg_pk_index_sink_manager,
                         [old_sink_id.as_job_id()],
                         old_state_table_ids.expect("replace sink should return old state tables"),
                         "replace_sink",
@@ -920,6 +951,8 @@ impl PostCollectCommand {
                     &barrier_manager_context.refresh_manager,
                     &barrier_manager_context.hummock_manager,
                     &barrier_manager_context.metadata_manager,
+                    &barrier_manager_context.sink_manager,
+                    &barrier_manager_context.iceberg_pk_index_sink_manager,
                     [],
                     to_drop_state_table_ids.clone(),
                     "replace_streaming_job",

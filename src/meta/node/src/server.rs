@@ -462,7 +462,7 @@ pub async fn start_service_as_election_leader(
         env.meta_store_ref().conn.clone(),
         hummock_manager.clone(),
         metadata_manager.clone(),
-        iceberg_compaction_stat_tx,
+        iceberg_compaction_stat_tx.clone(),
         env.await_tree_reg().clone(),
     );
     tracing::info!("SinkCoordinatorManager started");
@@ -478,10 +478,6 @@ pub async fn start_service_as_election_leader(
         env.session_params_manager_impl_ref(),
     ));
 
-    let iceberg_pk_index_sink_manager =
-        IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
-    tracing::info!("IcebergPkIndexSinkManager started");
-
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
     // TODO: introduce compactor event stream handler to handle iceberg compaction events.
@@ -490,7 +486,15 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
+        barrier_scheduler.clone(),
     );
+
+    let iceberg_pk_index_sink_manager = IcebergPkIndexSinkManager::new(
+        metadata_manager.catalog_controller.clone(),
+        iceberg_compaction_mgr.clone(),
+        iceberg_compaction_stat_tx,
+    );
+    tracing::info!("IcebergPkIndexSinkManager started");
 
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
         iceberg_compaction_mgr.clone(),
@@ -537,7 +541,6 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         iceberg_pk_index_sink_manager.clone(),
-        iceberg_compaction_mgr.clone(),
         scale_controller.clone(),
         refresh_manager.clone(),
     )
@@ -560,7 +563,8 @@ pub async fn start_service_as_election_leader(
             hummock_manager.clone(),
             source_manager.clone(),
             refresh_manager.clone(),
-            iceberg_compaction_mgr.clone(),
+            sink_manager.clone(),
+            iceberg_pk_index_sink_manager.clone(),
             scale_controller.clone(),
         )
         .unwrap(),

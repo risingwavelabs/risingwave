@@ -108,8 +108,8 @@ pub struct AbortCreatingJobResult {
     pub aborted: bool,
     /// The database of the job, if the job was found.
     pub database_id: Option<DatabaseId>,
-    /// The aborted sinks; the caller should clear their iceberg maintenance state via
-    /// `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
+    /// The aborted sinks; the caller should retire their maintenance state and stop their
+    /// coordinators, using only sinks actually removed.
     pub aborted_sink_ids: Vec<SinkId>,
     /// Runtime and state cleanup information captured before deleting the catalog rows.
     /// This is returned only when handling an explicit cancellation.
@@ -3184,7 +3184,9 @@ impl CatalogController {
         if let Statement::CreateSink { stmt } = &mut stmt {
             update_stmt_with_props(&mut stmt.with_properties.0, &props)?;
         } else {
-            panic!("definition is not a create sink statement")
+            return Err(MetaError::invalid_parameter(
+                "cannot alter an internal Iceberg sink; use ALTER TABLE ... CONNECTOR WITH (...) instead",
+            ));
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props.clone());
@@ -3266,7 +3268,9 @@ impl CatalogController {
             }
             update_stmt_with_props(with_options, &props)?;
         } else {
-            panic!("definition is not a create iceberg table statement")
+            return Err(MetaError::invalid_parameter(
+                "definition is not a create iceberg table statement",
+            ));
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props.clone());
@@ -4070,46 +4074,59 @@ async fn ensure_source_props_not_set_by_connection(
     Ok(())
 }
 
+fn update_sink_node_props(
+    node: &mut PbNodeBody,
+    sink_id: SinkId,
+    props: &BTreeMap<String, String>,
+) -> bool {
+    let sink_desc = match node {
+        PbNodeBody::Sink(node) => &mut node.sink_desc,
+        PbNodeBody::IcebergWithPkIndexWriter(node) => &mut node.sink_desc,
+        PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(node) => &mut node.sink_desc,
+        PbNodeBody::CompactionResolver(node) if node.sink_id == sink_id => {
+            node.properties.extend(props.clone());
+            return true;
+        }
+        _ => return false,
+    };
+    if let Some(sink_desc) = sink_desc
+        && sink_desc.id == sink_id
+    {
+        sink_desc.properties.extend(props.clone());
+        true
+    } else {
+        false
+    }
+}
+
 async fn update_sink_fragment_props(
     txn: &DatabaseTransaction,
     sink_id: SinkId,
     props: BTreeMap<String, String>,
 ) -> MetaResult<()> {
-    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
         .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::FragmentTypeMask,
-            fragment::Column::StreamNode,
-        ])
+        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
         .filter(fragment::Column::JobId.eq(sink_id))
         .into_tuple()
         .all(txn)
         .await?;
     let fragments = fragments
         .into_iter()
-        .filter(|(_, fragment_type_mask, _)| {
-            *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
-        })
-        .filter_map(|(id, _, stream_node)| {
+        .filter_map(|(id, stream_node)| {
             let mut stream_node = stream_node.to_protobuf();
             let mut found = false;
             visit_stream_node_mut(&mut stream_node, |node| {
-                if let PbNodeBody::Sink(node) = node
-                    && let Some(sink_desc) = &mut node.sink_desc
-                    && sink_desc.id == sink_id
-                {
-                    sink_desc.properties.extend(props.clone());
-                    found = true;
-                }
+                found |= update_sink_node_props(node, sink_id, &props);
             });
             if found { Some((id, stream_node)) } else { None }
         })
         .collect_vec();
-    assert!(
-        !fragments.is_empty(),
-        "sink id should be used by at least one fragment"
-    );
+    if fragments.is_empty() {
+        return Err(MetaError::invalid_parameter(format!(
+            "sink {sink_id} is not used by any fragment"
+        )));
+    }
     for (id, stream_node) in fragments {
         Fragment::update(fragment::ActiveModel {
             fragment_id: Set(id),
@@ -4194,9 +4211,66 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use risingwave_pb::stream_plan::{
+        CompactionResolverNode, IcebergWithPkIndexPositionDeleteMergerNode,
+        IcebergWithPkIndexWriterNode, SinkDesc, SinkNode,
+    };
     use risingwave_sqlparser::ast::{SqlOption, Statement};
 
-    use super::{Parser, merge_with_options};
+    use super::{Parser, PbNodeBody, SinkId, merge_with_options, update_sink_node_props};
+
+    #[test]
+    fn test_update_sink_props_in_all_sink_nodes() {
+        let sink_id = SinkId::new(42);
+        let props = BTreeMap::from([("enable_compaction".to_owned(), "true".to_owned())]);
+        let sink_desc = SinkDesc {
+            id: sink_id,
+            properties: BTreeMap::from([
+                ("connector".to_owned(), "iceberg".to_owned()),
+                ("enable_compaction".to_owned(), "false".to_owned()),
+            ]),
+            ..Default::default()
+        };
+        let nodes = [
+            PbNodeBody::Sink(Box::new(SinkNode {
+                sink_desc: Some(sink_desc.clone()),
+                ..Default::default()
+            })),
+            PbNodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
+                sink_desc: Some(sink_desc.clone()),
+                ..Default::default()
+            })),
+            PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(Box::new(
+                IcebergWithPkIndexPositionDeleteMergerNode {
+                    sink_desc: Some(sink_desc.clone()),
+                },
+            )),
+            PbNodeBody::CompactionResolver(Box::new(CompactionResolverNode {
+                sink_id,
+                properties: sink_desc.properties,
+                ..Default::default()
+            })),
+        ];
+        for mut node in nodes {
+            assert!(!update_sink_node_props(&mut node, SinkId::new(43), &props));
+            assert!(update_sink_node_props(&mut node, sink_id, &props));
+            let properties = match &node {
+                PbNodeBody::Sink(node) => &node.sink_desc.as_ref().unwrap().properties,
+                PbNodeBody::IcebergWithPkIndexWriter(node) => {
+                    &node.sink_desc.as_ref().unwrap().properties
+                }
+                PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(node) => {
+                    &node.sink_desc.as_ref().unwrap().properties
+                }
+                PbNodeBody::CompactionResolver(node) => &node.properties,
+                _ => unreachable!(),
+            };
+            assert_eq!(properties["enable_compaction"], "true");
+            assert_eq!(properties["connector"], "iceberg");
+        }
+    }
 
     #[test]
     fn test_merge_with_options_normalizes_altered_option_name() {
