@@ -49,7 +49,7 @@ fn debug_binary_op(
 
 impl std::fmt::Debug for FunctionCall {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if matches!(self.func_type, ExprType::JevAnalyze | ExprType::JevEval) {
+        if self.func_type == ExprType::JevEval {
             let mut builder = f.debug_tuple("JevEval");
             for (index, child) in self.inputs.iter().enumerate() {
                 if index == 4 {
@@ -334,7 +334,7 @@ pub struct FunctionCallDisplay<'a> {
 impl std::fmt::Debug for FunctionCallDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.function_call;
-        if matches!(that.func_type, ExprType::JevAnalyze | ExprType::JevEval) {
+        if that.func_type == ExprType::JevEval {
             let mut builder = f.debug_tuple("JevEval");
             for (index, child) in that.inputs.iter().enumerate() {
                 if index == 4 {

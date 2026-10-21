@@ -81,15 +81,6 @@
   expected_outputs:
     - binder_error
 
-- name: legacy name binds to the canonical function
-  sql: |
-    CREATE TABLE contexts (id INT, state JSONB);
-    SELECT jev_analyze(state, 'http://127.0.0.1:1/evaluate', 'test-model',
-      '{}'::jsonb, 'planner-only-key') FROM contexts;
-  expected_outputs:
-    - logical_plan
-    - stream_plan
-
 - name: constant execution options preserve volatility and key redaction
   sql: |
     CREATE TABLE contexts (id INT, state JSONB);
@@ -124,10 +115,5 @@
 
 - name: null options are rejected
   sql: SELECT jev_eval('{}'::jsonb, 'url', 'model', '{}'::jsonb, 'planner-only-key', NULL::jsonb);
-  expected_outputs:
-    - binder_error
-
-- name: legacy alias also validates options
-  sql: SELECT jev_analyze('{}'::jsonb, 'url', 'model', '{}'::jsonb, 'planner-only-key', '{"max_concurrency":-1}'::jsonb);
   expected_outputs:
     - binder_error

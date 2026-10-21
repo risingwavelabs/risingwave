@@ -821,7 +821,6 @@ impl Binder {
 
                 // AI model functions
                 ("jev_eval", jev_eval()),
-                ("jev_analyze", jev_eval()),
                 ("openai_embedding", guard_by_len(|_binder, [arg0, arg1]| {
                     // check if the first two arguments are constants
                     if let ExprImpl::Literal(config) = &arg0 && let Some(ScalarImpl::Jsonb(_config)) = config.get_data() {

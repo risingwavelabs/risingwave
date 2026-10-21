@@ -56,11 +56,6 @@ impl std::fmt::Debug for JevEval {
     }
 }
 
-#[build_function(
-    "jev_analyze(jsonb, varchar, varchar, jsonb, varchar) -> jsonb",
-    volatile,
-    deprecated
-)]
 #[build_function("jev_eval(jsonb, varchar, varchar, jsonb, varchar) -> jsonb", volatile)]
 #[build_function(
     "jev_eval(jsonb, varchar, varchar, jsonb, varchar, jsonb) -> jsonb",
@@ -704,18 +699,6 @@ mod tests {
             .expect("the configured limit must allow the initial request group to start");
             assert!(left.is_ok() && right.is_ok());
             assert_eq!(maximum.load(Ordering::SeqCst), max_concurrency);
-        }
-    }
-
-    #[tokio::test]
-    async fn legacy_serialized_function_still_builds() {
-        for kind in [ExprType::JevAnalyze, ExprType::JevEval] {
-            let children = expression(REQUEST_TIMEOUT).children.into_iter().collect();
-            let expr = build_func(kind, DataType::Jsonb, children).unwrap();
-            assert_eq!(
-                expr.eval_row(&OwnedRow::new(vec![None; 5])).await.unwrap(),
-                None
-            );
         }
     }
 }

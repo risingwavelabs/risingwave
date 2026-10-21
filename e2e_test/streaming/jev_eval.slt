@@ -4,12 +4,6 @@ SELECT jev_eval(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key');
 ----
 NULL
 
-# The legacy SQL name remains an alias.
-query T
-SELECT jev_analyze(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key');
-----
-NULL
-
 query T
 SELECT jev_eval(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key', '{"max_concurrency":16}'::jsonb);
 ----

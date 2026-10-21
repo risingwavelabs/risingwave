@@ -156,19 +156,6 @@
 
     Caused by:
       Invalid input syntax: secret reference is only allowed in user-defined function arguments
-- name: legacy name binds to the canonical function
-  sql: |
-    CREATE TABLE contexts (id INT, state JSONB);
-    SELECT jev_analyze(state, 'http://127.0.0.1:1/evaluate', 'test-model',
-      '{}'::jsonb, 'planner-only-key') FROM contexts;
-  logical_plan: |-
-    LogicalProject { exprs: [JevEval(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{}':Jsonb, "<redacted>") as $expr1] }
-    └─LogicalScan { table: contexts, columns: [contexts.id, contexts.state, contexts._row_id, contexts._rw_timestamp] }
-  stream_plan: |-
-    StreamMaterialize { columns: [jev_analyze, contexts._row_id(hidden)], stream_key: [contexts._row_id], pk_columns: [contexts._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr1, contexts._row_id] }
-      └─StreamMaterializedExprs { exprs: [JevEval(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{}':Jsonb, "<redacted>") as $expr1] }
-        └─StreamTableScan { table: contexts, columns: [contexts.state, contexts._row_id], stream_scan_type: SnapshotBackfill, stream_key: [contexts._row_id], pk: [_row_id], dist: UpstreamHashShard(contexts._row_id) }
 - name: constant execution options preserve volatility and key redaction
   sql: |
     CREATE TABLE contexts (id INT, state JSONB);
@@ -223,10 +210,3 @@
 
     Caused by:
       Invalid input syntax: jev_eval options must be constant non-null jsonb
-- name: legacy alias also validates options
-  sql: SELECT jev_analyze('{}'::jsonb, 'url', 'model', '{}'::jsonb, 'planner-only-key', '{"max_concurrency":-1}'::jsonb);
-  binder_error: |
-    Failed to bind expression: jev_analyze(CAST('{}' AS JSONB), 'url', 'model', CAST('{}' AS JSONB), 'planner-only-key', CAST('{"max_concurrency":-1}' AS JSONB))
-
-    Caused by:
-      Invalid input syntax: Invalid parameter jev_eval options: max_concurrency must be an integer from 1 to 256

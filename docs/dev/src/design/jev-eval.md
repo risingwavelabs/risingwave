@@ -1,8 +1,6 @@
 # Jev evaluation
 
 `jev_eval` evaluates SQL-built context using a System One compatible HTTP service.
-`jev_analyze` remains a SQL alias, and previously serialized plans using that
-function continue to work.
 
 ```sql
 jev_eval(
@@ -25,8 +23,8 @@ jev_eval(state, model_url, model, questions, api_key,
 Options must be a non-null JSONB object literal. `max_concurrency` accepts
 integers from 1 to 256; omitted options or `{}` use 8. Zero does not mean
 unlimited. Unknown options, invalid values and row-dependent options are rejected
-before creating a job. Both SQL names accept the options argument, in batch and
-streaming queries. Options configure the client and are not sent to the service.
+before creating a job. The options argument is supported in batch and streaming
+queries. Options configure the client and are not sent to the service.
 
 `model_url` is the complete
 HTTP(S) evaluation endpoint, for example `https://api.impossibl.com/v1/systemone`.
@@ -156,11 +154,10 @@ response is limited to 16 MiB. There is no separate aggregate byte budget.
 
 - Expression mock HTTP tests: request shape, full response, retry classification,
   timeout, SQL NULL and invisible rows, ordered results, configured shared limits,
-  slot refill behind a blocked first row, failures/cancellation,
-  and compatibility with the legacy serialized function.
+  slot refill behind a blocked first row, and failures/cancellation.
 - Project tests: saved results across updates, deletes and executor recovery;
   fatal error propagation and barrier/watermark ordering.
-- Planner fixture `jev_eval`: both names, constant options and early validation,
+- Planner fixture `jev_eval`: constant options and early validation,
   dynamic arguments, volatility, result storage, GROUP BY/OVER placement, both
   emission modes, and signature errors.
 - `./risedev slt './e2e_test/streaming/jev_eval.slt'`: a temporary local HTTP

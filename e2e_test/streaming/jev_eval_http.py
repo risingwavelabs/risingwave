@@ -94,13 +94,12 @@ def exercise(server):
     response = json.loads(sql(f"SELECT {analyze(batch_state)}")[0])
     assert response["echo"] == {"state": p1, "model": "test-model", "questions": {}}
     assert response["unknown_metadata"] is True
-    for function in ["jev_eval", "jev_analyze"]:
-        for options in ["", ", '{\"max_concurrency\":2}'::jsonb"]:
-            response = json.loads(sql(
-                f"SELECT {function}({batch_state}, '{url}', 'test-model', '{{}}'::jsonb, 'test-key'{options})"
-            )[0])
-            assert response["echo"] == {"state": p1, "model": "test-model", "questions": {}}
-            assert response["unknown_metadata"] is True
+    for options in ["", ", '{\"max_concurrency\":2}'::jsonb"]:
+        response = json.loads(sql(
+            f"SELECT jev_eval({batch_state}, '{url}', 'test-model', '{{}}'::jsonb, 'test-key'{options})"
+        )[0])
+        assert response["echo"] == {"state": p1, "model": "test-model", "questions": {}}
+        assert response["unknown_metadata"] is True
 
     sql("CREATE TABLE jev_input (id INT PRIMARY KEY, user_id INT, payload JSONB, questions JSONB)")
     sql(f"CREATE MATERIALIZED VIEW jev_direct AS SELECT id, {analyze('payload', 'questions')} AS result FROM jev_input")
