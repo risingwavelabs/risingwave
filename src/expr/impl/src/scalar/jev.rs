@@ -22,6 +22,7 @@ use risingwave_common::types::{DataType, Datum, DatumRef, JsonbRef, JsonbVal, Sc
 use risingwave_expr::expr::{
     AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo,
 };
+use risingwave_expr::scalar::jev::JevEvalOptions;
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
 use tokio::sync::Semaphore;
@@ -30,7 +31,6 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ATTEMPTS: usize = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(100);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
-const MAX_CONCURRENCY: usize = 8;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 /// One state is one request. An array in `state` is context, not an HTTP batch.
@@ -41,48 +41,76 @@ struct Request<'a> {
     questions: jsonbb::ValueRef<'a>,
 }
 
-struct JevAnalyze {
+struct JevEval {
     children: [BoxedExpression; 5],
     client: Client,
     // Shared by concurrent eval calls on this expression, including overlapping chunks.
     permits: Semaphore,
+    max_concurrency: usize,
 }
 
-impl std::fmt::Debug for JevAnalyze {
+impl std::fmt::Debug for JevEval {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Arguments may contain credentials or customer state.
-        f.debug_struct("JevAnalyze").finish_non_exhaustive()
+        f.debug_struct("JevEval").finish_non_exhaustive()
     }
 }
 
 #[build_function(
     "jev_analyze(jsonb, varchar, varchar, jsonb, varchar) -> jsonb",
+    volatile,
+    deprecated
+)]
+#[build_function("jev_eval(jsonb, varchar, varchar, jsonb, varchar) -> jsonb", volatile)]
+#[build_function(
+    "jev_eval(jsonb, varchar, varchar, jsonb, varchar, jsonb) -> jsonb",
     volatile
 )]
-fn build(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+fn build(_: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    let options = if children.len() == 6 {
+        let Some(ScalarImpl::Jsonb(options)) = children
+            .pop()
+            .unwrap()
+            .eval_const()
+            .map_err(|_| options_error())?
+        else {
+            return Err(options_error());
+        };
+        JevEvalOptions::parse(&options)?
+    } else {
+        JevEvalOptions::default()
+    };
     let children = children.try_into().map_err(|_| ExprError::InvalidParam {
-        name: "jev_analyze",
-        reason: "expected five arguments".into(),
+        name: "jev_eval",
+        reason: "expected five arguments and optional constant JSONB options".into(),
     })?;
     let client = Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| request_error("could not initialize HTTP client"))?;
-    Ok(JevAnalyze {
+    Ok(JevEval {
         children,
         client,
-        permits: Semaphore::new(MAX_CONCURRENCY),
+        permits: Semaphore::new(options.max_concurrency),
+        max_concurrency: options.max_concurrency,
     }
     .boxed())
 }
 
-fn request_error(message: impl std::fmt::Display) -> ExprError {
-    // Do not attach the request, response body, URL, or function arguments to errors.
-    ExprError::External(format!("jev_analyze: {message}"))
+fn options_error() -> ExprError {
+    ExprError::InvalidParam {
+        name: "jev_eval options",
+        reason: "must be constant non-null jsonb".into(),
+    }
 }
 
-impl JevAnalyze {
+fn request_error(message: impl std::fmt::Display) -> ExprError {
+    // Do not attach the request, response body, URL, or function arguments to errors.
+    ExprError::External(format!("jev_eval: {message}"))
+}
+
+impl JevEval {
     async fn request(
         &self,
         state: JsonbRef<'_>,
@@ -219,13 +247,13 @@ impl JevAnalyze {
     }
 }
 
-impl ExpressionInfo for JevAnalyze {
+impl ExpressionInfo for JevEval {
     fn return_type(&self) -> DataType {
         DataType::Jsonb
     }
 }
 
-impl AsyncExpression for JevAnalyze {
+impl AsyncExpression for JevEval {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut arrays = Vec::with_capacity(5);
         for child in &self.children {
@@ -236,15 +264,23 @@ impl AsyncExpression for JevAnalyze {
                 let arrays = &arrays;
                 async move {
                     if !input.visibility().is_set(index) {
-                        return Ok(None);
+                        return Ok((index, None));
                     }
-                    self.evaluate(std::array::from_fn(|i| arrays[i].value_at(index)))
-                        .await
+                    let value = self
+                        .evaluate(std::array::from_fn(|i| arrays[i].value_at(index)))
+                        .await?;
+                    Ok::<_, ExprError>((index, value))
                 }
             })
-            .buffered(MAX_CONCURRENCY);
+            .buffer_unordered(self.max_concurrency);
+        // Refill HTTP slots as soon as requests finish, independently of row order.
+        // The expression still returns one ordered array only after the whole chunk finishes.
+        let mut ordered_results = vec![None; input.capacity()];
+        while let Some((index, result)) = results.try_next().await? {
+            ordered_results[index] = result;
+        }
         let mut builder = JsonbArrayBuilder::new(input.capacity());
-        while let Some(result) = results.try_next().await? {
+        for result in ordered_results {
             builder.append_owned(result);
         }
         Ok(builder.finish().into_ref())
@@ -274,7 +310,11 @@ mod tests {
     use axum::{Json, Router};
     use risingwave_common::array::Utf8Array;
     use risingwave_common::types::Scalar;
-    use risingwave_expr::expr::{InputRefExpression, SyncExpressionBoxExt};
+    use risingwave_expr::expr::{
+        InputRefExpression, LiteralExpression, SyncExpressionBoxExt, build_func,
+    };
+    use risingwave_expr::scalar::jev::DEFAULT_MAX_CONCURRENCY;
+    use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
 
     use super::*;
@@ -297,8 +337,12 @@ mod tests {
         Server { url, task }
     }
 
-    fn expression(timeout: Duration) -> JevAnalyze {
-        JevAnalyze {
+    fn expression(timeout: Duration) -> JevEval {
+        expression_with_concurrency(timeout, DEFAULT_MAX_CONCURRENCY)
+    }
+
+    fn expression_with_concurrency(timeout: Duration, max_concurrency: usize) -> JevEval {
+        JevEval {
             children: std::array::from_fn(|i| {
                 let ty = if i == 0 || i == 3 {
                     DataType::Jsonb
@@ -313,11 +357,12 @@ mod tests {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap(),
-            permits: Semaphore::new(MAX_CONCURRENCY),
+            permits: Semaphore::new(max_concurrency),
+            max_concurrency,
         }
     }
 
-    async fn call(expr: &JevAnalyze, url: &str) -> Result<JsonbVal> {
+    async fn call(expr: &JevEval, url: &str) -> Result<JsonbVal> {
         expr.request(
             JsonbVal::from(json!({"messages": ["收到退款了"]})).as_scalar_ref(),
             url,
@@ -375,7 +420,8 @@ mod tests {
                 }),
             ))
             .await;
-            let result = call(&expression(REQUEST_TIMEOUT), &server.url).await;
+            let expr = expression(REQUEST_TIMEOUT);
+            let result = call(&expr, &server.url).await;
             assert_eq!(result.is_ok(), expected);
             assert_eq!(attempts.load(Ordering::SeqCst), calls);
         }
@@ -475,7 +521,7 @@ mod tests {
             }),
         ))
         .await;
-        let expr = expression(REQUEST_TIMEOUT);
+        let expr = expression_with_concurrency(REQUEST_TIMEOUT, 3);
         let input = chunk(&server.url, 20);
         // The semaphore bounds overlapping eval calls as well as a single chunk.
         let (left, right) = tokio::join!(expr.eval(&input), expr.eval(&input));
@@ -489,7 +535,8 @@ mod tests {
             }
         }
         assert_eq!(requests.load(Ordering::SeqCst), 36);
-        assert!((2..=MAX_CONCURRENCY).contains(&maximum.load(Ordering::SeqCst)));
+        assert_eq!(maximum.load(Ordering::SeqCst), 3);
+        assert_eq!(expr.permits.available_permits(), 3);
     }
 
     #[tokio::test]
@@ -505,6 +552,170 @@ mod tests {
             ];
             args[null_index] = None;
             assert!(expr.eval_row(&OwnedRow::new(args)).await.unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn refills_slots_behind_a_blocked_first_row_and_restores_order() {
+        for max_concurrency in [2, 8, 16] {
+            let first = Arc::new(Semaphore::new(0));
+            let gate = first.clone();
+            let completed = Arc::new(AtomicUsize::new(0));
+            let seen = completed.clone();
+            let server = server(Router::new().route(
+                "/evaluate",
+                post(move |Json(body): Json<Value>| {
+                    let gate = gate.clone();
+                    let seen = seen.clone();
+                    async move {
+                        let index = body["state"]["index"].as_u64().unwrap();
+                        if index == 0 {
+                            gate.acquire().await.unwrap().forget();
+                        }
+                        seen.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"index": index}))
+                    }
+                }),
+            ))
+            .await;
+            let expr = expression_with_concurrency(REQUEST_TIMEOUT, max_concurrency);
+            let input = chunk(&server.url, 30);
+            let evaluation = expr.eval(&input);
+            futures::pin_mut!(evaluation);
+            tokio::select! {
+                result = &mut evaluation => panic!("first row was not released: {result:?}"),
+                _ = async {
+                    tokio::time::timeout(Duration::from_secs(5), async {
+                        // 30 rows minus SQL NULL, invisible row and the blocked first row.
+                        while completed.load(Ordering::SeqCst) != 27 {
+                            tokio::time::sleep(Duration::from_millis(1)).await;
+                        }
+                    }).await.expect("completed rows must release scheduling slots");
+                } => {}
+            }
+            first.add_permits(1);
+            let output = evaluation.await.unwrap();
+            for i in 0..30 {
+                assert_eq!(
+                    output
+                        .as_jsonb()
+                        .value_at(i)
+                        .map(|value| JsonbVal::from(value).take()),
+                    (![1, 2].contains(&i)).then(|| json!({"index": i}))
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn failure_cancels_pending_rows_and_releases_permits() {
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(|Json(body): Json<Value>| async move {
+                match body["state"]["index"].as_u64().unwrap() {
+                    0 => futures::future::pending().await,
+                    3 => (StatusCode::OK, Json(json!({"ok": true}))),
+                    4 => (StatusCode::UNAUTHORIZED, Json(json!({}))),
+                    _ => unreachable!(),
+                }
+            }),
+        ))
+        .await;
+        let expr = expression_with_concurrency(REQUEST_TIMEOUT, 2);
+        let input = chunk(&server.url, 5);
+        let error = tokio::time::timeout(Duration::from_secs(5), expr.eval(&input))
+            .await
+            .expect("later failures must not wait for the blocked first row")
+            .unwrap_err();
+        assert!(error.to_string().contains("401"));
+        assert_eq!(expr.permits.available_permits(), 2);
+    }
+
+    #[tokio::test]
+    async fn cancellation_cleans_up_waiters_across_overlapping_evaluations() {
+        let started = Arc::new(Semaphore::new(0));
+        let seen = started.clone();
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(move || {
+                seen.add_permits(1);
+                async { futures::future::pending::<Json<Value>>().await }
+            }),
+        ))
+        .await;
+        let expr = expression_with_concurrency(REQUEST_TIMEOUT, 1);
+        {
+            let requests =
+                async { tokio::join!(call(&expr, &server.url), call(&expr, &server.url)) };
+            futures::pin_mut!(requests);
+            tokio::select! {
+                _ = &mut requests => panic!("server never completes"),
+                _ = async {
+                    tokio::time::timeout(Duration::from_secs(5), started.acquire())
+                        .await.unwrap().unwrap().forget();
+                } => {}
+            }
+            // Drop both request futures, including the semaphore waiter.
+        }
+        assert_eq!(expr.permits.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn configured_registered_expression_shares_the_requested_limit() {
+        for max_concurrency in [1, 3, 16] {
+            let active = Arc::new(AtomicUsize::new(0));
+            let maximum = Arc::new(AtomicUsize::new(0));
+            let started = Arc::new(AtomicUsize::new(0));
+            let gate = Arc::new(Semaphore::new(0));
+            let (a, m) = (active.clone(), maximum.clone());
+            let server = server(Router::new().route(
+                "/evaluate",
+                post(move |Json(body): Json<Value>| {
+                    let (a, m, started, gate) =
+                        (a.clone(), m.clone(), started.clone(), gate.clone());
+                    async move {
+                        let inflight = a.fetch_add(1, Ordering::SeqCst) + 1;
+                        m.fetch_max(inflight, Ordering::SeqCst);
+                        if started.fetch_add(1, Ordering::SeqCst) + 1 == max_concurrency {
+                            gate.add_permits(36);
+                        }
+                        gate.acquire().await.unwrap().forget();
+                        tokio::task::yield_now().await;
+                        a.fetch_sub(1, Ordering::SeqCst);
+                        Json(body)
+                    }
+                }),
+            ))
+            .await;
+            let mut children: Vec<_> = expression(REQUEST_TIMEOUT).children.into_iter().collect();
+            children.push(
+                LiteralExpression::new(
+                    DataType::Jsonb,
+                    Some(JsonbVal::from(json!({"max_concurrency": max_concurrency})).into()),
+                )
+                .boxed(),
+            );
+            let expr = build_func(ExprType::JevEval, DataType::Jsonb, children).unwrap();
+            let input = chunk(&server.url, 20);
+            let (left, right) = tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::join!(expr.eval(&input), expr.eval(&input))
+            })
+            .await
+            .expect("the configured limit must allow the initial request group to start");
+            assert!(left.is_ok() && right.is_ok());
+            assert_eq!(maximum.load(Ordering::SeqCst), max_concurrency);
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_serialized_function_still_builds() {
+        for kind in [ExprType::JevAnalyze, ExprType::JevEval] {
+            let children = expression(REQUEST_TIMEOUT).children.into_iter().collect();
+            let expr = build_func(kind, DataType::Jsonb, children).unwrap();
+            assert_eq!(
+                expr.eval_row(&OwnedRow::new(vec![None; 5])).await.unwrap(),
+                None
+            );
         }
     }
 }

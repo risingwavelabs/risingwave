@@ -82,7 +82,8 @@ def exercise(server):
     url = f"http://127.0.0.1:{server.server_port}/evaluate"
 
     def analyze(state, questions="'{}'::jsonb"):
-        return f"jev_analyze({state}, '{url}', 'test-model', {questions}, 'test-key')"
+        return f"""jev_eval({state}, '{url}', 'test-model', {questions}, 'test-key',
+            '{{"max_concurrency":2}}'::jsonb)"""
 
     def states(view, where="", order="id"):
         return f"SELECT result->'echo'->'state' FROM {view} {where} ORDER BY {order}"
@@ -93,6 +94,13 @@ def exercise(server):
     response = json.loads(sql(f"SELECT {analyze(batch_state)}")[0])
     assert response["echo"] == {"state": p1, "model": "test-model", "questions": {}}
     assert response["unknown_metadata"] is True
+    for function in ["jev_eval", "jev_analyze"]:
+        for options in ["", ", '{\"max_concurrency\":2}'::jsonb"]:
+            response = json.loads(sql(
+                f"SELECT {function}({batch_state}, '{url}', 'test-model', '{{}}'::jsonb, 'test-key'{options})"
+            )[0])
+            assert response["echo"] == {"state": p1, "model": "test-model", "questions": {}}
+            assert response["unknown_metadata"] is True
 
     sql("CREATE TABLE jev_input (id INT PRIMARY KEY, user_id INT, payload JSONB, questions JSONB)")
     sql(f"CREATE MATERIALIZED VIEW jev_direct AS SELECT id, {analyze('payload', 'questions')} AS result FROM jev_input")
@@ -162,7 +170,7 @@ def main():
         server.shutdown()
         server.server_close()
         worker.join()
-    print("jev_analyze HTTP integration passed")
+    print("jev_eval HTTP integration passed")
 
 
 if __name__ == "__main__":

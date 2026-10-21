@@ -49,12 +49,16 @@ fn debug_binary_op(
 
 impl std::fmt::Debug for FunctionCall {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.func_type == ExprType::JevAnalyze {
-            let mut builder = f.debug_tuple("JevAnalyze");
-            for child in self.inputs.iter().take(4) {
-                builder.field(child);
+        if matches!(self.func_type, ExprType::JevAnalyze | ExprType::JevEval) {
+            let mut builder = f.debug_tuple("JevEval");
+            for (index, child) in self.inputs.iter().enumerate() {
+                if index == 4 {
+                    builder.field(&"<redacted>");
+                } else {
+                    builder.field(child);
+                }
             }
-            return builder.field(&"<redacted>").finish();
+            return builder.finish();
         }
         if f.alternate() {
             f.debug_struct("FunctionCall")
@@ -330,15 +334,19 @@ pub struct FunctionCallDisplay<'a> {
 impl std::fmt::Debug for FunctionCallDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.function_call;
-        if that.func_type == ExprType::JevAnalyze {
-            let mut builder = f.debug_tuple("JevAnalyze");
-            for child in that.inputs.iter().take(4) {
-                builder.field(&ExprDisplay {
-                    expr: child,
-                    input_schema: self.input_schema,
-                });
+        if matches!(that.func_type, ExprType::JevAnalyze | ExprType::JevEval) {
+            let mut builder = f.debug_tuple("JevEval");
+            for (index, child) in that.inputs.iter().enumerate() {
+                if index == 4 {
+                    builder.field(&"<redacted>");
+                } else {
+                    builder.field(&ExprDisplay {
+                        expr: child,
+                        input_schema: self.input_schema,
+                    });
+                }
             }
-            return builder.field(&"<redacted>").finish();
+            return builder.finish();
         }
         match &that.func_type {
             ExprType::Cast => {

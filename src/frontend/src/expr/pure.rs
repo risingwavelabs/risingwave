@@ -407,6 +407,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
             | Type::JevAnalyze
+            | Type::JevEval
             | Type::HasDatabasePrivilege
             | Type::Random
             | Type::ClockTimestamp

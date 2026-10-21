@@ -1,0 +1,38 @@
+# SQL NULL arguments do not make a request, even with an invalid endpoint.
+query T
+SELECT jev_eval(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key');
+----
+NULL
+
+# The legacy SQL name remains an alias.
+query T
+SELECT jev_analyze(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key');
+----
+NULL
+
+query T
+SELECT jev_eval(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key', '{"max_concurrency":16}'::jsonb);
+----
+NULL
+
+statement error max_concurrency must be an integer from 1 to 256
+SELECT jev_eval(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key', '{"max_concurrency":0}'::jsonb);
+
+statement error options must be constant non-null jsonb
+SELECT jev_eval(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key', NULL::jsonb);
+
+query T
+SELECT CASE WHEN false THEN jev_eval('{}'::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key') ELSE '{}'::jsonb END;
+----
+{}
+
+# JSON null is a real input, unlike SQL NULL. An outer expression must not hide failures.
+statement error jev_eval: invalid model_url
+SELECT coalesce(jev_eval('null'::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key'), '{}'::jsonb);
+
+# The fixture uses a real local HTTP server and psql, which cannot run under madsim.
+skipif madsim
+system ok
+python3 e2e_test/streaming/jev_eval_http.py
+----
+jev_eval HTTP integration passed
