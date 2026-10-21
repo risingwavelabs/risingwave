@@ -590,8 +590,21 @@ impl DorisSchemaClient {
             )
             .send()
             .await
-            .and_then(reqwest::Response::error_for_status)
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .with_context(|| {
+                    format!("Failed to read Doris metadata HTTP {status} error response")
+                })
+                .map_err(SinkError::DorisStarrocksConnect)?;
+            return Err(SinkError::Doris(format!(
+                "Doris metadata request failed with HTTP {status}: {body}"
+            )));
+        }
 
         let json: Value = response
             .json()
