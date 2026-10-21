@@ -252,14 +252,7 @@ pub struct IcebergSinkCommitter {
 impl IcebergSinkCommitter {
     fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
         let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
-        self.table
-            .metadata()
-            .snapshot_for_ref(&branch)
-            .map(|snapshot| IcebergCommittedSnapshot {
-                branch,
-                snapshot_id: snapshot.snapshot_id(),
-                timestamp_ms: snapshot.timestamp_ms(),
-            })
+        IcebergCommittedSnapshot::from_branch_head(self.table.metadata(), &branch)
     }
 
     fn notify_iceberg_compaction_scheduler(&self, force_compaction: bool) {
