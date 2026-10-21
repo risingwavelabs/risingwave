@@ -772,7 +772,7 @@ impl BigQuerySinkWriter {
     }
 
     fn upsert(&mut self, chunk: StreamChunk) -> Result<Vec<Vec<u8>>> {
-        let sequence_numbers = reserve_change_sequence_numbers(chunk.cardinality());
+        let sequence_numbers = CHANGE_SEQUENCE_CLOCK.reserve(chunk.cardinality());
         let mut serialized_rows: Vec<Vec<u8>> = Vec::with_capacity(chunk.capacity());
         for ((op, row), sequence_number) in chunk.rows().zip_eq_debug(sequence_numbers) {
             if op == Op::UpdateDelete {
@@ -852,34 +852,50 @@ impl BigQuerySinkWriter {
     }
 }
 
-/// The physical time and the next logical number of the last reserved `_CHANGE_SEQUENCE_NUMBER`s,
-/// shared by all writers in the process.
-static NEXT_CHANGE_SEQUENCE_NUMBER: Mutex<(u64, u64)> = parking_lot::const_mutex((0, 0));
-
-/// Reserves `count` `_CHANGE_SEQUENCE_NUMBER`s, each greater than any reserved before in the
-/// process, as `{physical:X}/{logical:X}` with the wall clock in microseconds as `physical`.
+/// Hands out `_CHANGE_SEQUENCE_NUMBER`s as `{physical:X}/{logical:X}`, with the wall clock in
+/// microseconds as `physical`. Each number is greater than any reserved before from the same clock,
+/// even if the wall clock moves back.
 ///
 /// The change with the largest number wins for each key, so numbering rows in send order is
 /// enough: the sinker sends the changes of a key in log order, and every replay (rewind, recovery,
 /// rescale) resends all changes after the truncated offset, so the last change sent for a key is
 /// its latest one.
-fn reserve_change_sequence_numbers(count: usize) -> impl Iterator<Item = String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since_epoch| since_epoch.as_micros() as u64);
-    let count = count as u64;
-    let (physical, start) =
-        reserve_change_sequence_range(&mut NEXT_CHANGE_SEQUENCE_NUMBER.lock(), now, count);
-    (start..start + count).map(move |logical| format!("{physical:X}/{logical:X}"))
+struct ChangeSequenceClock {
+    /// The physical time of the last reserved numbers and the next logical number after them.
+    next: Mutex<(u64, u64)>,
 }
 
-/// Reserves `count` logical numbers at physical time `now`, or after the last reserved ones if the
-/// clock has not moved past their physical time.
-fn reserve_change_sequence_range(next: &mut (u64, u64), now: u64, count: u64) -> (u64, u64) {
-    let (physical, logical) = if now > next.0 { (now, 0) } else { *next };
-    *next = (physical, logical + count);
-    (physical, logical)
+impl ChangeSequenceClock {
+    const fn new() -> Self {
+        Self {
+            next: parking_lot::const_mutex((0, 0)),
+        }
+    }
+
+    /// Reserves `count` numbers at the current wall clock.
+    fn reserve(&self, count: usize) -> impl Iterator<Item = String> + use<> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since_epoch| since_epoch.as_micros() as u64);
+        let count = count as u64;
+        let (physical, start) = self.reserve_at(now, count);
+        (start..start + count).map(move |logical| format!("{physical:X}/{logical:X}"))
+    }
+
+    /// Reserves `count` logical numbers at physical time `now`, or after the last reserved ones if
+    /// `now` has not moved past their physical time. Returns the physical time and the first
+    /// logical number.
+    fn reserve_at(&self, now: u64, count: u64) -> (u64, u64) {
+        let mut next = self.next.lock();
+        let (physical, logical) = if now > next.0 { (now, 0) } else { *next };
+        *next = (physical, logical + count);
+        (physical, logical)
+    }
 }
+
+/// Shared by all writers in the process, so that the numbers keep increasing when a writer is
+/// rebuilt or a key moves to another actor in the process.
+static CHANGE_SEQUENCE_CLOCK: ChangeSequenceClock = ChangeSequenceClock::new();
 
 #[try_stream(ok = (), error = SinkError)]
 pub async fn resp_to_stream(
@@ -1106,8 +1122,8 @@ mod test {
     use crate::connector_common::AwsAuthProps;
     use crate::sink::big_query::{
         BigQueryCommon, BigQueryConfig, BigQuerySink, BigQuerySinkWriter, CHANGE_SEQUENCE_NUMBER,
-        CHANGE_TYPE, StorageWriterClient, build_protobuf_descriptor_pool, build_protobuf_schema,
-        reserve_change_sequence_range,
+        CHANGE_TYPE, ChangeSequenceClock, StorageWriterClient, build_protobuf_descriptor_pool,
+        build_protobuf_schema,
     };
 
     #[tokio::test]
@@ -1307,13 +1323,13 @@ mod test {
     }
 
     #[test]
-    fn test_reserve_change_sequence_range() {
-        let mut next = (0, 0);
-        assert_eq!(reserve_change_sequence_range(&mut next, 100, 3), (100, 0));
+    fn test_change_sequence_clock() {
+        let clock = ChangeSequenceClock::new();
+        assert_eq!(clock.reserve_at(100, 3), (100, 0));
         // The clock has not moved past the last physical time, or has moved back.
-        assert_eq!(reserve_change_sequence_range(&mut next, 100, 2), (100, 3));
-        assert_eq!(reserve_change_sequence_range(&mut next, 90, 1), (100, 5));
-        assert_eq!(reserve_change_sequence_range(&mut next, 101, 1), (101, 0));
+        assert_eq!(clock.reserve_at(100, 2), (100, 3));
+        assert_eq!(clock.reserve_at(90, 1), (100, 5));
+        assert_eq!(clock.reserve_at(101, 1), (101, 0));
     }
 
     #[test]
