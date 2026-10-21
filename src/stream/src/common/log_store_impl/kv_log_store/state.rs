@@ -352,7 +352,7 @@ mod tests {
             let [chunk1, chunk2]: [StreamChunk; 2] = chunk.split(split_size).try_into().unwrap();
 
             let end_seq_id = chunk1.cardinality() as SeqId - 1;
-            let (_, read_chunk, _) = read_state
+            let (_, read_chunk, _, _) = read_state
                 .read_flushed_chunk(
                     (**vnodes).clone(),
                     0,

@@ -86,7 +86,9 @@ impl<W: BatchingSinkWriter> LogSinker for BatchingLogSinker<W> {
                 }
             };
             match item {
-                LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                LogStoreReadItem::StreamChunk {
+                    chunk, chunk_id, ..
+                } => {
                     sink_writer.write_batch(chunk).await?;
                     if sink_writer.try_commit().await? {
                         // A chunk truncation also covers all preceding barriers.

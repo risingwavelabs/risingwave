@@ -138,6 +138,9 @@ struct NonAppendOnlyBehavior {
     pk_specified_and_matched: bool,
     /// Whether the user forces buffering all chunks between two barriers.
     force_compaction: bool,
+    /// Whether the sink orders the changes of a key by their seq ids. See
+    /// [`SinkImpl::orders_by_seq_id`].
+    orders_by_seq_id: bool,
 }
 
 impl NonAppendOnlyBehavior {
@@ -158,11 +161,15 @@ impl NonAppendOnlyBehavior {
     /// When `force_compaction` is true, we also skip compaction here, since the buffering
     /// will also make compaction.
     ///
+    /// When the sink orders changes by seq ids, we also skip compaction here: the row kept for
+    /// a key may not carry the seq id of the key's last change, e.g. a `DELETE` compacted from
+    /// `U-`, `U+`, `DELETE` keeps the row and seq id of `U-`.
+    ///
     /// When the sink is an append-only sink, it is either `force_append_only` or
     /// `append_only`, we should only append to downstream, so there should not be any
     /// overlapping keys.
     fn should_compact_in_log_reader(self) -> bool {
-        self.pk_specified_and_matched && !self.force_compaction
+        self.pk_specified_and_matched && !self.force_compaction && !self.orders_by_seq_id
     }
 
     /// When stream key is different from the user defined primary key columns for sinks.
@@ -308,6 +315,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             Some(NonAppendOnlyBehavior {
                 pk_specified_and_matched,
                 force_compaction,
+                orders_by_seq_id: sink.orders_by_seq_id(),
             })
         } else {
             None

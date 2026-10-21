@@ -116,7 +116,9 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
-                LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
+                LogStoreReadItem::StreamChunk {
+                    chunk_id, chunk, ..
+                } => {
                     if T::TRACE_LOG {
                         tracing::trace!(
                             target: "events::sink::message::chunk",

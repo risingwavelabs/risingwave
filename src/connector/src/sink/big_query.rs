@@ -51,6 +51,7 @@ use prost_types::{
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
@@ -61,7 +62,7 @@ use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
 use super::encoder::{ProtoEncoder, ProtoHeader, RowEncoder, SerTo};
-use super::log_store::{LogStoreReadItem, TruncateOffset};
+use super::log_store::{LogStoreReadItem, SeqId, TruncateOffset};
 use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
@@ -72,6 +73,7 @@ use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 pub const CHANGE_TYPE: &str = "_CHANGE_TYPE";
+pub const CHANGE_SEQUENCE_NUMBER: &str = "_CHANGE_SEQUENCE_NUMBER";
 const DEFAULT_GRPC_CHANNEL_NUMS: usize = 4;
 const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(30));
 const CONNECTION_TIMEOUT: Option<Duration> = None;
@@ -180,8 +182,8 @@ impl LogSinker for BigQueryLogSinker {
                 item_result = log_reader.next_item(), if self.bigquery_future_manager.offset_queue.len() <= self.future_num => {
                     let (epoch, item) = item_result?;
                     match item {
-                        LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
-                            let resp_num = self.writer.write_chunk(chunk)?;
+                        LogStoreReadItem::StreamChunk { chunk_id, chunk, seq_ids } => {
+                            let resp_num = self.writer.write_chunk(epoch, chunk, seq_ids)?;
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Chunk { epoch, chunk_id },resp_num);
                         }
@@ -534,6 +536,10 @@ impl Sink for BigQuerySink {
 
     crate::impl_validate_sink_unknown_fields!();
 
+    fn orders_by_seq_id(&self) -> bool {
+        !self.is_append_only
+    }
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
             self.config.clone(),
@@ -640,6 +646,7 @@ pub struct BigQuerySinkWriter {
     message_descriptor: MessageDescriptor,
     write_stream: String,
     proto_field: Option<FieldDescriptor>,
+    change_sequence_number_field: Option<FieldDescriptor>,
 }
 
 impl TryFrom<SinkParam> for BigQuerySink {
@@ -664,6 +671,17 @@ impl BigQuerySinkWriter {
             .common
             .build_writer_client(&config.aws_auth_props)
             .await?;
+        let writer = Self::with_client(config, schema, pk_indices, is_append_only, client)?;
+        Ok((writer, resp_stream))
+    }
+
+    fn with_client(
+        config: BigQueryConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+        client: StorageWriterClient,
+    ) -> Result<Self> {
         let mut descriptor_proto = build_protobuf_schema(
             schema
                 .fields()
@@ -676,6 +694,13 @@ impl BigQuerySinkWriter {
             let field = FieldDescriptorProto {
                 name: Some(CHANGE_TYPE.to_owned()),
                 number: Some((schema.len() + 1) as i32),
+                r#type: Some(field_descriptor_proto::Type::String.into()),
+                ..Default::default()
+            };
+            descriptor_proto.field.push(field);
+            let field = FieldDescriptorProto {
+                name: Some(CHANGE_SEQUENCE_NUMBER.to_owned()),
+                number: Some((schema.len() + 2) as i32),
                 r#type: Some(field_descriptor_proto::Type::String.into()),
                 ..Default::default()
             };
@@ -701,32 +726,40 @@ impl BigQuerySinkWriter {
         } else {
             None
         };
+        let change_sequence_number_field = if !is_append_only {
+            let field = message_descriptor
+                .get_field_by_name(CHANGE_SEQUENCE_NUMBER)
+                .ok_or_else(|| {
+                    SinkError::BigQuery(anyhow::anyhow!("Can't find {}", CHANGE_SEQUENCE_NUMBER))
+                })?;
+            Some(field)
+        } else {
+            None
+        };
         let row_encoder = ProtoEncoder::new(
             schema.clone(),
             None,
             message_descriptor.clone(),
             ProtoHeader::None,
         )?;
-        Ok((
-            Self {
-                write_stream: format!(
-                    "projects/{}/datasets/{}/tables/{}/streams/_default",
-                    config.common.project, config.common.dataset, config.common.table
-                ),
-                config,
-                schema,
-                pk_indices,
-                client,
-                is_append_only,
-                row_encoder,
-                message_descriptor,
-                proto_field,
-                writer_pb_schema: ProtoSchema {
-                    proto_descriptor: Some(descriptor_proto.clone()),
-                },
+        Ok(Self {
+            write_stream: format!(
+                "projects/{}/datasets/{}/tables/{}/streams/_default",
+                config.common.project, config.common.dataset, config.common.table
+            ),
+            config,
+            schema,
+            pk_indices,
+            client,
+            is_append_only,
+            row_encoder,
+            message_descriptor,
+            proto_field,
+            change_sequence_number_field,
+            writer_pb_schema: ProtoSchema {
+                proto_descriptor: Some(descriptor_proto.clone()),
             },
-            resp_stream,
-        ))
+        })
     }
 
     fn append_only(&mut self, chunk: StreamChunk) -> Result<Vec<Vec<u8>>> {
@@ -740,9 +773,15 @@ impl BigQuerySinkWriter {
         Ok(serialized_rows)
     }
 
-    fn upsert(&mut self, chunk: StreamChunk) -> Result<Vec<Vec<u8>>> {
+    fn upsert(
+        &mut self,
+        epoch: u64,
+        chunk: StreamChunk,
+        seq_ids: Vec<SeqId>,
+    ) -> Result<Vec<Vec<u8>>> {
+        assert_eq!(seq_ids.len(), chunk.cardinality());
         let mut serialized_rows: Vec<Vec<u8>> = Vec::with_capacity(chunk.capacity());
-        for (op, row) in chunk.rows() {
+        for ((op, row), seq_id) in chunk.rows().zip_eq_debug(seq_ids) {
             if op == Op::UpdateDelete {
                 continue;
             }
@@ -771,17 +810,29 @@ impl BigQuerySinkWriter {
                     )
                     .map_err(|e| SinkError::BigQuery(e.into()))?,
             };
+            pb_row
+                .message
+                .try_set_field(
+                    self.change_sequence_number_field.as_ref().unwrap(),
+                    prost_reflect::Value::String(change_sequence_number(epoch, seq_id)),
+                )
+                .map_err(|e| SinkError::BigQuery(e.into()))?;
 
             serialized_rows.push(pb_row.ser_to()?)
         }
         Ok(serialized_rows)
     }
 
-    fn write_chunk(&mut self, chunk: StreamChunk) -> Result<usize> {
+    fn write_chunk(
+        &mut self,
+        epoch: u64,
+        chunk: StreamChunk,
+        seq_ids: Vec<SeqId>,
+    ) -> Result<usize> {
         let serialized_rows = if self.is_append_only {
             self.append_only(chunk)?
         } else {
-            self.upsert(chunk)?
+            self.upsert(epoch, chunk, seq_ids)?
         };
         if serialized_rows.is_empty() {
             return Ok(0);
@@ -811,6 +862,13 @@ impl BigQuerySinkWriter {
         }
         Ok(len)
     }
+}
+
+/// Formats `{epoch}/{seq_id}` in hex. The sections are compared in order as unsigned integers,
+/// so the changes of a key are applied in `(epoch, seq_id)` order.
+fn change_sequence_number(epoch: u64, seq_id: SeqId) -> String {
+    let seq_id = u32::try_from(seq_id).expect("seq id should be non-negative");
+    format!("{epoch:X}/{seq_id:X}")
 }
 
 #[try_stream(ok = (), error = SinkError)]
@@ -1022,16 +1080,27 @@ fn build_protobuf_field(
 mod test {
 
     use std::assert_matches;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
+    use google_cloud_gax::conn::Environment;
+    use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
+        ProtoData, Rows as AppendRowsRequestRows,
+    };
+    use prost_reflect::{DynamicMessage, ReflectMessage};
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, StructType};
+    use tokio::sync::mpsc;
 
     use crate::connector_common::AwsAuthProps;
+    use crate::sink::Sink;
     use crate::sink::big_query::{
-        BigQueryCommon, BigQueryConfig, BigQuerySink, build_protobuf_descriptor_pool,
-        build_protobuf_schema,
+        BigQueryCommon, BigQueryConfig, BigQuerySink, BigQuerySinkWriter, CHANGE_SEQUENCE_NUMBER,
+        CHANGE_TYPE, StorageWriterClient, build_protobuf_descriptor_pool, build_protobuf_schema,
+        change_sequence_number,
     };
+    use crate::sink::log_store::SeqId;
 
     #[tokio::test]
     async fn test_type_check() {
@@ -1167,5 +1236,123 @@ mod test {
             "BIGNUMERIC(35, 12)".to_owned(),
         )]))
         .unwrap();
+    }
+
+    fn sink_config(sink_type: &str) -> BigQueryConfig {
+        BigQueryConfig::from_btreemap(BTreeMap::from(
+            [
+                ("bigquery.project", "project"),
+                ("bigquery.dataset", "dataset"),
+                ("bigquery.table", "table"),
+                ("type", sink_type),
+            ]
+            .map(|(k, v)| (k.to_owned(), v.to_owned())),
+        ))
+        .unwrap()
+    }
+
+    /// Writes `chunk` in epoch `0x1A2B << 16` and decodes the rows of the sent request.
+    fn write_and_decode(
+        sink_type: &str,
+        chunk: StreamChunk,
+        seq_ids: Vec<SeqId>,
+    ) -> Vec<DynamicMessage> {
+        let schema = Schema {
+            fields: vec![
+                Field::with_name(DataType::Int64, "id"),
+                Field::with_name(DataType::Varchar, "v"),
+            ],
+        };
+        let (request_sender, mut request_rx) = mpsc::unbounded_channel();
+        let client = StorageWriterClient {
+            environment: Environment::Emulator(String::new()),
+            request_sender,
+        };
+        let mut writer = BigQuerySinkWriter::with_client(
+            sink_config(sink_type),
+            schema,
+            vec![0],
+            sink_type == "append-only",
+            client,
+        )
+        .unwrap();
+        writer.write_chunk(0x1A2B << 16, chunk, seq_ids).unwrap();
+
+        let Some(AppendRowsRequestRows::ProtoRows(ProtoData {
+            writer_schema: Some(writer_schema),
+            rows: Some(rows),
+        })) = request_rx.try_recv().unwrap().rows
+        else {
+            panic!("expected proto rows");
+        };
+        let pool =
+            build_protobuf_descriptor_pool(&writer_schema.proto_descriptor.unwrap()).unwrap();
+        let message = pool.get_message_by_name("table").unwrap();
+        rows.serialized_rows
+            .iter()
+            .map(|row| DynamicMessage::decode(message.clone(), row.as_slice()).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn test_change_sequence_number_format() {
+        assert_eq!(change_sequence_number(0x1A2B << 16, 0), "1A2B0000/0");
+        assert_eq!(
+            change_sequence_number(u64::MAX, SeqId::MAX),
+            "FFFFFFFFFFFFFFFF/7FFFFFFF"
+        );
+    }
+
+    #[test]
+    fn test_write_change_sequence_number() {
+        let schema = Schema {
+            fields: vec![Field::with_name(DataType::Int64, "id")],
+        };
+        for (sink_type, is_append_only) in [("upsert", false), ("append-only", true)] {
+            let sink = BigQuerySink::new(
+                sink_config(sink_type),
+                schema.clone(),
+                vec![0],
+                is_append_only,
+            )
+            .unwrap();
+            assert_eq!(sink.orders_by_seq_id(), !is_append_only);
+        }
+
+        let chunk = StreamChunk::from_pretty(
+            "  I T
+            +  1 a
+            U- 1 a
+            U+ 1 b
+            -  2 c",
+        );
+        let rows = write_and_decode("upsert", chunk.clone(), vec![3, 4, 5, 6]);
+        let fields: Vec<_> = rows
+            .iter()
+            .map(|row| {
+                let field = |name: &str| {
+                    row.get_field_by_name(name)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                };
+                (field(CHANGE_TYPE), field(CHANGE_SEQUENCE_NUMBER))
+            })
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                ("UPSERT", "1A2B0000/3"),
+                ("UPSERT", "1A2B0000/5"),
+                ("DELETE", "1A2B0000/6"),
+            ]
+            .map(|(change_type, sequence)| (change_type.to_owned(), sequence.to_owned()))
+        );
+
+        let rows = write_and_decode("append-only", chunk, vec![3, 4, 5, 6]);
+        for name in [CHANGE_TYPE, CHANGE_SEQUENCE_NUMBER] {
+            assert!(rows[0].descriptor().get_field_by_name(name).is_none());
+        }
     }
 }

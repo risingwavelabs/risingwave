@@ -48,7 +48,7 @@ use risingwave_connector::sink::catalog::{
     SinkEncode, SinkFormat, SinkFormatDesc, SinkId, SinkType,
 };
 use risingwave_connector::sink::log_store::{
-    LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
+    LogReader, LogStoreReadItem, LogStoreResult, SeqId, TruncateOffset,
 };
 use risingwave_connector::sink::mock_coordination_client::MockMetaClient;
 use risingwave_connector::sink::{
@@ -77,6 +77,7 @@ pub struct MockRangeLogReader {
     upstreams: BoxStream<'static, MessageStreamItem>,
     current_epoch: u64,
     chunk_id: usize,
+    next_seq_id: SeqId,
     throughput_metric: Option<ThroughputMetric>,
     stop_rx: tokio::sync::mpsc::Receiver<()>,
     result_tx: Option<Sender<ThroughputMetric>>,
@@ -103,6 +104,7 @@ impl LogReader for MockRangeLogReader {
                     Message::Barrier(barrier) => {
                         let prev_epoch = self.current_epoch;
                         self.current_epoch = barrier.epoch.curr;
+                        self.next_seq_id = 0;
                         Ok((
                             prev_epoch,
                             LogStoreReadItem::Barrier {
@@ -116,11 +118,14 @@ impl LogReader for MockRangeLogReader {
                     Message::Chunk(chunk) => {
                         self.throughput_metric.as_mut().unwrap().add_metric(chunk.capacity());
                         self.chunk_id += 1;
+                        let start_seq_id = self.next_seq_id;
+                        self.next_seq_id += chunk.cardinality() as SeqId;
                         Ok((
                             self.current_epoch,
                             LogStoreReadItem::StreamChunk {
                                 chunk,
                                 chunk_id: self.chunk_id,
+                                seq_ids: (start_seq_id..self.next_seq_id).collect(),
                             },
                         ))
                     }
@@ -154,6 +159,7 @@ impl MockRangeLogReader {
             upstreams: mock_source.into_stream().boxed(),
             current_epoch: 0,
             chunk_id: 0,
+            next_seq_id: 0,
             throughput_metric: Some(throughput_metric),
             stop_rx,
             result_tx: Some(result_tx),

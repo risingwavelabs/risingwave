@@ -454,7 +454,9 @@ impl LogSinker for RemoteLogSinker {
                         let (epoch, item): (u64, LogStoreReadItem) = result?;
 
                         match item {
-                            LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                            LogStoreReadItem::StreamChunk {
+                                chunk, chunk_id, ..
+                            } => {
                                 let offset = TruncateOffset::Chunk { epoch, chunk_id };
                                 if let Some(prev_offset) = &prev_offset {
                                     prev_offset.check_next_offset(offset)?;

@@ -348,7 +348,7 @@ pub mod metrics {
 }
 
 pub(crate) type ReadFlushedChunkFuture =
-    BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
+    BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Vec<SeqId>, Epoch)>>;
 
 pub struct SyncKvLogStoreContext<S: StateStore> {
     pub table_id: TableId,
@@ -981,6 +981,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         KvLogStoreItem::StreamChunk {
                             chunk,
                             progress: chunk_progress,
+                            ..
                         } => {
                             tracing::trace!("read logstore chunk of size: {}", chunk.cardinality());
                             progress.apply_per_vnode(epoch, chunk_progress);
@@ -1064,7 +1065,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
             ReadFuture::ReadingFlushedChunk { future, end_seq_id } => (future, *end_seq_id),
         };
 
-        let (_, chunk, epoch) = future.await?;
+        let (_, chunk, _, epoch) = future.await?;
         progress.apply_aligned(read_state.vnodes().clone(), epoch, Some(end_seq_id));
         tracing::trace!(
             end_seq_id,

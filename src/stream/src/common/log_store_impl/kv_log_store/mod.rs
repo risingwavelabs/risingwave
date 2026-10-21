@@ -185,7 +185,7 @@ impl LogStoreVnodeProgress {
 // TODO: unify with `risingwave_common::Epoch`
 pub(crate) type Epoch = u64;
 
-pub(crate) type SeqId = i32;
+pub(crate) use risingwave_connector::sink::log_store::SeqId;
 type RowOpCodeType = i16;
 
 pub(crate) const FIRST_SEQ_ID: SeqId = 0;
@@ -675,8 +675,18 @@ mod tests {
         gen_test_log_store_table,
     };
     use crate::common::log_store_impl::kv_log_store::{
-        KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
+        KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, SeqId,
     };
+
+    /// Rows of `chunk` with their seq ids, in seq id order.
+    fn rows_with_seq_ids(chunk: &StreamChunk, seq_ids: Vec<SeqId>) -> Vec<(Op, OwnedRow, SeqId)> {
+        chunk
+            .rows()
+            .zip_eq(seq_ids)
+            .map(|((op, row), seq_id)| (op, row.into_owned_row(), seq_id))
+            .sorted_by_key(|(_, _, seq_id)| *seq_id)
+            .collect()
+    }
 
     #[tokio::test]
     async fn test_basic() {
@@ -874,19 +884,27 @@ mod tests {
 
         reader.init().await.unwrap();
         reader.start_from(None).await.unwrap();
-        match reader.next_item().await.unwrap() {
+        let epoch1_rows = match reader.next_item().await.unwrap() {
             (
                 epoch,
                 LogStoreReadItem::StreamChunk {
                     chunk: read_stream_chunk,
+                    seq_ids,
                     ..
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
+                let rows = rows_with_seq_ids(&read_stream_chunk, seq_ids);
+                assert!(
+                    rows.iter()
+                        .map(|(_, _, seq_id)| *seq_id)
+                        .eq(0..stream_chunk1.cardinality() as SeqId)
+                );
+                rows
             }
             _ => unreachable!(),
-        }
+        };
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
@@ -894,19 +912,27 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        match reader.next_item().await.unwrap() {
+        let epoch2_rows = match reader.next_item().await.unwrap() {
             (
                 epoch,
                 LogStoreReadItem::StreamChunk {
                     chunk: read_stream_chunk,
+                    seq_ids,
                     ..
                 },
             ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
+                let rows = rows_with_seq_ids(&read_stream_chunk, seq_ids);
+                assert!(
+                    rows.iter()
+                        .map(|(_, _, seq_id)| *seq_id)
+                        .eq(0..stream_chunk2.cardinality() as SeqId)
+                );
+                rows
             }
             _ => unreachable!(),
-        }
+        };
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
@@ -953,11 +979,13 @@ mod tests {
                 epoch,
                 LogStoreReadItem::StreamChunk {
                     chunk: read_stream_chunk,
+                    seq_ids,
                     ..
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
+                assert_eq!(rows_with_seq_ids(&read_stream_chunk, seq_ids), epoch1_rows);
             }
             _ => unreachable!(),
         }
@@ -973,11 +1001,13 @@ mod tests {
                 epoch,
                 LogStoreReadItem::StreamChunk {
                     chunk: read_stream_chunk,
+                    seq_ids,
                     ..
                 },
             ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
+                assert_eq!(rows_with_seq_ids(&read_stream_chunk, seq_ids), epoch2_rows);
             }
             _ => unreachable!(),
         }
@@ -1072,6 +1102,7 @@ mod tests {
                 LogStoreReadItem::StreamChunk {
                     chunk: read_stream_chunk,
                     chunk_id,
+                    ..
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
@@ -1086,6 +1117,7 @@ mod tests {
                 LogStoreReadItem::StreamChunk {
                     chunk: read_stream_chunk,
                     chunk_id,
+                    ..
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
@@ -1592,10 +1624,19 @@ mod tests {
                             LogStoreReadItem::StreamChunk {
                                 chunk: read_stream_chunk,
                                 chunk_id,
+                                seq_ids,
                             },
                         ) => {
                             assert_eq!(item_epoch, *epoch);
                             assert!(check_stream_chunk_eq(stream_chunk, &read_stream_chunk));
+                            // Each epoch has one chunk, so the seq ids start from 0.
+                            assert_eq!(
+                                rows_with_seq_ids(&read_stream_chunk, seq_ids),
+                                rows_with_seq_ids(
+                                    stream_chunk,
+                                    (0..stream_chunk.cardinality() as SeqId).collect()
+                                )
+                            );
                             chunk_ids.push(chunk_id);
                         }
                         _ => unreachable!(),
@@ -2039,6 +2080,7 @@ mod tests {
                     LogStoreReadItem::StreamChunk {
                         chunk: stream_chunk1.clone(),
                         chunk_id: 0,
+                        seq_ids: vec![],
                     },
                 ),
                 (
@@ -2055,6 +2097,7 @@ mod tests {
                     LogStoreReadItem::StreamChunk {
                         chunk: stream_chunk2.clone(),
                         chunk_id: 0,
+                        seq_ids: vec![],
                     },
                 ),
                 (
@@ -2105,6 +2148,7 @@ mod tests {
                     LogStoreReadItem::StreamChunk {
                         chunk: stream_chunk1.clone(),
                         chunk_id: 0,
+                        seq_ids: vec![],
                     },
                 ),
                 (
@@ -2121,6 +2165,7 @@ mod tests {
                     LogStoreReadItem::StreamChunk {
                         chunk: stream_chunk2.clone(),
                         chunk_id: 0,
+                        seq_ids: vec![],
                     },
                 ),
                 (
@@ -2181,6 +2226,7 @@ mod tests {
                     LogStoreReadItem::StreamChunk {
                         chunk: stream_chunk2.clone(),
                         chunk_id: 0,
+                        seq_ids: vec![],
                     },
                 ),
                 (
