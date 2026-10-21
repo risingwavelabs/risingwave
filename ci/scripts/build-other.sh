@@ -44,3 +44,5 @@ buildkite-agent artifact upload ./risingwave-connector.tar.gz
 buildkite-agent artifact upload ./java-binding-integration-test.tar.zst
 buildkite-agent artifact upload ./udf.jar
 buildkite-agent artifact upload ./udf.wasm
+
+# Bust the Maven cache key.
