@@ -63,6 +63,44 @@ ALTER SINK sink_kafka CONNECTOR WITH (
     topic = 'test-rw-sink-alter-connector-props-2'
 );
 
+# The bootstrap server can be altered. Unreachable brokers are rejected before the catalog is
+# touched; only a single broker is available here, so re-point the sink to a duplicated list.
+statement error cannot connect to kafka broker \(unreachable.invalid:9092\)
+ALTER SINK sink_kafka CONNECTOR WITH (
+    properties.bootstrap.server = 'unreachable.invalid:9092'
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 'sink_kafka'
+  and definition ilike '%properties.bootstrap.server = ''message_queue:29092''%';
+----
+1
+
+statement ok
+ALTER SINK sink_kafka CONNECTOR WITH (
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS},${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}'
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 'sink_kafka'
+  and definition ilike '%properties.bootstrap.server = ''${RISEDEV_KAFKA_BOOTSTRAP_SERVERS},${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}''%'
+  and connector_props->'properties.bootstrap.server'->>'value' = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS},${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}';
+----
+1
+
+statement ok
+INSERT INTO table_kafka VALUES (1, 'a');
+
+statement ok
+FLUSH;
+
+system ok retry 10 backoff 2s
+rpk topic consume test-rw-sink-alter-connector-props --offset start --num 1 -f '%v\n' | grep -q '"id":1'
+
 statement ok
 DROP SINK sink_kafka;
 
@@ -103,6 +141,19 @@ where name = 'sink_kafka_secret'
   and connector_props->'properties.bootstrap.server'->>'type' = 'secret';
 ----
 1
+
+# A property backed by a SECRET must be changed through ALTER SECRET: ALTER SINK does not update
+# secret references yet, so a plaintext value would be overwritten by the secret on recovery.
+statement error sink property `properties.bootstrap.server` is set as a SECRET
+ALTER SINK sink_kafka_secret CONNECTOR WITH (
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}'
+);
+
+# Altering a sink property to a SECRET is rejected instead of being silently ignored.
+statement error altering sink property `properties.batch.size` to a SECRET is not supported yet
+ALTER SINK sink_kafka_secret CONNECTOR WITH (
+    properties.batch.size = SECRET kafka_broker
+);
 
 # Same for a sink whose secret comes from a CONNECTION and is altered through the connection.
 statement ok

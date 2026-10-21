@@ -171,22 +171,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         properties: KafkaProperties,
         context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<KafkaSplitEnumerator> {
-        let mut config = rdkafka::ClientConfig::new();
-        let common_props = &properties.common;
-
+        let config = build_enumerator_client_config(&properties);
         let broker_address = properties.connection.brokers.clone();
-        let topic = common_props.topic.clone();
-        config.set("bootstrap.servers", &broker_address);
-        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
-        if let Some(log_level) = read_kafka_log_level() {
-            config.set_log_level(log_level);
-        }
-        properties.connection.set_security_properties(&mut config);
-        properties.set_client(&mut config);
-        // The meta-side split enumerator does not export librdkafka native stats, so disable
-        // periodic statistics callbacks here even if the source properties enable them for
-        // compute-side readers.
-        config.set("statistics.interval.ms", "0");
+        let topic = properties.common.topic.clone();
         let mut scan_start_offset = match properties
             .scan_startup_mode
             .as_ref()
@@ -206,30 +193,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let mut client: Option<Arc<KafkaConsumer>> = None;
-        SHARED_KAFKA_CONSUMER
-            .entry_by_ref(&properties.connection)
-            .and_try_compute_with::<_, _, ConnectorError>(|maybe_entry| async {
-                if let Some(entry) = maybe_entry {
-                    let entry_value = entry.into_value();
-                    if let Some(client_) = entry_value.upgrade() {
-                        // return if the client is already built
-                        tracing::info!("reuse existing kafka client for {}", broker_address);
-                        client = Some(client_);
-                        return Ok(Op::Nop);
-                    }
-                }
-                tracing::info!("build new kafka client for {}", broker_address);
-                client = Some(build_kafka_client(&config, &properties).await?);
-                Ok(Op::Put(Arc::downgrade(client.as_ref().unwrap())))
-            })
-            .await?;
+        let client = shared_kafka_client(&config, &properties).await?;
 
         Ok(Self {
             context,
             broker_address,
             topic,
-            client: client.unwrap(),
+            client,
             start_offset: scan_start_offset,
             resolved_start_offsets: HashMap::new(),
             stop_offset: KafkaEnumeratorOffset::None,
@@ -310,6 +280,80 @@ fn is_expected_no_group_poll_error(error: &KafkaError) -> bool {
         error,
         KafkaError::MessageConsumption(RDKafkaErrorCode::UnknownGroup)
     )
+}
+
+/// Builds the rdkafka client config used by meta-side (enumerator) clients.
+fn build_enumerator_client_config(properties: &KafkaProperties) -> ClientConfig {
+    let mut config = ClientConfig::new();
+    config.set("bootstrap.servers", &properties.connection.brokers);
+    config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
+    if let Some(log_level) = read_kafka_log_level() {
+        config.set_log_level(log_level);
+    }
+    properties.connection.set_security_properties(&mut config);
+    properties.set_client(&mut config);
+    // The meta-side split enumerator does not export librdkafka native stats, so disable
+    // periodic statistics callbacks here even if the source properties enable them for
+    // compute-side readers.
+    config.set("statistics.interval.ms", "0");
+    config
+}
+
+/// Returns the consumer client shared by all enumerators with the same connection properties,
+/// building it on first use.
+async fn shared_kafka_client(
+    config: &ClientConfig,
+    properties: &KafkaProperties,
+) -> ConnectorResult<Arc<KafkaConsumer>> {
+    let broker_address = &properties.connection.brokers;
+    let mut client: Option<Arc<KafkaConsumer>> = None;
+    SHARED_KAFKA_CONSUMER
+        .entry_by_ref(&properties.connection)
+        .and_try_compute_with::<_, _, ConnectorError>(|maybe_entry| async {
+            if let Some(entry) = maybe_entry {
+                let entry_value = entry.into_value();
+                if let Some(client_) = entry_value.upgrade() {
+                    // return if the client is already built
+                    tracing::info!("reuse existing kafka client for {}", broker_address);
+                    client = Some(client_);
+                    return Ok(Op::Nop);
+                }
+            }
+            tracing::info!("build new kafka client for {}", broker_address);
+            client = Some(build_kafka_client(config, properties).await?);
+            Ok(Op::Put(Arc::downgrade(client.as_ref().unwrap())))
+        })
+        .await?;
+    Ok(client.unwrap())
+}
+
+/// Fetches the id of the Kafka cluster behind the bootstrap servers of `properties`.
+///
+/// Returns `Ok(None)` if the brokers do not report a cluster id within
+/// `properties.sync.call.timeout` (e.g. old brokers, or none reachable), and `Err` if no client
+/// could be created (e.g. invalid security settings).
+pub async fn fetch_kafka_cluster_id(
+    properties: &KafkaProperties,
+) -> ConnectorResult<Option<String>> {
+    let config = build_enumerator_client_config(properties);
+    let client = shared_kafka_client(&config, properties).await?;
+    let timeout = properties.common.sync_call_timeout;
+
+    #[cfg(not(madsim))]
+    {
+        // `fetch_cluster_id` blocks the calling thread until the cluster id is available or the
+        // timeout elapses.
+        let cluster_id =
+            tokio::task::spawn_blocking(move || client.client().fetch_cluster_id(timeout))
+                .await
+                .context("failed to join the task fetching the kafka cluster id")?;
+        Ok(cluster_id)
+    }
+    #[cfg(madsim)]
+    {
+        let _ = (client, timeout);
+        Ok(None)
+    }
 }
 
 async fn build_kafka_client(
