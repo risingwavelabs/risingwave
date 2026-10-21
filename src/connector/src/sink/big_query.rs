@@ -15,6 +15,7 @@
 use core::pin::Pin;
 use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -42,6 +43,7 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 };
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use parking_lot::Mutex;
 use phf::{Set, phf_set};
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
@@ -62,7 +64,7 @@ use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
 use super::encoder::{ProtoEncoder, ProtoHeader, RowEncoder, SerTo};
-use super::log_store::{LogStoreReadItem, SeqId, TruncateOffset};
+use super::log_store::{LogStoreReadItem, TruncateOffset};
 use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
@@ -182,8 +184,8 @@ impl LogSinker for BigQueryLogSinker {
                 item_result = log_reader.next_item(), if self.bigquery_future_manager.offset_queue.len() <= self.future_num => {
                     let (epoch, item) = item_result?;
                     match item {
-                        LogStoreReadItem::StreamChunk { chunk_id, chunk, seq_ids } => {
-                            let resp_num = self.writer.write_chunk(epoch, chunk, seq_ids)?;
+                        LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
+                            let resp_num = self.writer.write_chunk(chunk)?;
                             self.bigquery_future_manager
                                 .add_offset(TruncateOffset::Chunk { epoch, chunk_id },resp_num);
                         }
@@ -536,10 +538,6 @@ impl Sink for BigQuerySink {
 
     crate::impl_validate_sink_unknown_fields!();
 
-    fn orders_by_seq_id(&self) -> bool {
-        !self.is_append_only
-    }
-
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
             self.config.clone(),
@@ -773,15 +771,10 @@ impl BigQuerySinkWriter {
         Ok(serialized_rows)
     }
 
-    fn upsert(
-        &mut self,
-        epoch: u64,
-        chunk: StreamChunk,
-        seq_ids: Vec<SeqId>,
-    ) -> Result<Vec<Vec<u8>>> {
-        assert_eq!(seq_ids.len(), chunk.cardinality());
+    fn upsert(&mut self, chunk: StreamChunk) -> Result<Vec<Vec<u8>>> {
+        let sequence_numbers = reserve_change_sequence_numbers(chunk.cardinality());
         let mut serialized_rows: Vec<Vec<u8>> = Vec::with_capacity(chunk.capacity());
-        for ((op, row), seq_id) in chunk.rows().zip_eq_debug(seq_ids) {
+        for ((op, row), sequence_number) in chunk.rows().zip_eq_debug(sequence_numbers) {
             if op == Op::UpdateDelete {
                 continue;
             }
@@ -814,7 +807,7 @@ impl BigQuerySinkWriter {
                 .message
                 .try_set_field(
                     self.change_sequence_number_field.as_ref().unwrap(),
-                    prost_reflect::Value::String(change_sequence_number(epoch, seq_id)),
+                    prost_reflect::Value::String(sequence_number),
                 )
                 .map_err(|e| SinkError::BigQuery(e.into()))?;
 
@@ -823,16 +816,11 @@ impl BigQuerySinkWriter {
         Ok(serialized_rows)
     }
 
-    fn write_chunk(
-        &mut self,
-        epoch: u64,
-        chunk: StreamChunk,
-        seq_ids: Vec<SeqId>,
-    ) -> Result<usize> {
+    fn write_chunk(&mut self, chunk: StreamChunk) -> Result<usize> {
         let serialized_rows = if self.is_append_only {
             self.append_only(chunk)?
         } else {
-            self.upsert(epoch, chunk, seq_ids)?
+            self.upsert(chunk)?
         };
         if serialized_rows.is_empty() {
             return Ok(0);
@@ -864,11 +852,33 @@ impl BigQuerySinkWriter {
     }
 }
 
-/// Formats `{epoch}/{seq_id}` in hex. The sections are compared in order as unsigned integers,
-/// so the changes of a key are applied in `(epoch, seq_id)` order.
-fn change_sequence_number(epoch: u64, seq_id: SeqId) -> String {
-    let seq_id = u32::try_from(seq_id).expect("seq id should be non-negative");
-    format!("{epoch:X}/{seq_id:X}")
+/// The physical time and the next logical number of the last reserved `_CHANGE_SEQUENCE_NUMBER`s,
+/// shared by all writers in the process.
+static NEXT_CHANGE_SEQUENCE_NUMBER: Mutex<(u64, u64)> = parking_lot::const_mutex((0, 0));
+
+/// Reserves `count` `_CHANGE_SEQUENCE_NUMBER`s, each greater than any reserved before in the
+/// process, as `{physical:X}/{logical:X}` with the wall clock in microseconds as `physical`.
+///
+/// The change with the largest number wins for each key, so numbering rows in send order is
+/// enough: the sinker sends the changes of a key in log order, and every replay (rewind, recovery,
+/// rescale) resends all changes after the truncated offset, so the last change sent for a key is
+/// its latest one.
+fn reserve_change_sequence_numbers(count: usize) -> impl Iterator<Item = String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since_epoch| since_epoch.as_micros() as u64);
+    let count = count as u64;
+    let (physical, start) =
+        reserve_change_sequence_range(&mut NEXT_CHANGE_SEQUENCE_NUMBER.lock(), now, count);
+    (start..start + count).map(move |logical| format!("{physical:X}/{logical:X}"))
+}
+
+/// Reserves `count` logical numbers at physical time `now`, or after the last reserved ones if the
+/// clock has not moved past their physical time.
+fn reserve_change_sequence_range(next: &mut (u64, u64), now: u64, count: u64) -> (u64, u64) {
+    let (physical, logical) = if now > next.0 { (now, 0) } else { *next };
+    *next = (physical, logical + count);
+    (physical, logical)
 }
 
 #[try_stream(ok = (), error = SinkError)]
@@ -1094,13 +1104,11 @@ mod test {
     use tokio::sync::mpsc;
 
     use crate::connector_common::AwsAuthProps;
-    use crate::sink::Sink;
     use crate::sink::big_query::{
         BigQueryCommon, BigQueryConfig, BigQuerySink, BigQuerySinkWriter, CHANGE_SEQUENCE_NUMBER,
         CHANGE_TYPE, StorageWriterClient, build_protobuf_descriptor_pool, build_protobuf_schema,
-        change_sequence_number,
+        reserve_change_sequence_range,
     };
-    use crate::sink::log_store::SeqId;
 
     #[tokio::test]
     async fn test_type_check() {
@@ -1251,12 +1259,8 @@ mod test {
         .unwrap()
     }
 
-    /// Writes `chunk` in epoch `0x1A2B << 16` and decodes the rows of the sent request.
-    fn write_and_decode(
-        sink_type: &str,
-        chunk: StreamChunk,
-        seq_ids: Vec<SeqId>,
-    ) -> Vec<DynamicMessage> {
+    /// Writes `chunks` in order and decodes the rows of the sent requests.
+    fn write_and_decode(sink_type: &str, chunks: Vec<StreamChunk>) -> Vec<DynamicMessage> {
         let schema = Schema {
             fields: vec![
                 Field::with_name(DataType::Int64, "id"),
@@ -1276,81 +1280,86 @@ mod test {
             client,
         )
         .unwrap();
-        writer.write_chunk(0x1A2B << 16, chunk, seq_ids).unwrap();
+        for chunk in chunks {
+            writer.write_chunk(chunk).unwrap();
+        }
 
-        let Some(AppendRowsRequestRows::ProtoRows(ProtoData {
-            writer_schema: Some(writer_schema),
-            rows: Some(rows),
-        })) = request_rx.try_recv().unwrap().rows
-        else {
-            panic!("expected proto rows");
-        };
-        let pool =
-            build_protobuf_descriptor_pool(&writer_schema.proto_descriptor.unwrap()).unwrap();
-        let message = pool.get_message_by_name("table").unwrap();
-        rows.serialized_rows
-            .iter()
-            .map(|row| DynamicMessage::decode(message.clone(), row.as_slice()).unwrap())
-            .collect()
+        let mut rows = vec![];
+        while let Ok(request) = request_rx.try_recv() {
+            let Some(AppendRowsRequestRows::ProtoRows(ProtoData {
+                writer_schema: Some(writer_schema),
+                rows: Some(proto_rows),
+            })) = request.rows
+            else {
+                panic!("expected proto rows");
+            };
+            let pool =
+                build_protobuf_descriptor_pool(&writer_schema.proto_descriptor.unwrap()).unwrap();
+            let message = pool.get_message_by_name("table").unwrap();
+            rows.extend(
+                proto_rows
+                    .serialized_rows
+                    .iter()
+                    .map(|row| DynamicMessage::decode(message.clone(), row.as_slice()).unwrap()),
+            );
+        }
+        rows
     }
 
     #[test]
-    fn test_change_sequence_number_format() {
-        assert_eq!(change_sequence_number(0x1A2B << 16, 0), "1A2B0000/0");
-        assert_eq!(
-            change_sequence_number(u64::MAX, SeqId::MAX),
-            "FFFFFFFFFFFFFFFF/7FFFFFFF"
-        );
+    fn test_reserve_change_sequence_range() {
+        let mut next = (0, 0);
+        assert_eq!(reserve_change_sequence_range(&mut next, 100, 3), (100, 0));
+        // The clock has not moved past the last physical time, or has moved back.
+        assert_eq!(reserve_change_sequence_range(&mut next, 100, 2), (100, 3));
+        assert_eq!(reserve_change_sequence_range(&mut next, 90, 1), (100, 5));
+        assert_eq!(reserve_change_sequence_range(&mut next, 101, 1), (101, 0));
     }
 
     #[test]
     fn test_write_change_sequence_number() {
-        let schema = Schema {
-            fields: vec![Field::with_name(DataType::Int64, "id")],
+        let chunks = || {
+            vec![
+                StreamChunk::from_pretty(
+                    "  I T
+                    +  1 a
+                    U- 1 a
+                    U+ 1 b",
+                ),
+                StreamChunk::from_pretty(
+                    " I T
+                    - 1 b",
+                ),
+            ]
         };
-        for (sink_type, is_append_only) in [("upsert", false), ("append-only", true)] {
-            let sink = BigQuerySink::new(
-                sink_config(sink_type),
-                schema.clone(),
-                vec![0],
-                is_append_only,
-            )
-            .unwrap();
-            assert_eq!(sink.orders_by_seq_id(), !is_append_only);
-        }
+        let field = |row: &DynamicMessage, name: &str| {
+            row.get_field_by_name(name)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
 
-        let chunk = StreamChunk::from_pretty(
-            "  I T
-            +  1 a
-            U- 1 a
-            U+ 1 b
-            -  2 c",
-        );
-        let rows = write_and_decode("upsert", chunk.clone(), vec![3, 4, 5, 6]);
-        let fields: Vec<_> = rows
+        let rows = write_and_decode("upsert", chunks());
+        let change_types: Vec<_> = rows.iter().map(|row| field(row, CHANGE_TYPE)).collect();
+        assert_eq!(change_types, ["UPSERT", "UPSERT", "DELETE"]);
+        let sequence_numbers: Vec<_> = rows
             .iter()
             .map(|row| {
-                let field = |name: &str| {
-                    row.get_field_by_name(name)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned()
-                };
-                (field(CHANGE_TYPE), field(CHANGE_SEQUENCE_NUMBER))
+                let sequence_number = field(row, CHANGE_SEQUENCE_NUMBER);
+                let (physical, logical) = sequence_number.split_once('/').unwrap();
+                (
+                    u64::from_str_radix(physical, 16).unwrap(),
+                    u64::from_str_radix(logical, 16).unwrap(),
+                )
             })
             .collect();
-        assert_eq!(
-            fields,
-            [
-                ("UPSERT", "1A2B0000/3"),
-                ("UPSERT", "1A2B0000/5"),
-                ("DELETE", "1A2B0000/6"),
-            ]
-            .map(|(change_type, sequence)| (change_type.to_owned(), sequence.to_owned()))
+        assert!(
+            sequence_numbers.windows(2).all(|pair| pair[0] < pair[1]),
+            "{sequence_numbers:?}"
         );
 
-        let rows = write_and_decode("append-only", chunk, vec![3, 4, 5, 6]);
+        let rows = write_and_decode("append-only", chunks());
         for name in [CHANGE_TYPE, CHANGE_SEQUENCE_NUMBER] {
             assert!(rows[0].descriptor().get_field_by_name(name).is_none());
         }

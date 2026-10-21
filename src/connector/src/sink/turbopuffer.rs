@@ -369,9 +369,7 @@ impl LogSinker for TurbopufferLogSinker {
                 }
             };
             match item {
-                LogStoreReadItem::StreamChunk {
-                    chunk, chunk_id, ..
-                } => {
+                LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
                     let offset = TruncateOffset::Chunk { epoch, chunk_id };
                     let has_pending_update = self.writer.write_chunk(chunk)?;
                     latest_truncate_offset = Some(offset);
@@ -1204,7 +1202,6 @@ mod tests {
                             + id body",
                         ),
                         chunk_id: 0,
-                        seq_ids: vec![0],
                     },
                 ),
                 (
@@ -1254,7 +1251,6 @@ mod tests {
                         + id body",
                     ),
                     chunk_id: 7,
-                    seq_ids: vec![0],
                 },
             )],
             truncates.clone(),
@@ -1290,7 +1286,6 @@ mod tests {
                             + id body",
                         ),
                         chunk_id: 0,
-                        seq_ids: vec![0],
                     },
                 ),
                 (

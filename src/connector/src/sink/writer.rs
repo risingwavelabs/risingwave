@@ -263,9 +263,7 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                 Either::Left(item_result) => {
                     let (epoch, item) = item_result?;
                     match item {
-                        LogStoreReadItem::StreamChunk {
-                            chunk_id, chunk, ..
-                        } => {
+                        LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
                             let add_future = self.future_manager.start_write_chunk(epoch, chunk_id);
                             self.writer
                                 .write_chunk(chunk, add_future)

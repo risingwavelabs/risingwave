@@ -912,13 +912,6 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         false
     }
 
-    /// Whether the sink orders the changes of a key by their [`SeqId`](log_store::SeqId). Such a
-    /// sink must see every row as written to the log store, so the log reader does not compact
-    /// chunks for it.
-    fn orders_by_seq_id(&self) -> bool {
-        false
-    }
-
     async fn new_coordinator(
         &self,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
@@ -1071,10 +1064,6 @@ impl SinkImpl {
 
     pub fn is_coordinated_sink(&self) -> bool {
         dispatch_sink!(self, sink, sink.is_coordinated_sink())
-    }
-
-    pub fn orders_by_seq_id(&self) -> bool {
-        dispatch_sink!(self, sink, sink.orders_by_seq_id())
     }
 
     pub fn validate_unknown_fields(&self) -> Result<()> {

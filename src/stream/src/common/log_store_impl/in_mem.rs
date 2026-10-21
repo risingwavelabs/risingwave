@@ -20,7 +20,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     FlushCurrentEpochOptions, LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult,
-    LogWriter, LogWriterPostFlushCurrentEpoch, SeqId, TruncateBarrierLogReader, TruncateOffset,
+    LogWriter, LogWriterPostFlushCurrentEpoch, TruncateBarrierLogReader, TruncateOffset,
 };
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -88,10 +88,6 @@ pub struct BoundedInMemLogStoreReader {
 
     /// Offset of the latest truncated item
     truncate_offset: TruncateOffset,
-
-    /// Seq id of the next row in the current epoch. Items are never re-read, so it only needs
-    /// to count the rows read so far in the epoch.
-    next_seq_id: SeqId,
 }
 
 type WaitInitEpochFn =
@@ -142,7 +138,6 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
             truncated_epoch_tx,
             latest_offset: TruncateOffset::Barrier { epoch: 0 },
             truncate_offset: TruncateOffset::Barrier { epoch: 0 },
-            next_seq_id: 0,
         };
         let writer = BoundedInMemLogStoreWriter {
             curr_epoch: None,
@@ -197,22 +192,15 @@ impl LogReader for BoundedInMemLogStoreReader {
                             epoch: current_epoch,
                             chunk_id,
                         };
-                        let start_seq_id = self.next_seq_id;
-                        self.next_seq_id += chunk.cardinality() as SeqId;
                         Ok((
                             current_epoch,
-                            LogStoreReadItem::StreamChunk {
-                                chunk,
-                                chunk_id,
-                                seq_ids: (start_seq_id..self.next_seq_id).collect(),
-                            },
+                            LogStoreReadItem::StreamChunk { chunk, chunk_id },
                         ))
                     }
                     InMemLogStoreItem::Barrier {
                         next_epoch,
                         options,
                     } => {
-                        self.next_seq_id = 0;
                         if options.is_checkpoint {
                             self.epoch_progress = AwaitingTruncate {
                                 next_epoch,
@@ -429,34 +417,18 @@ mod tests {
 
         reader.init().await.unwrap();
         let _chunk_id1_1 = match reader.next_item().await.unwrap() {
-            (
-                epoch,
-                LogStoreReadItem::StreamChunk {
-                    chunk,
-                    chunk_id,
-                    seq_ids,
-                },
-            ) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, chunk_id }) => {
                 assert_eq!(epoch, init_epoch);
                 assert_eq!(&chunk, &stream_chunk);
-                assert_eq!(seq_ids, vec![0, 1, 2, 3]);
                 chunk_id
             }
             _ => unreachable!(),
         };
 
         let chunk_id1_2 = match reader.next_item().await.unwrap() {
-            (
-                epoch,
-                LogStoreReadItem::StreamChunk {
-                    chunk,
-                    chunk_id,
-                    seq_ids,
-                },
-            ) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, chunk_id }) => {
                 assert_eq!(epoch, init_epoch);
                 assert_eq!(&chunk, &stream_chunk);
-                assert_eq!(seq_ids, vec![4, 5, 6, 7]);
                 chunk_id
             }
             _ => unreachable!(),
@@ -471,17 +443,9 @@ mod tests {
         }
 
         let chunk_id2_1 = match reader.next_item().await.unwrap() {
-            (
-                epoch,
-                LogStoreReadItem::StreamChunk {
-                    chunk,
-                    chunk_id,
-                    seq_ids,
-                },
-            ) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, chunk_id }) => {
                 assert_eq!(&chunk, &stream_chunk);
                 assert_eq!(epoch, epoch1);
-                assert_eq!(seq_ids, vec![0, 1, 2, 3]);
                 chunk_id
             }
             _ => unreachable!(),

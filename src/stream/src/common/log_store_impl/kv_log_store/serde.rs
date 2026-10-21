@@ -109,7 +109,6 @@ enum LogStoreOp {
         row: OwnedRow,
     },
     Update {
-        old_seq_id: SeqId,
         seq_id: SeqId,
         old_value: OwnedRow,
         new_value: OwnedRow,
@@ -129,7 +128,6 @@ enum AlignedLogStoreOp {
     },
     Update {
         vnode: VirtualNode,
-        old_seq_id: SeqId,
         seq_id: SeqId,
         old_value: OwnedRow,
         new_value: OwnedRow,
@@ -438,12 +436,11 @@ impl LogStoreRowSerde {
         end_seq_id: SeqId,
         expected_epoch: u64,
         metrics: &KvLogStoreReadMetrics,
-    ) -> LogStoreResult<(StreamChunk, Vec<SeqId>)> {
+    ) -> LogStoreResult<StreamChunk> {
         let size_bound = (end_seq_id - start_seq_id + 1) as usize;
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.payload_schema.clone(), size_bound + 1);
         let mut ops = Vec::with_capacity(size_bound);
-        let mut seq_ids = Vec::with_capacity(size_bound);
         let mut read_info = ReadInfo::new();
         let stream = select_all(
             iters
@@ -456,7 +453,7 @@ impl LogStoreRowSerde {
             let op = row.op;
             let row_size = row.row_meta.size;
             match (epoch, op) {
-                (epoch, LogStoreOp::Row { seq_id, op, row }) => {
+                (epoch, LogStoreOp::Row { op, row, .. }) => {
                     if epoch != expected_epoch {
                         return Err(anyhow!(
                             "decoded epoch {} not match expected epoch {}",
@@ -466,7 +463,6 @@ impl LogStoreRowSerde {
                     }
                     read_info.read_one_row(row_size);
                     ops.push(op);
-                    seq_ids.push(seq_id);
                     if ops.len() > size_bound {
                         return Err(anyhow!(
                             "row count {} exceed size bound {}",
@@ -479,10 +475,9 @@ impl LogStoreRowSerde {
                 (
                     epoch,
                     LogStoreOp::Update {
-                        old_seq_id,
-                        seq_id,
                         new_value,
                         old_value,
+                        ..
                     },
                 ) => {
                     if epoch != expected_epoch {
@@ -495,7 +490,6 @@ impl LogStoreRowSerde {
                     read_info.read_update(row_size);
                     ops.push(Op::UpdateDelete);
                     ops.push(Op::UpdateInsert);
-                    seq_ids.extend([old_seq_id, seq_id]);
                     if ops.len() > size_bound {
                         return Err(anyhow!(
                             "row count {} exceed size bound {}",
@@ -519,13 +513,12 @@ impl LogStoreRowSerde {
             ));
         }
         read_info.report(metrics);
-        let chunk = StreamChunk::from_parts(
+        Ok(StreamChunk::from_parts(
             ops,
             data_chunk_builder
                 .consume_all()
                 .expect("should not be empty"),
-        );
-        Ok((chunk, seq_ids))
+        ))
     }
 }
 
@@ -550,7 +543,6 @@ enum StreamState {
 pub(crate) enum KvLogStoreItem {
     StreamChunk {
         chunk: StreamChunk,
-        seq_ids: Vec<SeqId>,
         progress: HashMap<VirtualNode, SeqId>,
     },
     Barrier {
@@ -621,7 +613,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     async fn into_vnode_log_store_item_stream(mut self, chunk_size: usize) {
         assert!(chunk_size >= 2, "too small chunk_size: {}", chunk_size);
         let mut ops = Vec::with_capacity(chunk_size);
-        let mut seq_ids = Vec::with_capacity(chunk_size);
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
 
@@ -651,12 +642,9 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
             }
 
             match row_op {
-                AlignedLogStoreOp::Row {
-                    seq_id, op, row, ..
-                } => {
+                AlignedLogStoreOp::Row { op, row, .. } => {
                     read_info.read_one_row(row_read_size);
                     ops.push(op);
-                    seq_ids.push(seq_id);
                     if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         read_info.report(&this.metrics);
@@ -664,15 +652,12 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             epoch,
                             KvLogStoreItem::StreamChunk {
                                 chunk: StreamChunk::from_parts(ops, chunk),
-                                seq_ids: replace(&mut seq_ids, Vec::with_capacity(chunk_size)),
                                 progress: take(&mut progress),
                             },
                         );
                     }
                 }
                 AlignedLogStoreOp::Update {
-                    old_seq_id,
-                    seq_id,
                     new_value,
                     old_value,
                     ..
@@ -685,13 +670,11 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             epoch,
                             KvLogStoreItem::StreamChunk {
                                 chunk: StreamChunk::from_parts(ops, chunk),
-                                seq_ids: replace(&mut seq_ids, Vec::with_capacity(chunk_size)),
                                 progress: take(&mut progress),
                             },
                         );
                     }
                     ops.extend([Op::UpdateDelete, Op::UpdateInsert]);
-                    seq_ids.extend([old_seq_id, seq_id]);
                     assert!(data_chunk_builder.append_one_row(old_value).is_none());
                     if let Some(chunk) = data_chunk_builder.append_one_row(new_value) {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
@@ -700,7 +683,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             epoch,
                             KvLogStoreItem::StreamChunk {
                                 chunk: StreamChunk::from_parts(ops, chunk),
-                                seq_ids: replace(&mut seq_ids, Vec::with_capacity(chunk_size)),
                                 progress: take(&mut progress),
                             },
                         );
@@ -718,7 +700,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                             epoch,
                             KvLogStoreItem::StreamChunk {
                                 chunk: StreamChunk::from_parts(ops, chunk),
-                                seq_ids: replace(&mut seq_ids, Vec::with_capacity(chunk_size)),
                                 progress: take(&mut progress),
                             },
                         );
@@ -836,7 +817,6 @@ mod stream_de {
                         };
                         yield LogStoreRow {
                             op: LogStoreOp::Update {
-                                old_seq_id: seq_id,
                                 seq_id: next_seq_id,
                                 new_value,
                                 old_value,
@@ -1028,7 +1008,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                     return Ok(Some(row));
                 }
                 LogStoreOp::Update {
-                    old_seq_id,
                     seq_id,
                     old_value,
                     new_value,
@@ -1036,7 +1015,6 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
                     self.row_streams.push(stream.into_future());
                     let op = AlignedLogStoreOp::Update {
                         vnode,
-                        old_seq_id,
                         seq_id,
                         old_value,
                         new_value,
@@ -1429,7 +1407,7 @@ mod tests {
         );
         let end_seq_id = seq_id - 1;
         tx.send(()).unwrap();
-        let (chunk, seq_ids) = serde
+        let chunk = serde
             .deserialize_stream_chunk(
                 once((
                     VirtualNode::ZERO,
@@ -1446,7 +1424,6 @@ mod tests {
             assert_eq!(ops[i], op);
             assert_eq!(rows[i], row.to_owned_row());
         }
-        assert_eq!(seq_ids, (start_seq_id..=end_seq_id).collect_vec());
     }
 
     fn gen_row_stream(
@@ -1614,7 +1591,6 @@ mod tests {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
                     let expected_op = AlignedLogStoreOp::Update {
                         vnode: VirtualNode::ZERO,
-                        old_seq_id: 0,
                         seq_id: 0,
                         old_value: rows[i][j].clone(),
                         new_value: rows[i][j + 1].clone(),
@@ -1661,7 +1637,6 @@ mod tests {
                     assert_eq!(Op::UpdateInsert, ops[i][j + 1]);
                     let expected_op = AlignedLogStoreOp::Update {
                         vnode: VirtualNode::ZERO,
-                        old_seq_id: 0,
                         seq_id: 0,
                         old_value: rows[i][j].clone(),
                         new_value: rows[i][j + 1].clone(),

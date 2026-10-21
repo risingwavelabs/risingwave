@@ -133,8 +133,7 @@ enum KvLogStoreReaderFutureState<S: StateStoreRead> {
         /// when this variant is replaced (i.e. stream fully consumed or reset).
         Option<OwnedSemaphorePermit>,
     ),
-    #[expect(clippy::type_complexity)]
-    ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Vec<SeqId>, u64)>>),
+    ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
     Reset,
     Empty,
 }
@@ -373,7 +372,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                             latest_offset.check_next_item_epoch(epoch)?;
                         }
                         let item = match item {
-                            KvLogStoreItem::StreamChunk { chunk, seq_ids, .. } => {
+                            KvLogStoreItem::StreamChunk { chunk, .. } => {
                                 let chunk_id = if let Some(latest_offset) = self.latest_offset {
                                     latest_offset.next_chunk_id()
                                 } else {
@@ -381,11 +380,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                 };
                                 self.latest_offset =
                                     Some(TruncateOffset::Chunk { epoch, chunk_id });
-                                LogStoreReadItem::StreamChunk {
-                                    chunk,
-                                    chunk_id,
-                                    seq_ids,
-                                }
+                                LogStoreReadItem::StreamChunk { chunk, chunk_id }
                             }
                             KvLogStoreItem::Barrier { is_checkpoint, .. } => {
                                 self.latest_offset = Some(TruncateOffset::Barrier { epoch });
@@ -406,7 +401,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 }
             }
             KvLogStoreReaderFutureState::ReadFlushedChunk(future) => {
-                let (chunk_id, chunk, seq_ids, item_epoch) = future.await?;
+                let (chunk_id, chunk, item_epoch) = future.await?;
                 self.future_state = KvLogStoreReaderFutureState::Empty;
                 let offset = TruncateOffset::Chunk {
                     epoch: item_epoch,
@@ -418,11 +413,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 self.latest_offset = Some(offset);
                 return Ok((
                     item_epoch,
-                    LogStoreReadItem::StreamChunk {
-                        chunk,
-                        chunk_id,
-                        seq_ids,
-                    },
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id },
                 ));
             }
             KvLogStoreReaderFutureState::Empty => {}
@@ -442,11 +433,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         }
         Ok(match item {
             LogStoreBufferItem::StreamChunk {
-                chunk,
-                start_seq_id,
-                end_seq_id,
-                chunk_id,
-                ..
+                chunk, chunk_id, ..
             } => {
                 let offset = TruncateOffset::Chunk {
                     epoch: item_epoch,
@@ -458,11 +445,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 self.latest_offset = Some(offset);
                 (
                     item_epoch,
-                    LogStoreReadItem::StreamChunk {
-                        chunk,
-                        chunk_id,
-                        seq_ids: (start_seq_id..=end_seq_id).collect(),
-                    },
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id },
                 )
             }
             LogStoreBufferItem::Flushed {
@@ -485,7 +468,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         .boxed()
                 };
 
-                let (_, chunk, seq_ids, _) = set_and_drive_future!(
+                let (_, chunk, _) = set_and_drive_future!(
                     &mut self.future_state,
                     ReadFlushedChunk,
                     read_flushed_chunk_future
@@ -502,11 +485,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 self.latest_offset = Some(offset);
                 (
                     item_epoch,
-                    LogStoreReadItem::StreamChunk {
-                        chunk,
-                        chunk_id,
-                        seq_ids,
-                    },
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id },
                 )
             }
             LogStoreBufferItem::Barrier {
@@ -591,8 +570,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
         end_seq_id: SeqId,
         item_epoch: u64,
         read_metrics: KvLogStoreReadMetrics,
-    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, Vec<SeqId>, Epoch)>> + 'static
-    {
+    ) -> impl Future<Output = LogStoreResult<(ChunkId, StreamChunk, Epoch)>> + 'static {
         let state_store = self.state_store.clone();
         let serde = self.serde.clone();
         async move {
@@ -628,7 +606,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
             .instrument_await("Wait Create Iter Stream")
             .await?;
 
-            let (chunk, seq_ids) = serde
+            let chunk = serde
                 .deserialize_stream_chunk(
                     iters,
                     start_seq_id,
@@ -639,7 +617,7 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 .instrument_await("Deserialize Stream Chunk")
                 .await?;
 
-            Ok((chunk_id, chunk, seq_ids, item_epoch))
+            Ok((chunk_id, chunk, item_epoch))
         }
         .instrument_await("Read Flushed Chunk")
     }
@@ -935,17 +913,11 @@ mod tests {
         iter2.release();
 
         let (_, item) = reader2.next_item().await.unwrap();
-        let LogStoreReadItem::StreamChunk {
-            chunk,
-            chunk_id,
-            seq_ids,
-        } = item
-        else {
+        let LogStoreReadItem::StreamChunk { chunk, chunk_id } = item else {
             panic!("expected stream chunk");
         };
         assert_eq!(chunk_id, 0);
         assert!(check_stream_chunk_eq(&expected_chunk, &chunk));
-        assert_eq!(seq_ids, (0..=chunk_end_seq_id).collect::<Vec<_>>());
 
         let (_, item) = reader2.next_item().await.unwrap();
         assert!(matches!(

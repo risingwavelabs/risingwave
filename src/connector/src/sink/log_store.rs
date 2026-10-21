@@ -29,7 +29,6 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedIntCounter, RelabeledAggregatedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
-use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_rate_limit::{RateLimit, RateLimiter};
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
@@ -38,8 +37,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
-/// Position of a row within its epoch, assigned when the row is written to the log store.
-pub type SeqId = i32;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TruncateOffset {
@@ -124,9 +121,6 @@ pub enum LogStoreReadItem {
     StreamChunk {
         chunk: StreamChunk,
         chunk_id: ChunkId,
-        /// The [`SeqId`] of each visible row of `chunk`, in order. A row has the same seq id
-        /// every time it is read, and the rows of a key are in seq id order within an epoch.
-        seq_ids: Vec<SeqId>,
     },
     Barrier {
         is_checkpoint: bool,
@@ -252,20 +246,10 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
         let (epoch, item) = self.inner.next_item().await?;
         let item = match item {
-            LogStoreReadItem::StreamChunk {
-                chunk,
+            LogStoreReadItem::StreamChunk { chunk, chunk_id } => LogStoreReadItem::StreamChunk {
+                chunk: (self.f)(chunk),
                 chunk_id,
-                seq_ids,
-            } => {
-                let visibility = chunk.visibility().clone();
-                let chunk = (self.f)(chunk);
-                let seq_ids = retain_visible_seq_ids(&visibility, chunk.visibility(), seq_ids);
-                LogStoreReadItem::StreamChunk {
-                    chunk,
-                    chunk_id,
-                    seq_ids,
-                }
-            }
+            },
             other => other,
         };
         Ok((epoch, item))
@@ -285,31 +269,6 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.start_from(start_offset)
     }
-}
-
-/// Keeps the seq ids of the rows that stay visible after a transform hides some rows.
-fn retain_visible_seq_ids(before: &Bitmap, after: &Bitmap, seq_ids: Vec<SeqId>) -> Vec<SeqId> {
-    if before == after {
-        return seq_ids;
-    }
-    assert_eq!(
-        before.len(),
-        after.len(),
-        "chunk transform must not change the rows"
-    );
-    assert_eq!(seq_ids.len(), before.count_ones());
-    let seq_ids: Vec<_> = before
-        .iter_ones()
-        .zip_eq_debug(seq_ids)
-        .filter(|(row, _)| after.is_set(*row))
-        .map(|(_, seq_id)| seq_id)
-        .collect();
-    assert_eq!(
-        seq_ids.len(),
-        after.count_ones(),
-        "chunk transform must not make hidden rows visible"
-    );
-    seq_ids
 }
 
 impl<R: LogReader> LogReader for TruncateBarrierLogReader<R> {
@@ -479,24 +438,6 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
     }
 }
 
-/// Splits `chunk` by [`StreamChunk::split`], and the seq ids along with it.
-fn split_chunk(
-    chunk: StreamChunk,
-    seq_ids: Vec<SeqId>,
-    size: usize,
-) -> Vec<(StreamChunk, Vec<SeqId>)> {
-    assert_eq!(seq_ids.len(), chunk.cardinality());
-    let mut seq_ids = seq_ids.into_iter();
-    chunk
-        .split(size)
-        .into_iter()
-        .map(|chunk| {
-            let seq_ids = seq_ids.by_ref().take(chunk.cardinality()).collect();
-            (chunk, seq_ids)
-        })
-        .collect()
-}
-
 #[derive(Copy, Clone, PartialOrd, PartialEq, Debug)]
 struct UpstreamChunkOffset(TruncateOffset);
 #[derive(Copy, Clone, PartialOrd, PartialEq)]
@@ -504,12 +445,11 @@ struct DownstreamChunkOffset(TruncateOffset);
 
 struct RateLimitedLogReaderCore<R: LogReader> {
     inner: R,
-    #[expect(clippy::type_complexity)]
     consuming_chunk: Option<(
         UpstreamChunkOffset,
         // Newer items at the front, push_front, pop_back
         VecDeque<DownstreamChunkOffset>,
-        Vec<(StreamChunk, Vec<SeqId>)>, // split chunks
+        Vec<StreamChunk>, // split chunks
     )>,
     // Newer items at the front, push_front, pop_back
     consumed_offset_queue: VecDeque<(UpstreamChunkOffset, VecDeque<DownstreamChunkOffset>)>,
@@ -541,32 +481,24 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
     fn peek_next_pending_chunk(&self) -> Option<&StreamChunk> {
         self.consuming_chunk
             .as_ref()
-            .and_then(|(_, _, chunks)| chunks.last())
-            .map(|(chunk, _)| chunk)
+            .and_then(|(_, _, chunk)| chunk.last())
     }
 
-    fn consume_next_pending_chunk(&mut self) -> Option<(u64, LogStoreReadItem)> {
+    fn consume_next_pending_chunk(&mut self) -> Option<(u64, StreamChunk, ChunkId)> {
         let Some((upstream_offset, consumed_offsets, pending_chunk)) = &mut self.consuming_chunk
         else {
             return None;
         };
         let epoch = upstream_offset.0.epoch();
 
-        let item = pending_chunk.pop().map(|(chunk, seq_ids)| {
+        let item = pending_chunk.pop().map(|chunk| {
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
             consumed_offsets.push_front(DownstreamChunkOffset(TruncateOffset::Chunk {
                 epoch,
                 chunk_id,
             }));
-            (
-                epoch,
-                LogStoreReadItem::StreamChunk {
-                    chunk,
-                    chunk_id,
-                    seq_ids,
-                },
-            )
+            (epoch, chunk, chunk_id)
         });
         if pending_chunk.is_empty() {
             let (upstream_offset, consumed_offsets, _) =
@@ -614,8 +546,8 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
         match self.rate_limiter.rate_limit() {
             RateLimit::Pause => pending().await,
             RateLimit::Disabled => {
-                if let Some(item) = self.consume_next_pending_chunk() {
-                    Ok(item)
+                if let Some((epoch, chunk, chunk_id)) = self.consume_next_pending_chunk() {
+                    Ok((epoch, LogStoreReadItem::StreamChunk { chunk, chunk_id }))
                 } else {
                     let (epoch, item) = self.inner.next_item().await?;
                     Ok(self.consume_single_upstream_item(epoch, item))
@@ -625,15 +557,11 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
                 if self.peek_next_pending_chunk().is_none() {
                     let (epoch, item) = self.inner.next_item().await?;
                     match item {
-                        LogStoreReadItem::StreamChunk {
-                            chunk,
-                            chunk_id,
-                            seq_ids,
-                        } => {
+                        LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
                             let chunks = if chunk.rate_limit_permits() < limit.get() {
-                                vec![(chunk, seq_ids)]
+                                vec![chunk]
                             } else {
-                                let mut chunks = split_chunk(chunk, seq_ids, limit.get() as _);
+                                let mut chunks = chunk.split(limit.get() as _);
                                 // reverse to make the first chunk to be popped first
                                 chunks.reverse();
                                 chunks
@@ -660,7 +588,9 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
                 }
                 let chunk = self.peek_next_pending_chunk().expect("must Some");
                 self.rate_limiter.wait_chunk(chunk).await;
-                Ok(self.consume_next_pending_chunk().expect("must Some"))
+                let (epoch, chunk, chunk_id) =
+                    self.consume_next_pending_chunk().expect("must Some");
+                Ok((epoch, LogStoreReadItem::StreamChunk { chunk, chunk_id }))
             }
         }
     }
@@ -1029,18 +959,12 @@ mod tests {
     use std::task::Poll;
 
     use futures::{FutureExt, TryFuture};
-    use itertools::Itertools;
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
-    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::util::epoch::test_epoch;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Receiver;
 
-    use super::{
-        LogReader, LogReaderExt, LogStoreReadItem, LogStoreResult, TruncateBarrierLogReader,
-        split_chunk,
-    };
+    use super::{LogReader, LogStoreReadItem, LogStoreResult, TruncateBarrierLogReader};
     use crate::sink::log_store::{DeliveryFutureManager, TruncateOffset};
 
     struct MockLogReader {
@@ -1080,50 +1004,6 @@ mod tests {
         async fn rewind(&mut self) -> LogStoreResult<()> {
             Ok(())
         }
-    }
-
-    #[tokio::test]
-    async fn test_transform_chunk_keeps_seq_ids_of_visible_rows() {
-        let chunk = StreamChunk::from_pretty(
-            " I
-            + 1
-            + 2
-            + 3
-            + 4",
-        );
-        let item = LogStoreReadItem::StreamChunk {
-            chunk,
-            chunk_id: 0,
-            seq_ids: vec![10, 11, 12, 13],
-        };
-        let mut reader = MockLogReader::new([(1, item)]).transform_chunk(|chunk: StreamChunk| {
-            chunk.clone_with_vis(Bitmap::from_bool_slice(&[true, false, false, true]))
-        });
-        let (_, LogStoreReadItem::StreamChunk { chunk, seq_ids, .. }) =
-            reader.next_item().await.unwrap()
-        else {
-            unreachable!()
-        };
-        assert_eq!(chunk.cardinality(), 2);
-        assert_eq!(seq_ids, vec![10, 13]);
-    }
-
-    #[test]
-    fn test_split_chunk_keeps_seq_ids_aligned() {
-        let chunk = StreamChunk::from_pretty(
-            "  I
-            +  1
-            +  2 D
-            U- 3
-            U+ 4
-            +  5",
-        );
-        // The builder keeps `U-` and `U+` together, so the first chunk has 3 rows.
-        let split = split_chunk(chunk, vec![10, 11, 12, 13], 2)
-            .into_iter()
-            .map(|(chunk, seq_ids)| (chunk.cardinality(), seq_ids))
-            .collect_vec();
-        assert_eq!(split, vec![(3, vec![10, 11, 12]), (1, vec![13])]);
     }
 
     #[test]
@@ -1476,7 +1356,6 @@ mod tests {
                 LogStoreReadItem::StreamChunk {
                     chunk: StreamChunk::default(),
                     chunk_id: 0,
-                    seq_ids: vec![],
                 },
             ),
             (
