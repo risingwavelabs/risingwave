@@ -14,7 +14,7 @@
 
 use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
 use crate::error::{ErrorCode, RwError};
-use crate::expr::{CorrelatedInputRef, ExprVisitor, Subquery};
+use crate::expr::{CorrelatedInputRef, ExprVisitor, FunctionCallWithLambda, Subquery};
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalPlanRef as PlanRef, PlanTreeNodeBinary, VisitExprsRecursive,
 };
@@ -87,33 +87,60 @@ impl LogicalPlanVisitor for CheckApplyElimination {
     }
 }
 
-/// Finds `Subquery` and `CorrelatedInputRef` expressions, which cannot be serialized and must
-/// have been planned and unnested before the plan is converted to a physical plan.
+/// Finds `Subquery` and `CorrelatedInputRef` expressions, which cannot be serialized. The planner
+/// must turn every subquery into an `Apply`, and unnesting must resolve every correlated reference.
 #[derive(Default)]
 struct SubqueryExprFinder {
-    result: CheckResult,
+    has_subquery: bool,
+    has_correlated_input_ref: bool,
+}
+
+impl SubqueryExprFinder {
+    fn find(plan: &PlanRef) -> Self {
+        let mut finder = Self::default();
+        plan.visit_exprs_recursive(&mut finder);
+        finder
+    }
 }
 
 impl ExprVisitor for SubqueryExprFinder {
     fn visit_subquery(&mut self, _: &Subquery) {
-        self.result = self.result.max(CheckResult::UnplannedSubquery);
+        self.has_subquery = true;
     }
 
     fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {
-        self.result = self.result.max(CheckResult::UnresolvedCorrelatedInputRef);
+        self.has_correlated_input_ref = true;
+    }
+
+    // The default implementation skips the lambda body, which is also serialized.
+    fn visit_function_call_with_lambda(&mut self, func_call: &FunctionCallWithLambda) {
+        func_call
+            .inputs_with_lambda_arg()
+            .for_each(|expr| self.visit_expr(expr));
     }
 }
 
 #[easy_ext::ext(PlanCheckApplyEliminationExt)]
 impl PlanRef {
+    /// Checks that the planner has turned every subquery expression into an `Apply`. A subquery
+    /// left in an expression, e.g., in a lambda body, can be neither hashed nor unnested.
+    pub fn check_subquery_planned(&self) -> Result<(), RwError> {
+        if SubqueryExprFinder::find(self).has_subquery {
+            CheckResult::UnplannedSubquery.into()
+        } else {
+            Ok(())
+        }
+    }
+
     /// Checks if all `LogicalApply` nodes in the plan have been eliminated, that is,
-    /// subqueries are successfully unnested, and that no expression still contains a subquery
-    /// or a correlated column reference.
+    /// subqueries are successfully unnested, and that no correlated column reference is left.
     pub fn check_apply_elimination(&self) -> Result<(), RwError> {
         let mut visitor = CheckApplyElimination::default();
         visitor.visit(self.clone());
-        let mut finder = SubqueryExprFinder::default();
-        self.visit_exprs_recursive(&mut finder);
-        visitor.result.max(finder.result).into()
+        let mut result = visitor.result;
+        if SubqueryExprFinder::find(self).has_correlated_input_ref {
+            result = result.max(CheckResult::UnresolvedCorrelatedInputRef);
+        }
+        result.into()
     }
 }

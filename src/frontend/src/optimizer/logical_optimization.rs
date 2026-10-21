@@ -644,8 +644,8 @@ impl LogicalOptimizer {
     ) -> Result<LogicalPlanRef> {
         // Bail our if no apply operators.
         if !has_logical_apply(plan.clone()) {
-            // An expression can still contain a subquery or a correlated column reference
-            // without any `Apply`. Report it here instead of panicking during serialization.
+            // A correlated column reference can still be left without any `Apply`. Report it
+            // here instead of panicking during serialization.
             plan.check_apply_elimination()?;
             return Ok(plan);
         }
@@ -720,6 +720,9 @@ impl LogicalOptimizer {
             ctx.trace("Begin:");
             ctx.trace(plan.explain_to_string());
         }
+
+        // Check before common sub-plan sharing, which hashes the expressions.
+        plan.check_subquery_planned()?;
 
         // Convert grouping sets at first because other agg rule can't handle grouping sets.
         plan = plan.optimize_by_rules(&GROUPING_SETS)?;
@@ -853,6 +856,8 @@ impl LogicalOptimizer {
             ctx.trace("Begin:");
             ctx.trace(plan.explain_to_string());
         }
+
+        plan.check_subquery_planned()?;
 
         if ctx.session_ctx().config().enable_mv_selection() {
             let query_relations =

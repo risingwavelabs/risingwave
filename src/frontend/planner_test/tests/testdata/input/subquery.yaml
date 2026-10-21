@@ -388,3 +388,11 @@
     select * from my_tf(3);
   expected_outputs:
     - batch_error
+    - stream_error
+- name: subquery in a lambda body returns an error instead of panicking
+  sql: |
+    create table t(a int[]);
+    select array_transform(a, |x| (select 1)) from t;
+  expected_outputs:
+    - batch_error
+    - stream_error

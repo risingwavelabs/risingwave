@@ -1107,3 +1107,10 @@
     create function my_tf(n int) returns table (sq int) language sql as $$ select v * v from generate_series(1, n) as g(v) $$;
     select * from my_tf(3);
   batch_error: 'internal error: Subquery is not supported in this context.'
+  stream_error: 'internal error: Subquery is not supported in this context.'
+- name: subquery in a lambda body returns an error instead of panicking
+  sql: |
+    create table t(a int[]);
+    select array_transform(a, |x| (select 1)) from t;
+  batch_error: 'internal error: Subquery is not supported in this context.'
+  stream_error: 'internal error: Subquery is not supported in this context.'
