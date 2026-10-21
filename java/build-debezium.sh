@@ -15,6 +15,11 @@ if [[ -z "${DEBEZIUM_VERSION}" ]]; then
 fi
 
 if [[ ! -f "${DEBEZIUM_DIR}/pom.xml" ]]; then
+  if ! git -C "${REPO_ROOT}" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "java/debezium is empty and ${REPO_ROOT} is not a git repository, so the submodule cannot be checked out here." >&2
+    echo "Run 'git submodule update --init java/debezium' in the git checkout first, before 'docker build' for image builds." >&2
+    exit 1
+  fi
   git -C "${REPO_ROOT}" submodule update --init java/debezium
 fi
 
@@ -25,7 +30,6 @@ for arg in "$@"; do
   esac
 done
 STAMP_FILE="${LOCAL_REPO}/io/debezium/.risingwave-fork-stamp"
-INSTALLED_JAR="${LOCAL_REPO}/io/debezium/debezium-core/${DEBEZIUM_VERSION}/debezium-core-${DEBEZIUM_VERSION}.jar"
 
 cd "${DEBEZIUM_DIR}"
 
@@ -40,6 +44,8 @@ fi
 working_tree_stamp() {
   local index_dir tree
   index_dir="$(mktemp -d)"
+  # Use a temporary index so that `git add --all` can include every changed and untracked file in the
+  # tree hash without staging those changes in the real index.
   if GIT_INDEX_FILE="${index_dir}/index" git -c safe.directory='*' add --all &&
     tree="$(GIT_INDEX_FILE="${index_dir}/index" git -c safe.directory='*' write-tree)"; then
     echo "${DEBEZIUM_VERSION} ${tree} $(git hash-object "${JAVA_DIR}/build-debezium.sh")"
@@ -47,8 +53,17 @@ working_tree_stamp() {
   rm -rf "${index_dir}"
 }
 
+fork_installed() {
+  local module dir
+  for module in ${MODULES//,/ } debezium-core; do
+    dir="${LOCAL_REPO}/io/debezium/${module}/${DEBEZIUM_VERSION}"
+    [[ -f "${dir}/${module}-${DEBEZIUM_VERSION}.pom" ]] || return 1
+    [[ "${module}" == debezium-bom || -f "${dir}/${module}-${DEBEZIUM_VERSION}.jar" ]] || return 1
+  done
+}
+
 STAMP="$(working_tree_stamp 2>/dev/null)"
-if [[ -n "${STAMP}" && -f "${INSTALLED_JAR}" && -f "${STAMP_FILE}" && "$(cat "${STAMP_FILE}")" == "${STAMP}" ]]; then
+if [[ -n "${STAMP}" && -f "${STAMP_FILE}" && "$(cat "${STAMP_FILE}")" == "${STAMP}" ]] && fork_installed; then
   echo "Debezium fork ${DEBEZIUM_VERSION} is up to date, skipping its build"
   exit 0
 fi
