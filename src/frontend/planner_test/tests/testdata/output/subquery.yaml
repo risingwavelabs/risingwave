@@ -1096,3 +1096,14 @@
                                     └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr5] }
                                       └─BatchFilter { predicate: (rw_columns.is_hidden = false:Boolean) }
                                         └─BatchSysScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }
+- name: correlated column in multi-row VALUES returns an error instead of panicking
+  sql: |
+    create table t(a int, b int, c int);
+    select * from t where t.a in (select * from (values (t.b), (t.c)) v);
+  batch_error: 'internal error: Subquery cannot be unnested: a correlated column reference is not resolved.'
+  stream_error: 'internal error: Subquery cannot be unnested: a correlated column reference is not resolved.'
+- name: subquery left in SQL table function arguments returns an error instead of panicking
+  sql: |
+    create function my_tf(n int) returns table (sq int) language sql as $$ select v * v from generate_series(1, n) as g(v) $$;
+    select * from my_tf(3);
+  batch_error: 'internal error: Subquery is not supported in this context.'

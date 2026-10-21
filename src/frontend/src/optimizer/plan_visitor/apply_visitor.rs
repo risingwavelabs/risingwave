@@ -14,7 +14,10 @@
 
 use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
 use crate::error::{ErrorCode, RwError};
-use crate::optimizer::plan_node::{LogicalApply, LogicalPlanRef as PlanRef, PlanTreeNodeBinary};
+use crate::expr::{CorrelatedInputRef, ExprVisitor, Subquery};
+use crate::optimizer::plan_node::{
+    LogicalApply, LogicalPlanRef as PlanRef, PlanTreeNodeBinary, VisitExprsRecursive,
+};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct HasMaxOneRowApply();
@@ -37,6 +40,8 @@ impl LogicalPlanVisitor for HasMaxOneRowApply {
 enum CheckResult {
     #[default]
     Ok,
+    UnplannedSubquery,
+    UnresolvedCorrelatedInputRef,
     CannotBeUnnested,
     MoreThanOneRow,
 }
@@ -45,6 +50,10 @@ impl From<CheckResult> for Result<(), RwError> {
     fn from(val: CheckResult) -> Self {
         let msg = match val {
             CheckResult::Ok => return Ok(()),
+            CheckResult::UnplannedSubquery => "Subquery is not supported in this context.",
+            CheckResult::UnresolvedCorrelatedInputRef => {
+                "Subquery cannot be unnested: a correlated column reference is not resolved."
+            }
             CheckResult::CannotBeUnnested => "Subquery cannot be unnested.",
             CheckResult::MoreThanOneRow => "Scalar subquery might produce more than one row.",
         };
@@ -78,13 +87,33 @@ impl LogicalPlanVisitor for CheckApplyElimination {
     }
 }
 
+/// Finds `Subquery` and `CorrelatedInputRef` expressions, which cannot be serialized and must
+/// have been planned and unnested before the plan is converted to a physical plan.
+#[derive(Default)]
+struct SubqueryExprFinder {
+    result: CheckResult,
+}
+
+impl ExprVisitor for SubqueryExprFinder {
+    fn visit_subquery(&mut self, _: &Subquery) {
+        self.result = self.result.max(CheckResult::UnplannedSubquery);
+    }
+
+    fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {
+        self.result = self.result.max(CheckResult::UnresolvedCorrelatedInputRef);
+    }
+}
+
 #[easy_ext::ext(PlanCheckApplyEliminationExt)]
 impl PlanRef {
     /// Checks if all `LogicalApply` nodes in the plan have been eliminated, that is,
-    /// subqueries are successfully unnested.
+    /// subqueries are successfully unnested, and that no expression still contains a subquery
+    /// or a correlated column reference.
     pub fn check_apply_elimination(&self) -> Result<(), RwError> {
         let mut visitor = CheckApplyElimination::default();
         visitor.visit(self.clone());
-        visitor.result.into()
+        let mut finder = SubqueryExprFinder::default();
+        self.visit_exprs_recursive(&mut finder);
+        visitor.result.max(finder.result).into()
     }
 }
