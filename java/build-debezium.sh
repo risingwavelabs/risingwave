@@ -53,21 +53,25 @@ working_tree_stamp() {
   rm -rf "${index_dir}"
 }
 
+# This assumes it is only called when the stamp file exists and its first line matches the current stamp.
+# The stamp file is only written after a successful build, and that build records every file it installed
+# on the lines after the stamp, so the records always describe the build the stamp refers to.
 fork_installed() {
-  local module dir
-  for module in ${MODULES//,/ } debezium-core; do
-    dir="${LOCAL_REPO}/io/debezium/${module}/${DEBEZIUM_VERSION}"
-    [[ -f "${dir}/${module}-${DEBEZIUM_VERSION}.pom" ]] || return 1
-    [[ "${module}" == debezium-bom || -f "${dir}/${module}-${DEBEZIUM_VERSION}.jar" ]] || return 1
-  done
+  local path count=0
+  while IFS= read -r path; do
+    [[ -f "${LOCAL_REPO}/${path}" ]] || return 1
+    count=$((count + 1))
+  done < <(tail -n +2 "${STAMP_FILE}")
+  ((count > 0))
 }
 
 STAMP="$(working_tree_stamp 2>/dev/null)"
-if [[ -n "${STAMP}" && -f "${STAMP_FILE}" && "$(cat "${STAMP_FILE}")" == "${STAMP}" ]] && fork_installed; then
+if [[ -n "${STAMP}" && -f "${STAMP_FILE}" && "$(head -n 1 "${STAMP_FILE}")" == "${STAMP}" ]] && fork_installed; then
   echo "Debezium fork ${DEBEZIUM_VERSION} is up to date, skipping its build"
   exit 0
 fi
 
+rm -f "${STAMP_FILE}"
 trap 'restore_poms "$@"' EXIT
 
 ./mvnw -B -ntp -q "$@" "${VERSIONS_PLUGIN}:set" \
@@ -86,5 +90,9 @@ trap 'restore_poms "$@"' EXIT
 
 if [[ -n "${STAMP}" ]]; then
   mkdir -p "$(dirname "${STAMP_FILE}")"
-  echo "${STAMP}" > "${STAMP_FILE}"
+  {
+    echo "${STAMP}"
+    (cd "${LOCAL_REPO}" && find io/debezium -path "*/${DEBEZIUM_VERSION}/*" -type f \( -name '*.pom' -o -name '*.jar' \) | sort)
+  } > "${STAMP_FILE}.tmp"
+  mv "${STAMP_FILE}.tmp" "${STAMP_FILE}"
 fi
