@@ -22,19 +22,21 @@ use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::id::TableId;
+use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::OpendalSource;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxStreamingFileSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl,
 };
+use risingwave_pb::common::ThrottleType;
 use thiserror_ext::AsReport;
 
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::source::{
-    StreamSourceCore, apply_rate_limit_with_for_streaming_file_source_reader,
-    get_split_offset_col_idx, prune_additional_cols, source_reader_event_to_chunk_stream,
+    StreamSourceCore, apply_shared_rate_limit_to_file_source_reader, get_split_offset_col_idx,
+    prune_additional_cols, source_reader_event_to_chunk_stream,
 };
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
@@ -55,6 +57,9 @@ where
 
     /// Optional rate limit in rows/s to control data ingestion speed.
     rate_limit_rps: Option<u32>,
+
+    /// Shared with the running reader, so a `Throttle` mutation applies to the file being read.
+    rate_limiter: Arc<RateLimiter>,
 
     /// Local barrier manager for reporting load finished.
     barrier_manager: LocalBarrierManager,
@@ -82,6 +87,7 @@ where
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             rate_limit_rps,
+            rate_limiter: Arc::new(RateLimiter::new(rate_limit_rps.into())),
             barrier_manager,
             associated_table_id: associated_table_id.unwrap(),
             _marker: PhantomData,
@@ -114,7 +120,7 @@ where
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         split: OpendalFsSplit<Src>,
-        rate_limit_rps: Option<u32>,
+        rate_limiter: Arc<RateLimiter>,
     ) -> StreamExecutorResult<BoxStreamingFileSourceChunkStream> {
         let (stream, _) = source_desc
             .source
@@ -132,10 +138,7 @@ where
                 .map(|item| item.map(Some))
                 .chain(stream::once(async { Ok(None) }))
                 .boxed();
-        Ok(
-            apply_rate_limit_with_for_streaming_file_source_reader(optional_stream, rate_limit_rps)
-                .boxed(),
-        )
+        Ok(apply_shared_rate_limit_to_file_source_reader(optional_stream, rate_limiter).boxed())
     }
 
     async fn replace_with_new_batch_reader<const BIASED: bool>(
@@ -145,7 +148,7 @@ where
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
-        rate_limit_rps: Option<u32>,
+        rate_limiter: Arc<RateLimiter>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(BATCH_SIZE);
         for _ in 0..BATCH_SIZE {
@@ -167,7 +170,7 @@ where
                     source_ctx.clone(),
                     source_desc,
                     split,
-                    rate_limit_rps,
+                    rate_limiter.clone(),
                 )
                 .await?
                 .map_err(StreamExecutorError::connector_error);
@@ -223,6 +226,21 @@ where
                         Message::Barrier(barrier) => {
                             if let Some(mutation) = barrier.mutation.as_deref() {
                                 match mutation {
+                                    Mutation::Throttle(fragment_to_apply) => {
+                                        if let Some(entry) =
+                                            fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                            && entry.throttle_type() == ThrottleType::Source
+                                            && entry.rate_limit != self.rate_limit_rps
+                                        {
+                                            tracing::info!(
+                                                "updating rate limit from {:?} to {:?}",
+                                                self.rate_limit_rps,
+                                                entry.rate_limit
+                                            );
+                                            self.rate_limit_rps = entry.rate_limit;
+                                            self.rate_limiter.update(entry.rate_limit.into());
+                                        }
+                                    }
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
                                     Mutation::RefreshStart {
@@ -285,7 +303,13 @@ where
 
                             yield Message::Barrier(barrier);
 
-                            if files_in_progress == 0 && !file_queue.is_empty() && is_refreshing {
+                            // A paused source starts no reader: a reader built with a chunk size of 0
+                            // would read parquet files as empty.
+                            if files_in_progress == 0
+                                && !file_queue.is_empty()
+                                && is_refreshing
+                                && self.rate_limit_rps != Some(0)
+                            {
                                 let source_ctx = Self::build_source_ctx(
                                     &self.actor_ctx,
                                     &source_desc,
@@ -299,7 +323,7 @@ where
                                     core.column_ids.clone(),
                                     source_ctx,
                                     &source_desc,
-                                    self.rate_limit_rps,
+                                    self.rate_limiter.clone(),
                                 )
                                 .await?;
                             }

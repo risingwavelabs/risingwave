@@ -45,6 +45,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::retry::exponential_backoff;
 use risingwave_common::util::version::current_rw_version;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
@@ -122,7 +123,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{self};
-use tokio_retry::strategy::{ExponentialBackoff, jitter};
+use tokio_retry::strategy::jitter;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
 use tonic::{Code, Request, Streaming};
@@ -923,6 +924,14 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn remove_iceberg_table_orphan_files(
+        &self,
+        sink_id: SinkId,
+    ) -> Result<RemoveIcebergTableOrphanFilesResponse> {
+        let request = RemoveIcebergTableOrphanFilesRequest { sink_id };
+        self.inner.remove_iceberg_table_orphan_files(request).await
+    }
+
     pub async fn drop_view(&self, view_id: ViewId, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
@@ -1676,6 +1685,20 @@ impl MetaClient {
         Ok(resp.params.map(SystemParamsReader::from))
     }
 
+    pub async fn clear_file_cache(
+        &self,
+        clear_meta_cache: bool,
+        clear_data_cache: bool,
+    ) -> Result<()> {
+        self.inner
+            .clear_file_cache(ClearFileCacheRequest {
+                clear_meta_cache,
+                clear_data_cache,
+            })
+            .await?;
+        Ok(())
+    }
+
     pub async fn get_session_params(&self) -> Result<String> {
         let req = GetSessionParamsRequest {};
         let resp = self.inner.get_session_params(req).await?;
@@ -1744,6 +1767,21 @@ impl MetaClient {
             })
             .collect();
         Ok(mappings)
+    }
+
+    pub async fn warm_up_table_cache(
+        &self,
+        table_id: TableId,
+        concurrency: u32,
+    ) -> Result<(u64, u32)> {
+        let response = self
+            .inner
+            .warm_up_table_cache(WarmUpTableCacheRequest {
+                table_id,
+                concurrency,
+            })
+            .await?;
+        Ok((response.key_count, response.worker_count))
     }
 
     pub async fn risectl_list_compaction_status(
@@ -2659,9 +2697,12 @@ impl GrpcMetaClient {
         high_bound: Duration,
         exceed: bool,
     ) -> impl Iterator<Item = Duration> {
-        let iter = ExponentialBackoff::from_millis(Self::INIT_RETRY_BASE_INTERVAL_MS)
-            .max_delay(Duration::from_millis(Self::INIT_RETRY_MAX_INTERVAL_MS))
-            .map(jitter);
+        let iter = exponential_backoff(
+            Duration::from_millis(Self::INIT_RETRY_BASE_INTERVAL_MS),
+            Self::INIT_RETRY_BASE_INTERVAL_MS,
+            Duration::from_millis(Self::INIT_RETRY_MAX_INTERVAL_MS),
+        )
+        .map(jitter);
 
         let mut sum = Duration::default();
 
@@ -2766,6 +2807,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
             ,{ ddl_client, rewrite_iceberg_table_manifests, RewriteIcebergTableManifestsRequest, RewriteIcebergTableManifestsResponse }
             ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
+            ,{ ddl_client, remove_iceberg_table_orphan_files, RemoveIcebergTableOrphanFilesRequest, RemoveIcebergTableOrphanFilesResponse }
             ,{ ddl_client, create_iceberg_table, CreateIcebergTableRequest, CreateIcebergTableResponse }
             ,{ ddl_client, wait_iceberg_pk_index_sink_epoch, WaitIcebergPkIndexSinkEpochRequest, WaitIcebergPkIndexSinkEpochResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
@@ -2816,9 +2858,11 @@ macro_rules! for_all_meta_rpc {
             ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
+            ,{ system_params_client, clear_file_cache, ClearFileCacheRequest, ClearFileCacheResponse }
             ,{ session_params_client, get_session_params, GetSessionParamsRequest, GetSessionParamsResponse }
             ,{ session_params_client, set_session_param, SetSessionParamRequest, SetSessionParamResponse }
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
+            ,{ serving_client, warm_up_table_cache, WarmUpTableCacheRequest, WarmUpTableCacheResponse }
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }

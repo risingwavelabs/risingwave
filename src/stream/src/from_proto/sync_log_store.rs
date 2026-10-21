@@ -48,11 +48,8 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             SyncedKvLogStoreMetrics::new(streaming_metrics, actor_id, fragment_id, name, target)
         };
 
-        let serde = LogStoreRowSerde::new(
-            &table,
-            params.vnode_bitmap.map(|b| b.into()),
-            &KV_LOG_STORE_V2_INFO,
-        );
+        let serde =
+            LogStoreRowSerde::new(&table, params.vnode_bitmap.into(), &KV_LOG_STORE_V2_INFO);
         let [upstream] = params.input.try_into().unwrap();
 
         // Previously, these configs are persisted in the plan node.

@@ -110,6 +110,15 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                 ..
             }),
             ..
+        } | Statement::CreateSource {
+            stmt: CreateSourceStatement {
+                cdc_table_info:
+                    Some(CdcTableInfo {
+                        source_name: table_name,
+                        ..
+                    }),
+                ..
+            },
         } => replace_table_name(table_name, to),
         Statement::CreateSink {
             stmt: CreateSinkStatement {
@@ -159,7 +168,10 @@ impl QueryRewriter<'_> {
             for cte_table in &mut with.cte_tables {
                 match &mut cte_table.cte_inner {
                     risingwave_sqlparser::ast::CteInner::Query(query) => self.visit_query(query),
-                    risingwave_sqlparser::ast::CteInner::ChangeLog(name) => {
+                    risingwave_sqlparser::ast::CteInner::ChangeLog {
+                        from: name,
+                        key: _key,
+                    } => {
                         let idx = name.0.len() - 1;
                         if name.0[idx].real_value() == self.from {
                             replace_table_name(name, self.to);
@@ -207,6 +219,12 @@ impl QueryRewriter<'_> {
             }
             TableFactor::NestedJoin(table_with_joins) => {
                 self.visit_table_with_joins(table_with_joins);
+            }
+            TableFactor::MatchRecognize { table, .. } => {
+                // Only the input table can reference a relation: the binder rejects subqueries in
+                // both DEFINE and MEASURES (they have no representation in the executor's scalar
+                // expressions), so the remaining clauses contain no rename targets.
+                self.visit_table_factor(table);
             }
         }
     }

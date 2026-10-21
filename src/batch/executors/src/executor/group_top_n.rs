@@ -19,11 +19,13 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use hashbrown::HashMap;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::FilterByBitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -186,10 +188,12 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         if self.limit == 0 {
             return Ok(());
         }
+        // Keep all groups' payload charges until execution exits, including errors and cancellation.
+        let mem_ctx = MemoryContext::new(Some(self.mem_ctx.clone()), TrAdderAtomic::new(0));
         let mut groups =
             HashMap::<K, TopNHeap, PrecomputedBuildHasher, MonitoredGlobalAlloc>::with_hasher_in(
                 PrecomputedBuildHasher,
-                self.mem_ctx.global_allocator(),
+                mem_ctx.global_allocator(),
             );
 
         #[for_await]
@@ -204,12 +208,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
                 .filter_by_bitmap(chunk.visibility())
             {
                 let heap = groups.entry(key).or_insert_with(|| {
-                    TopNHeap::new(
-                        self.limit,
-                        self.offset,
-                        self.with_ties,
-                        self.mem_ctx.clone(),
-                    )
+                    TopNHeap::new(self.limit, self.offset, self.with_ties, mem_ctx.clone())
                 });
                 heap.push(HeapElem::new(encoded_row, chunk.row_at(row_id).0));
             }
@@ -219,9 +218,11 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         for (_, h) in &mut groups {
             let mut heap = TopNHeap::empty();
             swap(&mut heap, h);
-            for ele in heap.dump() {
-                if let Some(spilled) = chunk_builder.append_one_row(ele.row()) {
-                    yield spilled
+            for elem in heap.dump() {
+                let output = chunk_builder.append_one_row(elem.row());
+                drop(elem);
+                if let Some(output) = output {
+                    yield output
                 }
             }
         }

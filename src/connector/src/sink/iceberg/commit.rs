@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,7 +29,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 };
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH};
 use risingwave_common::error::IcebergError;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
@@ -252,14 +253,7 @@ pub struct IcebergSinkCommitter {
 impl IcebergSinkCommitter {
     fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
         let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
-        self.table
-            .metadata()
-            .snapshot_for_ref(&branch)
-            .map(|snapshot| IcebergCommittedSnapshot {
-                branch,
-                snapshot_id: snapshot.snapshot_id(),
-                timestamp_ms: snapshot.timestamp_ms(),
-            })
+        IcebergCommittedSnapshot::from_branch_head(self.table.metadata(), &branch)
     }
 
     fn notify_iceberg_compaction_scheduler(&self, force_compaction: bool) {
@@ -681,6 +675,7 @@ impl IcebergSinkCommitter {
             self.table.identifier(),
             expect_schema_id,
             expect_partition_spec_id,
+            None,
         )
         .await
         .map_err(SinkError::Iceberg)?;
@@ -726,6 +721,7 @@ impl IcebergSinkCommitter {
             table_ident.clone(),
             expect_schema_id,
             expect_partition_spec_id,
+            None,
             self.commit_retry_num as usize,
             retry_log_context,
             |table| {
@@ -739,6 +735,10 @@ impl IcebergSinkCommitter {
                         .fast_append()
                         .set_snapshot_id(snapshot_id)
                         .set_target_branch(target_branch.clone())
+                        .set_snapshot_properties(HashMap::from([(
+                            RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(),
+                            epoch.to_string(),
+                        )]))
                         .add_data_files(data_files);
 
                     let tx = append_action.apply(txn).map_err(|err| {

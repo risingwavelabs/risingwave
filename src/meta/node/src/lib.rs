@@ -33,6 +33,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
+use risingwave_sqlparser::ast::SqlOptionRedaction;
 pub use rpc::{ElectionClient, ElectionMember};
 use server::rpc_serve;
 pub use server::started::get as is_server_started;
@@ -188,9 +189,8 @@ pub struct MetaNodeOpts {
     pub license_key_path: Option<PathBuf>,
 
     /// 128-bit AES key for secret store in HEX format.
-    #[educe(Debug(ignore))] // TODO: use newtype to redact debug impl
     #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
-    pub secret_store_private_key_hex: Option<String>,
+    pub secret_store_private_key_hex: Option<Secret<String>>,
 
     /// The path of the temp secret file directory.
     #[clap(
@@ -317,7 +317,7 @@ pub fn start(
 
         let secret_store_private_key = opts
             .secret_store_private_key_hex
-            .map(|key| hex::decode(key).unwrap());
+            .map(|key| hex::decode(key.expose_secret()).unwrap());
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
@@ -407,12 +407,18 @@ pub fn start(
                     .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
+                iceberg_orphan_file_cleanup_interval_sec: config
+                    .meta
+                    .iceberg_orphan_file_cleanup_interval_sec,
                 iceberg_compaction_report_timeout_sec: config
                     .meta
                     .iceberg_compaction_report_timeout_sec,
                 iceberg_compaction_config_refresh_interval_sec: config
                     .meta
                     .iceberg_compaction_config_refresh_interval_sec,
+                iceberg_compaction_schedule_on_startup: config
+                    .meta
+                    .iceberg_compaction_schedule_on_startup,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -472,9 +478,6 @@ pub fn start(
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
-                protect_drop_table_with_incoming_sink: config
-                    .meta
-                    .protect_drop_table_with_incoming_sink,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
@@ -543,18 +546,9 @@ pub fn start(
                     .streaming
                     .developer
                     .refresh_scheduler_interval_sec,
-                table_stat_high_write_throughput_ratio_for_split: config
+                table_write_throughput_retention_seconds: config
                     .meta
-                    .table_stat_high_write_throughput_ratio_for_split,
-                table_stat_low_write_throughput_ratio_for_merge: config
-                    .meta
-                    .table_stat_low_write_throughput_ratio_for_merge,
-                table_stat_throuput_window_seconds_for_split: config
-                    .meta
-                    .table_stat_throuput_window_seconds_for_split,
-                table_stat_throuput_window_seconds_for_merge: config
-                    .meta
-                    .table_stat_throuput_window_seconds_for_merge,
+                    .table_write_throughput_retention_seconds,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta
@@ -579,17 +573,18 @@ pub fn start(
                     .meta
                     .developer
                     .table_change_log_delete_batch_size,
+                table_change_log_truncate_interval_sec: config
+                    .meta
+                    .developer
+                    .table_change_log_truncate_interval_sec,
                 license_key_path: opts.license_key_path,
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
                 frontend_client_config: config.meta.developer.frontend_client_config.clone(),
-                redact_sql_option_keywords: Arc::new(
-                    config
-                        .batch
-                        .redact_sql_option_keywords
-                        .into_iter()
-                        .collect(),
-                ),
+                sql_option_redaction: Arc::new(SqlOptionRedaction::new(
+                    config.batch.redact_sql_option_keywords,
+                    config.batch.redact_sql_option_allowlist,
+                )),
                 cdc_table_split_init_sleep_interval_splits: config
                     .meta
                     .cdc_table_split_init_sleep_interval_splits,

@@ -1,0 +1,36 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# The primary key is also the distribution key, so the vnode of each row is computed from the
+# decimal hash. The keys cover zero, several scales, the extreme magnitudes and special values.
+statement ok
+CREATE TABLE decimal_pk (k DECIMAL PRIMARY KEY, v INT);
+
+statement ok
+INSERT INTO decimal_pk VALUES
+    (0, 1),
+    (1.5, 2),
+    (-1.5, 3),
+    (1000.00, 4),
+    (123456789.987654321, 5),
+    (0.0000000000000000000000000001, 6),
+    (7.9228162514264337593543950335, 7),
+    (79228162514264337593543950335, 8),
+    (-79228162514264337593543950335, 9),
+    ('NaN', 10),
+    ('Infinity', 11),
+    ('-Infinity', 12);
+
+statement ok
+INSERT INTO decimal_pk SELECT i::DECIMAL / 8 + 1000000, i + 100 FROM generate_series(1, 2000) AS s(i);
+
+# The group key decides both the dispatching and the vnode of the aggregation state.
+statement ok
+CREATE TABLE decimal_src (g DECIMAL, v INT);
+
+statement ok
+CREATE MATERIALIZED VIEW decimal_agg AS
+SELECT g, count(*) AS cnt, sum(v) AS total FROM decimal_src GROUP BY g;
+
+statement ok
+INSERT INTO decimal_src SELECT (i % 40)::DECIMAL / 8, i FROM generate_series(1, 2000) AS s(i);

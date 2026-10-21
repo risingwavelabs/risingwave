@@ -54,25 +54,29 @@ use crate::common::log_store_impl::kv_log_store::{
     Epoch, KvLogStoreMetrics, KvLogStoreReadMetrics, SeqId,
 };
 
-pub(crate) const REWIND_BASE_DELAY: Duration = Duration::from_secs(1);
-pub(crate) const REWIND_BACKOFF_FACTOR: u64 = 2;
+pub(crate) const REWIND_INITIAL_DELAY: Duration = Duration::from_secs(1);
+pub(crate) const REWIND_BACKOFF_MULTIPLIER: u64 = 2;
 pub(crate) const REWIND_MAX_DELAY: Duration = Duration::from_secs(180);
 
 mod rewind_backoff_policy {
     use std::time::Duration;
 
+    use risingwave_common::util::retry::exponential_backoff;
+
     use crate::common::log_store_impl::kv_log_store::{
-        REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
+        REWIND_BACKOFF_MULTIPLIER, REWIND_INITIAL_DELAY, REWIND_MAX_DELAY,
     };
 
     pub(super) type RewindBackoffPolicy = impl Iterator<Item = Duration>;
 
     #[define_opaque(RewindBackoffPolicy)]
     pub(super) fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
-        tokio_retry::strategy::ExponentialBackoff::from_millis(REWIND_BASE_DELAY.as_millis() as _)
-            .factor(REWIND_BACKOFF_FACTOR)
-            .max_delay(REWIND_MAX_DELAY)
-            .map(tokio_retry::strategy::jitter)
+        exponential_backoff(
+            REWIND_INITIAL_DELAY,
+            REWIND_BACKOFF_MULTIPLIER,
+            REWIND_MAX_DELAY,
+        )
+        .map(tokio_retry::strategy::jitter)
     }
 }
 
@@ -830,7 +834,7 @@ mod tests {
         let pk_info = &KV_LOG_STORE_V2_INFO;
         let table = gen_test_log_store_table(pk_info);
         let vnodes = single_vnode_bitmap();
-        let serde = LogStoreRowSerde::new(&table, Some(vnodes), pk_info);
+        let serde = LogStoreRowSerde::new(&table, vnodes, pk_info);
         let read_state = LogStoreReadState {
             table_id: TEST_TABLE_ID,
             state_store: Arc::new(state_store),

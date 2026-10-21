@@ -1044,6 +1044,7 @@ mod logical_join;
 mod logical_kafka_scan;
 mod logical_limit;
 mod logical_locality_provider;
+mod logical_match_recognize;
 mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
@@ -1082,6 +1083,7 @@ mod stream_iceberg_with_pk_index_writer;
 mod stream_join_common;
 mod stream_local_approx_percentile;
 mod stream_locality_provider;
+mod stream_match_recognize;
 mod stream_materialize;
 mod stream_materialized_exprs;
 mod stream_now;
@@ -1109,6 +1111,7 @@ mod batch_iceberg_scan;
 mod batch_kafka_scan;
 mod batch_postgres_query;
 
+mod batch_mssql_query;
 mod batch_mysql_query;
 mod derive;
 mod logical_file_scan;
@@ -1118,6 +1121,7 @@ mod logical_iceberg_scan;
 mod logical_postgres_query;
 
 mod batch_vector_search;
+mod logical_mssql_query;
 mod logical_mysql_query;
 mod logical_vector_search;
 mod logical_vector_search_lookup_join;
@@ -1147,6 +1151,7 @@ pub use batch_limit::BatchLimit;
 pub use batch_log_seq_scan::BatchLogSeqScan;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
+pub use batch_mssql_query::BatchMssqlQuery;
 pub use batch_mysql_query::BatchMySqlQuery;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
@@ -1165,6 +1170,7 @@ pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use batch_vector_search::BatchVectorSearch;
+pub use generic::MssqlConnection;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
@@ -1187,7 +1193,9 @@ pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
 pub use logical_locality_provider::LogicalLocalityProvider;
+pub use logical_match_recognize::LogicalMatchRecognize;
 pub use logical_max_one_row::LogicalMaxOneRow;
+pub use logical_mssql_query::LogicalMssqlQuery;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_mysql_query::LogicalMySqlQuery;
 pub use logical_now::LogicalNow;
@@ -1231,6 +1239,7 @@ pub use stream_iceberg_with_pk_index_writer::StreamIcebergWithPkIndexWriter;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_locality_provider::StreamLocalityProvider;
+pub use stream_match_recognize::StreamMatchRecognize;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_materialized_exprs::StreamMaterializedExprs;
 pub use stream_now::StreamNow;
@@ -1310,6 +1319,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MatchRecognize }
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
@@ -1319,6 +1329,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
+            , { Logical, MssqlQuery }
             , { Logical, GapFill }
             , { Logical, VectorSearch }
             , { Logical, GetChannelDeltaStats }
@@ -1358,6 +1369,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, MssqlQuery }
             , { Batch, GetChannelDeltaStats }
             , { Batch, VectorSearch }
             , { Stream, Project }
@@ -1391,6 +1403,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
             , { Stream, EowcSort }
+            , { Stream, MatchRecognize }
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }

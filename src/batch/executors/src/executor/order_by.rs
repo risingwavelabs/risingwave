@@ -17,9 +17,11 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
@@ -111,6 +113,9 @@ impl BoxedExecutorBuilder for SortExecutor {
 impl SortExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        // Each sort invocation owns a private context. Completion, errors, and cancellation release
+        // its remaining charges without waiting for the shared parent or sibling sorts to finish.
+        let mem_context = MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0));
         let child_schema = self.child.schema().clone();
         let mut need_to_spill = false;
         // If the memory upper bound is less than 1MB, we don't need to check memory usage.
@@ -120,7 +125,7 @@ impl SortExecutor {
         };
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        let mut chunks = Vec::new_in(self.mem_context.global_allocator());
+        let mut chunks = Vec::new_in(mem_context.global_allocator());
 
         let mut input_stream = self.child.execute();
         #[for_await]
@@ -128,7 +133,9 @@ impl SortExecutor {
             let chunk = chunk?.compact_vis();
             let chunk_estimated_heap_size = chunk.estimated_heap_size();
             chunks.push(chunk);
-            if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
+            // The chunk is retained for sorting or spilling regardless of the budget check.
+            mem_context.add_unchecked(chunk_estimated_heap_size as i64);
+            if check_memory && !mem_context.check_memory_usage() {
                 if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
@@ -138,8 +145,8 @@ impl SortExecutor {
             }
         }
 
-        let mut encoded_rows =
-            Vec::with_capacity_in(chunks.len(), self.mem_context.global_allocator());
+        let mut encoded_rows_heap_size = 0;
+        let mut encoded_rows = Vec::with_capacity_in(chunks.len(), mem_context.global_allocator());
 
         for chunk in &chunks {
             let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
@@ -153,7 +160,9 @@ impl SortExecutor {
                     .enumerate()
                     .map(|(row_id, row)| (chunk.row_at_unchecked_vis(row_id), row)),
             );
-            if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
+            encoded_rows_heap_size += chunk_estimated_heap_size as i64;
+            mem_context.add_unchecked(chunk_estimated_heap_size as i64);
+            if check_memory && !mem_context.check_memory_usage() {
                 if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
@@ -183,10 +192,13 @@ impl SortExecutor {
 
             // Release memory
             drop(encoded_rows);
+            mem_context.add_unchecked(-encoded_rows_heap_size);
 
-            // Spill buffer
+            // Release manual buffer charges before recursive sorts charge the shared context.
             for chunk in chunks {
+                let chunk_heap_size = chunk.estimated_heap_size() as i64;
                 sort_spill_manager.write_input_chunk(chunk).await?;
+                mem_context.add_unchecked(-chunk_heap_size);
             }
 
             // Spill input chunks.

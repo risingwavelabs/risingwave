@@ -33,6 +33,7 @@ use iceberg::io::{
     GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+use iceberg_storage_opendal::OpenDalResolvingStorageFactory;
 use moka::future::Cache as MokaCache;
 use phf::{Set, phf_set};
 use risingwave_common::bail;
@@ -188,8 +189,11 @@ pub struct IcebergCommon {
 
     /// Security type for REST catalog authentication.
     /// Supported values: `none`, `oauth2`, `google`.
-    /// When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
-    /// for authentication using Google Application Default Credentials (ADC).
+    /// When set to `google`, native REST catalogs authenticate using
+    /// `gcs.credential` or Google Application Default Credentials (ADC).
+    /// JNI REST catalogs use Java's `GoogleAuthManager` with ADC;
+    /// `gcs.credential` only configures Rust `FileIO` storage credentials.
+    /// Vended credentials use the native Rust REST catalog.
     #[serde(rename = "catalog.security")]
     pub catalog_security: Option<String>,
 
@@ -206,8 +210,8 @@ pub struct IcebergCommon {
     /// - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
     /// - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
     /// - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
-    /// Google Cloud Lakehouse Iceberg REST catalogs with credential vending require
-    /// `org.apache.iceberg.gcp.gcs.GCSFileIO`.
+    /// Applies only to JNI catalogs. Native REST catalogs route storage by URI
+    /// and support GCS vended credentials without a Java `FileIO` class.
     #[serde(rename = "catalog.io_impl")]
     pub catalog_io_impl: Option<String>,
 }
@@ -441,6 +445,7 @@ impl<'a> ResolvedIcebergCatalogConfig<'a> {
             }
             CatalogBuildPlan::NativeRest(iceberg_configs) => {
                 let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
+                    .with_storage_factory(Arc::new(OpenDalResolvingStorageFactory::new()))
                     .load("rest", iceberg_configs)
                     .await
                     .map_err(|e| anyhow!(IcebergError::from(e)))?;
@@ -651,8 +656,42 @@ impl IcebergCommon {
         Ok(CatalogBuildPlan::Storage(config))
     }
 
+    fn validate_native_rest_catalog_auth(
+        &self,
+        disable_default_credential: bool,
+    ) -> ConnectorResult<()> {
+        if disable_default_credential
+            && self
+                .catalog_security
+                .as_deref()
+                .is_some_and(|security| security.eq_ignore_ascii_case("google"))
+            && self.gcs_credential.is_none()
+        {
+            // Google token refresh uses ADC without a GCS credential, even when
+            // a catalog token or OAuth credential was explicitly provided.
+            bail!(
+                "`catalog.security=google` requires `gcs.credential` when `DISABLE_DEFAULT_CREDENTIAL=true`"
+            );
+        }
+        Ok(())
+    }
+
     fn build_native_rest_catalog_props(&self) -> ConnectorResult<CatalogBuildPlan> {
+        self.validate_native_rest_catalog_auth(env_var_is_true(DISABLE_DEFAULT_CREDENTIAL))?;
+
         let mut iceberg_configs = HashMap::new();
+        iceberg_configs.extend(self.adls_file_io_props()?);
+
+        if self
+            .catalog_security
+            .as_deref()
+            .is_some_and(|security| security.eq_ignore_ascii_case("google"))
+        {
+            iceberg_configs.insert("rest.auth.type".to_owned(), "google".to_owned());
+        }
+        if let Some(scopes) = &self.gcp_auth_scopes {
+            iceberg_configs.insert("gcp.auth.scopes".to_owned(), scopes.clone());
+        }
 
         // check gcs credential or s3 access key and secret key
         if let Some(gcs_credential) = &self.gcs_credential {
@@ -710,6 +749,68 @@ impl IcebergCommon {
         }
 
         Ok(CatalogBuildPlan::NativeRest(iceberg_configs))
+    }
+
+    fn adls_file_io_props(&self) -> ConnectorResult<HashMap<String, String>> {
+        let mut props = HashMap::new();
+        if let Some(endpoint) = &self.adlsgen2_endpoint {
+            props.insert(iceberg::io::ADLS_ENDPOINT.to_owned(), endpoint.clone());
+        }
+        let nonempty =
+            |value: &Option<String>| value.as_ref().filter(|s| !s.trim().is_empty()).cloned();
+        let tenant = nonempty(&self.adlsgen2_tenant_id);
+        let client = nonempty(&self.adlsgen2_client_id);
+        let secret = nonempty(&self.adlsgen2_client_secret);
+        let authority = nonempty(&self.adlsgen2_authority_host);
+        let account = nonempty(&self.adlsgen2_account_name);
+        let key = nonempty(&self.adlsgen2_account_key);
+        let any_sp =
+            tenant.is_some() || client.is_some() || secret.is_some() || authority.is_some();
+        if key.is_some() && any_sp {
+            bail!(
+                "adlsgen2: cannot configure both shared-key auth and service-principal auth simultaneously. Specify exactly one auth mode."
+            );
+        }
+        if any_sp && !(tenant.is_some() && client.is_some() && secret.is_some()) {
+            bail!(
+                "adlsgen2: service-principal auth requires all three of adlsgen2.tenant_id, adlsgen2.client_id, and adlsgen2.client_secret to be set"
+            );
+        }
+        if let Some(host) = &authority {
+            // The OAuth client sends its secret to this host. Only allow a bare HTTPS origin.
+            let parsed = Url::parse(host)
+                .map_err(|_| anyhow!("adlsgen2.authority_host does not parse as a URL"))?;
+            if parsed.scheme() != "https" {
+                bail!("adlsgen2.authority_host must use the https scheme");
+            }
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                bail!("adlsgen2.authority_host must not contain userinfo");
+            }
+            if parsed.query().is_some() || parsed.fragment().is_some() {
+                bail!("adlsgen2.authority_host must not contain a query or fragment");
+            }
+            if !matches!(parsed.path(), "" | "/") {
+                bail!("adlsgen2.authority_host must not contain a path component");
+            }
+        }
+        if let (Some(account), Some(key)) = (account, key) {
+            props.insert(ADLS_ACCOUNT_NAME.to_owned(), account);
+            props.insert(ADLS_ACCOUNT_KEY.to_owned(), key);
+        }
+        if let (Some(tenant), Some(client), Some(secret)) = (tenant, client, secret) {
+            props.insert(ADLS_TENANT_ID.to_owned(), tenant);
+            props.insert(ADLS_CLIENT_ID.to_owned(), client);
+            props.insert(ADLS_CLIENT_SECRET.to_owned(), secret);
+            props.insert(
+                ADLS_AUTHORITY_HOST.to_owned(),
+                authority
+                    .as_deref()
+                    .unwrap_or(ADLS_DEFAULT_AUTHORITY_HOST)
+                    .trim_end_matches('/')
+                    .to_owned(),
+            );
+        }
+        Ok(props)
     }
 
     fn build_native_glue_catalog_props(&self) -> ConnectorResult<CatalogBuildPlan> {
@@ -822,88 +923,10 @@ impl IcebergCommon {
                 require_rest("azblob")?;
             }
 
-            // Validate adlsgen2 auth configuration before populating iceberg_configs.
-            // Treat empty and whitespace-only strings as unset — serde surfaces
-            // `adlsgen2.tenant_id = ''` (or a value with trailing `\n` from a copy-paste)
-            // as `Some("...")` which would pass `is_some()` but break downstream auth.
-            fn nonempty(v: &Option<String>) -> Option<&str> {
-                v.as_deref().filter(|s| !s.trim().is_empty())
-            }
-            let sp_tenant = nonempty(&self.adlsgen2_tenant_id);
-            let sp_client = nonempty(&self.adlsgen2_client_id);
-            let sp_secret = nonempty(&self.adlsgen2_client_secret);
-            let sp_authority = nonempty(&self.adlsgen2_authority_host);
-            let sk_account_name = nonempty(&self.adlsgen2_account_name);
-            let sk_account_key = nonempty(&self.adlsgen2_account_key);
-            let any_sp_field = sp_tenant.is_some()
-                || sp_client.is_some()
-                || sp_secret.is_some()
-                || sp_authority.is_some();
-            let all_sp_required = sp_tenant.is_some() && sp_client.is_some() && sp_secret.is_some();
-
-            if sk_account_key.is_some() && any_sp_field {
-                bail!(
-                    "adlsgen2: cannot configure both shared-key auth \
-                     (adlsgen2.account_key) and service-principal auth \
-                     (adlsgen2.tenant_id / adlsgen2.client_id / adlsgen2.client_secret / \
-                     adlsgen2.authority_host) simultaneously. Specify exactly one auth mode."
-                );
-            }
-            if any_sp_field && !all_sp_required {
-                bail!(
-                    "adlsgen2: service-principal auth requires all three of \
-                     adlsgen2.tenant_id, adlsgen2.client_id, and adlsgen2.client_secret \
-                     to be set. (adlsgen2.authority_host is optional and defaults to the \
-                     public Azure AAD endpoint.)"
-                );
-            }
-            // Defense in depth: reqsign POSTs the OAuth token request — carrying the
-            // client_secret to this host. Require a bare https origin: no userinfo,
-            // no query, no fragment, and no path beyond "/". The value itself is not
-            // echoed into error messages in case a user pasted a secret by mistake.
-            if let Some(host) = sp_authority {
-                let parsed = Url::parse(host).map_err(|_| {
-                    anyhow!(
-                        "adlsgen2.authority_host does not parse as a URL ({} chars)",
-                        host.len()
-                    )
-                })?;
-                if parsed.scheme() != "https" {
-                    bail!(
-                        "adlsgen2.authority_host must use the https scheme, got {}",
-                        parsed.scheme()
-                    );
-                }
-                if !parsed.username().is_empty() || parsed.password().is_some() {
-                    bail!("adlsgen2.authority_host must not contain userinfo");
-                }
-                if parsed.query().is_some() || parsed.fragment().is_some() {
-                    bail!("adlsgen2.authority_host must not contain a query or fragment");
-                }
-                if !matches!(parsed.path(), "" | "/") {
-                    bail!("adlsgen2.authority_host must not contain a path component");
-                }
-            }
-
-            if let (Some(account_name), Some(account_key)) = (sk_account_name, sk_account_key) {
-                iceberg_configs.insert(ADLS_ACCOUNT_NAME.to_owned(), account_name.to_owned());
-                iceberg_configs.insert(ADLS_ACCOUNT_KEY.to_owned(), account_key.to_owned());
+            let adls_props = self.adls_file_io_props()?;
+            if !adls_props.is_empty() {
                 require_rest("adlsgen2")?;
-            }
-
-            if let (Some(tenant_id), Some(client_id), Some(client_secret)) =
-                (sp_tenant, sp_client, sp_secret)
-            {
-                iceberg_configs.insert(ADLS_TENANT_ID.to_owned(), tenant_id.to_owned());
-                iceberg_configs.insert(ADLS_CLIENT_ID.to_owned(), client_id.to_owned());
-                iceberg_configs.insert(ADLS_CLIENT_SECRET.to_owned(), client_secret.to_owned());
-                // Strip trailing slash to prevent double slash
-                let authority_host = sp_authority
-                    .unwrap_or(ADLS_DEFAULT_AUTHORITY_HOST)
-                    .trim_end_matches('/')
-                    .to_owned();
-                iceberg_configs.insert(ADLS_AUTHORITY_HOST.to_owned(), authority_host);
-                require_rest("adlsgen2")?;
+                iceberg_configs.extend(adls_props);
             }
 
             match &self.warehouse_path {
@@ -1091,11 +1114,11 @@ impl IcebergCommon {
                         java_catalog_configs
                             .insert("rest.signing-name".to_owned(), rest_signing_name.clone());
                     }
-                    if let Some(rest_sigv4_enabled) = self.rest_sigv4_enabled {
-                        java_catalog_configs.insert(
-                            "rest.sigv4-enabled".to_owned(),
-                            rest_sigv4_enabled.to_string(),
-                        );
+                    if self.rest_sigv4_enabled == Some(true) {
+                        // Equivalent to the legacy `rest.sigv4-enabled=true`, which is
+                        // deprecated since Iceberg 1.10 and warns on every catalog load.
+                        java_catalog_configs
+                            .insert("rest.auth.type".to_owned(), "sigv4".to_owned());
 
                         if let Some(access_key) = &self.s3_access_key {
                             java_catalog_configs
@@ -1106,6 +1129,15 @@ impl IcebergCommon {
                             java_catalog_configs
                                 .insert("rest.secret-access-key".to_owned(), secret_key.clone());
                         }
+                    }
+                    // Iceberg 1.10+ infers `rest.auth.type=oauth2` from `credential`/`token`
+                    // when it is unset, warning on every catalog load. Set it explicitly.
+                    if !java_catalog_configs.contains_key("rest.auth.type")
+                        && (java_catalog_configs.contains_key("credential")
+                            || java_catalog_configs.contains_key("token"))
+                    {
+                        java_catalog_configs
+                            .insert("rest.auth.type".to_owned(), "oauth2".to_owned());
                     }
                 }
                 JniCatalogImpl::Glue => {
@@ -1311,6 +1343,99 @@ mod tests {
     }
 
     #[test]
+    fn test_gcs_vended_rest_catalog_passes_google_authentication() {
+        let common = IcebergCommon {
+            catalog_uri: Some("https://catalog.example".to_owned()),
+            warehouse_path: Some("gs://bucket/warehouse".to_owned()),
+            catalog_security: Some("google".to_owned()),
+            gcp_auth_scopes: Some("scope-a,scope-b".to_owned()),
+            gcs_credential: Some("service-account-json".to_owned()),
+            catalog_header: Some("x-goog-user-project=billing-project".to_owned()),
+            vended_credentials: Some(true),
+            ..test_common("rest")
+        };
+        assert_eq!(
+            common.resolve_catalog_kind().unwrap(),
+            IcebergCatalogKind::Rest(IcebergCatalogRuntime::NativeRust)
+        );
+        let CatalogBuildPlan::NativeRest(props) = common.build_native_rest_catalog_props().unwrap()
+        else {
+            panic!("expected native REST catalog");
+        };
+        assert_eq!(props["rest.auth.type"], "google");
+        assert_eq!(props["gcp.auth.scopes"], "scope-a,scope-b");
+        assert_eq!(props[GCS_CREDENTIALS_JSON], "service-account-json");
+        assert_eq!(props["warehouse"], "gs://bucket/warehouse");
+        assert_eq!(
+            props["header.X-Iceberg-Access-Delegation"],
+            "vended-credentials"
+        );
+        assert_eq!(props["header.x-goog-user-project"], "billing-project");
+        assert!(!props.contains_key("io-impl"));
+    }
+
+    #[test]
+    fn test_native_google_catalog_supports_adc_without_storage_credentials() {
+        let common = IcebergCommon {
+            catalog_uri: Some("https://catalog.example".to_owned()),
+            catalog_security: Some("google".to_owned()),
+            vended_credentials: Some(true),
+            ..test_common("rest_rust")
+        };
+        let CatalogBuildPlan::NativeRest(props) = common.build_native_rest_catalog_props().unwrap()
+        else {
+            panic!("expected native REST catalog");
+        };
+        assert_eq!(props["rest.auth.type"], "google");
+        assert!(!props.contains_key(GCS_CREDENTIALS_JSON));
+        assert!(!props.contains_key("gcp.auth.scopes"));
+    }
+
+    #[test]
+    fn test_native_google_catalog_rejects_adc_when_default_credentials_disabled() {
+        for security in ["google", "GoOgLe"] {
+            for (credential, token) in [
+                (None, None),
+                (Some("client:secret"), None),
+                (None, Some("catalog-token")),
+                (Some("client:secret"), Some("catalog-token")),
+            ] {
+                let common = IcebergCommon {
+                    catalog_security: Some(security.to_owned()),
+                    catalog_credential: credential.map(str::to_owned),
+                    catalog_token: token.map(str::to_owned),
+                    ..test_common("rest_rust")
+                };
+                assert_eq!(
+                    common
+                        .validate_native_rest_catalog_auth(true)
+                        .unwrap_err()
+                        .to_string(),
+                    "`catalog.security=google` requires `gcs.credential` when `DISABLE_DEFAULT_CREDENTIAL=true`"
+                );
+                common.validate_native_rest_catalog_auth(false).unwrap();
+
+                let common = IcebergCommon {
+                    gcs_credential: Some("service-account-json".to_owned()),
+                    ..common
+                };
+                common.validate_native_rest_catalog_auth(true).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_native_non_google_catalog_auth_does_not_require_gcs_credentials() {
+        for security in [None, Some("none"), Some("oauth2")] {
+            let common = IcebergCommon {
+                catalog_security: security.map(str::to_owned),
+                ..test_common("rest_rust")
+            };
+            common.validate_native_rest_catalog_auth(true).unwrap();
+        }
+    }
+
+    #[test]
     fn test_s3_path_style_access_preserves_existing_default() {
         let common = test_common("storage");
         assert!(common.effective_s3_path_style_access());
@@ -1383,6 +1508,41 @@ mod tests {
     }
 
     #[test]
+    fn test_rest_jni_catalog_sets_auth_type_explicitly() {
+        let build = |common: IcebergCommon, props: &[(&str, &str)]| {
+            let props = props
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect();
+            common
+                .build_jni_catalog_configs(JniCatalogImpl::Rest, &props)
+                .unwrap()
+                .1
+        };
+        let oauth2 = IcebergCommon {
+            catalog_credential: Some("client-id:client-secret".to_owned()),
+            rest_sigv4_enabled: Some(false),
+            ..test_common("rest")
+        };
+
+        let configs = build(oauth2.clone(), &[]);
+        assert_eq!(configs.get("rest.auth.type").unwrap(), "oauth2");
+        assert!(!configs.contains_key("rest.sigv4-enabled"));
+
+        let configs = build(oauth2, &[("rest.auth.type", "basic")]);
+        assert_eq!(configs.get("rest.auth.type").unwrap(), "basic");
+
+        let sigv4 = IcebergCommon {
+            catalog_token: Some("token".to_owned()),
+            rest_sigv4_enabled: Some(true),
+            ..test_common("rest")
+        };
+        let configs = build(sigv4, &[]);
+        assert_eq!(configs.get("rest.auth.type").unwrap(), "sigv4");
+        assert!(!configs.contains_key("rest.sigv4-enabled"));
+    }
+
+    #[test]
     fn test_adlsgen2_service_principal_populates_file_io_configs_with_default_authority_host() {
         let common = test_adlsgen2_service_principal_common(None);
 
@@ -1409,6 +1569,7 @@ mod tests {
             adlsgen2_client_id: Some("client-uuid".to_owned()),
             adlsgen2_client_secret: Some("secret-value".to_owned()),
             adlsgen2_authority_host: authority_host.map(str::to_owned),
+            catalog_uri: Some("http://localhost:8181".to_owned()),
             warehouse_path: Some("abfss://wh@acct.dfs.core.windows.net/wh".to_owned()),
             ..test_common("rest")
         }

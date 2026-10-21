@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
@@ -22,12 +22,13 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use serde::{Deserialize, Serialize};
 use tiberius::{Config, Query, QueryItem};
 
+use crate::connector_common::sql_server::mssql_type_to_rw_type;
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::parser::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row_with_strict_pk};
+use crate::parser::{ScalarImplTiberiusWrapper, SqlServerRowDecoder};
 use crate::sink::sqlserver::SqlServerClient;
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
@@ -110,7 +111,9 @@ impl SqlServerExternalTable {
                     INFORMATION_SCHEMA.COLUMNS
                 WHERE
                     TABLE_SCHEMA = '{}'
-                    AND TABLE_NAME = '{}'",
+                    AND TABLE_NAME = '{}'
+                ORDER BY
+                    ORDINAL_POSITION",
                 config.schema.clone(),
                 config.table.clone(),
             ));
@@ -125,7 +128,11 @@ impl SqlServerExternalTable {
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
-                            mssql_type_to_rw_type(col_type, col_name)?,
+                            mssql_type_to_rw_type(col_type).with_context(|| {
+                                format!(
+                                    "unsupported SQL Server data type {col_type:?}, column name: {col_name}"
+                                )
+                            })?,
                         ));
                     }
                 }
@@ -143,7 +150,9 @@ impl SqlServerExternalTable {
                     tc.TABLE_NAME = kcu.TABLE_NAME
                 WHERE
                     tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND
-                    tc.TABLE_SCHEMA = '{}' AND tc.TABLE_NAME = '{}'",
+                    tc.TABLE_SCHEMA = '{}' AND tc.TABLE_NAME = '{}'
+                ORDER BY
+                    kcu.ORDINAL_POSITION",
                 config.schema, config.table,
             ));
 
@@ -182,35 +191,6 @@ impl SqlServerExternalTable {
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
     }
-}
-
-fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
-    let dtype = match col_type.to_lowercase().as_str() {
-        "bit" => DataType::Boolean,
-        "binary" | "varbinary" => DataType::Bytea,
-        "tinyint" | "smallint" => DataType::Int16,
-        "integer" | "int" => DataType::Int32,
-        "bigint" => DataType::Int64,
-        "real" => DataType::Float32,
-        "float" => DataType::Float64,
-        "decimal" | "numeric" => DataType::Decimal,
-        "date" => DataType::Date,
-        "time" => DataType::Time,
-        "datetime" | "datetime2" | "smalldatetime" => DataType::Timestamp,
-        "datetimeoffset" => DataType::Timestamptz,
-        "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
-        | "uniqueidentifier" => DataType::Varchar,
-        "money" => DataType::Decimal,
-        mssql_type => {
-            return Err(anyhow!(
-                "Unsupported Sql Server data type: {:?}, column name: {}",
-                mssql_type,
-                col_name
-            )
-            .into());
-        }
-    };
-    Ok(dtype)
 }
 
 #[derive(Debug)]
@@ -392,12 +372,21 @@ impl SqlServerExternalTableReader {
             }
         }
 
-        let stream = sql.query(&mut client.inner_client).await?.into_row_stream();
+        let mut query_stream = sql.query(&mut client.inner_client).await?;
+        let decoder = SqlServerRowDecoder::new(
+            query_stream
+                .columns()
+                .await?
+                .context("SQL Server snapshot query returned no result metadata")?,
+            &self.rw_schema,
+        )?;
+        let stream = query_stream.into_row_stream();
 
         let row_stream = stream.map(|res| {
             // convert sql server row into OwnedRow
             let mut row = res?;
-            sql_server_row_to_owned_row_with_strict_pk(&mut row, &self.rw_schema, &self.pk_indices)
+            decoder
+                .decode_with_strict_pk(&mut row, &self.pk_indices)
                 .map_err(ConnectorError::from)
         });
 
