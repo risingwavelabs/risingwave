@@ -43,7 +43,19 @@ jobs:
         with:
           java-version: ${{ matrix.java }}
           distribution: 'adopt'
-          cache: 'maven'
+      - name: Get the Debezium submodule commit
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
+        id: debezium
+        run: echo "commit=$(git rev-parse HEAD:java/debezium)" >> "$GITHUB_OUTPUT"
+      - name: Cache the local Maven repository
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: v1-cache-maven-${{ runner.os }}-${{ hashFiles('.github/workflows/connector-node-integration.yml') }}-${{ hashFiles('java/build-debezium.sh') }}-${{ hashFiles('java/pom.xml') }}-${{ steps.debezium.outputs.commit }}
+          restore-keys: |
+            v1-cache-maven-${{ runner.os }}-
+            v1-cache-maven-
       - name: Setup Rust toolchain
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: rustup show
