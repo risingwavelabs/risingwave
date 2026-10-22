@@ -125,6 +125,8 @@ public class Binding {
 
     public static native void cdcSourceSenderClose(long channelPtr);
 
+    public static native boolean sendOracleSnapshotResponseToChannel(long channelPtr, byte[] msg);
+
     public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
             recvSinkWriterRequestFromChannel(long channelPtr);
 
