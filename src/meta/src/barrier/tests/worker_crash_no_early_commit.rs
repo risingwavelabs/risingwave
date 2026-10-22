@@ -43,6 +43,7 @@ use tokio::task::yield_now;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::MetaResult;
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::context::recovery::LoadedRecoveryContext;
@@ -141,21 +142,14 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unreachable!()
     }
 
-    async fn handle_list_finished_source_ids(
+    async fn handle_refresh_load_progress(
         &self,
-        _list_finished_source_ids: Vec<
-            risingwave_pb::stream_service::barrier_complete_response::PbListFinishedSource,
-        >,
+        _refresh_load_progress: Vec<crate::barrier::load_progress::LoadReport>,
     ) -> MetaResult<()> {
         unimplemented!()
     }
 
-    async fn handle_load_finished_source_ids(
-        &self,
-        _load_finished_source_ids: Vec<
-            risingwave_pb::stream_service::barrier_complete_response::PbLoadFinishedSource,
-        >,
-    ) -> MetaResult<()> {
+    async fn apply_bounded_load_action(&self, _action: BoundedLoadAction) -> MetaResult<()> {
         unimplemented!()
     }
 

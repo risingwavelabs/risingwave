@@ -1616,7 +1616,7 @@ impl DatabaseCheckpointControl {
                 staging_table_id,
                 trigger_time,
             }) => {
-                let mutation = Some(Command::refresh_to_mutation(table_id, associated_source_id));
+                let mutation = Some(Command::start_load_mutation(associated_source_id));
                 let actors = RefreshCycleActors::from_fragments(
                     self.database_info.job_fragment_infos(table_id.as_job_id()),
                 );
@@ -1637,12 +1637,17 @@ impl DatabaseCheckpointControl {
                 )
             }
 
-            Some(Command::ListFinish {
-                table_id: _,
-                associated_source_id,
-            }) => {
-                let mutation = Some(Command::list_finish_to_mutation(associated_source_id));
+            Some(Command::ListFinish { source_id }) => {
+                let mutation = Some(Command::list_finish_mutation(source_id));
                 self.apply_simple_command(mutation, "ListFinish")
+            }
+
+            Some(Command::StartBoundedLoad { job_id, source_id }) => {
+                let mutation = self
+                    .database_info
+                    .install_bounded_load_tracker(job_id, source_id)
+                    .then(|| Command::start_load_mutation(source_id));
+                self.apply_simple_command(mutation, "StartBoundedLoad")
             }
 
             Some(Command::LoadFinish {
@@ -1967,6 +1972,7 @@ impl DatabaseCheckpointControl {
                             fragment_infos: new_fragment_info,
                             subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
                             status: CreateStreamingJobStatus::Created,
+                            bounded_load_tracker: None, // no bounded ingestion for snapshot backfill
                             cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
                         });
                     }

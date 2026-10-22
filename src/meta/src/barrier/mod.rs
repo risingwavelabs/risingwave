@@ -28,6 +28,7 @@ use crate::notification::Notifier;
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
+pub(crate) mod bounded_progress;
 pub mod cdc_progress;
 mod checkpoint;
 mod command;
@@ -36,6 +37,7 @@ mod complete_task;
 pub(super) mod context;
 mod edge_builder;
 mod info;
+mod load_progress;
 mod manager;
 mod partial_graph;
 mod progress;

@@ -24,14 +24,14 @@ use risingwave_common::id::{JobId, PartialGraphId};
 use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
-};
+use risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedActor;
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
+use crate::barrier::load_progress::LoadReport;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
@@ -48,7 +48,9 @@ use crate::manager::sink_coordination::{RecoveryStart, SinkCoordinatorManager};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::serving::ServingVnodeMappingRef;
 use crate::stream::source_manager::SplitAssignment;
-use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
+use crate::stream::{
+    BoundedLoadManagerRef, GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef,
+};
 
 #[derive(Debug)]
 pub(super) struct CreateIndependentStreamingJobCommandInfo {
@@ -123,6 +125,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         job: TrackingJob,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
+    fn apply_bounded_load_action(
+        &self,
+        action: BoundedLoadAction,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
     fn finish_cdc_table_backfill(
         &self,
         job_id: JobId,
@@ -142,14 +149,9 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         database_id: DatabaseId,
     ) -> MetaResult<DatabaseRuntimeInfoSnapshot>;
 
-    fn handle_list_finished_source_ids(
+    fn handle_refresh_load_progress(
         &self,
-        list_finished_source_ids: Vec<PbListFinishedSource>,
-    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
-
-    fn handle_load_finished_source_ids(
-        &self,
-        load_finished_source_ids: Vec<PbLoadFinishedSource>,
+        refresh_load_progress: Vec<LoadReport>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     fn handle_refresh_finished_actors(
@@ -202,6 +204,8 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     pub(super) refresh_manager: GlobalRefreshManagerRef,
 
+    bounded_load_manager: BoundedLoadManagerRef,
+
     sink_manager: SinkCoordinatorManager,
 
     pub(super) iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
@@ -221,6 +225,7 @@ impl GlobalBarrierWorkerContextImpl {
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
         refresh_manager: GlobalRefreshManagerRef,
+        bounded_load_manager: BoundedLoadManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
@@ -235,6 +240,7 @@ impl GlobalBarrierWorkerContextImpl {
             _scale_controller: scale_controller,
             env,
             refresh_manager,
+            bounded_load_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
             iceberg_compaction_manager,

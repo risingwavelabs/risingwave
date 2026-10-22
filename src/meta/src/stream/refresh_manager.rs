@@ -306,6 +306,29 @@ impl GlobalRefreshManager {
         Ok(())
     }
 
+    pub fn report_source_stage(
+        &self,
+        source_id: SourceId,
+        stage: RefreshStage,
+        actors: HashSet<ActorId>,
+    ) -> MetaResult<()> {
+        let table_id = self
+            .cycles
+            .lock()
+            .trackers
+            .iter()
+            .find(|(_, tracker)| tracker.associated_source_id == source_id)
+            .map(|(table_id, _)| *table_id);
+
+        let Some(table_id) = table_id else {
+            // The cycle was abandoned or the table dropped meanwhile.
+            tracing::warn!(%source_id, ?stage, ?actors, "ignore refresh stage report without tracker");
+            return Ok(());
+        };
+
+        self.report_stage(table_id, stage, actors)
+    }
+
     /// Schedules the next stage once every actor of the stage reported; an unexpected reporter
     /// fails the barrier, which abandons the cycle through a recovery.
     pub fn report_stage(
@@ -331,8 +354,7 @@ impl GlobalRefreshManager {
         );
         let command = match stage {
             RefreshStage::List => Command::ListFinish {
-                table_id,
-                associated_source_id,
+                source_id: associated_source_id,
             },
             RefreshStage::Fetch => Command::LoadFinish {
                 table_id,

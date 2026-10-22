@@ -69,8 +69,8 @@ use crate::manager::{
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::serving::ServingVnodeMappingRef;
 use crate::stream::{
-    GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
-    rendered_layout_matches_current,
+    BoundedLoadManagerRef, GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef,
+    build_reschedule_commands, rendered_layout_matches_current,
 };
 use crate::{MetaError, MetaResult};
 
@@ -305,6 +305,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         refresh_manager: GlobalRefreshManagerRef,
+        bounded_load_manager: BoundedLoadManagerRef,
     ) -> Self {
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
@@ -318,6 +319,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             scale_controller,
             env.clone(),
             refresh_manager,
+            bounded_load_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
             iceberg_compaction_manager,
