@@ -1,0 +1,80 @@
+control substitution on
+
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_col_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_col_slot';
+    DROP TABLE IF EXISTS quoted_col_tbl;
+"
+
+system ok
+psql -c "
+    CREATE TABLE quoted_col_tbl (
+        id int PRIMARY KEY,
+        \"a\"\"b\" int,
+        note varchar
+    );
+    INSERT INTO quoted_col_tbl (id, \"a\"\"b\", note) VALUES
+        (1, 10, 'backfill_1'),
+        (2, 20, 'backfill_2');
+"
+
+statement ok
+create source s with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'quoted_col_slot'
+);
+
+statement ok
+create table quoted_col_tbl (
+    id int primary key,
+    "a""b" int,
+    note varchar
+) from s table 'public.quoted_col_tbl';
+
+query IIT retry 6 backoff 1s
+select id, "a""b", note from quoted_col_tbl order by id;
+----
+1 10 backfill_1
+2 20 backfill_2
+
+system ok
+psql -c "
+    INSERT INTO quoted_col_tbl (id, \"a\"\"b\", note) VALUES (3, 30, 'stream_1');
+"
+
+query IIT retry 6 backoff 1s
+select id, "a""b", note from quoted_col_tbl order by id;
+----
+1 10 backfill_1
+2 20 backfill_2
+3 30 stream_1
+
+statement ok
+drop table quoted_col_tbl;
+
+statement ok
+drop source s;
+
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_col_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_col_slot';
+    DROP TABLE IF EXISTS quoted_col_tbl;
+"

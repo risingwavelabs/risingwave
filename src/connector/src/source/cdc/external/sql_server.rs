@@ -443,7 +443,7 @@ impl SqlServerExternalTableReader {
     }
 
     fn quote_column(column: &str) -> String {
-        format!("\"{}\"", column)
+        format!("\"{}\"", column.replace('"', "\"\""))
     }
 }
 

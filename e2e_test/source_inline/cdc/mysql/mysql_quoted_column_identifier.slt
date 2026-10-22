@@ -1,0 +1,65 @@
+control substitution on
+
+statement ok
+drop source if exists s_mysql_quoted_col cascade;
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'quoted_col_cdc'@'%';
+    DROP DATABASE IF EXISTS mysql_quoted_col;
+    CREATE DATABASE mysql_quoted_col;
+    CREATE USER 'quoted_col_cdc'@'%' IDENTIFIED BY 'quoted_col_cdc_pwd';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'quoted_col_cdc'@'%';
+    USE mysql_quoted_col;
+    CREATE TABLE upstream_table (
+        id INT PRIMARY KEY,
+        \`a\`\`b\` INT,
+        note VARCHAR(50)
+    );
+    INSERT INTO upstream_table VALUES
+        (1, 10, 'backfill_1'),
+        (2, 20, 'backfill_2');
+"
+
+statement ok
+create source s_mysql_quoted_col with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = 'quoted_col_cdc',
+  password = 'quoted_col_cdc_pwd',
+  database.name = 'mysql_quoted_col'
+);
+
+statement ok
+create table rw_mysql_quoted_col (
+    id int primary key,
+    "a`b" int,
+    note varchar
+) from s_mysql_quoted_col table 'mysql_quoted_col.upstream_table';
+
+query IIT retry 10 backoff 1s
+select id, "a`b", note from rw_mysql_quoted_col order by id;
+----
+1 10 backfill_1
+2 20 backfill_2
+
+system ok
+mysql -e "
+    USE mysql_quoted_col;
+    INSERT INTO upstream_table VALUES (3, 30, 'stream_1');
+"
+
+query IIT retry 10 backoff 1s
+select id, "a`b", note from rw_mysql_quoted_col order by id;
+----
+1 10 backfill_1
+2 20 backfill_2
+3 30 stream_1
+
+statement ok
+drop source s_mysql_quoted_col cascade;
+
+system ok
+mysql -e "
+    DROP DATABASE IF EXISTS mysql_quoted_col;
+    DROP USER IF EXISTS 'quoted_col_cdc'@'%';
+"

@@ -484,7 +484,7 @@ impl PostgresExternalTableReader {
     }
 
     fn quote_column(column: &str) -> String {
-        format!("\"{}\"", column)
+        format!("\"{}\"", column.replace('"', "\"\""))
     }
 
     async fn min_and_max(
