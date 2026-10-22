@@ -168,25 +168,23 @@ pub(crate) fn derive_with_options_for_cdc_table(
     unreachable!("All valid CDC connectors should have returned by now")
 }
 
-/// Oracle's unquoted identifiers are case-insensitive, but its catalogs and Debezium
-/// topic suffix use upper case. Quoted names (including dots inside names) are not supported.
+/// Both parts are exact Oracle names, like `schema.name` and `table.name`. Oracle stores
+/// unquoted names in upper case, so `app.orders` does not match a table created as `APP.ORDERS`.
+/// Names containing dots are not supported.
 fn parse_oracle_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
-    fn is_unquoted_identifier(name: &str) -> bool {
-        let mut chars = name.chars();
-        chars.next().is_some_and(|c| c.is_ascii_alphabetic())
-            && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '$' | '#'))
-    }
-
-    let (schema, table) = external_table_name.split_once('.').ok_or_else(|| {
-        anyhow!("Invalid Oracle CDC table name '{external_table_name}': expected schema.table")
-    })?;
-    if !is_unquoted_identifier(schema) || !is_unquoted_identifier(table) {
-        return Err(anyhow!(
-            "Invalid Oracle CDC table name '{external_table_name}': expected unquoted schema.table identifiers"
+    match external_table_name
+        .split('.')
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [schema, table] if !schema.is_empty() && !table.is_empty() => {
+            Ok(((*schema).to_owned(), (*table).to_owned()))
+        }
+        _ => Err(anyhow!(
+            "Invalid Oracle CDC table name '{external_table_name}': expected schema.table"
         )
-        .into());
+        .into()),
     }
-    Ok((schema.to_ascii_uppercase(), table.to_ascii_uppercase()))
 }
 
 /// Parse the schema/table name from the CDC `TABLE` clause.

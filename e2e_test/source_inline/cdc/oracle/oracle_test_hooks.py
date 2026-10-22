@@ -190,6 +190,7 @@ def check_heartbeat_seed(
     context: HookContext,
     *,
     owner: str,
+    table=TEST_ORACLE_HEARTBEAT_TABLE,
     allowed_values=None,
     timeout=0,
 ) -> None:
@@ -200,7 +201,7 @@ def check_heartbeat_seed(
         with _connect_as_sys(TEST_ORACLE_PDB) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    f"SELECT HEARTBEAT FROM {owner}.{TEST_ORACLE_HEARTBEAT_TABLE} WHERE ID = 1"
+                    f'SELECT HEARTBEAT FROM "{owner}"."{table}" WHERE ID = 1'
                 )
                 rows = cursor.fetchall()
         if len(rows) == 1:
@@ -209,7 +210,7 @@ def check_heartbeat_seed(
                 return
         if time.monotonic() >= deadline:
             raise RuntimeError(
-                f"unexpected seed in {owner}.{TEST_ORACLE_HEARTBEAT_TABLE}: {rows}; "
+                f"unexpected seed in {owner}.{table}: {rows}; "
                 f"allowed_values={allowed_values}"
             )
         time.sleep(CHECKPOINT_POLL_INTERVAL_SECONDS)
