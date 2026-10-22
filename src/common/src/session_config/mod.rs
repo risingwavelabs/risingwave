@@ -415,6 +415,16 @@ pub struct SessionConfig {
     #[parameter(default = None)]
     streaming_cache_refill_policy: OptionConfig<CacheRefillPolicy>,
 
+    /// Override the asynchronous projection chunk window for new streaming jobs in this session.
+    /// Unset inherits the compute-node config (default 1); 0 means unlimited.
+    #[parameter(default = None)]
+    streaming_project_expr_concurrency: OptionConfig<usize>,
+
+    /// Override the asynchronous projection visible-row budget for new streaming jobs in this
+    /// session. Unset inherits the compute-node config (default 0); 0 means unlimited.
+    #[parameter(default = None)]
+    streaming_project_expr_inflight_request_concurrency: OptionConfig<usize>,
+
     /// Run DDL statements in background
     #[parameter(default = false)]
     background_ddl: bool,
@@ -707,6 +717,22 @@ impl SessionConfig {
                 .upsert("streaming.developer.cache_refill_policy", v)
                 .unwrap();
         }
+        if let Some(v) = self.streaming_project_expr_concurrency.as_ref() {
+            table
+                .upsert("streaming.developer.project_expr_concurrency", v)
+                .unwrap();
+        }
+        if let Some(v) = self
+            .streaming_project_expr_inflight_request_concurrency
+            .as_ref()
+        {
+            table
+                .upsert(
+                    "streaming.developer.project_expr_inflight_request_concurrency",
+                    v,
+                )
+                .unwrap();
+        }
 
         let res = toml::to_string(&table)?;
 
@@ -795,6 +821,36 @@ mod test {
             merged.developer.cache_refill_policy,
             CacheRefillPolicy::Both
         );
+    }
+
+    #[test]
+    fn test_initial_projection_config_override() {
+        let mut config = SessionConfig::default();
+        assert_eq!(config.to_initial_streaming_config_override().unwrap(), "");
+        config
+            .set_streaming_project_expr_concurrency(Some(0).into(), &mut ())
+            .unwrap();
+        config
+            .set_streaming_project_expr_inflight_request_concurrency(Some(13).into(), &mut ())
+            .unwrap();
+        let merged = merge_streaming_config_section(
+            &StreamingConfig::default(),
+            &config.to_initial_streaming_config_override().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(merged.developer.project_expr_concurrency, 0);
+        assert_eq!(
+            merged.developer.project_expr_inflight_request_concurrency,
+            13
+        );
+        config
+            .set_streaming_project_expr_concurrency(None.into(), &mut ())
+            .unwrap();
+        config
+            .set_streaming_project_expr_inflight_request_concurrency(None.into(), &mut ())
+            .unwrap();
+        assert_eq!(config.to_initial_streaming_config_override().unwrap(), "");
     }
 
     #[test]

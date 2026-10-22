@@ -358,7 +358,7 @@ fn invalid_param_err(reason: impl Into<String>) -> ExprError {
     }
 }
 
-#[build_function("openai_embedding(jsonb, varchar) -> float4[]")]
+#[build_function("openai_embedding(jsonb, varchar) -> float4[]", always_async)]
 fn build_openai_embedding_expr(
     _: DataType,
     mut children: Vec<BoxedExpression>,

@@ -708,6 +708,14 @@ impl LogicalPlanRoot {
             ctx.trace(plan.explain_to_string());
         }
 
+        // Run after expression rewrites and project merging, so asynchronous evaluation windows
+        // never include unrelated synchronous computations. Keep nested expressions intact.
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Split asynchronous StreamProject",
+            vec![StreamProjectSplitRule::create()],
+            ApplyOrder::BottomUp,
+        ))?;
+
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 

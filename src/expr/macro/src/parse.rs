@@ -78,6 +78,8 @@ impl Parse for FunctionAttr {
                 parsed.type_infer = Some(get_value()?);
             } else if meta.path().is_ident("generic") {
                 parsed.generic = Some(get_value()?);
+            } else if meta.path().is_ident("always_async") {
+                parsed.always_async = true;
             } else if meta.path().is_ident("volatile") {
                 parsed.volatile = true;
             } else if meta.path().is_ident("deprecated") || meta.path().is_ident("internal") {

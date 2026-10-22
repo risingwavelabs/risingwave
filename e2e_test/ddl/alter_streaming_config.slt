@@ -180,3 +180,111 @@ select name, key, value from rw_streaming_job_config where name = 'cf_default';
 
 statement ok
 drop table cf_default;
+
+# Projection session settings are captured independently by each newly created job.
+statement ok
+set streaming_project_expr_concurrency = 0;
+
+statement ok
+set streaming_project_expr_inflight_request_concurrency = 13;
+
+statement ok
+create table cf_projection_a (v int);
+
+statement ok
+set streaming_project_expr_concurrency = 3;
+
+statement ok
+set streaming_project_expr_inflight_request_concurrency = 5;
+
+statement ok
+create table cf_projection_b (v int);
+
+query TTT rowsort
+select name, key, value from rw_streaming_job_config where name in ('cf_projection_a', 'cf_projection_b');
+----
+cf_projection_a streaming.developer.project_expr_concurrency 0
+cf_projection_a streaming.developer.project_expr_inflight_request_concurrency 13
+cf_projection_b streaming.developer.project_expr_concurrency 3
+cf_projection_b streaming.developer.project_expr_inflight_request_concurrency 5
+
+statement ok
+alter table cf_projection_a set config (streaming.developer.project_expr_inflight_request_concurrency = 0);
+
+query TTT rowsort
+select name, key, value from rw_streaming_job_config where name in ('cf_projection_a', 'cf_projection_b');
+----
+cf_projection_a streaming.developer.project_expr_concurrency 0
+cf_projection_a streaming.developer.project_expr_inflight_request_concurrency 0
+cf_projection_b streaming.developer.project_expr_concurrency 3
+cf_projection_b streaming.developer.project_expr_inflight_request_concurrency 5
+
+statement ok
+alter table cf_projection_a reset config (streaming.developer.project_expr_concurrency, streaming.developer.project_expr_inflight_request_concurrency);
+
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf_projection_a';
+----
+
+statement ok
+set streaming_project_expr_concurrency = default;
+
+statement ok
+set streaming_project_expr_inflight_request_concurrency = default;
+
+statement ok
+create table cf_projection_default (v int);
+
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf_projection_default';
+----
+
+statement ok
+drop table cf_projection_a;
+
+statement ok
+drop table cf_projection_b;
+
+statement ok
+drop table cf_projection_default;
+
+# Execute a mixed projection with a row budget smaller than its input chunk. The async
+# expression remains conditional, so positive rows never evaluate the slow branch.
+statement ok
+set streaming_project_expr_concurrency = 0;
+
+statement ok
+set streaming_project_expr_inflight_request_concurrency = 1;
+
+statement ok
+create table cf_projection_input (v int) append only;
+
+statement ok
+create materialized view cf_projection_result as
+select v, v + 1 as next_v, case when v < 0 then pg_sleep(30) else v end as guarded
+from cf_projection_input;
+
+statement ok
+insert into cf_projection_input values (1), (2), (3);
+
+statement ok
+flush;
+
+query III rowsort
+select v, next_v, guarded from cf_projection_result;
+----
+1 2 1
+2 3 2
+3 4 3
+
+statement ok
+drop materialized view cf_projection_result;
+
+statement ok
+drop table cf_projection_input;
+
+statement ok
+set streaming_project_expr_concurrency = default;
+
+statement ok
+set streaming_project_expr_inflight_request_concurrency = default;

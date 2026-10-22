@@ -442,6 +442,7 @@ pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Different from `#[function]`, which implements the `Expression` trait for a rust scalar function,
 /// `#[build_function]` is used when you already implemented `Expression` manually.
+/// Set `always_async` when the expression is asynchronous even with synchronous children.
 ///
 /// The expected input is a "build" function:
 /// ```ignore
@@ -531,6 +532,8 @@ struct FunctionAttr {
     type_infer: Option<String>,
     /// Generic type.
     generic: Option<String>,
+    /// Whether a custom scalar builder always returns an asynchronous expression.
+    always_async: bool,
     /// Whether the function is volatile.
     volatile: bool,
     /// If true, the function is unavailable on the frontend.
