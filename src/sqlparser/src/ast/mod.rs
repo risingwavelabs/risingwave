@@ -4089,6 +4089,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_parse_cdc_table_excluded_columns() {
+        let cols = parse_cdc_table_excluded_columns(" a, b ,,c");
+        assert_eq!(cols, ["a", "b", "c"].map(String::from).into());
+    }
+
+    #[test]
     fn test_sql_option_redaction_preserves_primary_key() {
         let redaction = Arc::new(SqlOptionRedaction::new(
             [
