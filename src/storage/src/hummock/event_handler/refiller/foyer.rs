@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::ops::{Bound, Range};
-use std::sync::Arc;
 use std::time::Instant;
 
 use ::foyer::RangeBoundsExt;
@@ -30,18 +29,20 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::key::{FullKey, vnode_range};
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use thiserror_ext::AsReport;
+use tokio::task::JoinHandle;
 
-use super::{CacheRefillContext, SpawnRefillTask, TableCacheRefillContext};
+use super::{CacheRefillContext, TableCacheRefillContext};
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex, TableHolder,
 };
 use crate::monitor::{GLOBAL_CACHE_REFILL_METRICS, StoreLocalStatistic};
 
-pub(super) fn default_spawn_refill_task() -> SpawnRefillTask {
-    Arc::new(|deltas, context| {
-        let task = CacheRefillTask { deltas, context };
-        tokio::spawn(task.run())
-    })
+pub(super) fn spawn_refill_task(
+    deltas: Vec<SstDeltaInfo>,
+    context: CacheRefillContext,
+) -> JoinHandle<()> {
+    let task = CacheRefillTask { deltas, context };
+    tokio::spawn(task.run())
 }
 
 fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> bool {
