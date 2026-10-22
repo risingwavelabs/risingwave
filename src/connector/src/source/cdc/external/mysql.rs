@@ -938,10 +938,7 @@ impl MySqlExternalTableReader {
     fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
-        conditions.push(format!(
-            "({} > :p0)",
-            Self::quote_column(&columns[0])
-        ));
+        conditions.push(format!("({} > :p0)", Self::quote_column(&columns[0])));
         for i in 2..=columns.len() {
             // '=' condition
             let mut condition = String::new();
