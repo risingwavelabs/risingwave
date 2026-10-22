@@ -1222,13 +1222,13 @@ mod tests {
     fn test_mysql_filter_expr() {
         let cols = vec!["id".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(`id` > :id)");
+        assert_eq!(expr, "(`id` > :p0)");
 
         let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
-            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+            "(`aa` > :p0) OR ((`aa` = :p0) AND (`bb` > :p1)) OR ((`aa` = :p0) AND (`bb` = :p1) AND (`cc` > :p2))"
         );
     }
 
