@@ -58,7 +58,7 @@ impl DockerServiceConfig for StarrocksConfig {
     }
 }
 
-/// Docker-backed StarRocks service.
+/// Docker-backed `StarRocks` service.
 pub struct StarrocksService(DockerService<StarrocksConfig>);
 
 impl StarrocksService {
