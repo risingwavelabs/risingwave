@@ -121,7 +121,7 @@ async fn start_v3_test_cluster(
 
     let compaction_options = if enable_compaction {
         "enable_compaction = 'true', \
-         compaction_interval_sec = '1', \
+         compaction_interval_sec = '1000', \
          compaction.trigger_snapshot_count = '1000', \
          enable_snapshot_expiration = 'false', "
     } else {
