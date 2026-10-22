@@ -15,6 +15,7 @@
 use std::mem::take;
 use std::num::NonZeroU64;
 
+use anyhow::Context;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
@@ -52,9 +53,7 @@ impl CommitCheckpointInterval {
                     .get(COMMIT_CHECKPOINT_INTERVAL)
                     .map(|value| value.parse::<NonZeroU64>())
                     .transpose()
-                    .map_err(|error| {
-                        anyhow::anyhow!("invalid `commit_checkpoint_interval`: {error}")
-                    })?
+                    .context("invalid `commit_checkpoint_interval`")?
                     .unwrap_or(
                         NonZeroU64::new(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL).unwrap(),
                     );
