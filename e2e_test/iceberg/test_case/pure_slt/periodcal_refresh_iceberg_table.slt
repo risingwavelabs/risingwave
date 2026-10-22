@@ -47,13 +47,14 @@ create table iceberg_batch_table ( primary key (id) ) with (
   catalog.type = 'storage',
   table.name = 't_refresh',
   database.name = 'public',
+  refresh_mode = 'FULL_RELOAD',
   refresh_interval_sec = 'abcdef'
 );
 ----
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Invalid parameter value: `refresh_interval_sec` must be a positive integer and larger than 0, but got: abcdef (error: invalid digit found in string)
+  Invalid parameter value: `refresh_interval_sec` must be a positive integer, but got: abcdef
 
 
 statement error
@@ -67,13 +68,14 @@ create table iceberg_batch_table ( primary key (id) ) with (
   catalog.type = 'storage',
   table.name = 't_refresh',
   database.name = 'public',
+  refresh_mode = 'FULL_RELOAD',
   refresh_interval_sec = '-10'
 );
 ----
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Invalid parameter value: `refresh_interval_sec` must be larger than 0, but got: -10
+  Invalid parameter value: `refresh_interval_sec` must be a positive integer, but got: -10
 
 
 statement error
@@ -93,7 +95,7 @@ create table iceberg_batch_table ( primary key (id) ) with (
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Invalid parameter value: `refresh_interval_sec` is not allowed when `refresh_mode` is not 'FULL_RELOAD'
+  Invalid parameter value: `refresh_interval_sec` is only allowed when `refresh_mode` is 'FULL_RELOAD'
 
 
 statement ok

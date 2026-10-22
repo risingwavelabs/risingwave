@@ -63,6 +63,7 @@ use risingwave_pb::id::{ActorId, IcebergCompactionTaskId};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_bounded_jobs_response::BoundedJob;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_compaction_status_response::IcebergCompactionStatus;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
@@ -1303,6 +1304,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_refresh_table_states(&self) -> RpcResult<Vec<RefreshTableState>> {
+        unimplemented!()
+    }
+
+    async fn list_bounded_jobs(&self) -> RpcResult<Vec<BoundedJob>> {
         unimplemented!()
     }
 
