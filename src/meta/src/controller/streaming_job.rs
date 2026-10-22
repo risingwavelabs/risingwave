@@ -108,8 +108,8 @@ pub struct AbortCreatingJobResult {
     pub aborted: bool,
     /// The database of the job, if the job was found.
     pub database_id: Option<DatabaseId>,
-    /// The aborted sinks; the caller should clear their iceberg maintenance state via
-    /// `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
+    /// The aborted sinks; the caller should retire their maintenance state and stop their
+    /// coordinators, using only sinks actually removed.
     pub aborted_sink_ids: Vec<SinkId>,
     /// Runtime and state cleanup information captured before deleting the catalog rows.
     /// This is returned only when handling an explicit cancellation.
@@ -127,7 +127,7 @@ pub struct CancelStreamingJobInfo {
 }
 
 #[derive(Debug)]
-pub struct IndependentJobChangeLogInfo {
+pub struct CommittedEpochTruncateJob {
     pub job_id: JobId,
     pub state_table_ids: HashSet<TableId>,
     pub upstream_table_snapshot_epochs: HashMap<TableId, Option<u64>>,
@@ -136,7 +136,15 @@ pub struct IndependentJobChangeLogInfo {
 #[derive(Debug)]
 pub struct TableChangeLogTruncateInfo {
     pub subscription_retention_seconds: HashMap<TableId, u64>,
-    pub independent_jobs: Vec<IndependentJobChangeLogInfo>,
+    pub progress_table_subscribers: Vec<ProgressTableChangeLogSubscriber>,
+    pub committed_epoch_truncate_jobs: Vec<CommittedEpochTruncateJob>,
+}
+
+#[derive(Debug)]
+pub struct ProgressTableChangeLogSubscriber {
+    pub subscriber_job_id: JobId,
+    pub upstream_table_id: TableId,
+    pub progress_table_id: TableId,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -268,7 +276,7 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
-        let jobs: Vec<JobId> = StreamingJobModel::find()
+        let committed_epoch_truncate_job_ids: HashSet<JobId> = StreamingJobModel::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
@@ -278,13 +286,40 @@ impl CatalogController {
             )
             .into_tuple::<JobId>()
             .all(&inner.db)
-            .await?;
-        let mut job_info: HashMap<_, _> = jobs
+            .await?
             .into_iter()
+            .collect();
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode, TableIdArray)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+                fragment::Column::StateTableIds,
+            ])
+            .filter(FragmentTypeMask::intersects_any([
+                FragmentTypeFlag::IcebergWithPkIndexWriter,
+                FragmentTypeFlag::SnapshotBackfillStreamScan,
+            ]))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let iceberg_job_ids: HashSet<_> = fragments
+            .iter()
+            .filter(|(_, _, fragment_type_mask, _, _)| {
+                FragmentTypeMask::from(*fragment_type_mask)
+                    .contains(FragmentTypeFlag::IcebergWithPkIndexWriter)
+            })
+            .map(|(_, job_id, _, _, _)| *job_id)
+            .collect();
+        let mut committed_epoch_truncate_job_info: HashMap<_, _> = committed_epoch_truncate_job_ids
+            .into_iter()
+            .filter(|job_id| !iceberg_job_ids.contains(job_id))
             .map(|job_id| {
                 (
                     job_id,
-                    IndependentJobChangeLogInfo {
+                    CommittedEpochTruncateJob {
                         job_id,
                         state_table_ids: HashSet::new(),
                         upstream_table_snapshot_epochs: HashMap::new(),
@@ -292,25 +327,55 @@ impl CatalogController {
                 )
             })
             .collect();
-        if !job_info.is_empty() {
-            let fragments = Fragment::find()
-                .filter(fragment::Column::JobId.is_in(job_info.keys().copied()))
-                .all(&inner.db)
-                .await?;
-            for fragment in fragments {
-                let info = job_info
-                    .get_mut(&fragment.job_id)
-                    .expect("job should exist");
-                info.state_table_ids
-                    .extend(fragment.state_table_ids.inner_ref().iter().copied());
+        let mut progress_table_subscribers = Vec::new();
+        for (fragment_id, job_id, fragment_type_mask, stream_node, state_table_ids) in fragments {
+            let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
+            if iceberg_job_ids.contains(&job_id) {
+                if !fragment_type_mask.contains(FragmentTypeFlag::SnapshotBackfillStreamScan) {
+                    continue;
+                }
                 let mut collection_error = None;
-                visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+                visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
                     let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
                         Ok(scan_type) => scan_type,
                         Err(err) => {
                             collection_error = Some(anyhow::Error::new(err).context(format!(
                                 "invalid persisted stream scan type {} in job {} fragment {}",
-                                stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
+                                stream_scan.stream_scan_type, job_id, fragment_id
+                            )));
+                            return;
+                        }
+                    };
+                    if scan_type != StreamScanType::SnapshotBackfill {
+                        return;
+                    }
+                    let Some(progress_table) = stream_scan.state_table.as_ref() else {
+                        collection_error = Some(anyhow!(
+                            "snapshot backfill in Iceberg V3 job {} has no progress table",
+                            job_id
+                        ));
+                        return;
+                    };
+                    progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
+                        subscriber_job_id: job_id,
+                        upstream_table_id: stream_scan.table_id,
+                        progress_table_id: progress_table.id,
+                    });
+                });
+                if let Some(err) = collection_error {
+                    return Err(err.into());
+                }
+            } else if let Some(info) = committed_epoch_truncate_job_info.get_mut(&job_id) {
+                info.state_table_ids
+                    .extend(state_table_ids.inner_ref().iter().copied());
+                let mut collection_error = None;
+                visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
+                    let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                        Ok(scan_type) => scan_type,
+                        Err(err) => {
+                            collection_error = Some(anyhow::Error::new(err).context(format!(
+                                "invalid persisted stream scan type {} in job {} fragment {}",
+                                stream_scan.stream_scan_type, job_id, fragment_id
                             )));
                             return;
                         }
@@ -326,7 +391,7 @@ impl CatalogController {
                             if entry.get() != &stream_scan.snapshot_backfill_epoch {
                                 collection_error = Some(anyhow!(
                                     "job {} has inconsistent snapshot epochs for upstream table {}",
-                                    fragment.job_id,
+                                    job_id,
                                     stream_scan.table_id
                                 ));
                             }
@@ -341,13 +406,14 @@ impl CatalogController {
                 }
             }
         }
-        let independent_jobs = job_info
+        let committed_epoch_truncate_jobs = committed_epoch_truncate_job_info
             .into_values()
             .filter(|info| !info.upstream_table_snapshot_epochs.is_empty())
             .collect();
         Ok(TableChangeLogTruncateInfo {
             subscription_retention_seconds,
-            independent_jobs,
+            progress_table_subscribers,
+            committed_epoch_truncate_jobs,
         })
     }
 
@@ -3118,7 +3184,9 @@ impl CatalogController {
         if let Statement::CreateSink { stmt } = &mut stmt {
             update_stmt_with_props(&mut stmt.with_properties.0, &props)?;
         } else {
-            panic!("definition is not a create sink statement")
+            return Err(MetaError::invalid_parameter(
+                "cannot alter an internal Iceberg sink; use ALTER TABLE ... CONNECTOR WITH (...) instead",
+            ));
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props.clone());
@@ -3200,7 +3268,9 @@ impl CatalogController {
             }
             update_stmt_with_props(with_options, &props)?;
         } else {
-            panic!("definition is not a create iceberg table statement")
+            return Err(MetaError::invalid_parameter(
+                "definition is not a create iceberg table statement",
+            ));
         }
         let mut new_config = sink.properties.clone().into_inner();
         new_config.extend(props.clone());
@@ -4004,46 +4074,59 @@ async fn ensure_source_props_not_set_by_connection(
     Ok(())
 }
 
+fn update_sink_node_props(
+    node: &mut PbNodeBody,
+    sink_id: SinkId,
+    props: &BTreeMap<String, String>,
+) -> bool {
+    let sink_desc = match node {
+        PbNodeBody::Sink(node) => &mut node.sink_desc,
+        PbNodeBody::IcebergWithPkIndexWriter(node) => &mut node.sink_desc,
+        PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(node) => &mut node.sink_desc,
+        PbNodeBody::CompactionResolver(node) if node.sink_id == sink_id => {
+            node.properties.extend(props.clone());
+            return true;
+        }
+        _ => return false,
+    };
+    if let Some(sink_desc) = sink_desc
+        && sink_desc.id == sink_id
+    {
+        sink_desc.properties.extend(props.clone());
+        true
+    } else {
+        false
+    }
+}
+
 async fn update_sink_fragment_props(
     txn: &DatabaseTransaction,
     sink_id: SinkId,
     props: BTreeMap<String, String>,
 ) -> MetaResult<()> {
-    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
         .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::FragmentTypeMask,
-            fragment::Column::StreamNode,
-        ])
+        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
         .filter(fragment::Column::JobId.eq(sink_id))
         .into_tuple()
         .all(txn)
         .await?;
     let fragments = fragments
         .into_iter()
-        .filter(|(_, fragment_type_mask, _)| {
-            *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
-        })
-        .filter_map(|(id, _, stream_node)| {
+        .filter_map(|(id, stream_node)| {
             let mut stream_node = stream_node.to_protobuf();
             let mut found = false;
             visit_stream_node_mut(&mut stream_node, |node| {
-                if let PbNodeBody::Sink(node) = node
-                    && let Some(sink_desc) = &mut node.sink_desc
-                    && sink_desc.id == sink_id
-                {
-                    sink_desc.properties.extend(props.clone());
-                    found = true;
-                }
+                found |= update_sink_node_props(node, sink_id, &props);
             });
             if found { Some((id, stream_node)) } else { None }
         })
         .collect_vec();
-    assert!(
-        !fragments.is_empty(),
-        "sink id should be used by at least one fragment"
-    );
+    if fragments.is_empty() {
+        return Err(MetaError::invalid_parameter(format!(
+            "sink {sink_id} is not used by any fragment"
+        )));
+    }
     for (id, stream_node) in fragments {
         Fragment::update(fragment::ActiveModel {
             fragment_id: Set(id),
@@ -4128,9 +4211,66 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use risingwave_pb::stream_plan::{
+        CompactionResolverNode, IcebergWithPkIndexPositionDeleteMergerNode,
+        IcebergWithPkIndexWriterNode, SinkDesc, SinkNode,
+    };
     use risingwave_sqlparser::ast::{SqlOption, Statement};
 
-    use super::{Parser, merge_with_options};
+    use super::{Parser, PbNodeBody, SinkId, merge_with_options, update_sink_node_props};
+
+    #[test]
+    fn test_update_sink_props_in_all_sink_nodes() {
+        let sink_id = SinkId::new(42);
+        let props = BTreeMap::from([("enable_compaction".to_owned(), "true".to_owned())]);
+        let sink_desc = SinkDesc {
+            id: sink_id,
+            properties: BTreeMap::from([
+                ("connector".to_owned(), "iceberg".to_owned()),
+                ("enable_compaction".to_owned(), "false".to_owned()),
+            ]),
+            ..Default::default()
+        };
+        let nodes = [
+            PbNodeBody::Sink(Box::new(SinkNode {
+                sink_desc: Some(sink_desc.clone()),
+                ..Default::default()
+            })),
+            PbNodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
+                sink_desc: Some(sink_desc.clone()),
+                ..Default::default()
+            })),
+            PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(Box::new(
+                IcebergWithPkIndexPositionDeleteMergerNode {
+                    sink_desc: Some(sink_desc.clone()),
+                },
+            )),
+            PbNodeBody::CompactionResolver(Box::new(CompactionResolverNode {
+                sink_id,
+                properties: sink_desc.properties,
+                ..Default::default()
+            })),
+        ];
+        for mut node in nodes {
+            assert!(!update_sink_node_props(&mut node, SinkId::new(43), &props));
+            assert!(update_sink_node_props(&mut node, sink_id, &props));
+            let properties = match &node {
+                PbNodeBody::Sink(node) => &node.sink_desc.as_ref().unwrap().properties,
+                PbNodeBody::IcebergWithPkIndexWriter(node) => {
+                    &node.sink_desc.as_ref().unwrap().properties
+                }
+                PbNodeBody::IcebergWithPkIndexPositionDeleteMerger(node) => {
+                    &node.sink_desc.as_ref().unwrap().properties
+                }
+                PbNodeBody::CompactionResolver(node) => &node.properties,
+                _ => unreachable!(),
+            };
+            assert_eq!(properties["enable_compaction"], "true");
+            assert_eq!(properties["connector"], "iceberg");
+        }
+    }
 
     #[test]
     fn test_merge_with_options_normalizes_altered_option_name() {

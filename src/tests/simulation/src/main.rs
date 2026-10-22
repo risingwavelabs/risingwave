@@ -170,6 +170,7 @@ async fn main() {
         frontend_nodes: args.frontend_nodes,
         compute_nodes: args.compute_nodes,
         compactor_nodes: args.compactor_nodes,
+        iceberg_compactor_nodes: 0,
         compute_node_cores: args.compute_node_cores,
         meta_nodes: args.meta_nodes,
         per_session_queries: if args.use_arrangement_backfill {

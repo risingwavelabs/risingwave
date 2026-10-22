@@ -19,8 +19,10 @@ use std::sync::Arc;
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableOption;
+#[cfg(test)]
+use risingwave_common::metrics::GaugeAggregation;
 use risingwave_common::metrics::{
-    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+    LabelGuardedHistogram, LabelGuardedIntCounter, RelabeledAggregatedIntGauge,
 };
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::log_store::{LogStoreFactory, TruncateBarrierLogReader};
@@ -35,6 +37,7 @@ use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::FragmentId;
 
 pub(crate) mod buffer;
 pub mod reader;
@@ -213,11 +216,11 @@ pub(crate) struct KvLogStoreMetrics {
     pub storage_write_size: LabelGuardedIntCounter,
     pub rewind_count: LabelGuardedIntCounter,
     pub rewind_delay: LabelGuardedHistogram,
-    pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
-    pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
-    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
-    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
-    pub buffer_memory_bytes: LabelGuardedIntGauge,
+    pub buffer_unconsumed_item_count: RelabeledAggregatedIntGauge,
+    pub buffer_unconsumed_row_count: RelabeledAggregatedIntGauge,
+    pub buffer_unconsumed_epoch_count: RelabeledAggregatedIntGauge,
+    pub buffer_unconsumed_min_epoch: RelabeledAggregatedIntGauge,
+    pub buffer_memory_bytes: RelabeledAggregatedIntGauge,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -226,12 +229,13 @@ impl KvLogStoreMetrics {
     pub(crate) fn new(
         metrics: &StreamingMetrics,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
         let id = sink_param.sink_id.as_raw_id();
         let name = &sink_param.sink_name;
-        Self::new_inner(metrics, actor_id, id, name, connector)
+        Self::new_inner(metrics, actor_id, fragment_id, id, name, connector)
     }
 
     /// `id`: refers to a unique way to identify the logstore. This can be the sink id,
@@ -243,11 +247,13 @@ impl KvLogStoreMetrics {
     pub(crate) fn new_inner(
         metrics: &StreamingMetrics,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         id: u32,
         name: &str,
         target: &'static str,
     ) -> Self {
         let actor_id_str = actor_id.to_string();
+        let fragment_id_str = fragment_id.to_string();
         let id_str = id.to_string();
 
         let labels = &[&actor_id_str, target, &id_str, name];
@@ -321,7 +327,13 @@ impl KvLogStoreMetrics {
             .with_guarded_label_values(labels);
         let buffer_memory_bytes = metrics
             .kv_log_store_buffer_memory_bytes
-            .with_guarded_label_values(labels);
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                target,
+                id_str.as_str(),
+                name,
+            ]);
 
         Self {
             storage_write_size,
@@ -349,11 +361,21 @@ impl KvLogStoreMetrics {
         KvLogStoreMetrics {
             storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
             storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
-            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
-            buffer_memory_bytes: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_item_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                GaugeAggregation::Sum,
+            ),
+            buffer_unconsumed_row_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                GaugeAggregation::Sum,
+            ),
+            buffer_unconsumed_epoch_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                GaugeAggregation::Sum,
+            ),
+            buffer_unconsumed_min_epoch: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                GaugeAggregation::Min,
+            ),
+            buffer_memory_bytes: RelabeledAggregatedIntGauge::test_int_gauge::<5>(
+                GaugeAggregation::Sum,
+            ),
             rewind_count: LabelGuardedIntCounter::test_int_counter::<4>(),
             rewind_delay: LabelGuardedHistogram::test_histogram::<4>(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),

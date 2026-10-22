@@ -373,3 +373,26 @@
     ORDER BY con1.conname;
   expected_outputs:
     - batch_plan
+# https://github.com/risingwavelabs/risingwave/issues/26395
+- name: correlated column in multi-row VALUES returns an error instead of panicking
+  sql: |
+    create table t(a int, b int, c int);
+    select * from t where t.a in (select * from (values (t.b), (t.c)) v);
+  expected_outputs:
+    - batch_error
+    - stream_error
+# https://github.com/risingwavelabs/risingwave/issues/24357
+- name: subquery left in SQL table function arguments returns an error instead of panicking
+  sql: |
+    create function my_tf(n int) returns table (sq int) language sql as $$ select v * v from generate_series(1, n) as g(v) $$;
+    select * from my_tf(3);
+  expected_outputs:
+    - batch_error
+    - stream_error
+- name: subquery in a lambda body returns an error instead of panicking
+  sql: |
+    create table t(a int[]);
+    select array_transform(a, |x| (select 1)) from t;
+  expected_outputs:
+    - batch_error
+    - stream_error

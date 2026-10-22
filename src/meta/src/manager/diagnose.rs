@@ -36,7 +36,7 @@ use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
+use risingwave_sqlparser::ast::SqlOptionRedactionRef;
 use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
 use thiserror_ext::AsReport;
@@ -59,7 +59,7 @@ pub struct DiagnoseCommand {
     event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
     prometheus_selector: String,
-    redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+    sql_option_redaction: SqlOptionRedactionRef,
     system_params_controller: SystemParamsControllerRef,
 }
 
@@ -72,7 +72,7 @@ impl DiagnoseCommand {
         event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
-        redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+        sql_option_redaction: SqlOptionRedactionRef,
         system_params_controller: SystemParamsControllerRef,
     ) -> Self {
         Self {
@@ -83,7 +83,7 @@ impl DiagnoseCommand {
             event_log_manager,
             prometheus_client,
             prometheus_selector,
-            redact_sql_option_keywords,
+            sql_option_redaction,
             system_params_controller,
         }
     }
@@ -683,6 +683,9 @@ impl DiagnoseCommand {
             row.add_cell("pending_snapshot_count".into());
             row.add_cell("next_compaction_after_sec".into());
             row.add_cell("is_triggerable".into());
+            row.add_cell("wait_reason".into());
+            row.add_cell("retry_after_sec".into());
+            row.add_cell("blocked_age_sec".into());
             row
         });
 
@@ -706,6 +709,9 @@ impl DiagnoseCommand {
             );
             try_add_cell(&mut row, status.next_compaction_after_sec);
             row.add_cell(status.is_triggerable.into());
+            row.add_cell(status.wait_reason.into());
+            try_add_cell(&mut row, status.retry_after_sec);
+            try_add_cell(&mut row, status.blocked_age_sec);
             table.add_row(row);
         }
 
@@ -1040,7 +1046,7 @@ impl DiagnoseCommand {
             for (id, (name, database_id, schema_id, definition, created_at_epoch)) in items {
                 obj_id_to_name.insert(id, name.clone());
                 let mut row = Row::new();
-                let may_redact = redact_sql(&definition, self.redact_sql_option_keywords.clone())
+                let may_redact = redact_sql(&definition, self.sql_option_redaction.clone())
                     .unwrap_or_else(|| "[REDACTED]".into());
                 let created_at = if let Some(created_at_epoch) = created_at_epoch {
                     format!("{}", Epoch::from(created_at_epoch).as_timestamptz())
@@ -1293,11 +1299,11 @@ fn merge_prometheus_selector<'a>(selectors: impl IntoIterator<Item = &'a str>) -
     selectors.into_iter().filter(|s| !s.is_empty()).join(",")
 }
 
-fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> Option<String> {
+fn redact_sql(sql: &str, redaction: SqlOptionRedactionRef) -> Option<String> {
     match Parser::parse_sql(sql) {
         Ok(sqls) => Some(
             sqls.into_iter()
-                .map(|sql| sql.to_redacted_string(keywords.clone()))
+                .map(|sql| sql.to_redacted_string(redaction.clone()))
                 .join(";"),
         ),
         Err(_) => None,
