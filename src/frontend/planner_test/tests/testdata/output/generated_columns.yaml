@@ -64,3 +64,7 @@
           │   └─StreamDml { columns: [v, _row_id] }
           │     └─StreamSource
           └─StreamUpstreamSinkUnion
+- name: subquery in generated column
+  sql: |
+    explain create table t (v text as (select 'a'));
+  planner_error: 'failed to bind the expression in generated column "v": Failed to bind expression: (SELECT ''a''): Invalid input syntax: subqueries are not allowed in GENERATED COLUMN'
