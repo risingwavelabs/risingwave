@@ -77,7 +77,7 @@ trait CdcSplitTrait: Send + Sync {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
-pub struct MySqlCdcSplit {
+pub struct MysqlCdcSplit {
     pub inner: CdcSplitBase,
 }
 
@@ -89,7 +89,7 @@ pub struct PostgresCdcSplit {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
-pub struct MongoDbCdcSplit {
+pub struct MongodbCdcSplit {
     pub inner: CdcSplitBase,
 }
 
@@ -103,7 +103,7 @@ pub struct OracleCdcSplit {
     pub inner: CdcSplitBase,
 }
 
-impl MySqlCdcSplit {
+impl MysqlCdcSplit {
     pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
         let split = CdcSplitBase {
             split_id,
@@ -144,7 +144,7 @@ impl MySqlCdcSplit {
     }
 }
 
-impl CdcSplitTrait for MySqlCdcSplit {
+impl CdcSplitTrait for MysqlCdcSplit {
     fn split_id(&self) -> u32 {
         self.inner.split_id
     }
@@ -301,7 +301,7 @@ impl CdcSplitTrait for PostgresCdcSplit {
     }
 }
 
-impl MongoDbCdcSplit {
+impl MongodbCdcSplit {
     pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
         let split = CdcSplitBase {
             split_id,
@@ -312,7 +312,7 @@ impl MongoDbCdcSplit {
     }
 }
 
-impl CdcSplitTrait for MongoDbCdcSplit {
+impl CdcSplitTrait for MongodbCdcSplit {
     fn split_id(&self) -> u32 {
         self.inner.split_id
     }
@@ -408,12 +408,12 @@ impl CdcSplitTrait for OracleCdcSplit {
 /// We use this struct to wrap the specific split, which act as an interface to other modules
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
-    pub mysql_split: Option<MySqlCdcSplit>,
+    pub mysql_split: Option<MysqlCdcSplit>,
 
     #[serde(rename = "pg_split")] // backward compatibility
     pub postgres_split: Option<PostgresCdcSplit>,
     pub citus_split: Option<PostgresCdcSplit>,
-    pub mongodb_split: Option<MongoDbCdcSplit>,
+    pub mongodb_split: Option<MongodbCdcSplit>,
     pub sql_server_split: Option<SqlServerCdcSplit>,
     pub oracle_split: Option<OracleCdcSplit>,
 
@@ -486,7 +486,7 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         };
         match T::source_type() {
             CdcSourceType::Mysql => {
-                let split = MySqlCdcSplit::new(split_id, start_offset);
+                let split = MysqlCdcSplit::new(split_id, start_offset);
                 ret.mysql_split = Some(split);
             }
             CdcSourceType::Postgres => {
@@ -498,7 +498,7 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
                 ret.citus_split = Some(split);
             }
             CdcSourceType::Mongodb => {
-                let split = MongoDbCdcSplit::new(split_id, start_offset);
+                let split = MongodbCdcSplit::new(split_id, start_offset);
                 ret.mongodb_split = Some(split);
             }
             CdcSourceType::SqlServer => {
@@ -820,7 +820,7 @@ mod tests {
             },
             "isHeartbeat": false
         }"#;
-        let split = MySqlCdcSplit::new(1, Some(offset.to_owned()));
+        let split = MysqlCdcSplit::new(1, Some(offset.to_owned()));
         assert_eq!(split.mysql_binlog_offset(), Some((37568, 12345)));
     }
 
