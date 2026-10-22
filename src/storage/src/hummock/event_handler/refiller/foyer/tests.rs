@@ -404,7 +404,7 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
     let disabled_table = TableId::from(3);
     let internal_table = TableId::from(4);
     let fallback_table = TableId::from(5);
-    let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+    let owned_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
     let sstable_store = mock_sstable_store().await;
     let sst_info = |table_ids: Vec<TableId>| {
         SstableInfo::from(SstableInfoInner {
@@ -415,8 +415,8 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
     let capture_pruned_table_ids = |role,
                                     default_policy,
                                     policies: HashMap<TableId, CacheRefillPolicy>,
-                                    streaming_table_vnodes: HashMap<TableId, Bitmap>,
-                                    serving_table_vnodes: HashMap<TableId, Bitmap>,
+                                    streaming_tables: &[TableId],
+                                    serving_tables: &[TableId],
                                     delta| {
         let captured_deltas = Arc::new(Mutex::new(None::<Vec<SstDeltaInfo>>));
         let captured_deltas_clone = captured_deltas.clone();
@@ -431,10 +431,15 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
             spawn_refill_task,
         );
         refiller.replace_table_cache_refill_policies(policies);
-        for (table_id, vnodes) in streaming_table_vnodes {
-            refiller.update_streaming_table_vnodes(table_id, Some(vnodes));
+        for table_id in streaming_tables {
+            refiller.update_streaming_table_vnodes(*table_id, Some(owned_vnodes.clone()));
         }
-        refiller.replace_serving_table_vnode_mapping(serving_table_vnodes);
+        refiller.replace_serving_table_vnode_mapping(
+            serving_tables
+                .iter()
+                .map(|table_id| (*table_id, owned_vnodes.clone()))
+                .collect(),
+        );
         let _handle = refiller.start_cache_refill(vec![delta]);
         captured_deltas
             .lock()
@@ -467,8 +472,8 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
                 (disabled_table, CacheRefillPolicy::Disabled),
                 (streaming_table, CacheRefillPolicy::Enabled),
             ]),
-            HashMap::new(),
-            HashMap::new(),
+            &[],
+            &[],
             normal_delta(vec![
                 sst_info(vec![disabled_table]),
                 sst_info(vec![streaming_table]),
@@ -485,8 +490,8 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
                 (streaming_table, CacheRefillPolicy::Streaming),
                 (internal_table, CacheRefillPolicy::Serving),
             ]),
-            HashMap::from([(streaming_table, serving_vnodes.clone())]),
-            HashMap::new(),
+            &[streaming_table],
+            &[],
             normal_delta(vec![
                 sst_info(vec![streaming_table]),
                 sst_info(vec![internal_table]),
@@ -504,8 +509,8 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
                 (serving_table, CacheRefillPolicy::Serving),
                 (internal_table, CacheRefillPolicy::Serving),
             ]),
-            HashMap::from([(streaming_table, serving_vnodes.clone())]),
-            HashMap::from([(serving_table, serving_vnodes.clone())]),
+            &[streaming_table],
+            &[serving_table],
             insert_only_delta(vec![
                 sst_info(vec![streaming_table]),
                 sst_info(vec![serving_table]),
@@ -523,8 +528,8 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
                 (streaming_table, CacheRefillPolicy::Streaming),
                 (serving_table, CacheRefillPolicy::Serving),
             ]),
-            HashMap::new(),
-            HashMap::from([(serving_table, serving_vnodes.clone())]),
+            &[],
+            &[serving_table],
             normal_delta(vec![
                 sst_info(vec![streaming_table]),
                 sst_info(vec![serving_table]),
@@ -541,8 +546,8 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
                 (streaming_table, CacheRefillPolicy::Enabled),
                 (serving_table, CacheRefillPolicy::Enabled),
             ]),
-            HashMap::new(),
-            HashMap::from([(serving_table, serving_vnodes.clone())]),
+            &[],
+            &[serving_table],
             normal_delta(vec![
                 sst_info(vec![streaming_table]),
                 sst_info(vec![serving_table]),
@@ -556,103 +561,64 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
         ],
     );
 
-    assert_eq!(
-        capture_pruned_table_ids(
-            Role::Both,
-            CacheRefillPolicy::Disabled,
-            HashMap::from([
-                (streaming_table, CacheRefillPolicy::Both),
-                (serving_table, CacheRefillPolicy::Both),
-            ]),
-            HashMap::new(),
-            HashMap::new(),
-            normal_delta(vec![
-                sst_info(vec![streaming_table]),
-                sst_info(vec![serving_table]),
-            ]),
-        ),
-        Vec::<Vec<TableId>>::new(),
-    );
+    for (streaming_tables, serving_tables, expected) in [
+        (vec![], vec![], vec![]),
+        (vec![streaming_table], vec![], vec![vec![streaming_table]]),
+        (vec![], vec![serving_table], vec![vec![serving_table]]),
+    ] {
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Both,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Both),
+                    (serving_table, CacheRefillPolicy::Both),
+                ]),
+                &streaming_tables,
+                &serving_tables,
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            expected,
+            "streaming tables {streaming_tables:?}, serving tables {serving_tables:?}",
+        );
+    }
 
-    assert_eq!(
-        capture_pruned_table_ids(
-            Role::Both,
-            CacheRefillPolicy::Disabled,
-            HashMap::from([
-                (streaming_table, CacheRefillPolicy::Both),
-                (serving_table, CacheRefillPolicy::Both),
-            ]),
-            HashMap::from([(streaming_table, serving_vnodes.clone())]),
-            HashMap::new(),
-            normal_delta(vec![
-                sst_info(vec![streaming_table]),
-                sst_info(vec![serving_table]),
-            ]),
-        ),
-        vec![vec![streaming_table]],
-    );
-
-    assert_eq!(
-        capture_pruned_table_ids(
-            Role::Both,
-            CacheRefillPolicy::Disabled,
-            HashMap::from([
-                (streaming_table, CacheRefillPolicy::Both),
-                (serving_table, CacheRefillPolicy::Both),
-            ]),
-            HashMap::new(),
-            HashMap::from([(serving_table, serving_vnodes.clone())]),
-            normal_delta(vec![
-                sst_info(vec![streaming_table]),
-                sst_info(vec![serving_table]),
-            ]),
-        ),
-        vec![vec![serving_table]],
-    );
-
-    assert_eq!(
-        capture_pruned_table_ids(
-            Role::Streaming,
-            CacheRefillPolicy::Disabled,
-            HashMap::from([
-                (streaming_table, CacheRefillPolicy::Streaming),
-                (serving_table, CacheRefillPolicy::Serving),
-            ]),
-            HashMap::new(),
-            HashMap::new(),
-            normal_delta(vec![
-                sst_info(vec![streaming_table]),
-                sst_info(vec![serving_table]),
-            ]),
-        ),
-        Vec::<Vec<TableId>>::new(),
-    );
-
-    assert_eq!(
-        capture_pruned_table_ids(
-            Role::Streaming,
-            CacheRefillPolicy::Disabled,
-            HashMap::from([
-                (streaming_table, CacheRefillPolicy::Streaming),
-                (serving_table, CacheRefillPolicy::Serving),
-            ]),
-            HashMap::new(),
-            HashMap::new(),
-            insert_only_delta(vec![
-                sst_info(vec![streaming_table]),
-                sst_info(vec![serving_table]),
-            ]),
-        ),
-        Vec::<Vec<TableId>>::new(),
-    );
+    let unowned_ssts = vec![
+        sst_info(vec![streaming_table]),
+        sst_info(vec![serving_table]),
+    ];
+    for delta in [
+        normal_delta(unowned_ssts.clone()),
+        insert_only_delta(unowned_ssts),
+    ] {
+        let insert_only = delta.delete_sst_object_ids.is_empty();
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Streaming,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                ]),
+                &[],
+                &[],
+                delta,
+            ),
+            Vec::<Vec<TableId>>::new(),
+            "streaming worker without ownership, insert_only={insert_only}",
+        );
+    }
 
     assert_eq!(
         capture_pruned_table_ids(
             Role::Both,
             CacheRefillPolicy::Enabled,
             HashMap::from([(disabled_table, CacheRefillPolicy::Disabled)]),
-            HashMap::new(),
-            HashMap::new(),
+            &[],
+            &[],
             normal_delta(vec![
                 sst_info(vec![disabled_table]),
                 sst_info(vec![fallback_table]),
@@ -1053,66 +1019,42 @@ async fn test_refill_units_do_not_cross_table_projection_boundaries() {
             table_cache_refill_context_map: table_cache_refill_context_map.clone(),
         }
     };
-    let generated_tasks = |context: &CacheRefillContext| {
-        deltas
+    for (unit, deltas, description) in [
+        (1, &deltas, "each logical projection selects its own block"),
+        (2, &deltas, "wide units stop at table boundaries"),
+        (2, &normal_deltas, "normal refill uses the same geometry"),
+    ] {
+        let context = make_context(unit);
+        let tasks = deltas
             .iter()
             .map(|delta| {
                 DataCacheRefillTaskGenerator {
-                    context,
+                    context: &context,
                     delta,
                     ssts: std::slice::from_ref(&sst),
                 }
                 .generate_unfiltered_tasks()
             })
-            .collect::<Vec<_>>()
-    };
-    let generated_ranges = |context: &CacheRefillContext| {
-        generated_tasks(context)
-            .into_iter()
-            .map(|tasks| tasks.into_iter().map(|task| task.blks).collect::<Vec<_>>())
-            .collect::<Vec<_>>()
-    };
+            .collect::<Vec<_>>();
+        let ranges = tasks
+            .iter()
+            .map(|tasks| {
+                tasks
+                    .iter()
+                    .map(|task| task.blks.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ranges, vec![vec![0..1], vec![1..2]], "{description}");
 
-    assert_eq!(
-        generated_ranges(&make_context(1)),
-        vec![vec![0..1], vec![1..2]],
-        "each logical projection must select only its own block"
-    );
-
-    let wide_unit_context = make_context(2);
-    assert_eq!(
-        generated_ranges(&wide_unit_context),
-        vec![vec![0..1], vec![1..2]],
-        "units are clipped at table boundaries even when unit is larger than a table run"
-    );
-
-    let normal_ranges = normal_deltas
-        .iter()
-        .map(|delta| {
-            DataCacheRefillTaskGenerator {
-                context: &wide_unit_context,
-                delta,
-                ssts: std::slice::from_ref(&sst),
-            }
-            .generate_unfiltered_tasks()
-            .into_iter()
-            .map(|task| task.blks)
-            .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        normal_ranges,
-        vec![vec![0..1], vec![1..2]],
-        "normal refill uses the same table-boundary geometry"
-    );
-
-    for task in generated_tasks(&wide_unit_context).into_iter().flatten() {
-        assert!(task.blks.len() <= wide_unit_context.config.unit);
-        assert_eq!(
-            task.sst.meta.block_metas[task.blks.start].table_id(),
-            task.sst.meta.block_metas[task.blks.end - 1].table_id(),
-            "a refill unit must not cross a table boundary"
-        );
+        for task in tasks.into_iter().flatten() {
+            assert!(task.blks.len() <= unit);
+            assert_eq!(
+                task.sst.meta.block_metas[task.blks.start].table_id(),
+                task.sst.meta.block_metas[task.blks.end - 1].table_id(),
+                "a refill unit must not cross a table boundary"
+            );
+        }
     }
 }
 
@@ -1154,17 +1096,19 @@ async fn test_scoped_refill_handles_multi_table_vnode_boundary() {
     .await;
     assert_eq!(sst.block_count(), 2, "table switch must form a new block");
 
+    let delta = SstDeltaInfo {
+        insert_sst_infos: vec![sst_info],
+        delete_sst_object_ids: vec![2330.into()],
+        insert_sst_level: 0,
+    };
     let generate = |streaming_vnodes| {
-        let sstable_store = sstable_store.clone();
-        let sst = sst.clone();
-        let sst_info = sst_info.clone();
         let mut config = test_refill_config(CacheRefillPolicy::Streaming);
         config.data_refill_levels.insert(0);
         let context = CacheRefillContext {
             config: Arc::new(config),
             meta_refill_concurrency: None,
             concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
-            sstable_store,
+            sstable_store: sstable_store.clone(),
             table_cache_refill_context_map: Arc::new(HashMap::from([(
                 table_a,
                 TableCacheRefillContext {
@@ -1174,31 +1118,23 @@ async fn test_scoped_refill_handles_multi_table_vnode_boundary() {
                 },
             )])),
         };
-        async move {
-            let generator = DataCacheRefillTaskGenerator {
-                context: &context,
-                delta: &SstDeltaInfo {
-                    insert_sst_infos: vec![sst_info.clone()],
-                    delete_sst_object_ids: vec![2330.into()],
-                    insert_sst_level: 0,
-                },
-                ssts: std::slice::from_ref(&sst),
-            };
-            let tasks = generator.generate_unfiltered_tasks();
-            generator.filter_by_inheritance_if_needed(tasks).await
+        DataCacheRefillTaskGenerator {
+            context: &context,
+            delta: &delta,
+            ssts: std::slice::from_ref(&sst),
         }
+        // This L0 geometry case has recent and inheritance filtering disabled.
+        .generate_unfiltered_tasks()
     };
 
-    let matching_tasks =
-        generate(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode_a])).await;
+    let matching_tasks = generate(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode_a]));
     assert_eq!(matching_tasks.len(), 1);
     assert_eq!(matching_tasks[0].blks, 0..1);
 
     let non_matching_tasks = generate(Bitmap::from_indices(
         VirtualNode::COUNT_FOR_TEST,
         [VirtualNode::ZERO.to_index()],
-    ))
-    .await;
+    ));
     assert!(non_matching_tasks.is_empty());
 }
 
