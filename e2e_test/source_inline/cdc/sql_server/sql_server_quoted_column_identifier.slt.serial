@@ -1,10 +1,7 @@
 control substitution on
 
 system ok
-sqlcmd -C -d master -Q 'DROP DATABASE IF EXISTS quoted_col_db;' -b
-
-system ok
-sqlcmd -C -d master -Q 'CREATE DATABASE quoted_col_db;' -b
+sqlcmd -C -d master -Q "IF DB_ID('quoted_col_db') IS NOT NULL BEGIN ALTER DATABASE quoted_col_db SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE quoted_col_db; END; CREATE DATABASE quoted_col_db;" -b
 
 system ok
 sqlcmd -C -d quoted_col_db -i e2e_test/source_inline/cdc/sql_server/sql_server_quoted_column_identifier_prepare.sql -b
@@ -49,6 +46,3 @@ select "p""k", "a""b", note from rw_quoted_col_tbl order by "p""k";
 
 statement ok
 drop source mssql_quoted_col_source cascade;
-
-system ok
-sqlcmd -C -d master -Q 'DROP DATABASE IF EXISTS quoted_col_db;' -b
