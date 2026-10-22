@@ -1110,6 +1110,7 @@ mod tests {
     #[tokio::test]
     async fn test_version_updates_wait_for_foyer_and_publish_in_order() {
         use risingwave_hummock_sdk::version::HummockVersionDelta;
+        use risingwave_pb::hummock::StateTableInfoDelta;
         use tokio::sync::Semaphore;
 
         use super::HummockVersionUpdate;
@@ -1122,6 +1123,13 @@ mod tests {
         let version = PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 1.into(),
+                state_table_info: HashMap::from_iter([(
+                    TEST_TABLE_ID,
+                    StateTableInfo {
+                        committed_epoch: test_epoch(1),
+                        compaction_group_id: StaticCompactionGroupId::StateDefault,
+                    },
+                )]),
                 ..Default::default()
             }),
             pin_tx,
@@ -1166,6 +1174,13 @@ mod tests {
         handler.handle_version_update(HummockVersionUpdate::PinnedVersion(Box::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 2.into(),
+                state_table_info: HashMap::from_iter([(
+                    TEST_TABLE_ID,
+                    StateTableInfo {
+                        committed_epoch: test_epoch(2),
+                        compaction_group_id: StaticCompactionGroupId::StateDefault,
+                    },
+                )]),
                 ..Default::default()
             }),
         )));
@@ -1175,6 +1190,13 @@ mod tests {
                     let mut delta = HummockVersionDelta::default();
                     delta.id = id.into();
                     delta.prev_id = (id - 1).into();
+                    delta.state_table_info_delta.insert(
+                        TEST_TABLE_ID,
+                        StateTableInfoDelta {
+                            committed_epoch: test_epoch(id),
+                            compaction_group_id: StaticCompactionGroupId::StateDefault,
+                        },
+                    );
                     delta
                 })
                 .collect(),
@@ -1222,8 +1244,7 @@ mod tests {
         assert_eq!(version_updates_rx.borrow_and_update().id().as_raw_id(), 4);
         drop(version_updates_rx);
         assert_eq!(read_version.read().committed().id().as_raw_id(), 4);
-        // The non-committing intermediate version can be released after publication.
-        assert!(matches!(pin_rx.try_recv(), Ok(Unpin(id)) if id.as_raw_id() == 2));
+        // History retains the committing intermediate version after publication.
         assert!(pin_rx.try_recv().is_err());
         assert_eq!(handler.uploader.hummock_version().id().as_raw_id(), 4);
         assert_eq!(
@@ -1239,6 +1260,16 @@ mod tests {
                 .as_raw_id(),
             4
         );
+        assert_eq!(
+            handler
+                .recent_versions
+                .load()
+                .get_safe_version(TEST_TABLE_ID, test_epoch(2))
+                .unwrap()
+                .id()
+                .as_raw_id(),
+            2
+        );
 
         let mut delta = HummockVersionDelta::default();
         delta.prev_id = 4.into();
@@ -1249,7 +1280,16 @@ mod tests {
         assert!(pin_rx.try_recv().is_err());
         // Main detaches already-started Foyer tasks when the handler shuts down.
         drop(handler);
-        assert!(matches!(pin_rx.try_recv(), Ok(Unpin(id)) if id.as_raw_id() == 5));
+        // Dropping history releases version 2; the unpublished version 5 is also released.
+        let unpinned_versions = (0..2)
+            .map(|_| {
+                let Unpin(id) = pin_rx.try_recv().unwrap() else {
+                    panic!("expected an unpin action");
+                };
+                id.as_raw_id()
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(unpinned_versions, HashSet::from([2, 5]));
         assert!(pin_rx.try_recv().is_err());
         permits[2].add_permits(1);
         assert_eq!(finished_rx.recv().await, Some(2));
