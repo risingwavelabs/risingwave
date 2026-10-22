@@ -101,7 +101,7 @@ CREATE TABLE missing_app_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WI
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={
         "owner": "$TEST_ORACLE_SOURCE_SCHEMA",
-        "expected_message": "Failed to create Oracle heartbeat table '$TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE'",
+        "expected_message": "Failed to create Oracle heartbeat table '\"$TEST_ORACLE_SOURCE_SCHEMA\".\"$TEST_ORACLE_HEARTBEAT_TABLE\"'",
         "after_error_check_hook": check_heartbeat_missing,
         "after_error_check_hook_kwargs": {"owner": "$TEST_ORACLE_SOURCE_SCHEMA"},
     },
@@ -143,7 +143,7 @@ CREATE TABLE empty_app_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WITH
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={
         "owner": "$TEST_ORACLE_SOURCE_SCHEMA",
-        "expected_message": "Failed to insert the seed row into Oracle heartbeat table '$TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE'",
+        "expected_message": "Failed to insert the seed row into Oracle heartbeat table '\"$TEST_ORACLE_SOURCE_SCHEMA\".\"$TEST_ORACLE_HEARTBEAT_TABLE\"'",
         "create_table": False,
         "after_error_check_hook": check_heartbeat_empty,
         "after_error_check_hook_kwargs": {"owner": "$TEST_ORACLE_SOURCE_SCHEMA"},
@@ -187,7 +187,7 @@ CREATE TABLE seeded_app_oracle_hb ("ID" DECIMAL PRIMARY KEY, "NAME" VARCHAR) WIT
     after_sqls_hook=check_heartbeat_creation_error,
     after_sqls_hook_kwargs={
         "owner": "$TEST_ORACLE_SOURCE_SCHEMA",
-        "expected_message": "needs UPDATE permission on heartbeat table '$TEST_ORACLE_SOURCE_SCHEMA.$TEST_ORACLE_HEARTBEAT_TABLE'",
+        "expected_message": "needs UPDATE permission on heartbeat table '\"$TEST_ORACLE_SOURCE_SCHEMA\".\"$TEST_ORACLE_HEARTBEAT_TABLE\"'",
         "create_table": False, "insert_seed": False,
         # Failed validation must preserve the preexisting sentinel, not update it.
         "after_error_check_hook": check_heartbeat_seed,
