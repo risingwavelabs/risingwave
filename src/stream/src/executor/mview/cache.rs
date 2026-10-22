@@ -469,7 +469,7 @@ fn versions_are_newer_or_equal(
 }
 
 /// TOAST column handling for CDC tables with TOAST columns.
-mod toast {
+pub(super) mod toast {
     use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DEBEZIUM_UNAVAILABLE_VECTOR_ELEM};
 
     use super::*;
@@ -536,6 +536,15 @@ mod toast {
         }
     }
 
+    /// Whether any row in the chunk carries an unchanged-TOAST placeholder in a TOAST-able column.
+    pub fn chunk_has_unavailable_value(chunk: &StreamChunk, toastable_indices: &[usize]) -> bool {
+        chunk.rows().any(|(_, row)| {
+            toastable_indices
+                .iter()
+                .any(|&idx| is_debezium_unavailable_value(&row.datum_at(idx)))
+        })
+    }
+
     /// Fix TOAST columns by replacing unavailable values with old row values.
     pub fn handle_toast_columns_for_postgres_cdc(
         old_row: &OwnedRow,
@@ -556,5 +565,30 @@ mod toast {
         }
 
         OwnedRow::new(fixed_row_data)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        use super::*;
+
+        #[test]
+        fn test_chunk_has_unavailable_value() {
+            let chunk = StreamChunk::from_pretty(&format!(
+                " i T
+                + 1 foo
+                + 2 {DEBEZIUM_UNAVAILABLE_VALUE}"
+            ));
+            assert!(chunk_has_unavailable_value(&chunk, &[1]));
+            assert!(!chunk_has_unavailable_value(&chunk, &[]));
+
+            let chunk = StreamChunk::from_pretty(
+                " i T
+                + 1 foo
+                + 2 bar",
+            );
+            assert!(!chunk_has_unavailable_value(&chunk, &[1]));
+        }
     }
 }
