@@ -269,10 +269,12 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     use multimap::MultiMap;
-    use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, DataChunk, JsonbArrayBuilder};
+    use risingwave_common::array::{Array, ArrayRef, DataChunk};
     use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{Datum, JsonbVal};
+    use risingwave_common::types::{
+        Datum, F64, JsonbVal, ListValue, MapType, MapValue, ScalarImpl, StructType, StructValue,
+    };
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::{
@@ -293,20 +295,54 @@ mod tests {
         calls: Arc<AtomicU64>,
         fail: Arc<AtomicBool>,
         gate: Option<Arc<Semaphore>>,
+        typed: bool,
+    }
+
+    impl RemoteExpression {
+        fn result(&self, version: u64) -> ScalarImpl {
+            if !self.typed {
+                return JsonbVal::from(json!({"version": version})).into();
+            }
+            StructValue::new(vec![
+                Some((version as i64).into()),
+                Some(
+                    MapValue::try_from_kv(
+                        ListValue::from_iter(["billing", "technical"]),
+                        ListValue::from_iter([F64::from(0.8), F64::from(0.2)]),
+                    )
+                    .unwrap()
+                    .into(),
+                ),
+                Some(ListValue::from_iter([F64::from(0.25), F64::from(0.75)]).into()),
+            ])
+            .into()
+        }
     }
 
     impl ExpressionInfo for RemoteExpression {
         fn return_type(&self) -> DataType {
-            DataType::Jsonb
+            if self.typed {
+                StructType::new([
+                    ("version", DataType::Int64),
+                    (
+                        "choices",
+                        MapType::from_kv(DataType::Varchar, DataType::Float64).into(),
+                    ),
+                    ("levels", DataType::list(DataType::Float64)),
+                ])
+                .into()
+            } else {
+                DataType::Jsonb
+            }
         }
     }
 
     impl AsyncExpression for RemoteExpression {
         async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-            let mut builder = JsonbArrayBuilder::new(input.capacity());
+            let mut builder = self.return_type().create_array_builder(input.capacity());
             for visible in input.visibility().iter() {
                 if !visible {
-                    builder.append_null();
+                    builder.append(None::<ScalarImpl>);
                     continue;
                 }
                 let version = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
@@ -316,7 +352,7 @@ mod tests {
                 if self.fail.load(Ordering::SeqCst) {
                     return Err(ExprError::External("mock service unavailable".into()));
                 }
-                builder.append_owned(Some(JsonbVal::from(json!({"version": version}))));
+                builder.append(Some(self.result(version)));
             }
             Ok(builder.finish().into_ref())
         }
@@ -340,6 +376,7 @@ mod tests {
             vec![0],
         );
         // Exercise the non-strict wrapper used in production, not just the mock's error return.
+        let output_type = expression.return_type();
         let expr = NonStrictExpression::new_topmost(expression.boxed(), LogReport);
         let actor_ctx = ActorContext::for_test(123);
         if !materialized {
@@ -351,7 +388,7 @@ mod tests {
             );
         }
         let state_table = create_in_memory_state_table_from_state_store(
-            &[DataType::Int64, DataType::Int64, DataType::Jsonb],
+            &[DataType::Int64, DataType::Int64, output_type],
             &[OrderType::ascending()],
             &[0],
             store,
@@ -412,6 +449,38 @@ mod tests {
         let chunk = recovered.expect_chunk().await;
         assert_eq!(chunk.ops(), &[Op::Delete]);
         assert_eq!(versions(&chunk), vec![Some(json!({"version": 2}))]);
+        assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn restores_typed_struct_map_and_array_after_recovery() {
+        let store = MemoryStateStore::new();
+        let expr = RemoteExpression {
+            typed: true,
+            ..Default::default()
+        };
+        let (mut tx, mut stream) = executor(store.clone(), expr.clone(), true).await;
+        tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+        tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
+        let chunk = stream.expect_chunk().await;
+        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
+        tx.push_barrier(test_epoch(2), false);
+        stream.expect_barrier().await;
+        drop(stream);
+
+        // A fresh executor must fetch the complete typed value from persisted state.
+        let (mut tx, mut recovered) = executor(store, expr.clone(), true).await;
+        tx.push_barrier(test_epoch(2), false);
+        recovered.expect_barrier().await;
+        tx.push_chunk(StreamChunk::from_pretty("I I\nU- 1 10\nU+ 1 20"));
+        let chunk = recovered.expect_chunk().await;
+        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
+        assert_eq!(chunk.columns()[2].datum_at(1), Some(expr.result(2)));
+        expr.fail.store(true, Ordering::SeqCst);
+        tx.push_chunk(StreamChunk::from_pretty("I I\n- 1 20"));
+        let chunk = recovered.expect_chunk().await;
+        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(2)));
         assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
     }
 

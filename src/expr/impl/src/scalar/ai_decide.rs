@@ -16,13 +16,16 @@ use std::time::Duration;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use reqwest::{Client, StatusCode};
-use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, DataChunk, JsonbArrayBuilder};
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, DatumRef, JsonbRef, JsonbVal, ScalarImpl};
+use risingwave_common::types::{
+    DataType, Datum, DatumRef, F64, JsonbRef, JsonbVal, ListValue, MapValue, ScalarImpl,
+    StructValue,
+};
 use risingwave_expr::expr::{
     AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo,
 };
-use risingwave_expr::scalar::jev::JevEvalOptions;
+use risingwave_expr::scalar::ai_decide::{AiDecideOptions, QuestionKind, QuestionSchema};
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
 use tokio::sync::Semaphore;
@@ -41,27 +44,33 @@ struct Request<'a> {
     questions: jsonbb::ValueRef<'a>,
 }
 
-struct JevEval {
+struct AiDecide {
     children: [BoxedExpression; 5],
+    schema: QuestionSchema,
     client: Client,
     // Shared by concurrent eval calls on this expression, including overlapping chunks.
     permits: Semaphore,
     max_concurrency: usize,
 }
 
-impl std::fmt::Debug for JevEval {
+impl std::fmt::Debug for AiDecide {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Arguments may contain credentials or customer state.
-        f.debug_struct("JevEval").finish_non_exhaustive()
+        f.debug_struct("AiDecide").finish_non_exhaustive()
     }
 }
 
-#[build_function("jev_eval(jsonb, varchar, varchar, jsonb, varchar) -> jsonb", volatile)]
 #[build_function(
-    "jev_eval(jsonb, varchar, varchar, jsonb, varchar, jsonb) -> jsonb",
+    "ai_decide(jsonb, varchar, varchar, jsonb, varchar) -> struct",
+    volatile,
+    type_infer = "unreachable"
+)]
+#[build_function(
+    "ai_decide(jsonb, varchar, varchar, jsonb, varchar, jsonb) -> struct",
+    type_infer = "unreachable",
     volatile
 )]
-fn build(_: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let options = if children.len() == 6 {
         let Some(ScalarImpl::Jsonb(options)) = children
             .pop()
@@ -71,21 +80,36 @@ fn build(_: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpress
         else {
             return Err(options_error());
         };
-        JevEvalOptions::parse(&options)?
+        AiDecideOptions::parse(&options)?
     } else {
-        JevEvalOptions::default()
+        AiDecideOptions::default()
     };
-    let children = children.try_into().map_err(|_| ExprError::InvalidParam {
-        name: "jev_eval",
-        reason: "expected five arguments and optional constant JSONB options".into(),
-    })?;
+    let children: [BoxedExpression; 5] =
+        children.try_into().map_err(|_| ExprError::InvalidParam {
+            name: "ai_decide",
+            reason: "expected five arguments and optional constant JSONB options".into(),
+        })?;
+    let Some(ScalarImpl::Jsonb(questions)) = children[3].eval_const()? else {
+        return Err(ExprError::InvalidParam {
+            name: "ai_decide questions",
+            reason: "must be constant non-null JSONB".into(),
+        });
+    };
+    let schema = QuestionSchema::parse(&questions)?;
+    if return_type != schema.return_type() {
+        return Err(ExprError::InvalidParam {
+            name: "ai_decide",
+            reason: "return type does not match fixed questions".into(),
+        });
+    }
     let client = Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| request_error("could not initialize HTTP client"))?;
-    Ok(JevEval {
+    Ok(AiDecide {
         children,
+        schema,
         client,
         permits: Semaphore::new(options.max_concurrency),
         max_concurrency: options.max_concurrency,
@@ -95,17 +119,118 @@ fn build(_: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpress
 
 fn options_error() -> ExprError {
     ExprError::InvalidParam {
-        name: "jev_eval options",
+        name: "ai_decide options",
         reason: "must be constant non-null jsonb".into(),
     }
 }
 
 fn request_error(message: impl std::fmt::Display) -> ExprError {
     // Do not attach the request, response body, URL, or function arguments to errors.
-    ExprError::External(format!("jev_eval: {message}"))
+    ExprError::External(format!("ai_decide: {message}"))
 }
 
-impl JevEval {
+/// Decode strictly before the result can be persisted. Contract errors must survive
+/// non-strict streaming wrappers, just like transport errors.
+fn decode_response(response: JsonbVal, schema: &QuestionSchema) -> Result<StructValue> {
+    let response = response.take();
+    let answers = response
+        .get("answers")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| request_error("response must contain an answers object"))?;
+    let mut fields = Vec::with_capacity(schema.0.len());
+    for question in &schema.0 {
+        let error = |field: &str| {
+            request_error(format!(
+                "invalid response for question {:?}: {field}",
+                question.id
+            ))
+        };
+        let answer = answers
+            .get(&question.id)
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| error("missing answer object"))?;
+        let expected = match &question.kind {
+            QuestionKind::Noul => "noul",
+            QuestionKind::Choice(_) => "choice",
+            QuestionKind::Score(_) => "score",
+        };
+        if answer.get("type").and_then(serde_json::Value::as_str) != Some(expected) {
+            return Err(error("answer type does not match the question"));
+        }
+        let number = |field: &str, maximum: f64| -> Result<F64> {
+            answer
+                .get(field)
+                .and_then(serde_json::Value::as_f64)
+                .filter(|v| v.is_finite() && (0.0..=maximum).contains(v))
+                .map(F64::from)
+                .ok_or_else(|| error(field))
+        };
+        let value = if let QuestionKind::Noul = &question.kind {
+            ScalarImpl::Float64(number("noul", 1.0)?)
+        } else {
+            let confidence = number("confidence", 1.0)?;
+            let probabilities = answer
+                .get("probabilities")
+                .and_then(serde_json::Value::as_object)
+                .ok_or_else(|| error("missing probabilities object"))?;
+            let keys = match &question.kind {
+                QuestionKind::Choice(labels) => labels.clone(),
+                QuestionKind::Score(count) => (0..*count).map(|i| i.to_string()).collect(),
+                QuestionKind::Noul => unreachable!(),
+            };
+            if probabilities.len() != keys.len() {
+                return Err(error(
+                    "probabilities must contain exactly the declared options",
+                ));
+            }
+            let distribution = keys
+                .iter()
+                .map(|key| {
+                    probabilities
+                        .get(key)
+                        .and_then(serde_json::Value::as_f64)
+                        .filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
+                        .ok_or_else(|| error("missing or invalid probability"))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            // Services may round each probability independently. Preserve their values
+            // rather than imposing a precision or silently renormalizing the answer.
+            let distribution = ListValue::from_iter(distribution.into_iter().map(F64::from));
+            let (value, probabilities) = match &question.kind {
+                QuestionKind::Choice(labels) => {
+                    let choice = answer
+                        .get("choice")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|s| labels.iter().any(|label| label == s))
+                        .ok_or_else(|| error("choice must be a declared option"))?;
+                    let probabilities = MapValue::try_from_kv(
+                        ListValue::from_iter(labels.iter().map(String::as_str)),
+                        distribution,
+                    )
+                    .map_err(|_| error("invalid probability map"))?;
+                    (
+                        ScalarImpl::Utf8(choice.into()),
+                        ScalarImpl::Map(probabilities),
+                    )
+                }
+                QuestionKind::Score(count) => (
+                    ScalarImpl::Float64(number("score", (count - 1) as f64)?),
+                    ScalarImpl::List(distribution),
+                ),
+                QuestionKind::Noul => unreachable!(),
+            };
+            ScalarImpl::Struct(StructValue::new(vec![
+                Some(value),
+                Some(confidence.into()),
+                Some(probabilities),
+            ]))
+        };
+        fields.push(Some(value));
+    }
+    Ok(StructValue::new(fields))
+}
+
+impl AiDecide {
     async fn request(
         &self,
         state: JsonbRef<'_>,
@@ -176,7 +301,7 @@ impl JevEval {
                         if let Some(err) = read_error {
                             Err(err)
                         } else {
-                            // Preserve the entire response, including unknown metadata fields.
+                            // Decode the full JSON envelope before validating typed answers.
                             return jsonbb::Value::from_text(&bytes)
                                 .map(JsonbVal::from)
                                 .map_err(|_| {
@@ -219,7 +344,7 @@ impl JevEval {
         unreachable!("last attempt always returns")
     }
 
-    async fn evaluate(&self, args: [DatumRef<'_>; 5]) -> Result<Option<JsonbVal>> {
+    async fn evaluate(&self, args: [DatumRef<'_>; 5]) -> Result<Option<StructValue>> {
         let [
             Some(state),
             Some(url),
@@ -238,17 +363,18 @@ impl JevEval {
             api_key.into_utf8(),
         )
         .await
+        .and_then(|response| decode_response(response, &self.schema))
         .map(Some)
     }
 }
 
-impl ExpressionInfo for JevEval {
+impl ExpressionInfo for AiDecide {
     fn return_type(&self) -> DataType {
-        DataType::Jsonb
+        self.schema.return_type()
     }
 }
 
-impl AsyncExpression for JevEval {
+impl AsyncExpression for AiDecide {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut arrays = Vec::with_capacity(5);
         for child in &self.children {
@@ -274,9 +400,9 @@ impl AsyncExpression for JevEval {
         while let Some((index, result)) = results.try_next().await? {
             ordered_results[index] = result;
         }
-        let mut builder = JsonbArrayBuilder::new(input.capacity());
+        let mut builder = self.return_type().create_array_builder(input.capacity());
         for result in ordered_results {
-            builder.append_owned(result);
+            builder.append(result.map(ScalarImpl::Struct));
         }
         Ok(builder.finish().into_ref())
     }
@@ -290,7 +416,7 @@ impl AsyncExpression for JevEval {
             args[i].as_ref().map(ScalarImpl::as_scalar_ref_impl)
         }))
         .await
-        .map(|value| value.map(ScalarImpl::Jsonb))
+        .map(|value| value.map(ScalarImpl::Struct))
     }
 }
 
@@ -303,12 +429,12 @@ mod tests {
     use axum::response::IntoResponse;
     use axum::routing::post;
     use axum::{Json, Router};
-    use risingwave_common::array::Utf8Array;
+    use risingwave_common::array::{Array, ArrayBuilder, JsonbArrayBuilder, Utf8Array};
     use risingwave_common::types::Scalar;
     use risingwave_expr::expr::{
         InputRefExpression, LiteralExpression, SyncExpressionBoxExt, build_func,
     };
-    use risingwave_expr::scalar::jev::DEFAULT_MAX_CONCURRENCY;
+    use risingwave_expr::scalar::ai_decide::DEFAULT_MAX_CONCURRENCY;
     use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
 
@@ -332,19 +458,24 @@ mod tests {
         Server { url, task }
     }
 
-    fn expression(timeout: Duration) -> JevEval {
+    fn expression(timeout: Duration) -> AiDecide {
         expression_with_concurrency(timeout, DEFAULT_MAX_CONCURRENCY)
     }
 
-    fn expression_with_concurrency(timeout: Duration, max_concurrency: usize) -> JevEval {
-        JevEval {
+    fn expression_with_concurrency(timeout: Duration, max_concurrency: usize) -> AiDecide {
+        AiDecide {
+            schema: test_schema(),
             children: std::array::from_fn(|i| {
                 let ty = if i == 0 || i == 3 {
                     DataType::Jsonb
                 } else {
                     DataType::Varchar
                 };
-                InputRefExpression::new(ty, i).boxed()
+                if i == 3 {
+                    LiteralExpression::new(DataType::Jsonb, Some(test_questions().into())).boxed()
+                } else {
+                    InputRefExpression::new(ty, i).boxed()
+                }
             }),
             client: Client::builder()
                 .timeout(timeout)
@@ -357,7 +488,92 @@ mod tests {
         }
     }
 
-    async fn call(expr: &JevEval, url: &str) -> Result<JsonbVal> {
+    fn test_questions() -> JsonbVal {
+        JsonbVal::from(json!({"q": {"type": "noul", "instructions": "Test probability?"}}))
+    }
+
+    fn test_schema() -> QuestionSchema {
+        QuestionSchema::parse(&test_questions()).unwrap()
+    }
+
+    fn score_at(array: &ArrayRef, index: usize) -> Option<f64> {
+        array
+            .as_struct()
+            .value_at(index)
+            .map(|value| value.field_at(0).unwrap().into_float64().0)
+    }
+
+    #[test]
+    fn decodes_mixed_answers_without_losing_distributions() {
+        let schema = QuestionSchema::parse(&JsonbVal::from(json!({
+            "refund":{"type":"noul","instructions":"Refund?"},
+            "team":{"type":"choice","instructions":"Team?","criteria":{"billing":"Payments","tech":"Bugs"}},
+            "urgency":{"type":"score","instructions":"Urgent?","criteria":["Routine","Soon","Blocking"]}
+        }))).unwrap();
+        let response = json!({"answers":{
+            "refund":{"type":"noul","noul":0.8},
+            "team":{"type":"choice","choice":"billing","confidence":0.6,"probabilities":{"tech":0.2,"billing":0.8}},
+            "urgency":{"type":"score","score":1.25,"confidence":0.4,"probabilities":{"2":0.5,"0":0.25,"1":0.25}}
+        },"unknown_metadata":true});
+        let result = decode_response(JsonbVal::from(response.clone()), &schema).unwrap();
+        assert_eq!(result.fields()[0], Some(ScalarImpl::Float64(0.8.into())));
+        let team = result.fields()[1].as_ref().unwrap().as_struct();
+        assert_eq!(team.fields()[0], Some(ScalarImpl::Utf8("billing".into())));
+        assert_eq!(team.fields()[1], Some(ScalarImpl::Float64(0.6.into())));
+        let expected_map = MapValue::try_from_kv(
+            ListValue::from_iter(["billing", "tech"]),
+            ListValue::from_iter([F64::from(0.8), F64::from(0.2)]),
+        )
+        .unwrap();
+        assert_eq!(team.fields()[2], Some(ScalarImpl::Map(expected_map)));
+        let urgency = result.fields()[2].as_ref().unwrap().as_struct();
+        assert_eq!(urgency.fields()[0], Some(ScalarImpl::Float64(1.25.into())));
+        assert_eq!(
+            urgency.fields()[2],
+            Some(ScalarImpl::List(ListValue::from_iter([
+                F64::from(0.25),
+                F64::from(0.25),
+                F64::from(0.5)
+            ])))
+        );
+
+        let mut rounded = response.clone();
+        rounded["answers"]["urgency"]["probabilities"] =
+            json!({"0": 0.3333, "1": 0.3333, "2": 0.3333});
+        let rounded = decode_response(JsonbVal::from(rounded), &schema).unwrap();
+        assert_eq!(
+            rounded.fields()[2].as_ref().unwrap().as_struct().fields()[2],
+            Some(ScalarImpl::List(ListValue::from_iter(
+                [F64::from(0.3333); 3]
+            )))
+        );
+
+        for (pointer, value) in [
+            ("/answers/refund", Value::Null),
+            ("/answers/refund/noul", json!(1.1)),
+            ("/answers/refund/noul", json!("test-only-key")),
+            ("/answers/team/type", json!("score")),
+            ("/answers/team/choice", json!("undeclared")),
+            ("/answers/team/confidence", Value::Null),
+            ("/answers/team/probabilities", json!({"billing":0.8})),
+            (
+                "/answers/team/probabilities",
+                json!({"billing":0.8,"other":0.2}),
+            ),
+            ("/answers/team/probabilities/tech", json!(1.2)),
+            ("/answers/team/probabilities/tech", json!(-0.2)),
+            ("/answers/urgency/score", json!(3.0)),
+            ("/answers/urgency/probabilities", json!([0.25, 0.25, 0.5])),
+        ] {
+            let mut malformed = response.clone();
+            *malformed.pointer_mut(pointer).unwrap() = value;
+            let error = decode_response(JsonbVal::from(malformed), &schema).unwrap_err();
+            assert!(matches!(error, ExprError::External(_)), "{pointer}");
+            assert!(!error.to_string().contains("test-only-key"));
+        }
+    }
+
+    async fn call(expr: &AiDecide, url: &str) -> Result<JsonbVal> {
         expr.request(
             JsonbVal::from(json!({"messages": ["收到退款了"]})).as_scalar_ref(),
             url,
@@ -511,7 +727,7 @@ mod tests {
                     tokio::time::sleep(Duration::from_millis(if index == 0 { 80 } else { 5 }))
                         .await;
                     a.fetch_sub(1, Ordering::SeqCst);
-                    Json(json!({"index": index}))
+                    Json(json!({"answers": {"q": {"type": "noul", "noul": index as f64 / 100.0}}}))
                 }
             }),
         ))
@@ -522,11 +738,10 @@ mod tests {
         let (left, right) = tokio::join!(expr.eval(&input), expr.eval(&input));
         for output in [left.unwrap(), right.unwrap()] {
             for i in 0..20 {
-                let value = output
-                    .as_jsonb()
-                    .value_at(i)
-                    .map(|v| JsonbVal::from(v).take());
-                assert_eq!(value, (![1, 2].contains(&i)).then(|| json!({"index": i})));
+                assert_eq!(
+                    score_at(&output, i),
+                    (![1, 2].contains(&i)).then_some(i as f64 / 100.0)
+                );
             }
         }
         assert_eq!(requests.load(Ordering::SeqCst), 36);
@@ -537,7 +752,7 @@ mod tests {
     #[tokio::test]
     async fn any_null_argument_skips_request() {
         let expr = expression(REQUEST_TIMEOUT);
-        for null_index in 0..5 {
+        for null_index in [0, 1, 2, 4] {
             let mut args = vec![
                 Some(ScalarImpl::Jsonb(JsonbVal::empty_object())),
                 Some(ScalarImpl::Utf8("invalid URL".into())),
@@ -568,7 +783,7 @@ mod tests {
                             gate.acquire().await.unwrap().forget();
                         }
                         seen.fetch_add(1, Ordering::SeqCst);
-                        Json(json!({"index": index}))
+                        Json(json!({"answers": {"q": {"type": "noul", "noul": index as f64 / 100.0}}}))
                     }
                 }),
             ))
@@ -592,11 +807,8 @@ mod tests {
             let output = evaluation.await.unwrap();
             for i in 0..30 {
                 assert_eq!(
-                    output
-                        .as_jsonb()
-                        .value_at(i)
-                        .map(|value| JsonbVal::from(value).take()),
-                    (![1, 2].contains(&i)).then(|| json!({"index": i}))
+                    score_at(&output, i),
+                    (![1, 2].contains(&i)).then_some(i as f64 / 100.0)
                 );
             }
         }
@@ -609,7 +821,10 @@ mod tests {
             post(|Json(body): Json<Value>| async move {
                 match body["state"]["index"].as_u64().unwrap() {
                     0 => futures::future::pending().await,
-                    3 => (StatusCode::OK, Json(json!({"ok": true}))),
+                    3 => (
+                        StatusCode::OK,
+                        Json(json!({"answers":{"q":{"type":"noul","noul":0.03}}})),
+                    ),
                     4 => (StatusCode::UNAUTHORIZED, Json(json!({}))),
                     _ => unreachable!(),
                 }
@@ -677,7 +892,7 @@ mod tests {
                         gate.acquire().await.unwrap().forget();
                         tokio::task::yield_now().await;
                         a.fetch_sub(1, Ordering::SeqCst);
-                        Json(body)
+                        Json(json!({"answers":{"q":{"type":"noul","noul":body["state"]["index"].as_f64().unwrap()/100.0}}}))
                     }
                 }),
             ))
@@ -690,7 +905,8 @@ mod tests {
                 )
                 .boxed(),
             );
-            let expr = build_func(ExprType::JevEval, DataType::Jsonb, children).unwrap();
+            let expr =
+                build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap();
             let input = chunk(&server.url, 20);
             let (left, right) = tokio::time::timeout(Duration::from_secs(5), async {
                 tokio::join!(expr.eval(&input), expr.eval(&input))

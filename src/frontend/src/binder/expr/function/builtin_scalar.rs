@@ -49,28 +49,6 @@ impl Binder {
             rewrite(r#type, Ok)
         }
 
-        fn jev_eval() -> Handle {
-            Box::new(|_binder, inputs| {
-                if inputs.len() == 6 {
-                    let ExprImpl::Literal(options) = &inputs[5] else {
-                        return Err(ErrorCode::InvalidInputSyntax(
-                            "jev_eval options must be constant non-null jsonb".into(),
-                        )
-                        .into());
-                    };
-                    let Some(ScalarImpl::Jsonb(options)) = options.get_data() else {
-                        return Err(ErrorCode::InvalidInputSyntax(
-                            "jev_eval options must be constant non-null jsonb".into(),
-                        )
-                        .into());
-                    };
-                    risingwave_expr::scalar::jev::JevEvalOptions::parse(options)
-                        .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?;
-                }
-                Ok(FunctionCall::new(ExprType::JevEval, inputs)?.into())
-            })
-        }
-
         fn guard_by_len<const E: usize>(
             handle: impl Fn(&mut Binder, [ExprImpl; E]) -> Result<ExprImpl> + Sync + Send + 'static,
         ) -> Handle {
@@ -820,7 +798,12 @@ impl Binder {
                 })),
 
                 // AI model functions
-                ("jev_eval", jev_eval()),
+                ("ai_decide", raw(|_, inputs| super::ai_decide::bind(inputs))),
+                ("ai_questions", raw(|_, inputs| super::ai_decide::questions(inputs))),
+                ("ai_prob_question", raw(|_, inputs| super::ai_decide::question("noul", inputs))),
+                ("ai_choice_question", raw(|_, inputs| super::ai_decide::question("choice", inputs))),
+                ("ai_score_question", raw(|_, inputs| super::ai_decide::question("score", inputs))),
+                ("ai_option", raw(|_, inputs| super::ai_decide::option(inputs))),
                 ("openai_embedding", guard_by_len(|_binder, [arg0, arg1]| {
                     // check if the first two arguments are constants
                     if let ExprImpl::Literal(config) = &arg0 && let Some(ScalarImpl::Jsonb(_config)) = config.get_data() {

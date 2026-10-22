@@ -391,7 +391,7 @@ message ExprNode {
 
     // AI model functions
     OPENAI_EMBEDDING = 2501;
-    JEV_EVAL = 2502;
+    AI_DECIDE = 2502;
   }
   // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
   Type function_type = 1;

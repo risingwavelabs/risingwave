@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod ai_decide;
 mod ai_model;
 mod arithmetic_op;
 mod array;
@@ -56,7 +57,6 @@ mod format_type;
 mod hmac;
 mod in_;
 mod int256;
-mod jev;
 mod jsonb_access;
 mod jsonb_build;
 mod jsonb_concat;

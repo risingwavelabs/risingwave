@@ -46,6 +46,7 @@ use crate::expr::{
 use crate::handler::privilege::ObjectCheckItem;
 
 mod aggregate;
+mod ai_decide;
 mod builtin_scalar;
 mod window;
 
