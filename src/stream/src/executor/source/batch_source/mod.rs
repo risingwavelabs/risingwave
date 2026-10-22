@@ -23,7 +23,25 @@ pub use batch_opendal_fs_fetch::*;
 mod batch_iceberg_list;
 pub use batch_iceberg_list::*;
 mod batch_iceberg_fetch;
+use std::time::Duration;
+
 pub use batch_iceberg_fetch::*;
+
+use crate::executor::source::get_infinite_backoff_strategy;
+
+/// Retries a bounded load makes before it fails.
+const BOUNDED_LOAD_MAX_RETRIES: usize = 10;
+
+type Backoff = Box<dyn Iterator<Item = Duration> + Send>;
+
+/// Delays between retries of a load. Once a bounded load's backoff runs out, the load fails.
+fn load_backoff(bounded: bool) -> Backoff {
+    if bounded {
+        Box::new(get_infinite_backoff_strategy().take(BOUNDED_LOAD_MAX_RETRIES))
+    } else {
+        Box::new(get_infinite_backoff_strategy())
+    }
+}
 
 /// Define a stream executor module that is gated by a feature.
 ///

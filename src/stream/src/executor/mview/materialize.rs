@@ -49,7 +49,7 @@ use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
 use crate::executor::mview::cache::MaterializeCache;
 use crate::executor::prelude::*;
-use crate::executor::{BarrierInner, BarrierMutationType};
+use crate::executor::{BarrierInner, BarrierMutationType, LoadAction};
 use crate::task::LocalBarrierManager;
 
 #[derive(Debug, Clone)]
@@ -130,26 +130,29 @@ pub struct RefreshableMaterializeArgs<S: StateStore, SD: ValueRowSerde> {
     /// Table catalog for staging table
     pub staging_table_catalog: Table,
 
-    /// During data refresh (between `RefreshStart` and `LoadFinish`),
+    /// During data refresh (between `Load { Start }` and `LoadFinish`),
     /// data will be written to both the main table and the staging table.
     ///
     /// The staging table is PK-only.
     ///
     /// After `LoadFinish`, we will do a `DELETE FROM main_table WHERE pk NOT IN (SELECT pk FROM staging_table)`.
-    /// The commit of the `RefreshStart` barrier truncates the staging table, so every cycle loads
+    /// The commit of the `Load { Start }` barrier truncates the staging table, so every cycle loads
     /// into an empty one.
     pub staging_table: StateTableInner<S, SD>,
 
     /// Per-vnode merge progress of the current cycle; the merge resumes from it after every barrier.
     pub progress_table: RefreshProgressTable<S>,
 
-    /// `prev` epoch of the running cycle's `RefreshStart` barrier, `None` outside a cycle. The
+    /// `prev` epoch of the running cycle's `Load { Start }` barrier, `None` outside a cycle. The
     /// staging truncation is committed at that epoch, so the merge waits for it to be visible
     /// locally.
     pub refresh_start_prev_epoch: Option<u64>,
 
     /// Table ID for this refreshable materialized view
     pub table_id: TableId,
+
+    /// The table's associated source, which the loads of its refreshes are addressed to
+    pub associated_source_id: SourceId,
 }
 
 impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
@@ -166,6 +169,10 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
         let table_id = table_catalog.id;
+        let associated_source_id = table_catalog
+            .optional_associated_source_id
+            .expect("refreshable table must have an associated source")
+            .into();
 
         // staging table is pk-only, and we don't need to check value consistency
         let staging_table = StateTableInner::from_table_catalog_inconsistent_op(
@@ -195,6 +202,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
             progress_table,
             refresh_start_prev_epoch: None,
             table_id,
+            associated_source_id,
         }
     }
 }
@@ -749,18 +757,18 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     let mut wait_staging_visible = None;
                     if let Some(ref mut refresh_args) = self.refresh_args {
                         match barrier.mutation.as_deref() {
-                            Some(Mutation::RefreshStart {
-                                table_id: refresh_table_id,
-                                associated_source_id: _,
-                            }) if *refresh_table_id == refresh_args.table_id => {
+                            Some(Mutation::Load {
+                                source_id,
+                                action: LoadAction::Start,
+                            }) if *source_id == refresh_args.associated_source_id => {
                                 if refresh_args.is_refreshing() {
                                     consistency_panic!(
-                                        table_id = %refresh_table_id,
-                                        "RefreshStart received while a refresh is in progress"
+                                        table_id = %refresh_args.table_id,
+                                        "load started while a refresh is in progress"
                                     );
                                 }
                                 refresh_args.refresh_start_prev_epoch = Some(barrier.epoch.prev);
-                                tracing::info!(table_id = %refresh_table_id, "RefreshStart barrier received");
+                                tracing::info!(table_id = %refresh_args.table_id, "load started, staging the refresh");
 
                                 // Initialize progress tracking for all VNodes
                                 Self::init_refresh_progress(
@@ -772,16 +780,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             Some(Mutation::LoadFinish {
                                 associated_source_id: load_finish_source_id,
                             }) => {
-                                // Get associated source id from table catalog
-                                let associated_source_id: SourceId = match refresh_args
-                                    .table_catalog
-                                    .optional_associated_source_id
-                                {
-                                    Some(id) => id.into(),
-                                    None => unreachable!("associated_source_id is not set"),
-                                };
-
-                                if *load_finish_source_id == associated_source_id {
+                                if *load_finish_source_id == refresh_args.associated_source_id {
                                     if !refresh_args.is_refreshing() {
                                         // Merging now would run against an empty staging table.
                                         consistency_panic!(
