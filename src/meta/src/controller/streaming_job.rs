@@ -251,15 +251,6 @@ impl CatalogController {
     ) -> MetaResult<TableChangeLogTruncateInfo> {
         let inner = self.inner.read().await;
 
-        // Fragments are the source of truth for cross-database backfills and contain all
-        // information needed to resolve their safe change-log truncation epochs.
-        let cross_db_fragments = Fragment::find()
-            .filter(FragmentTypeMask::intersects(
-                FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
-            ))
-            .all(&inner.db)
-            .await?;
-
         let subscriptions: Vec<(SubscriptionId, TableId, Option<i64>)> = Subscription::find()
             .select_only()
             .columns([
@@ -294,11 +285,7 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
-    let cross_db_job_ids: HashSet<_> = cross_db_fragments
-        .iter()
-        .map(|fragment| fragment.job_id)
-        .collect();
-    let committed_epoch_truncate_job_ids: HashSet<JobId> = StreamingJobModel::find()
+        let committed_epoch_truncate_job_ids: HashSet<JobId> = StreamingJobModel::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
@@ -323,6 +310,7 @@ impl CatalogController {
             .filter(FragmentTypeMask::intersects_any([
                 FragmentTypeFlag::IcebergWithPkIndexWriter,
                 FragmentTypeFlag::SnapshotBackfillStreamScan,
+                FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
             ]))
             .into_tuple()
             .all(&inner.db)
@@ -337,9 +325,7 @@ impl CatalogController {
             .collect();
         let mut committed_epoch_truncate_job_info: HashMap<_, _> = committed_epoch_truncate_job_ids
             .into_iter()
-            .filter(|job_id| {
-            !iceberg_job_ids.contains(job_id) && !cross_db_job_ids.contains(job_id)
-        })
+            .filter(|job_id| !iceberg_job_ids.contains(job_id))
             .map(|job_id| {
                 (
                     job_id,
@@ -352,12 +338,89 @@ impl CatalogController {
             })
             .collect();
         let mut progress_table_subscribers = Vec::new();
+        // Progress-table subscribers come from Iceberg snapshot backfills and cross-database
+        // snapshot backfills. Process cross-database fragments independently because one job may
+        // also participate in the local committed-epoch truncation path.
         for (fragment_id, job_id, fragment_type_mask, stream_node, state_table_ids) in fragments {
             let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
-            if iceberg_job_ids.contains(&job_id) {
-                if !fragment_type_mask.contains(FragmentTypeFlag::SnapshotBackfillStreamScan) {
-                    continue;
+            if fragment_type_mask.contains(FragmentTypeFlag::SnapshotBackfillStreamScan) {
+                if iceberg_job_ids.contains(&job_id) {
+                    let mut collection_error = None;
+                    visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
+                        let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type)
+                        {
+                            Ok(scan_type) => scan_type,
+                            Err(err) => {
+                                collection_error = Some(anyhow::Error::new(err).context(format!(
+                                    "invalid persisted stream scan type {} in job {} fragment {}",
+                                    stream_scan.stream_scan_type, job_id, fragment_id
+                                )));
+                                return;
+                            }
+                        };
+                        if scan_type != StreamScanType::SnapshotBackfill {
+                            return;
+                        }
+                        let Some(progress_table) = stream_scan.state_table.as_ref() else {
+                            collection_error = Some(anyhow!(
+                                "snapshot backfill in Iceberg V3 job {} has no progress table",
+                                job_id
+                            ));
+                            return;
+                        };
+                        progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
+                            subscriber_job_id: job_id,
+                            upstream_table_id: stream_scan.table_id,
+                            progress_table_id: progress_table.id,
+                        });
+                    });
+                    if let Some(err) = collection_error {
+                        return Err(err.into());
+                    }
+                } else if let Some(info) = committed_epoch_truncate_job_info.get_mut(&job_id) {
+                    info.state_table_ids
+                        .extend(state_table_ids.inner_ref().iter().copied());
+                    let mut collection_error = None;
+                    visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
+                        let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type)
+                        {
+                            Ok(scan_type) => scan_type,
+                            Err(err) => {
+                                collection_error = Some(anyhow::Error::new(err).context(format!(
+                                    "invalid persisted stream scan type {} in job {} fragment {}",
+                                    stream_scan.stream_scan_type, job_id, fragment_id
+                                )));
+                                return;
+                            }
+                        };
+                        if scan_type != StreamScanType::SnapshotBackfill {
+                            return;
+                        }
+                        match info
+                            .upstream_table_snapshot_epochs
+                            .entry(stream_scan.table_id)
+                        {
+                            std::collections::hash_map::Entry::Occupied(entry) => {
+                                if entry.get() != &stream_scan.snapshot_backfill_epoch {
+                                    collection_error = Some(anyhow!(
+                                        "job {} has inconsistent snapshot epochs for upstream table {}",
+                                        job_id,
+                                        stream_scan.table_id
+                                    ));
+                                }
+                            }
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(stream_scan.snapshot_backfill_epoch);
+                            }
+                        }
+                    });
+                    if let Some(err) = collection_error {
+                        return Err(err.into());
+                    }
                 }
+            }
+
+            if fragment_type_mask.contains(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan) {
                 let mut collection_error = None;
                 visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
                     let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
@@ -370,12 +433,12 @@ impl CatalogController {
                             return;
                         }
                     };
-                    if scan_type != StreamScanType::SnapshotBackfill {
+                    if scan_type != StreamScanType::CrossDbSnapshotBackfill {
                         return;
                     }
                     let Some(progress_table) = stream_scan.state_table.as_ref() else {
                         collection_error = Some(anyhow!(
-                            "snapshot backfill in Iceberg V3 job {} has no progress table",
+                            "cross-database backfill in job {} has no progress table",
                             job_id
                         ));
                         return;
@@ -389,81 +452,9 @@ impl CatalogController {
                 if let Some(err) = collection_error {
                     return Err(err.into());
                 }
-            } else if let Some(info) = committed_epoch_truncate_job_info.get_mut(&job_id) {
-                info.state_table_ids
-                    .extend(state_table_ids.inner_ref().iter().copied());
-                let mut collection_error = None;
-                visit_stream_node_stream_scan(&stream_node.to_protobuf(), |stream_scan| {
-                    let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
-                        Ok(scan_type) => scan_type,
-                        Err(err) => {
-                            collection_error = Some(anyhow::Error::new(err).context(format!(
-                                "invalid persisted stream scan type {} in job {} fragment {}",
-                                stream_scan.stream_scan_type, job_id, fragment_id
-                            )));
-                            return;
-                        }
-                    };
-                    if scan_type != StreamScanType::SnapshotBackfill {
-                        return;
-                    }
-                    match info
-                        .upstream_table_snapshot_epochs
-                        .entry(stream_scan.table_id)
-                    {
-                        std::collections::hash_map::Entry::Occupied(entry) => {
-                            if entry.get() != &stream_scan.snapshot_backfill_epoch {
-                                collection_error = Some(anyhow!(
-                                    "job {} has inconsistent snapshot epochs for upstream table {}",
-                                    job_id,
-                                    stream_scan.table_id
-                                ));
-                            }
-                        }
-                        std::collections::hash_map::Entry::Vacant(entry) => {
-                            entry.insert(stream_scan.snapshot_backfill_epoch);
-                        }
-                    }
-                });
-                if let Some(err) = collection_error {
-                    return Err(err.into());
-                }
             }
         }
-        for fragment in cross_db_fragments {
-        let mut collection_error = None;
-        visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
-            let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
-                Ok(scan_type) => scan_type,
-                Err(err) => {
-                    collection_error = Some(anyhow::Error::new(err).context(format!(
-                        "invalid persisted stream scan type {} in job {} fragment {}",
-                        stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
-                    )));
-                    return;
-                }
-            };
-            if scan_type != StreamScanType::CrossDbSnapshotBackfill {
-                return;
-            }
-            let Some(progress_table) = stream_scan.state_table.as_ref() else {
-                collection_error = Some(anyhow!(
-                    "cross-database backfill in job {} has no progress table",
-                    fragment.job_id
-                ));
-                return;
-            };
-            progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
-                subscriber_job_id: fragment.job_id,
-                upstream_table_id: stream_scan.table_id,
-                progress_table_id: progress_table.id,
-            });
-        });
-        if let Some(err) = collection_error {
-            return Err(err.into());
-        }
-    }
-    let committed_epoch_truncate_jobs = committed_epoch_truncate_job_info
+        let committed_epoch_truncate_jobs = committed_epoch_truncate_job_info
             .into_values()
             .filter(|info| !info.upstream_table_snapshot_epochs.is_empty())
             .collect();

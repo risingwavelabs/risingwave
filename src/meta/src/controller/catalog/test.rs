@@ -2777,6 +2777,7 @@ mod tests {
         let txn = inner.db.begin().await?;
         let (job_id, _, state_table_id) =
             insert_test_streaming_job(&txn, "snapshot_job", true, None).await?;
+        let cross_db_progress_table_id = TableId::new(9998);
         let mut job = streaming_job::Entity::find_by_id(job_id)
             .one(&txn)
             .await?
@@ -2799,6 +2800,30 @@ mod tests {
                 ..Default::default()
             })),
             state_table_ids: Set(vec![state_table_id].into()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(104)),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as i32),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode {
+                node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
+                    table_id: upstream_table_id,
+                    stream_scan_type: StreamScanType::CrossDbSnapshotBackfill as i32,
+                    state_table: Some(PbTable {
+                        id: cross_db_progress_table_id,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            })),
+            state_table_ids: Set(vec![cross_db_progress_table_id].into()),
             upstream_fragment_id: Set(I32Array::default()),
             vnode_count: Set(1),
             parallelism: Set(None),
@@ -2880,11 +2905,28 @@ mod tests {
             committed_epoch_truncate_job.upstream_table_snapshot_epochs,
             HashMap::from([(upstream_table_id, None)])
         );
-        assert_eq!(truncate_info.progress_table_subscribers.len(), 1);
-        let progress_subscriber = truncate_info.progress_table_subscribers.first().unwrap();
+        assert_eq!(truncate_info.progress_table_subscribers.len(), 2);
+        let progress_subscriber = truncate_info
+            .progress_table_subscribers
+            .iter()
+            .find(|subscriber| subscriber.subscriber_job_id == iceberg_job_id)
+            .unwrap();
         assert_eq!(progress_subscriber.subscriber_job_id, iceberg_job_id);
         assert_eq!(progress_subscriber.upstream_table_id, upstream_table_id);
         assert_eq!(progress_subscriber.progress_table_id, progress_table_id);
+        let cross_db_progress_subscriber = truncate_info
+            .progress_table_subscribers
+            .iter()
+            .find(|subscriber| subscriber.subscriber_job_id == job_id)
+            .unwrap();
+        assert_eq!(
+            cross_db_progress_subscriber.upstream_table_id,
+            upstream_table_id
+        );
+        assert_eq!(
+            cross_db_progress_subscriber.progress_table_id,
+            cross_db_progress_table_id
+        );
 
         Ok(())
     }
@@ -2965,9 +3007,7 @@ mod tests {
 
         let truncate_info_without_subscription = mgr.get_table_change_log_truncate_info().await?;
         assert_eq!(
-            truncate_info_without_subscription.progress_table_subscribers[0]
-                .progress_table
-                .id,
+            truncate_info_without_subscription.progress_table_subscribers[0].progress_table_id,
             progress_table_id
         );
 
@@ -3019,9 +3059,7 @@ mod tests {
         assert!(truncate_info.subscription_retention_seconds.is_empty());
         assert_eq!(truncate_info.progress_table_subscribers.len(), 1);
         assert_eq!(
-            truncate_info.progress_table_subscribers[0]
-                .progress_table
-                .id,
+            truncate_info.progress_table_subscribers[0].progress_table_id,
             progress_table_id
         );
 
