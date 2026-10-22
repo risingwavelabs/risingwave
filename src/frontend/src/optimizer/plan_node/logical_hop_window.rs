@@ -119,6 +119,10 @@ impl LogicalHopWindow {
         self.core.output_window_end_col_idx()
     }
 
+    pub fn window_end_offset_from_start(&self) -> Option<Interval> {
+        self.core.window_end_offset_from_start()
+    }
+
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         self.core.o2i_col_mapping()
     }

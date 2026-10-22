@@ -1183,12 +1183,11 @@
     StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], stream_key: [window_start, window_end, supplier_id], pk_columns: [window_start, window_end, supplier_id], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [$expr3 DESC], limit: 3, offset: 0, group_key: [$expr1, $expr2] }
       └─StreamExchange { dist: HashShard($expr1, $expr2) }
-        └─StreamProject { exprs: [$expr1, $expr2, bid.supplier_id, Case((count(bid.price) = 0:Int64), null:Decimal, sum(bid.price)) as $expr3, count] }
-          └─StreamHashAgg { group_key: [$expr1, $expr2, bid.supplier_id], aggs: [sum(bid.price), count, count(bid.price)] }
-            └─StreamExchange { dist: HashShard($expr1, $expr2, bid.supplier_id) }
-              └─StreamProject { exprs: [$expr1, ($expr1 + '00:10:00':Interval) as $expr2, bid.supplier_id, bid.price, bid._row_id] }
-                └─StreamProject { exprs: [bid.bidtime, bid.price, bid.supplier_id, TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, bid._row_id] }
-                  └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.supplier_id, bid._row_id], stream_scan_type: SnapshotBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
+        └─StreamProject { exprs: [$expr1, ($expr1 + '00:10:00':Interval) as $expr2, bid.supplier_id, Case((count(bid.price) = 0:Int64), null:Decimal, sum(bid.price)) as $expr3, count] }
+          └─StreamHashAgg { group_key: [$expr1, bid.supplier_id], aggs: [sum(bid.price), count, count(bid.price)] }
+            └─StreamExchange { dist: HashShard($expr1, bid.supplier_id) }
+              └─StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, bid.supplier_id, bid.price, bid._row_id] }
+                └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.supplier_id, bid._row_id], stream_scan_type: SnapshotBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
 - before:
   - create_bid
   sql: |

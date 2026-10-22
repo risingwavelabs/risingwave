@@ -994,13 +994,13 @@
       └─BatchFilter { predicate: IsNotNull(t1.created_at) }
         └─BatchScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start], pk_columns: [t1._row_id, window_start], pk_conflict: NoCheck }
     └─StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
       └─StreamFilter { predicate: IsNotNull(t1.created_at) }
         └─StreamTableScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start], pk_columns: [t1._row_id, window_start], pk_conflict: NoCheck }
     └── StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
         └── StreamFilter { predicate: IsNotNull(t1.created_at) }
             └── StreamTableScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -1008,12 +1008,18 @@
                 ├── Upstream
                 └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ row_id, uid, v, created_at, window_start, window_end, t1._row_id, _rw_timestamp ]
-    ├── primary key: [ $6 ASC, $4 ASC, $5 ASC ]
+    ├── primary key: [ $6 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 6 ]
-    └── read pk prefix len hint: 3
+    └── read pk prefix len hint: 2
 

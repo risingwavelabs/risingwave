@@ -369,6 +369,14 @@ static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::n
     )
 });
 
+static REMOVE_DERIVED_GROUP_KEY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Remove Derived Group Key",
+        vec![AggGroupByDerivedKeyRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simplify Aggregation",
@@ -826,6 +834,9 @@ impl LogicalOptimizer {
         };
 
         plan = plan.optimize_by_rules(&SIMPLIFY_AGG)?;
+        // Must be applied after `SIMPLIFY_AGG`, whose key check fails once a group key is removed
+        // but its column is still in the input.
+        plan = plan.optimize_by_rules(&REMOVE_DERIVED_GROUP_KEY)?;
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
 

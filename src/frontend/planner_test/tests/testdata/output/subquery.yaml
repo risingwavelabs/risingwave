@@ -267,8 +267,8 @@
                   └─BatchFilter { predicate: IsNotNull(auction.date_time) }
                     └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [date_time, window_start, window_end, auction._row_id(hidden)], stream_key: [auction._row_id, window_start, window_end, date_time], pk_columns: [auction._row_id, window_start, window_end, date_time], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(auction.date_time, window_start, window_end, auction._row_id) }
+    StreamMaterialize { columns: [date_time, window_start, window_end, auction._row_id(hidden)], stream_key: [auction._row_id, window_start, date_time], pk_columns: [auction._row_id, window_start, date_time], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(auction.date_time, window_start, auction._row_id) }
       └─StreamHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
         ├─StreamExchange { dist: HashShard(auction.date_time) }
         │ └─StreamShare { id: 3 }
@@ -810,8 +810,8 @@
               └─BatchExchange { order: [], dist: HashShard(1:Int32) }
                 └─BatchValues { rows: [[1:Int32], [2:Int32]] }
   stream_plan: |-
-    StreamMaterialize { columns: [col, k, ts, window_start, window_end], stream_key: [col, window_start, window_end], pk_columns: [col, window_start, window_end], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(1:Int32, window_start, window_end) }
+    StreamMaterialize { columns: [col, k, ts, window_start, window_end], stream_key: [col, window_start], pk_columns: [col, window_start], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(1:Int32, window_start) }
       └─StreamHashJoin { type: Inner, predicate: 1:Int32 = t1.k, output: all }
         ├─StreamProject { exprs: [1:Int32] }
         │ └─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }

@@ -80,12 +80,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
                 .iter()
                 .filter_map(|&pk_idx| self.output_indices.iter().position(|&idx| idx == pk_idx))
                 .collect_vec();
-            if let Some(start_idx) = window_start_index {
-                pk.push(start_idx);
-            };
-            if let Some(end_idx) = window_end_index {
-                pk.push(end_idx);
-            };
+            // Each input row has one output row per window, so one of `window_start` and
+            // `window_end` is enough to tell them apart.
+            pk.extend(window_start_index.or(window_end_index));
             Some(pk)
         }
     }
@@ -135,6 +132,20 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     pub fn output_window_end_col_idx(&self) -> Option<usize> {
         self.internal2output_col_mapping()
             .try_map(self.internal_window_end_col_idx())
+    }
+
+    /// Returns the interval to add to `window_start` to get `window_end` of the same row, if the
+    /// addition always gives the value of the `window_end` expression.
+    ///
+    /// Both expressions add a multiple of `window_slide` to the same hop start, so the result is the
+    /// same when interval addition is associative: without months, whose days are clamped to the
+    /// month end, and for `timestamptz`, without days, whose length depends on the time zone.
+    pub fn window_end_offset_from_start(&self) -> Option<Interval> {
+        let slide = self.window_slide;
+        let associative = slide.months() == 0
+            && (slide.days() == 0 || self.time_col.data_type != DataType::Timestamptz);
+        // `window_size` is an exact multiple of `window_slide` in each unit.
+        associative.then_some(self.window_size)
     }
 
     pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {

@@ -163,6 +163,59 @@ select * from mv_hop_agg_3 order by window_start, uid;
 2 2 2022-01-04 00:00:00
 1 1 2022-01-05 00:00:00
 
+# `window_end` is derived from `window_start` instead of being a group key, so the results must stay
+# correct when rows move between windows or groups, or get deleted.
+statement ok
+create materialized view mv_tumble_agg_3 as
+select uid, sum(v) as sum_v, window_start, window_end
+from tumble(t1, created_at, interval '30' minute)
+group by window_start, window_end, uid;
+
+statement ok
+create materialized view mv_hop_agg_4 as
+select uid, sum(v) as sum_v, window_start, window_end
+from hop(t1, created_at, interval '15' minute, interval '30' minute)
+group by window_start, window_end, uid;
+
+statement ok
+update t1 set created_at = '2022-01-01 10:35:00' where row_id = 2;
+
+statement ok
+update t1 set uid = 2 where row_id = 7;
+
+statement ok
+delete from t1 where row_id >= 8;
+
+statement ok
+flush;
+
+query IITT
+select * from mv_tumble_agg_3 order by window_start, uid;
+----
+1 5 2022-01-01 10:00:00 2022-01-01 10:30:00
+2 2 2022-01-01 10:00:00 2022-01-01 10:30:00
+2 13 2022-01-01 10:30:00 2022-01-01 11:00:00
+3 8 2022-01-01 10:30:00 2022-01-01 11:00:00
+
+query IITT
+select * from mv_hop_agg_4 order by window_start, uid;
+----
+1 4 2022-01-01 09:45:00 2022-01-01 10:15:00
+2 2 2022-01-01 09:45:00 2022-01-01 10:15:00
+1 5 2022-01-01 10:00:00 2022-01-01 10:30:00
+2 2 2022-01-01 10:00:00 2022-01-01 10:30:00
+1 1 2022-01-01 10:15:00 2022-01-01 10:45:00
+2 7 2022-01-01 10:15:00 2022-01-01 10:45:00
+3 8 2022-01-01 10:15:00 2022-01-01 10:45:00
+2 13 2022-01-01 10:30:00 2022-01-01 11:00:00
+3 8 2022-01-01 10:30:00 2022-01-01 11:00:00
+2 6 2022-01-01 10:45:00 2022-01-01 11:15:00
+
+statement ok
+drop materialized view mv_tumble_agg_3;
+
+statement ok
+drop materialized view mv_hop_agg_4;
 
 statement ok
 drop materialized view mv_tumble;

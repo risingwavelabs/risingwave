@@ -1,0 +1,55 @@
+- name: hop window_end is computed from window_start after the aggregation
+  sql: |
+    create table t (k int, ts timestamp, watermark for ts as ts - interval '5 seconds') append only;
+    select k, window_start, window_end, count(*) as cnt from hop(t, ts, interval '1' minute, interval '5' minute) group by k, window_start, window_end;
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_plan
+- name: hop window columns renamed in a subquery
+  sql: |
+    create table t (k int, ts timestamp);
+    select k, ws, we, count(*) as cnt from (select k, window_start as ws, window_end as we from hop(t, ts, interval '1' minute, interval '5' minute)) group by k, ws, we;
+  expected_outputs:
+    - stream_plan
+- name: hop day slide on timestamptz keeps window_end, as a day depends on the time zone
+  sql: |
+    create table t (k int, ts timestamptz);
+    select k, window_start, window_end, count(*) as cnt from hop(t, ts, interval '1' day, interval '3' day) group by k, window_start, window_end;
+  expected_outputs:
+    - stream_plan
+- name: hop month slide keeps window_end, as a month has no fixed length
+  sql: |
+    create table t (k int, ts timestamp);
+    select k, window_start, window_end, count(*) as cnt from hop(t, ts, interval '1' month, interval '2' month) group by k, window_start, window_end;
+  expected_outputs:
+    - stream_plan
+- name: tumble window_end is computed from window_start after the aggregation
+  sql: |
+    create table t (k int, ts timestamptz);
+    select window_end, k, window_start, count(*) as cnt from tumble(t, ts, interval '1' minute) group by window_end, k, window_start;
+  expected_outputs:
+    - stream_plan
+- name: group key computed from other group keys
+  sql: |
+    create table t (a int, s varchar, v int);
+    select a, a + 1 as b, s, upper(s) as u, sum(v) as sv from t group by a, a + 1, s, upper(s);
+  expected_outputs:
+    - stream_plan
+- name: group key computed from keys whose equal values may differ
+  sql: |
+    create table t (f float8, d decimal, i interval, v int);
+    select f, f::varchar as fs, d, d::varchar as ds, i, extract(day from i) as id, sum(v) as sv from t group by f, f::varchar, d, d::varchar, i, extract(day from i);
+  expected_outputs:
+    - stream_plan
+- name: constant group keys keep one key
+  sql: |
+    create table t (v int);
+    select 1 as x, 2 as y, sum(v) as sv from t group by 1, 2;
+  expected_outputs:
+    - stream_plan
+- name: group key computed from a key below another key that compares by value
+  sql: |
+    create table t (a int, v int);
+    select a, a::float8 as f, a::float8 + 1 as f1, sum(v) as sv from t group by a, a::float8, a::float8 + 1;
+  expected_outputs:
+    - stream_plan
