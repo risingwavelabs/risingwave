@@ -30,13 +30,15 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use iceberg::spec::{NestedField, PrimitiveType, Schema, TableMetadataBuilder, Type};
+use iceberg::spec::{
+    FormatVersion, NestedField, PrimitiveType, Schema, TableMetadataBuilder, Type,
+};
 use iceberg::{TableCreation, TableIdent};
 use risingwave_common::id::SinkId;
 use risingwave_connector::sink::iceberg::mock_v3_catalog_registry::{MockCatalogGuard, register};
 use risingwave_meta_model::pending_sink_state;
 use risingwave_simulation::cluster::Cluster;
-use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 
 use super::mock_catalog::MockIcebergV3Catalog;
 
@@ -52,8 +54,24 @@ pub struct V3TestHandle {
 /// upstream `TABLE -> MV -> SINK` chain. Once this returns, the streaming
 /// graph is live and ready to accept `INSERT INTO test_v3_table` writes.
 pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3TestHandle> {
+    start_v3_test_cluster(parallelism, false).await
+}
+
+/// Start the same V3 topology with a dedicated compactor and a high automatic threshold.
+pub async fn start_v3_test_cluster_with_compaction(parallelism: usize) -> Result<V3TestHandle> {
+    start_v3_test_cluster(parallelism, true).await
+}
+
+async fn start_v3_test_cluster(
+    parallelism: usize,
+    enable_compaction: bool,
+) -> Result<V3TestHandle> {
     // 1. Start the simulation cluster.
-    let mut cluster = crate::sink::utils::start_sink_test_cluster().await?;
+    let mut cluster = if enable_compaction {
+        crate::sink::utils::start_sink_test_cluster_with_iceberg_compactor().await?
+    } else {
+        crate::sink::utils::start_sink_test_cluster().await?
+    };
 
     // 2. Build a minimal iceberg TableMetadata for schema (id int, name varchar).
     let schema = Schema::builder()
@@ -72,6 +90,7 @@ pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3Tes
         .build();
 
     let metadata = TableMetadataBuilder::from_table_creation(creation)?
+        .upgrade_format_version(FormatVersion::V3)?
         .build()?
         .metadata;
 
@@ -100,8 +119,16 @@ pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3Tes
         )
         .await?;
 
+    let compaction_options = if enable_compaction {
+        "enable_compaction = 'true', \
+         compaction_interval_sec = '1000', \
+         compaction.trigger_snapshot_count = '1000', \
+         enable_snapshot_expiration = 'false', "
+    } else {
+        ""
+    };
     session
-        .run(
+        .run(&format!(
             "CREATE SINK test_v3_sink FROM test_v3_mv \
              WITH ( \
                connector = 'iceberg', \
@@ -112,9 +139,10 @@ pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3Tes
                is_exactly_once = 'true', \
                enable_pk_index = 'true', \
                format_version = '3', \
+               {compaction_options} \
                type = 'upsert' \
-             )",
-        )
+             )"
+        ))
         .await?;
 
     Ok(V3TestHandle {
@@ -299,17 +327,8 @@ pub async fn assert_invariants(handle: &mut V3TestHandle) -> Result<()> {
     Ok(())
 }
 
-/// Open a read-only sea-orm connection against the cluster's SQLite metastore
-/// and verify the V3 sink's `pending_sink_state` rows have fully drained.
-///
-/// After the sink is idle, every `persist_pre_commit_metadata` row must have
-/// been advanced through `commit_and_prune_epoch` (Committed + prev epoch
-/// deleted) — at most the latest `Committed` row should remain. Lingering
-/// `Pending` rows mean a 2PC commit was abandoned mid-flight; `Aborted` rows
-/// mean recovery flagged a row that `clean_aborted_records` then failed to
-/// reap. Either signals a bug in the V3 state machine that the existing mock
-/// assertions cannot detect.
-async fn assert_pending_sink_state_drained(handle: &mut V3TestHandle) -> Result<()> {
+/// Open a read-only connection for inspecting this sink's persisted 2PC state.
+async fn sink_state_db(handle: &mut V3TestHandle) -> Result<(SinkId, DatabaseConnection)> {
     let sink_id_str = handle
         .cluster
         .run("SELECT id FROM rw_catalog.rw_sinks WHERE name = 'test_v3_sink'")
@@ -328,7 +347,27 @@ async fn assert_pending_sink_state_drained(handle: &mut V3TestHandle) -> Result<
     let db = Database::connect(&url)
         .await
         .with_context(|| format!("failed to open meta sqlite at {}", url))?;
+    Ok((sink_id, db))
+}
 
+/// Verify that the compaction fault leaves an actual persisted epoch for recovery to replay.
+pub async fn assert_compaction_pending(handle: &mut V3TestHandle) -> Result<()> {
+    let (sink_id, db) = sink_state_db(handle).await?;
+    let rows = pending_sink_state::Entity::find()
+        .filter(pending_sink_state::Column::SinkId.eq(sink_id))
+        .filter(pending_sink_state::Column::SinkState.eq(pending_sink_state::SinkState::Pending))
+        .all(&db)
+        .await?;
+    anyhow::ensure!(
+        rows.len() == 1,
+        "expected one Pending compaction epoch, got {rows:?}"
+    );
+    Ok(())
+}
+
+/// After recovery settles, only Committed rows may remain for this sink.
+async fn assert_pending_sink_state_drained(handle: &mut V3TestHandle) -> Result<()> {
+    let (sink_id, db) = sink_state_db(handle).await?;
     // The Committed marker is written by `commit_and_prune_epoch` after iceberg
     // accepts the snapshot, so it may briefly lag the mock's 'I' event. Poll
     // for up to 30s before failing.
@@ -357,7 +396,7 @@ async fn assert_pending_sink_state_drained(handle: &mut V3TestHandle) -> Result<
                 .collect();
             anyhow::bail!(
                 "pending_sink_state did not drain for sink_id={}: rows = [{}]; event trace = {}",
-                sink_id_u32,
+                sink_id,
                 detail.join(", "),
                 handle.mock.get_event_trace(),
             );

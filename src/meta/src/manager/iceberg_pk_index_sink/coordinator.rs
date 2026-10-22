@@ -461,6 +461,14 @@ impl IcebergPkIndexSinkCoordinator {
         })?;
         self.table = refreshed_table;
 
+        // Leave the durable overwrite's row Pending so recovery must replay it.
+        if !commit.merged.overwrite_files.is_empty() {
+            fail::fail_point!("iceberg_pk_index_compaction_after_commit_reached");
+            fail::fail_point!("iceberg_pk_index_compaction_after_commit", |_| Err(
+                anyhow!("injected failure after compaction commit, before marking Committed")
+            ));
+        }
+
         commit_and_prune_epoch(
             &self.db,
             self.sink_id,
@@ -757,6 +765,9 @@ async fn commit_one_epoch(
                     .snapshots()
                     .any(|s| s.snapshot_id() == snapshot_id)
                 {
+                    if !merged.overwrite_files.is_empty() {
+                        fail::fail_point!("iceberg_pk_index_compaction_replayed");
+                    }
                     return Ok(table);
                 }
 
