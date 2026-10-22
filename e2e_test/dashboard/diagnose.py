@@ -87,12 +87,12 @@ def main():
         for trace_format in ("text", "json"):
             filtered = report(database_id=ids[database], actor_traces_format=trace_format)
             # Check the catalog independently of shared traces and metrics.
-            catalog = filtered.split("FRAGMENT\n", 1)[0]
+            catalog = filtered.split("ACTOR\n", 1)[0]
             assert all(name in catalog for name in names[database]), database
             assert all(name not in catalog for name in names[other]), other
-            fragment_table = filtered.split("FRAGMENT\n", 1)[1].split("top sources", 1)[0]
-            assert f"{database}_table" in fragment_table
-            assert f"{other}_table" not in fragment_table
+            actor_table = filtered.split("ACTOR\n", 1)[1].split("top sources", 1)[0]
+            assert f"{database}_table" in actor_table
+            assert f"{other}_table" not in actor_table
             trace_ids = set(re.findall(r"^>> Actor (\d+)$", filtered, re.MULTILINE))
             assert trace_ids <= actors[database], trace_ids - actors[database]
             # Some cluster configurations disable await trees.
@@ -107,7 +107,7 @@ def main():
             assert "LICENSE" in filtered
 
     empty = report(database_id=4294967295)
-    empty_catalog = empty.split("FRAGMENT\n", 1)[0]
+    empty_catalog = empty.split("ACTOR\n", 1)[0]
     assert all(
         name not in empty_catalog for values in names.values() for name in values
     )
