@@ -17,24 +17,30 @@
 //! Mock only the two methods V3 coordinator actually calls (`load_table`,
 //! `update_table`); all other trait methods panic.
 //!
-//! Tracks data files at the file_path level (not row level) — PK correctness
-//! is V3 writer's responsibility, not within this spec's scope.
+//! Tracks catalog events at the file_path level. The deterministic compaction
+//! conflict test also reads actual rows with their live position deletes applied.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
+use iceberg::delete_vector::DeleteVector;
 use iceberg::io::FileIO;
-use iceberg::spec::{DataContentType, SerializedDataFile, TableMetadata, TableMetadataRef};
+use iceberg::spec::{
+    DataContentType, DataFile, SerializedDataFile, TableMetadata, TableMetadataRef,
+};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Error as IcebergError, ErrorKind as IcebergErrorKind, Namespace, NamespaceIdent,
     Result as IcebergResult, Runtime, TableCommit, TableCreation, TableIdent, TableUpdate,
 };
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use rand::RngExt as _;
+use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, StringArray};
+use risingwave_connector::sink::iceberg::read_position_deletes_from_file;
 use tokio::time::sleep;
 
 static ICEBERG_RUNTIME: LazyLock<rw_tokio::runtime::Runtime> = LazyLock::new(|| {
@@ -163,23 +169,18 @@ impl MockIcebergV3Catalog {
             .current_snapshot()
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("mock table has no current snapshot"))?;
-        let table = self.build_table_with_metadata(metadata.clone())?;
-        let manifest_list = table.manifest_list_reader(&snapshot).load().await?;
-        let mut live_files = HashMap::new();
-        for manifest_file in manifest_list.entries().iter().rev() {
-            let manifest = manifest_file.load_manifest(&self.file_io).await?;
-            for entry in manifest.entries() {
-                if entry.content_type() != DataContentType::Data {
-                    continue;
-                }
-                let path = entry.data_file().file_path().to_owned();
-                if entry.is_alive() {
-                    live_files.insert(path, entry.data_file().clone());
-                } else {
-                    live_files.remove(&path);
-                }
-            }
-        }
+        let live_files: HashMap<_, _> = self
+            .live_files(&metadata)
+            .await?
+            .into_iter()
+            .map(|file| (file.file_path().to_owned(), file))
+            .collect();
+        anyhow::ensure!(
+            live_files
+                .values()
+                .all(|file| file.content_type() == DataContentType::Data),
+            "simulated rewrite requires inputs without baseline deletes"
+        );
         let partition_type = metadata.default_partition_type();
         let format_version = metadata.format_version();
         let mut paths = live_files.keys().cloned().collect::<Vec<_>>();
@@ -208,6 +209,81 @@ impl MockIcebergV3Catalog {
             metadata.default_partition_spec_id(),
             snapshot.snapshot_id(),
         ))
+    }
+
+    /// Read the actual Parquet rows, masking live position deletes rather than trusting summaries.
+    pub async fn live_rows(&self) -> Result<BTreeMap<i32, String>> {
+        let metadata = self.inner().current_metadata.clone();
+        let files = self.live_files(&metadata).await?;
+        let mut deletes: HashMap<String, DeleteVector> = HashMap::new();
+        for file in &files {
+            if file.content_type() == DataContentType::PositionDeletes {
+                let path = file
+                    .referenced_data_file()
+                    .context("delete file has no data path")?;
+                let positions = read_position_deletes_from_file(&self.file_io, file).await?;
+                anyhow::ensure!(
+                    deletes.insert(path, positions).is_none(),
+                    "duplicate live delete file"
+                );
+            }
+        }
+        let mut rows = BTreeMap::new();
+        for file in &files {
+            if file.content_type() != DataContentType::Data {
+                continue;
+            }
+            let deleted = deletes.get(file.file_path());
+            let bytes = self.file_io.new_input(file.file_path())?.read().await?;
+            let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?.build()?;
+            let mut position = 0;
+            for batch in reader {
+                let batch = batch?;
+                let ids = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Int32Array>()
+                    .context("expected int PK")?;
+                let names = batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .context("expected string name")?;
+                for row in 0..batch.num_rows() {
+                    if !deleted.is_some_and(|dv| dv.contains(position)) {
+                        anyhow::ensure!(
+                            rows.insert(ids.value(row), names.value(row).to_owned())
+                                .is_none(),
+                            "duplicate live primary key {}",
+                            ids.value(row)
+                        );
+                    }
+                    position += 1;
+                }
+            }
+        }
+        Ok(rows)
+    }
+
+    async fn live_files(&self, metadata: &TableMetadata) -> Result<Vec<DataFile>> {
+        let snapshot = metadata
+            .current_snapshot()
+            .context("mock table has no current snapshot")?;
+        let table = self.build_table_with_metadata(metadata.clone())?;
+        let manifest_list = table.manifest_list_reader(snapshot).load().await?;
+        let mut files = HashMap::new();
+        for manifest_file in manifest_list.entries().iter().rev() {
+            let manifest = manifest_file.load_manifest(&self.file_io).await?;
+            for entry in manifest.entries() {
+                let path = entry.data_file().file_path().to_owned();
+                if entry.is_alive() {
+                    files.insert(path, entry.data_file().clone());
+                } else {
+                    files.remove(&path);
+                }
+            }
+        }
+        Ok(files.into_values().collect())
     }
 
     /// Sum of `data_files_added` across all snapshots.

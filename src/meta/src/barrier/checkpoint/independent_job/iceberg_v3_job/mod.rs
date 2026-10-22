@@ -1166,11 +1166,6 @@ impl IcebergV3JobCheckpointControl {
                     },
                 ..
             } if completed_epoch == *end_epoch => {
-                fail::fail_point!("iceberg_pk_index_compaction_after_commit_reached");
-                fail::fail_point!("iceberg_pk_index_compaction_after_commit", |_| Err(
-                    anyhow::anyhow!("injected failure after compaction commit").into()
-                ));
-
                 partial_graph_manager
                     .ack_completed(self.control.info.partial_graph_id, completed_epoch);
                 self.control.ack_completed(completed_epoch);

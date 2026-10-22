@@ -15655,6 +15655,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "parquet",
  "paste",
  "pin-project",
  "pretty_assertions",

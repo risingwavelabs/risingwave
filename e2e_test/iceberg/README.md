@@ -101,8 +101,12 @@ Parquet position deletes and read directly from Iceberg to check compaction,
 deletion, and reinsertion. They need MinIO and connector libs, but not Spark.
 
 Simulation coverage uses V3 deletion vectors and injects failures before the
-independent job's End barrier and after its durable commit. Only the compactor
-rewrite is simulated; resolver, checkpoint, commit, and recovery paths are real:
+independent job's End barrier and after the Iceberg commit but before its metastore
+row becomes Committed. Recovery must replay the Pending epoch without another
+overwrite. A fixed-snapshot test also commits deletes after the simulated rewrite
+and reads the actual Iceberg rows to check conflict masking and reinsertion.
+Only the compactor rewrite is simulated; resolver, checkpoint, commit, and recovery
+paths are real:
 
 ```sh
 ./risedev sit-test iceberg_pk_index
