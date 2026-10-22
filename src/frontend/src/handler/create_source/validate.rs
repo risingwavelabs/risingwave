@@ -260,10 +260,14 @@ pub fn validate_compatibility(
     let uses_pulsar_schema = validate_pulsar_schema_options(format_encode, &connector)?;
     if connector != KAFKA_CONNECTOR && !uses_pulsar_schema {
         let res = match (&format_encode.format, &format_encode.row_encode) {
-            (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
+            (Format::Plain | Format::Upsert, Encode::Protobuf | Encode::Avro) => {
                 let mut options = WithOptions::try_from(format_encode.row_options())?;
-                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
-                use_schema_registry
+                // TODO(xiangjinwu): move these option parsing to `connector::parser` as well,
+                // together with `external_schema::bind_columns_from_source_for_non_cdc`
+                options.remove(AWS_GLUE_SCHEMA_ARN_KEY).is_none() && {
+                    let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
+                    use_schema_registry
+                }
             }
             (Format::Debezium, Encode::Avro) => true,
             (_, _) => false,

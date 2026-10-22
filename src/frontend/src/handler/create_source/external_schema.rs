@@ -215,7 +215,8 @@ async fn bind_columns_from_source_for_non_cdc(
             {
                 // Legacy logic that assumes either `schema.location` or confluent `schema.registry`.
                 // The handling of newly added aws glue is centralized in `connector::parser`.
-                // TODO(xiangjinwu): move these option parsing to `connector::parser` as well.
+                // TODO(xiangjinwu): move these option parsing to `connector::parser` as well,
+                // together with schema registry logic in `validate::validate_compatibility`
 
                 let (row_schema_location, use_schema_registry) =
                     get_schema_location(&mut format_encode_options_to_consume)?;
