@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Fixed question schemas and execution options shared by the binder and executor.
+//! Fixed question schemas shared by the binder and executor.
 
 use risingwave_common::types::{DataType, JsonbVal, MapType, StructType};
 
 use crate::{ExprError, Result};
-
-pub const DEFAULT_MAX_CONCURRENCY: usize = 8;
-pub const MAX_CONCURRENCY_LIMIT: usize = 256;
 
 #[derive(Debug, Clone)]
 pub enum QuestionKind {
@@ -152,49 +149,6 @@ fn invalid_questions(reason: impl Into<String>) -> ExprError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AiDecideOptions {
-    pub max_concurrency: usize,
-}
-
-impl Default for AiDecideOptions {
-    fn default() -> Self {
-        Self {
-            max_concurrency: DEFAULT_MAX_CONCURRENCY,
-        }
-    }
-}
-
-impl AiDecideOptions {
-    pub fn parse(options: &JsonbVal) -> Result<Self> {
-        let value = options.clone().take();
-        let object = value
-            .as_object()
-            .ok_or_else(|| invalid_options("options must be a JSON object"))?;
-        if object.keys().any(|key| key != "max_concurrency") {
-            return Err(invalid_options("unknown option; expected max_concurrency"));
-        }
-        let Some(value) = object.get("max_concurrency") else {
-            return Ok(Self::default());
-        };
-        let max_concurrency = value
-            .as_u64()
-            .filter(|value| (1..=MAX_CONCURRENCY_LIMIT as u64).contains(value))
-            .ok_or_else(|| invalid_options("max_concurrency must be an integer from 1 to 256"))?;
-        Ok(Self {
-            max_concurrency: max_concurrency as usize,
-        })
-    }
-}
-
-fn invalid_options(reason: &'static str) -> ExprError {
-    // Do not include the supplied JSON, including unknown keys, in errors.
-    ExprError::InvalidParam {
-        name: "ai_decide options",
-        reason: reason.into(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,38 +186,6 @@ mod tests {
                 QuestionSchema::parse(&json.parse().unwrap()).is_err(),
                 "{json}"
             );
-        }
-    }
-
-    #[test]
-    fn validates_bounded_options_without_echoing_values() {
-        for (json, expected) in [
-            ("{}", 8),
-            (r#"{"max_concurrency":1}"#, 1),
-            (r#"{"max_concurrency":16}"#, 16),
-            (r#"{"max_concurrency":256}"#, 256),
-        ] {
-            assert_eq!(
-                AiDecideOptions::parse(&json.parse().unwrap())
-                    .unwrap()
-                    .max_concurrency,
-                expected
-            );
-        }
-        for json in [
-            "null",
-            "[]",
-            "8",
-            r#"{"max_concurrency":null}"#,
-            r#"{"max_concurrency":0}"#,
-            r#"{"max_concurrency":-1}"#,
-            r#"{"max_concurrency":257}"#,
-            r#"{"max_concurrency":1.5}"#,
-            r#"{"max_concurrency":"test-secret"}"#,
-            r#"{"test-secret":8}"#,
-        ] {
-            let error = AiDecideOptions::parse(&json.parse().unwrap()).unwrap_err();
-            assert!(!error.to_string().contains("test-secret"));
         }
     }
 }

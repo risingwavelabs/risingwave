@@ -4,15 +4,11 @@ SELECT ai_decide(NULL::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_ques
 ----
 NULL
 
-query T
+# The function accepts exactly five arguments, including when state is NULL.
+statement error ai_decide expects exactly five arguments
 SELECT ai_decide(NULL::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key', '{"max_concurrency":16}'::jsonb);
-----
-NULL
 
-statement error max_concurrency must be an integer from 1 to 256
-SELECT ai_decide(NULL::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key', '{"max_concurrency":0}'::jsonb);
-
-statement error ai_decide options must be non-null JSONB
+statement error ai_decide expects exactly five arguments
 SELECT ai_decide(NULL::jsonb, 'invalid', 'test-model', ai_questions(ai_prob_question('q', 'Question?')), 'test-key', NULL::jsonb);
 
 query T

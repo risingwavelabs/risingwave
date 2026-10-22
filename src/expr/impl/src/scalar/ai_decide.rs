@@ -25,7 +25,7 @@ use risingwave_common::types::{
 use risingwave_expr::expr::{
     AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo,
 };
-use risingwave_expr::scalar::ai_decide::{AiDecideOptions, QuestionKind, QuestionSchema};
+use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
 use tokio::sync::Semaphore;
@@ -35,6 +35,7 @@ const MAX_ATTEMPTS: usize = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(100);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CONCURRENCY: usize = 8;
 
 /// One state is one request. An array in `state` is context, not an HTTP batch.
 #[derive(Serialize)]
@@ -65,29 +66,11 @@ impl std::fmt::Debug for AiDecide {
     volatile,
     type_infer = "unreachable"
 )]
-#[build_function(
-    "ai_decide(jsonb, varchar, varchar, jsonb, varchar, jsonb) -> struct",
-    type_infer = "unreachable",
-    volatile
-)]
-fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    let options = if children.len() == 6 {
-        let Some(ScalarImpl::Jsonb(options)) = children
-            .pop()
-            .unwrap()
-            .eval_const()
-            .map_err(|_| options_error())?
-        else {
-            return Err(options_error());
-        };
-        AiDecideOptions::parse(&options)?
-    } else {
-        AiDecideOptions::default()
-    };
+fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let children: [BoxedExpression; 5] =
         children.try_into().map_err(|_| ExprError::InvalidParam {
             name: "ai_decide",
-            reason: "expected five arguments and optional constant JSONB options".into(),
+            reason: "expected exactly five arguments".into(),
         })?;
     let Some(ScalarImpl::Jsonb(questions)) = children[3].eval_const()? else {
         return Err(ExprError::InvalidParam {
@@ -111,17 +94,10 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         children,
         schema,
         client,
-        permits: Semaphore::new(options.max_concurrency),
-        max_concurrency: options.max_concurrency,
+        permits: Semaphore::new(MAX_CONCURRENCY),
+        max_concurrency: MAX_CONCURRENCY,
     }
     .boxed())
-}
-
-fn options_error() -> ExprError {
-    ExprError::InvalidParam {
-        name: "ai_decide options",
-        reason: "must be constant non-null jsonb".into(),
-    }
 }
 
 fn request_error(message: impl std::fmt::Display) -> ExprError {
@@ -434,7 +410,6 @@ mod tests {
     use risingwave_expr::expr::{
         InputRefExpression, LiteralExpression, SyncExpressionBoxExt, build_func,
     };
-    use risingwave_expr::scalar::ai_decide::DEFAULT_MAX_CONCURRENCY;
     use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
 
@@ -459,7 +434,7 @@ mod tests {
     }
 
     fn expression(timeout: Duration) -> AiDecide {
-        expression_with_concurrency(timeout, DEFAULT_MAX_CONCURRENCY)
+        expression_with_concurrency(timeout, MAX_CONCURRENCY)
     }
 
     fn expression_with_concurrency(timeout: Duration, max_concurrency: usize) -> AiDecide {
@@ -871,50 +846,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn configured_registered_expression_shares_the_requested_limit() {
-        for max_concurrency in [1, 3, 16] {
-            let active = Arc::new(AtomicUsize::new(0));
-            let maximum = Arc::new(AtomicUsize::new(0));
-            let started = Arc::new(AtomicUsize::new(0));
-            let gate = Arc::new(Semaphore::new(0));
-            let (a, m) = (active.clone(), maximum.clone());
-            let server = server(Router::new().route(
-                "/evaluate",
-                post(move |Json(body): Json<Value>| {
-                    let (a, m, started, gate) =
-                        (a.clone(), m.clone(), started.clone(), gate.clone());
-                    async move {
-                        let inflight = a.fetch_add(1, Ordering::SeqCst) + 1;
-                        m.fetch_max(inflight, Ordering::SeqCst);
-                        if started.fetch_add(1, Ordering::SeqCst) + 1 == max_concurrency {
-                            gate.add_permits(36);
-                        }
-                        gate.acquire().await.unwrap().forget();
-                        tokio::task::yield_now().await;
-                        a.fetch_sub(1, Ordering::SeqCst);
-                        Json(json!({"answers":{"q":{"type":"noul","noul":body["state"]["index"].as_f64().unwrap()/100.0}}}))
+    async fn registered_expression_shares_the_fixed_limit() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(Semaphore::new(0));
+        let (a, m) = (active.clone(), maximum.clone());
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(move |Json(body): Json<Value>| {
+                let (a, m, started, gate) =
+                    (a.clone(), m.clone(), started.clone(), gate.clone());
+                async move {
+                    let inflight = a.fetch_add(1, Ordering::SeqCst) + 1;
+                    m.fetch_max(inflight, Ordering::SeqCst);
+                    if started.fetch_add(1, Ordering::SeqCst) + 1 == MAX_CONCURRENCY {
+                        gate.add_permits(36);
                     }
-                }),
-            ))
-            .await;
-            let mut children: Vec<_> = expression(REQUEST_TIMEOUT).children.into_iter().collect();
-            children.push(
-                LiteralExpression::new(
-                    DataType::Jsonb,
-                    Some(JsonbVal::from(json!({"max_concurrency": max_concurrency})).into()),
-                )
-                .boxed(),
-            );
-            let expr =
-                build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap();
-            let input = chunk(&server.url, 20);
-            let (left, right) = tokio::time::timeout(Duration::from_secs(5), async {
-                tokio::join!(expr.eval(&input), expr.eval(&input))
-            })
-            .await
-            .expect("the configured limit must allow the initial request group to start");
-            assert!(left.is_ok() && right.is_ok());
-            assert_eq!(maximum.load(Ordering::SeqCst), max_concurrency);
-        }
+                    gate.acquire().await.unwrap().forget();
+                    tokio::task::yield_now().await;
+                    a.fetch_sub(1, Ordering::SeqCst);
+                    Json(json!({"answers":{"q":{"type":"noul","noul":body["state"]["index"].as_f64().unwrap()/100.0}}}))
+                }
+            }),
+        ))
+        .await;
+        let children = expression(REQUEST_TIMEOUT).children.into_iter().collect();
+        let expr = build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap();
+        let input = chunk(&server.url, 20);
+        let (left, right) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(expr.eval(&input), expr.eval(&input))
+        })
+        .await
+        .expect("the fixed limit must allow the initial request group to start");
+        assert!(left.is_ok() && right.is_ok());
+        assert_eq!(maximum.load(Ordering::SeqCst), MAX_CONCURRENCY);
     }
 }

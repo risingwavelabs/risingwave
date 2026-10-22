@@ -81,39 +81,15 @@
   expected_outputs:
     - binder_error
 
-- name: constant execution options preserve volatility and key redaction
+- name: sixth execution-options argument is rejected
   sql: |
     CREATE TABLE contexts (id INT, state JSONB);
     SELECT ai_decide(state, 'http://127.0.0.1:1/evaluate', 'test-model',
       ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', '{"max_concurrency":16}'::jsonb) FROM contexts;
   expected_outputs:
-    - logical_plan
-    - batch_plan
-    - stream_plan
-
-- name: options cannot depend on input rows
-  sql: |
-    CREATE TABLE contexts (state JSONB, options JSONB);
-    SELECT ai_decide(state, 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', options) FROM contexts;
-  expected_outputs:
     - binder_error
 
-- name: zero concurrency is rejected before creating a job
-  sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', '{"max_concurrency":0}'::jsonb);
-  expected_outputs:
-    - binder_error
-
-- name: excessive concurrency is rejected
-  sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', '{"max_concurrency":257}'::jsonb);
-  expected_outputs:
-    - binder_error
-
-- name: unknown execution options are rejected
-  sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', '{"private-unknown-option":1}'::jsonb);
-  expected_outputs:
-    - binder_error
-
-- name: null options are rejected
+- name: null sixth argument is rejected
   sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', NULL::jsonb);
   expected_outputs:
     - binder_error

@@ -141,7 +141,7 @@
     Failed to bind expression: ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', ai_questions(ai_prob_question('q', 'Resolved?')))
 
     Caused by:
-      Invalid input syntax: ai_decide expects five arguments and optional constant JSONB options
+      Invalid input syntax: ai_decide expects exactly five arguments
 - name: wrong argument type is rejected
   sql: SELECT ai_decide(42, 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key');
   binder_error: |
@@ -156,60 +156,23 @@
 
     Caused by:
       Invalid input syntax: secret reference is only allowed in user-defined function arguments
-- name: constant execution options preserve volatility and key redaction
+- name: sixth execution-options argument is rejected
   sql: |
     CREATE TABLE contexts (id INT, state JSONB);
     SELECT ai_decide(state, 'http://127.0.0.1:1/evaluate', 'test-model',
       ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', '{"max_concurrency":16}'::jsonb) FROM contexts;
-  logical_plan: |-
-    LogicalProject { exprs: [AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>", '{"max_concurrency": 16}':Jsonb) as $expr1] }
-    └─LogicalScan { table: contexts, columns: [contexts.id, contexts.state, contexts._row_id, contexts._rw_timestamp] }
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>", '{"max_concurrency": 16}':Jsonb) as $expr1] }
-      └─BatchScan { table: contexts, columns: [contexts.state], distribution: SomeShard }
-  stream_plan: |-
-    StreamMaterialize { columns: [ai_decide, contexts._row_id(hidden)], stream_key: [contexts._row_id], pk_columns: [contexts._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr1, contexts._row_id] }
-      └─StreamMaterializedExprs { exprs: [AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>", '{"max_concurrency": 16}':Jsonb) as $expr1] }
-        └─StreamTableScan { table: contexts, columns: [contexts.state, contexts._row_id], stream_scan_type: SnapshotBackfill, stream_key: [contexts._row_id], pk: [_row_id], dist: UpstreamHashShard(contexts._row_id) }
-- name: options cannot depend on input rows
-  sql: |
-    CREATE TABLE contexts (state JSONB, options JSONB);
-    SELECT ai_decide(state, 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', options) FROM contexts;
   binder_error: |
-    Failed to bind expression: ai_decide(state, 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', options)
+    Failed to bind expression: ai_decide(state, 'http://127.0.0.1:1/evaluate', 'test-model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', CAST('{"max_concurrency":16}' AS JSONB))
 
     Caused by:
-      Invalid input syntax: ai_decide options must be constant
-- name: zero concurrency is rejected before creating a job
-  sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', '{"max_concurrency":0}'::jsonb);
-  binder_error: |
-    Failed to bind expression: ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', CAST('{"max_concurrency":0}' AS JSONB))
-
-    Caused by:
-      Invalid input syntax: Invalid parameter ai_decide options: max_concurrency must be an integer from 1 to 256
-- name: excessive concurrency is rejected
-  sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', '{"max_concurrency":257}'::jsonb);
-  binder_error: |
-    Failed to bind expression: ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', CAST('{"max_concurrency":257}' AS JSONB))
-
-    Caused by:
-      Invalid input syntax: Invalid parameter ai_decide options: max_concurrency must be an integer from 1 to 256
-- name: unknown execution options are rejected
-  sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', '{"private-unknown-option":1}'::jsonb);
-  binder_error: |
-    Failed to bind expression: ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', CAST('{"private-unknown-option":1}' AS JSONB))
-
-    Caused by:
-      Invalid input syntax: Invalid parameter ai_decide options: unknown option; expected max_concurrency
-- name: null options are rejected
+      Invalid input syntax: ai_decide expects exactly five arguments
+- name: null sixth argument is rejected
   sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', NULL::jsonb);
   binder_error: |
     Failed to bind expression: ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', CAST(NULL AS JSONB))
 
     Caused by:
-      Invalid input syntax: ai_decide options must be non-null JSONB
+      Invalid input syntax: ai_decide expects exactly five arguments
 - name: mixed question constructors infer named nested fields
   sql: |
     CREATE TABLE contexts (id INT, state JSONB);

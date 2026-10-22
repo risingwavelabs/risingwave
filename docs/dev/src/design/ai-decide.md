@@ -101,22 +101,12 @@ without renormalization or a sum-to-one check. Invalid responses fail the
 query, including through non-strict streaming expressions. They do not silently
 become NULL, zero, or an empty label. Additional response metadata is ignored.
 
-## Connection and execution options
+## Connection configuration
 
 State, endpoint, model and API key may be expressions or columns. A SQL NULL in
 any of these four arguments produces a NULL STRUCT without a request; JSON null
-is sent as a real state. Questions and execution options must be non-null
-constants. An optional sixth argument configures execution:
-
-```sql
-ai_decide(state, model_url, model, questions, api_key,
-          '{"max_concurrency":16}'::jsonb)
-```
-
-`max_concurrency` accepts integers from 1 to 256; omitted options or `{}` use 8.
-Zero does not mean unlimited. Unknown options, invalid values and row-dependent
-options are rejected before creating a job. Options configure the client and are
-not sent to the service.
+is sent as a real state. Questions must be a non-null constant. The function
+accepts exactly five arguments; there is no execution-options argument.
 
 `model_url` is the complete HTTP(S) evaluation endpoint, for example
 `https://api.impossibl.com/v1/systemone`. It is separate from the model identifier,
@@ -187,8 +177,8 @@ the ordinary asynchronous projection path. Existing restrictions on volatile
 expressions in other SQL positions still apply; put the call in a SELECT
 projection. Leave `streaming_unsafe_allow_unmaterialized_impure_expr` disabled.
 
-Each expression instance reuses an HTTP client and shares its configured request
-limit across overlapping chunk and single-row evaluations. A permit covers the
+Each expression instance reuses an HTTP client and shares a fixed limit of eight
+requests across overlapping chunk and single-row evaluations. A permit covers the
 whole logical request, including retries and backoff. This is an instance-local
 concurrency limit, not an endpoint-wide or cluster-wide QPS limit. Multiple
 actors or expressions each have their own limit.
@@ -223,15 +213,14 @@ errors therefore prevent progress until resolved.
 
 On evaluation failure, other local futures for that chunk are dropped and their
 permits are released. Requests already received by the service may continue
-running. Changing the local concurrency does not guarantee remote cancellation,
-service capacity, or exactly-once effects.
+running. Releasing local permits does not guarantee remote cancellation.
 
 ## Tuning
 
 Tune against successful row throughput, HTTP attempt rate, latency distributions,
-429s, memory and checkpoint progress. Start with the default limit and use finite
-Project windows. A larger limit can increase service queueing or rejection rather
-than throughput; coordinate shared endpoint quotas outside individual expressions.
+429s, memory and checkpoint progress. Use finite Project windows. Increasing
+parallelism can increase service queueing or rejection rather than throughput;
+coordinate shared endpoint quotas outside individual expressions.
 AI_DECIDE-specific metrics and dashboards are deferred.
 Result buffering remains bounded by the input chunks being evaluated, and each
 response is limited to 16 MiB. There is no separate aggregate byte budget.

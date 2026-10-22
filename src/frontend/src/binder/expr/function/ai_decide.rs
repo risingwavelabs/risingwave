@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl, ScalarRefImpl};
-use risingwave_expr::scalar::ai_decide::{AiDecideOptions, QuestionSchema};
+use risingwave_expr::scalar::ai_decide::QuestionSchema;
 use serde_json::{Map, Value, json};
 
 use crate::error::{ErrorCode, Result};
@@ -47,10 +47,8 @@ fn literal(value: Value) -> ExprImpl {
 }
 
 pub(super) fn bind(mut inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
-    if !matches!(inputs.len(), 5 | 6) {
-        return Err(invalid(
-            "ai_decide expects five arguments and optional constant JSONB options",
-        ));
+    if inputs.len() != 5 {
+        return Err(invalid("ai_decide expects exactly five arguments"));
     }
     for (index, ty) in [
         DataType::Jsonb,
@@ -68,12 +66,6 @@ pub(super) fn bind(mut inputs: Vec<ExprImpl>) -> Result<ExprImpl> {
     let schema = QuestionSchema::parse(&questions).map_err(|e| invalid(e.to_string()))?;
     // Ship the validated constant to the executor, not an unevaluated expression.
     inputs[3] = Literal::new(Some(questions.into()), DataType::Jsonb).into();
-    if inputs.len() == 6 {
-        inputs[5].cast_implicit_mut(&DataType::Jsonb)?;
-        let options = json_constant(&inputs[5], "ai_decide options")?;
-        AiDecideOptions::parse(&options).map_err(|e| invalid(e.to_string()))?;
-        inputs[5] = Literal::new(Some(options.into()), DataType::Jsonb).into();
-    }
     Ok(FunctionCall::new_unchecked(ExprType::AiDecide, inputs, schema.return_type()).into())
 }
 

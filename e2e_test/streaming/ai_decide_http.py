@@ -105,25 +105,23 @@ def exercise(server):
     )"""
 
     def analyze(state):
-        return f"""ai_decide({state}, '{url}', 'test-model', {questions}, 'test-key',
-            '{{"max_concurrency":2}}'::jsonb)"""
+        return f"ai_decide({state}, '{url}', 'test-model', {questions}, 'test-key')"
 
     def states(view, where="", order="id"):
         return f"SELECT (result).signal FROM {view} {where} ORDER BY {order}"
 
     p1, p2, p3 = {"message": "first"}, {"message": "second"}, {"message": "updated"}
     batch_state = "'" + json.dumps(p1) + "'::jsonb"
-    for options in ["", ", '{\"max_concurrency\":2}'::jsonb"]:
-        before = server.count()
-        response = json.loads(sql(
-            f"SELECT to_jsonb(result) FROM (SELECT ai_decide({batch_state}, '{url}', 'test-model', {questions}, 'test-key'{options}) AS result) e"
-        )[0])
-        assert response["signal"] == 0.1
-        assert response["team"] == {"choice": "billing", "confidence": 0.6, "probabilities": {"billing": 0.8, "technical": 0.2}}
-        assert response["size"] == {"score": 1.0, "confidence": 1.0, "probabilities": [0.0, 1.0, 0.0]}
-        assert server.count() == before + 1
-        assert server.calls[-1]["questions"]["team"]["criteria"] == {"billing": "Payments and refunds", "technical": "Software issues"}
-        assert server.calls[-1]["state"] == p1
+    before = server.count()
+    response = json.loads(sql(
+        f"SELECT to_jsonb(result) FROM (SELECT {analyze(batch_state)} AS result) e"
+    )[0])
+    assert response["signal"] == 0.1
+    assert response["team"] == {"choice": "billing", "confidence": 0.6, "probabilities": {"billing": 0.8, "technical": 0.2}}
+    assert response["size"] == {"score": 1.0, "confidence": 1.0, "probabilities": [0.0, 1.0, 0.0]}
+    assert server.count() == before + 1
+    assert server.calls[-1]["questions"]["team"]["criteria"] == {"billing": "Payments and refunds", "technical": "Software issues"}
+    assert server.calls[-1]["state"] == p1
 
     # Referencing several fields of one subquery result must not duplicate inference.
     before = server.count()
