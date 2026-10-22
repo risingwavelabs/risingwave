@@ -601,9 +601,14 @@ impl MetadataManager {
         &self,
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<()> {
+        requested_throttle_type: risingwave_pb::common::ThrottleType,
+    ) -> MetaResult<risingwave_pb::common::ThrottleType> {
         self.catalog_controller
-            .update_fragment_rate_limit_by_fragment_id(fragment_id as _, rate_limit)
+            .update_fragment_rate_limit_by_fragment_id(
+                fragment_id as _,
+                rate_limit,
+                requested_throttle_type,
+            )
             .await
     }
 
