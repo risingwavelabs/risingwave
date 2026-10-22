@@ -40,7 +40,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
 
-use super::refiller::{CacheRefillConfig, CacheRefiller};
+use super::refiller::{CacheRefillConfig, CacheRefiller, default_spawn_refill_task};
 use super::version_update::{VersionUpdateEvent, VersionUpdateQueue};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
@@ -457,7 +457,7 @@ impl HummockEventHandler {
                     }
                 })
             }),
-            CacheRefiller::default_spawn_refill_task(),
+            default_spawn_refill_task(),
         )
     }
 
@@ -1090,7 +1090,9 @@ mod tests {
 
     use crate::hummock::HummockError;
     use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
-    use crate::hummock::event_handler::refiller::{CacheRefillConfig, CacheRefiller};
+    use crate::hummock::event_handler::refiller::{
+        CacheRefillConfig, CacheRefiller, default_spawn_refill_task,
+    };
     use crate::hummock::event_handler::uploader::UploadTaskOutput;
     use crate::hummock::event_handler::uploader::test_utils::{
         TEST_TABLE_ID, gen_imm_inner, gen_imm_with_unlimit,
@@ -1314,7 +1316,7 @@ mod tests {
             Role::Both,
             CacheRefillConfig::from_storage_opts(&storage_opt),
             mock_sstable_store().await,
-            CacheRefiller::default_spawn_refill_task(),
+            default_spawn_refill_task(),
         );
 
         HummockEventHandler::apply_table_refill_runtime_config(
@@ -1454,7 +1456,7 @@ mod tests {
             RecentVersions::new(pinned_version, 10, metrics.clone()),
             BufferTracker::from_storage_opts(&storage_opt, &metrics),
             spawn_upload_task,
-            CacheRefiller::default_spawn_refill_task(),
+            default_spawn_refill_task(),
         );
 
         let (tx, rx) = oneshot::channel();
@@ -1593,7 +1595,7 @@ mod tests {
                     _ => unreachable!(),
                 }
             }),
-            CacheRefiller::default_spawn_refill_task(),
+            default_spawn_refill_task(),
         );
 
         let event_tx = event_handler.event_sender();
@@ -1751,7 +1753,7 @@ mod tests {
             RecentVersions::new(initial_version.clone(), 10, metrics.clone()),
             buffer_tracker,
             spawn_task,
-            CacheRefiller::default_spawn_refill_task(),
+            default_spawn_refill_task(),
         );
 
         let event_tx = event_handler.event_sender();
