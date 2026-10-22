@@ -21,6 +21,7 @@ import static org.junit.Assert.assertTrue;
 
 import com.risingwave.connector.source.SourceTestClient;
 import java.sql.SQLException;
+import java.util.List;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -50,6 +51,39 @@ public class OracleSourceValidationTest extends OracleSourceTestBase {
     public void acceptsTableLevelAllColumnLogging() {
         createSourceTableWithAllColumnLogging();
         assertValid(oracle.sourceProperties());
+    }
+
+    @Test
+    public void rejectsMissingOrMismatchedDeclaredPrimaryKeys() {
+        createSourceTableWithAllColumnLogging();
+        for (var schema : List.of(primaryKeySchema(), primaryKeySchema("OTHER_COLUMN"))) {
+            var error = validate(oracle.sourceProperties(), schema).getError().getErrorMessage();
+            assertTrue(error, error.contains("Primary key mismatch"));
+        }
+        var caseError =
+                validate(oracle.sourceProperties(), primaryKeySchema("id"))
+                        .getError()
+                        .getErrorMessage();
+        assertTrue(caseError, caseError.contains("preserve the upstream column name"));
+    }
+
+    @Test
+    public void validatesCompositePrimaryKeyMembershipRegardlessOfOrder() {
+        createTable(
+                "APP.CUSTOMERS",
+                "CREATE TABLE APP.CUSTOMERS (TENANT_ID NUMBER(9), ID NUMBER(9), "
+                        + "OTHER_COLUMN NUMBER(9), PRIMARY KEY (TENANT_ID, ID))");
+        execute("ALTER TABLE APP.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS");
+        for (var schema :
+                List.of(primaryKeySchema("TENANT_ID", "ID"), primaryKeySchema("ID", "TENANT_ID"))) {
+            assertEquals(
+                    "", validate(oracle.sourceProperties(), schema).getError().getErrorMessage());
+        }
+        for (var schema :
+                List.of(primaryKeySchema("ID"), primaryKeySchema("TENANT_ID", "OTHER_COLUMN"))) {
+            var error = validate(oracle.sourceProperties(), schema).getError().getErrorMessage();
+            assertTrue(error, error.contains("Primary key mismatch"));
+        }
     }
 
     @Test
