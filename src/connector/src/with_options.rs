@@ -182,6 +182,12 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         connector == ICEBERG_CONNECTOR
     }
 
+    /// Whether the connector can read a pinned input once, through
+    /// [`crate::source::SourceProperties::bounded_input`].
+    fn supports_bounded_read(&self) -> bool {
+        self.is_iceberg_connector()
+    }
+
     fn connector_need_pk(&self) -> bool {
         // Currently only iceberg connector doesn't need primary key
         // introduced in https://github.com/risingwavelabs/risingwave/pull/14971
