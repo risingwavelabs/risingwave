@@ -19,9 +19,6 @@ jobs:
       matrix:
         java: [ '21' ]
     name: Java ${{ matrix.java }}
-    env:
-      # External test dependency only; do not bundle Oracle into RisingWave images.
-      ORACLE_TEST_IMAGE: container-registry.oracle.com/database/free:23.9.0.0
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
@@ -52,10 +49,6 @@ jobs:
           sudo apt-get install -y make build-essential cmake protobuf-compiler \
             libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config \
             lld libopenblas-dev liblapack-dev
-      - name: Pre-pull Oracle source test image
-        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
-        timeout-minutes: 10
-        run: docker pull "$ORACLE_TEST_IMAGE"
       - name: run integration tests
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: |
@@ -66,5 +59,4 @@ jobs:
           echo "--- build connector node with Rust native library"
           cd ${RISINGWAVE_ROOT}/java
           # Build with Rust to support OpendalSchemaHistory in MySQL CDC integration tests
-          mvn --batch-mode --update-snapshots clean package -Dapi.version=1.44 \
-            -Doracle.test.image="$ORACLE_TEST_IMAGE"
+          mvn --batch-mode --update-snapshots clean package -Dapi.version=1.44

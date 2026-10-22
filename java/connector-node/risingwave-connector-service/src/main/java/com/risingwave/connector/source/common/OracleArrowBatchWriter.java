@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -211,22 +212,22 @@ final class OracleArrowBatchWriter implements AutoCloseable {
             case DATE -> {
                 var target = (DateDayVector) vector;
                 yield (result, row) -> {
-                    var value = result.getDate(column);
+                    var value = result.getObject(column, LocalDate.class);
                     if (value == null) {
                         target.setNull(row);
                     } else {
-                        target.setSafe(row, Math.toIntExact(value.toLocalDate().toEpochDay()));
+                        target.setSafe(row, Math.toIntExact(value.toEpochDay()));
                     }
                 };
             }
             case TIMESTAMP -> {
                 var target = (TimeStampMicroVector) vector;
                 yield (result, row) -> {
-                    var value = result.getTimestamp(column);
+                    var value = result.getObject(column, LocalDateTime.class);
                     if (value == null) {
                         target.setNull(row);
                     } else {
-                        target.setSafe(row, epochMicros(value.toLocalDateTime()));
+                        target.setSafe(row, epochMicros(value));
                     }
                 };
             }
@@ -285,8 +286,8 @@ final class OracleArrowBatchWriter implements AutoCloseable {
         try {
             return result.getObject(column, OffsetDateTime.class);
         } catch (SQLException unsupportedConversion) {
-            var value = result.getTimestamp(column);
-            return value == null ? null : value.toLocalDateTime().atOffset(ZoneOffset.UTC);
+            var value = result.getObject(column, LocalDateTime.class);
+            return value == null ? null : value.atOffset(ZoneOffset.UTC);
         }
     }
 

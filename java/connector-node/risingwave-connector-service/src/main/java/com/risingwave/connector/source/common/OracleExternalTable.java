@@ -39,7 +39,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
-import java.util.regex.Pattern;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.slf4j.Logger;
@@ -48,8 +47,6 @@ import org.slf4j.LoggerFactory;
 /** Pull-based Oracle catalog and live table scan operations used by the Rust CDC backfill. */
 final class OracleExternalTable {
     private static final Logger LOG = LoggerFactory.getLogger(OracleExternalTable.class);
-    private static final Pattern ORACLE_UNQUOTED_IDENTIFIER =
-            Pattern.compile("[A-Za-z][A-Za-z0-9_$#]*");
     private static final int BATCH_ROW_COUNT = 256;
     private static final BufferAllocator ROOT_ALLOCATOR = new RootAllocator();
 
@@ -157,9 +154,8 @@ final class OracleExternalTable {
             ConnectorServiceProto.OracleConnectionProperties properties) throws SQLException {
         var propertiesMap = properties.getPropertiesMap();
         try (var connection = connect(propertiesMap)) {
-            var schemaName =
-                    propertyIdentifier(propertiesMap, DbzConnectorConfig.ORACLE_SCHEMA_NAME);
-            var tableName = propertyIdentifier(propertiesMap, DbzConnectorConfig.TABLE_NAME);
+            var schemaName = propertiesMap.get(DbzConnectorConfig.ORACLE_SCHEMA_NAME);
+            var tableName = propertiesMap.get(DbzConnectorConfig.TABLE_NAME);
             var columns = discoverColumns(connection, schemaName, tableName);
             if (columns.isEmpty()) {
                 throw new SQLException(
@@ -232,8 +228,8 @@ final class OracleExternalTable {
             throw new SQLException("Oracle snapshot request has an invalid limit");
         }
 
-        var schemaName = normalizeIdentifier(request.getSchemaName(), "schema name");
-        var tableName = normalizeIdentifier(request.getTableName(), "table name");
+        var schemaName = request.getSchemaName();
+        var tableName = request.getTableName();
         var tableSchema = request.getTableSchema();
         var columnNames =
                 tableSchema.getColumnsList().stream().map(PlanCommon.ColumnDesc::getName).toList();
@@ -282,21 +278,25 @@ final class OracleExternalTable {
 
     private static Connection connect(Map<String, String> properties) throws SQLException {
         var pdbName =
-                OracleValidator.normalizePdbName(
+                OracleValidator.normalizeIdentifierInConfigOption(
+                        DbzConnectorConfig.ORACLE_PDB_NAME,
                         properties.get(DbzConnectorConfig.ORACLE_PDB_NAME));
         var jdbcUrl =
                 ValidatorUtils.getJdbcUrl(
                         SourceTypeE.ORACLE,
                         properties.get(DbzConnectorConfig.HOST),
                         properties.get(DbzConnectorConfig.PORT),
-                        properties.get(DbzConnectorConfig.DB_NAME));
+                        OracleValidator.normalizeIdentifierInConfigOption(
+                                DbzConnectorConfig.DB_NAME,
+                                properties.get(DbzConnectorConfig.DB_NAME)));
         var connection =
                 DriverManager.getConnection(
                         jdbcUrl,
                         properties.get(DbzConnectorConfig.USER),
                         properties.get(DbzConnectorConfig.PASSWORD));
         try (var statement = connection.createStatement()) {
-            statement.execute("ALTER SESSION SET CONTAINER = " + pdbName);
+            statement.execute(
+                    "ALTER SESSION SET CONTAINER = " + OracleValidator.quoteIdentifier(pdbName));
             statement.execute("ALTER SESSION SET TIME_ZONE = 'UTC'");
             // Match RisingWave's native string ordering for keyset pagination.
             statement.execute("ALTER SESSION SET NLS_SORT = BINARY");
@@ -506,15 +506,15 @@ final class OracleExternalTable {
         if (limit <= 0) {
             throw new SQLException("Oracle snapshot query has an invalid limit");
         }
-        var fields = columns.stream().map(OracleExternalTable::quoteIdentifier).toList();
-        var keys = primaryKeys.stream().map(OracleExternalTable::quoteIdentifier).toList();
+        var fields = columns.stream().map(OracleValidator::quoteIdentifier).toList();
+        var keys = primaryKeys.stream().map(OracleValidator::quoteIdentifier).toList();
         var sql =
                 new StringBuilder("SELECT ")
                         .append(String.join(",", fields))
                         .append(" FROM ")
-                        .append(quoteIdentifier(schemaName))
+                        .append(OracleValidator.quoteIdentifier(schemaName))
                         .append(".")
-                        .append(quoteIdentifier(tableName));
+                        .append(OracleValidator.quoteIdentifier(tableName));
         if (hasStartPrimaryKey) {
             sql.append(" WHERE ").append(buildPrimaryKeyFilter(keys));
         }
@@ -561,8 +561,7 @@ final class OracleExternalTable {
                 throw new SQLException("Oracle snapshot primary-key index is outside the schema");
             }
             var schemaName = tableSchema.getColumns(schemaIndex).getName();
-            if (!normalizeIdentifier(request.getPrimaryKeys(i), "primary key")
-                    .equals(normalizeIdentifier(schemaName, "primary key"))) {
+            if (!request.getPrimaryKeys(i).equals(schemaName)) {
                 throw new SQLException(
                         String.format(
                                 "Oracle snapshot primary key '%s' does not match schema column '%s'",
@@ -584,22 +583,6 @@ final class OracleExternalTable {
     private static Integer nullableInteger(ResultSet result, String column) throws SQLException {
         var value = result.getInt(column);
         return result.wasNull() ? null : value;
-    }
-
-    private static String propertyIdentifier(Map<String, String> properties, String property) {
-        return normalizeIdentifier(properties.get(property), property);
-    }
-
-    private static String quoteIdentifier(String identifier) {
-        return '"' + normalizeIdentifier(identifier, "Oracle identifier") + '"';
-    }
-
-    private static String normalizeIdentifier(String identifier, String description) {
-        if (identifier == null || !ORACLE_UNQUOTED_IDENTIFIER.matcher(identifier).matches()) {
-            throw new IllegalArgumentException(
-                    description + " must be an unquoted Oracle identifier");
-        }
-        return identifier.toUpperCase(Locale.ROOT);
     }
 
     private record OracleColumn(String name, Data.DataType dataType, boolean nullable) {}
