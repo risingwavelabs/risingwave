@@ -455,4 +455,14 @@ mod tests {
         );
         validate_compatibility(&format_encode, &mut source_options(KAFKA_CONNECTOR)).unwrap();
     }
+
+    #[test]
+    fn glue_schema_registry_non_kafka() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[(AWS_GLUE_SCHEMA_ARN_KEY, "placeholder")],
+        );
+        validate_compatibility(&format_encode, &mut source_options(KINESIS_CONNECTOR)).unwrap();
+    }
 }
