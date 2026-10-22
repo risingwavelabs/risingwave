@@ -522,7 +522,39 @@ pub(crate) fn bind_cdc_table_schema(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+
     use super::*;
+
+    #[test]
+    fn test_exclude_cdc_table_columns() {
+        let columns = || {
+            ["id", "name", "payload"]
+                .into_iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    ColumnCatalog::visible(ColumnDesc::named(
+                        n,
+                        ColumnId::new(i as _),
+                        DataType::Varchar,
+                    ))
+                })
+                .collect_vec()
+        };
+        let pk = ["id".to_owned()];
+        let excluded = |names: &[&str]| names.iter().map(|n| n.to_string()).collect();
+
+        let mut cols = columns();
+        exclude_cdc_table_columns(&mut cols, &pk, &excluded(&["payload"])).unwrap();
+        assert_eq!(cols.iter().map(|c| c.name()).collect_vec(), ["id", "name"]);
+
+        let err = exclude_cdc_table_columns(&mut columns(), &pk, &excluded(&["id"])).unwrap_err();
+        assert!(err.to_string().contains("primary key column `id`"));
+
+        let err = exclude_cdc_table_columns(&mut columns(), &pk, &excluded(&["nope"])).unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
 
     fn test_schema_table_name() -> SchemaTableName {
         SchemaTableName {
