@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
+use std::collections::hash_map::RandomState;
+use std::hash::BuildHasher;
 use std::ops::Bound;
 
 use anyhow::Context;
@@ -26,7 +27,7 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common_estimate_size::{EstimateSize, KvSize, hash_table_heap_size};
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
@@ -63,30 +64,37 @@ pub struct TemporalJoinExecutor<
     is_broadcast: bool,
 }
 
+/// The cached right-side rows of one join key.
+///
+/// `cached` is a `hashbrown` map so that its allocation can be measured with
+/// [`hashbrown::HashMap::allocation_size`]. It keeps the standard library's [`RandomState`]
+/// hasher; the hasher is a type parameter only so that tests can use a deterministic one.
 #[derive(Default)]
-pub struct JoinEntry {
+pub struct JoinEntry<S = RandomState> {
     /// pk -> row
-    cached: HashMap<OwnedRow, OwnedRow>,
+    cached: hashbrown::HashMap<OwnedRow, OwnedRow, S>,
     kv_heap_size: KvSize,
 }
 
-impl EstimateSize for JoinEntry {
+impl<S: BuildHasher> EstimateSize for JoinEntry<S> {
+    /// The heap size of the cached rows plus the rest of the hash table allocation.
     fn estimated_heap_size(&self) -> usize {
         // `kv_heap_size` counts each cached row's full size, including the part stored inline
-        // in the hash table's buckets. Add the rest of the table allocation: empty slots and
-        // control bytes. Capacity is not released on removal, so this keeps counting it.
-        let table = hash_table_heap_size::<(OwnedRow, OwnedRow)>(self.cached.capacity());
+        // in the table's buckets. Add the rest of the table allocation: empty and deleted slots
+        // and control bytes. The allocation is not released when rows are removed, and
+        // `capacity()` cannot be used to infer it because a removal that leaves a tombstone
+        // lowers `capacity()` without freeing anything.
         let occupied = self.cached.len() * size_of::<(OwnedRow, OwnedRow)>();
-        self.kv_heap_size.size() + table.saturating_sub(occupied)
+        self.kv_heap_size.size() + self.cached.allocation_size().saturating_sub(occupied)
     }
 }
 
-impl JoinEntry {
+impl<S: BuildHasher> JoinEntry<S> {
     /// Insert into the cache.
     pub fn insert(&mut self, key: OwnedRow, value: OwnedRow) {
         // Lookup might refill the cache before the `insert` messages from the temporal side
         // upstream.
-        if let Entry::Vacant(e) = self.cached.entry(key) {
+        if let hashbrown::hash_map::Entry::Vacant(e) = self.cached.entry(key) {
             self.kv_heap_size.add(e.key(), &value);
             e.insert(value);
         } else {
@@ -103,6 +111,7 @@ impl JoinEntry {
         }
     }
 
+    /// Whether no rows are cached for this key.
     pub fn is_empty(&self) -> bool {
         self.cached.is_empty()
     }
@@ -922,42 +931,80 @@ mod tests {
         OwnedRow::new(vec![Some(ScalarImpl::Int64(v))])
     }
 
+    /// A hasher that maps every key to the same hash, so that all keys share one probe sequence
+    /// and removals from a full run of buckets leave tombstones.
+    #[derive(Default)]
+    struct CollidingHasher;
+
+    impl std::hash::Hasher for CollidingHasher {
+        fn finish(&self) -> u64 {
+            0
+        }
+
+        fn write(&mut self, _bytes: &[u8]) {}
+    }
+
+    type CollidingState = std::hash::BuildHasherDefault<CollidingHasher>;
+
+    /// An entry that has never held a row has no allocation to count.
     #[test]
     fn test_join_entry_estimated_size_empty() {
-        let entry = JoinEntry::default();
+        let entry = JoinEntry::<RandomState>::default();
         assert_eq!(entry.estimated_heap_size(), 0);
     }
 
+    /// The estimate counts the rows plus at least the inline storage of the empty slots.
     #[test]
     fn test_join_entry_estimated_size_includes_table_overhead() {
-        let mut entry = JoinEntry::default();
+        let mut entry = JoinEntry::<RandomState>::default();
         for i in 0..100 {
             entry.insert(int_row(i), int_row(i));
         }
         let rows = entry.kv_heap_size.size();
-        let table = hash_table_heap_size::<(OwnedRow, OwnedRow)>(entry.cached.capacity());
-        let occupied = entry.cached.len() * size_of::<(OwnedRow, OwnedRow)>();
-        assert!(table > occupied);
-        assert_eq!(entry.estimated_heap_size(), rows + table - occupied);
+        let empty_slots = entry.cached.capacity() - entry.cached.len();
+        assert!(empty_slots > 0);
+        assert!(
+            entry.estimated_heap_size() >= rows + empty_slots * size_of::<(OwnedRow, OwnedRow)>()
+        );
     }
 
-    /// The hash table does not shrink on removal, so its allocation must still be counted after
-    /// every row is removed.
+    /// Removing rows does not release the table allocation, even when a removal leaves a
+    /// tombstone that lowers `capacity()`. The estimate must keep counting the allocation that
+    /// was measured before any removal.
     #[test]
-    fn test_join_entry_estimated_size_after_removal() {
-        let mut entry = JoinEntry::default();
-        for i in 0..100 {
-            entry.insert(int_row(i), int_row(i));
+    fn test_join_entry_estimated_size_retained_after_tombstone_removal() {
+        let mut entry = JoinEntry::<CollidingState>::default();
+        let mut next = 0;
+        // Grow the table once, then fill it to capacity without growing it again.
+        while entry.cached.len() < 16 || entry.cached.len() < entry.cached.capacity() {
+            entry.insert(int_row(next), int_row(next));
+            next += 1;
         }
-        for i in 0..100 {
+        let allocation = entry.cached.allocation_size();
+        let capacity = entry.cached.capacity();
+        // The allocation holds at least one inline row per slot of capacity.
+        assert!(allocation >= capacity * size_of::<(OwnedRow, OwnedRow)>());
+
+        let mut tombstones = 0;
+        for i in 0..next {
+            let capacity_before = entry.cached.capacity();
             entry.remove(&int_row(i));
+            if entry.cached.capacity() < capacity_before {
+                tombstones += 1;
+            }
+            let occupied = entry.cached.len() * size_of::<(OwnedRow, OwnedRow)>();
+            assert_eq!(entry.cached.allocation_size(), allocation);
+            assert_eq!(
+                entry.estimated_heap_size(),
+                entry.kv_heap_size.size() + allocation - occupied
+            );
         }
+
+        assert!(tombstones > 0, "expected removals to leave tombstones");
+        assert!(entry.cached.capacity() < capacity);
+        assert!(entry.is_empty());
         assert_eq!(entry.kv_heap_size.size(), 0);
-        assert_eq!(
-            entry.estimated_heap_size(),
-            hash_table_heap_size::<(OwnedRow, OwnedRow)>(entry.cached.capacity())
-        );
-        assert!(entry.estimated_heap_size() > 0);
+        assert_eq!(entry.estimated_heap_size(), allocation);
     }
 
     /// Tests that a temporal join on a pk-prefix (join key is a strict prefix of the right table's
