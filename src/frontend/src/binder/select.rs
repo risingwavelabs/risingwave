@@ -29,7 +29,7 @@ use super::{BoundShareInput, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_column_name_not_reserved;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, ScopeId};
 use crate::optimizer::plan_node::generic::CHANGELOG_OP;
 use crate::utils::group_by::GroupBy;
 
@@ -129,11 +129,11 @@ impl BoundSelect {
             .chain(self.having.iter_mut())
     }
 
-    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_scope(&self, scope: ScopeId) -> bool {
         self.exprs()
-            .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
+            .any(|expr| expr.has_correlated_input_ref_by_scope(scope))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_from_correlated_by_depth(depth),
+                Some(relation) => relation.is_correlated_by_scope(scope),
                 None => false,
             }
     }
@@ -147,22 +147,21 @@ impl BoundSelect {
             }
     }
 
-    pub fn collect_correlated_indices_by_depth_and_assign_id(
+    pub fn collect_correlated_indices_by_scope_and_assign_id(
         &mut self,
-        depth: Depth,
+        scope: ScopeId,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         let mut correlated_indices = self
             .exprs_mut()
             .flat_map(|expr| {
-                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+                expr.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id)
             })
             .collect_vec();
 
         if let Some(relation) = self.from.as_mut() {
             correlated_indices.extend(
-                relation
-                    .collect_from_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                relation.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
             );
         }
 

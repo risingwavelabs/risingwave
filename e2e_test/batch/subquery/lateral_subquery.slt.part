@@ -287,6 +287,51 @@ FROM lateral_outer_a;
 1 4
 2 4
 
+# Each correlated reference is bound to the join that owns its column, however deep the join tree.
+query II rowsort
+SELECT a1, (SELECT max(v) FROM lateral_outer_t1, (lateral_outer_t2 CROSS JOIN
+  (lateral_outer_b CROSS JOIN LATERAL (SELECT y AS yy) l CROSS JOIN (SELECT a1 AS v) w)))
+FROM lateral_outer_a;
+----
+1 1
+2 2
+
+query II rowsort
+SELECT a1, (SELECT count(*) FROM lateral_outer_t1, (lateral_outer_t2 CROSS JOIN
+  (lateral_outer_b CROSS JOIN LATERAL (SELECT y AS yy) l JOIN lateral_outer_b b2 ON b2.b1 = a1 + 9)))
+FROM lateral_outer_a;
+----
+1 8
+2 8
+
+query IIII rowsort
+SELECT x, y, b1, s FROM lateral_outer_t1,
+  (lateral_outer_t2 CROSS JOIN (lateral_outer_b CROSS JOIN LATERAL (SELECT x + b1 AS s) q))
+WHERE y = 10;
+----
+1 10 10 11
+1 10 11 12
+2 10 10 12
+2 10 11 13
+
+query IIII rowsort
+SELECT x, y, b1, s FROM lateral_outer_t1
+  CROSS JOIN (lateral_outer_t2 CROSS JOIN (lateral_outer_b CROSS JOIN unnest(array[x + b1]) q(s)))
+WHERE y = 10;
+----
+1 10 10 11
+1 10 11 12
+2 10 10 12
+2 10 11 13
+
+query II rowsort
+SELECT a1, (SELECT max(s) FROM lateral_outer_t1,
+  (lateral_outer_t2 CROSS JOIN (lateral_outer_b CROSS JOIN LATERAL (SELECT a1 + b1 AS s) q)))
+FROM lateral_outer_a;
+----
+1 12
+2 13
+
 statement ok
 DROP TABLE lateral_outer_a;
 

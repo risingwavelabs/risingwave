@@ -614,6 +614,12 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: correlated CTE referenced from a nested subquery
+  sql: |
+    create table t1(x int);
+    select x, (with cte as (select x as v) select (select v from cte)) from t1;
+  expected_outputs:
+    - batch_plan
 - name: subqueries in case when exprs
   sql: |
     WITH input AS (

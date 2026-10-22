@@ -628,7 +628,7 @@
               └─BatchHashAgg { group_key: [t2.y], aggs: [] }
                 └─BatchExchange { order: [], dist: HashShard(t2.y) }
                   └─BatchScan { table: t2, columns: [t2.y], distribution: SomeShard }
-- name: hidden left inputs do not add a correlation depth
+- name: non-lateral item under a join references an enclosing query
   sql: |
     create table a (a1 int);
     create table t1 (x int);
@@ -656,3 +656,171 @@
                 │       └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
                 └─BatchExchange { order: [], dist: Single }
                   └─BatchScan { table: t2, columns: [], distribution: SomeShard }
+- name: non-lateral item under a nested lateral join references an enclosing query
+  sql: |
+    create table a (a1 int);
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select a1, (select max(v) from t0, (t1 cross join (t2 cross join lateral (select y as yy) l cross join (select a1 as v) w))) from a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: a.a1 IS NOT DISTINCT FROM a.a1, output: [a.a1, max(a.a1)] }
+      ├─BatchExchange { order: [], dist: HashShard(a.a1) }
+      │ └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
+      └─BatchHashAgg { group_key: [a.a1], aggs: [max(a.a1)] }
+        └─BatchHashJoin { type: LeftOuter, predicate: a.a1 IS NOT DISTINCT FROM a.a1, output: [a.a1, a.a1] }
+          ├─BatchHashAgg { group_key: [a.a1], aggs: [] }
+          │ └─BatchExchange { order: [], dist: HashShard(a.a1) }
+          │   └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(a.a1) }
+            └─BatchProject { exprs: [a.a1, a.a1] }
+              └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                ├─BatchExchange { order: [], dist: Single }
+                │ └─BatchHashJoin { type: Inner, predicate: t1.y IS NOT DISTINCT FROM t1.y, output: [] }
+                │   ├─BatchExchange { order: [], dist: HashShard(t1.y) }
+                │   │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                │   │   ├─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                │   │   │ ├─BatchExchange { order: [], dist: Single }
+                │   │   │ │ └─BatchScan { table: t0, columns: [], distribution: SomeShard }
+                │   │   │ └─BatchExchange { order: [], dist: Single }
+                │   │   │   └─BatchScan { table: t1, columns: [t1.y], distribution: SomeShard }
+                │   │   └─BatchExchange { order: [], dist: Single }
+                │   │     └─BatchScan { table: t2, columns: [], distribution: SomeShard }
+                │   └─BatchHashAgg { group_key: [t1.y], aggs: [] }
+                │     └─BatchExchange { order: [], dist: HashShard(t1.y) }
+                │       └─BatchScan { table: t1, columns: [t1.y], distribution: SomeShard }
+                └─BatchExchange { order: [], dist: Single }
+                  └─BatchHashAgg { group_key: [a.a1], aggs: [] }
+                    └─BatchExchange { order: [], dist: HashShard(a.a1) }
+                      └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
+- name: join condition under a nested lateral join references an enclosing query
+  sql: |
+    create table a (a1 int);
+    create table b (b1 int);
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select a1, (select count(*) from t0, (t1 cross join (t2 cross join lateral (select y as yy) l join b on b1 = a1))) from a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: a.a1 IS NOT DISTINCT FROM a.a1, output: [a.a1, count(1:Int32)] }
+      ├─BatchExchange { order: [], dist: HashShard(a.a1) }
+      │ └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
+      └─BatchHashAgg { group_key: [a.a1], aggs: [count(1:Int32)] }
+        └─BatchHashJoin { type: LeftOuter, predicate: a.a1 IS NOT DISTINCT FROM b.b1, output: [a.a1, 1:Int32] }
+          ├─BatchHashAgg { group_key: [a.a1], aggs: [] }
+          │ └─BatchExchange { order: [], dist: HashShard(a.a1) }
+          │   └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(b.b1) }
+            └─BatchProject { exprs: [b.b1, 1:Int32] }
+              └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                ├─BatchExchange { order: [], dist: Single }
+                │ └─BatchHashJoin { type: Inner, predicate: t1.y IS NOT DISTINCT FROM t1.y, output: [] }
+                │   ├─BatchExchange { order: [], dist: HashShard(t1.y) }
+                │   │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                │   │   ├─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                │   │   │ ├─BatchExchange { order: [], dist: Single }
+                │   │   │ │ └─BatchScan { table: t0, columns: [], distribution: SomeShard }
+                │   │   │ └─BatchExchange { order: [], dist: Single }
+                │   │   │   └─BatchScan { table: t1, columns: [t1.y], distribution: SomeShard }
+                │   │   └─BatchExchange { order: [], dist: Single }
+                │   │     └─BatchScan { table: t2, columns: [], distribution: SomeShard }
+                │   └─BatchHashAgg { group_key: [t1.y], aggs: [] }
+                │     └─BatchExchange { order: [], dist: HashShard(t1.y) }
+                │       └─BatchScan { table: t1, columns: [t1.y], distribution: SomeShard }
+                └─BatchExchange { order: [], dist: Single }
+                  └─BatchFilter { predicate: IsNotNull(b.b1) }
+                    └─BatchScan { table: b, columns: [b.b1], distribution: SomeShard }
+- name: lateral item under an intermediate join references an outer left input
+  sql: |
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select * from t0, (t1 cross join (t2 cross join lateral (select x + z as s) q));
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t0.x, t1.y, t2.z, (t0.x + t2.z) as $expr1] }
+      └─BatchHashJoin { type: Inner, predicate: t2.z IS NOT DISTINCT FROM t2.z AND t0.x IS NOT DISTINCT FROM t0.x, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(t0.x, t2.z) }
+        │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+        │   ├─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+        │   │ ├─BatchExchange { order: [], dist: Single }
+        │   │ │ └─BatchScan { table: t0, columns: [t0.x], distribution: SomeShard }
+        │   │ └─BatchExchange { order: [], dist: Single }
+        │   │   └─BatchScan { table: t1, columns: [t1.y], distribution: SomeShard }
+        │   └─BatchExchange { order: [], dist: Single }
+        │     └─BatchScan { table: t2, columns: [t2.z], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(t0.x, t2.z) }
+          └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+            ├─BatchExchange { order: [], dist: Single }
+            │ └─BatchHashAgg { group_key: [t0.x], aggs: [] }
+            │   └─BatchExchange { order: [], dist: HashShard(t0.x) }
+            │     └─BatchScan { table: t0, columns: [t0.x], distribution: SomeShard }
+            └─BatchExchange { order: [], dist: Single }
+              └─BatchHashAgg { group_key: [t2.z], aggs: [] }
+                └─BatchExchange { order: [], dist: HashShard(t2.z) }
+                  └─BatchScan { table: t2, columns: [t2.z], distribution: SomeShard }
+- name: lateral table function under an intermediate join references an outer left input
+  sql: |
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select * from t0 cross join (t1 cross join (t2 cross join unnest(array[x, z]) u));
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t0.x IS NOT DISTINCT FROM t0.x, output: [t0.x, t1.y, t2.z, Unnest(Array($0, $1))] }
+      ├─BatchExchange { order: [], dist: HashShard(t0.x) }
+      │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+      │   ├─BatchExchange { order: [], dist: Single }
+      │   │ └─BatchScan { table: t0, columns: [t0.x], distribution: SomeShard }
+      │   └─BatchExchange { order: [], dist: Single }
+      │     └─BatchScan { table: t1, columns: [t1.y], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t0.x) }
+        └─BatchProjectSet { select_list: [$0, $1, Unnest(Array($0, $1))] }
+          └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+            ├─BatchExchange { order: [], dist: Single }
+            │ └─BatchHashAgg { group_key: [t0.x], aggs: [] }
+            │   └─BatchExchange { order: [], dist: HashShard(t0.x) }
+            │     └─BatchScan { table: t0, columns: [t0.x], distribution: SomeShard }
+            └─BatchExchange { order: [], dist: Single }
+              └─BatchScan { table: t2, columns: [t2.z], distribution: SomeShard }
+- name: lateral item under an intermediate join references an enclosing query
+  sql: |
+    create table a (a1 int);
+    create table t0 (x int);
+    create table t1 (y int);
+    create table t2 (z int);
+    select a1, (select max(s) from t0, (t1 cross join (t2 cross join lateral (select a1 + z as s) q))) from a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: a.a1 IS NOT DISTINCT FROM a.a1, output: [a.a1, max($expr1)] }
+      ├─BatchExchange { order: [], dist: HashShard(a.a1) }
+      │ └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
+      └─BatchHashAgg { group_key: [a.a1], aggs: [max($expr1)] }
+        └─BatchHashJoin { type: LeftOuter, predicate: a.a1 IS NOT DISTINCT FROM a.a1, output: [a.a1, $expr1] }
+          ├─BatchHashAgg { group_key: [a.a1], aggs: [] }
+          │ └─BatchExchange { order: [], dist: HashShard(a.a1) }
+          │   └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(a.a1) }
+            └─BatchProject { exprs: [a.a1, (a.a1 + t2.z) as $expr1] }
+              └─BatchHashJoin { type: Inner, predicate: t2.z IS NOT DISTINCT FROM t2.z, output: all }
+                ├─BatchExchange { order: [], dist: HashShard(t2.z) }
+                │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                │   ├─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                │   │ ├─BatchExchange { order: [], dist: Single }
+                │   │ │ └─BatchScan { table: t0, columns: [], distribution: SomeShard }
+                │   │ └─BatchExchange { order: [], dist: Single }
+                │   │   └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+                │   └─BatchExchange { order: [], dist: Single }
+                │     └─BatchScan { table: t2, columns: [t2.z], distribution: SomeShard }
+                └─BatchExchange { order: [], dist: HashShard(t2.z) }
+                  └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                    ├─BatchExchange { order: [], dist: Single }
+                    │ └─BatchHashAgg { group_key: [a.a1], aggs: [] }
+                    │   └─BatchExchange { order: [], dist: HashShard(a.a1) }
+                    │     └─BatchScan { table: a, columns: [a.a1], distribution: SomeShard }
+                    └─BatchExchange { order: [], dist: Single }
+                      └─BatchHashAgg { group_key: [t2.z], aggs: [] }
+                        └─BatchExchange { order: [], dist: HashShard(t2.z) }
+                          └─BatchScan { table: t2, columns: [t2.z], distribution: SomeShard }
