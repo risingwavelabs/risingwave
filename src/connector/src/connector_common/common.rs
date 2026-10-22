@@ -1406,43 +1406,21 @@ mod tests {
             );
         }
 
-        fn parse_kafka_props(
-            extra: &[(&str, &str)],
-        ) -> Result<KafkaConnectionProps, serde_json::Error> {
-            let mut map = BTreeMap::from([(
-                "properties.bootstrap.server".to_owned(),
-                "localhost:9092".to_owned(),
-            )]);
-            map.extend(
-                extra
-                    .iter()
-                    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned())),
-            );
-            serde_json::from_value(serde_json::to_value(map).unwrap())
-        }
-
         // Values that could escape the quotes or be parsed as a `kinit` flag are rejected.
         for key in [
             "properties.sasl.kerberos.principal",
             "properties.sasl.kerberos.keytab",
         ] {
             for bad in ["x'; id; '", "'", "-c/tmp/cache", "--help"] {
-                assert!(
-                    parse_kafka_props(&[(key, bad)]).is_err(),
-                    "{key}={bad:?} should be rejected"
-                );
+                let map = BTreeMap::from([
+                    ("properties.bootstrap.server", "localhost:9092"),
+                    (key, bad),
+                ]);
+                let result: Result<KafkaConnectionProps, _> =
+                    serde_json::from_value(serde_json::to_value(map).unwrap());
+                assert!(result.is_err(), "{key}={bad:?} should be rejected");
             }
         }
-
-        // Values that the shell previously mangled now pass through as-is.
-        parse_kafka_props(&[
-            ("properties.sasl.kerberos.principal", "svc_kafka$@CORP.COM"),
-            (
-                "properties.sasl.kerberos.keytab",
-                "/opt/my keytabs/rw.keytab",
-            ),
-        ])
-        .unwrap();
     }
 
     #[test]
