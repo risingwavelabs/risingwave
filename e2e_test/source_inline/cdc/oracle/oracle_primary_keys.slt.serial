@@ -21,6 +21,31 @@ execute_oracle_sqls([
     # NATIONAL exercises Oracle's national-character type, NVARCHAR2.
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NATIONAL (ID NVARCHAR2(20) PRIMARY KEY, VALUE VARCHAR2(100))",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NATIONAL ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NCHAR (ID NCHAR(20) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NCHAR ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_SCALE_EXCEEDED (ID NUMBER(28,29) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_SCALE_EXCEEDED ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NEGATIVE_SCALE_WIDE (ID NUMBER(28,-1) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NEGATIVE_SCALE_WIDE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    # Supported keys at the edge of RisingWave's 28-digit decimal, plus a DATE key.
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_0 (ID NUMBER(28,0) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_0 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_0 VALUES (1, 'small')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_0 VALUES (9999999999999999999999999999, 'max')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_28 (ID NUMBER(28,28) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_28 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_28 VALUES (0.0000000000000000000000000001, 'small')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_28_28 VALUES (0.9999999999999999999999999999, 'max')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_27_NEG1 (ID NUMBER(27,-1) PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_27_NEG1 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_27_NEG1 VALUES (10, 'small')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NUMBER_27_NEG1 VALUES (9999999999999999999999999990, 'max')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_DATE (ID DATE PRIMARY KEY, VALUE VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_DATE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_DATE "
+    "VALUES (TO_DATE('2024-01-01 00:00:00', 'YYYY-MM-DD HH24:MI:SS'), 'small')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_DATE "
+    "VALUES (TO_DATE('2024-01-01 00:00:01', 'YYYY-MM-DD HH24:MI:SS'), 'max')",
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE "
     "(TENANT_ID NUMBER(9) NOT NULL, ORDER_ID NUMBER(9) NOT NULL, "
     "OTHER_COLUMN NUMBER, VALUE VARCHAR2(100), PRIMARY KEY (TENANT_ID, ORDER_ID))",
@@ -188,13 +213,120 @@ statement error (?s).*unsupported type NVARCHAR2.*
 CREATE TABLE oracle_pk_national (*)
 FROM oracle_pk_source TABLE 'APP.RW_PK_NATIONAL';
 
+statement error (?s).*unsupported type NCHAR.*
+CREATE TABLE oracle_pk_nchar (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NCHAR';
+
+# invalid upstream primary key (NUMBER scale exceeds 28 digits)
+statement error (?s).*requires a declared NUMBER precision.*
+CREATE TABLE oracle_pk_scale_exceeded (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_SCALE_EXCEEDED';
+
+# invalid upstream primary key (a negative scale needs 29 integer digits)
+statement error (?s).*requires a declared NUMBER precision.*
+CREATE TABLE oracle_pk_negative_scale_wide (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NEGATIVE_SCALE_WIDE';
+
 query I
 SELECT count(*) FROM rw_catalog.rw_relations
 WHERE name IN ('oracle_pk_count_mismatch', 'oracle_pk_name_mismatch',
                'oracle_pk_case_mismatch', 'oracle_pk_missing', 'oracle_pk_unbounded',
-               'oracle_pk_wide', 'oracle_pk_timestamp', 'oracle_pk_national');
+               'oracle_pk_wide', 'oracle_pk_timestamp', 'oracle_pk_national',
+               'oracle_pk_nchar', 'oracle_pk_scale_exceeded',
+               'oracle_pk_negative_scale_wide');
 ----
 0
+
+# Keys at the edge of RisingWave's 28-digit decimal, and DATE keys, are exact: one-row pages
+# keep both rows, and CDC updates the right row.
+statement ok
+CREATE TABLE oracle_pk_number_28_0 (*) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NUMBER_28_0';
+
+statement ok
+CREATE TABLE oracle_pk_number_28_28 (*) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NUMBER_28_28';
+
+statement ok
+CREATE TABLE oracle_pk_number_27_neg1 (*) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_source TABLE 'APP.RW_PK_NUMBER_27_NEG1';
+
+statement ok
+CREATE TABLE oracle_pk_date (*) WITH (snapshot.batch_size = 1)
+FROM oracle_pk_source TABLE 'APP.RW_PK_DATE';
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_number_28_0;
+----
+1 small
+9999999999999999999999999999 max
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_number_28_28;
+----
+0.0000000000000000000000000001 small
+0.9999999999999999999999999999 max
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_number_27_neg1;
+----
+10 small
+9999999999999999999999999990 max
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_date;
+----
+2024-01-01 00:00:00 small
+2024-01-01 00:00:01 max
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import begin_tx, end_tx
+begin_tx("oracle_pk_edge_dml", [
+    "UPDATE APP.RW_PK_NUMBER_28_0 SET VALUE = 'max-updated' WHERE ID = 9999999999999999999999999999",
+    "UPDATE APP.RW_PK_NUMBER_28_28 SET VALUE = 'max-updated' WHERE ID = 0.9999999999999999999999999999",
+    "UPDATE APP.RW_PK_NUMBER_27_NEG1 SET VALUE = 'max-updated' WHERE ID = 9999999999999999999999999990",
+    "UPDATE APP.RW_PK_DATE SET VALUE = 'max-updated' "
+    "WHERE ID = TO_DATE('2024-01-01 00:00:01', 'YYYY-MM-DD HH24:MI:SS')",
+])
+end_tx("oracle_pk_edge_dml")
+PY
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_number_28_0;
+----
+1 small
+9999999999999999999999999999 max-updated
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_number_28_28;
+----
+0.0000000000000000000000000001 small
+0.9999999999999999999999999999 max-updated
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_number_27_neg1;
+----
+10 small
+9999999999999999999999999990 max-updated
+
+query T rowsort retry 30 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_pk_date;
+----
+2024-01-01 00:00:00 small
+2024-01-01 00:00:01 max-updated
+
+statement ok
+DROP TABLE oracle_pk_number_28_0;
+
+statement ok
+DROP TABLE oracle_pk_number_28_28;
+
+statement ok
+DROP TABLE oracle_pk_number_27_neg1;
+
+statement ok
+DROP TABLE oracle_pk_date;
 
 statement ok
 DROP TABLE oracle_pk_reversed;

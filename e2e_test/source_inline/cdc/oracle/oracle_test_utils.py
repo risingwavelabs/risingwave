@@ -164,11 +164,12 @@ def cleanup() -> None:
 def execute_oracle_sqls(
     sqls: list[str],
     *,
+    service=TEST_ORACLE_PDB,
     after_oracle_sqls_hook=None,
     after_oracle_sqls_hook_kwargs=None,
 ) -> None:
     """Execute and commit in order, then invoke the optional success hook."""
-    with _connect_as_sys(TEST_ORACLE_PDB) as connection:
+    with _connect_as_sys(service) as connection:
         with connection.cursor() as cursor:
             for sql in sqls:
                 cursor.execute(sql)

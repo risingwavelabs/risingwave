@@ -16,6 +16,12 @@ statement ok
 DROP TABLE IF EXISTS oracle_shared_empty;
 
 statement ok
+DROP TABLE IF EXISTS oracle_shared_quoted;
+
+statement ok
+DROP TABLE IF EXISTS oracle_shared_quoted_explicit;
+
+statement ok
 DROP SOURCE IF EXISTS oracle_shared_source CASCADE;
 
 system ok
@@ -34,17 +40,37 @@ execute_oracle_sqls([
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_E2_EMPTY ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_E2_ORDERS (ID, NAME) VALUES (10, 'order-initial')",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_E2_ORDERS (ID, NAME) VALUES (11, 'order-delete')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.\"rw_e2_quoted\" (\"id\" NUMBER(9) PRIMARY KEY, \"Name\" VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.\"rw_e2_quoted\" ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.\"rw_e2_quoted\" (\"id\", \"Name\") VALUES (30, 'quoted-initial')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.\"rw_e2_quoted\" (\"id\", \"Name\") VALUES (31, 'quoted-delete')",
 ])
 PY
 
 # A source with no new user-table writes must start and allow table creation immediately.
-statement ok
-CREATE SOURCE oracle_shared_source WITH (
-    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
-    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
-    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
-    heartbeat.table.auto.initialize = 'true'
-) FORMAT PLAIN ENCODE JSON;
+# The heartbeat table name is exact: auto-initialization creates the lowercase table, and the
+# heartbeat action flips its seeded 0 to 1.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls
+from oracle_test_hooks import check_heartbeat_seed
+execute_sqls(
+    ["""CREATE SOURCE oracle_shared_source WITH (
+        $TEST_ORACLE_WITH_OPTIONS_COMMON,
+        schema.name = '$TEST_ORACLE_SOURCE_SCHEMA',
+        heartbeat.table.name = '$TEST_ORACLE_USER.rw_quoted_heartbeat',
+        heartbeat.table.auto.initialize = 'true',
+        debezium.heartbeat.interval.ms = '1000'
+    ) FORMAT PLAIN ENCODE JSON;"""],
+    after_sqls_hook=check_heartbeat_seed,
+    after_sqls_hook_kwargs={
+        "owner": "$TEST_ORACLE_USER",
+        "table": "rw_quoted_heartbeat",
+        "allowed_values": [1],
+        "timeout": 60,
+    },
+)
+PY
 
 statement ok
 CREATE TABLE oracle_shared_customers (
@@ -53,14 +79,27 @@ CREATE TABLE oracle_shared_customers (
     PRIMARY KEY ("ID")
 ) FROM oracle_shared_source TABLE 'APP.CUSTOMERS';
 
-# Discover columns automatically and accept lower/mixed-case upstream table names.
+# Discover columns automatically.
 statement ok
 CREATE TABLE oracle_shared_orders (*)
-FROM oracle_shared_source TABLE 'app.rw_e2_orders';
+FROM oracle_shared_source TABLE 'APP.RW_E2_ORDERS';
 
 statement ok
 CREATE TABLE oracle_shared_empty (*)
-FROM oracle_shared_source TABLE 'App.Rw_E2_Empty';
+FROM oracle_shared_source TABLE 'APP.RW_E2_EMPTY';
+
+# Quoted upstream names are used exactly, both when columns are discovered and when they are
+# declared with matching quoted names.
+statement ok
+CREATE TABLE oracle_shared_quoted (*)
+FROM oracle_shared_source TABLE 'APP.rw_e2_quoted';
+
+statement ok
+CREATE TABLE oracle_shared_quoted_explicit (
+    "id" INT,
+    "Name" VARCHAR,
+    PRIMARY KEY ("id")
+) FROM oracle_shared_source TABLE 'APP.rw_e2_quoted';
 
 query T retry 30 backoff 1s
 SELECT "ID", "NAME" FROM oracle_shared_customers;
@@ -78,12 +117,34 @@ SELECT count(*) FROM oracle_shared_empty;
 ----
 0
 
+query T rowsort retry 30 backoff 1s
+SELECT "id", "Name" FROM oracle_shared_quoted;
+----
+30 quoted-initial
+31 quoted-delete
+
+query T rowsort retry 30 backoff 1s
+SELECT "id", "Name" FROM oracle_shared_quoted_explicit;
+----
+30 quoted-initial
+31 quoted-delete
+
 # Invalid upstream table names must be rejected without leaving catalog objects.
 statement error (?s).*Invalid Oracle CDC table name.*expected schema.table.*
 CREATE TABLE oracle_invalid_table_name (*)
 FROM oracle_shared_source TABLE 'CUSTOMERS';
 
-statement error (?s).*Invalid Oracle CDC table name.*expected unquoted schema.table identifiers.*
+statement error (?s).*Invalid Oracle CDC table name.*expected schema.table.*
+CREATE TABLE oracle_invalid_table_name (*)
+FROM oracle_shared_source TABLE 'APP.CUSTOMERS.ARCHIVE';
+
+# Table names are exact: a mixed-case name does not match the unquoted RW_E2_ORDERS table,
+# and the quotes are part of the name.
+statement error (?s).*Oracle table 'aPp.Rw_E2_Orders' has no visible columns.*
+CREATE TABLE oracle_mixed_case_table_name (*)
+FROM oracle_shared_source TABLE 'aPp.Rw_E2_Orders';
+
+statement error (?s).*Oracle table 'APP."CUSTOMERS"' has no visible columns.*
 CREATE TABLE oracle_invalid_quoted_name (*)
 FROM oracle_shared_source TABLE 'APP."CUSTOMERS"';
 
@@ -91,10 +152,26 @@ statement error (?s).*Oracle table 'APP.RW_DOES_NOT_EXIST' has no visible column
 CREATE TABLE oracle_missing_upstream (*)
 FROM oracle_shared_source TABLE 'APP.RW_DOES_NOT_EXIST';
 
+# With declared columns there is no discovery, so source validation reports the missing table.
+statement error (?s).*Oracle table 'APP.RW_DOES_NOT_EXIST' does not exist in PDB.*
+CREATE TABLE oracle_missing_upstream_declared (
+    "ID" INT,
+    PRIMARY KEY ("ID")
+) FROM oracle_shared_source TABLE 'APP.RW_DOES_NOT_EXIST';
+
+# Unquoted RisingWave columns are lowercase, so "name" does not match the upstream "Name".
+statement error (?s).*Column 'name' not found in the upstream database.*Use double quotes.*
+CREATE TABLE oracle_unquoted_column_name (
+    id INT,
+    name VARCHAR,
+    PRIMARY KEY (id)
+) FROM oracle_shared_source TABLE 'APP.rw_e2_quoted';
+
 query I
 SELECT count(*) FROM rw_catalog.rw_relations
-WHERE name IN ('oracle_invalid_table_name', 'oracle_invalid_quoted_name',
-               'oracle_missing_upstream');
+WHERE name IN ('oracle_invalid_table_name', 'oracle_mixed_case_table_name',
+               'oracle_invalid_quoted_name', 'oracle_missing_upstream',
+               'oracle_missing_upstream_declared', 'oracle_unquoted_column_name');
 ----
 0
 
@@ -103,7 +180,7 @@ WHERE name IN ('oracle_invalid_table_name', 'oracle_invalid_quoted_name',
 statement ok
 CREATE SOURCE oracle_shared_orders_events (*)
 WITH (snapshot = 'false')
-FROM oracle_shared_source TABLE 'aPp.Rw_E2_Orders';
+FROM oracle_shared_source TABLE 'APP.RW_E2_ORDERS';
 
 statement ok
 CREATE MATERIALIZED VIEW oracle_shared_orders_events_changelog AS
@@ -115,7 +192,7 @@ SELECT count(*) FROM oracle_shared_orders_events_changelog;
 ----
 0
 
-# Change all three upstream tables, including inserting into the empty table.
+# Change all upstream tables, including inserting into the empty table.
 # Each RisingWave table should receive only changes from its own upstream table.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
@@ -127,6 +204,9 @@ begin_tx("oracle_shared_dml", [
     "DELETE FROM APP.RW_E2_ORDERS WHERE ID = 11",
     "INSERT INTO APP.RW_E2_ORDERS (ID, NAME) VALUES (12, 'order-inserted')",
     "INSERT INTO APP.RW_E2_EMPTY (ID, NAME) VALUES (20, 'empty-inserted')",
+    "UPDATE APP.\"rw_e2_quoted\" SET \"Name\" = 'quoted-updated' WHERE \"id\" = 30",
+    "DELETE FROM APP.\"rw_e2_quoted\" WHERE \"id\" = 31",
+    "INSERT INTO APP.\"rw_e2_quoted\" (\"id\", \"Name\") VALUES (32, 'quoted-inserted')",
 ])
 end_tx("oracle_shared_dml")
 PY
@@ -147,6 +227,18 @@ query T retry 30 backoff 1s
 SELECT "ID", "NAME" FROM oracle_shared_empty;
 ----
 20 empty-inserted
+
+query T rowsort retry 30 backoff 1s
+SELECT "id", "Name" FROM oracle_shared_quoted;
+----
+30 quoted-updated
+32 quoted-inserted
+
+query T rowsort retry 30 backoff 1s
+SELECT "id", "Name" FROM oracle_shared_quoted_explicit;
+----
+30 quoted-updated
+32 quoted-inserted
 
 # Only the three new RW_E2_ORDERS changes should appear, not changes to the other tables.
 # changelog_op is 1 for insert/update and 2 for delete.
@@ -171,6 +263,12 @@ DROP TABLE oracle_shared_orders;
 
 statement ok
 DROP TABLE oracle_shared_empty;
+
+statement ok
+DROP TABLE oracle_shared_quoted;
+
+statement ok
+DROP TABLE oracle_shared_quoted_explicit;
 
 statement ok
 DROP SOURCE oracle_shared_source CASCADE;

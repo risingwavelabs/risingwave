@@ -20,7 +20,8 @@ execute_oracle_sqls([
     "RAW_VALUE RAW(16), BLOB_VALUE BLOB, BOOLEAN_VALUE BOOLEAN, JSON_VALUE JSON, "
     "DATE_VALUE DATE, TIMESTAMP_VALUE TIMESTAMP(6), "
     "TIMESTAMPTZ_VALUE TIMESTAMP(6) WITH TIME ZONE, "
-    "TIMESTAMPLTZ_VALUE TIMESTAMP(6) WITH LOCAL TIME ZONE)",
+    "TIMESTAMPLTZ_VALUE TIMESTAMP(6) WITH LOCAL TIME ZONE, "
+    "N_STAR NUMBER(*,0), DOUBLE_VALUE DOUBLE PRECISION)",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES VALUES ("
     "1, 9999, 999999999, 999999999999999999, 9223372036854775808, "
@@ -31,7 +32,8 @@ execute_oracle_sqls([
     "TO_DATE('1999-12-31 08:30:00', 'YYYY-MM-DD HH24:MI:SS'), "
     "TIMESTAMP '2024-02-29 23:59:59.123456', "
     "TIMESTAMP '2024-03-10 08:00:00.25 +05:30', "
-    "TIMESTAMP '2024-03-10 08:00:00.25 +05:30')",
+    "TIMESTAMP '2024-03-10 08:00:00.25 +05:30', "
+    "123456789012345678901, 3.141592653589793238)",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES VALUES ("
     "2, -9999, -999999999, -999999999999999999, -9223372036854775809, "
     "-1234549, -0.01, -0.000001, -2.5, -0.375f, -1e300d, "
@@ -40,7 +42,8 @@ execute_oracle_sqls([
     "TO_DATE('1965-07-04 12:00:00', 'YYYY-MM-DD HH24:MI:SS'), "
     "TIMESTAMP '1965-07-04 12:00:00.5', "
     "TIMESTAMP '1969-12-31 23:59:59.999999 -08:00', "
-    "TIMESTAMP '1969-12-31 23:59:59.999999 -08:00')",
+    "TIMESTAMP '1969-12-31 23:59:59.999999 -08:00', "
+    "-1, -0.5)",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES (ID) VALUES (3)",
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LONG (ID NUMBER(9) PRIMARY KEY, LONG_VALUE LONG)",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LONG ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
@@ -64,6 +67,9 @@ execute_oracle_sqls([
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('a', 'c1')",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('ab', 'c2')",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('b', 'c3')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_INTERVAL "
+    "(ID NUMBER(9) PRIMARY KEY, INTERVAL_VALUE INTERVAL DAY TO SECOND)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_INTERVAL ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
 ])
 PY
 
@@ -96,6 +102,50 @@ statement ok
 CREATE TABLE oracle_snapshot_char_key (*) WITH (snapshot.batch_size = 1)
 FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_CHAR_KEY';
 
+# Discovery must reject Oracle types it cannot map, without leaving a catalog object.
+statement error (?s).*Unsupported Oracle data type: INTERVAL DAY.*
+CREATE TABLE oracle_snapshot_interval (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_INTERVAL';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations WHERE name = 'oracle_snapshot_interval';
+----
+0
+
+# Discovered types match Debezium's mapping, so snapshot and CDC values agree.
+query TT
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_name = 'oracle_snapshot_types' AND NOT starts_with(column_name, '_rw')
+ORDER BY ordinal_position;
+----
+ID integer
+N4 smallint
+N9 integer
+N18 bigint
+N19 numeric
+N7_NEG2 integer
+N10_2 numeric
+N_UNBOUNDED numeric
+FLOAT_VALUE numeric
+BINARY_FLOAT_VALUE real
+BINARY_DOUBLE_VALUE double precision
+CHAR_VALUE character varying
+NCHAR_VALUE character varying
+VARCHAR_VALUE character varying
+NVARCHAR_VALUE character varying
+CLOB_VALUE character varying
+NCLOB_VALUE character varying
+RAW_VALUE bytea
+BLOB_VALUE bytea
+BOOLEAN_VALUE boolean
+JSON_VALUE jsonb
+DATE_VALUE timestamp without time zone
+TIMESTAMP_VALUE timestamp without time zone
+TIMESTAMPTZ_VALUE timestamp with time zone
+TIMESTAMPLTZ_VALUE timestamp with time zone
+N_STAR numeric
+DOUBLE_VALUE numeric
+
 query I retry 30 backoff 1s
 SELECT count(*) FROM oracle_snapshot_types;
 ----
@@ -109,6 +159,15 @@ FROM oracle_snapshot_types ORDER BY "ID";
 1 9999 999999999 999999999999999999 9223372036854775808 1234600 12345.67 123456789012345678.9 3.14159 1.5 1.25
 2 -9999 -999999999 -999999999999999999 -9223372036854775809 -1234500 -0.01 -0.000001 -2.5 -0.375 -1e+300
 3 NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL
+
+# NUMBER(*,0) and DOUBLE PRECISION are decimals: values beyond BIGINT and beyond a double's
+# precision stay exact.
+query T
+SELECT "ID", "N_STAR", "DOUBLE_VALUE" FROM oracle_snapshot_types ORDER BY "ID";
+----
+1 123456789012345678901 3.141592653589793238
+2 -1 -0.5
+3 NULL NULL
 
 # Blanks are shown as underscores so CHAR/NCHAR padding and kept spaces are compared exactly.
 query T
