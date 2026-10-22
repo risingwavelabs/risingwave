@@ -59,7 +59,7 @@ public class SourceTestClient {
         }
     }
 
-    public static Connection connect(DataSource dataSource) {
+    protected static Connection connect(DataSource dataSource) {
         Connection connection = null;
         try {
             connection = dataSource.getConnection();
@@ -69,7 +69,7 @@ public class SourceTestClient {
         return connection;
     }
 
-    public static ResultSet performQuery(Connection connection, String sql) {
+    protected static ResultSet performQuery(Connection connection, String sql) {
         ResultSet resultSet = null;
         try {
             Statement statement = connection.createStatement();
@@ -85,7 +85,7 @@ public class SourceTestClient {
         return resultSet;
     }
 
-    public static DataSource getDataSource(
+    protected static DataSource getDataSource(
             String jdbcUrl, String username, String password, String driverClassName) {
         HikariConfig hikariConfig = new HikariConfig();
         hikariConfig.setJdbcUrl(jdbcUrl);
@@ -93,26 +93,6 @@ public class SourceTestClient {
         hikariConfig.setPassword(password);
         hikariConfig.setDriverClassName(driverClassName);
         return new HikariDataSource(hikariConfig);
-    }
-
-    public ConnectorServiceProto.ValidateSourceResponse validateSource(
-            ConnectorServiceProto.SourceType sourceType, Map<String, String> properties) {
-        return validateSource(
-                sourceType, properties, ConnectorServiceProto.TableSchema.getDefaultInstance());
-    }
-
-    public ConnectorServiceProto.ValidateSourceResponse validateSource(
-            ConnectorServiceProto.SourceType sourceType,
-            Map<String, String> properties,
-            ConnectorServiceProto.TableSchema tableSchema) {
-        ConnectorServiceProto.ValidateSourceRequest req =
-                ConnectorServiceProto.ValidateSourceRequest.newBuilder()
-                        .setSourceId(0)
-                        .setSourceType(sourceType)
-                        .putAllProperties(properties)
-                        .setTableSchema(tableSchema)
-                        .build();
-        return blockingStub.validateSource(req);
     }
 
     protected ConnectorServiceProto.ValidateSourceResponse validateSource(
