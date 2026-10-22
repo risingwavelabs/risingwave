@@ -238,7 +238,7 @@ pub struct StreamingDeveloperConfig {
 
     /// Maximum number of right-side rows cached per join key in a temporal join. If a key has
     /// more matching rows than this, they are not cached; lookups for that key read the rows from
-    /// the right table instead. Set to 0 to disable the limit.
+    /// the right table instead. 0 (the default) disables the limit.
     #[serde(default = "default::developer::streaming_temporal_join_entry_state_max_rows")]
     pub temporal_join_entry_state_max_rows: usize,
 

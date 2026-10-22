@@ -406,8 +406,8 @@ pub mod default {
         }
 
         pub fn streaming_temporal_join_entry_state_max_rows() -> usize {
-            // Same as `streaming_hash_join_entry_state_max_rows`.
-            30000
+            // Disabled by default.
+            0
         }
 
         pub fn streaming_join_hash_map_evict_interval_rows() -> u32 {
