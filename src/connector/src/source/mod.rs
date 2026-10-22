@@ -80,6 +80,7 @@ use utils::feature_gated_source_mod;
 pub use self::adbc_snowflake::ADBC_SNOWFLAKE_CONNECTOR;
 mod common;
 pub mod iceberg;
+pub mod ingest_mode;
 mod manager;
 pub mod reader;
 pub mod test_source;
