@@ -1,0 +1,150 @@
+# Bounded Iceberg loads fail once their pinned snapshot's files are gone.
+
+
+statement ok
+DROP TABLE IF EXISTS bounded_fetch_failed;
+
+statement ok
+DROP TABLE IF EXISTS bounded_list_failed;
+
+statement ok
+DROP SOURCE IF EXISTS failure_upstream_src;
+
+statement ok
+DROP SINK IF EXISTS failure_upstream_sink;
+
+statement ok
+DROP TABLE IF EXISTS failure_upstream;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_failure/
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+CREATE TABLE failure_upstream (id INT, v VARCHAR) APPEND ONLY;
+
+statement ok
+CREATE SINK failure_upstream_sink FROM failure_upstream WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    warehouse.path = 's3://hummock001/bounded_iceberg_failure',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'failure_db',
+    table.name = 'failure_t',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true'
+);
+
+statement ok
+CREATE SOURCE failure_upstream_src WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_failure',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'failure_db',
+    table.name = 'failure_t'
+);
+
+# ==== fetch failure: the data files are gone
+
+statement ok
+INSERT INTO failure_upstream VALUES (1, 'a'), (2, 'b');
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'failure_upstream_src';
+----
+1
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_failure/failure_db/failure_t/data/
+
+system ok
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT snapshot_id FROM rw_iceberg_snapshots
+    WHERE source_name = 'failure_upstream_src'
+    ORDER BY timestamp_ms DESC LIMIT 1
+") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+CREATE TABLE bounded_fetch_failed (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_failure',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'failure_db',
+    table.name = 'failure_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '$snapshot_id'
+)"
+
+query TT retry 60 backoff 2s
+SELECT status, completed_at IS NULL FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_tables WHERE name = 'bounded_fetch_failed');
+----
+FAILED t
+
+# ==== list failure: the manifest lists are gone
+
+# Delete the snapshot manifest lists, so planning the scan fails and the lister gives up.
+# `risedev` also prints cargo-make logs to stdout, so pass only the found paths to `mc rm`.
+system ok
+./risedev mc find hummock-minio/hummock001/bounded_iceberg_failure/failure_db/failure_t/metadata/ --name 'snap-*.avro' | grep '^hummock-minio/.*\.avro$' | xargs -n1 ./risedev mc rm
+
+system ok
+snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
+    SELECT snapshot_id FROM rw_iceberg_snapshots
+    WHERE source_name = 'failure_upstream_src'
+    ORDER BY timestamp_ms DESC LIMIT 1
+") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+CREATE TABLE bounded_list_failed (PRIMARY KEY (id)) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_failure',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'failure_db',
+    table.name = 'failure_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '$snapshot_id'
+)"
+
+query TT retry 60 backoff 2s
+SELECT status, completed_at IS NULL FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_tables WHERE name = 'bounded_list_failed');
+----
+FAILED t
+
+# ==== cleanup
+
+statement ok
+DROP TABLE bounded_fetch_failed;
+
+statement ok
+DROP TABLE bounded_list_failed;
+
+statement ok
+DROP SOURCE failure_upstream_src;
+
+statement ok
+DROP SINK failure_upstream_sink;
+
+statement ok
+DROP TABLE failure_upstream;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_failure/
