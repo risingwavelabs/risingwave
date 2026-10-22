@@ -62,6 +62,7 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::source::nexmark::source::{EventType, get_event_data_types_with_names};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 pub use risingwave_connector::source::{
@@ -76,8 +77,7 @@ use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::source_ingest_mode::{IngestMode, SourceIngestModeStreaming};
-use risingwave_pb::plan_common::{EncodeType, FormatType, SourceIngestMode};
+use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
@@ -114,8 +114,9 @@ use crate::optimizer::plan_node::{BackfillType, LogicalSource, ToStream, ToStrea
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::utils::{
-    OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
-    resolve_secret_ref_in_with_options, resolve_source_ingest_mode_in_with_option,
+    OverwriteOptions, RefreshMode, resolve_connection_ref_and_secret_ref,
+    resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options,
+    resolve_source_refresh_mode_in_with_option,
 };
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
@@ -766,21 +767,15 @@ pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     format_encode: &FormatEncodeOptions,
     is_create_source: bool,
-) -> Result<(WithOptions, SourceIngestMode)> {
+) -> Result<(WithOptions, Option<RefreshMode>)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(format_encode, &mut with_properties)?;
-    let ingest_mode = {
-        let ingest_mode = resolve_source_ingest_mode_in_with_option(&mut with_properties)?;
-        if is_create_source && ingest_mode.is_some() {
-            return Err(RwError::from(ProtocolError(
-                "`refresh_mode` only supported for CREATE TABLE".to_owned(),
-            )));
-        }
-
-        ingest_mode.unwrap_or(SourceIngestMode {
-            ingest_mode: Some(IngestMode::Streaming(SourceIngestModeStreaming {})),
-        })
-    };
+    let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
+    if is_create_source && refresh_mode.is_some() {
+        return Err(RwError::from(ProtocolError(
+            "`refresh_mode` is only supported for CREATE TABLE".to_owned(),
+        )));
+    }
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
 
@@ -832,7 +827,7 @@ pub fn bind_connector_props(
             .entry("server.id".to_owned())
             .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
-    Ok((with_properties, ingest_mode))
+    Ok((with_properties, refresh_mode))
 }
 
 fn must_wait_cdc_offset_before_report(with_properties: &WithOptions) -> bool {
@@ -918,7 +913,7 @@ pub async fn bind_create_source_or_table_with_connector(
     create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
-    ingest_mode: SourceIngestMode,
+    refresh_mode: Option<RefreshMode>,
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
@@ -1071,6 +1066,30 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         )?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 
+    let bounded_input = if with_properties.supports_bounded_read() {
+        ConnectorProperties::extract(with_properties.clone(), false)?.bounded_input()?
+    } else {
+        None
+    };
+    let ingest_mode = match (refresh_mode, bounded_input) {
+        (Some(_), Some(_)) => {
+            return Err(ErrorCode::InvalidParameterValue(
+                "A bounded read cannot be combined with `refresh_mode`".to_owned(),
+            )
+            .into());
+        }
+        (None, Some(_)) if is_create_source => {
+            return Err(RwError::from(ProtocolError(
+                "Bounded reads are only supported for CREATE TABLE".to_owned(),
+            )));
+        }
+        (None, Some(input)) => IngestMode::Bounded(input),
+        (None, None) | (Some(RefreshMode::Streaming), None) => IngestMode::Streaming,
+        (Some(RefreshMode::FullReload { interval_sec }), None) => {
+            IngestMode::FullReload { interval_sec }
+        }
+    };
+
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
         let Some(connector) = with_properties.get_connector() else {
@@ -1116,6 +1135,15 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
 
     let (mut columns, pk_col_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+
+    // A bounded load restarts from scratch on recovery, so rows must be deduplicated by key.
+    if ingest_mode.is_bounded() && row_id_index.is_some() {
+        return Err(ErrorCode::BindError(
+            "Bounded tables must have a PRIMARY KEY. Please define a primary key for the table."
+                .to_owned(),
+        )
+        .into());
+    }
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
@@ -1178,7 +1206,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
-        ingest_mode: Some(ingest_mode),
+        ingest_mode,
     };
     Ok(source)
 }
@@ -1230,7 +1258,8 @@ pub async fn handle_create_source(
     }
 
     let format_encode = stmt.format_encode.into_v2_with_warning();
-    let (with_properties, ingest_mode) = bind_connector_props(&handler_args, &format_encode, true)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&handler_args, &format_encode, true)?;
     if let Some(connector) = with_properties.get_connector() {
         ensure_local_fs_connector_allowed(&session, &connector)?;
     }
@@ -1277,7 +1306,7 @@ pub async fn handle_create_source(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
-        ingest_mode,
+        refresh_mode,
     )
     .await?;
 
