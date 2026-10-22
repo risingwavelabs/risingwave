@@ -183,6 +183,12 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         connector == ICEBERG_CONNECTOR
     }
 
+    /// Whether the connector can read a pinned input once, through
+    /// [`crate::source::SourceProperties::bounded_input`].
+    fn supports_bounded_read(&self) -> bool {
+        self.is_iceberg_connector()
+    }
+
     fn connector_need_pk(&self) -> bool {
         // Legacy Iceberg scans do not require a key. Retracting update ingestion uses
         // the SQL primary key, like other non-append-only sources.

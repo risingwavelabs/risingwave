@@ -14,9 +14,9 @@
 
 use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SOURCE_PREFIX, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
-use risingwave_pb::plan_common::SourceIngestMode;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
@@ -53,7 +53,7 @@ pub struct SourceCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub rate_limit: Option<u32>,
-    pub ingest_mode: Option<SourceIngestMode>,
+    pub ingest_mode: IngestMode,
 }
 
 impl SourceCatalog {
@@ -93,7 +93,7 @@ impl SourceCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
             rate_limit: self.rate_limit,
-            ingest_mode: self.ingest_mode,
+            ingest_mode: Some(self.ingest_mode.to_proto()),
         }
     }
 
@@ -127,15 +127,10 @@ impl SourceCatalog {
         if !self.is_iceberg_update_source() {
             return Ok(());
         }
-        let full_reload = self.ingest_mode.as_ref().is_some_and(|mode| {
-            matches!(
-                mode.ingest_mode,
-                Some(risingwave_pb::plan_common::source_ingest_mode::IngestMode::FullReload(_))
-            )
-        });
         let unsupported = [
             (self.info.is_shared(), "shared sources"),
-            (full_reload, "FULL_RELOAD refresh"),
+            (self.ingest_mode.is_full_reload(), "FULL_RELOAD refresh"),
+            (self.ingest_mode.is_bounded(), "bounded ingestion"),
             (self.rate_limit.is_some(), "source rate limiting"),
             (
                 self.columns
@@ -168,6 +163,11 @@ impl SourceCatalog {
             ).into());
         }
         Ok(())
+    }
+
+    /// Whether this source loads a bounded input once instead of streaming continuously.
+    pub fn is_bounded(&self) -> bool {
+        self.ingest_mode.is_bounded()
     }
 
     /// If this source is an iceberg source, returns the corresponding iceberg table name.
@@ -251,6 +251,8 @@ impl From<&PbSource> for SourceCatalog {
 
         let connection_id = prost.connection_id;
         let rate_limit = prost.rate_limit;
+        let ingest_mode = IngestMode::from_proto(prost.ingest_mode.as_ref())
+            .expect("stored ingest mode should be valid");
 
         Self {
             id,
@@ -274,7 +276,7 @@ impl From<&PbSource> for SourceCatalog {
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
             rate_limit,
-            ingest_mode: prost.ingest_mode,
+            ingest_mode,
         }
     }
 }
