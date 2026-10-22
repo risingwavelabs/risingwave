@@ -39,7 +39,7 @@ use super::super::{
 };
 use super::{
     CacheRefillContext, DataCacheRefillTaskGenerator, SstDeltaInfo, block_vnode_range,
-    default_spawn_refill_task, vnode_range_overlaps_bitmap,
+    vnode_range_overlaps_bitmap,
 };
 use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
 use crate::hummock::recent_filter::simple::SimpleRecentFilter;
@@ -308,7 +308,6 @@ async fn test_table_cache_refill_contexts_by_role_and_policy() {
             case.role,
             test_refill_config(case.default_policy),
             sstable_store.clone(),
-            default_spawn_refill_task(),
         );
         if let Some(policy) = case.policy {
             refiller.replace_table_cache_refill_policies(HashMap::from([(table_id, policy)]));
@@ -364,8 +363,8 @@ async fn test_refill_task_captures_runtime_context_snapshot() {
         Role::Serving,
         test_refill_config(CacheRefillPolicy::Enabled),
         mock_sstable_store().await,
-        spawn_refill_task,
-    );
+    )
+    .with_foyer_spawn_task(spawn_refill_task);
 
     refiller.replace_table_cache_refill_policies(HashMap::from([(
         table_id,
@@ -428,8 +427,8 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
             role,
             test_refill_config(default_policy),
             sstable_store.clone(),
-            spawn_refill_task,
-        );
+        )
+        .with_foyer_spawn_task(spawn_refill_task);
         refiller.replace_table_cache_refill_policies(policies);
         for table_id in streaming_tables {
             refiller.update_streaming_table_vnodes(*table_id, Some(owned_vnodes.clone()));
@@ -850,12 +849,7 @@ async fn test_l0_refill_after_truncation_uses_serving_ownership() {
     let infos = version.build_sst_delta_infos(&raw);
     let mut config = test_refill_config(CacheRefillPolicy::Serving);
     config.data_refill_levels.insert(0);
-    let mut refiller = CacheRefiller::new(
-        Role::Serving,
-        config,
-        fixture.sstable_store.clone(),
-        default_spawn_refill_task(),
-    );
+    let mut refiller = CacheRefiller::new(Role::Serving, config, fixture.sstable_store.clone());
     refiller.replace_serving_table_vnode_mapping(HashMap::from([(
         fixture.table_id,
         Bitmap::ones(VirtualNode::COUNT_FOR_TEST),

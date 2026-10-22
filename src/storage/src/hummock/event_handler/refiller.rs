@@ -32,7 +32,7 @@ use crate::opts::StorageOpts;
 
 // Foyer tasks consume immutable snapshots; mutable policy and ownership stay here.
 mod foyer;
-pub(crate) use foyer::default_spawn_refill_task;
+use foyer::default_spawn_refill_task;
 
 #[derive(Debug)]
 pub struct CacheRefillConfig {
@@ -95,7 +95,7 @@ impl CacheRefillConfig {
     }
 }
 
-pub(crate) type SpawnRefillTask =
+type SpawnRefillTask =
     Arc<dyn Fn(Vec<SstDeltaInfo>, CacheRefillContext) -> JoinHandle<()> + Send + Sync + 'static>;
 
 pub type TableCacheRefillContextMap = HashMap<TableId, TableCacheRefillContext>;
@@ -146,7 +146,6 @@ impl CacheRefiller {
         role: Role,
         config: CacheRefillConfig,
         sstable_store: SstableStoreRef,
-        spawn_refill_task: SpawnRefillTask,
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
@@ -157,7 +156,7 @@ impl CacheRefiller {
             Some(Arc::new(Semaphore::new(config.meta_refill_concurrency)))
         };
         Self {
-            spawn_refill_task,
+            spawn_refill_task: default_spawn_refill_task(),
             config,
             meta_refill_concurrency,
             concurrency,
@@ -168,6 +167,12 @@ impl CacheRefiller {
             streaming_table_vnode_mapping: HashMap::new(),
             serving_table_vnode_mapping: HashMap::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_foyer_spawn_task(mut self, spawn: SpawnRefillTask) -> Self {
+        self.spawn_refill_task = spawn;
+        self
     }
 
     pub(crate) fn start_cache_refill(&mut self, mut deltas: Vec<SstDeltaInfo>) -> JoinHandle<()> {

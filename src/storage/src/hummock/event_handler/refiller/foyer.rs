@@ -37,7 +37,7 @@ use crate::hummock::{
 };
 use crate::monitor::{GLOBAL_CACHE_REFILL_METRICS, StoreLocalStatistic};
 
-pub(crate) fn default_spawn_refill_task() -> SpawnRefillTask {
+pub(super) fn default_spawn_refill_task() -> SpawnRefillTask {
     Arc::new(|deltas, context| {
         let task = CacheRefillTask { deltas, context };
         tokio::spawn(task.run())
