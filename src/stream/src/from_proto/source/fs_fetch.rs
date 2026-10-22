@@ -21,6 +21,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
+use risingwave_pb::stream_plan::stream_node::StreamKind;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
@@ -37,6 +38,22 @@ use crate::task::ExecutorParams;
 pub struct FsFetchExecutorBuilder;
 
 impl_stream_node_body!(StreamFsFetch(StreamFsFetchNode) => FsFetchExecutorBuilder);
+
+fn iceberg_update_mode(
+    properties: &ConnectorProperties,
+    stream_kind: StreamKind,
+    is_full_reload_refresh: bool,
+) -> StreamResult<bool> {
+    // Retract is also the protobuf default for legacy plans, not an opt-in.
+    let enabled = matches!(properties, ConnectorProperties::Iceberg(properties) if properties.streaming_updates);
+    if enabled && (is_full_reload_refresh || stream_kind != StreamKind::Retract) {
+        return Err(anyhow::anyhow!(
+            "Iceberg streaming_updates requires a retracting, non-refresh graph"
+        )
+        .into());
+    }
+    Ok(enabled)
+}
 
 impl ExecutorBuilder for FsFetchExecutorBuilder {
     type Node = StreamFsFetchNode;
@@ -74,18 +91,8 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             .collect();
 
         let vnodes = Some(Arc::new(params.vnode_bitmap));
-        let is_iceberg_update = matches!(&properties, ConnectorProperties::Iceberg(_))
-            && !is_full_reload_refresh
-            && params.info.stream_kind
-                == risingwave_pb::stream_plan::stream_node::StreamKind::Retract;
-        if let ConnectorProperties::Iceberg(properties) = &properties
-            && properties.streaming_updates != is_iceberg_update
-        {
-            return Err(anyhow::anyhow!(
-                "Iceberg streaming_updates requires a retracting, non-refresh graph"
-            )
-            .into());
-        }
+        let is_iceberg_update =
+            iceberg_update_mode(&properties, params.info.stream_kind, is_full_reload_refresh)?;
         if is_iceberg_update {
             crate::executor::source::validate_update_state_table(source.get_state_table()?, false)?;
         }

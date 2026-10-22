@@ -27,7 +27,8 @@ use risingwave_pb::plan_common::{
     AdditionalColumnType as LegacyAdditionalColumnType, ColumnDescVersion, FormatType,
     PbColumnCatalog, PbEncodeType,
 };
-use risingwave_pb::stream_plan::SourceNode;
+use risingwave_pb::stream_plan::stream_node::StreamKind;
+use risingwave_pb::stream_plan::{SourceNode, StreamSource};
 
 use super::*;
 use crate::executor::TroublemakerExecutor;
@@ -133,6 +134,20 @@ pub fn create_source_desc_builder(
 
 impl_stream_node_body!(Source(SourceNode) => SourceExecutorBuilder);
 
+fn iceberg_update_mode(source: &StreamSource, stream_kind: StreamKind) -> StreamResult<bool> {
+    // Only the explicit property selects update mode; legacy plans may default to Retract.
+    let enabled = source.with_properties.is_iceberg_update_source();
+    if source.iceberg_fetch_state_table.is_some() != enabled {
+        bail!("Iceberg update List requires an opted-in source with a dedicated Fetch state table");
+    }
+    if enabled
+        && (is_full_reload_refresh(&source.refresh_mode) || stream_kind != StreamKind::Retract)
+    {
+        bail!("Iceberg streaming_updates requires a retracting, non-refresh graph");
+    }
+    Ok(enabled)
+}
+
 impl ExecutorBuilder for SourceExecutorBuilder {
     type Node = SourceNode;
 
@@ -185,16 +200,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .map(|column| column.column_id)
                     .collect();
 
-                let is_iceberg_update = source.with_properties.is_iceberg_connector()
-                    && !is_full_reload_refresh
-                    && params.info.stream_kind
-                        == risingwave_pb::stream_plan::stream_node::StreamKind::Retract;
-                if source.iceberg_fetch_state_table.is_some() && !is_iceberg_update {
-                    bail!("Iceberg update List requires a retracting Iceberg graph");
-                }
-                if source.with_properties.is_iceberg_update_source() != is_iceberg_update {
-                    bail!("Iceberg streaming_updates requires a retracting, non-refresh graph");
-                }
+                let is_iceberg_update = iceberg_update_mode(source, params.info.stream_kind)?;
                 if is_iceberg_update {
                     crate::executor::source::validate_update_state_table(
                         source.get_state_table()?,
