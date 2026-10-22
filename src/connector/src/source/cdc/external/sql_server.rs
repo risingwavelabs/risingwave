@@ -402,7 +402,8 @@ impl SqlServerExternalTableReader {
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         format!(
             "\"{}\".\"{}\"",
-            table_name.schema_name, table_name.table_name
+            table_name.schema_name.replace('"', "\"\""),
+            table_name.table_name.replace('"', "\"\"")
         )
     }
 

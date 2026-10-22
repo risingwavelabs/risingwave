@@ -3,7 +3,7 @@ SET NOCOUNT ON;
 EXEC sys.sp_cdc_enable_db;
 
 CREATE TABLE quoted_col_tbl (
-  id INT PRIMARY KEY,
+  [p"k] INT PRIMARY KEY,
   [a"b] INT,
   note VARCHAR(50)
 );
@@ -15,4 +15,5 @@ EXEC sys.sp_cdc_enable_table
 
 INSERT INTO quoted_col_tbl VALUES
   (1, 10, 'backfill_1'),
-  (2, 20, 'backfill_2');
+  (2, 20, 'backfill_2'),
+  (3, 30, 'backfill_3');

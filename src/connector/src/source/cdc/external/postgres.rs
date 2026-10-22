@@ -330,7 +330,8 @@ impl PostgresExternalTableReader {
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         format!(
             "\"{}\".\"{}\"",
-            table_name.schema_name, table_name.table_name
+            table_name.schema_name.replace('"', "\"\""),
+            table_name.table_name.replace('"', "\"\"")
         )
     }
 
@@ -493,8 +494,8 @@ impl PostgresExternalTableReader {
     ) -> ConnectorResult<Option<(ScalarImpl, ScalarImpl)>> {
         let sql = format!(
             "SELECT MIN({}), MAX({}) FROM {}",
-            split_column.name,
-            split_column.name,
+            Self::quote_column(&split_column.name),
+            Self::quote_column(&split_column.name),
             Self::get_normalized_table_name(&self.schema_table_name),
         );
         let client = self.client.lock().await;

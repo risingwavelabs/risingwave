@@ -19,28 +19,33 @@ create source mssql_quoted_col_source with (
     database.name = 'quoted_col_db',
 );
 
+# Quoted primary-key and data columns, forced over multiple snapshot pages.
 statement ok
 create table rw_quoted_col_tbl (
-    id int primary key,
+    "p""k" int primary key,
     "a""b" int,
     note varchar
+) with (
+    snapshot.batch_size = '1'
 ) from mssql_quoted_col_source table 'quoted_col_db.dbo.quoted_col_tbl';
 
 query IIT retry 10 backoff 1s
-select id, "a""b", note from rw_quoted_col_tbl order by id;
+select "p""k", "a""b", note from rw_quoted_col_tbl order by "p""k";
 ----
 1 10 backfill_1
 2 20 backfill_2
+3 30 backfill_3
 
 system ok
-sqlcmd -C -d quoted_col_db -Q "INSERT INTO quoted_col_tbl VALUES (3, 30, 'stream_1');" -b
+sqlcmd -C -d quoted_col_db -Q "INSERT INTO quoted_col_tbl VALUES (4, 40, 'stream_1');" -b
 
 query IIT retry 10 backoff 1s
-select id, "a""b", note from rw_quoted_col_tbl order by id;
+select "p""k", "a""b", note from rw_quoted_col_tbl order by "p""k";
 ----
 1 10 backfill_1
 2 20 backfill_2
-3 30 stream_1
+3 30 backfill_3
+4 40 stream_1
 
 statement ok
 drop source mssql_quoted_col_source cascade;

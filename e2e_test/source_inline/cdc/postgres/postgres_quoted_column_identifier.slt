@@ -10,18 +10,25 @@ psql -c "
     FROM pg_replication_slots
     WHERE slot_name = 'quoted_col_slot';
     DROP TABLE IF EXISTS quoted_col_tbl;
+    DROP TABLE IF EXISTS quoted_split_tbl;
 "
 
 system ok
 psql -c "
     CREATE TABLE quoted_col_tbl (
-        id int PRIMARY KEY,
+        \"p\"\"k\" int PRIMARY KEY,
         \"a\"\"b\" int,
         note varchar
     );
-    INSERT INTO quoted_col_tbl (id, \"a\"\"b\", note) VALUES
+    INSERT INTO quoted_col_tbl (\"p\"\"k\", \"a\"\"b\", note) VALUES
         (1, 10, 'backfill_1'),
-        (2, 20, 'backfill_2');
+        (2, 20, 'backfill_2'),
+        (3, 30, 'backfill_3');
+    CREATE TABLE quoted_split_tbl (
+        \"p\"\"k\" int PRIMARY KEY,
+        v int
+    );
+    INSERT INTO quoted_split_tbl (\"p\"\"k\", v) SELECT g, g * 10 FROM generate_series(1, 20) g;
 "
 
 statement ok
@@ -36,33 +43,44 @@ create source s with (
   slot.name = 'quoted_col_slot'
 );
 
+# Quoted primary-key and data columns, forced over multiple snapshot pages.
 statement ok
 create table quoted_col_tbl (
-    id int primary key,
+    "p""k" int primary key,
     "a""b" int,
     note varchar
+) with (
+    snapshot.batch_size = '1'
 ) from s table 'public.quoted_col_tbl';
 
-query IIT retry 6 backoff 1s
-select id, "a""b", note from quoted_col_tbl order by id;
+query IIT retry 10 backoff 1s
+select "p""k", "a""b", note from quoted_col_tbl order by "p""k";
 ----
 1 10 backfill_1
 2 20 backfill_2
+3 30 backfill_3
 
-system ok
-psql -c "
-    INSERT INTO quoted_col_tbl (id, \"a\"\"b\", note) VALUES (3, 30, 'stream_1');
-"
+# Parallelized (V2) backfill with uneven splits uses the quoted primary key as the split column.
+statement ok
+create table quoted_split_tbl (
+    "p""k" int primary key,
+    v int
+) with (
+    backfill.parallelism = '2',
+    backfill.as_even_splits = 'false',
+    backfill.num_rows_per_split = '5'
+) from s table 'public.quoted_split_tbl';
 
-query IIT retry 6 backoff 1s
-select id, "a""b", note from quoted_col_tbl order by id;
+query II retry 10 backoff 1s
+select count(*), sum(v) from quoted_split_tbl;
 ----
-1 10 backfill_1
-2 20 backfill_2
-3 30 stream_1
+20 2100
 
 statement ok
 drop table quoted_col_tbl;
+
+statement ok
+drop table quoted_split_tbl;
 
 statement ok
 drop source s;
@@ -77,4 +95,5 @@ psql -c "
     FROM pg_replication_slots
     WHERE slot_name = 'quoted_col_slot';
     DROP TABLE IF EXISTS quoted_col_tbl;
+    DROP TABLE IF EXISTS quoted_split_tbl;
 "
