@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod checkpoint;
 mod render;
 
 use std::cmp::max;
@@ -36,6 +37,7 @@ use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::{Phase, Res
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::info;
 
+use self::checkpoint::CommitCheckpointInterval;
 use self::render::{
     CompactionTransition, IcebergV3FragmentPartition, RenderedResolver,
     build_compaction_transitions, partition_resolver,
@@ -281,6 +283,7 @@ impl IcebergV3RenderResult {
 /// job's entire lifetime and retains the inactive resolver graph for future compaction commands.
 pub(crate) struct IcebergV3JobCheckpointControl {
     control: IndependentJobControl,
+    commit_checkpoint_interval: CommitCheckpointInterval,
     status: IcebergV3JobStatus,
     fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     node_actors: HashMap<WorkerId, HashSet<ActorId>>,
@@ -377,8 +380,12 @@ impl IcebergV3JobCheckpointControl {
         let max_pending_barrier_num = super::snapshot_backfill_max_pending_barrier_num(
             &partial_graph_manager.control_stream_manager().env.opts,
         );
+        let commit_checkpoint_interval = CommitCheckpointInterval::from_fragment_nodes(
+            fragment_infos.values().map(|fragment| &fragment.nodes),
+        )?;
 
         let iceberg_job = Self {
+            commit_checkpoint_interval,
             control: IndependentJobControl::new(IndependentJobInfo::from_fragment_infos(
                 database_id,
                 job_id,
@@ -572,6 +579,9 @@ impl IcebergV3JobCheckpointControl {
             )?
         };
 
+        let commit_checkpoint_interval = CommitCheckpointInterval::from_fragment_nodes(
+            fragment_infos.values().map(|fragment| &fragment.nodes),
+        )?;
         partial_graph_recoverer.recover_graph(
             partial_graph_id,
             term_id,
@@ -587,6 +597,7 @@ impl IcebergV3JobCheckpointControl {
         );
         Ok(Self {
             control,
+            commit_checkpoint_interval,
             status: IcebergV3JobStatus::Running(status),
             fragment_infos,
             node_actors,
@@ -742,6 +753,14 @@ impl IcebergV3JobCheckpointControl {
                 for barrier_to_inject in barriers_to_inject {
                     let barrier_mutation = mutation.take();
                     let barrier_notifier = notifier.take();
+                    // Snapshot completion must remain a checkpoint so creation can finish.
+                    let force_checkpoint = barrier_mutation.is_some()
+                        || barrier_to_inject.prev_epoch() == self.control.info.snapshot_epoch
+                        || barrier_to_inject.curr_epoch.value().0
+                            == self.control.info.snapshot_epoch;
+                    let barrier_to_inject = self
+                        .commit_checkpoint_interval
+                        .transform(barrier_to_inject, force_checkpoint);
                     partial_graph_manager.inject_barrier(
                         self.control.info.partial_graph_id,
                         barrier_mutation,
@@ -936,8 +955,18 @@ impl IcebergV3JobCheckpointControl {
         &mut self,
         upstream_barrier: &BarrierInfo,
     ) -> MetaResult<(Vec<BarrierInfo>, BarrierInfo, BarrierInfo)> {
-        self.status
-            .next_compaction_barriers(self.control.info.job_id, upstream_barrier)
+        let (before, begin, end) = self
+            .status
+            .next_compaction_barriers(self.control.info.job_id, upstream_barrier)?;
+        let before = before
+            .into_iter()
+            .map(|barrier| self.commit_checkpoint_interval.transform(barrier, false))
+            .collect();
+        // Begin flushes foreground writes and End durably applies the overwrite, regardless of
+        // the normal commit interval.
+        let begin = self.commit_checkpoint_interval.transform(begin, true);
+        let end = self.commit_checkpoint_interval.transform(end, true);
+        Ok((before, begin, end))
     }
 
     #[expect(clippy::type_complexity)]
