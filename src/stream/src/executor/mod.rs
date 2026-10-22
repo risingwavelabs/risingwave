@@ -1230,6 +1230,7 @@ impl Mutation {
                 source_id: SourceId::from(inject.source_id),
                 split_offsets: inject.split_offsets.clone(),
             },
+            PbMutation::Load(_) => unimplemented!("load mutations are handled in the next layer"),
         };
         Ok(mutation)
     }
