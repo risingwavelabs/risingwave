@@ -337,7 +337,8 @@ impl CompactionTrack {
     /// Determines if compaction should be triggered.
     ///
     /// Trigger conditions:
-    /// - An active automatic round is controlled only by its next-attempt time.
+    /// - An active automatic round is controlled by its next-attempt time, with
+    ///   the pending commit threshold as an early trigger for PK-index batches.
     /// - Otherwise, pending commit threshold or an interval with pending commits
     ///   can trigger a task.
     ///
@@ -370,14 +371,15 @@ impl CompactionTrack {
         };
 
         let time_ready = now >= next_compaction_time;
+        let commit_ready = self.demand.commit_count >= self.config.trigger_snapshot_count;
         if self.round.is_some() {
             // Active work remains schedulable without new commits. PK-index batches
-            // consume new demand when they advance their boundary; legacy rounds
-            // retain a fixed boundary. Neither can bypass failure backoff.
-            return time_ready;
+            // consume new demand when they advance their boundary, so the commit
+            // threshold can trigger them early. Legacy rounds retain a fixed
+            // boundary. Neither can bypass failure backoff.
+            return time_ready || (self.config.pk_index_coordinated && commit_ready);
         }
 
-        let commit_ready = self.demand.commit_count >= self.config.trigger_snapshot_count;
         let has_commits = self.demand.commit_count > 0;
         if self.config.pk_index_coordinated {
             // An empty manual Full can finish before the first snapshot is observed.

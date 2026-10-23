@@ -2115,28 +2115,31 @@ fn test_pk_index_commit_events_ignore_duplicates_and_maintenance() {
 
 #[test]
 fn test_pk_index_retry_gate_cannot_be_bypassed_by_commits_or_force() {
-    let now = Instant::now();
-    let mut track = pk_index_track(now, false);
-    track.config.trigger_snapshot_count = 1;
-    track.finish_failed(now, "boom".to_owned());
-    record_commits(&mut track, 10);
-    track.record_force_compaction(now, None);
-    assert!(!track.should_trigger(now));
-    let first_retry = track.retry.not_before.unwrap();
-    assert!(
-        (Duration::from_secs(1)..=Duration::from_millis(1250))
-            .contains(&first_retry.duration_since(now))
-    );
-    assert!(track.should_trigger(first_retry));
-    start_in_flight(&mut track, 10, first_retry);
-    track.finish_failed(first_retry, "boom".to_owned());
-    assert!(!track.should_trigger(first_retry + Duration::from_secs(1)));
-    let second_retry = track.retry.not_before.unwrap();
-    assert!(
-        (Duration::from_secs(2)..=Duration::from_millis(2500))
-            .contains(&second_retry.duration_since(first_retry))
-    );
-    assert!(track.should_trigger(second_retry));
+    for bounded in [false, true] {
+        let now = Instant::now();
+        let mut track = pk_index_track(now, bounded);
+        track.config.trigger_snapshot_count = 1;
+        track.finish_failed(now, "boom".to_owned());
+        record_commits(&mut track, 10);
+        assert!(!track.should_trigger(now));
+        track.record_force_compaction(now, None);
+        assert!(!track.should_trigger(now));
+        let first_retry = track.retry.not_before.unwrap();
+        assert!(
+            (Duration::from_secs(1)..=Duration::from_millis(1250))
+                .contains(&first_retry.duration_since(now))
+        );
+        assert!(track.should_trigger(first_retry));
+        start_in_flight(&mut track, 10, first_retry);
+        track.finish_failed(first_retry, "boom".to_owned());
+        assert!(!track.should_trigger(first_retry + Duration::from_secs(1)));
+        let second_retry = track.retry.not_before.unwrap();
+        assert!(
+            (Duration::from_secs(2)..=Duration::from_millis(2500))
+                .contains(&second_retry.duration_since(first_retry))
+        );
+        assert!(track.should_trigger(second_retry));
+    }
 }
 
 #[tokio::test]
@@ -2790,13 +2793,15 @@ fn test_pk_index_successful_batches_wait_for_interval_under_continuous_commits()
         TaskType::SmallFiles,
         TaskType::FilesWithDelete,
     ] {
-        for interval_sec in [1, 60, 120] {
+        for (interval_sec, trigger_snapshot_count) in [(1, 3), (60, 3), (120, 3), (120, usize::MAX)]
+        {
             for applying in [false, true] {
-                let mut now = Instant::now();
-                let mut track = new_round_track(now, interval_sec, 1, 1);
+                let now = Instant::now();
+                let mut track = new_round_track(now, interval_sec, trigger_snapshot_count, 1);
                 track.config.pk_index_coordinated = true;
                 track.config.policy.task_type = task_type;
                 track.record_observed_snapshot(committed_snapshot(10, 1000));
+                let mut now = now + Duration::from_secs(interval_sec);
 
                 for batch in 0..3 {
                     assert!(track.should_trigger(now));
@@ -2829,6 +2834,55 @@ fn test_pk_index_successful_batches_wait_for_interval_under_continuous_commits()
                     assert!(track.should_trigger(deadline));
                     now = deadline;
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_pk_index_successful_batches_trigger_at_commit_threshold_before_interval() {
+    for task_type in [
+        TaskType::Auto,
+        TaskType::SmallFiles,
+        TaskType::FilesWithDelete,
+    ] {
+        for applying in [false, true] {
+            let mut now = Instant::now();
+            let mut track = new_round_track(now, 1800, 10, 10);
+            track.config.pk_index_coordinated = true;
+            track.config.policy.task_type = task_type;
+            track.record_observed_snapshot(committed_snapshot(10, 1000));
+
+            for batch in 0..3 {
+                assert!(track.should_trigger(now));
+                let boundary = track.latest_observed_snapshot.as_ref().unwrap().snapshot_id;
+                let task_id = IcebergCompactionTaskId::new(9 + batch);
+                start_in_flight(&mut track, task_id, now);
+                assert_eq!(track.round_boundary(), Some(boundary));
+                assert_eq!(track.demand.commit_count, 0);
+                now += Duration::from_secs(60);
+                commit_update(boundary + 1, 2000).apply_to_track(&mut track, now);
+                if applying {
+                    let CompactionTrackState::InFlight { attempt, .. } = &track.state else {
+                        unreachable!()
+                    };
+                    track.state = CompactionTrackState::Applying {
+                        task_id,
+                        attempt: attempt.clone(),
+                    };
+                }
+                track.finish_success(now);
+                let deadline = now + Duration::from_secs(1800);
+                assert!(!track.should_trigger(now));
+
+                for commit in 2..=10 {
+                    now += Duration::from_secs(60);
+                    commit_update(boundary + commit, 2000 + commit).apply_to_track(&mut track, now);
+                    assert_eq!(track.demand.commit_count, commit as usize);
+                    assert!(now < deadline);
+                    assert_eq!(track.should_trigger(now), commit == 10);
+                }
+                assert_eq!(track.round_boundary(), Some(boundary));
             }
         }
     }
