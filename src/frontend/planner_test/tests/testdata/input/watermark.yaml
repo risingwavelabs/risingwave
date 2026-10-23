@@ -171,3 +171,15 @@
     select * from (select *, row_number() over (partition by v1 order by ts desc) as rn from t) where rn <= 1;
   expected_outputs:
   - stream_plan
+- name: append-only dedup with watermark on the first dedup column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select distinct on (ts, v1) * from t;
+  expected_outputs:
+  - stream_dist_plan
+- name: append-only dedup with watermark on a non-first dedup column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select distinct on (v1, ts) * from t;
+  expected_outputs:
+  - stream_dist_plan
