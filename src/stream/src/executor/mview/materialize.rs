@@ -47,7 +47,7 @@ use crate::consistency::consistency_panic;
 use crate::executor::error::ErrorKind;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
-use crate::executor::mview::cache::MaterializeCache;
+use crate::executor::mview::cache::{MaterializeCache, toast};
 use crate::executor::prelude::*;
 use crate::executor::{BarrierInner, BarrierMutationType};
 use crate::task::LocalBarrierManager;
@@ -442,16 +442,19 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 // When the table carries TOAST-able columns (PostgreSQL CDC), the
                                 // `MaterializeCache` is the only place where the Debezium
                                 // unchanged-TOAST placeholder is detected and swapped for the row's
-                                // previous value. Demoting to `NoCheck` here would skip the cache
-                                // entirely and let the placeholder land in state. Keep the original
-                                // `Overwrite` behavior in that case so the replacement path runs.
+                                // previous value. Demoting to `NoCheck` would let the placeholder land
+                                // in state, so only demote chunks without any placeholder (e.g. the
+                                // snapshot rows of a CDC backfill).
                                 let optimized_conflict_behavior = if let ConflictBehavior::Overwrite =
                                     self.conflict_behavior
                                     && !self.state_table.is_consistent_op()
                                     && !self.cleaned_by_ttl_watermark
                                     && self.version_column_indices.is_empty()
-                                    && self.toastable_column_indices.is_none()
-                                {
+                                    && self.toastable_column_indices.as_ref().is_none_or(
+                                        |indices| {
+                                            !toast::chunk_has_unavailable_value(&chunk, indices)
+                                        },
+                                    ) {
                                     ConflictBehavior::NoCheck
                                 } else {
                                     self.conflict_behavior
