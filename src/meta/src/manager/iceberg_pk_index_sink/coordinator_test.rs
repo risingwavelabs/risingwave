@@ -14,14 +14,15 @@
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use iceberg::delete_vector::DeleteVector;
 use iceberg::io::FileIO;
 use iceberg::spec::{
-    DataFileBuilder, DataFileFormat, FormatVersion, Literal, NestedField, PrimitiveType, Schema,
-    SortOrder, Struct, TableMetadataBuilder, Transform, Type, UnboundPartitionField,
-    UnboundPartitionSpec,
+    DataFileBuilder, DataFileFormat, FormatVersion, Literal, NestedField, Operation, PrimitiveType,
+    Schema, Snapshot, SortOrder, Struct, Summary, TableMetadataBuilder, Transform, Type,
+    UnboundPartitionField, UnboundPartitionSpec,
 };
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
@@ -244,13 +245,19 @@ async fn write_test_position_delete_with_partition(
 #[derive(Debug)]
 struct ReloadingTestCatalog {
     table: Mutex<Table>,
+    loads: AtomicUsize,
 }
 
 impl ReloadingTestCatalog {
     fn new(table: Table) -> Self {
         Self {
             table: Mutex::new(table),
+            loads: AtomicUsize::new(0),
         }
+    }
+
+    fn load_count(&self) -> usize {
+        self.loads.load(Ordering::SeqCst)
     }
 
     fn set_table(&self, table: Table) {
@@ -261,6 +268,7 @@ impl ReloadingTestCatalog {
 #[async_trait]
 impl Catalog for ReloadingTestCatalog {
     async fn load_table(&self, _table: &TableIdent) -> iceberg::Result<Table> {
+        self.loads.fetch_add(1, Ordering::SeqCst);
         Ok(self.table.lock().unwrap().clone())
     }
 
@@ -961,4 +969,107 @@ fn aggregate_reports_ignores_empty_ordinary_metadata() {
 
     assert_eq!(merged.schema_id, 3);
     assert_eq!(merged.partition_spec_id, 4);
+}
+
+#[tokio::test]
+async fn delete_filter_manager_only_runs_when_data_files_leave() -> Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let table = coalesce_test_table(&temp_dir, FormatVersion::V3)?;
+    let config = coalesce_test_config();
+    let data_file = output_data_file(&table, "input")?;
+    let dv = write_test_position_delete(&table, &config, "dv", data_file.file_path(), [1]).await?;
+
+    assert!(!removes_data_files(&[]));
+    assert!(!removes_data_files(std::slice::from_ref(&dv)));
+    assert!(removes_data_files(&[dv, data_file]));
+    Ok(())
+}
+
+fn table_with_committed_snapshot(table: &Table, snapshot_id: i64) -> Result<Table> {
+    let snapshot = Snapshot::builder()
+        .with_snapshot_id(snapshot_id)
+        .with_sequence_number(1)
+        .with_timestamp_ms(table.metadata().last_updated_ms() + 1)
+        .with_manifest_list(format!(
+            "{}/metadata/snap-{snapshot_id}.avro",
+            table.metadata().location()
+        ))
+        .with_summary(Summary {
+            operation: Operation::Append,
+            additional_properties: HashMap::new(),
+        })
+        .with_schema_id(0)
+        .build();
+    let metadata = TableMetadataBuilder::new_from_metadata(table.metadata().clone(), None)
+        .add_snapshot(snapshot)?
+        .build()?
+        .metadata;
+    Ok(Table::builder()
+        .identifier(table.identifier().clone())
+        .file_io(table.file_io().clone())
+        .runtime(Runtime::try_current()?)
+        .metadata(metadata)
+        .build()?)
+}
+
+fn empty_epoch_commit(snapshot_id: i64, staged_on_current_table: bool) -> EpochCommit {
+    EpochCommit {
+        epoch: 1,
+        merged: Arc::new(IcebergPkIndexSinkAggResult {
+            schema_id: 0,
+            partition_spec_id: 0,
+            format_version: Some(FormatVersion::V2),
+            data_files: vec![],
+            delete_files: vec![],
+            overwrite_files: vec![],
+        }),
+        snapshot_id,
+        has_new_data: false,
+        materialized_add_files: None,
+        staged_on_current_table,
+    }
+}
+
+#[tokio::test]
+async fn commit_one_epoch_reuses_pre_commit_table_on_first_attempt() -> Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let snapshot_id = 7;
+    let table = table_with_committed_snapshot(
+        &coalesce_test_table(&temp_dir, FormatVersion::V2)?,
+        snapshot_id,
+    )?;
+    let catalog = Arc::new(ReloadingTestCatalog::new(table.clone()));
+
+    // The snapshot is already committed, so both paths stop at the idempotency check.
+    let reused = commit_one_epoch(
+        catalog.clone(),
+        table.identifier().clone(),
+        Some(table.clone()),
+        "main".to_owned(),
+        SinkId::new(42),
+        &empty_epoch_commit(snapshot_id, true),
+        0,
+    )
+    .await
+    .map_err(|err| match err {
+        CommitError::Commit(err) | CommitError::ReloadTable(err) => err,
+    })?;
+    assert!(reused.metadata().snapshot_by_id(snapshot_id).is_some());
+    assert_eq!(catalog.load_count(), 0);
+
+    commit_one_epoch(
+        catalog.clone(),
+        table.identifier().clone(),
+        None,
+        "main".to_owned(),
+        SinkId::new(42),
+        &empty_epoch_commit(snapshot_id, false),
+        0,
+    )
+    .await
+    .map_err(|err| match err {
+        CommitError::Commit(err) | CommitError::ReloadTable(err) => err,
+    })?;
+    assert_eq!(catalog.load_count(), 1);
+    Ok(())
 }
