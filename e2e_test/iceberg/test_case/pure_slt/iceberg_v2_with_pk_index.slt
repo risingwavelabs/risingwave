@@ -34,6 +34,15 @@ insert into t_v2 values(1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
 statement ok
 flush;
 
+# Wait for the initial Iceberg commit so later changes produce position deletes.
+query I retry 6 backoff 1s
+select sum(record_count) from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v2'
+  and content = 'Data';
+----
+3
+
 statement ok
 update t_v2 set v1 = 150 where id = 1;
 
@@ -63,7 +72,7 @@ where schema_name = 'public'
 ----
 t
 
-query ??? rowsort retry 3 backoff 1s
+query ??? rowsort retry 6 backoff 1s
 select * from t_v2;
 ----
 1 alice 150
@@ -76,6 +85,13 @@ delete from t_v2 where id = 1;
 statement ok
 FLUSH;
 
+# FLUSH does not wait for the three-checkpoint Iceberg commit interval.
+# Wait for the delete to be visible before checking the absence of equality deletes.
+query ??? rowsort retry 6 backoff 1s
+select * from t_v2;
+----
+3 charlie 300
+
 query ?? retry 6 backoff 1s
 select count(*) = 0 from rw_iceberg_files
 where schema_name = 'public'
@@ -83,11 +99,6 @@ where schema_name = 'public'
   and content = 'EqualityDeletes';
 ----
 t
-
-query ??? rowsort retry 3 backoff 1s
-select * from t_v2;
-----
-3 charlie 300
 
 statement ok
 DROP TABLE t_v2;
@@ -125,7 +136,7 @@ insert into t_v2_storage values(1, 'alice'), (2, 'bob');
 statement ok
 flush;
 
-query ??? rowsort retry 3 backoff 1s
+query ??? rowsort retry 6 backoff 1s
 select * from t_v2_storage;
 ----
 1 alice
