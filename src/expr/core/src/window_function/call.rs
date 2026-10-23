@@ -211,6 +211,22 @@ impl FrameBounds {
             Self::Session(_) => true,
         }
     }
+
+    /// Whether the window of a row may be closed by the watermark of the order key in ascending
+    /// order, rather than only by later rows. A frame ending before the current row is closed once
+    /// the row arrives, and a frame without an end is never closed.
+    pub fn may_close_by_watermark(&self) -> bool {
+        match self {
+            Self::Rows(_) => false,
+            Self::Range(RangeFrameBounds { end, .. }) => match end {
+                Preceding(offset) => offset.is_zero(),
+                CurrentRow | Following(_) => true,
+                UnboundedFollowing => false,
+                UnboundedPreceding => unreachable!("frame end never be UNBOUNDED PRECEDING"),
+            },
+            Self::Session(_) => true,
+        }
+    }
 }
 
 /// Whether a watermark on the first `ORDER BY` column can be forwarded through a general (i.e.
@@ -387,6 +403,21 @@ mod tests {
             }),
             exclusion: FrameExclusion::default(),
         }
+    }
+
+    #[test]
+    fn test_may_close_by_watermark() {
+        let asc = OrderType::ascending();
+        let may_close = |frame: Frame| frame.bounds.may_close_by_watermark();
+
+        assert!(!may_close(rows_frame(Preceding(1), Preceding(1))));
+        assert!(!may_close(rows_frame(CurrentRow, Following(1))));
+        assert!(may_close(range_frame(UnboundedPreceding, CurrentRow, asc)));
+        assert!(may_close(range_frame(CurrentRow, Following(10), asc)));
+        assert!(may_close(range_frame(Preceding(10), Preceding(0), asc)));
+        assert!(!may_close(range_frame(Preceding(10), Preceding(5), asc)));
+        assert!(!may_close(range_frame(CurrentRow, UnboundedFollowing, asc)));
+        assert!(may_close(session_frame(asc)));
     }
 
     #[test]

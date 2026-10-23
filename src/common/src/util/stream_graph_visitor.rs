@@ -258,6 +258,10 @@ pub fn visit_stream_node_tables_inner<F>(
                     node.intermediate_state_table,
                     "EowcOverWindowIntermediateState"
                 );
+                optional!(
+                    node.watermark_trigger_table,
+                    "EowcOverWindowWatermarkTrigger"
+                );
             }
 
             NodeBody::OverWindow(node) => {

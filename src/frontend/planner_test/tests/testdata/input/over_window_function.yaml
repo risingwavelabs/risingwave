@@ -755,6 +755,7 @@
   expected_outputs:
     - logical_plan
     - eowc_stream_plan
+    - eowc_stream_dist_plan
     - batch_plan
 - sql: |
     create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);

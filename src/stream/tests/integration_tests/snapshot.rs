@@ -128,7 +128,7 @@ struct Snapshot {
     output: Vec<SnapshotEvent>,
 }
 
-async fn executor_snapshot<F, Fut>(
+pub async fn executor_snapshot<F, Fut>(
     create_executor: F,
     inputs: &str,
     options: SnapshotOptions,

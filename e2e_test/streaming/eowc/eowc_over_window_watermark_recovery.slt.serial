@@ -1,0 +1,68 @@
+# Rows output by the watermark are not output again after recovery, even if they are retained for
+# later windows, here for `lag`.
+
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table t (
+    tm timestamp,
+    foo int,
+    bar int,
+    watermark for tm as tm - interval '5 minutes'
+) append only;
+
+statement ok
+create materialized view mv as
+select
+    tm, foo, bar,
+    count(*) over (partition by bar order by tm session with gap '10 minutes') as cnt,
+    lag(foo) over (partition by bar order by tm) as prev_foo
+from t
+emit on window close;
+
+# The session of bar 1 is closed by the watermark 10:15.
+statement ok
+insert into t values
+  ('2023-05-06 10:00:00', 1, 1)
+, ('2023-05-06 10:01:00', 2, 1)
+, ('2023-05-06 10:20:00', 0, 2);
+
+query TIIII
+select * from mv order by tm;
+----
+2023-05-06 10:00:00 1 1 2 NULL
+2023-05-06 10:01:00 2 1 2 1
+
+statement ok
+recover;
+
+statement ok
+wait;
+
+# `recover` resets session variables.
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+# 10:01 of bar 1 is retained for `lag` of 10:30, but must not be output again.
+statement ok
+insert into t values
+  ('2023-05-06 10:30:00', 3, 1)
+, ('2023-05-06 10:50:00', 0, 2);
+
+query TIIII
+select * from mv order by tm;
+----
+2023-05-06 10:00:00 1 1 2 NULL
+2023-05-06 10:01:00 2 1 2 1
+2023-05-06 10:20:00 0 2 1 NULL
+2023-05-06 10:30:00 3 1 1 2
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

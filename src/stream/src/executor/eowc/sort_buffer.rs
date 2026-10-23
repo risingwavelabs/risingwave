@@ -12,28 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
 use std::marker::PhantomData;
-use std::ops::Bound;
 
-use anyhow::Context;
-use bytes::Bytes;
-use futures::StreamExt;
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{
     DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_storage::StateStore;
-use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::KeyedRow;
-use risingwave_storage::table::merge_sort::merge_sort;
 
-use crate::common::state_cache::{StateCache, StateCacheFiller, TopNStateCache};
+use super::BufferTableCache;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
@@ -58,9 +49,6 @@ fn row_to_cache_key<S: StateStore>(
     (timestamp_val.into(), pk.into())
 }
 
-// TODO(rc): need to make this configurable?
-const CACHE_CAPACITY: usize = 2048;
-
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
 /// stream by watermark. This component maintains a buffer table passed in, whose schema is same as
 /// [`SortBuffer`]'s input and output. Generally, the component acts as a buffer that output the
@@ -70,7 +58,7 @@ pub struct SortBuffer<S: StateStore> {
     sort_column_index: usize,
 
     /// Cache of buffer table.
-    cache: TopNStateCache<CacheKey, OwnedRow>,
+    cache: BufferTableCache<CacheKey, OwnedRow>,
 
     _phantom: PhantomData<S>,
 }
@@ -86,7 +74,7 @@ impl<S: StateStore> SortBuffer<S> {
 
         Self {
             sort_column_index,
-            cache: TopNStateCache::new(CACHE_CAPACITY),
+            cache: BufferTableCache::new(),
             _phantom: PhantomData,
         }
     }
@@ -171,16 +159,11 @@ impl<S: StateStore> SortBuffer<S> {
 
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     async fn consume_from_cache<'a>(&'a mut self, watermark: ScalarRefImpl<'a>) {
-        while self.cache.is_synced() {
-            let Some(key) = self.cache.first_key_value().map(|(k, _)| k.clone()) else {
-                break;
-            };
-            if key.0.as_scalar_ref_impl().default_cmp(&watermark).is_lt() {
-                let row = self.cache.delete(&key).unwrap();
-                yield row;
-            } else {
-                break;
-            }
+        while let Some((_, row)) = self
+            .cache
+            .pop_first_if(|key, _| key.0.as_scalar_ref_impl().default_cmp(&watermark).is_lt())
+        {
+            yield row;
         }
     }
 
@@ -190,68 +173,13 @@ impl<S: StateStore> SortBuffer<S> {
         last_table_pk: Option<OwnedRow>,
         buffer_table: &StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        let mut filler = self.cache.begin_syncing();
-
-        let pk_range = (
-            last_table_pk
-                .map(Bound::Excluded)
-                .unwrap_or(Bound::Unbounded),
-            Bound::<row::Empty>::Unbounded,
-        );
-
-        let streams: Vec<_> =
-            futures::future::try_join_all(buffer_table.vnodes().iter_vnodes().map(|vnode| {
-                buffer_table.iter_keyed_row_with_vnode(
-                    vnode,
-                    &pk_range,
-                    PrefetchOptions::new(filler.capacity().is_none(), false),
-                )
-            }))
-            .await?
-            .into_iter()
-            .map(Box::pin)
-            .collect();
-
-        #[for_await]
-        for kv in merge_sort(streams).take(filler.capacity().unwrap_or(usize::MAX)) {
-            let row = key_value_to_full_row(kv?, buffer_table)?;
-            let key = row_to_cache_key(self.sort_column_index, &row, buffer_table);
-            filler.insert_unchecked(key, row);
-        }
-
-        filler.finish();
+        let sort_column_index = self.sort_column_index;
+        self.cache
+            .refill(buffer_table, last_table_pk, |row| {
+                let key = row_to_cache_key(sort_column_index, &row, buffer_table);
+                Ok((key, row))
+            })
+            .await?;
         Ok(())
     }
-}
-
-/// Merge the key part and value part of a row into a full row. This is needed for state table with
-/// non-None value indices.
-fn key_value_to_full_row<S: StateStore>(
-    keyed_row: KeyedRow<Bytes>,
-    table: &StateTable<S>,
-) -> StreamExecutorResult<OwnedRow> {
-    let Some(val_indices) = table.value_indices() else {
-        return Ok(keyed_row.into_owned_row());
-    };
-    let pk_indices = table.pk_indices();
-    let indices: BTreeSet<_> = val_indices
-        .iter()
-        .chain(pk_indices.iter())
-        .copied()
-        .collect();
-    let len = indices.iter().max().unwrap() + 1;
-    assert!(indices.iter().copied().eq(0..len));
-
-    let mut row = vec![None; len];
-    let key = table
-        .pk_serde()
-        .deserialize(keyed_row.key())
-        .context("failed to deserialize pk")?;
-    for (i, v) in key.into_iter().enumerate() {
-        row[pk_indices[i]] = v;
-    }
-    for (i, v) in keyed_row.into_owned_row().into_iter().enumerate() {
-        row[val_indices[i]] = v;
-    }
-    Ok(OwnedRow::new(row))
 }
