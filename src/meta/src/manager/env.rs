@@ -28,7 +28,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
-use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
+use risingwave_sqlparser::ast::SqlOptionRedactionRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
@@ -96,6 +96,8 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
+    /// Whether to clean up all foreground creating streaming jobs during recovery.
+    pub clean_all_foreground_jobs_on_recovery: bool,
     /// Whether to disable the auto-scaling feature.
     pub disable_automatic_parallelism_control: bool,
     /// The number of streaming jobs per scaling operation.
@@ -126,10 +128,14 @@ pub struct MetaOpts {
     pub vacuum_spin_interval_ms: u64,
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     pub iceberg_gc_interval_sec: u64,
+    /// Interval of scanning Iceberg table locations for orphan files.
+    pub iceberg_orphan_file_cleanup_interval_sec: u64,
     /// Maximum time to wait for an iceberg compaction task report before the lease expires.
     pub iceberg_compaction_report_timeout_sec: u64,
     /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it.
     pub iceberg_compaction_config_refresh_interval_sec: u64,
+    /// Whether to schedule one compaction for every Iceberg sink when meta starts.
+    pub iceberg_compaction_schedule_on_startup: bool,
     pub time_travel_vacuum_interval_sec: u64,
     pub time_travel_vacuum_max_version_count: Option<u32>,
     /// Interval of hummock version checkpoint.
@@ -173,8 +179,6 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
-    /// Whether to protect the drop table operation with incoming sink.
-    pub protect_drop_table_with_incoming_sink: bool,
     /// The Prometheus endpoint for Meta Dashboard Service.
     /// The Dashboard service uses this in the following ways:
     /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
@@ -261,17 +265,8 @@ pub struct MetaOpts {
     /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
     pub refresh_scheduler_interval_sec: u64,
 
-    /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
-    pub table_stat_high_write_throughput_ratio_for_split: f64,
-
-    /// To merge the compaction group when the low throughput statistics of the group exceeds the threshold.
-    pub table_stat_low_write_throughput_ratio_for_merge: f64,
-
-    /// The window seconds of table throughput statistic history for split compaction group.
-    pub table_stat_throuput_window_seconds_for_split: usize,
-
-    /// The window seconds of table throughput statistic history for merge compaction group.
-    pub table_stat_throuput_window_seconds_for_merge: usize,
+    /// Retention of successful commit throughput observations for automatic group scheduling.
+    pub table_write_throughput_retention_seconds: usize,
 
     /// The configuration of the object store
     pub object_store_config: ObjectStoreConfig,
@@ -289,7 +284,11 @@ pub struct MetaOpts {
 
     pub compaction_group_merge_dimension_threshold: f64,
 
-    // The private key for the secret store, used when the secret is stored in the meta.
+    /// The private key for the secret store, used when the secret is stored in the meta.
+    ///
+    /// Never serialize this: `MetaOpts` is dumped as JSON into the `META_NODE_START` event log
+    /// on every meta startup
+    #[serde(skip)]
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
     pub temp_secret_file_dir: String,
@@ -300,13 +299,14 @@ pub struct MetaOpts {
 
     pub table_change_log_insert_batch_size: u64,
     pub table_change_log_delete_batch_size: u64,
+    pub table_change_log_truncate_interval_sec: u64,
 
     pub license_key_path: Option<PathBuf>,
 
     pub compute_client_config: RpcClientConfig,
     pub stream_client_config: RpcClientConfig,
     pub frontend_client_config: RpcClientConfig,
-    pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+    pub sql_option_redaction: SqlOptionRedactionRef,
 
     pub cdc_table_split_init_sleep_interval_splits: u64,
     pub cdc_table_split_init_sleep_duration_millis: u64,
@@ -322,6 +322,7 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
+            clean_all_foreground_jobs_on_recovery: false,
             disable_automatic_parallelism_control: false,
             parallelism_control_batch_size: 1,
             parallelism_control_trigger_period_sec: 10,
@@ -337,8 +338,10 @@ impl MetaOpts {
             time_travel_vacuum_max_version_count: None,
             vacuum_spin_interval_ms: 0,
             iceberg_gc_interval_sec: 3600,
+            iceberg_orphan_file_cleanup_interval_sec: 7 * 24 * 60 * 60,
             iceberg_compaction_report_timeout_sec: 30 * 60,
             iceberg_compaction_config_refresh_interval_sec: 60,
+            iceberg_compaction_schedule_on_startup: false,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             checkpoint_compression_algorithm:
@@ -364,7 +367,6 @@ impl MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 300,
             node_num_monitor_interval_sec: 10,
-            protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,
             prometheus_selector: None,
             vpc_id: None,
@@ -406,17 +408,14 @@ impl MetaOpts {
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
             split_group_size_ratio: 0.9,
-            table_stat_high_write_throughput_ratio_for_split: 0.5,
-            table_stat_low_write_throughput_ratio_for_merge: 0.7,
-            table_stat_throuput_window_seconds_for_split: 60,
-            table_stat_throuput_window_seconds_for_merge: 240,
+            table_write_throughput_retention_seconds: 300,
             periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
             compaction_group_merge_dimension_threshold: 1.2,
             license_key_path: None,
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),
             frontend_client_config: RpcClientConfig::default(),
-            redact_sql_option_keywords: Arc::new(Default::default()),
+            sql_option_redaction: Arc::new(Default::default()),
             cdc_table_split_init_sleep_interval_splits: 1000,
             cdc_table_split_init_sleep_duration_millis: 10,
             cdc_table_split_init_insert_batch_size: 1000,
@@ -426,6 +425,7 @@ impl MetaOpts {
             serverless_backfill_controller_addr: String::new(),
             table_change_log_insert_batch_size: 1000,
             table_change_log_delete_batch_size: 1000,
+            table_change_log_truncate_interval_sec: 600,
         }
     }
 }
@@ -615,5 +615,22 @@ impl MetaSrvEnv {
         )
         .await
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_secret_store_private_key_is_not_serialized() {
+        let opts = MetaOpts::test(false);
+        assert!(opts.secret_store_private_key.is_some());
+
+        let json = serde_json::to_string(&opts).unwrap();
+        assert!(
+            !json.contains("secret_store_private_key"),
+            "secret_store_private_key must not be serialized into MetaOpts JSON"
+        );
     }
 }

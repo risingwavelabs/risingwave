@@ -47,6 +47,8 @@ mod filter;
 pub use filter::*;
 mod gap_fill;
 pub use gap_fill::*;
+mod match_recognize;
+pub use match_recognize::*;
 mod expand;
 pub use expand::*;
 mod source;
@@ -102,6 +104,10 @@ pub use postgres_query::*;
 mod mysql_query;
 
 pub use mysql_query::*;
+
+mod mssql_query;
+
+pub use mssql_query::*;
 
 mod locality_provider;
 pub use locality_provider::*;

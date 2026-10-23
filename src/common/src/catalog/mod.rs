@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod cdc_type_compatibility;
 mod column;
 mod external_table;
 mod internal_table;
@@ -143,6 +144,11 @@ pub const CDC_TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
 pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
+
+/// Iceberg snapshot summary property containing the highest RisingWave epoch committed by the
+/// sink. Append-only Iceberg engine batch reads use it to exclude committed rows from the sink
+/// log store.
+pub const RISINGWAVE_ICEBERG_COMMIT_EPOCH: &str = "risingwave.commit.epoch";
 
 /// The local system catalog reader in the frontend node.
 pub trait SysCatalogReader: Sync + Send + 'static {
@@ -337,7 +343,8 @@ macro_rules! for_all_fragment_type_flags {
                 StreamCdcScan,
                 VectorIndexWrite,
                 UpstreamSinkUnion,
-                LocalityProvider
+                LocalityProvider,
+                IcebergWithPkIndexWriter
             },
             {},
             0
@@ -422,6 +429,7 @@ impl FragmentTypeFlag {
             FragmentTypeFlag::SourceScan,
             FragmentTypeFlag::StreamScan,
             FragmentTypeFlag::StreamCdcScan,
+            FragmentTypeFlag::LocalityProvider,
         ]
         .into_iter()
     }
@@ -442,6 +450,7 @@ impl FragmentTypeFlag {
         Self::backfill_rate_limit_fragments()
             .chain(Self::source_rate_limit_fragments())
             .chain(Self::sink_rate_limit_fragments())
+            .chain(Self::dml_rate_limit_fragments())
     }
 
     pub fn dml_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
@@ -601,6 +610,11 @@ mod tests {
                     LocalityProvider,
                     131072,
                     "LOCALITY_PROVIDER",
+                ),
+                (
+                    IcebergWithPkIndexWriter,
+                    262144,
+                    "ICEBERG_WITH_PK_INDEX_WRITER",
                 ),
             ]
         "#]]

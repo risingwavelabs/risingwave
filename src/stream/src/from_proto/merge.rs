@@ -35,37 +35,88 @@ impl MergeExecutorBuilder {
         node: &MergeNode,
         chunk_size: usize,
     ) -> StreamResult<Option<MergeExecutorInput>> {
-        let Some(upstream_actors) = actor_context
-            .initial_upstream_actors
-            .get(&node.upstream_fragment_id)
-        else {
-            return Ok(None);
-        };
-        let upstream_fragment_id = node.get_upstream_fragment_id();
+        Self::new_input_inner(
+            local_barrier_manager,
+            executor_stats,
+            actor_context,
+            info,
+            node,
+            chunk_size,
+            false,
+        )
+        .await
+    }
 
-        let inputs: Vec<_> = try_join_all(upstream_actors.actors.iter().map(|upstream_actor| {
-            new_input(
-                &local_barrier_manager,
-                executor_stats.clone(),
-                actor_context.id,
-                actor_context.fragment_id,
-                upstream_actor,
-                upstream_fragment_id,
-                actor_context.config.clone(),
-            )
-        }))
+    /// Creates a merge input that may start empty and can be updated in place later.
+    pub(crate) async fn new_input_allow_empty_upstream(
+        local_barrier_manager: LocalBarrierManager,
+        executor_stats: Arc<StreamingMetrics>,
+        actor_context: ActorContextRef,
+        info: ExecutorInfo,
+        node: &MergeNode,
+        chunk_size: usize,
+    ) -> StreamResult<MergeExecutorInput> {
+        Ok(Self::new_input_inner(
+            local_barrier_manager,
+            executor_stats,
+            actor_context,
+            info,
+            node,
+            chunk_size,
+            true,
+        )
+        .await?
+        .expect("allowing an empty upstream always creates a merge input"))
+    }
+
+    async fn new_input_inner(
+        local_barrier_manager: LocalBarrierManager,
+        executor_stats: Arc<StreamingMetrics>,
+        actor_context: ActorContextRef,
+        info: ExecutorInfo,
+        node: &MergeNode,
+        chunk_size: usize,
+        allow_empty_upstream: bool,
+    ) -> StreamResult<Option<MergeExecutorInput>> {
+        let upstream_fragment_id = node.get_upstream_fragment_id();
+        let upstream_actors = actor_context
+            .initial_upstream_actors
+            .get(&upstream_fragment_id);
+        if upstream_actors.is_none() && !allow_empty_upstream {
+            return Ok(None);
+        }
+
+        let inputs: Vec<_> = try_join_all(
+            upstream_actors
+                .into_iter()
+                .flat_map(|upstream_actors| upstream_actors.actors.iter())
+                .map(|upstream_actor| {
+                    new_input(
+                        &local_barrier_manager,
+                        executor_stats.clone(),
+                        actor_context.id,
+                        actor_context.fragment_id,
+                        upstream_actor,
+                        upstream_fragment_id,
+                        actor_context.config.clone(),
+                    )
+                }),
+        )
         .await?;
 
         // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
-        // scale to multiple upstreams.
-        let always_single_input = match node.get_upstream_dispatcher_type()? {
-            DispatcherType::Unspecified => unreachable!(),
-            DispatcherType::Hash | DispatcherType::Broadcast => false,
-            // There could be arbitrary number of upstreams with simple dispatcher.
-            DispatcherType::Simple => false,
-            // There should be always only one upstream with no-shuffle dispatcher.
-            DispatcherType::NoShuffle => true,
-        };
+        // scale to multiple upstreams. A merge that allows an empty upstream must not use the
+        // singleton optimization because it may transition to or from an empty input set.
+        let always_single_input = !allow_empty_upstream
+            && !inputs.is_empty()
+            && match node.get_upstream_dispatcher_type()? {
+                DispatcherType::Unspecified => unreachable!(),
+                DispatcherType::Hash | DispatcherType::Broadcast => false,
+                // There could be arbitrary number of upstreams with simple dispatcher.
+                DispatcherType::Simple => false,
+                // There should be always only one upstream with no-shuffle dispatcher.
+                DispatcherType::NoShuffle => true,
+            };
 
         let upstreams = if always_single_input {
             MergeExecutorUpstream::Singleton(Itertools::exactly_one(inputs.into_iter()).unwrap())
@@ -102,7 +153,6 @@ impl ExecutorBuilder for MergeExecutorBuilder {
     ) -> StreamResult<Executor> {
         let actor_id = params.actor_context.id;
         let fragment_id = params.actor_context.fragment_id;
-        let barrier_rx = params.local_barrier_manager.subscribe_barrier(actor_id);
         Ok(Self::new_input(
             params.local_barrier_manager,
             params.executor_stats,
@@ -119,6 +169,6 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 fragment_id
             )
         })?
-        .into_executor(barrier_rx))
+        .into_executor())
     }
 }

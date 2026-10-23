@@ -63,29 +63,35 @@ impl NonOverlapSubLevelPicker {
             });
         }
 
-        // Directly find the best non-overlapping level without allocating intermediate Vec
-        let level_idx = l0
+        if let [level] = l0 {
+            return (level.level_type == LevelType::Nonoverlapping)
+                .then_some(level.table_infos.as_slice());
+        }
+
+        let mut candidates = l0
             .iter()
             .enumerate()
             .filter(|(_, level)| level.level_type == LevelType::Nonoverlapping)
-            .max_by(|(idx1, levels1), (idx2, levels2)| {
-                let non_pending1 = levels1
+            .peekable();
+        let first = candidates.next()?;
+        // No pending lookups are needed when there is only one candidate.
+        if candidates.peek().is_none() {
+            return Some(&first.1.table_infos);
+        }
+        let level_idx = std::iter::once(first)
+            .chain(candidates)
+            .map(|(idx, level)| {
+                let non_pending = level
                     .table_infos
                     .iter()
                     .filter(|sst| !level_handler.is_pending_compact(&sst.sst_id))
                     .count();
-                let non_pending2 = levels2
-                    .table_infos
-                    .iter()
-                    .filter(|sst| !level_handler.is_pending_compact(&sst.sst_id))
-                    .count();
-
-                non_pending1
-                    .cmp(&non_pending2)
-                    .then_with(|| levels1.table_infos.len().cmp(&levels2.table_infos.len()))
-                    .then(idx2.cmp(idx1))
+                (idx, non_pending, level.table_infos.len())
             })
-            .map(|(idx, _)| idx)?;
+            .max_by_key(|&(idx, non_pending, file_count)| {
+                (non_pending, file_count, std::cmp::Reverse(idx))
+            })
+            .map(|(idx, _, _)| idx)?;
 
         Some(&l0[level_idx].table_infos)
     }
@@ -487,6 +493,114 @@ pub mod tests {
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::picker::non_overlap_sub_level_picker::NonOverlapSubLevelPicker;
     use crate::hummock::compaction::selector::tests::generate_table;
+
+    #[test]
+    fn test_select_intervals_tie_breaks() {
+        let l0 = vec![
+            Level {
+                level_type: LevelType::Nonoverlapping,
+                table_infos: vec![
+                    generate_table(0, 1, 0, 9, 1),
+                    generate_table(1, 1, 10, 19, 1),
+                ],
+                ..Default::default()
+            },
+            Level {
+                level_type: LevelType::Nonoverlapping,
+                table_infos: vec![
+                    generate_table(2, 1, 0, 9, 1),
+                    generate_table(3, 1, 10, 19, 1),
+                ],
+                ..Default::default()
+            },
+        ];
+        let picker = NonOverlapSubLevelPicker::new(
+            0,
+            10000,
+            1,
+            10000,
+            Arc::new(RangeOverlapStrategy::default()),
+            true,
+            10,
+            true,
+        );
+        let mut handler = LevelHandler::new(0);
+        // Equal scores retain the oldest sub-level.
+        assert_eq!(picker.select_intervals(&l0, &handler).unwrap()[0].sst_id, 0);
+        handler.test_add_pending_sst(0.into(), 1);
+        assert_eq!(picker.select_intervals(&l0, &handler).unwrap()[0].sst_id, 2);
+        handler.test_add_pending_sst(2.into(), 1);
+        assert_eq!(picker.select_intervals(&l0, &handler).unwrap()[0].sst_id, 0);
+        // With equal non-pending counts, prefer the larger total file count.
+        let mut l0 = l0;
+        l0[1].table_infos.push(generate_table(4, 1, 20, 29, 1));
+        handler.test_add_pending_sst(4.into(), 1);
+        assert_eq!(picker.select_intervals(&l0, &handler).unwrap()[0].sst_id, 2);
+    }
+
+    // Run explicitly with cargo test --release -p risingwave_meta bench_select_intervals -- --ignored --nocapture --test-threads=1.
+    #[test]
+    #[ignore = "microbenchmark"]
+    fn bench_select_intervals() {
+        use std::hint::black_box;
+        use std::time::Duration;
+
+        let mut criterion = criterion::Criterion::default()
+            .sample_size(30)
+            .warm_up_time(Duration::from_secs(1))
+            .measurement_time(Duration::from_secs(3));
+        let picker = NonOverlapSubLevelPicker::new(
+            0,
+            10000,
+            1,
+            10000,
+            Arc::new(RangeOverlapStrategy::default()),
+            false,
+            64,
+            true,
+        );
+        for (name, counts) in [
+            ("single", vec![1024]),
+            ("small", vec![8; 4]),
+            ("balanced", vec![256; 64]),
+            (
+                "skewed",
+                std::iter::once(10000)
+                    .chain(std::iter::repeat_n(1, 63))
+                    .collect(),
+            ),
+        ] {
+            let mut next_id = 0;
+            let mut handler = LevelHandler::new(0);
+            let levels: Vec<_> = counts
+                .into_iter()
+                .map(|count| {
+                    let table_infos = (0..count)
+                        .map(|idx| {
+                            let sst = generate_table(next_id, 1, idx * 10, idx * 10 + 9, 1);
+                            // Include pending lookups that cannot use the empty-map fast path.
+                            if next_id.is_multiple_of(4) {
+                                handler.test_add_pending_sst(next_id.into(), 1);
+                            }
+                            next_id += 1;
+                            sst
+                        })
+                        .collect();
+                    Level {
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos,
+                        ..Default::default()
+                    }
+                })
+                .collect();
+            criterion.bench_function(&format!("select_intervals/{name}"), |b| {
+                b.iter(|| {
+                    black_box(picker.select_intervals(black_box(&levels), black_box(&handler)))
+                })
+            });
+        }
+        criterion.final_summary();
+    }
 
     #[test]
     fn test_pick_l0_multi_level() {

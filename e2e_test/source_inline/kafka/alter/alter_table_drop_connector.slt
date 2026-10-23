@@ -122,6 +122,76 @@ select foo, bar from avro_drop_table_connector_test_table
 ----
 ABC	1
 
+# ===== test with watermark =====
+
+system ok
+rpk topic create test_alter_table_drop_connector_wm -p 1
+
+statement ok
+CREATE TABLE wm_t (k INT, ts INT, WATERMARK FOR ts AS ts - 10) APPEND ONLY
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_alter_table_drop_connector_wm')
+FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE MATERIALIZED VIEW wm_mv AS SELECT ts, count(*) AS cnt FROM wm_t GROUP BY ts EMIT ON WINDOW CLOSE;
+
+system ok
+cat <<EOF | rpk topic produce 'test_alter_table_drop_connector_wm'
+{"k": 1, "ts": 1}
+{"k": 2, "ts": 30}
+EOF
+
+# The watermark reaches 20 and closes the window of ts 1.
+query II retry 30 backoff 1s
+SELECT ts, cnt FROM wm_mv;
+----
+1 1
+
+statement ok
+ALTER TABLE wm_t DROP CONNECTOR;
+
+# The watermark filter keeps its state, so the row below the watermark 20 is filtered out.
+statement ok
+INSERT INTO wm_t VALUES (3, 5), (4, 45);
+
+statement ok
+FLUSH;
+
+query II
+SELECT k, ts FROM wm_t ORDER BY k;
+----
+1 1
+2 30
+4 45
+
+# The watermark 35 closes the window of ts 30.
+query II retry 30 backoff 1s
+SELECT ts, cnt FROM wm_mv ORDER BY ts;
+----
+1 1
+30 1
+
+query TT
+SHOW CREATE TABLE wm_t;
+----
+public.wm_t CREATE TABLE wm_t (k INT, ts INT, WATERMARK FOR ts AS ts - 10) APPEND ONLY
+
+query IT
+SELECT count(*), bool_and(name LIKE '%watermarkfilter%') FROM rw_internal_table_info WHERE job_name = 'wm_t';
+----
+1 t
+
+statement ok
+DROP MATERIALIZED VIEW wm_mv;
+
+statement ok
+DROP TABLE wm_t;
+
+system ok
+rpk topic delete 'test_alter_table_drop_connector_wm'
+
 # ===== clean up =====
 
 statement ok

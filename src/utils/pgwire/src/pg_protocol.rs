@@ -33,7 +33,7 @@ use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
-use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
+use risingwave_sqlparser::ast::{SqlOptionRedactionRef, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -108,7 +108,7 @@ where
     // Client Address
     peer_addr: AddressRef,
 
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    sql_option_redaction: Option<SqlOptionRedactionRef>,
     message_memory_manager: MessageMemoryManagerRef,
 }
 
@@ -172,8 +172,10 @@ where
 }
 
 /// States flow happened from top to down.
+#[derive(PartialEq, Eq)]
 enum PgProtocolState {
     Startup,
+    Authentication,
     Regular,
 }
 
@@ -203,12 +205,12 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 
 fn get_redacted_and_truncated_sql(
     sql: &str,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    sql_option_redaction: Option<SqlOptionRedactionRef>,
 ) -> String {
-    let redacted_sql = if let Some(keywords) = redact_sql_option_keywords
-        && !keywords.is_empty()
+    let redacted_sql = if let Some(redaction) = sql_option_redaction
+        && !redaction.keywords.is_empty()
     {
-        redact_sql(sql, keywords)
+        redact_sql(sql, redaction)
     } else {
         sql.to_owned()
     };
@@ -219,11 +221,10 @@ fn get_redacted_and_truncated_sql(
 /// Record `sql` in the current tracing span.
 fn record_sql_in_span(
     sql: &str,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    sql_option_redaction: Option<SqlOptionRedactionRef>,
     span: &mut tracing::Span,
 ) {
-    let redacted_and_truncated_sql =
-        get_redacted_and_truncated_sql(sql, redact_sql_option_keywords);
+    let redacted_and_truncated_sql = get_redacted_and_truncated_sql(sql, sql_option_redaction);
     span.record("sql", tracing::field::display(&redacted_and_truncated_sql));
 }
 
@@ -232,11 +233,11 @@ fn record_user_in_span(user: &str, span: &mut tracing::Span) {
 }
 
 /// Redacts sensitive SQL fields. Data in DML is not redacted.
-fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
+fn redact_sql(sql: &str, redaction: SqlOptionRedactionRef) -> String {
     match Parser::parse_sql(sql) {
         Ok(sqls) => sqls
             .into_iter()
-            .map(|sql| sql.to_redacted_string(keywords.clone()))
+            .map(|sql| sql.to_redacted_string(redaction.clone()))
             .join(";"),
         Err(_) => sql.to_owned(),
     }
@@ -245,8 +246,9 @@ fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
 #[derive(Clone)]
 pub struct ConnectionContext {
     pub tls_config: Option<TlsConfig>,
-    pub redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    pub sql_option_redaction: Option<SqlOptionRedactionRef>,
     pub message_memory_manager: MessageMemoryManagerRef,
+    pub stream_flush_threshold_bytes: usize,
 }
 
 impl<S, SM> PgProtocol<S, SM>
@@ -262,11 +264,12 @@ where
     ) -> Self {
         let ConnectionContext {
             tls_config,
-            redact_sql_option_keywords,
+            sql_option_redaction,
             message_memory_manager,
+            stream_flush_threshold_bytes,
         } = context;
         Self {
-            stream: PgStream::new(stream),
+            stream: PgStream::new(stream, stream_flush_threshold_bytes),
             is_terminate: false,
             state: PgProtocolState::Startup,
             session_mgr,
@@ -283,7 +286,7 @@ where
             statement_portal_dependency: Default::default(),
             ignore_util_sync: false,
             peer_addr,
-            redact_sql_option_keywords,
+            sql_option_redaction,
             message_memory_manager,
         }
     }
@@ -373,14 +376,14 @@ where
                 if let Ok(portal_name) = cstr_to_str(&execute_msg.portal_name)
                     && let Ok(sql) = self.get_portal_sql(portal_name)
                 {
-                    record_sql_in_span(&sql, self.redact_sql_option_keywords.clone(), &mut span);
+                    record_sql_in_span(&sql, self.sql_option_redaction.clone(), &mut span);
                 }
             }
             _ => {
                 if let Ok(sql) = msg.get_sql()
                     && let Some(sql) = sql
                 {
-                    record_sql_in_span(sql, self.redact_sql_option_keywords.clone(), &mut span);
+                    record_sql_in_span(sql, self.sql_option_redaction.clone(), &mut span);
                 }
             }
         }
@@ -511,7 +514,9 @@ where
                         return None;
                     }
 
-                    PsqlError::StartupError(_) | PsqlError::PasswordError => {
+                    PsqlError::StartupError(_)
+                    | PsqlError::PasswordError
+                    | PsqlError::ProtocolError(_) => {
                         self.stream
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
@@ -572,6 +577,13 @@ where
     }
 
     async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<()> {
+        if self.state == PgProtocolState::Authentication && !matches!(&msg, FeMessage::Password(_))
+        {
+            return Err(PsqlError::protocol_error(
+                "expected PasswordMessage during authentication",
+            ));
+        }
+
         // Ignore util sync message.
         if self.ignore_util_sync {
             if let FeMessage::Sync = msg {
@@ -661,7 +673,7 @@ where
                 .read_startup()
                 .await
                 .map(|message: FeMessage| (message, None)),
-            PgProtocolState::Regular => {
+            PgProtocolState::Authentication | PgProtocolState::Regular => {
                 self.stream.read_header().await?;
                 let guard = if let Some(ref header) = self.stream.read_header {
                     let payload_len = std::cmp::max(header.payload_len, 0) as u64;
@@ -754,7 +766,7 @@ where
                 .map_err(|e| PsqlError::StartupError(e.into()))?;
         }
 
-        match session.user_authenticator() {
+        self.state = match session.user_authenticator() {
             UserAuthenticator::None => {
                 self.stream.write_no_flush(BeMessage::AuthenticationOk)?;
 
@@ -775,21 +787,23 @@ where
                         application_name: application_name.cloned(),
                     })?;
                 self.ready_for_query()?;
+                PgProtocolState::Regular
             }
             UserAuthenticator::ClearText(_)
             | UserAuthenticator::OAuth { .. }
             | UserAuthenticator::Ldap(..) => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationCleartextPassword)?;
+                PgProtocolState::Authentication
             }
             UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationMd5Password(salt))?;
+                PgProtocolState::Authentication
             }
-        }
+        };
 
         self.session = Some(session);
-        self.state = PgProtocolState::Regular;
         Ok(())
     }
 
@@ -821,8 +835,7 @@ where
     }
 
     async fn process_query_msg(&mut self, sql: Arc<str>) -> PsqlResult<()> {
-        let truncated_sql =
-            get_redacted_and_truncated_sql(&sql, self.redact_sql_option_keywords.clone());
+        let truncated_sql = get_redacted_and_truncated_sql(&sql, self.sql_option_redaction.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
@@ -893,7 +906,9 @@ where
             while let Some(row_set) = res.values_stream().next().await {
                 let row_set = row_set.map_err(PsqlError::SimpleQueryError)?;
                 for row in row_set {
-                    self.stream.write_no_flush(BeMessage::CopyData(&row))?;
+                    self.stream
+                        .write_streaming(BeMessage::CopyData(&row))
+                        .await?;
                     count += 1;
                 }
             }
@@ -917,7 +932,9 @@ where
             while let Some(row_set) = res.values_stream().next().await {
                 let row_set = row_set.map_err(PsqlError::SimpleQueryError)?;
                 for row in row_set {
-                    self.stream.write_no_flush(BeMessage::DataRow(&row))?;
+                    self.stream
+                        .write_streaming(BeMessage::DataRow(&row))
+                        .await?;
                     rows_cnt += 1;
                 }
             }
@@ -1138,7 +1155,7 @@ where
                 let portal = self.get_portal_data(&portal_name)?.clone();
                 let sql = format!("{}", portal.portal);
                 let truncated_sql =
-                    get_redacted_and_truncated_sql(&sql, self.redact_sql_option_keywords.clone());
+                    get_redacted_and_truncated_sql(&sql, self.sql_option_redaction.clone());
                 drop(sql);
 
                 session.check_idle_in_transaction_timeout()?;
@@ -1310,17 +1327,19 @@ pub struct PgStream<S> {
     stream: Arc<Mutex<PgStreamInner<S>>>,
     /// Write into buffer before flush to stream.
     write_buf: BytesMut,
+    stream_flush_threshold_bytes: usize,
     read_header: Option<FeMessageHeader>,
 }
 
 impl<S> PgStream<S> {
-    /// Create a new `PgStream` with the given stream and default write buffer capacity.
-    pub fn new(stream: S) -> Self {
+    /// Create a new `PgStream` with the given stream and streaming flush threshold.
+    pub fn new(stream: S, stream_flush_threshold_bytes: usize) -> Self {
         const DEFAULT_WRITE_BUF_CAPACITY: usize = 10 * 1024;
 
         Self {
             stream: Arc::new(Mutex::new(PgStreamInner::Unencrypted(stream))),
             write_buf: BytesMut::with_capacity(DEFAULT_WRITE_BUF_CAPACITY),
+            stream_flush_threshold_bytes,
             read_header: None,
         }
     }
@@ -1337,6 +1356,7 @@ impl<S> Clone for PgStream<S> {
         Self {
             stream: Arc::clone(&self.stream),
             write_buf: BytesMut::with_capacity(self.write_buf.capacity()),
+            stream_flush_threshold_bytes: self.stream_flush_threshold_bytes,
             read_header: self.read_header.clone(),
         }
     }
@@ -1437,6 +1457,16 @@ where
 
     pub fn write_no_flush(&mut self, message: BeMessage<'_>) -> io::Result<()> {
         BeMessage::write(&mut self.write_buf, message)
+    }
+
+    /// Write a message that is part of a potentially large response, flushing periodically to
+    /// bound the write buffer and propagate network backpressure to the result stream.
+    pub(crate) async fn write_streaming(&mut self, message: BeMessage<'_>) -> io::Result<()> {
+        self.write_no_flush(message)?;
+        if self.write_buf.len() >= self.stream_flush_threshold_bytes {
+            self.flush().await?;
+        }
+        Ok(())
     }
 
     async fn write(&mut self, message: BeMessage<'_>) -> io::Result<()> {
@@ -1659,13 +1689,44 @@ fn parse_options(options: &str) -> PsqlResult<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use risingwave_sqlparser::ast::SqlOptionRedaction;
+    use tokio::io::AsyncReadExt;
 
     use super::*;
+    use crate::types::Row;
+
+    #[tokio::test]
+    async fn test_streaming_write_flushes_at_threshold() {
+        const STREAM_FLUSH_THRESHOLD: usize = 64 * 1024;
+
+        let (server, mut client) = tokio::io::duplex(STREAM_FLUSH_THRESHOLD * 2);
+        let mut stream = PgStream::new(server, STREAM_FLUSH_THRESHOLD);
+
+        let small_row = Row::new(vec![Some(Bytes::from_static(b"small"))]);
+        stream
+            .write_streaming(BeMessage::DataRow(&small_row))
+            .await
+            .unwrap();
+        assert!(!stream.write_buf.is_empty());
+
+        let large_row = Row::new(vec![Some(Bytes::from(vec![0; STREAM_FLUSH_THRESHOLD]))]);
+        stream
+            .write_streaming(BeMessage::DataRow(&large_row))
+            .await
+            .unwrap();
+        assert!(stream.write_buf.is_empty());
+
+        let mut message_tag = [0];
+        client.read_exact(&mut message_tag).await.unwrap();
+        assert_eq!(message_tag[0], b'D');
+    }
 
     #[test]
     fn test_redact_parsable_sql() {
-        let keywords = Arc::new(HashSet::from(["v2".into(), "v4".into(), "b".into()]));
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            ["v2".into(), "v4".into(), "b".into()],
+            [],
+        ));
         let sql = r"
         create source temp (k bigint, v varchar) with (
             connector = 'datagen',
@@ -1676,28 +1737,57 @@ mod tests {
         ) FORMAT plain ENCODE json (a='1',b='2')
         ";
         assert_eq!(
-            redact_sql(sql, keywords),
+            redact_sql(sql, redaction),
             "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
         );
     }
 
     #[test]
+    fn test_redact_sql_option_allowlist() {
+        let config = risingwave_common::config::BatchConfig::default();
+        let sql = "CREATE SINK s FROM t WITH (primary_key = 'id', api_key = 'secret')";
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            config.redact_sql_option_keywords.clone(),
+            config.redact_sql_option_allowlist,
+        ));
+        assert_eq!(
+            get_redacted_and_truncated_sql(sql, Some(redaction)),
+            "CREATE SINK s FROM t WITH (primary_key = 'id', api_key = [REDACTED])",
+        );
+
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            config.redact_sql_option_keywords,
+            [],
+        ));
+        assert_eq!(
+            get_redacted_and_truncated_sql(sql, Some(redaction)),
+            "CREATE SINK s FROM t WITH (primary_key = [REDACTED], api_key = [REDACTED])",
+        );
+    }
+
+    #[test]
     fn test_redact_user_password_sql() {
-        let keywords = Arc::new(HashSet::from(["password".into()]));
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            ["password".into()],
+            ["password".into()],
+        ));
 
         assert_eq!(
-            redact_sql("ALTER USER WITH PASSWORD 'rw_password_2'", keywords.clone()),
+            redact_sql(
+                "ALTER USER WITH PASSWORD 'rw_password_2'",
+                redaction.clone()
+            ),
             "ALTER USER WITH PASSWORD [REDACTED]"
         );
         assert_eq!(
             redact_sql(
                 "ALTER USER foo WITH ENCRYPTED PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
-                keywords.clone(),
+                redaction.clone(),
             ),
             "ALTER USER foo WITH ENCRYPTED PASSWORD [REDACTED]"
         );
         assert_eq!(
-            redact_sql("CREATE USER foo WITH PASSWORD 'rw_password_2'", keywords),
+            redact_sql("CREATE USER foo WITH PASSWORD 'rw_password_2'", redaction),
             "CREATE USER foo WITH PASSWORD [REDACTED]"
         );
     }

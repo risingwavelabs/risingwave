@@ -54,13 +54,13 @@ pub struct BackfillState {
 }
 
 impl BackfillState {
+    /// Whether any vnode has started backfilling, i.e. whether any upstream row may be forwarded.
+    /// After a reschedule, an actor may hold finished vnodes and vnodes that have not started, with
+    /// none in progress.
     pub(crate) fn has_progress(&self) -> bool {
-        self.inner.values().any(|p| {
-            matches!(
-                p.current_state(),
-                &BackfillProgressPerVnode::InProgress { .. }
-            )
-        })
+        self.inner
+            .values()
+            .any(|p| !matches!(p.current_state(), &BackfillProgressPerVnode::NotStarted))
     }
 
     pub(crate) fn get_current_state(
@@ -297,6 +297,9 @@ impl BackfillProgressPerVnode {
     }
 }
 
+/// Mark CDC rows that are safe to emit downstream as visible and all other rows as invisible
+///
+/// A row is safe when it's offset is `>= last_cdc_offset` and it's PK is `<= current_pos`
 pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,

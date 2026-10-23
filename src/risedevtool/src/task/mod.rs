@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod clickhouse_service;
 mod compactor_service;
 mod compute_node_service;
 mod configure_tmux_service;
@@ -32,6 +33,7 @@ mod mqtt_service;
 mod mysql_service;
 mod nats_service;
 mod opensearch_service;
+mod oracle_service;
 mod postgres_service;
 mod prometheus_service;
 mod pubsub_service;
@@ -39,6 +41,7 @@ mod pulsar_service;
 mod redis_service;
 mod schema_registry_service;
 mod sql_server_service;
+mod task_clickhouse_ready_check;
 mod task_configure_minio;
 mod task_db_ready_check;
 mod task_kafka_ready_check;
@@ -64,6 +67,7 @@ use reqwest::blocking::{Client, Response};
 use tempfile::TempDir;
 pub use utils::*;
 
+pub use self::clickhouse_service::*;
 pub use self::compactor_service::*;
 pub use self::compute_node_service::*;
 pub use self::configure_tmux_service::*;
@@ -83,6 +87,7 @@ pub use self::mqtt_service::*;
 pub use self::mysql_service::*;
 pub use self::nats_service::*;
 pub use self::opensearch_service::*;
+pub use self::oracle_service::*;
 pub use self::postgres_service::*;
 pub use self::prometheus_service::*;
 pub use self::pubsub_service::*;
@@ -90,6 +95,7 @@ pub use self::pulsar_service::*;
 pub use self::redis_service::*;
 pub use self::schema_registry_service::SchemaRegistryService;
 pub use self::sql_server_service::*;
+pub use self::task_clickhouse_ready_check::*;
 pub use self::task_configure_minio::*;
 pub use self::task_db_ready_check::*;
 pub use self::task_kafka_ready_check::*;

@@ -2764,6 +2764,7 @@ async fn test_commit_multi_epoch() {
                         change_log_delta: Default::default(),
                         vector_index_delta: Default::default(),
                         tables_to_commit,
+                        table_change_log_progress: Default::default(),
                         truncate_tables: Default::default(),
                     })
                     .await
@@ -3090,6 +3091,7 @@ async fn test_commit_with_large_size() {
                         change_log_delta: Default::default(),
                         vector_index_delta: Default::default(),
                         tables_to_commit,
+                        table_change_log_progress: Default::default(),
                         truncate_tables: Default::default(),
                     })
                     .await
@@ -3225,6 +3227,7 @@ async fn test_commit_with_truncate_tables() {
                     change_log_delta: Default::default(),
                     vector_index_delta: Default::default(),
                     tables_to_commit,
+                    table_change_log_progress: Default::default(),
                     truncate_tables,
                 })
                 .await

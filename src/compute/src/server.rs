@@ -186,6 +186,7 @@ pub async fn compute_node_serve(
     info!("Assigned worker node id {}", worker_id);
 
     // Initialize the metrics subsystem.
+    risingwave_connector::init_connector_metrics(config.server.metrics_level);
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
     let streaming_metrics = Arc::new(global_streaming_metrics(config.server.metrics_level));
@@ -565,7 +566,7 @@ fn validate_compute_node_memory_config(
         >= cn_total_memory_bytes
     {
         tracing::warn!(
-            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nWe recommend that at least 4 GiB memory should be reserved for RisingWave. Please increase the total compute node memory or decrease the storage memory in configurations.",
+            "Not enough memory remains for compute workloads and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nWe recommend reserving at least 4 GiB of memory for RisingWave. Please increase the total compute node memory or decrease the configured storage memory.",
             convert(cn_total_memory_bytes as _),
             convert(storage_memory_bytes as _)
         );

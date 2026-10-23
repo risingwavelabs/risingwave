@@ -42,6 +42,7 @@ use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
 use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
@@ -57,7 +58,7 @@ use risingwave_pb::ddl_service::{
     alter_swap_rename_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType as PbFragmentDistributionType;
-use risingwave_pb::plan_common::PbColumnCatalog;
+use risingwave_pb::plan_common::{PbColumnCatalog, PbExternalTableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
@@ -75,7 +76,6 @@ use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
-use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -95,8 +95,8 @@ use crate::stream::{
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
     ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
     StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    create_source_worker, first_variant_column, rewrite_refresh_schema_sink_fragment, state_match,
-    validate_sink,
+    cleanup_dropped_sink_runtimes, create_source_worker, first_variant_column,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -287,7 +287,6 @@ pub struct DdlController {
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
-    iceberg_compaction_manager: IcebergCompactionManagerRef,
     iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
@@ -410,7 +409,6 @@ impl DdlController {
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
-        iceberg_compaction_manager: IcebergCompactionManagerRef,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
@@ -421,7 +419,6 @@ impl DdlController {
             source_manager,
             barrier_manager,
             sink_manager,
-            iceberg_compaction_manager,
             iceberg_pk_index_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
@@ -688,6 +685,24 @@ impl DdlController {
         source: Source,
         iceberg_table_id: Option<TableId>,
     ) -> MetaResult<NotificationVersion> {
+        if let Some(cdc_table_desc) = source
+            .info
+            .as_ref()
+            .and_then(|info| info.external_table.as_ref())
+        {
+            assert!(iceberg_table_id.is_none());
+            // A CDC table source has no streaming job, so validate the declared schema against
+            // the upstream table here, the same way `CREATE TABLE ... FROM <cdc source>` does
+            // while creating its job.
+            self.validate_cdc_table_desc(cdc_table_desc).await?;
+            let (_, version) = self
+                .metadata_manager
+                .catalog_controller
+                .create_source(source, iceberg_table_id)
+                .await?;
+            return Ok(version);
+        }
+
         let handle = create_source_worker(
             &source,
             self.source_manager.metrics.clone(),
@@ -731,11 +746,11 @@ impl DdlController {
             .run_command(database_id, Command::ResetSource { source_id })
             .await?;
 
-        // RESET SOURCE doesn't modify catalog, so return the current catalog version
+        // RESET SOURCE doesn't modify catalog, so return the current catalog version.
         let version = self
             .metadata_manager
             .catalog_controller
-            .notify_frontend_trivial()
+            .current_notification_version()
             .await;
         Ok(version)
     }
@@ -1063,24 +1078,34 @@ impl DdlController {
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
-            let options_with_secret = WithOptionsSecResolved::new(
-                cdc_table_desc.connect_properties.clone(),
-                cdc_table_desc.secret_refs.clone(),
-            );
-
-            let mut props = ConnectorProperties::extract(options_with_secret, true)?;
-            props.init_from_pb_cdc_table_desc(cdc_table_desc);
-
-            // Try creating a split enumerator to validate
-            let _enumerator = props
-                .create_split_enumerator(SourceEnumeratorContext::dummy().into())
-                .await?;
-
+            self.validate_cdc_table_desc(cdc_table_desc).await?;
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    /// Validates a CDC table descriptor against its upstream table, by creating a throw-away
+    /// split enumerator: the connector validator checks that the table exists and that the
+    /// declared columns and primary key match the upstream ones.
+    pub(crate) async fn validate_cdc_table_desc(
+        &self,
+        cdc_table_desc: &PbExternalTableDesc,
+    ) -> MetaResult<()> {
+        let options_with_secret = WithOptionsSecResolved::new(
+            cdc_table_desc.connect_properties.clone(),
+            cdc_table_desc.secret_refs.clone(),
+        );
+
+        let mut props = ConnectorProperties::extract(options_with_secret, true)?;
+        props.init_from_pb_cdc_table_desc(cdc_table_desc);
+
+        let _enumerator = props
+            .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+            .await?;
+
+        Ok(())
     }
 
     pub async fn validate_table_for_sink(&self, table_id: TableId) -> MetaResult<()> {
@@ -1206,7 +1231,7 @@ impl DdlController {
             .instrument_await("acquire_creating_streaming_job_permit")
             .await
             .unwrap();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let name = streaming_job.name();
         let definition = streaming_job.definition();
@@ -1214,8 +1239,6 @@ impl DdlController {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
         };
-        // Generate streaming job metadata and issue the create command in two steps, so that the
-        // error phase is classified at the barrier command boundary.
         let create_result = match self
             .generate_streaming_job(
                 ctx,
@@ -1228,17 +1251,17 @@ impl DdlController {
             )
             .await
         {
-            Ok((stream_job_fragments, ctx)) => self
-                .stream_manager
-                .create_streaming_job(stream_job_fragments, ctx, permit)
-                .await
-                .map_err(|err| (err, true)),
-            Err(err) => Err((err, false)),
+            Ok((stream_job_fragments, ctx)) => {
+                self.stream_manager
+                    .create_streaming_job(stream_job_fragments, ctx, permit, reschedule_job_lock)
+                    .await
+            }
+            Err(err) => Err((err, false, None)),
         };
 
         match create_result {
             Ok(version) => Ok(version),
-            Err((err, is_cancelled)) => {
+            Err((err, is_cancelled, cancel_notifier)) => {
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
@@ -1254,9 +1277,16 @@ impl DdlController {
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
-                self.iceberg_compaction_manager
-                    .clear_maintenance_for_aborted_job(&abort_result);
-                if abort_result.aborted {
+                let aborted = abort_result.aborted;
+                self.stream_manager
+                    .cleanup_aborted_streaming_job(abort_result)
+                    .await?;
+                if let Some(cancel_notifier) = cancel_notifier {
+                    let _ = cancel_notifier.send(true).inspect_err(|err| {
+                        tracing::warn!("failed to notify cancellation result: {err}")
+                    });
+                }
+                if aborted {
                     tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
@@ -1353,13 +1383,13 @@ impl DdlController {
                 // commit.
                 if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
                 {
-                    let iceberg_config =
-                        crate::manager::iceberg_pk_index_sink::build_iceberg_config(sink)?;
                     self.iceberg_pk_index_sink_manager
                         .register_sink(
                             sink.id,
-                            crate::barrier::to_partial_graph_id(sink.database_id, None),
-                            iceberg_config,
+                            crate::barrier::to_partial_graph_id(
+                                sink.database_id,
+                                Some(sink.id.as_job_id()),
+                            ),
                         )
                         .await
                         .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
@@ -1453,8 +1483,9 @@ impl DdlController {
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
             removed_iceberg_sink_ids,
-            removed_iceberg_pk_index_sink_ids,
         } = release_ctx;
+        self.iceberg_pk_index_sink_manager
+            .retire_sinks(removed_iceberg_sink_ids);
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
         // This is driven by the fragment model deletion (cascade from Object::delete_many),
@@ -1497,11 +1528,6 @@ impl DdlController {
             .await;
 
         // clean up iceberg table sinks
-        let iceberg_sink_ids: Vec<SinkId> = removed_iceberg_table_sinks
-            .iter()
-            .map(|sink| sink.id)
-            .collect();
-
         for sink in removed_iceberg_table_sinks {
             let sink_param = SinkParam::try_from_sink_catalog(sink.into())
                 .expect("Iceberg sink should be valid");
@@ -1525,28 +1551,6 @@ impl DdlController {
                         );
                     });
             }
-        }
-
-        // stop sink coordinators for iceberg table sinks
-        if !iceberg_sink_ids.is_empty() {
-            self.sink_manager
-                .stop_sink_coordinator(iceberg_sink_ids)
-                .await;
-        }
-
-        // Covers user-created iceberg sinks dropped via CASCADE, which are not in
-        // `removed_iceberg_table_sinks` above.
-        for sink_id in removed_iceberg_sink_ids {
-            self.iceberg_compaction_manager
-                .clear_iceberg_maintenance_by_sink_id(sink_id);
-        }
-
-        // Unregister per-sink commit coordinators for any dropped pk-index iceberg sink,
-        // including user-created sinks with arbitrary names (not just the
-        // `__iceberg_sink_%` auto-created ones above).
-        if !removed_iceberg_pk_index_sink_ids.is_empty() {
-            self.iceberg_pk_index_sink_manager
-                .unregister_sinks(removed_iceberg_pk_index_sink_ids);
         }
 
         // remove secrets.
@@ -1574,7 +1578,20 @@ impl DdlController {
 
         let job_id = streaming_job.id();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
+        if let StreamingJob::Table(_, table, _) = &streaming_job
+            && self
+                .metadata_manager
+                .catalog_controller
+                .get_refresh_job_state(table.id)
+                .await?
+                .is_some_and(|state| state != RefreshState::Idle)
+        {
+            bail!(
+                "Cannot alter table {} because it is being refreshed",
+                table.name
+            );
+        }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         // Ensure the max parallelism unchanged before replacing table.
@@ -1873,8 +1890,15 @@ impl DdlController {
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
-                self.iceberg_compaction_manager
-                    .clear_maintenance_for_aborted_job(&abort_result);
+                cleanup_dropped_sink_runtimes(
+                    &self.sink_manager,
+                    &self.iceberg_pk_index_sink_manager,
+                    abort_result
+                        .aborted_sink_ids
+                        .iter()
+                        .map(|id| id.as_job_id()),
+                )
+                .await;
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {
@@ -2129,14 +2153,18 @@ impl DdlController {
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
         if let Some(to_remove_source_id) = drop_table_associated_source_id {
-            // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
-            debug_assert!(old_internal_table_ids.len() == 1);
+            let old_internal_tables = self
+                .metadata_manager
+                .get_table_catalog_by_ids(&old_internal_table_ids)
+                .await?;
+            let to_remove_state_table_ids = fragment_graph
+                .fit_internal_tables_for_drop_connector(&old_fragments, old_internal_tables)?;
 
             drop_table_connector_ctx = Some(DropTableConnectorContext {
                 // we do not remove the original table catalog as it's still needed for the streaming job
-                // just need to remove the ref to the state table
+                // just need to remove the refs to the state tables of the connector
                 to_change_streaming_job_id: id,
-                to_remove_state_table_id: old_internal_table_ids[0], // asserted before
+                to_remove_state_table_ids,
                 to_remove_source_id,
             });
         } else if stream_job.is_materialized_view() {
@@ -2413,16 +2441,16 @@ impl DdlController {
         let timeout_ms = 2 * 60 * 60 * 1000;
         let poll_interval = Duration::from_millis(100);
         for _ in 0..(timeout_ms / poll_interval.as_millis() as usize) {
-            let background_jobs = self
+            let creating_jobs = self
                 .metadata_manager
                 .catalog_controller
-                .list_background_creating_jobs(true, None)
+                .list_creating_jobs(true, None)
                 .await?;
-            if background_jobs.is_empty() {
+            if creating_jobs.is_empty() {
                 let catalog_version = self
                     .metadata_manager
                     .catalog_controller
-                    .notify_frontend_trivial()
+                    .current_notification_version()
                     .await;
                 let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
                 return Ok(WaitVersion {

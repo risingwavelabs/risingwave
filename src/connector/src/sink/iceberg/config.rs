@@ -41,6 +41,7 @@ pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 
 pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
 pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
+pub const ICEBERG_COMPACTION_TYPE_AUTO: &str = "auto";
 pub const ICEBERG_COMPACTION_TYPE_FULL: &str = "full";
 pub const ICEBERG_COMPACTION_TYPE_SMALL_FILES: &str = "small-files";
 pub const ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE: &str = "files-with-delete";
@@ -115,6 +116,8 @@ pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
 pub const ENABLE_MANIFEST_REWRITE: &str = "enable_manifest_rewrite";
 pub const MANIFEST_REWRITE_TARGET_SIZE_BYTES: &str = "manifest_rewrite_target_size_bytes";
 pub const MANIFEST_REWRITE_MIN_COUNT_TO_MERGE: &str = "manifest_rewrite_min_count_to_merge";
+pub const ENABLE_ORPHAN_FILE_CLEANUP: &str = "enable_orphan_file_cleanup";
+pub const ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS: &str = "orphan_file_cleanup_min_age_millis";
 pub const COMPACTION_MAX_SNAPSHOTS_NUM: &str = "compaction.max_snapshots_num";
 
 pub const COMPACTION_SMALL_FILES_THRESHOLD_MB: &str = "compaction.small_files_threshold_mb";
@@ -135,6 +138,8 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
 pub const ORDER_KEY: &str = "order_key";
 pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
+pub const ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT: u64 = 7 * 24 * 60 * 60 * 1000;
+pub const ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_MINIMUM: u64 = 24 * 60 * 60 * 1000;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
 pub const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
@@ -224,11 +229,12 @@ where
 }
 
 /// Compaction type for Iceberg sink
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CompactionType {
+    /// Auto compaction - compacts the union of small and delete-heavy files
+    Auto,
     /// Full compaction - rewrites all data files
-    #[default]
     Full,
     /// Small files compaction - only compact small files
     SmallFiles,
@@ -239,6 +245,7 @@ pub enum CompactionType {
 impl CompactionType {
     pub fn as_str(&self) -> &'static str {
         match self {
+            CompactionType::Auto => ICEBERG_COMPACTION_TYPE_AUTO,
             CompactionType::Full => ICEBERG_COMPACTION_TYPE_FULL,
             CompactionType::SmallFiles => ICEBERG_COMPACTION_TYPE_SMALL_FILES,
             CompactionType::FilesWithDelete => ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE,
@@ -251,12 +258,14 @@ impl std::str::FromStr for CompactionType {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
+            ICEBERG_COMPACTION_TYPE_AUTO => Ok(CompactionType::Auto),
             ICEBERG_COMPACTION_TYPE_FULL => Ok(CompactionType::Full),
             ICEBERG_COMPACTION_TYPE_SMALL_FILES => Ok(CompactionType::SmallFiles),
             ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE => Ok(CompactionType::FilesWithDelete),
             _ => Err(SinkError::Config(anyhow!(format!(
-                "invalid compaction_type: {}, must be one of: {}, {}, {}",
+                "invalid compaction_type: {}, must be one of: {}, {}, {}, {}",
                 s,
+                ICEBERG_COMPACTION_TYPE_AUTO,
                 ICEBERG_COMPACTION_TYPE_FULL,
                 ICEBERG_COMPACTION_TYPE_SMALL_FILES,
                 ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE
@@ -328,6 +337,13 @@ pub struct IcebergConfig {
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
+
+    /// For REST catalogs such as AWS Glue, derive a missing table location from the
+    /// namespace's `location` property. Defaults to false. An existing location
+    /// derived from `warehouse.path` takes precedence; a missing or empty namespace
+    /// location leaves server-side location assignment unchanged.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub default_table_location_from_namespace: bool,
 
     /// Whether it is `exactly_once`, the default is true.
     #[serde(default = "default_some_true")]
@@ -428,6 +444,23 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub manifest_rewrite_min_count_to_merge: Option<usize>,
 
+    /// Whether to periodically remove files that are unreachable from Iceberg metadata.
+    /// Cleanup runs on the global Iceberg orphan-file cleanup interval.
+    #[serde(
+        rename = "enable_orphan_file_cleanup",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub enable_orphan_file_cleanup: bool,
+
+    /// Minimum file age in milliseconds before an unreachable file may be removed.
+    /// Defaults to 7 days and must be at least 24 hours.
+    #[serde(rename = "orphan_file_cleanup_min_age_millis", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub orphan_file_cleanup_min_age_millis: Option<u64>,
+
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
     /// If unset, defaults to 1000 only when compaction is enabled
@@ -446,6 +479,12 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub delete_files_count_threshold: Option<usize>,
 
+    /// Minimum percentage of deleted physical rows for PK-index compaction.
+    #[serde(rename = "compaction.delete_ratio_percent", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub delete_ratio_percent: Option<u32>,
+
     #[serde(rename = "compaction.trigger_snapshot_count", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly, iceberg_engine)]
@@ -456,8 +495,8 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub target_file_size_mb: Option<u64>,
 
-    /// Compaction type: `full`, `small-files`, or `files-with-delete`
-    /// If not set, will default to `full`
+    /// Compaction type: `auto`, `full`, `small-files`, or `files-with-delete`
+    /// If not set, defaults to `auto` when Iceberg compaction is licensed, otherwise `full`
     #[serde(rename = "compaction.type", default)]
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub compaction_type: Option<CompactionType>,
@@ -606,6 +645,12 @@ impl IcebergConfig {
         config.validate_enable_pk_index()?;
         config.validate_manifest_rewrite_format(config.format_version)?;
 
+        if config.default_table_location_from_namespace && !config.common.is_rest_catalog()? {
+            return Err(SinkError::Config(anyhow!(
+                "`default_table_location_from_namespace` is only supported for REST catalogs"
+            )));
+        }
+
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = iceberg_java_catalog_props_from_options(
             values
@@ -652,6 +697,15 @@ impl IcebergConfig {
             )));
         }
 
+        if config
+            .delete_ratio_percent
+            .is_some_and(|percent| !(1..=100).contains(&percent))
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.delete_ratio_percent` must be between 1 and 100"
+            )));
+        }
+
         if config.target_file_size_mb == Some(0) {
             return Err(SinkError::Config(anyhow!(
                 "`compaction.target_file_size_mb` must be greater than 0"
@@ -682,6 +736,23 @@ impl IcebergConfig {
             )));
         }
 
+        if config
+            .orphan_file_cleanup_min_age_millis
+            .is_some_and(|min_age_millis| {
+                min_age_millis < ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_MINIMUM
+            })
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`orphan_file_cleanup_min_age_millis` must be at least {} (24 hours)",
+                ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_MINIMUM
+            )));
+        }
+
+        if config.enable_orphan_file_cleanup || config.orphan_file_cleanup_min_age_millis.is_some()
+        {
+            config.ensure_orphan_file_cleanup_supported()?;
+        }
+
         // Validate table identifier (e.g., database.name should not contain dots)
         config
             .table
@@ -705,6 +776,16 @@ impl IcebergConfig {
         self.common
             .resolve_catalog_kind()
             .map_err(|err| SinkError::Config(anyhow!(err)))
+    }
+
+    pub fn ensure_orphan_file_cleanup_supported(&self) -> Result<()> {
+        if matches!(self.catalog_kind()?, IcebergCatalogKind::Storage) {
+            return Err(SinkError::Config(anyhow!(
+                "Iceberg orphan file cleanup is not supported for `catalog.type = 'storage'`"
+            )));
+        }
+
+        Ok(())
     }
 
     fn resolved_catalog_config(&self) -> Result<ResolvedIcebergCatalogConfig<'_>> {
@@ -796,6 +877,11 @@ impl IcebergConfig {
             .unwrap_or(MANIFEST_MIN_MERGE_COUNT_DEFAULT as usize)
     }
 
+    pub fn orphan_file_cleanup_min_age_millis(&self) -> u64 {
+        self.orphan_file_cleanup_min_age_millis
+            .unwrap_or(ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT)
+    }
+
     pub fn trigger_snapshot_count(&self) -> usize {
         self.trigger_snapshot_count.unwrap_or(usize::MAX)
     }
@@ -808,14 +894,12 @@ impl IcebergConfig {
         self.delete_files_count_threshold.unwrap_or(256)
     }
 
-    pub fn target_file_size_mb(&self) -> u64 {
-        self.target_file_size_mb.unwrap_or(1024)
+    pub fn delete_ratio_percent(&self) -> u32 {
+        self.delete_ratio_percent.unwrap_or(30)
     }
 
-    /// Get the compaction type as an enum
-    /// This method parses the string and returns the enum value
-    pub fn compaction_type(&self) -> CompactionType {
-        self.compaction_type.unwrap_or_default()
+    pub fn target_file_size_mb(&self) -> u64 {
+        self.target_file_size_mb.unwrap_or(1024)
     }
 
     /// Get the parquet compression codec

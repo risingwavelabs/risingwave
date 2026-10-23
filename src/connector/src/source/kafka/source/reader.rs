@@ -24,7 +24,9 @@ use futures_async_stream::try_stream;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+use risingwave_common::metrics::{
+    LabelGuardedIntCounter, LabelGuardedIntGauge, RelabeledAggregatedIntGauge,
+};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use crate::connector_common::read_kafka_log_level;
@@ -107,6 +109,10 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
+        // Skip the final offset commit on drop. The consumer is closed in the background, so that
+        // commit could land after meta has deleted the group and recreate it. Committed offsets
+        // only expose progress to external tools.
+        consumer.set_no_consumer_close_on_drop();
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
@@ -410,7 +416,8 @@ impl KafkaSplitReader {
             )
         });
 
-        let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
+        let mut latest_message_id_metrics: HashMap<String, RelabeledAggregatedIntGauge> =
+            HashMap::new();
         let mut partition_eof_count_metrics: HashMap<String, LabelGuardedIntCounter> =
             HashMap::new();
         let mut partition_eof_offset_metrics: HashMap<String, LabelGuardedIntGauge> =
@@ -515,8 +522,8 @@ impl KafkaSplitReader {
                             .latest_message_id
                             .with_guarded_label_values(&[
                                 // source name is not available here
-                                &self.source_ctx.source_id.to_string(),
                                 &self.source_ctx.actor_id.to_string(),
+                                &self.source_ctx.source_id.to_string(),
                                 &split_id,
                             ])
                     })

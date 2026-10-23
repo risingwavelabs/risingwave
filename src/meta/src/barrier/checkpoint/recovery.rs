@@ -19,6 +19,7 @@ use std::task::{Context, Poll};
 use futures::FutureExt;
 use prometheus::{HistogramTimer, IntCounter};
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
@@ -245,14 +246,32 @@ impl CheckpointControl {
 pub(crate) struct EnterReset;
 
 impl DatabaseStatusAction<'_, EnterReset> {
+    pub(crate) fn job_ids(&self) -> HashSet<JobId> {
+        let database_status = self
+            .control
+            .databases
+            .get(&self.database_id)
+            .expect("should exist");
+        match database_status {
+            DatabaseCheckpointControlStatus::Running(database) => database
+                .database_info
+                .job_ids()
+                .chain(database.independent_checkpoint_job_controls.keys().copied())
+                .collect(),
+            DatabaseCheckpointControlStatus::Recovering(_) => {
+                unreachable!("should only enter reset from a running database")
+            }
+        }
+    }
+
     pub(crate) fn enter(
         self,
         barrier_complete_output: Option<BarrierCompleteOutput>,
         partial_graph_manager: &mut PartialGraphManager,
-    ) {
+    ) -> MetaResult<()> {
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
-            self.control.ack_completed(partial_graph_manager, output);
+            self.control.ack_completed(partial_graph_manager, output)?;
         }
         let database_status = self
             .control
@@ -323,6 +342,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                 }
             },
         }
+        Ok(())
     }
 }
 
@@ -393,7 +413,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut state_table_committed_epochs,
             mut state_table_log_epochs,
             mut mv_depended_subscriptions,
-            mut background_jobs,
+            mut creating_jobs,
             mut cdc_table_snapshot_splits,
         } = runtime_info;
         let fragment_relations = &recovery_context.fragment_relations;
@@ -402,6 +422,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             stream_actors,
             mut source_splits,
             batch_refresh,
+            iceberg_v3,
         } = rendered_info;
         let mut recoverer = partial_graph_manager.start_recover();
         let result: MetaResult<_> = try {
@@ -414,12 +435,13 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 fragment_relations,
                 &stream_actors,
                 &mut source_splits,
-                &mut background_jobs,
+                &mut creating_jobs,
                 &mut mv_depended_subscriptions,
                 false,
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_splits,
                 batch_refresh,
+                iceberg_v3,
             )?
         };
         match result {
@@ -499,7 +521,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
 pub(crate) struct EnterRunning;
 
 impl DatabaseStatusAction<'_, EnterRunning> {
-    pub(crate) fn enter(self) {
+    pub(crate) fn enter(self) -> HashSet<JobId> {
         info!(database_id = ?self.database_id, "database enter running");
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         event_log_manager_ref.add_event_logs(vec![Event::Recovery(
@@ -542,9 +564,16 @@ impl DatabaseStatusAction<'_, EnterRunning> {
                     DatabaseRecoveringStage::Initializing {
                         initial_barrier_collector,
                     } => {
-                        *database_status = DatabaseCheckpointControlStatus::Running(
-                            initial_barrier_collector.finish(),
-                        );
+                        let database = initial_barrier_collector.finish();
+                        let running_job_ids = database
+                            .independent_checkpoint_job_controls
+                            .iter()
+                            .filter_map(|(job_id, control)| {
+                                control.running().is_some().then_some(*job_id)
+                            })
+                            .collect();
+                        *database_status = DatabaseCheckpointControlStatus::Running(database);
+                        running_job_ids
                     }
                 }
             }

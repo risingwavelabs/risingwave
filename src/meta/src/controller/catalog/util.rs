@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::FragmentTypeMask;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;

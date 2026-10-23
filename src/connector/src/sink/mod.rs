@@ -13,6 +13,7 @@
 // limitations under the License.
 
 feature_gated_sink_mod!(big_query, "bigquery");
+pub mod batching_log_sink;
 pub mod boxed;
 pub mod catalog;
 feature_gated_sink_mod!(clickhouse, ClickHouse, "clickhouse");
@@ -28,6 +29,7 @@ pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
 feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
+feature_gated_sink_mod!(lancedb, LanceDb, "lancedb");
 pub mod http;
 pub mod iceberg;
 pub mod kafka;
@@ -77,11 +79,12 @@ use prometheus::Registry;
 use risingwave_common::array::ArrayError;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::config::StreamingConfig;
-use risingwave_common::hash::ActorId;
+use risingwave_common::config::{MetricLevel, StreamingConfig};
+use risingwave_common::hash::{ActorId, VnodeBitmapExt};
 use risingwave_common::metrics::{
-    LabelGuardedHistogram, LabelGuardedHistogramVec, LabelGuardedIntCounter,
-    LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+    GaugeAggregation, IntGaugeVecRelabelExt, LabelGuardedHistogram, LabelGuardedIntCounter,
+    LabelGuardedIntGaugeVec, MetricVecRelabelExt, RelabeledAggregatedIntGaugeVec,
+    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::secret::{LocalSecretManager, SecretError};
@@ -105,8 +108,8 @@ use self::catalog::{SinkFormatDesc, SinkType};
 use self::clickhouse::CLICKHOUSE_SINK;
 use self::deltalake::DELTALAKE_SINK;
 use self::iceberg::ICEBERG_SINK;
+use self::lancedb::LANCEDB_SINK;
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
-use crate::WithPropertiesExt;
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::boxed::{BoxSinglePhaseCoordinator, BoxTwoPhaseCoordinator};
@@ -117,6 +120,7 @@ use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
 use crate::sink::utils::feature_gated_sink_mod;
+use crate::{WithPropertiesExt, connector_metrics_level};
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
@@ -153,6 +157,7 @@ macro_rules! for_all_sinks {
                 { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::SnowflakeConfig },
                 { RedShift, $crate::sink::snowflake_redshift::redshift::RedshiftSink, $crate::sink::snowflake_redshift::redshift::RedShiftConfig },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
+                { LanceDb, $crate::sink::lancedb::LanceDbSink, $crate::sink::lancedb::LanceDbConfig },
                 { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
                 { Mongodb, $crate::sink::mongodb::MongodbSink, $crate::sink::mongodb::MongodbConfig },
@@ -250,6 +255,27 @@ pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
 /// same downstream primary key instead of compacting them into one final-state update within a
 /// barrier. Upstream changes under the same stream key may still be compacted earlier.
 pub const SINK_USER_PRESERVE_ROW_LEVEL_CHANGES: &str = "preserve_row_level_changes";
+
+/// Return whether the configured sink uses exactly-once commit state.
+///
+/// Connector dispatch is centralized here, while each [`Sink`] implementation owns the
+/// interpretation and default of its properties.
+pub fn sink_is_exactly_once(properties: &BTreeMap<String, String>) -> Result<bool> {
+    let sink_type = properties
+        .get(CONNECTOR_TYPE_KEY)
+        .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?
+        .to_lowercase();
+
+    match_sink_name_str!(
+        sink_type.as_str(),
+        SinkType,
+        SinkType::is_exactly_once(properties),
+        |other| Err(SinkError::Config(anyhow!(
+            "unsupported sink connector {}",
+            other
+        )))
+    )
+}
 
 pub trait UnknownFields {
     /// Unrecognized fields in the `WITH` clause.
@@ -465,43 +491,44 @@ pub fn enforce_secret_sink(props: &impl WithPropertiesExt) -> ConnectorResult<()
 }
 
 pub static GLOBAL_SINK_METRICS: LazyLock<SinkMetrics> =
-    LazyLock::new(|| SinkMetrics::new(&GLOBAL_METRICS_REGISTRY));
+    LazyLock::new(|| SinkMetrics::new(&GLOBAL_METRICS_REGISTRY, connector_metrics_level()));
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration: LabelGuardedHistogramVec,
-    pub connector_sink_rows_received: LabelGuardedIntCounterVec,
+    pub sink_commit_duration: RelabeledGuardedHistogramVec,
+    pub connector_sink_rows_received: RelabeledGuardedIntCounterVec,
 
     // Log store writer metrics
-    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec,
-    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec,
-    pub log_store_write_rows: LabelGuardedIntCounterVec,
+    pub log_store_first_write_epoch: RelabeledAggregatedIntGaugeVec,
+    pub log_store_latest_write_epoch: RelabeledAggregatedIntGaugeVec,
+    pub log_store_write_rows: RelabeledGuardedIntCounterVec,
 
     // Log store reader metrics
-    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec,
-    pub log_store_read_rows: LabelGuardedIntCounterVec,
-    pub log_store_read_bytes: LabelGuardedIntCounterVec,
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec,
+    pub log_store_latest_read_epoch: RelabeledAggregatedIntGaugeVec,
+    pub log_store_read_rows: RelabeledGuardedIntCounterVec,
+    pub log_store_read_bytes: RelabeledGuardedIntCounterVec,
+    pub log_store_reader_wait_new_future_duration_ns: RelabeledGuardedIntCounterVec,
 
     // Iceberg metrics
-    pub iceberg_write_qps: LabelGuardedIntCounterVec,
-    pub iceberg_write_latency: LabelGuardedHistogramVec,
-    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec,
-    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
-    pub iceberg_partition_num: LabelGuardedIntGaugeVec,
-    pub iceberg_write_bytes: LabelGuardedIntCounterVec,
+    pub iceberg_write_qps: RelabeledGuardedIntCounterVec,
+    pub iceberg_write_latency: RelabeledGuardedHistogramVec,
+    pub iceberg_rolling_unflushed_data_file: RelabeledAggregatedIntGaugeVec,
+    pub iceberg_position_delete_cache_num: RelabeledAggregatedIntGaugeVec,
+    pub iceberg_partition_num: RelabeledAggregatedIntGaugeVec,
+    pub iceberg_write_bytes: RelabeledGuardedIntCounterVec,
     pub iceberg_snapshot_num: LabelGuardedIntGaugeVec,
 }
 
 impl SinkMetrics {
-    pub fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         let sink_commit_duration = register_guarded_histogram_vec_with_registry!(
             "sink_commit_duration",
             "Duration of commit op in sink",
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(metric_level);
 
         let connector_sink_rows_received = register_guarded_int_counter_vec_with_registry!(
             "connector_sink_rows_received",
@@ -509,7 +536,8 @@ impl SinkMetrics {
             &["actor_id", "connector_type", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(metric_level);
 
         let log_store_first_write_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_first_write_epoch",
@@ -517,7 +545,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Min);
 
         let log_store_latest_write_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_latest_write_epoch",
@@ -525,7 +554,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Min);
 
         let log_store_write_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_write_rows",
@@ -533,7 +563,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(metric_level);
 
         let log_store_latest_read_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_latest_read_epoch",
@@ -541,7 +572,8 @@ impl SinkMetrics {
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Min);
 
         let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_read_rows",
@@ -549,7 +581,8 @@ impl SinkMetrics {
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(metric_level);
 
         let log_store_read_bytes = register_guarded_int_counter_vec_with_registry!(
             "log_store_read_bytes",
@@ -557,7 +590,8 @@ impl SinkMetrics {
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(metric_level);
 
         let log_store_reader_wait_new_future_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
@@ -566,7 +600,8 @@ impl SinkMetrics {
                 &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .relabel_debug_1(metric_level);
 
         let iceberg_write_qps = register_guarded_int_counter_vec_with_registry!(
             "iceberg_write_qps",
@@ -574,7 +609,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(metric_level);
 
         let iceberg_write_latency = register_guarded_histogram_vec_with_registry!(
             "iceberg_write_latency",
@@ -582,7 +618,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(metric_level);
 
         let iceberg_rolling_unflushed_data_file = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_rolling_unflushed_data_file",
@@ -590,7 +627,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Sum);
 
         let iceberg_position_delete_cache_num = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_position_delete_cache_num",
@@ -598,7 +636,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Sum);
 
         let iceberg_partition_num = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_partition_num",
@@ -606,7 +645,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Sum);
 
         let iceberg_write_bytes = register_guarded_int_counter_vec_with_registry!(
             "iceberg_write_bytes",
@@ -614,7 +654,8 @@ impl SinkMetrics {
             &["actor_id", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(metric_level);
 
         let iceberg_snapshot_num = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_snapshot_num",
@@ -649,7 +690,7 @@ impl SinkMetrics {
 pub struct SinkWriterParam {
     // TODO(eric): deprecate executor_id
     pub executor_id: ExecutorId,
-    pub vnode_bitmap: Option<Bitmap>,
+    pub vnode_bitmap: Bitmap,
     pub meta_client: Option<SinkMetaClient>,
     // The val has two effect:
     // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
@@ -737,7 +778,11 @@ impl SinkMetaClient {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        tracing::warn!(error = %e.as_report(), %sink_id, "Failed to add sink fail event to event log.");
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            %sink_id,
+                            "failed to add the sink failure event to the event log",
+                        );
                     }
                 }
             }
@@ -750,7 +795,7 @@ impl SinkWriterParam {
     pub fn for_test() -> Self {
         SinkWriterParam {
             executor_id: Default::default(),
-            vnode_bitmap: Default::default(),
+            vnode_bitmap: Bitmap::singleton().clone(),
             meta_client: Default::default(),
             extra_partition_col_idx: Default::default(),
 
@@ -767,13 +812,23 @@ impl SinkWriterParam {
 fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
     matches!(
         sink_name,
-        ICEBERG_SINK | CLICKHOUSE_SINK | STARROCKS_SINK | DELTALAKE_SINK | SNOWFLAKE_SINK_V2
+        ICEBERG_SINK
+            | CLICKHOUSE_SINK
+            | STARROCKS_SINK
+            | DELTALAKE_SINK
+            | SNOWFLAKE_SINK_V2
+            | LANCEDB_SINK
     )
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
 
     type LogSinker: LogSinker;
+
+    /// Return whether this sink uses exactly-once commit state for the loaded properties.
+    fn is_exactly_once(_properties: &BTreeMap<String, String>) -> Result<bool> {
+        Ok(false)
+    }
 
     fn set_default_commit_checkpoint_interval(
         desc: &mut SinkDesc,
@@ -829,6 +884,17 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 
     fn support_schema_change() -> bool {
         false
+    }
+
+    /// Validates an `ALTER SINK` transition and the resulting configuration.
+    ///
+    /// `config` contains the merged sink properties, while `alter_props` contains only the
+    /// properties specified by the current statement.
+    fn validate_alter_config_change(
+        config: &BTreeMap<String, String>,
+        _alter_props: &BTreeMap<String, String>,
+    ) -> Result<()> {
+        Self::validate_alter_config(config)
     }
 
     fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
@@ -1115,6 +1181,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("LanceDB error: {0}")]
+    LanceDb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("ElasticSearch/OpenSearch error: {0}")]
     ElasticSearchOpenSearch(
         #[source]
@@ -1260,6 +1332,20 @@ mod tests {
 
     use super::*;
 
+    fn assert_aggregation(
+        gauge_vec: &RelabeledAggregatedIntGaugeVec,
+        first_labels: &[&str],
+        second_labels: &[&str],
+        expected: i64,
+    ) {
+        let first = gauge_vec.with_guarded_label_values(first_labels);
+        let second = gauge_vec.with_guarded_label_values(second_labels);
+        first.set(5);
+        second.set(7);
+        assert_eq!(first.get(), expected);
+        assert_eq!(second.get(), expected);
+    }
+
     fn btreemap<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<String, String> {
         entries
             .into_iter()
@@ -1297,5 +1383,74 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(err.to_report_string().contains("missing field `topic`"));
+    }
+
+    #[test]
+    fn test_sink_exactly_once_policy() {
+        assert!(sink_is_exactly_once(&btreemap([(CONNECTOR_TYPE_KEY, ICEBERG_SINK)])).unwrap());
+        assert!(
+            !sink_is_exactly_once(&btreemap([
+                (CONNECTOR_TYPE_KEY, ICEBERG_SINK),
+                ("is_exactly_once", "false"),
+            ]))
+            .unwrap()
+        );
+
+        #[cfg(feature = "sink-deltalake")]
+        {
+            assert!(
+                !sink_is_exactly_once(&btreemap([(CONNECTOR_TYPE_KEY, DELTALAKE_SINK)])).unwrap()
+            );
+            assert!(
+                sink_is_exactly_once(&btreemap([
+                    (CONNECTOR_TYPE_KEY, DELTALAKE_SINK),
+                    ("is_exactly_once", "true"),
+                ]))
+                .unwrap()
+            );
+        }
+
+        #[cfg(feature = "sink-lancedb")]
+        assert!(sink_is_exactly_once(&btreemap([(CONNECTOR_TYPE_KEY, LANCEDB_SINK)])).unwrap());
+
+        let error = sink_is_exactly_once(&btreemap([
+            (CONNECTOR_TYPE_KEY, ICEBERG_SINK),
+            ("is_exactly_once", "invalid"),
+        ]))
+        .unwrap_err();
+        assert!(error.to_report_string().contains("is_exactly_once"));
+    }
+
+    #[test]
+    fn actor_relabeled_gauges_use_the_assigned_reducers() {
+        for level in [MetricLevel::Critical, MetricLevel::Info] {
+            let registry = Registry::new();
+            let metrics = SinkMetrics::new(&registry, level);
+
+            for gauge_vec in [
+                &metrics.log_store_first_write_epoch,
+                &metrics.log_store_latest_write_epoch,
+            ] {
+                assert_aggregation(gauge_vec, &["1", "sink", "name"], &["2", "sink", "name"], 5);
+            }
+            assert_aggregation(
+                &metrics.log_store_latest_read_epoch,
+                &["1", "connector", "sink", "name"],
+                &["2", "connector", "sink", "name"],
+                5,
+            );
+            for gauge_vec in [
+                &metrics.iceberg_partition_num,
+                &metrics.iceberg_position_delete_cache_num,
+                &metrics.iceberg_rolling_unflushed_data_file,
+            ] {
+                assert_aggregation(
+                    gauge_vec,
+                    &["1", "sink", "name"],
+                    &["2", "sink", "name"],
+                    12,
+                );
+            }
+        }
     }
 }

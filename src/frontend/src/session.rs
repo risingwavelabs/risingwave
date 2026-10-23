@@ -314,12 +314,12 @@ impl FrontendEnv {
             .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("advertise addr is not specified, defaulting to listen_addr");
+                tracing::warn!("advertise address is not specified; defaulting to listen_addr");
                 &opts.listen_addr
             })
             .parse()
             .unwrap();
-        info!("advertise addr is {}", frontend_address);
+        info!("advertise address is {}", frontend_address);
 
         let rpc_addr: HostAddr = opts.frontend_rpc_listener_addr.parse().unwrap();
         let internal_rpc_host_addr = HostAddr {
@@ -423,6 +423,7 @@ impl FrontendEnv {
         meta_client.activate(&frontend_address).await?;
 
         let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
+        risingwave_connector::init_connector_metrics(config.server.metrics_level);
         let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
         let spill_metrics = Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone());
 
@@ -447,7 +448,7 @@ impl FrontendEnv {
             join_handles.push(join_handle);
             shutdown_senders.push(shutdown_sender);
         } else {
-            tracing::info!("Telemetry didn't start due to config");
+            tracing::info!("Telemetry did not start because it is disabled by configuration");
         }
 
         tokio::spawn(async move {
@@ -462,7 +463,7 @@ impl FrontendEnv {
                 .unwrap();
         });
         info!(
-            "Health Check RPC Listener is set up on {}",
+            "Health check RPC listener is listening on {}",
             opts.frontend_rpc_listener_addr.clone()
         );
 
@@ -546,7 +547,7 @@ impl FrontendEnv {
         let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
 
         info!(
-            "Frontend  total_memory: {} batch_memory: {}",
+            "Frontend total memory: {}, batch memory: {}",
             convert(total_memory_bytes as _),
             convert(batch_memory_limit as _),
         );

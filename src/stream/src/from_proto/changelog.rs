@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use risingwave_pb::stream_plan::ChangeLogNode;
+use risingwave_pb::stream_plan::change_log_node::Mode;
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::{ChangeLogExecutor, Executor};
+use crate::executor::{ChangeLogExecutor, ChangeLogMode, Executor};
 use crate::task::ExecutorParams;
 
 pub struct ChangeLogExecutorBuilder;
@@ -34,22 +35,27 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
-        let vnodes = params
-            .vnode_bitmap
-            .expect("vnodes not set for changelog executor");
+        let vnodes = params.vnode_bitmap;
         let vnode_count = params.actor_context.vnode_count;
         let distribution_keys = node
             .distribution_keys
             .iter()
             .map(|k| *k as usize)
             .collect::<Vec<_>>();
+        let mode = match &node.mode {
+            None => ChangeLogMode::Normal,
+            Some(Mode::Keyed(_)) => ChangeLogMode::Keyed,
+        };
+        let stream_keys = node.stream_keys.iter().map(|&k| k as usize).collect();
         let exec = ChangeLogExecutor::new(
             params.actor_context,
             input,
             node.need_op,
             vnode_count,
             vnodes,
+            mode,
             distribution_keys,
+            stream_keys,
         );
         Ok((params.info, exec).into())
     }

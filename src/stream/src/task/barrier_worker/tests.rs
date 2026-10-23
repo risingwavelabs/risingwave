@@ -15,14 +15,160 @@
 use std::future::{Future, poll_fn};
 use std::iter::once;
 use std::pin::pin;
+use std::sync::Arc;
 use std::task::Poll;
 
 use futures::FutureExt;
 use futures::future::join_all;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
+use risingwave_pb::stream_service::streaming_control_stream_request::{
+    CreatePartialGraphRequest, ResetPartialGraphsRequest,
+};
+use risingwave_pb::stream_service::{
+    StreamingControlStreamRequest, streaming_control_stream_request,
+};
 
 use super::*;
+use crate::task::TEST_PARTIAL_GRAPH_ID;
 use crate::task::barrier_test_utils::LocalBarrierTestEnv;
+
+#[test]
+fn test_table_change_log_progress_local_preaggregation() {
+    let progress = |actor_id, vnodes: &[usize], truncate_epoch| TableChangeLogProgress {
+        actor_id: ActorId::new(actor_id),
+        fragment_id: FragmentId::new(10),
+        upstream_table_id: TableId::new(20),
+        progress_table_id: TableId::new(30),
+        vnode_bitmap: Arc::new(Bitmap::from_indices(8, vnodes)),
+        truncate_epoch,
+    };
+    let reports = vec![progress(1, &[0, 1], 100), progress(2, &[2, 3], 80)];
+
+    let aggregated = aggregate_table_change_log_progress(reports);
+    assert_eq!(aggregated.len(), 1);
+    let aggregated = &aggregated[0];
+    assert_eq!(aggregated.min_truncate_epoch, 80);
+    assert_eq!(
+        Bitmap::from(aggregated.vnode_bitmap.as_ref().unwrap()),
+        Bitmap::from_indices(8, [0, 1, 2, 3])
+    );
+
+    let overlapping = vec![progress(1, &[0, 1], 100), progress(2, &[1, 2], 80)];
+    assert!(aggregate_table_change_log_progress(overlapping).is_empty());
+
+    let inconsistent_lengths = vec![
+        progress(1, &[0, 1], 100),
+        TableChangeLogProgress {
+            actor_id: ActorId::new(2),
+            fragment_id: FragmentId::new(10),
+            upstream_table_id: TableId::new(20),
+            progress_table_id: TableId::new(30),
+            vnode_bitmap: Arc::new(Bitmap::from_indices(4, [2, 3])),
+            truncate_epoch: 80,
+        },
+    ];
+    assert!(aggregate_table_change_log_progress(inconsistent_lengths).is_empty());
+}
+
+#[tokio::test]
+async fn test_reject_exchange_request_with_stale_partial_graph_term() -> StreamResult<()> {
+    let test_env = LocalBarrierTestEnv::for_test().await;
+    let result = test_env
+        .actor_op_tx
+        .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
+            partial_graph_id: TEST_PARTIAL_GRAPH_ID,
+            term_id: "stale".to_owned(),
+            ids: (1.into(), 2.into()),
+            request: TakeReceiverRequest::Remote {
+                result_sender,
+                upstream_fragment_id: 1.into(),
+            },
+        })
+        .await?;
+
+    assert!(
+        result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("unmatched partial graph term")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_filter_buffered_exchange_requests_by_partial_graph_term() -> StreamResult<()> {
+    let mut test_env = LocalBarrierTestEnv::for_test().await;
+    test_env
+        .request_tx
+        .send(Ok(StreamingControlStreamRequest {
+            request: Some(
+                streaming_control_stream_request::Request::ResetPartialGraphs(
+                    ResetPartialGraphsRequest {
+                        partial_graph_ids: vec![TEST_PARTIAL_GRAPH_ID],
+                    },
+                ),
+            ),
+        }))
+        .unwrap();
+    assert!(matches!(
+        test_env
+            .response_rx
+            .recv()
+            .await
+            .unwrap()
+            .unwrap()
+            .response
+            .unwrap(),
+        streaming_control_stream_response::Response::ResetPartialGraph(_)
+    ));
+
+    let actor_op_tx = test_env.actor_op_tx.clone();
+    let take_receiver = move |term_id: &str, upstream_actor_id: ActorId| {
+        let actor_op_tx = actor_op_tx.clone();
+        let term_id = term_id.to_owned();
+        tokio::spawn(async move {
+            actor_op_tx
+                .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
+                    partial_graph_id: TEST_PARTIAL_GRAPH_ID,
+                    term_id,
+                    ids: (upstream_actor_id, 3.into()),
+                    request: TakeReceiverRequest::Remote {
+                        result_sender,
+                        upstream_fragment_id: 1.into(),
+                    },
+                })
+                .await
+                .unwrap()
+        })
+    };
+    let stale_request = take_receiver("for_test", 1.into());
+    let matching_request = take_receiver("next_term", 2.into());
+    LocalBarrierTestEnv::flush_all_events_impl(&test_env.actor_op_tx).await;
+
+    test_env
+        .request_tx
+        .send(Ok(StreamingControlStreamRequest {
+            request: Some(
+                streaming_control_stream_request::Request::CreatePartialGraph(
+                    CreatePartialGraphRequest {
+                        partial_graph_id: TEST_PARTIAL_GRAPH_ID,
+                        term_id: "next_term".to_owned(),
+                    },
+                ),
+            ),
+        }))
+        .unwrap();
+
+    assert!(stale_request.await.unwrap().is_err());
+    assert!(matching_request.await.unwrap().is_ok());
+    let pending = test_env.take_pending_new_output_requests(2.into()).await;
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0, ActorId::from(3));
+    Ok(())
+}
 
 #[tokio::test]
 async fn test_managed_barrier_collection() -> StreamResult<()> {

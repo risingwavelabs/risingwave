@@ -51,7 +51,7 @@ use crate::common::log_store_impl::kv_log_store::{
     SeqId,
 };
 
-const INSERT_OP_CODE: RowOpCodeType = 1;
+const INSERT_OP_CODE: RowOpCodeType = risingwave_common::constants::log_store::INSERT_OP_CODE;
 const DELETE_OP_CODE: RowOpCodeType = 2;
 const UPDATE_INSERT_OP_CODE: RowOpCodeType = 3;
 const UPDATE_DELETE_OP_CODE: RowOpCodeType = 4;
@@ -187,7 +187,7 @@ pub(crate) struct LogStoreRowSerde {
 impl LogStoreRowSerde {
     pub(crate) fn new(
         table_catalog: &Table,
-        vnodes: Option<Arc<Bitmap>>,
+        vnodes: Arc<Bitmap>,
         pk_info: &'static KvLogStorePkInfo,
     ) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -228,11 +228,6 @@ impl LogStoreRowSerde {
         let payload_schema = data_types[predefined_column_len..].to_vec();
 
         let row_serde = BasicSerde::new(input_value_indices.into(), table_columns.into());
-
-        let vnodes = match vnodes {
-            Some(vnodes) => vnodes,
-            None => Bitmap::singleton_arc().clone(),
-        };
 
         // epoch and seq_id. The seq_id of barrier is set null, and therefore the second order type
         // is nulls last
@@ -276,11 +271,11 @@ impl LogStoreRowSerde {
     }
 
     pub(crate) fn encode_epoch(epoch: u64) -> i64 {
-        epoch as i64 ^ (1i64 << 63)
+        risingwave_common::constants::log_store::encode_epoch(epoch)
     }
 
     pub(crate) fn decode_epoch(encoded_epoch: i64) -> u64 {
-        encoded_epoch as u64 ^ (1u64 << 63)
+        risingwave_common::constants::log_store::decode_epoch(encoded_epoch)
     }
 }
 
@@ -1249,7 +1244,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
 
@@ -1395,7 +1390,7 @@ mod tests {
         let table = gen_test_log_store_table(pk_info);
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
         let (ops, rows) = gen_test_data(0);
@@ -1558,7 +1553,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
 
@@ -1694,7 +1689,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
 
@@ -1808,7 +1803,7 @@ mod tests {
 
         let serde = LogStoreRowSerde::new(
             &table,
-            Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST))),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             pk_info,
         );
 

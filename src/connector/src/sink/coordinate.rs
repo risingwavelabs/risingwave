@@ -57,13 +57,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedLogSinker<
                 .sink_coordinate_client()
                 .await,
             param,
-            vnode_bitmap: writer_param
-                .vnode_bitmap
-                .as_ref()
-                .ok_or_else(|| {
-                    anyhow!("sink needs coordination and should not have singleton input")
-                })?
-                .clone(),
+            vnode_bitmap: writer_param.vnode_bitmap.clone(),
             commit_checkpoint_interval,
             sink_writer_metrics: SinkWriterMetrics::new(writer_param),
         })

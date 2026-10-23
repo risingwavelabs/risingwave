@@ -47,6 +47,28 @@ select jsonb_agg((row(v2, v3)).* order by v2) from t;
 [{"f1": 0, "f2": "bbb"}, {"f1": 1, "f2": "ccc"}, {"f1": 2, "f2": "bbb"}, {"f1": 8, "f2": "ddd"}]
 
 statement ok
+create table jsonb_fields (x int, y varchar);
+
+statement ok
+create materialized view jsonb_fields_mv as
+select jsonb_agg(s.*) as value
+from (select x as a, y as a from jsonb_fields) s;
+
+statement ok
+insert into jsonb_fields values (1, 'x');
+
+query T
+select value from jsonb_fields_mv;
+----
+[{"a": "x"}]
+
+statement ok
+drop materialized view jsonb_fields_mv;
+
+statement ok
+drop table jsonb_fields;
+
+statement ok
 drop materialized view mv1;
 
 statement ok

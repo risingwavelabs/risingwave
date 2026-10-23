@@ -25,10 +25,11 @@ use futures::future::{BoxFuture, join, join_all};
 use futures::stream::{BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
+    PbLocalSstableInfo, PbTableChangeLogProgress,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -72,8 +73,10 @@ use crate::executor::Barrier;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::barrier_worker::managed_state::{
-    ManagedBarrierStateDebugInfo, ManagedBarrierStateEvent, PartialGraphState, PartialGraphStatus,
+    EpochBarrierEvent, ManagedBarrierStateDebugInfo, ManagedBarrierStateEvent, PartialGraphState,
+    PartialGraphStatus,
 };
+use crate::task::progress::TableChangeLogProgress;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -84,28 +87,83 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 pub struct BarrierCompleteResult {
     /// The result returned from `sync` of `StateStore`.
     pub sync_result: Option<SyncResult>,
+    pub(crate) event: EpochBarrierEvent,
+}
 
-    /// The updated creation progress of materialized view after this barrier.
-    pub create_mview_progress: Vec<PbCreateMviewProgress>,
+type TableChangeLogSubscriberKey = (FragmentId, TableId, TableId);
 
-    /// The source IDs that have finished listing data for refreshable batch sources.
-    pub list_finished_source_ids: Vec<PbListFinishedSource>,
+struct LocalTableChangeLogProgress {
+    vnode_bitmap: Bitmap,
+    min_truncate_epoch: u64,
+}
 
-    /// The source IDs that have finished loading data for refreshable batch sources.
-    pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
+fn aggregate_table_change_log_progress(
+    reports: Vec<TableChangeLogProgress>,
+) -> Vec<PbTableChangeLogProgress> {
+    let mut aggregated = HashMap::<TableChangeLogSubscriberKey, LocalTableChangeLogProgress>::new();
+    let mut invalid = HashSet::new();
 
-    pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+    for report in reports {
+        let key = (
+            report.fragment_id,
+            report.upstream_table_id,
+            report.progress_table_id,
+        );
+        if !report.vnode_bitmap.any() {
+            warn!(
+                actor_id = %report.actor_id,
+                fragment_id = %report.fragment_id,
+                upstream_table_id = %report.upstream_table_id,
+                progress_table_id = %report.progress_table_id,
+                "ignore empty table change log progress vnode bitmap"
+            );
+            invalid.insert(key);
+            continue;
+        }
 
-    /// CDC sources that have updated their offset at least once.
-    pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+        match aggregated.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(LocalTableChangeLogProgress {
+                    vnode_bitmap: (*report.vnode_bitmap).clone(),
+                    min_truncate_epoch: report.truncate_epoch,
+                });
+            }
+            Entry::Occupied(mut entry) => {
+                let progress = entry.get_mut();
+                if progress.vnode_bitmap.len() != report.vnode_bitmap.len()
+                    || (&progress.vnode_bitmap & &*report.vnode_bitmap).any()
+                {
+                    warn!(
+                        actor_id = %report.actor_id,
+                        fragment_id = %report.fragment_id,
+                        upstream_table_id = %report.upstream_table_id,
+                        progress_table_id = %report.progress_table_id,
+                        "ignore inconsistent table change log progress vnode ownership"
+                    );
+                    invalid.insert(key);
+                    continue;
+                }
+                progress.vnode_bitmap |= &*report.vnode_bitmap;
+                progress.min_truncate_epoch =
+                    progress.min_truncate_epoch.min(report.truncate_epoch);
+            }
+        }
+    }
 
-    /// Iceberg pk-index sink metadata reports collected during this barrier.
-    pub iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
-
-    /// The table IDs that should be truncated.
-    pub truncate_tables: Vec<TableId>,
-    /// The table IDs that have finished refresh.
-    pub refresh_finished_tables: Vec<TableId>,
+    aggregated
+        .into_iter()
+        .filter_map(
+            |(key @ (fragment_id, upstream_table_id, progress_table_id), progress)| {
+                (!invalid.contains(&key)).then(|| PbTableChangeLogProgress {
+                    fragment_id,
+                    upstream_table_id,
+                    progress_table_id,
+                    min_truncate_epoch: progress.min_truncate_epoch,
+                    vnode_bitmap: Some(progress.vnode_bitmap.to_protobuf()),
+                })
+            },
+        )
+        .collect()
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -202,7 +260,7 @@ impl ControlStreamHandle {
                 .is_err()
             {
                 self.pair = None;
-                warn!("fail to send response. control stream reset");
+                warn!("failed to send the response; the control stream was reset");
             }
         } else {
             debug!(?response, "control stream has been reset. ignore response");
@@ -312,18 +370,15 @@ pub(super) struct LocalBarrierWorker {
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
-
-    pub(super) term_id: String,
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(actor_manager: Arc<StreamActorManager>, term_id: String) -> Self {
+    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
         Self {
             state: Default::default(),
             await_epoch_completed_futures: Default::default(),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
-            term_id,
         }
     }
 
@@ -401,11 +456,12 @@ impl LocalBarrierWorker {
                             actor_id,
                             upstream_actor_id,
                             upstream_partial_graph_id,
+                            term_id,
                             tx
                         } => {
                             self.handle_actor_op(LocalActorOperation::TakeReceiver {
                                 partial_graph_id: upstream_partial_graph_id,
-                                term_id: self.term_id.clone(),
+                                term_id,
                                 ids: (upstream_actor_id, actor_id),
                                 request: TakeReceiverRequest::Local(tx),
                             });
@@ -415,7 +471,7 @@ impl LocalBarrierWorker {
                 (partial_graph_id, barrier, result) = Self::next_completed_epoch(&mut self.await_epoch_completed_futures) => {
                     match result {
                         Ok(result) => {
-                            self.on_epoch_completed(partial_graph_id, barrier.epoch.prev, result);
+                            self.on_epoch_completed(partial_graph_id, result);
                         }
                         Err(err) => {
                             // TODO: may only report as partial graph failure instead of reset the stream
@@ -495,7 +551,7 @@ impl LocalBarrierWorker {
                 Ok(())
             }
             Request::CreatePartialGraph(req) => {
-                self.add_partial_graph(req.partial_graph_id);
+                self.add_partial_graph(req.partial_graph_id, req.term_id);
                 Ok(())
             }
             Request::ResetPartialGraphs(req) => {
@@ -519,29 +575,28 @@ impl LocalBarrierWorker {
                 ids,
                 request,
             } => {
-                let err = if self.term_id != term_id {
-                    {
-                        warn!(
-                            ?ids,
-                            term_id,
-                            current_term_id = self.term_id,
-                            "take receiver on unmatched term_id"
-                        );
-                        anyhow!(
-                            "take receiver {:?} on unmatched term_id {} to current term_id {}",
-                            ids,
-                            term_id,
-                            self.term_id
-                        )
-                    }
-                } else {
-                    match self.state.partial_graphs.entry(partial_graph_id) {
-                        Entry::Occupied(mut entry) => match entry.get_mut() {
-                            PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                                pending_requests.push((ids, request));
-                                return;
-                            }
-                            PartialGraphStatus::Running(graph) => {
+                let err = match self.state.partial_graphs.entry(partial_graph_id) {
+                    Entry::Occupied(mut entry) => match entry.get_mut() {
+                        PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
+                            pending_requests.push((term_id, ids, request));
+                            return;
+                        }
+                        PartialGraphStatus::Running(graph) => {
+                            if graph.local_barrier_manager.term_id != term_id {
+                                warn!(
+                                    %partial_graph_id,
+                                    ?ids,
+                                    request_term_id = term_id,
+                                    current_term_id = graph.local_barrier_manager.term_id,
+                                    "take receiver on unmatched partial graph term"
+                                );
+                                anyhow!(
+                                    "take receiver {:?} on unmatched partial graph term {} to current term {}",
+                                    ids,
+                                    term_id,
+                                    graph.local_barrier_manager.term_id
+                                )
+                            } else {
                                 let (upstream_actor_id, actor_id) = ids;
                                 graph.new_actor_output_request(
                                     actor_id,
@@ -550,22 +605,16 @@ impl LocalBarrierWorker {
                                 );
                                 return;
                             }
-                            PartialGraphStatus::Suspended(_) => {
-                                anyhow!("partial graph suspended")
-                            }
-                            PartialGraphStatus::Resetting => {
-                                anyhow!("partial graph resetting")
-                            }
-                            PartialGraphStatus::Unspecified => {
-                                unreachable!()
-                            }
-                        },
-                        Entry::Vacant(entry) => {
-                            entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![(
-                                ids, request,
-                            )]));
-                            return;
                         }
+                        PartialGraphStatus::Suspended(_) => anyhow!("partial graph suspended"),
+                        PartialGraphStatus::Resetting => anyhow!("partial graph resetting"),
+                        PartialGraphStatus::Unspecified => unreachable!(),
+                    },
+                    Entry::Vacant(entry) => {
+                        entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![(
+                            term_id, ids, request,
+                        )]));
+                        return;
                     }
                 };
                 if let TakeReceiverRequest::Remote { result_sender, .. } = request {
@@ -637,34 +686,22 @@ mod await_epoch_completed_future {
 
     use futures::FutureExt;
     use futures::future::BoxFuture;
-    use risingwave_common::id::TableId;
     use risingwave_hummock_sdk::SyncResult;
-    use risingwave_pb::stream_service::barrier_complete_response::{
-        PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-        PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
-    };
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
+    use crate::task::barrier_worker::managed_state::EpochBarrierEvent;
     use crate::task::{BarrierCompleteResult, await_tree_key};
 
     pub(super) type AwaitEpochCompletedFuture =
         impl Future<Output = (Barrier, StreamResult<BarrierCompleteResult>)> + 'static;
 
     #[define_opaque(AwaitEpochCompletedFuture)]
-    #[expect(clippy::too_many_arguments)]
     pub(super) fn instrument_complete_barrier_future(
         complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
-        create_mview_progress: Vec<PbCreateMviewProgress>,
-        list_finished_source_ids: Vec<PbListFinishedSource>,
-        load_finished_source_ids: Vec<PbLoadFinishedSource>,
-        cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
-        cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
-        iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
-        truncate_tables: Vec<TableId>,
-        refresh_finished_tables: Vec<TableId>,
+        event: EpochBarrierEvent,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -678,17 +715,7 @@ mod await_epoch_completed_future {
         .map(move |result| {
             (
                 barrier,
-                result.map(|sync_result| BarrierCompleteResult {
-                    sync_result,
-                    create_mview_progress,
-                    list_finished_source_ids,
-                    load_finished_source_ids,
-                    cdc_table_backfill_progress,
-                    cdc_source_offset_updated,
-                    iceberg_pk_index_sink_metadata,
-                    truncate_tables,
-                    refresh_finished_tables,
-                }),
+                result.map(|sync_result| BarrierCompleteResult { sync_result, event }),
             )
         });
         if let Some(reg) = barrier_await_tree_reg {
@@ -705,7 +732,6 @@ mod await_epoch_completed_future {
 }
 
 use await_epoch_completed_future::*;
-use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
@@ -758,14 +784,7 @@ impl LocalBarrierWorker {
             let BarrierToComplete {
                 barrier,
                 table_ids,
-                create_mview_progress,
-                list_finished_source_ids,
-                load_finished_source_ids,
-                cdc_table_backfill_progress,
-                cdc_source_offset_updated,
-                iceberg_pk_index_sink_metadata,
-                truncate_tables,
-                refresh_finished_tables,
+                event,
             } = graph_state.pop_barrier_to_complete(prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
@@ -795,14 +814,7 @@ impl LocalBarrierWorker {
                         complete_barrier_future,
                         barrier,
                         self.actor_manager.await_tree_reg.as_ref(),
-                        create_mview_progress,
-                        list_finished_source_ids,
-                        load_finished_source_ids,
-                        cdc_table_backfill_progress,
-                        cdc_source_offset_updated,
-                        iceberg_pk_index_sink_metadata,
-                        truncate_tables,
-                        refresh_finished_tables,
+                        event,
                     )
                 });
         }
@@ -811,20 +823,30 @@ impl LocalBarrierWorker {
     fn on_epoch_completed(
         &mut self,
         partial_graph_id: PartialGraphId,
-        epoch: u64,
         result: BarrierCompleteResult,
     ) {
-        let BarrierCompleteResult {
+        let BarrierCompleteResult { sync_result, event } = result;
+        let EpochBarrierEvent {
+            epoch: event_epoch,
             create_mview_progress,
-            sync_result,
+            table_change_log_progress,
             list_finished_source_ids,
             load_finished_source_ids,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
             iceberg_pk_index_sink_metadata,
-            truncate_tables,
-            refresh_finished_tables,
-        } = result;
+            refresh_finished_actors,
+        } = event;
+        let create_mview_progress = create_mview_progress
+            .into_iter()
+            .map(|(actor, (fragment_id, state))| state.to_pb(fragment_id, actor))
+            .collect();
+        let table_change_log_progress =
+            aggregate_table_change_log_progress(table_change_log_progress);
+        let cdc_table_backfill_progress = cdc_table_backfill_progress
+            .into_iter()
+            .map(|(actor, state)| state.to_pb(actor, event_epoch.curr))
+            .collect();
 
         let (synced_sstables, table_watermarks, old_value_ssts, vector_index_adds) = sync_result
             .map(|sync_result| {
@@ -843,9 +865,10 @@ impl LocalBarrierWorker {
                     BarrierCompleteResponse {
                         request_id: "todo".to_owned(),
                         partial_graph_id,
-                        epoch,
+                        epoch: event_epoch.prev,
                         status: None,
                         create_mview_progress,
+                        table_change_log_progress,
                         synced_sstables: synced_sstables
                             .into_iter()
                             .map(
@@ -884,8 +907,7 @@ impl LocalBarrierWorker {
                             })
                             .collect(),
                         cdc_table_backfill_progress,
-                        truncate_tables,
-                        refresh_finished_tables,
+                        refresh_finished_actors,
                         iceberg_pk_index_sink_metadata,
                     },
                 )
@@ -946,18 +968,37 @@ impl LocalBarrierWorker {
         }
     }
 
-    fn add_partial_graph(&mut self, partial_graph_id: PartialGraphId) {
+    fn add_partial_graph(&mut self, partial_graph_id: PartialGraphId, term_id: String) {
         match self.state.partial_graphs.entry(partial_graph_id) {
             Entry::Occupied(entry) => {
                 let status = entry.into_mut();
                 if let PartialGraphStatus::ReceivedExchangeRequest(pending_requests) = status {
                     let mut graph = PartialGraphState::new(
                         partial_graph_id,
-                        self.term_id.clone(),
+                        term_id.clone(),
                         self.actor_manager.clone(),
                     );
-                    for ((upstream_actor_id, actor_id), request) in pending_requests.drain(..) {
-                        graph.new_actor_output_request(actor_id, upstream_actor_id, request);
+                    for (request_term_id, (upstream_actor_id, actor_id), request) in
+                        pending_requests.drain(..)
+                    {
+                        if request_term_id == term_id {
+                            graph.new_actor_output_request(actor_id, upstream_actor_id, request);
+                        } else {
+                            warn!(
+                                %partial_graph_id,
+                                %upstream_actor_id,
+                                %actor_id,
+                                request_term_id,
+                                current_term_id = term_id,
+                                "reject buffered exchange request with stale partial graph term"
+                            );
+                            if let TakeReceiverRequest::Remote { result_sender, .. } = request {
+                                let _ = result_sender.send(Err(anyhow!(
+                                    "take receiver ({upstream_actor_id}, {actor_id}) on stale partial graph term {request_term_id}; current term is {term_id}"
+                                )
+                                .into()));
+                            }
+                        }
                     }
                     *status = PartialGraphStatus::Running(graph);
                 } else {
@@ -966,13 +1007,9 @@ impl LocalBarrierWorker {
 
                 status
             }
-            Entry::Vacant(entry) => {
-                entry.insert(PartialGraphStatus::Running(PartialGraphState::new(
-                    partial_graph_id,
-                    self.term_id.clone(),
-                    self.actor_manager.clone(),
-                )))
-            }
+            Entry::Vacant(entry) => entry.insert(PartialGraphStatus::Running(
+                PartialGraphState::new(partial_graph_id, term_id, self.actor_manager.clone()),
+            )),
         };
     }
 
@@ -1057,7 +1094,7 @@ impl LocalBarrierWorker {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    async fn reset(&mut self, init_request: InitRequest) {
+    async fn reset(&mut self, _init_request: InitRequest) {
         join(
             join_all(
                 self.state
@@ -1083,7 +1120,7 @@ impl LocalBarrierWorker {
                 .await
         }
         self.actor_manager.env.dml_manager_ref().clear();
-        *self = Self::new(self.actor_manager.clone(), init_request.term_id);
+        *self = Self::new(self.actor_manager.clone());
         self.actor_manager.env.client_pool().invalidate_all();
     }
 
@@ -1115,7 +1152,7 @@ impl LocalBarrierWorker {
             runtime: runtime.into(),
             config_override_cache: ConfigOverrideCache::new(CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY),
         });
-        let worker = LocalBarrierWorker::new(actor_manager, "uninitialized".into());
+        let worker = LocalBarrierWorker::new(actor_manager);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -1191,6 +1228,7 @@ pub(crate) mod barrier_test_utils {
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             PbCreatePartialGraphRequest {
                                 partial_graph_id: TEST_PARTIAL_GRAPH_ID,
+                                term_id: "for_test".into(),
                             },
                         ),
                     ),
@@ -1202,9 +1240,7 @@ pub(crate) mod barrier_test_utils {
                     response_tx,
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
-                init_request: InitRequest {
-                    term_id: "for_test".into(),
-                },
+                init_request: InitRequest {},
             });
 
             assert_matches!(

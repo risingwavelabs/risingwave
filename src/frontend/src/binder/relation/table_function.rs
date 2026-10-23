@@ -1,4 +1,4 @@
-// Copyright 2022 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -90,6 +90,13 @@ impl Binder {
                 self.bind_watermark(alias, args)?,
             )));
         };
+
+        if with_ordinality && func_name.eq_ignore_ascii_case("mssql_query") {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "WITH ORDINALITY is not supported for mssql_query".to_owned(),
+            )
+            .into());
+        }
 
         self.push_context();
         let mut clause = Some(Clause::From);

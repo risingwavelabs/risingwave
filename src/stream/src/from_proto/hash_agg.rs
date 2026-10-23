@@ -74,9 +74,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .map(AggCall::from_protobuf)
             .try_collect()?;
 
-        let vnodes = Some(Arc::new(
-            params.vnode_bitmap.expect("vnodes not set for hash agg"),
-        ));
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
         let storages = build_agg_state_storages_from_proto(
             node.get_agg_call_states(),
             store.clone(),

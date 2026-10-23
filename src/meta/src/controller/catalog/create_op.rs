@@ -120,17 +120,18 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::Database(ObjectModel(db.clone(), db_obj, None).into()),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::Database(ObjectModel(db.clone(), db_obj, None).into()),
+        );
         for schema in schemas {
-            version = self
-                .notify_frontend(NotificationOperation::Add, NotificationInfo::Schema(schema))
-                .await;
+            notifications.add(NotificationOperation::Add, NotificationInfo::Schema(schema));
         }
+        let version = notifications
+            .publish()
+            .await
+            .expect("the database notification batch contains the database");
 
         Ok((version, db))
     }
@@ -159,17 +160,18 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::Schema(ObjectModel(schema, schema_obj, None).into()),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::Schema(ObjectModel(schema, schema_obj, None).into()),
+        );
 
         // notify default privileges for schemas
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the schema notification batch contains the schema");
 
         Ok(version)
     }
@@ -231,6 +233,14 @@ impl CatalogController {
         // handle secret ref
         let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
         let connection_ids = get_referred_connection_ids_from_source(&pb_source);
+        let cdc_source_id = pb_source
+            .info
+            .as_ref()
+            .and_then(|info| info.external_table.as_ref())
+            .map(|table| table.source_id);
+        if let Some(cdc_source_id) = cdc_source_id {
+            ensure_object_id(ObjectType::Source, cdc_source_id, &txn).await?;
+        }
 
         let source_obj = Self::create_object(
             &txn,
@@ -243,17 +253,32 @@ impl CatalogController {
         .await?;
         let source_id = source_obj.oid.as_source_id();
         pb_source.id = source_id;
+        if let Some(external_table) = pb_source
+            .info
+            .as_mut()
+            .and_then(|info| info.external_table.as_mut())
+        {
+            external_table.table_id = source_id.as_cdc_table_id();
+            // The connect properties were only needed to validate the descriptor. Consumers
+            // resolve them from the upstream shared source when they are planned, so persisting
+            // a copy here would only make credentials and secret references stale after
+            // `ALTER SOURCE`.
+            external_table.connect_properties.clear();
+            external_table.secret_refs.clear();
+        }
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
-        // add secret and connection dependency
+        // Add secret, connection, and upstream shared CDC source dependencies.
         let dep_relation_ids = secret_ids
             .iter()
             .copied()
             .map_into()
-            .chain(connection_ids.iter().copied().map_into());
-        let dependencies = if !secret_ids.is_empty() || !connection_ids.is_empty() {
-            ObjectDependency::insert_many(dep_relation_ids.map(|id| {
+            .chain(connection_ids.iter().copied().map_into())
+            .chain(cdc_source_id.map(|id| id.as_object_id()))
+            .collect_vec();
+        let dependencies = if !dep_relation_ids.is_empty() {
+            ObjectDependency::insert_many(dep_relation_ids.into_iter().map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(id),
                     used_by: Set(source_id.as_object_id()),
@@ -273,6 +298,11 @@ impl CatalogController {
                     object_id: source_id.as_object_id(),
                     referenced_object_id: id.as_object_id(),
                     referenced_object_type: PbObjectType::Connection as _,
+                }))
+                .chain(cdc_source_id.map(|id| PbObjectDependency {
+                    object_id: source_id.as_object_id(),
+                    referenced_object_id: id.as_object_id(),
+                    referenced_object_type: PbObjectType::Source as _,
                 }))
                 .collect_vec()
         } else {
@@ -314,19 +344,38 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        let mut notifications = self.frontend_notification_batch();
+        let mut finished_job_ids = Vec::with_capacity(job_notifications.len());
         for (job_id, (op, objects, user_info, dependencies)) in job_notifications {
-            let mut version = self
-                .notify_frontend(
-                    op,
-                    NotificationInfo::ObjectGroup(PbObjectGroup {
-                        objects,
-                        dependencies,
-                    }),
-                )
-                .await;
-            if !user_info.is_empty() {
-                version = self.notify_users_update(user_info).await;
-            }
+            notifications.add(
+                op,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects,
+                    dependencies,
+                }),
+            );
+            Self::add_users_update_notifications(&mut notifications, user_info);
+            finished_job_ids.push(job_id);
+        }
+
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: Some(PbObjectInfo::Source(pb_source)),
+                }],
+                dependencies,
+            }),
+        );
+
+        // notify default privileges for source
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the source notification batch contains the source");
+
+        for job_id in finished_job_ids {
             inner
                 .creating_table_finish_notifier
                 .values_mut()
@@ -337,23 +386,6 @@ impl CatalogController {
                         }
                     }
                 });
-        }
-
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: vec![PbObject {
-                        object_info: Some(PbObjectInfo::Source(pb_source)),
-                    }],
-                    dependencies,
-                }),
-            )
-            .await;
-
-        // notify default privileges for source
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
         }
 
         Ok((source_id, version))
@@ -391,17 +423,18 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::Function(pb_function),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::Function(pb_function),
+        );
 
         // notify default privileges for functions
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the function notification batch contains the function");
 
         Ok(version)
     }
@@ -472,29 +505,30 @@ impl CatalogController {
             );
         }
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: vec![PbObject {
-                        object_info: Some(PbObjectInfo::Connection(pb_connection)),
-                    }],
-                    dependencies: dep_secrets
-                        .iter()
-                        .map(|secret_id| PbObjectDependency {
-                            object_id: conn_obj.oid,
-                            referenced_object_id: secret_id.as_object_id(),
-                            referenced_object_type: PbObjectType::Secret as _,
-                        })
-                        .collect(),
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: Some(PbObjectInfo::Connection(pb_connection)),
+                }],
+                dependencies: dep_secrets
+                    .iter()
+                    .map(|secret_id| PbObjectDependency {
+                        object_id: conn_obj.oid,
+                        referenced_object_id: secret_id.as_object_id(),
+                        referenced_object_type: PbObjectType::Secret as _,
+                    })
+                    .collect(),
+            }),
+        );
 
         // notify default privileges for connections
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the connection notification batch contains the connection");
 
         Ok(version)
     }
@@ -537,17 +571,18 @@ impl CatalogController {
             .notification_manager()
             .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
 
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::Secret(secret_plain),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::Secret(secret_plain),
+        );
 
         // notify default privileges for secrets
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the secret notification batch contains the secret");
 
         Ok(version)
     }
@@ -602,22 +637,23 @@ impl CatalogController {
         let updated_user_info = grant_default_privileges_automatically(&txn, view_obj.oid).await?;
 
         txn.commit().await?;
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: vec![PbObject {
-                        object_info: Some(PbObjectInfo::View(pb_view)),
-                    }],
-                    dependencies,
-                }),
-            )
-            .await;
+        let mut notifications = self.frontend_notification_batch();
+        notifications.add(
+            NotificationOperation::Add,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: Some(PbObjectInfo::View(pb_view)),
+                }],
+                dependencies,
+            }),
+        );
 
         // notify default privileges for views
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
+        Self::add_users_update_notifications(&mut notifications, updated_user_info);
+        let version = notifications
+            .publish()
+            .await
+            .expect("the view notification batch contains the view");
 
         Ok(version)
     }

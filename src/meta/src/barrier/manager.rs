@@ -38,7 +38,6 @@ use crate::barrier::{
     RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
-use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
@@ -69,7 +68,7 @@ impl GlobalBarrierManager {
         let job_info = self
             .metadata_manager
             .catalog_controller
-            .list_creating_jobs(true, true, None)
+            .list_creating_jobs(true, None)
             .await?;
         Ok(job_info
             .into_iter()
@@ -80,7 +79,7 @@ impl GlobalBarrierManager {
                         backfill_type,
                     } = match &mut backfill_progress {
                         Ok(progress) => progress.remove(&job_id).unwrap_or_else(|| {
-                            warn!(%job_id, "background job has no ddl progress");
+                            warn!(%job_id, "creating job has no ddl progress");
                             BackfillProgress {
                                 progress: "0.0%".into(),
                                 backfill_type: PbBackfillType::NormalBackfill,
@@ -184,7 +183,6 @@ impl GlobalBarrierManager {
 }
 
 impl GlobalBarrierManager {
-    #[expect(clippy::too_many_arguments)]
     pub async fn start(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
@@ -194,9 +192,7 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
-        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
-        barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
@@ -211,10 +207,8 @@ impl GlobalBarrierManager {
             source_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
-            iceberg_compaction_manager,
             scale_controller,
             request_rx,
-            barrier_scheduler,
             refresh_manager,
         )
         .await;

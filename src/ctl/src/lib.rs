@@ -339,6 +339,16 @@ enum HummockCommands {
         meta_cache_capacity_mb: Option<u64>,
         #[clap(long)]
         data_cache_capacity_mb: Option<u64>,
+        #[clap(
+            long,
+            help = "Clear the local file-backed meta cache on all compute nodes (best effort)"
+        )]
+        clear_meta_cache: bool,
+        #[clap(
+            long,
+            help = "Clear the local file-backed data cache on all compute nodes (best effort)"
+        )]
+        clear_data_cache: bool,
     },
     /// Table cache refill tools.
     #[clap(subcommand)]
@@ -349,6 +359,14 @@ enum HummockCommands {
 enum RefillCommands {
     /// Collect table cache refill stats from compute nodes.
     Stats,
+    /// Warm up a Hummock-backed table in the streaming compute node caches.
+    WarmUp {
+        #[clap(long)]
+        table_id: TableId,
+        /// Maximum number of vnodes scanned concurrently on each compute node.
+        #[clap(long, default_value_t = 16)]
+        concurrency: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -923,18 +941,26 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ResizeCache {
             meta_cache_capacity_mb,
             data_cache_capacity_mb,
+            clear_meta_cache,
+            clear_data_cache,
         }) => {
             const MIB: u64 = 1024 * 1024;
             cmd_impl::hummock::resize_cache(
                 context,
                 meta_cache_capacity_mb.map(|v| v * MIB),
                 data_cache_capacity_mb.map(|v| v * MIB),
+                clear_meta_cache,
+                clear_data_cache,
             )
             .await?
         }
         Commands::Hummock(HummockCommands::Refill(RefillCommands::Stats)) => {
             cmd_impl::hummock::refill_stats(context).await?
         }
+        Commands::Hummock(HummockCommands::Refill(RefillCommands::WarmUp {
+            table_id,
+            concurrency,
+        })) => cmd_impl::hummock::warm_up_table_cache(context, table_id, concurrency).await?,
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,

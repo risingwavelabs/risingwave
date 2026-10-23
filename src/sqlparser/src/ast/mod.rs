@@ -38,9 +38,11 @@ pub use self::ddl::{
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
-    Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
-    NamedWindow, OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias,
-    TableFactor, TableWithJoins, Top, Values, With,
+    AfterMatchSkip, Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint,
+    JoinOperator, LateralView, MatchRecognizePattern, MatchRecognizeSymbol, Measure, NamedWindow,
+    OrderByExpr, Query, RepetitionQuantifier, RowsPerMatch, Select, SelectItem, SetExpr,
+    SetOperator, SubsetDefinition, SymbolDefinition, TableAlias, TableFactor, TableWithJoins, Top,
+    Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
@@ -57,10 +59,29 @@ use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrEr
 pub use crate::quote_ident::QuoteIdent;
 use crate::tokenizer::Tokenizer;
 
-pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
+/// Case-insensitive SQL option redaction with exact-name exemptions.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct SqlOptionRedaction {
+    pub keywords: HashSet<String>,
+    pub allowlist: HashSet<String>,
+}
+
+impl SqlOptionRedaction {
+    pub fn new(
+        keywords: impl IntoIterator<Item = String>,
+        allowlist: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self {
+            keywords: keywords.into_iter().map(|s| s.to_lowercase()).collect(),
+            allowlist: allowlist.into_iter().map(|s| s.to_lowercase()).collect(),
+        }
+    }
+}
+
+pub type SqlOptionRedactionRef = Arc<SqlOptionRedaction>;
 
 task_local::task_local! {
-    pub static REDACT_SQL_OPTION_KEYWORDS: RedactSqlOptionKeywordsRef;
+    pub static SQL_OPTION_REDACTION: SqlOptionRedactionRef;
 }
 
 pub struct DisplaySeparated<'a, T>
@@ -1261,6 +1282,13 @@ pub enum WaitTarget {
     Index(ObjectName),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileCacheType {
+    Meta,
+    Data,
+    All,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1701,6 +1729,10 @@ pub enum Statement {
         param: Ident,
         value: SetVariableValue,
     },
+    /// ALTER SYSTEM CLEAR FILE CACHE [META | DATA | ALL]
+    AlterSystemClearFileCache {
+        cache_type: FileCacheType,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1718,13 +1750,20 @@ pub enum Statement {
     Use {
         db_name: ObjectName,
     },
-    /// `VACUUM [FULL] [database_name][schema_name][object_name]`
+    /// `VACUUM [FULL | ORPHAN] [database_name][schema_name][object_name]`
     ///
-    /// Note: this is a RisingWave specific statement for iceberg table/sink compaction.
+    /// Note: this is a RisingWave specific statement for Iceberg table/sink maintenance.
     Vacuum {
         object_name: ObjectName,
-        full: bool,
+        mode: VacuumMode,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VacuumMode {
+    Default,
+    Full,
+    OrphanFiles,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2137,7 +2176,11 @@ impl Statement {
                 }
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
-                    write!(f, " TABLE '{}'", info.external_table_name)?;
+                    write!(
+                        f,
+                        " TABLE '{}'",
+                        value::escape_single_quote_string(&info.external_table_name)
+                    )?;
                 }
                 if let Some(info) = webhook_info
                     && let Some(signature_expr) = &info.signature_expr
@@ -2477,6 +2520,14 @@ impl Statement {
                 f.write_str("ALTER SYSTEM SET ")?;
                 write!(f, "{param} = {value}",)
             }
+            Statement::AlterSystemClearFileCache { cache_type } => {
+                f.write_str("ALTER SYSTEM CLEAR FILE CACHE ")?;
+                match cache_type {
+                    FileCacheType::Meta => f.write_str("META"),
+                    FileCacheType::Data => f.write_str("DATA"),
+                    FileCacheType::All => f.write_str("ALL"),
+                }
+            }
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
@@ -2516,14 +2567,11 @@ impl Statement {
                 write!(f, "USE {}", db_name)?;
                 Ok(())
             }
-            Statement::Vacuum { object_name, full } => {
-                if *full {
-                    write!(f, "VACUUM FULL {}", object_name)?;
-                } else {
-                    write!(f, "VACUUM {}", object_name)?;
-                }
-                Ok(())
-            }
+            Statement::Vacuum { object_name, mode } => match mode {
+                VacuumMode::Default => write!(f, "VACUUM {}", object_name),
+                VacuumMode::Full => write!(f, "VACUUM FULL {}", object_name),
+                VacuumMode::OrphanFiles => write!(f, "VACUUM ORPHAN {}", object_name),
+            },
             Statement::AlterFragment {
                 fragment_ids,
                 operation,
@@ -3295,12 +3343,26 @@ pub struct SqlOption {
     pub value: SqlOptionValue,
 }
 
+impl SqlOption {
+    /// Creates an option whose value is a typed secret reference.
+    pub fn from_secret_ref(name: &str, secret_ref: SecretRefValue) -> Self {
+        Self {
+            name: ObjectName(name.split('.').map(Ident::from_real_value).collect()),
+            value: SqlOptionValue::SecretRef(secret_ref),
+        }
+    }
+}
+
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let should_redact = REDACT_SQL_OPTION_KEYWORDS
-            .try_with(|keywords| {
+        let should_redact = SQL_OPTION_REDACTION
+            .try_with(|redaction| {
                 let sql_option_name = self.name.real_value().to_lowercase();
-                keywords.iter().any(|k| sql_option_name.contains(k))
+                !redaction.allowlist.contains(&sql_option_name)
+                    && redaction
+                        .keywords
+                        .iter()
+                        .any(|k| sql_option_name.contains(k))
             })
             .unwrap_or(false);
         if should_redact {
@@ -3891,6 +3953,10 @@ impl fmt::Display for SetVariableValueSingle {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AsOf {
     ProcessTime,
+    /// Internal marker for a process-time temporal join whose lookup side is broadcast to all join
+    /// actors. It stays on the lookup relation so optimizer rewrites cannot detach the strategy
+    /// from that relation; [`crate::ast::Join`]'s `Display` renders the modifier in join position.
+    ProcessTimeBroadcast,
     // used by time travel
     ProcessTimeWithInterval((String, DateTimeField)),
     // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
@@ -3904,7 +3970,9 @@ impl fmt::Display for AsOf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use AsOf::*;
         match self {
-            ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            ProcessTime | ProcessTimeBroadcast => {
+                write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")
+            }
             ProcessTimeWithInterval((value, leading_field)) => write!(
                 f,
                 " FOR SYSTEM_TIME AS OF NOW() - '{}' {}",
@@ -3962,8 +4030,8 @@ impl fmt::Display for BackfillOrderStrategy {
 }
 
 impl Statement {
-    pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
-        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string_unchecked())
+    pub fn to_redacted_string(&self, redaction: SqlOptionRedactionRef) -> String {
+        SQL_OPTION_REDACTION.sync_scope(redaction, || self.to_string_unchecked())
     }
 
     /// Create a new `CREATE TABLE` statement with the given `name` and empty fields.
@@ -3994,6 +4062,62 @@ impl Statement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sql_option_redaction_preserves_primary_key() {
+        let redaction = Arc::new(SqlOptionRedaction::new(
+            [
+                "credential".into(),
+                "key".into(),
+                "password".into(),
+                "private".into(),
+                "secret".into(),
+                "token".into(),
+            ],
+            ["primary_key".into()],
+        ));
+        for (name, expected_value) in [
+            ("primary_key", "'id'"),
+            ("\"primary_key\"", "'id'"),
+            ("\"PRIMARY_KEY\"", "'id'"),
+            ("api_key", "[REDACTED]"),
+            ("access_key", "[REDACTED]"),
+            ("password", "[REDACTED]"),
+            ("token", "[REDACTED]"),
+            ("primary_key_password", "[REDACTED]"),
+            ("my_primary_key", "[REDACTED]"),
+            ("aws.secret_access_key", "[REDACTED]"),
+            ("connector", "'id'"),
+        ] {
+            let sql = format!("CREATE SINK s FROM t WITH ({name} = 'id')");
+            let statement = Parser::parse_sql(&sql).unwrap().remove(0);
+            assert_eq!(
+                statement.to_redacted_string(redaction.clone()),
+                format!("CREATE SINK s FROM t WITH ({name} = {expected_value})"),
+                "option: {name}",
+            );
+            assert_eq!(statement.to_string_unchecked(), sql);
+        }
+    }
+
+    #[test]
+    fn test_sql_option_redaction_custom_allowlist() {
+        let sql = "CREATE SINK s FROM t WITH (primary_key = 'id', partition_key = 'region', partition_key_password = 'secret')";
+        let statement = Parser::parse_sql(sql).unwrap().remove(0);
+        for (allowlist, expected) in [
+            (
+                vec![],
+                "CREATE SINK s FROM t WITH (primary_key = [REDACTED], partition_key = [REDACTED], partition_key_password = [REDACTED])",
+            ),
+            (
+                vec!["PARTITION_KEY".into()],
+                "CREATE SINK s FROM t WITH (primary_key = [REDACTED], partition_key = 'region', partition_key_password = [REDACTED])",
+            ),
+        ] {
+            let redaction = Arc::new(SqlOptionRedaction::new(["KEY".into()], allowlist));
+            assert_eq!(statement.to_redacted_string(redaction), expected);
+        }
+    }
 
     #[test]
     fn test_grouping_sets_display() {
@@ -4172,5 +4296,32 @@ mod tests {
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true )",
             format!("{}", create_function)
         );
+    }
+
+    #[test]
+    fn test_sql_option_from_secret_ref() {
+        let text_option = SqlOption::from_secret_ref(
+            "password",
+            SecretRefValue {
+                secret_name: ObjectName(vec![
+                    Ident::from_real_value("public"),
+                    Ident::from_real_value("s2"),
+                ]),
+                ref_as: SecretRefAsType::Text,
+            },
+        );
+
+        assert!(matches!(text_option.value, SqlOptionValue::SecretRef(_)));
+        assert_eq!(text_option.to_string(), "password = secret public.s2");
+
+        let file_option = SqlOption::from_secret_ref(
+            "certificate",
+            SecretRefValue {
+                secret_name: ObjectName(vec![Ident::from_real_value("cert")]),
+                ref_as: SecretRefAsType::File,
+            },
+        );
+
+        assert_eq!(file_option.to_string(), "certificate = secret cert AS FILE");
     }
 }

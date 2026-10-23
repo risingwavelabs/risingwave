@@ -60,7 +60,7 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::id::JobId;
+    use risingwave_common::id::{DatabaseId, JobId};
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{
@@ -75,7 +75,7 @@ pub(super) mod handlers {
     use risingwave_pb::monitor_service::{
         AnalyzeHeapRequest, ChannelDeltaStats, GetStreamingPrometheusStatsResponse,
         GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
-        ListHeapProfilingRequest, ListHeapProfilingResponse, StackTraceResponse,
+        ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, StackTraceResponse,
     };
     use risingwave_pb::user::PbUserInfo;
     use serde::{Deserialize, Serialize};
@@ -149,9 +149,12 @@ pub(super) mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
-        let worker_type = WorkerType::try_from(ty)
-            .map_err(|_| anyhow!("invalid worker type"))
-            .map_err(err)?;
+        let worker_type = match WorkerType::try_from(ty) {
+            Ok(WorkerType::Unspecified) | Err(_) => {
+                return Err(err(anyhow!("invalid worker type: {ty}")));
+            }
+            Ok(worker_type) => worker_type,
+        };
         let mut result = srv
             .metadata_manager
             .list_worker_node(Some(worker_type), None)
@@ -559,6 +562,44 @@ pub(super) mod handlers {
         Ok(result.into())
     }
 
+    pub async fn cpu_profile(
+        Path((worker_id, duration_secs)): Path<(WorkerId, u64)>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Response> {
+        if duration_secs == 0 {
+            return Err(err(anyhow!(
+                "CPU profiling duration must be greater than zero"
+            )));
+        }
+
+        let flamegraph = if worker_id == crate::manager::META_NODE_ID {
+            srv.profile_service
+                .profiling(Request::new(ProfilingRequest {
+                    sleep_s: duration_secs,
+                }))
+                .await
+                .map_err(err)?
+                .into_inner()
+                .result
+        } else {
+            let worker_node = srv
+                .metadata_manager
+                .get_worker_by_id(worker_id)
+                .await
+                .map_err(err)?
+                .context("worker node not found")
+                .map_err(err)?;
+
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
+            client.profile(duration_secs).await.map_err(err)?.result
+        };
+
+        Response::builder()
+            .header("Content-Type", "image/svg+xml")
+            .body(flamegraph.into())
+            .map_err(err)
+    }
+
     pub async fn list_heap_profile(
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
@@ -631,6 +672,8 @@ pub(super) mod handlers {
     pub struct DiagnoseParams {
         #[serde(default = "await_tree_default_format")]
         actor_traces_format: String,
+        /// Filter database-owned details; shared cluster diagnostics remain included.
+        database_id: Option<DatabaseId>,
     }
 
     pub async fn diagnose(
@@ -647,7 +690,10 @@ pub(super) mod handlers {
                 )));
             }
         };
-        Ok(srv.diagnose_command.report(actor_traces_format).await)
+        Ok(srv
+            .diagnose_command
+            .report(actor_traces_format, params.database_id)
+            .await)
     }
 
     /// NOTE(kwannoel): Although we fetch the BP for the entire graph via this API,
@@ -978,13 +1024,17 @@ impl DashboardService {
             .route("/monitor/await_tree/{worker_id}", get(dump_await_tree))
             // /monitor/await_tree/?format={text or json}
             .route("/monitor/await_tree/", get(dump_await_tree_all))
+            .route(
+                "/monitor/dump_cpu_profile/{worker_id}/{duration_secs}",
+                get(cpu_profile),
+            )
             .route("/monitor/dump_heap_profile/{worker_id}", get(heap_profile))
             .route(
                 "/monitor/list_heap_profile/{worker_id}",
                 get(list_heap_profile),
             )
             .route("/monitor/analyze/{worker_id}/{*path}", get(analyze_heap))
-            // /monitor/diagnose/?format={text or json}
+            // /monitor/diagnose/?actor_traces_format={text or json}&database_id={optional id}
             .route("/monitor/diagnose/", get(diagnose))
             .layer(
                 ServiceBuilder::new()

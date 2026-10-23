@@ -19,8 +19,10 @@ use itertools::Itertools;
 use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
+use risingwave_connector::connector_common::sql_server::{
+    MssqlConnectionConfig, describe_mssql_query,
+};
 use risingwave_connector::connector_common::{PgConnectionConfig, create_pg_client};
 use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
@@ -31,15 +33,14 @@ pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use tokio_postgres::types::Type as TokioPgType;
 
 use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
-use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
-use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::BindError;
 use crate::expr::reject_impure;
 use crate::utils::FRONTEND_RUNTIME;
 
-const INLINE_ARG_LEN: usize = 6;
-const CDC_SOURCE_ARG_LEN: usize = 2;
+pub(crate) const MSSQL_QUERY_ARG_COUNT: usize = 8;
+const MSSQL_QUERY_ENCRYPT_ARG_INDEX: usize = 6;
+const MSSQL_QUERY_TRUST_CERT_ARG_INDEX: usize = 7;
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -298,85 +299,7 @@ impl TableFunction {
         })
     }
 
-    fn handle_postgres_or_mysql_query_args(
-        catalog_reader: &CatalogReadGuard,
-        db_name: &str,
-        schema_path: SchemaPath<'_>,
-        args: Vec<ExprImpl>,
-        expect_connector_name: &str,
-    ) -> RwResult<Vec<ExprImpl>> {
-        let cast_args = match args.len() {
-            INLINE_ARG_LEN => {
-                let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
-                for arg in args {
-                    let arg = arg.cast_implicit(&DataType::Varchar)?;
-                    cast_args.push(arg);
-                }
-                cast_args
-            }
-            CDC_SOURCE_ARG_LEN => {
-                let source_name = expr_impl_to_string_fn(&args[0])?;
-                let source_catalog = catalog_reader
-                    .get_source_by_name(db_name, schema_path, &source_name)?
-                    .0;
-                if !source_catalog
-                    .connector_name()
-                    .eq_ignore_ascii_case(expect_connector_name)
-                {
-                    return Err(BindError(format!("TVF function only accepts `mysql-cdc` and `postgres-cdc` source. Expected: {}, but got: {}", expect_connector_name, source_catalog.connector_name())).into());
-                }
-
-                let (props, secret_refs) = source_catalog.with_properties.clone().into_parts();
-                let secret_resolved =
-                    LocalSecretManager::global().fill_secrets(props, secret_refs)?;
-
-                let mut args_vec = vec![
-                    ExprImpl::literal_varchar(secret_resolved["hostname"].clone()),
-                    ExprImpl::literal_varchar(secret_resolved["port"].clone()),
-                    ExprImpl::literal_varchar(secret_resolved["username"].clone()),
-                    ExprImpl::literal_varchar(secret_resolved["password"].clone()),
-                    ExprImpl::literal_varchar(secret_resolved["database.name"].clone()),
-                    args.get(1)
-                        .unwrap()
-                        .clone()
-                        .cast_implicit(&DataType::Varchar)?,
-                ];
-
-                if expect_connector_name.eq_ignore_ascii_case("postgres-cdc") {
-                    args_vec.push(ExprImpl::literal_varchar(
-                        secret_resolved.get("ssl.mode").cloned().unwrap_or_default(),
-                    ));
-                    args_vec.push(ExprImpl::literal_varchar(
-                        secret_resolved
-                            .get("ssl.root.cert")
-                            .cloned()
-                            .unwrap_or_default(),
-                    ));
-                }
-
-                args_vec
-            }
-            _ => {
-                return Err(BindError("postgres_query function and mysql_query function accept either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)".to_owned()).into());
-            }
-        };
-
-        Ok(cast_args)
-    }
-
-    pub fn new_postgres_query(
-        catalog_reader: &CatalogReadGuard,
-        db_name: &str,
-        schema_path: SchemaPath<'_>,
-        args: Vec<ExprImpl>,
-    ) -> RwResult<Self> {
-        let args = Self::handle_postgres_or_mysql_query_args(
-            catalog_reader,
-            db_name,
-            schema_path,
-            args,
-            "postgres-cdc",
-        )?;
+    pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
         let evaled_args = args
             .iter()
             .map(expr_impl_to_string_fn)
@@ -415,7 +338,7 @@ impl TableFunction {
                         ssl_mode,
                         ssl_root_cert,
                     };
-                    let client = create_pg_client(&pg_conn, None).await?;
+                    let client = create_pg_client(&pg_conn, None, None).await?;
 
                     let statement = client.prepare(evaled_args[5].as_str()).await?;
 
@@ -463,19 +386,7 @@ impl TableFunction {
         }
     }
 
-    pub fn new_mysql_query(
-        catalog_reader: &CatalogReadGuard,
-        db_name: &str,
-        schema_path: SchemaPath<'_>,
-        args: Vec<ExprImpl>,
-    ) -> RwResult<Self> {
-        let args = Self::handle_postgres_or_mysql_query_args(
-            catalog_reader,
-            db_name,
-            schema_path,
-            args,
-            "mysql-cdc",
-        )?;
+    pub fn new_mysql_query(args: Vec<ExprImpl>) -> RwResult<Self> {
         let evaled_args = args
             .iter()
             .map(expr_impl_to_string_fn)
@@ -520,7 +431,7 @@ impl TableFunction {
 
                     let mut rw_types = vec![];
 
-                    for column in statement.columns() {
+                    for column in statement.columns().iter() {
                         let name = column.name_str().to_string();
                         let data_type = match column.column_type() {
                             // Boolean types
@@ -604,6 +515,94 @@ impl TableFunction {
                 args,
                 return_type: schema,
                 function_type: TableFunctionType::MysqlQuery,
+                user_defined: None,
+            })
+        }
+    }
+
+    /// Bind a `mssql_query(...)` table function call.
+    ///
+    /// `args` is the **pre-resolved** argument vector produced by the
+    /// binder (`Binder::bind_external_db_query_args`), so this function
+    /// only does the bind-time schema discovery — it does not look up the
+    /// source catalog or check privileges. See `bind_external_db_query_args`
+    /// for the inline / source-reference calling forms and the
+    /// privilege-check ordering.
+    ///
+    /// The returned `TableFunction` has a `return_type` that is a
+    /// `DataType::Struct` discovered at bind time by calling
+    /// `describe_mssql_query` against the user-provided query. The
+    /// `encrypt` and `trust_cert` flags are parsed strictly (any value
+    /// other than case-insensitive `true` / `false` is a bind error).
+    pub fn new_mssql_query(mut args: Vec<ExprImpl>) -> RwResult<Self> {
+        if args.len() != MSSQL_QUERY_ARG_COUNT {
+            return Err(BindError(format!(
+                "mssql_query expects {MSSQL_QUERY_ARG_COUNT} resolved arguments, got {}",
+                args.len()
+            ))
+            .into());
+        }
+        let evaled_args = args
+            .iter()
+            .map(expr_impl_to_string_fn)
+            .collect::<RwResult<Vec<_>>>()?;
+
+        let encrypt = evaled_args[MSSQL_QUERY_ENCRYPT_ARG_INDEX]
+            .trim()
+            .to_ascii_lowercase()
+            .parse::<bool>()
+            .context("invalid `encrypt` value for mssql_query: expected 'true' or 'false'")?;
+        let trust_cert = evaled_args[MSSQL_QUERY_TRUST_CERT_ARG_INDEX]
+            .trim()
+            .to_ascii_lowercase()
+            .parse::<bool>()
+            .context("invalid `trust_cert` value for mssql_query: expected 'true' or 'false'")?;
+        // These flags are strings at the SQL boundary to preserve the public
+        // function signature, but booleans everywhere in the internal plan.
+        // This also ensures they are parsed exactly once.
+        args[MSSQL_QUERY_ENCRYPT_ARG_INDEX] = ExprImpl::literal_bool(encrypt);
+        args[MSSQL_QUERY_TRUST_CERT_ARG_INDEX] = ExprImpl::literal_bool(trust_cert);
+
+        #[cfg(madsim)]
+        {
+            return Err(crate::error::ErrorCode::BindError(
+                "mssql_query can't be used in the madsim mode".to_string(),
+            )
+            .into());
+        }
+
+        #[cfg(not(madsim))]
+        {
+            // Schema discovery is async and yields on `FRONTEND_RUNTIME` while
+            // waiting for network I/O. The binder API itself is synchronous,
+            // so `block_in_place` tells the caller's Tokio runtime to move its
+            // other tasks off this worker while it waits for the async result.
+            let schema = tokio::task::block_in_place(|| {
+                FRONTEND_RUNTIME.block_on(async {
+                    let conn_config = MssqlConnectionConfig {
+                        host: evaled_args[0].clone(),
+                        port: evaled_args[1].parse().with_context(|| {
+                            format!("invalid sql server port `{}`", evaled_args[1])
+                        })?,
+                        user: evaled_args[2].clone(),
+                        password: evaled_args[3].clone(),
+                        database: evaled_args[4].clone(),
+                        encrypt,
+                        trust_cert,
+                    };
+
+                    let rw_types = describe_mssql_query(&conn_config, &evaled_args[5]).await?;
+
+                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
+                        StructType::new(rw_types),
+                    ))
+                })
+            })?;
+
+            Ok(TableFunction {
+                args,
+                return_type: schema,
+                function_type: TableFunctionType::MssqlQuery,
                 user_defined: None,
             })
         }
@@ -735,12 +734,12 @@ impl Expr for TableFunction {
     }
 }
 
-fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
+pub(crate) fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
     match arg.try_fold_const() {
         Some(Ok(value)) => {
             let Some(scalar) = value else {
                 return Err(BindError(
-                    "postgres_query function and mysql_query function do not accept null arguments"
+                    "postgres_query / mysql_query / mssql_query do not accept null arguments"
                         .to_owned(),
                 )
                 .into());
@@ -749,8 +748,7 @@ fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
         }
         Some(Err(err)) => Err(err),
         None => Err(BindError(
-            "postgres_query function and mysql_query function only accept constant arguments"
-                .to_owned(),
+            "postgres_query / mysql_query / mssql_query only accept constant arguments".to_owned(),
         )
         .into()),
     }
