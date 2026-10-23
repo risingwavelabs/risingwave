@@ -58,7 +58,7 @@ impl PinCache {
             };
             let entry = self.account_existing(metadata.key, metadata.total_size as u64);
             let shard_index = Self::shard_index(object_id, self.shards.len());
-            let state = self.shards[shard_index].get_mut();
+            let state = self.shards[shard_index].state.get_mut();
             let Some(object) = state.objects.get_mut(&object_id) else {
                 continue;
             };
