@@ -706,14 +706,17 @@ impl CompactionTrack {
             self.health.record_progress();
             // Beneficial PK-index batches can advance their boundary on new commits,
             // so continuous ingestion may prevent the round from ever draining.
-            // Pace successful batches even while the round remains active. Full
-            // retains a fixed boundary and can continue immediately until drained.
-            let delay =
-                if attempt.pk_index_coordinated && attempt.policy.task_type != TaskType::Full {
-                    Duration::from_secs(self.config.trigger_interval_sec)
-                } else {
-                    Duration::ZERO
-                };
+            // Pace successful batches only when new commits would advance the
+            // boundary. Otherwise, continue immediately to finish deferred plans
+            // and the empty scan needed to drain. Full always keeps a fixed boundary.
+            let delay = if attempt.pk_index_coordinated
+                && attempt.policy.task_type != TaskType::Full
+                && self.demand.commit_count > 0
+            {
+                Duration::from_secs(self.config.trigger_interval_sec)
+            } else {
+                Duration::ZERO
+            };
             self.state = CompactionTrackState::Idle {
                 next_compaction_time: now + delay,
                 manual_task_type: None,

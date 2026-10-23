@@ -2835,6 +2835,112 @@ fn test_pk_index_successful_batches_wait_for_interval_under_continuous_commits()
 }
 
 #[test]
+fn test_pk_index_successful_batches_continue_without_new_commits() {
+    for task_type in [
+        TaskType::Auto,
+        TaskType::SmallFiles,
+        TaskType::FilesWithDelete,
+    ] {
+        for interval_sec in [1, 60, 120, 3600] {
+            for applying in [false, true] {
+                let now = Instant::now();
+                let mut track = new_round_track(now, interval_sec, 1, 1);
+                track.config.pk_index_coordinated = true;
+                track.config.policy.task_type = task_type;
+                track.record_observed_snapshot(committed_snapshot(10, 1000));
+
+                // Deferred plans below the same boundary must not wait either.
+                for task_id in [9, 10] {
+                    assert!(track.should_trigger(now));
+                    start_in_flight(&mut track, task_id, now);
+                    assert_eq!(track.demand.commit_count, 0);
+                    if applying {
+                        let CompactionTrackState::InFlight {
+                            task_id, attempt, ..
+                        } = &track.state
+                        else {
+                            unreachable!()
+                        };
+                        track.state = CompactionTrackState::Applying {
+                            task_id: *task_id,
+                            attempt: attempt.clone(),
+                        };
+                    }
+                    track.finish_success(now);
+                    assert_eq!(track.round_boundary(), Some(10));
+                    assert!(track.should_trigger(now));
+                }
+
+                start_in_flight(&mut track, 11, now);
+                track.finish_drained(now);
+                assert!(track.round.is_none());
+                assert_eq!(track.demand.commit_count, 0);
+                assert!(!track.should_trigger(now + Duration::from_secs(interval_sec)));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_pk_index_no_commit_round_drains_before_manual_full() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let mut config = new_test_iceberg_config(3600, 10, CompactionType::Auto);
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    register_sink_ready(
+        &manager,
+        sink_id,
+        &config,
+        Some(committed_snapshot(10, 1000)),
+    );
+    {
+        let mut guard = manager.inner.write();
+        let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
+        let now = Instant::now();
+        start_in_flight(track, 9, now);
+        track.finish_success(now);
+        assert_eq!(track.demand.commit_count, 0);
+    }
+
+    // The final empty scan is dispatchable without waiting the default hour.
+    let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
+    assert_eq!(handles.len(), 1);
+    assert_eq!(handles[0].attempt.max_file_sequence_number, Some(10));
+    {
+        let mut guard = manager.inner.write();
+        guard
+            .sink_schedules
+            .get_mut(&sink_id)
+            .unwrap()
+            .mark_dispatched(10.into(), 1.into(), Instant::now());
+    }
+    manager.finish_report_task(
+        IcebergReportTask {
+            task_id: 10.into(),
+            sink_id,
+            status: IcebergReportTaskStatus::Drained as i32,
+            ..Default::default()
+        },
+        false,
+    );
+    assert!(
+        manager.inner.read().sink_schedules[&sink_id]
+            .round
+            .is_none()
+    );
+
+    let _waiter = manager.start_manual_compaction(sink_id).await.unwrap();
+    assert!(matches!(
+        manager.inner.read().sink_schedules[&sink_id].state,
+        CompactionTrackState::Idle {
+            manual_task_type: Some(TaskType::Full),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn test_pk_index_maintenance_does_not_reselect_rewrite_outputs() {
     let now = Instant::now();
     let mut track = new_round_track(now, 120, 10, 1);
@@ -2848,6 +2954,7 @@ fn test_pk_index_maintenance_does_not_reselect_rewrite_outputs() {
     .apply_to_track(&mut track, now);
     assert_eq!(track.demand.commit_count, 0);
     track.finish_success(now);
+    assert!(track.should_trigger(now));
     let next = track.start_attempt();
     assert_eq!(next.max_file_sequence_number, Some(10));
     assert_eq!(next.gc_watermark_snapshot.as_ref().unwrap().snapshot_id, 20);
