@@ -16,6 +16,7 @@
 
 package com.risingwave.connector.source.common;
 
+import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -24,12 +25,8 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 public class OracleValidator extends DatabaseValidator implements AutoCloseable {
-    private static final Pattern ORACLE_UNQUOTED_IDENTIFIER =
-            Pattern.compile("[A-Za-z][A-Za-z0-9_$#]*");
-
     private static final Set<String> REQUIRED_PRIVILEGES =
             Set.of(
                     "CREATE SESSION",
@@ -49,6 +46,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private static final int INITIALIZATION_TIMEOUT_SECONDS = 30;
 
     private final Connection jdbcConnection;
+    private final TableSchema tableSchema;
     private final String pdbName;
     private final String schemaName;
     private final String tableName;
@@ -56,9 +54,14 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private final boolean autoInitializeHeartbeatTable;
     private final boolean isCdcSourceJob;
 
-    public OracleValidator(Map<String, String> userProps, boolean isCdcSourceJob)
+    public OracleValidator(
+            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
             throws SQLException {
-        this.pdbName = normalizePdbName(userProps.get(DbzConnectorConfig.ORACLE_PDB_NAME));
+        this.tableSchema = tableSchema;
+        this.pdbName =
+                normalizeIdentifierInConfigOption(
+                        DbzConnectorConfig.ORACLE_PDB_NAME,
+                        userProps.get(DbzConnectorConfig.ORACLE_PDB_NAME));
         this.heartbeatTable =
                 OracleHeartbeatTable.parse(
                         userProps.get(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
@@ -72,7 +75,9 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                         SourceTypeE.ORACLE,
                         userProps.get(DbzConnectorConfig.HOST),
                         userProps.get(DbzConnectorConfig.PORT),
-                        userProps.get(DbzConnectorConfig.DB_NAME));
+                        normalizeIdentifierInConfigOption(
+                                DbzConnectorConfig.DB_NAME,
+                                userProps.get(DbzConnectorConfig.DB_NAME)));
         this.jdbcConnection =
                 DriverManager.getConnection(
                         jdbcUrl,
@@ -183,7 +188,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             }
             try (var result = stmt.executeQuery()) {
                 while (result.next()) {
-                    values.add(result.getString(1).toUpperCase(Locale.ROOT));
+                    values.add(result.getString(1));
                 }
             }
         }
@@ -205,15 +210,83 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         try {
             switchToPdb();
             validateTableExists();
+            validateTableColumns();
+            validateTablePrimaryKey();
             validateTableSupplementalLogging();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
+    private void validateTableColumns() throws SQLException {
+        var upstreamColumns = new HashSet<String>();
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        "SELECT COLUMN_NAME FROM ALL_TAB_COLS "
+                                + "WHERE OWNER = ? AND TABLE_NAME = ? AND HIDDEN_COLUMN = 'NO'")) {
+            stmt.setString(1, schemaName);
+            stmt.setString(2, tableName);
+            try (var result = stmt.executeQuery()) {
+                while (result.next()) {
+                    upstreamColumns.add(result.getString("COLUMN_NAME"));
+                }
+            }
+        }
+        for (var columnName : tableSchema.getColumnNames()) {
+            if (columnName.startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                continue;
+            }
+            if (!upstreamColumns.contains(columnName)) {
+                throw ValidatorUtils.invalidArgument(
+                        "Column '"
+                                + columnName
+                                + "' not found in the upstream database.\nHint: Oracle stores unquoted column names in uppercase. Use double quotes (\") in RisingWave to preserve the upstream column name.");
+            }
+        }
+    }
+
+    private void validateTablePrimaryKey() throws SQLException {
+        var pkFields = new HashSet<String>();
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        "SELECT cols.COLUMN_NAME FROM ALL_CONSTRAINTS cons "
+                                + "JOIN ALL_CONS_COLUMNS cols ON cons.OWNER = cols.OWNER "
+                                + "AND cons.CONSTRAINT_NAME = cols.CONSTRAINT_NAME "
+                                + "WHERE cons.OWNER = ? AND cons.TABLE_NAME = ? "
+                                + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED'")) {
+            stmt.setString(1, schemaName);
+            stmt.setString(2, tableName);
+            try (var result = stmt.executeQuery()) {
+                while (result.next()) {
+                    pkFields.add(result.getString("COLUMN_NAME"));
+                }
+            }
+        }
+        primaryKeyCheck(tableSchema, pkFields);
+    }
+
+    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields) {
+        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+            throw ValidatorUtils.invalidArgument(
+                    "Primary key mismatch: the SQL schema defines "
+                            + sourceSchema.getPrimaryKeys().size()
+                            + " primary key columns, but the source table in Oracle has "
+                            + pkFields.size()
+                            + " columns.");
+        }
+        for (var colName : sourceSchema.getPrimaryKeys()) {
+            if (!pkFields.contains(colName)) {
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key mismatch: The primary key list of the source table in Oracle does not contain '"
+                                + colName
+                                + "'.\nHint: Oracle stores unquoted column names in uppercase. Use double quotes (\") in RisingWave to preserve the upstream column name.");
+            }
+        }
+    }
+
     private void switchToPdb() throws SQLException {
         try (var stmt = jdbcConnection.createStatement()) {
-            stmt.execute("ALTER SESSION SET CONTAINER = " + pdbName);
+            stmt.execute("ALTER SESSION SET CONTAINER = " + quoteIdentifier(pdbName));
         }
     }
 
@@ -571,9 +644,9 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             Set<String> updateGrantees) {
         // In Oracle, each user owns a schema with the same name. The table owner can update
         // its tables without an explicit UPDATE grant, so it need not appear in updateGrantees.
-        if (owner.equalsIgnoreCase(sessionUser)
+        if (owner.equals(sessionUser)
                 || sessionPrivileges.contains("UPDATE ANY TABLE")
-                || updateGrantees.contains(sessionUser.toUpperCase(Locale.ROOT))
+                || updateGrantees.contains(sessionUser)
                 || updateGrantees.contains("PUBLIC")) {
             return true;
         }
@@ -617,12 +690,18 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         }
     }
 
-    static String normalizePdbName(String pdbName) {
-        if (pdbName == null || !ORACLE_UNQUOTED_IDENTIFIER.matcher(pdbName).matches()) {
-            throw ValidatorUtils.invalidArgument(
-                    "'database.pdb.name' must be an unquoted Oracle identifier");
+    static String normalizeIdentifierInConfigOption(String optionName, String value) {
+        if (value == null || value.isEmpty()) {
+            throw ValidatorUtils.invalidArgument("'" + optionName + "' is required");
         }
-        return pdbName.toUpperCase(Locale.ROOT);
+        if (value.startsWith("\"") && value.endsWith("\"")) {
+            throw ValidatorUtils.invalidArgument("'" + optionName + "' must not be quoted");
+        }
+        return value.toUpperCase(Locale.ROOT);
+    }
+
+    static String quoteIdentifier(String identifier) {
+        return '"' + identifier.replace("\"", "\"\"") + '"';
     }
 
     @Override
