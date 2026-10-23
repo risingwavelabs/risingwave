@@ -9,10 +9,6 @@ create materialized view mv as select * from v;
 
 connection txn
 statement ok
-SET VISIBILITY_MODE TO checkpoint;
-
-connection txn
-statement ok
 insert into t select * from generate_series(
     now() at time zone 'utc' - interval '10' second,
     now() at time zone 'utc' + interval '20' second,

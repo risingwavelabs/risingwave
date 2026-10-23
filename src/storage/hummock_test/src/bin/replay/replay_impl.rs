@@ -105,7 +105,6 @@ fn convert_read_options(read_options: TracedReadOptions) -> StateStoreTestReadOp
         prefix_hint: read_options.prefix_hint.map(Into::into),
         prefetch_options: read_options.prefetch_options.into(),
         cache_policy: read_options.cache_policy.into(),
-        read_committed: read_options.read_committed,
         retention_seconds: read_options.retention_seconds,
         read_version_from_backup: read_options.read_version_from_backup,
     }

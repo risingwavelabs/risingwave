@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use itertools::Itertools;
 use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::Role;
@@ -27,9 +26,7 @@ use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
-use risingwave_hummock_sdk::key::{
-    TableKey, TableKeyRange, is_empty_key_range, vnode, vnode_range,
-};
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange, is_empty_key_range, vnode_range};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -41,7 +38,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 
 use super::local_hummock_storage::LocalHummockStorage;
-use super::version::{CommittedVersion, HummockVersionReader, read_filter_for_version};
+use super::version::{CommittedVersion, HummockVersionReader};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 #[cfg(any(test, feature = "test"))]
 use crate::compaction_catalog_manager::{CompactionCatalogManager, FakeRemoteTableAccessor};
@@ -54,7 +51,6 @@ use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, Hummoc
 use crate::hummock::event_handler::refiller::TableCacheRefillMonitorSnapshot;
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockObserverEvent, HummockVersionUpdate,
-    ReadOnlyReadVersionMapping,
 };
 use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_version_worker};
@@ -113,8 +109,6 @@ pub struct HummockStorage {
     hummock_version_reader: HummockVersionReader,
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
-
-    read_version_mapping: ReadOnlyReadVersionMapping,
 
     backup_reader: BackupReaderRef,
 
@@ -250,7 +244,6 @@ impl HummockStorage {
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
             }),
-            read_version_mapping: hummock_event_handler.read_version_mapping(),
             backup_reader,
             write_limiter,
             compact_await_tree_reg: await_tree_reg,
@@ -411,10 +404,6 @@ impl HummockStorageReadSnapshot {
                 self.build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
                     .await
             }
-            HummockReadEpoch::NoWait(epoch) => {
-                self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
-                    .await
-            }
         }
     }
 
@@ -469,101 +458,6 @@ impl HummockStorageReadSnapshot {
         Ok(get_committed_read_version_tuple(
             version, table_id, key_range, epoch,
         ))
-    }
-
-    async fn build_read_version_tuple_from_all(
-        &self,
-        epoch: u64,
-        table_id: TableId,
-        key_range: TableKeyRange,
-    ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        let pinned_version = self.recent_versions.load().latest_version().clone();
-        let info = pinned_version.state_table_info.info().get(&table_id);
-
-        // check epoch if lower mce
-        let ret = if let Some(info) = info
-            && epoch <= info.committed_epoch
-        {
-            let pinned_version = if epoch < info.committed_epoch {
-                pinned_version
-            } else {
-                self.get_epoch_hummock_version(epoch, table_id).await?
-            };
-            // read committed_version directly without build snapshot
-            get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
-        } else {
-            let vnode = vnode(&key_range);
-            let mut matched_replicated_read_version_cnt = 0;
-            let read_version_vec = {
-                let read_guard = self.read_version_mapping.read();
-                read_guard
-                    .get(&table_id)
-                    .map(|v| {
-                        v.values()
-                            .filter(|v| {
-                                let read_version = v.read();
-                                if read_version.is_initialized() && read_version.contains(vnode) {
-                                    if read_version.is_replicated() {
-                                        matched_replicated_read_version_cnt += 1;
-                                        false
-                                    } else {
-                                        // Only non-replicated read version with matched vnode is considered
-                                        true
-                                    }
-                                } else {
-                                    false
-                                }
-                            })
-                            .cloned()
-                            .collect_vec()
-                    })
-                    .unwrap_or_default()
-            };
-
-            // When the system has just started and no state has been created, the memory state
-            // may be empty
-            if read_version_vec.is_empty() {
-                let table_committed_epoch = info.map(|info| info.committed_epoch);
-                if matched_replicated_read_version_cnt > 0 {
-                    tracing::warn!(
-                        "Read(table_id={} vnode={} epoch={}) is not allowed on replicated read version ({} found). Fall back to committed version (epoch={:?})",
-                        table_id,
-                        vnode.to_index(),
-                        epoch,
-                        matched_replicated_read_version_cnt,
-                        table_committed_epoch,
-                    );
-                } else {
-                    tracing::debug!(
-                        "No read version found for read(table_id={} vnode={} epoch={}). Fall back to committed version (epoch={:?})",
-                        table_id,
-                        vnode.to_index(),
-                        epoch,
-                        table_committed_epoch
-                    );
-                }
-                get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
-            } else {
-                if read_version_vec.len() != 1 {
-                    let read_version_vnodes = read_version_vec
-                        .into_iter()
-                        .map(|v| {
-                            let v = v.read();
-                            v.vnodes().iter_ones().collect_vec()
-                        })
-                        .collect_vec();
-                    return Err(HummockError::other(format!("There are {} read version associated with vnode {}. read_version_vnodes={:?}", read_version_vnodes.len(), vnode.to_index(), read_version_vnodes)).into());
-                }
-                read_filter_for_version(
-                    epoch,
-                    table_id,
-                    key_range,
-                    read_version_vec.first().unwrap(),
-                )?
-            }
-        };
-
-        Ok(ret)
     }
 }
 
@@ -692,7 +586,6 @@ pub struct HummockStorageReadSnapshot {
     table_option: TableOption,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
     hummock_version_reader: HummockVersionReader,
-    read_version_mapping: ReadOnlyReadVersionMapping,
     backup_reader: BackupReaderRef,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
@@ -769,11 +662,6 @@ impl StateStoreReadVector for HummockStorageReadSnapshot {
                         epoch
                     ))
                 })?,
-            HummockReadEpoch::NoWait(_) => {
-                return Err(
-                    HummockError::other("nearest query does not support NoWait epoch").into(),
-                );
-            }
         };
         dispatch_distance_measurement!(options.measure, MeasurementType, {
             Ok(self
@@ -887,8 +775,7 @@ impl StateStoreReadLog for HummockStorage {
 }
 
 impl HummockStorage {
-    /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
-    /// we will only check whether it is le `sealed_epoch` and won't wait.
+    /// Waits until the local Hummock version contains the requested committed epoch.
     async fn try_wait_epoch_impl(
         &self,
         wait_epoch: HummockReadEpoch,
@@ -982,7 +869,6 @@ impl StateStore for HummockStorage {
             table_option: options.table_option,
             recent_versions: self.recent_versions.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
-            read_version_mapping: self.read_version_mapping.clone(),
             backup_reader: self.backup_reader.clone(),
             hummock_meta_client: self.hummock_meta_client.clone(),
             simple_time_travel_version_cache: self.simple_time_travel_version_cache.clone(),

@@ -500,7 +500,6 @@ pub struct StateStoreTestReadOptions {
     pub prefix_hint: Option<Bytes>,
     pub prefetch_options: PrefetchOptions,
     pub cache_policy: CachePolicy,
-    pub read_committed: bool,
     pub retention_seconds: Option<u32>,
     pub read_version_from_backup: bool,
 }
@@ -509,10 +508,8 @@ impl StateStoreTestReadOptions {
     fn get_read_epoch(&self, epoch: u64) -> HummockReadEpoch {
         if self.read_version_from_backup {
             HummockReadEpoch::Backup(epoch)
-        } else if self.read_committed {
-            HummockReadEpoch::Committed(epoch)
         } else {
-            HummockReadEpoch::NoWait(epoch)
+            HummockReadEpoch::Committed(epoch)
         }
     }
 }
