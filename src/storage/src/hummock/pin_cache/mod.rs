@@ -37,7 +37,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectResult, ObjectStoreRef};
 
 mod gc;
-mod membership;
+pub(crate) mod membership;
 mod read;
 mod recovery;
 mod refill;

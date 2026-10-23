@@ -73,7 +73,7 @@ fn version_with_ssts(ssts: &[SstableInfo]) -> PinnedVersion {
     )
 }
 
-fn intra_level_delta(
+pub(super) fn intra_level_delta(
     deleted: &[SstableInfo],
     inserted: &[SstableInfo],
     group_version: u64,
@@ -96,7 +96,7 @@ fn intra_level_delta(
     delta
 }
 
-// Enumerate the authoritative version independently of the controller's selection/delta helpers.
+// Enumerate the authoritative version independently of the index's selection/delta helpers.
 fn reference_counts(
     version: &HummockVersion,
     pinned_tables: &HashSet<TableId>,
@@ -125,20 +125,21 @@ fn reference_counts(
     counts
 }
 
-fn assert_reference_counts(controller: &PinCacheRefillController) {
+fn assert_reference_counts(index: &PinCacheMembershipIndex, pinned: &HashSet<TableId>) {
     assert_eq!(
-        controller.object_ref_counts,
-        reference_counts(&controller.planning_version, &controller.pinned_table_ids),
+        index.object_ref_counts,
+        reference_counts(&index.tracked_version, pinned),
         "incremental counts must match the authoritative version"
     );
 }
 
 fn apply_and_check_version_deltas(
-    controller: &mut PinCacheRefillController,
+    index: &mut PinCacheMembershipIndex,
     deltas: &[HummockVersionDelta],
-) -> (HashSet<HummockSstableObjectId>, PinCacheObjectChanges) {
-    let before = reference_counts(&controller.planning_version, &controller.pinned_table_ids);
-    let mut version = (*controller.planning_version).clone();
+    pinned: &HashSet<TableId>,
+) -> PinCacheMembershipChanges {
+    let before = reference_counts(&index.tracked_version, pinned);
+    let mut version = (*index.tracked_version).clone();
     let mut deltas = deltas.to_vec();
     let mut sst_deltas = Vec::new();
     for delta in &mut deltas {
@@ -147,15 +148,12 @@ fn apply_and_check_version_deltas(
         sst_deltas.extend(version.build_sst_delta_infos(delta));
         version.apply_version_delta(delta);
     }
-    let after = reference_counts(&version, &controller.pinned_table_ids);
-    let result = controller.apply_version_update(
-        &sst_deltas,
-        PinnedVersion::new(version, mpsc::unbounded_channel().0),
-        Some(&deltas),
-    );
-    assert_reference_counts(controller);
+    let after = reference_counts(&version, pinned);
+    let target = PinnedVersion::new(version, mpsc::unbounded_channel().0);
+    let membership_changes = index.advance_version(&sst_deltas, target, Some(&deltas), pinned);
+    assert_reference_counts(index, pinned);
     assert_eq!(
-        result.1.inserted,
+        membership_changes.inserted,
         after
             .keys()
             .filter(|id| !before.contains_key(*id))
@@ -163,14 +161,14 @@ fn apply_and_check_version_deltas(
             .collect()
     );
     assert_eq!(
-        result.1.removed,
+        membership_changes.removed,
         before
             .keys()
             .filter(|id| !after.contains_key(*id))
             .copied()
             .collect()
     );
-    result
+    membership_changes
 }
 
 // Mirrors Meta's apply_compact_task: per-input-level deletion followed by output insertion.
@@ -232,75 +230,99 @@ fn test_membership_tracks_physical_references() {
         .sub_levels
         .clear();
     let empty = PinnedVersion::new(empty, mpsc::unbounded_channel().0);
-    let mut controller = PinCacheRefillController::new(empty.clone());
-    let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&empty));
-    assert_reference_counts(&controller);
-    assert!(changes.inserted.is_empty() && changes.removed.is_empty());
-    let (candidates, changes) = controller.apply_version_update(
-        &[SstDeltaInfo {
-            insert_sst_infos: branches[1..].to_vec(),
-            ..Default::default()
-        }],
-        only_b.clone(),
-        Some(&[intra_level_delta(&[], &branches[1..], 0)]),
-    );
-    assert_reference_counts(&controller);
-    assert_eq!(candidates, [1001.into()].into());
-    assert_eq!(changes.inserted, [1001.into()].into());
-    // A new logical reference can require refill without adding physical membership.
-    let (candidates, changes) = controller.apply_version_update(
-        &[SstDeltaInfo {
-            insert_sst_infos: branches[..1].to_vec(),
-            ..Default::default()
-        }],
-        both.clone(),
-        Some(&[intra_level_delta(&[], &branches[..1], 0)]),
-    );
-    assert_reference_counts(&controller);
-    assert_eq!(candidates, [1001.into()].into());
-    assert!(changes.inserted.is_empty() && changes.removed.is_empty());
-    let (_, changes) = controller.apply_version_update(
+    // Unit-level reference transitions; SDK-applied Meta transitions are covered by
+    // test_pin_reference_counts_match_versions_across_batch_boundaries below.
+    let mut pinned: HashSet<_> = tables.into();
+    let mut index = PinCacheMembershipIndex::new(empty.clone(), &pinned);
+    assert_reference_counts(&index, &pinned);
+    let target = only_b.clone();
+    let sst_deltas = &[SstDeltaInfo {
+        insert_sst_infos: branches[1..].to_vec(),
+        ..Default::default()
+    }];
+    let raw_deltas: Option<&[HummockVersionDelta]> =
+        Some(&[intra_level_delta(&[], &branches[1..], 0)]);
+    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, &pinned);
+    assert_reference_counts(&index, &pinned);
+    assert_eq!(membership_changes.inserted, [1001.into()].into());
+    // A new logical reference must not add physical membership twice.
+    let target = both.clone();
+    let sst_deltas = &[SstDeltaInfo {
+        insert_sst_infos: branches[..1].to_vec(),
+        ..Default::default()
+    }];
+    let raw_deltas: Option<&[HummockVersionDelta]> =
+        Some(&[intra_level_delta(&[], &branches[..1], 0)]);
+    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, &pinned);
+    assert_reference_counts(&index, &pinned);
+    assert!(membership_changes.inserted.is_empty() && membership_changes.removed.is_empty());
+    let membership_changes = index.advance_version(
         &[SstDeltaInfo {
             delete_sst_infos: vec![branches[0].clone()],
             ..Default::default()
         }],
-        only_b,
+        only_b.clone(),
         Some(&[intra_level_delta(&branches[..1], &[], 0)]),
+        &pinned,
     );
-    assert_reference_counts(&controller);
-    assert!(changes.inserted.is_empty() && changes.removed.is_empty());
-    let (_, changes) = controller.apply_version_update(
+    assert_reference_counts(&index, &pinned);
+    assert!(membership_changes.inserted.is_empty() && membership_changes.removed.is_empty());
+    let membership_changes = index.advance_version(
         &[SstDeltaInfo {
             delete_sst_infos: vec![branches[1].clone()],
             ..Default::default()
         }],
         empty,
         Some(&[intra_level_delta(&branches[1..], &[], 0)]),
+        &pinned,
     );
-    assert_reference_counts(&controller);
-    assert_eq!(changes.removed, [1001.into()].into());
+    assert_reference_counts(&index, &pinned);
+    assert_eq!(membership_changes.removed, [1001.into()].into());
 
-    // The planning version is now empty, but the resident snapshot still contains both SSTs.
-    // Policy diffs must use the resident snapshot, while reference counts follow planning.
-    let changes = controller.replace_pinned_tables([tables[1]].into(), std::slice::from_ref(&both));
-    assert_reference_counts(&controller);
-    assert!(changes.inserted.is_empty() && changes.removed.is_empty());
-    let changes = controller.replace_pinned_tables(HashSet::new(), std::slice::from_ref(&both));
-    assert_reference_counts(&controller);
-    assert_eq!(changes.removed, [1001.into()].into());
-    let changes = controller.replace_pinned_tables(tables.into(), std::slice::from_ref(&both));
-    assert_reference_counts(&controller);
-    assert_eq!(changes.inserted, [1001.into()].into());
+    // The tracked version is empty, while the supplied snapshots still contain O.
+    // Compare policy membership over those snapshots separately from changing tracked counts.
+    let versions = [only_b.clone(), both.clone()];
+    for (pinned_tables, inserted, removed) in [
+        (HashSet::from([tables[0]]), HashSet::new(), HashSet::new()),
+        (HashSet::from([tables[1]]), HashSet::new(), HashSet::new()),
+        (HashSet::new(), HashSet::new(), HashSet::from([1001.into()])),
+        (tables.into(), HashSet::from([1001.into()]), HashSet::new()),
+    ] {
+        let membership_changes =
+            PinCacheMembershipChanges::between_policies(&versions, &pinned, &pinned_tables);
+        assert_eq!(membership_changes.inserted, inserted);
+        assert_eq!(membership_changes.removed, removed);
+        pinned = pinned_tables;
+        index.rebuild_for_policy(&pinned);
+        assert_reference_counts(&index, &pinned);
+        assert!(index.object_ref_counts.is_empty());
+    }
+    // A -> B above preserves O only after unioning across both supplied snapshots.
+    // Version comparison instead fixes one policy and compares just the two versions.
+    for (pinned_tables, expected_inserted) in [
+        (HashSet::from([tables[0]]), HashSet::from([1001.into()])),
+        (HashSet::from([tables[1]]), HashSet::new()),
+    ] {
+        let membership_changes =
+            PinCacheMembershipChanges::between_versions(&only_b, &both, &pinned_tables);
+        assert_eq!(membership_changes.inserted, expected_inserted);
+        assert!(membership_changes.removed.is_empty());
+    }
 
-    // A full snapshot restores membership without scheduling a backfill.
-    let (candidates, changes) = controller.apply_version_update(&[], both.clone(), None);
-    assert_reference_counts(&controller);
-    assert!(candidates.is_empty());
-    assert_eq!(changes.inserted, [1001.into()].into());
-    assert!(changes.removed.is_empty());
-    let (candidates, changes) = controller.apply_version_update(&[], both.clone(), Some(&[]));
-    assert_reference_counts(&controller);
-    assert!(candidates.is_empty() && changes.inserted.is_empty() && changes.removed.is_empty());
+    // A full snapshot rebuilds the reference index.
+    let target = both.clone();
+    let sst_deltas = &[];
+    let raw_deltas: Option<&[HummockVersionDelta]> = None;
+    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, &pinned);
+    assert_reference_counts(&index, &pinned);
+    assert_eq!(membership_changes.inserted, [1001.into()].into());
+    assert!(membership_changes.removed.is_empty());
+    let target = both;
+    let sst_deltas = &[];
+    let raw_deltas: Option<&[HummockVersionDelta]> = Some(&[]);
+    let membership_changes = index.advance_version(sst_deltas, target, raw_deltas, &pinned);
+    assert_reference_counts(&index, &pinned);
+    assert!(membership_changes.inserted.is_empty() && membership_changes.removed.is_empty());
 
     // Meta unregisters tables and prunes their SST projections in the same delta.
     for table in tables {
@@ -312,12 +334,12 @@ fn test_membership_tracks_physical_references() {
                 group_deltas: vec![GroupDelta::PruneTableIdsFromSsts([table].into())],
             },
         );
-        // A trailing no-op ensures the controller checks the entire batch.
+        // A trailing no-op ensures the index checks the entire batch.
         let deltas = [removed, HummockVersionDelta::default()];
-        let (_, changes) = apply_and_check_version_deltas(&mut controller, &deltas);
-        assert!(changes.inserted.is_empty());
+        let membership_changes = apply_and_check_version_deltas(&mut index, &deltas, &pinned);
+        assert!(membership_changes.inserted.is_empty());
         assert_eq!(
-            changes.removed,
+            membership_changes.removed,
             if table == tables[1] {
                 [1001.into()].into()
             } else {
@@ -325,13 +347,7 @@ fn test_membership_tracks_physical_references() {
             }
         );
     }
-    assert!(
-        controller
-            .planning_version
-            .state_table_info
-            .info()
-            .is_empty()
-    );
+    assert!(index.tracked_version.state_table_info.info().is_empty());
 }
 
 #[test]
@@ -479,7 +495,7 @@ fn test_pin_reference_counts_match_versions_across_batch_boundaries() {
     assert!(version.levels[&group].levels[0].table_infos.is_empty());
     assert_eq!(
         version.levels[&group].levels[1].table_infos,
-        vec![output_a.clone()],
+        vec![output_a],
         "the SDK must actually move the SST from L1 to L2"
     );
     let b = version.levels[&group].l0.sub_levels[0].table_infos[0].clone();
@@ -510,14 +526,19 @@ fn test_pin_reference_counts_match_versions_across_batch_boundaries() {
 
     for batch_size in [1, 2, deltas.len()] {
         let initial = PinnedVersion::new(initial.clone(), mpsc::unbounded_channel().0);
-        let mut controller = PinCacheRefillController::new(initial.clone());
-        let changes = controller.replace_pinned_tables(tables.into(), &[initial]);
-        assert_eq!(changes.inserted, [shared.object_id].into());
-        assert_reference_counts(&controller);
+        let pinned: HashSet<_> = tables.into();
+        let mut index = PinCacheMembershipIndex::new(initial.clone(), &pinned);
+        let membership_changes = PinCacheMembershipChanges::between_policies(
+            &[initial],
+            &HashSet::new(),
+            &tables.into(),
+        );
+        assert_eq!(membership_changes.inserted, [shared.object_id].into());
+        assert_reference_counts(&index, &pinned);
         for batch in deltas.chunks(batch_size) {
-            let _ = apply_and_check_version_deltas(&mut controller, batch);
+            let _ = apply_and_check_version_deltas(&mut index, batch, &pinned);
         }
-        assert!(controller.object_ref_counts.is_empty());
-        assert_eq!(*controller.planning_version, version);
+        assert!(index.object_ref_counts.is_empty());
+        assert_eq!(*index.tracked_version, version);
     }
 }
