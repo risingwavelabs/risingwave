@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Bound;
 
@@ -22,12 +23,42 @@ use risingwave_pb::id::TableId;
 
 use super::Sstable;
 
-/// Borrows the CN table metadata ownership maps, projected by worker role.
+/// Borrows the single ownership source in CN `TableCacheMetadata`, projected by worker role.
 /// Keep both lanes: Foyer's policies distinguish them, while Pin uses their union.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct RefillOwnership<'a> {
     pub streaming: Option<&'a HashMap<TableId, Bitmap>>,
     pub serving: Option<&'a HashMap<TableId, Bitmap>>,
+}
+
+impl<'a> RefillOwnership<'a> {
+    /// Checks coarse table admission without constructing a union bitmap.
+    pub(crate) fn has_vnodes(self, table: &TableId) -> bool {
+        self.streaming
+            .and_then(|map| map.get(table))
+            .is_some_and(Bitmap::any)
+            || self
+                .serving
+                .and_then(|map| map.get(table))
+                .is_some_and(Bitmap::any)
+    }
+
+    /// Metadata preparation captures merged bitmaps; this view stores no derived ownership state.
+    pub(crate) fn owned_vnodes(self, table: &TableId) -> Option<Cow<'a, Bitmap>> {
+        let streaming = self
+            .streaming
+            .and_then(|map| map.get(table))
+            .filter(|b| b.any());
+        let serving = self
+            .serving
+            .and_then(|map| map.get(table))
+            .filter(|b| b.any());
+        match (streaming, serving) {
+            (Some(streaming), Some(serving)) => Some(Cow::Owned(streaming | serving)),
+            (Some(bitmap), None) | (None, Some(bitmap)) => Some(Cow::Borrowed(bitmap)),
+            (None, None) => None,
+        }
+    }
 }
 
 pub(crate) fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> bool {
@@ -102,6 +133,36 @@ mod tests {
         default_builder_opt_for_test, gen_test_sstable_with_table_ids,
     };
     use crate::hummock::value::HummockValue;
+
+    #[test]
+    fn test_owned_vnodes_unions_nonempty_lanes() {
+        let table = TableId::from(233);
+        let streaming = HashMap::from([(
+            table,
+            Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1, 3]),
+        )]);
+        let serving = HashMap::from([(
+            table,
+            Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [3, 4]),
+        )]);
+        let empty = HashMap::from([(table, Bitmap::zeros(VirtualNode::COUNT_FOR_TEST))]);
+        let missing = HashMap::new();
+        for (streaming, serving, expected) in [
+            (None, None, vec![]),
+            (Some(&missing), Some(&missing), vec![]),
+            (Some(&streaming), None, vec![1, 3]),
+            (None, Some(&serving), vec![3, 4]),
+            (Some(&streaming), Some(&serving), vec![1, 3, 4]),
+            (Some(&empty), Some(&empty), vec![]),
+            (Some(&empty), Some(&serving), vec![3, 4]),
+            (Some(&streaming), Some(&empty), vec![1, 3]),
+        ] {
+            let actual = RefillOwnership { streaming, serving }.owned_vnodes(&table);
+            let expected = (!expected.is_empty())
+                .then(|| Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, expected));
+            assert_eq!(actual.as_deref(), expected.as_ref());
+        }
+    }
 
     #[tokio::test]
     async fn test_block_vnode_range_handles_vnode_only_block_boundaries() {
