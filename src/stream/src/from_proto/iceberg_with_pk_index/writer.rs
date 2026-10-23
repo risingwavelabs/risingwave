@@ -111,6 +111,11 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             pk_index_state_table,
             writer,
             params.config.developer.chunk_size,
+            params
+                .config
+                .developer
+                .iceberg_pk_index_sink_lookup_concurrency,
+            params.config.developer.iceberg_pk_index_sink_max_batch_rows,
             sink_id,
             params.local_barrier_manager.clone(),
         );
