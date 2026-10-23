@@ -34,6 +34,15 @@ insert into t_v2 values(1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
 statement ok
 flush;
 
+# Wait for the initial Iceberg commit so later changes produce position deletes.
+query I retry 6 backoff 1s
+select sum(record_count) from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v2'
+  and content = 'Data';
+----
+3
+
 statement ok
 update t_v2 set v1 = 150 where id = 1;
 

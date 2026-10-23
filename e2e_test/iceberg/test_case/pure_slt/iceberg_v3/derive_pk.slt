@@ -30,6 +30,7 @@ WITH (
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
     format_version = '3',
+    commit_checkpoint_interval = '1',
     enable_pk_index = 'true'
 );
 
@@ -151,6 +152,7 @@ WITH (
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
     format_version = '3',
+    commit_checkpoint_interval = '1',
     enable_pk_index = 'true'
 );
 
