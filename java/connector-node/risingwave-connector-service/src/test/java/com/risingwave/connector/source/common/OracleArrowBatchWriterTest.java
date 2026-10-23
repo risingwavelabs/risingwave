@@ -25,14 +25,12 @@ import java.io.ByteArrayInputStream;
 import java.lang.reflect.Proxy;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.TimeZone;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.DateDayVector;
 import org.apache.arrow.vector.TimeStampMicroTZVector;
 import org.apache.arrow.vector.TimeStampMicroVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -81,27 +79,6 @@ public class OracleArrowBatchWriterTest {
         }
     }
 
-    @Test
-    public void dateSkippedByTimeZoneIsNotShifted() throws Exception {
-        TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Apia"));
-        var skipped = LocalDate.of(2011, 12, 30);
-        var schema = tableSchema(Map.of("DATE_VALUE", Data.DataType.TypeName.DATE), "DATE_VALUE");
-
-        try (var allocator = new RootAllocator();
-                var writer = new OracleArrowBatchWriter(allocator, schema)) {
-            writer.append(resultSet(Map.of(1, skipped)));
-            try (var reader =
-                    new ArrowStreamReader(
-                            new ByteArrayInputStream(writer.finishBatch()), allocator)) {
-                VectorSchemaRoot root = reader.getVectorSchemaRoot();
-                reader.loadNextBatch();
-                assertEquals(
-                        Math.toIntExact(skipped.toEpochDay()),
-                        ((DateDayVector) root.getVector(0)).get(0));
-            }
-        }
-    }
-
     private static ConnectorServiceProto.TableSchema tableSchema(
             Map<String, Data.DataType.TypeName> types, String... columnNames) {
         var builder = ConnectorServiceProto.TableSchema.newBuilder();
@@ -136,8 +113,6 @@ public class OracleArrowBatchWriterTest {
                                     case "getTimestamp" ->
                                             java.sql.Timestamp.valueOf(
                                                     (LocalDateTime) values.get(args[0]));
-                                    case "getDate" ->
-                                            java.sql.Date.valueOf((LocalDate) values.get(args[0]));
                                     case "wasNull" -> false;
                                     default ->
                                             throw new UnsupportedOperationException(

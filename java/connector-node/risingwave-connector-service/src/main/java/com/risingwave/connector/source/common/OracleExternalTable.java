@@ -461,7 +461,6 @@ final class OracleExternalTable {
                             TypeName.VARCHAR;
                     case "RAW", "LONG RAW", "BLOB" -> TypeName.BYTEA;
                     case "BOOLEAN" -> TypeName.BOOLEAN;
-                    case "JSON" -> TypeName.JSONB;
                     case "DATE" -> TypeName.TIMESTAMP;
                     default -> {
                         if (oracleType.startsWith("TIMESTAMP")) {

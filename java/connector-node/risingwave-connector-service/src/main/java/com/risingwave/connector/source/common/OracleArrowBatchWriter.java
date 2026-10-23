@@ -25,7 +25,6 @@ import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -35,7 +34,6 @@ import java.util.Map;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
-import org.apache.arrow.vector.DateDayVector;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.Float4Vector;
 import org.apache.arrow.vector.Float8Vector;
@@ -47,7 +45,6 @@ import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowStreamWriter;
-import org.apache.arrow.vector.types.DateUnit;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.pojo.ArrowType;
@@ -62,7 +59,6 @@ import org.apache.arrow.vector.types.pojo.Schema;
 final class OracleArrowBatchWriter implements AutoCloseable {
     private static final String EXTENSION_NAME_KEY = "ARROW:extension:name";
     private static final String DECIMAL_EXTENSION = "arrowudf.decimal";
-    private static final String JSON_EXTENSION = "arrowudf.json";
     private static final String UTC = "+00:00";
 
     private final VectorSchemaRoot root;
@@ -122,10 +118,9 @@ final class OracleArrowBatchWriter implements AutoCloseable {
                     case FLOAT -> new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE);
                     case DOUBLE -> new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE);
                     case BOOLEAN -> ArrowType.Bool.INSTANCE;
-                    case DATE -> new ArrowType.Date(DateUnit.DAY);
                     case TIMESTAMP -> new ArrowType.Timestamp(TimeUnit.MICROSECOND, null);
                     case TIMESTAMPTZ -> new ArrowType.Timestamp(TimeUnit.MICROSECOND, UTC);
-                    case DECIMAL, VARCHAR, JSONB -> ArrowType.Utf8.INSTANCE;
+                    case DECIMAL, VARCHAR -> ArrowType.Utf8.INSTANCE;
                     case BYTEA -> ArrowType.Binary.INSTANCE;
                     default ->
                             throw new SQLException(
@@ -134,7 +129,6 @@ final class OracleArrowBatchWriter implements AutoCloseable {
         Map<String, String> metadata =
                 switch (typeName) {
                     case DECIMAL -> Map.of(EXTENSION_NAME_KEY, DECIMAL_EXTENSION);
-                    case JSONB -> Map.of(EXTENSION_NAME_KEY, JSON_EXTENSION);
                     default -> null;
                 };
         return new Field(name, new FieldType(true, type, null, metadata), null);
@@ -209,17 +203,6 @@ final class OracleArrowBatchWriter implements AutoCloseable {
                     }
                 };
             }
-            case DATE -> {
-                var target = (DateDayVector) vector;
-                yield (result, row) -> {
-                    var value = result.getObject(column, LocalDate.class);
-                    if (value == null) {
-                        target.setNull(row);
-                    } else {
-                        target.setSafe(row, Math.toIntExact(value.toEpochDay()));
-                    }
-                };
-            }
             case TIMESTAMP -> {
                 var target = (TimeStampMicroVector) vector;
                 yield (result, row) -> {
@@ -253,7 +236,7 @@ final class OracleArrowBatchWriter implements AutoCloseable {
                     }
                 };
             }
-            case VARCHAR, JSONB -> {
+            case VARCHAR -> {
                 var target = (VarCharVector) vector;
                 yield (result, row) -> {
                     var value = result.getString(column);
