@@ -34,7 +34,7 @@ sink-deltalake = ["dep:deltalake"]
 sink-lancedb = ["dep:lancedb", "dep:lance", "dep:lance-table"]
 # TODO: pubsub source is not feature-gated, thus `google-cloud-pubsub` cannot be optional.
 sink-google_pubsub = ["dep:google-cloud-googleapis"]
-sink-clickhouse = ["dep:clickhouse"]
+sink-clickhouse = ["dep:clickhouse", "dep:clickhouse-types"]
 sink-doris = []
 sink-starrocks = []
 
@@ -68,10 +68,11 @@ cfg-if = "1"
 cfg-or-panic = "0.2"
 chrono = { workspace = true, features = ["clock", "std"] }
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
-clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
+clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "dad4c6dd8a40aaeaa7534abf38155219f6fd73b5", features = [
     "time",
     "rustls-tls",
 ], optional = true }
+clickhouse-types = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "dad4c6dd8a40aaeaa7534abf38155219f6fd73b5", optional = true }
 csv = "1.4"
 deltalake = { workspace = true, optional = true }
 duration-str = "0.21.0"
