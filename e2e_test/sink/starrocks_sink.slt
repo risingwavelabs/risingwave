@@ -43,7 +43,7 @@ system ok retry 120 backoff 1s
 set -o pipefail
 starrocks -B --column-names -e 'SHOW BACKENDS' | awk -F '\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "Alive") alive_column = i; next } alive_column && (tolower($alive_column) == "true" || $alive_column == "1") { found = 1 } END { exit !found }'
 
-system ok
+system ok retry 60 backoff 2s
 starrocks -e "
 DROP DATABASE IF EXISTS ${STARROCKS_DATABASE};
 CREATE DATABASE ${STARROCKS_DATABASE};
