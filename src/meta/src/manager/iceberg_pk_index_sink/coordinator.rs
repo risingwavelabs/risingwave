@@ -53,6 +53,7 @@ use iceberg::writer::file_writer::location_generator::{
     DefaultLocationGenerator, FileNameGenerator, LocationGenerator,
 };
 use prost::Message;
+use risingwave_common::catalog::RISINGWAVE_ICEBERG_COMMIT_EPOCH;
 use risingwave_connector::connector_common::IcebergCommittedSnapshot;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError, CommitRetryLogContext};
@@ -203,14 +204,15 @@ impl IcebergPkIndexSinkCoordinator {
                 PbIcebergPkIndexSinkRole::try_from(report.role)
                     != Ok(PbIcebergPkIndexSinkRole::CompactionResolver)
             });
-        // Begin flushes foreground writes; the compaction End epoch only commits maintenance.
-        let has_new_data = compaction.is_none();
         let ordinary_aggregate = aggregate_ordinary_reports(
             &ordinary_reports,
             current_schema_id,
             current_partition_spec_id,
             current_format_version,
         )?;
+        // Compaction epochs are isolated from ordinary writes, so a compaction commit
+        // is always a pure rewrite rather than a logical data change.
+        let is_compaction = compaction.is_some();
 
         let Some(compaction) = compaction else {
             if !resolver_reports.is_empty() {
@@ -226,7 +228,7 @@ impl IcebergPkIndexSinkCoordinator {
                 );
             }
             return self
-                .stage_pre_commit(prev_epoch, merged, has_new_data)
+                .stage_pre_commit(prev_epoch, merged, is_compaction)
                 .await;
         };
         let CompactionOverwrite {
@@ -323,7 +325,7 @@ impl IcebergPkIndexSinkCoordinator {
             delete_files: serialized_delete_files,
             ..merged
         };
-        self.stage_pre_commit(prev_epoch, merged, has_new_data)
+        self.stage_pre_commit(prev_epoch, merged, is_compaction)
             .await?;
         self.cleanup_discarded_uncommitted_paths(prev_epoch, discarded_paths)
             .await;
@@ -345,9 +347,11 @@ impl IcebergPkIndexSinkCoordinator {
         &mut self,
         prev_epoch: u64,
         merged: IcebergPkIndexSinkAggResult,
-        has_new_data: bool,
+        is_compaction: bool,
     ) -> Result<()> {
-        let (merged, materialized_add_files) = self.backfill_delete_file_partitions(merged).await?;
+        let (mut merged, materialized_add_files) =
+            self.backfill_delete_file_partitions(merged).await?;
+        merged.is_compaction = is_compaction;
         let merged = Arc::new(merged);
 
         let snapshot_id = FastAppendAction::generate_snapshot_id(&self.table);
@@ -358,7 +362,7 @@ impl IcebergPkIndexSinkCoordinator {
             epoch: prev_epoch,
             merged,
             snapshot_id,
-            has_new_data,
+            has_new_data: !is_compaction,
             materialized_add_files,
         });
         Ok(())
@@ -571,6 +575,7 @@ impl IcebergPkIndexSinkCoordinator {
             schema_id: merged.schema_id,
             partition_spec_id: merged.partition_spec_id,
             format_version: merged.format_version,
+            is_compaction: merged.is_compaction,
             data_files: merged.data_files,
             delete_files: serialized_delete_files,
             overwrite_files: merged.overwrite_files,
@@ -805,15 +810,31 @@ async fn commit_one_epoch(
                     .iter()
                     .map(&materialize)
                     .collect::<Result<Vec<_>, _>>()?;
-
                 let txn = Transaction::new(&table);
-                let action = txn
-                    .overwrite_files()
-                    .set_snapshot_id(snapshot_id)
-                    .set_target_branch(target_branch)
-                    .add_data_files(add_files)
-                    .delete_files(overwrite_files);
-                let txn = action.apply(txn).map_err(|err| {
+                let properties = HashMap::from([(
+                    RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(),
+                    commit.epoch.to_string(),
+                )]);
+                let result = if merged.is_compaction {
+                    let mut action = txn
+                        .rewrite_files()
+                        .set_snapshot_id(snapshot_id)
+                        .set_target_branch(target_branch)
+                        .add_data_files(add_files)
+                        .delete_files(overwrite_files);
+                    action.set_snapshot_properties(properties);
+                    action.apply(txn)
+                } else {
+                    let mut action = txn
+                        .overwrite_files()
+                        .set_snapshot_id(snapshot_id)
+                        .set_target_branch(target_branch)
+                        .add_data_files(add_files)
+                        .delete_files(overwrite_files);
+                    action.set_snapshot_properties(properties);
+                    action.apply(txn)
+                };
+                let txn = result.map_err(|err| {
                     CommitError::Commit(
                         anyhow!(err).context("apply iceberg pk-index sink overwrite_files action"),
                     )
@@ -837,6 +858,10 @@ struct IcebergPkIndexSinkAggResult {
     partition_spec_id: i32,
     #[serde(default)]
     format_version: Option<FormatVersion>,
+    /// Persist the native operation decision with the files. Legacy pending epochs used
+    /// Overwrite for every commit and must not be reinterpreted as pure compaction.
+    #[serde(default)]
+    is_compaction: bool,
     data_files: Vec<SerializedDataFile>,
     delete_files: Vec<SerializedDataFile>,
     overwrite_files: Vec<SerializedDataFile>,
@@ -848,6 +873,7 @@ impl std::fmt::Debug for IcebergPkIndexSinkAggResult {
             .field("schema_id", &self.schema_id)
             .field("partition_spec_id", &self.partition_spec_id)
             .field("format_version", &self.format_version)
+            .field("is_compaction", &self.is_compaction)
             .field("data_files", &self.data_files.len())
             .field("delete_files", &self.delete_files.len())
             .field("overwrite_files", &self.overwrite_files.len())
@@ -1078,6 +1104,7 @@ fn combine_compaction_aggregate(
         schema_id: current_schema_id,
         partition_spec_id: current_partition_spec_id,
         format_version: None,
+        is_compaction: false,
         data_files: vec![],
         delete_files: vec![],
         overwrite_files: vec![],
@@ -1157,6 +1184,7 @@ fn aggregate_reports(
         partition_spec_id,
         // Filled from the coordinator's current table after report ID validation.
         format_version: None,
+        is_compaction: false,
         data_files,
         delete_files,
         overwrite_files,

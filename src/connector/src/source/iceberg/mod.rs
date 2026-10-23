@@ -14,19 +14,22 @@
 
 pub mod parquet_file_handler;
 pub mod planner;
+pub mod update_planner;
+pub mod update_reader;
+pub mod update_state;
 
 pub mod metrics;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use iceberg::Catalog;
 use iceberg::expr::{BoundPredicate, Predicate as IcebergPredicate};
 use iceberg::scan::FileScanTask;
-use iceberg::spec::{FormatVersion, TableMetadata};
+use iceberg::spec::{FormatVersion, Schema, TableMetadata};
 use iceberg::table::Table;
 pub use parquet_file_handler::*;
 use phf::{Set, phf_set};
@@ -56,9 +59,31 @@ use crate::source::{
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
 };
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
+pub const STREAMING_UPDATES_KEY: &str = "streaming_updates";
+
+fn validate_update_projection(schema: &Schema, field_ids: &[i32]) -> anyhow::Result<()> {
+    let mut ids = HashSet::new();
+    for id in field_ids {
+        ensure!(
+            ids.insert(*id)
+                && !iceberg::metadata_columns::is_metadata_field(*id)
+                && schema
+                    .as_struct()
+                    .fields()
+                    .iter()
+                    .any(|field| field.id == *id),
+            "update projection requires unique stored top-level fields, not virtual metadata"
+        );
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
 pub struct IcebergProperties {
+    /// Opt in to Insert/Delete ingestion of RisingWave PK-index sink output.
+    #[serde(default, deserialize_with = "crate::deserialize_bool_from_string")]
+    pub streaming_updates: bool,
+
     #[serde(flatten)]
     pub common: IcebergCommon,
 

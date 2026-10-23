@@ -14,7 +14,7 @@
 
 pub mod compaction;
 mod jni_catalog;
-mod mock_catalog;
+pub mod mock_catalog;
 mod storage_catalog;
 
 use std::collections::HashMap;
