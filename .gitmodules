@@ -1,0 +1,5 @@
+[submodule "java/debezium"]
+	path = java/debezium
+	url = https://github.com/anlowee/debezium.git
+	branch = v3.2.4.Final
+	shallow = true

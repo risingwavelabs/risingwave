@@ -113,7 +113,7 @@ else
 fi
 
 echo "--- Build connector node"
-cd "${REPO_ROOT}"/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
+cd "${REPO_ROOT}"/java && ./build-debezium.sh && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
 
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Collect all release assets"

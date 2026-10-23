@@ -22,6 +22,9 @@ if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
   exit 0
 fi
 
+echo "--- init Debezium submodule"
+git submodule update --init java/debezium
+
 # Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
 echo "--- docker build and tag"
 echo "CARGO_PROFILE is set to ${CARGO_PROFILE}"
