@@ -147,6 +147,24 @@ impl ClickHouseEngine {
         }
     }
 
+    fn check_delete_column(&self, columns: &[SystemColumn]) -> Result<()> {
+        let Some(delete_col) = self.get_delete_col() else {
+            return Ok(());
+        };
+        let column = columns.iter().find(|c| c.name == delete_col).ok_or_else(|| {
+            SinkError::ClickHouse(format!(
+                "`clickhouse.delete.column` refers to column {delete_col:?}, which does not exist in the ClickHouse target table"
+            ))
+        })?;
+        if !matches!(column.r#type.as_str(), "UInt8" | "Int8") {
+            return Err(SinkError::ClickHouse(format!(
+                "`clickhouse.delete.column` refers to column {delete_col:?} with ClickHouse type `{}`: expected UInt8 or Int8 because the delete flag is encoded as a single byte",
+                column.r#type
+            )));
+        }
+        Ok(())
+    }
+
     pub fn get_sign_name(&self) -> Option<String> {
         match self {
             ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.clone()),
@@ -905,6 +923,10 @@ async fn query_column_engine_from_ck(
     let clickhouse_engine =
         ClickHouseEngine::from_query_engine(clickhouse_engine.first().unwrap(), config)?;
 
+    // Validate against the complete schema before removing special columns. This runs during
+    // both CREATE SINK validation and writer initialization, which may see a changed schema.
+    clickhouse_engine.check_delete_column(&clickhouse_column)?;
+
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
         clickhouse_column.retain(|a| sign.ne(&a.name))
     }
@@ -1228,6 +1250,69 @@ mod tests {
             name: "amount".to_owned(),
             r#type: ck_type.to_owned(),
             is_in_primary_key: 0,
+        }
+    }
+
+    #[test]
+    fn test_delete_column_check() {
+        for engine in [
+            ClickHouseEngine::ReplacingMergeTree(Some("is_deleted".to_owned())),
+            ClickHouseEngine::ReplicatedReplacingMergeTree(Some("is_deleted".to_owned())),
+            ClickHouseEngine::SharedReplacingMergeTree(Some("is_deleted".to_owned())),
+        ] {
+            let mut columns = vec![system_column("Int32")];
+            let err = engine
+                .check_delete_column(&columns)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("clickhouse.delete.column"), "{err}");
+            assert!(err.contains("is_deleted"), "{err}");
+            assert!(err.contains("does not exist"), "{err}");
+
+            columns.push(SystemColumn {
+                name: "is_deleted".to_owned(),
+                r#type: "UInt8".to_owned(),
+                is_in_primary_key: 0,
+            });
+            for ck_type in ["UInt8", "Int8"] {
+                columns[1].r#type = ck_type.to_owned();
+                engine.check_delete_column(&columns).unwrap();
+            }
+            for ck_type in [
+                "Nullable(UInt8)",
+                "Nullable(Int8)",
+                "LowCardinality(UInt8)",
+                "UInt16",
+                "UInt32",
+                "Int64",
+                "Array(UInt8)",
+                "String",
+            ] {
+                columns[1].r#type = ck_type.to_owned();
+                let err = engine
+                    .check_delete_column(&columns)
+                    .unwrap_err()
+                    .to_string();
+                assert!(err.contains("clickhouse.delete.column"), "{err}");
+                assert!(err.contains("is_deleted"), "{err}");
+                assert!(err.contains(ck_type), "{err}");
+                assert!(err.contains("expected UInt8 or Int8"), "{err}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_no_delete_column_check() {
+        for engine in [
+            ClickHouseEngine::ReplacingMergeTree(None),
+            ClickHouseEngine::ReplicatedReplacingMergeTree(None),
+            ClickHouseEngine::SharedReplacingMergeTree(None),
+            ClickHouseEngine::MergeTree,
+            ClickHouseEngine::CollapsingMergeTree("sign".to_owned()),
+        ] {
+            engine
+                .check_delete_column(&[system_column("Int32")])
+                .unwrap();
         }
     }
 
