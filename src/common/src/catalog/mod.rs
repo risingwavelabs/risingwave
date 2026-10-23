@@ -418,7 +418,12 @@ impl FragmentTypeFlag {
 
     /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
     pub fn backfill_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
-        [FragmentTypeFlag::SourceScan, FragmentTypeFlag::StreamScan].into_iter()
+        [
+            FragmentTypeFlag::SourceScan,
+            FragmentTypeFlag::StreamScan,
+            FragmentTypeFlag::StreamCdcScan,
+        ]
+        .into_iter()
     }
 
     /// Fragments that may be affected by `SOURCE_RATE_LIMIT`.
@@ -608,5 +613,15 @@ mod tests {
         for flag in FRAGMENT_TYPE_FLAG_LIST {
             assert_eq!(FragmentTypeFlag::try_from(flag as u32).unwrap(), flag);
         }
+    }
+
+    #[test]
+    fn test_backfill_rate_limit_fragments_include_cdc_scan() {
+        // `ALTER TABLE ... SET BACKFILL_RATE_LIMIT` on a CDC table must reach the
+        // `StreamCdcScan` fragment, otherwise meta reports "stream scan node not found".
+        assert!(
+            FragmentTypeFlag::backfill_rate_limit_fragments()
+                .any(|f| f == FragmentTypeFlag::StreamCdcScan)
+        );
     }
 }
