@@ -101,8 +101,15 @@ public class DbzChangeEventConsumer
     }
 
     /**
-     * Postgres and Oracle connectors need to commit the offset to the upstream database, so that we
-     * need to wait for the epoch commit before committing the record offset.
+     * Whether records can be acknowledged before the corresponding RisingWave checkpoint.
+     *
+     * <p>PostgreSQL needs checkpoint-delayed acknowledgement because the acknowledged LSN advances
+     * the replication slot's low watermark, allowing PostgreSQL to recycle older WAL. Acknowledging
+     * it before the output is durable could recycle WAL that RisingWave still needs for recovery.
+     *
+     * <p>Oracle LogMiner does not use acknowledgements to control redo retention. It acknowledges
+     * batches directly to maintain Debezium's restart offsets, while RisingWave independently
+     * checkpoints the full native offset for its own recovery.
      */
     private boolean noNeedCommitOffset() {
         return connector != SourceTypeE.POSTGRES;
@@ -169,10 +176,23 @@ public class DbzChangeEventConsumer
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
             EventType eventType = getEventType(record);
+            Map<String, ?> sourceOffset = record.sourceOffset();
+            if (connector == SourceTypeE.ORACLE
+                    && eventType == EventType.DATA
+                    && record.value() != null) {
+                var source = ((Struct) record.value()).getStruct("source");
+                if (source == null || source.getString("commit_scn") == null) {
+                    throw new CdcConnectorException(
+                            "Oracle data event is missing source.commit_scn");
+                }
+                Map<String, Object> comparisonOffset = new HashMap<>(sourceOffset);
+                comparisonOffset.put("decoded_commit_scn", source.getString("commit_scn"));
+                sourceOffset = comparisonOffset;
+            }
             DebeziumOffset offset =
                     new DebeziumOffset(
                             record.sourcePartition(),
-                            record.sourceOffset(),
+                            sourceOffset,
                             (eventType == EventType.HEARTBEAT));
             // serialize the offset to a JSON, so that kernel doesn't need to
             // aware its layout

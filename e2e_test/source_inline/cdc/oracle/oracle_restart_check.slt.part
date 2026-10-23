@@ -1,0 +1,72 @@
+# The checkpointed prefix survives. Fresh CDC below waits for automatic recovery;
+# reading these already-persisted rows alone cannot prove the connector is ready.
+query IT rowsort retry 120 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_restart_table WHERE "ID" IN (0, 1, 2);
+----
+0 before-insert-prefix
+1 before-prefix
+
+# Both sides are online again. More committed mutations must also be reconciled.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'after-prefix' WHERE ID = 3",
+    "UPDATE APP.RW_LIVE_PAGE SET VALUE = 'after-suffix' WHERE ID = 902",
+    "DELETE FROM APP.RW_LIVE_PAGE WHERE ID IN (4, 903)",
+    "INSERT INTO APP.RW_LIVE_PAGE VALUES (-1, 'after-insert-prefix')",
+    "INSERT INTO APP.RW_LIVE_PAGE VALUES (1002, 'after-insert-suffix')",
+])
+PY
+
+# A fresh prefix mutation proves CDC delivery works before attempting throttle DDL.
+query IT rowsort retry 120 backoff 1s
+SELECT "ID", "VALUE" FROM oracle_restart_table WHERE "ID" IN (-1, 3, 4);
+----
+-1 after-insert-prefix
+3 after-prefix
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_sqls, end_backfills
+from oracle_test_hooks import check_backfill_unchanged, check_backfill_finished
+execute_sqls(
+    ["FLUSH;"],
+    after_sqls_hook=check_backfill_unchanged,
+    after_sqls_hook_kwargs={"table": "oracle_restart_table"},
+)
+end_backfills(
+    ["oracle_restart_table"],
+    after_backfill_resume_hook=check_backfill_finished,
+)
+PY
+
+query I retry 90 backoff 1s
+SELECT count(*) FROM oracle_restart_table;
+----
+1000
+
+# Zero mismatches means no missing, extra, or wrong rows from either mutation phase.
+query I retry 90 backoff 1s
+WITH expected AS (
+    SELECT id, CASE WHEN id = 1 THEN 'before-prefix'
+                    WHEN id = 3 THEN 'after-prefix'
+                    WHEN id = 900 THEN 'before-suffix'
+                    WHEN id = 902 THEN 'after-suffix'
+                    ELSE 'initial-' || id::VARCHAR END AS value
+    FROM generate_series(1, 1000) AS rows(id) WHERE id NOT IN (2, 4, 901, 903)
+    UNION ALL SELECT 0, 'before-insert-prefix'
+    UNION ALL SELECT 1001, 'before-insert-suffix'
+    UNION ALL SELECT -1, 'after-insert-prefix'
+    UNION ALL SELECT 1002, 'after-insert-suffix'
+)
+SELECT count(*) FROM expected e FULL OUTER JOIN oracle_restart_table t ON e.id = t."ID"
+WHERE e.id IS NULL OR t."ID" IS NULL OR e.value IS DISTINCT FROM t."VALUE";
+----
+0
+
+statement ok
+DROP SOURCE oracle_restart_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
