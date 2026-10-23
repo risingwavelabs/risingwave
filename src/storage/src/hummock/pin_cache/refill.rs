@@ -99,18 +99,23 @@ impl PinCache {
     }
 
     /// Copies and validates a whole SST without reading or changing the cache index.
+    /// `object_size` is the full physical size (`SstableInfo::file_size`), not the logical
+    /// SST projection size (`SstableInfo::sst_size`).
     /// The caller checks membership, ownership and cache hits before downloading, and serializes
     /// attempts per object. Only a successful return can be submitted to `publish`.
     pub(crate) async fn download(
         &self,
         object_id: HummockSstableObjectId,
-        size: u64,
+        object_size: u64,
         remote_store: ObjectStoreRef,
         remote_path: String,
     ) -> ObjectResult<PinCacheDownload> {
         let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
         let path = format!("{}-{path_id}.sst", object_id.as_raw_id());
-        let file = PinCacheFile { path, size };
+        let file = PinCacheFile {
+            path,
+            size: object_size,
+        };
         let reader = remote_store
             .streaming_read(&remote_path, ..)
             .await
@@ -162,9 +167,11 @@ mod tests {
     #[tokio::test]
     async fn test_revoked_download_cannot_publish_and_replacement_can_retry() {
         for revoke_by_unregister in [false, true] {
-            let pin_cache = PinCache::new(in_memory_object_store(), 1, []);
+            let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
+                .await
+                .unwrap();
             let object_id = HummockSstableObjectId::from(1001);
-            pin_cache.register_objects([(object_id, 11)]);
+            pin_cache.register_objects([object_id]);
             let token = pin_cache.prepare_refill(object_id).unwrap();
             let remote = in_memory_object_store();
             remote
@@ -178,7 +185,7 @@ mod tests {
 
             if revoke_by_unregister {
                 pin_cache.unregister_objects([object_id]);
-                pin_cache.register_objects([(object_id, 11)]);
+                pin_cache.register_objects([object_id]);
             } else {
                 pin_cache.revoke_refill(object_id);
             }
@@ -187,7 +194,7 @@ mod tests {
             assert!(!pin_cache.publish(token, old));
             assert!(pin_cache.get(object_id).is_none());
 
-            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id)
+            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id, 11)
                 .await
                 .unwrap();
             assert_ne!(old_path, pin_cache.get(object_id).unwrap().file.path);
@@ -202,9 +209,9 @@ mod tests {
     async fn test_interrupted_fs_upload_cannot_publish() {
         for cancel in [false, true] {
             let (_dir, local_store) = local_object_store().await;
-            let pin_cache = PinCache::new(local_store.clone(), 1, []);
+            let pin_cache = PinCache::new(local_store.clone(), 1, []).await.unwrap();
             let object_id = HummockSstableObjectId::from(1001);
-            pin_cache.register_objects([(object_id, 8)]);
+            pin_cache.register_objects([object_id]);
 
             let file = PinCacheFile {
                 path: "1001-0.sst".into(),
@@ -276,7 +283,7 @@ mod tests {
                 .upload("sst", Bytes::from_static(b"complete"))
                 .await
                 .unwrap();
-            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id)
+            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id, 8)
                 .await
                 .unwrap();
         }
