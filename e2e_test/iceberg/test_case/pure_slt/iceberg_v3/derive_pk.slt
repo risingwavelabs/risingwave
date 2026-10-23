@@ -30,7 +30,7 @@ WITH (
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
     format_version = '3',
-    commit_checkpoint_interval = '1',
+    commit_checkpoint_interval = '1000000',
     enable_pk_index = 'true'
 );
 
@@ -62,6 +62,10 @@ CREATE SOURCE iceberg_derive_pk_source WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin'
 );
+
+# Lowering the sink's interval must release pending writes without recovery.
+statement ok
+ALTER SINK s_v3_derive_pk CONNECTOR WITH (commit_checkpoint_interval = '1');
 
 # Both orders for user 1 must be preserved. The iceberg pk is derived from the
 # upstream stream key (user_id, order_id), so rows sharing user_id are not overwritten.

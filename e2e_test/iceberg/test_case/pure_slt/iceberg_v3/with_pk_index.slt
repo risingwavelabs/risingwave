@@ -151,7 +151,7 @@ set iceberg_engine_connection = 'public.storage_catalog_conn';
 statement ok
 create table t_v3_storage(id int primary key, name varchar)
 with(
-    commit_checkpoint_interval = 2,
+    commit_checkpoint_interval = 1000000,
     format_version = 3,
     enable_pk_index = 'true'
 ) engine = iceberg;
@@ -161,6 +161,10 @@ insert into t_v3_storage values(1, 'alice'), (2, 'bob');
 
 statement ok
 flush;
+
+# Lowering the interval must release pending writes without recovery.
+statement ok
+ALTER TABLE t_v3_storage CONNECTOR WITH (commit_checkpoint_interval = '1');
 
 query ??? rowsort retry 6 backoff 1s
 select * from t_v3_storage;

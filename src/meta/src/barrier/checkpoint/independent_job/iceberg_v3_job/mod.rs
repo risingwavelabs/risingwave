@@ -26,6 +26,7 @@ use risingwave_common::id::{JobId, SinkId};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_meta_model::{WorkerId, streaming_job};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::PbBackfillType;
@@ -695,6 +696,17 @@ impl IcebergV3JobCheckpointControl {
 
     pub(crate) fn resolver_fragment_info(&self) -> &InflightFragmentInfo {
         &self.resolver.fragment_info
+    }
+
+    pub(crate) fn update_commit_checkpoint_interval(
+        &mut self,
+        properties: &HashMap<String, String>,
+    ) -> MetaResult<()> {
+        self.commit_checkpoint_interval.update(
+            properties
+                .get(COMMIT_CHECKPOINT_INTERVAL)
+                .map(String::as_str),
+        )
     }
 
     pub(crate) fn on_new_upstream_barrier(

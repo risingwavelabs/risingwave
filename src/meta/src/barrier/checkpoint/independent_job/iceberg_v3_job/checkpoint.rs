@@ -48,23 +48,31 @@ impl CommitCheckpointInterval {
                 sink_desc.is_none()
             });
             if let Some(sink_desc) = sink_desc {
-                let interval = sink_desc
-                    .properties
-                    .get(COMMIT_CHECKPOINT_INTERVAL)
-                    .map(|value| value.parse::<NonZeroU64>())
-                    .transpose()
-                    .context("invalid `commit_checkpoint_interval`")?
-                    .unwrap_or(
-                        NonZeroU64::new(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL).unwrap(),
-                    );
-                return Ok(Self {
-                    interval,
+                let mut interval = Self {
+                    interval: NonZeroU64::new(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL).unwrap(),
                     checkpoint_count: 0,
                     pending_epochs: vec![],
-                });
+                };
+                interval.update(
+                    sink_desc
+                        .properties
+                        .get(COMMIT_CHECKPOINT_INTERVAL)
+                        .map(String::as_str),
+                )?;
+                return Ok(interval);
             }
         }
         Err(anyhow::anyhow!("Iceberg V3 job has no writer sink description").into())
+    }
+
+    pub(super) fn update(&mut self, value: Option<&str>) -> MetaResult<()> {
+        if let Some(value) = value {
+            // Preserve skipped epochs and the elapsed interval across ALTER.
+            self.interval = value
+                .parse()
+                .context("invalid `commit_checkpoint_interval`")?;
+        }
+        Ok(())
     }
 
     pub(super) fn transform(&mut self, mut barrier: BarrierInfo, force: bool) -> BarrierInfo {
@@ -152,6 +160,80 @@ mod tests {
             barrier.kind,
             BarrierKind::Checkpoint(vec![10, 12, 14, 16, 18])
         );
+    }
+
+    #[test]
+    fn test_decrease_interval_preserves_pending_epochs() {
+        let mut interval = checkpoint_interval(Some("5")).unwrap();
+        for prev in [10, 12] {
+            let barrier = interval.transform(
+                barrier_info(prev, prev + 2, BarrierKind::Checkpoint(vec![prev])),
+                false,
+            );
+            assert_eq!(barrier.kind, BarrierKind::Barrier);
+        }
+        interval.update(Some("1")).unwrap();
+        let barrier = interval.transform(
+            barrier_info(14, 16, BarrierKind::Checkpoint(vec![14])),
+            false,
+        );
+        assert_eq!(barrier.kind, BarrierKind::Checkpoint(vec![10, 12, 14]));
+        let barrier = interval.transform(
+            barrier_info(16, 18, BarrierKind::Checkpoint(vec![16])),
+            false,
+        );
+        assert_eq!(barrier.kind, BarrierKind::Checkpoint(vec![16]));
+    }
+
+    #[test]
+    fn test_increase_interval_preserves_checkpoint_count() {
+        let mut interval = checkpoint_interval(Some("2")).unwrap();
+        interval.transform(
+            barrier_info(10, 12, BarrierKind::Checkpoint(vec![10])),
+            false,
+        );
+        interval.update(Some("3")).unwrap();
+        let barrier = interval.transform(
+            barrier_info(12, 14, BarrierKind::Checkpoint(vec![12])),
+            false,
+        );
+        assert_eq!(barrier.kind, BarrierKind::Barrier);
+        let barrier = interval.transform(
+            barrier_info(14, 16, BarrierKind::Checkpoint(vec![14])),
+            false,
+        );
+        assert_eq!(barrier.kind, BarrierKind::Checkpoint(vec![10, 12, 14]));
+    }
+
+    #[test]
+    fn test_unrelated_properties_preserve_interval_progress() {
+        let mut interval = checkpoint_interval(Some("2")).unwrap();
+        interval.transform(
+            barrier_info(10, 12, BarrierKind::Checkpoint(vec![10])),
+            false,
+        );
+        interval.update(None).unwrap();
+        assert_eq!(interval.interval.get(), 2);
+        let barrier = interval.transform(
+            barrier_info(12, 14, BarrierKind::Checkpoint(vec![12])),
+            false,
+        );
+        assert_eq!(barrier.kind, BarrierKind::Checkpoint(vec![10, 12]));
+    }
+
+    #[test]
+    fn test_invalid_interval_update_preserves_state() {
+        let mut interval = checkpoint_interval(Some("2")).unwrap();
+        interval.transform(
+            barrier_info(10, 12, BarrierKind::Checkpoint(vec![10])),
+            false,
+        );
+        for value in ["0", "-1", "invalid"] {
+            assert!(interval.update(Some(value)).is_err());
+            assert_eq!(interval.interval.get(), 2);
+            assert_eq!(interval.checkpoint_count, 1);
+            assert_eq!(interval.pending_epochs, vec![10]);
+        }
     }
 
     #[test]
