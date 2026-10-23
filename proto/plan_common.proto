@@ -321,14 +321,36 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_PULSAR_MESSAGE_ID_DATA = 9; // for pulsar source, used for ack message
 }
 
-message SourceRefreshMode {
-  message SourceRefreshModeStreaming {}
-  message SourceRefreshModeFullReload {
+message IcebergBoundedScan {
+  message Snapshot {
+    int64 snapshot_id = 1;
+  }
+
+  oneof scan {
+    Snapshot snapshot = 1;
+  }
+}
+
+// How a source table ingests data.
+message SourceIngestMode {
+  // Ingests continuously.
+  message SourceIngestModeStreaming {}
+
+  // Reloads the whole source on `REFRESH TABLE`, or every `refresh_interval_sec` if set.
+  message SourceIngestModeFullReload {
     optional int64 refresh_interval_sec = 1;
   }
 
-  oneof refresh_mode {
-    SourceRefreshModeStreaming streaming = 1;
-    SourceRefreshModeFullReload full_reload = 2;
+  // Loads a pinned input once. The input is pinned when the table is created.
+  message SourceIngestModeBounded {
+    oneof input {
+      IcebergBoundedScan iceberg = 1;
+    }
+  }
+
+  oneof ingest_mode {
+    SourceIngestModeStreaming streaming = 1;
+    SourceIngestModeFullReload full_reload = 2;
+    SourceIngestModeBounded bounded = 3;
   }
 }
