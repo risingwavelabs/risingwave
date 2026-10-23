@@ -335,7 +335,7 @@ final class OracleExternalTable {
         return columns;
     }
 
-    private static List<String> discoverPrimaryKeys(
+    static List<String> discoverPrimaryKeys(
             Connection connection, String schemaName, String tableName) throws SQLException {
         var primaryKeys = new ArrayList<String>();
         try (var statement =
@@ -434,16 +434,15 @@ final class OracleExternalTable {
                         + "or binary CHAR/VARCHAR2 in an AL32UTF8 database");
     }
 
-    private static Data.DataType oracleTypeToRisingWaveType(
+    static Data.DataType oracleTypeToRisingWaveType(
             String rawType, Integer precision, Integer scale) throws SQLException {
         var oracleType = rawType.toUpperCase(Locale.ROOT);
         var typeName =
                 switch (oracleType) {
                     case "BINARY_FLOAT" -> TypeName.FLOAT;
                     case "BINARY_DOUBLE" -> TypeName.DOUBLE;
-                        // Oracle FLOAT and its aliases are NUMBER subtypes with binary precision,
-                        // not
-                        // IEEE-754 values. Preserve their decimal semantics.
+                        // Oracle FLOAT and its aliases are NUMBER subtypes with binary
+                        // precision, not IEEE-754 values. Preserve their decimal semantics.
                     case "FLOAT", "REAL", "DOUBLE PRECISION" -> TypeName.DECIMAL;
                     case "NUMBER", "DECIMAL", "NUMERIC", "INTEGER", "INT", "SMALLINT" ->
                             oracleNumberType(precision, scale);
@@ -579,7 +578,7 @@ final class OracleExternalTable {
         }
     }
 
-    private static Integer nullableInteger(ResultSet result, String column) throws SQLException {
+    static Integer nullableInteger(ResultSet result, String column) throws SQLException {
         var value = result.getInt(column);
         return result.wasNull() ? null : value;
     }

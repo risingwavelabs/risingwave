@@ -41,7 +41,7 @@ pub struct MaterializeCache {
     row_serde: BasicSerde,
     version_column_indices: Vec<u32>,
     conflict_behavior: ConflictBehavior,
-    toastable_column_indices: Option<Vec<usize>>,
+    placeholder_column_indices: Option<Vec<usize>>,
     metrics: MaterializeCacheMetrics,
 }
 
@@ -88,15 +88,15 @@ impl MaterializeCache {
         row_serde: BasicSerde,
         version_column_indices: Vec<u32>,
         conflict_behavior: ConflictBehavior,
-        toastable_column_indices: Option<Vec<usize>>,
+        placeholder_column_indices: Option<Vec<usize>>,
         materialize_cache_metrics: MaterializeCacheMetrics,
     ) -> Option<Self> {
         match conflict_behavior {
             checked_conflict_behaviors!() => {}
             ConflictBehavior::NoCheck => {
                 assert!(
-                    toastable_column_indices.is_none(),
-                    "when there are toastable columns, conflict handling must be enabled"
+                    placeholder_column_indices.is_none(),
+                    "when there are placeholder columns, conflict handling must be enabled"
                 );
                 return None;
             }
@@ -109,7 +109,7 @@ impl MaterializeCache {
             row_serde,
             version_column_indices,
             conflict_behavior,
-            toastable_column_indices,
+            placeholder_column_indices,
             metrics: materialize_cache_metrics,
         })
     }
@@ -218,12 +218,14 @@ impl MaterializeCache {
                             };
 
                             if need_overwrite {
-                                if let Some(toastable_indices) = &self.toastable_column_indices {
-                                    // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
-                                    let final_row = toast::handle_toast_columns_for_postgres_cdc(
+                                if let Some(placeholder_column_indices) =
+                                    &self.placeholder_column_indices
+                                {
+                                    // Replace Debezium's placeholder with old row values.
+                                    let final_row = placeholder::restore_placeholder_columns(
                                         &old_row_deserialized,
                                         &new_row_deserialized,
-                                        toastable_indices,
+                                        placeholder_column_indices,
                                     );
 
                                     change_buffer.update(
@@ -240,7 +242,7 @@ impl MaterializeCache {
                                         }),
                                     );
                                 } else {
-                                    // No TOAST columns, use the original row bytes directly to avoid unnecessary serialization
+                                    // No placeholder columns, use the original row bytes directly to avoid unnecessary serialization
                                     change_buffer.update(
                                         key.clone(),
                                         old_row_deserialized,
@@ -280,16 +282,18 @@ impl MaterializeCache {
                                 );
                                 let mut updated_row = OwnedRow::new(row_deserialized_vec);
 
-                                // Apply TOAST column fix for CDC tables with TOAST columns
-                                if let Some(toastable_indices) = &self.toastable_column_indices {
+                                // Replace Debezium's placeholder with old row values.
+                                if let Some(placeholder_column_indices) =
+                                    &self.placeholder_column_indices
+                                {
                                     // Note: we need to use old_row_deserialized again, but it was moved above
                                     // So we re-deserialize the old row
                                     let old_row_deserialized_again =
                                         row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                    updated_row = toast::handle_toast_columns_for_postgres_cdc(
+                                    updated_row = placeholder::restore_placeholder_columns(
                                         &old_row_deserialized_again,
                                         &updated_row,
-                                        toastable_indices,
+                                        placeholder_column_indices,
                                     );
                                 }
 
@@ -468,40 +472,37 @@ fn versions_are_newer_or_equal(
     true
 }
 
-/// TOAST column handling for CDC tables with TOAST columns.
-mod toast {
+/// Handling of Debezium's placeholder for column values that an UPDATE left unchanged and the
+/// upstream did not log, such as PostgreSQL TOAST values and Oracle LOB, XML and extended string
+/// values.
+mod placeholder {
     use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DEBEZIUM_UNAVAILABLE_VECTOR_ELEM};
 
     use super::*;
 
     /// Fast string comparison to check if a string equals `DEBEZIUM_UNAVAILABLE_VALUE`.
     /// Optimized by checking length first to avoid expensive string comparison.
-    fn is_unavailable_value_str(s: &str) -> bool {
+    fn is_placeholder_str(s: &str) -> bool {
         s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE
     }
 
-    /// Check if a datum represents Debezium's unavailable value placeholder.
+    /// Check if a datum represents Debezium's placeholder.
     /// This function handles both scalar types and one-dimensional arrays.
-    fn is_debezium_unavailable_value(
+    fn is_debezium_placeholder(
         datum: &Option<risingwave_common::types::ScalarRefImpl<'_>>,
     ) -> bool {
         match datum {
-            Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => {
-                is_unavailable_value_str(val)
-            }
+            Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => is_placeholder_str(val),
             Some(risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                // For jsonb type, check if it's a string containing the unavailable value
-                jsonb_ref
-                    .as_str()
-                    .map(is_unavailable_value_str)
-                    .unwrap_or(false)
+                // For jsonb type, check if it's a string containing the placeholder
+                jsonb_ref.as_str().map(is_placeholder_str).unwrap_or(false)
             }
             Some(risingwave_common::types::ScalarRefImpl::Bytea(bytea)) => {
                 // For bytea type, we need to check if it contains the string bytes of DEBEZIUM_UNAVAILABLE_VALUE
                 // This is because when processing bytea from Debezium, we convert the base64-encoded string
                 // to `DEBEZIUM_UNAVAILABLE_VALUE` in the json.rs parser to maintain consistency
                 if let Ok(bytea_str) = std::str::from_utf8(bytea) {
-                    is_unavailable_value_str(bytea_str)
+                    is_placeholder_str(bytea_str)
                 } else {
                     false
                 }
@@ -519,7 +520,7 @@ mod toast {
                         .iter()
                         .all(|f| f.0 == DEBEZIUM_UNAVAILABLE_VECTOR_ELEM)
             }
-            // For list type, check if it contains exactly one element with the unavailable value.
+            // For list type, check if it contains exactly one element with the placeholder.
             // This is because when any element in an array triggers TOAST, Debezium treats the
             // entire array as unchanged and sends a placeholder array with only one element.
             Some(risingwave_common::types::ScalarRefImpl::List(list_ref))
@@ -527,7 +528,7 @@ mod toast {
             {
                 if let Some(Some(element)) = list_ref.get(0) {
                     // Recursively check the array element
-                    is_debezium_unavailable_value(&Some(element))
+                    is_debezium_placeholder(&Some(element))
                 } else {
                     false
                 }
@@ -536,21 +537,22 @@ mod toast {
         }
     }
 
-    /// Fix TOAST columns by replacing unavailable values with old row values.
-    pub fn handle_toast_columns_for_postgres_cdc(
+    /// Replace Debezium's placeholder in the given columns of `new_row` with the values from
+    /// `old_row`.
+    pub fn restore_placeholder_columns(
         old_row: &OwnedRow,
         new_row: &OwnedRow,
-        toastable_indices: &[usize],
+        placeholder_column_indices: &[usize],
     ) -> OwnedRow {
         let mut fixed_row_data = new_row.as_inner().to_vec();
 
-        for &toast_idx in toastable_indices {
-            // Check if the new value is Debezium's unavailable value placeholder
-            let is_unavailable = is_debezium_unavailable_value(&new_row.datum_at(toast_idx));
-            if is_unavailable {
+        for &placeholder_column_idx in placeholder_column_indices {
+            // Check if the new value is Debezium's placeholder
+            let is_placeholder = is_debezium_placeholder(&new_row.datum_at(placeholder_column_idx));
+            if is_placeholder {
                 // Replace with old row value if available
-                if let Some(old_datum_ref) = old_row.datum_at(toast_idx) {
-                    fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
+                if let Some(old_datum_ref) = old_row.datum_at(placeholder_column_idx) {
+                    fixed_row_data[placeholder_column_idx] = Some(old_datum_ref.into_scalar_impl());
                 }
             }
         }

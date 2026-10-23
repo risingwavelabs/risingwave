@@ -85,7 +85,7 @@ async fn build_accessor_builder(
                 json_config
                     .bigint_unsigned_handling
                     .unwrap_or(BigintUnsignedHandlingMode::Long),
-                json_config.handle_toast_columns,
+                json_config.handle_postgres_toast_columns,
             )?,
         )),
         _ => bail!("unsupported encoding for Debezium"),
@@ -143,7 +143,7 @@ impl DebeziumParser {
                 timestamp_handling: None,
                 time_handling: None,
                 bigint_unsigned_handling: None,
-                handle_toast_columns: false,
+                handle_postgres_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -251,7 +251,7 @@ mod tests {
                 timestamp_handling: None,
                 time_handling: None,
                 bigint_unsigned_handling: None,
-                handle_toast_columns: false,
+                handle_postgres_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -318,7 +318,7 @@ mod tests {
                 timestamp_handling: None,
                 time_handling: None,
                 bigint_unsigned_handling: None,
-                handle_toast_columns: false,
+                handle_postgres_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -407,7 +407,7 @@ mod tests {
                 timestamp_handling: None,
                 time_handling: None,
                 bigint_unsigned_handling: None,
-                handle_toast_columns: false,
+                handle_postgres_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

@@ -40,7 +40,7 @@ impl DebeziumJsonAccessBuilder {
         time_handling: TimeHandling,
         numeric_handling: NumericHandling,
         bigint_unsigned_handling: BigintUnsignedHandlingMode,
-        handle_toast_columns: bool,
+        handle_postgres_toast_columns: bool,
     ) -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
@@ -50,7 +50,7 @@ impl DebeziumJsonAccessBuilder {
                 time_handling,
                 numeric_handling,
                 bigint_unsigned_handling,
-                handle_toast_columns,
+                handle_postgres_toast_columns,
             ),
         })
     }
@@ -174,7 +174,7 @@ mod tests {
                 timestamp_handling: None,
                 time_handling: None,
                 bigint_unsigned_handling: None,
-                handle_toast_columns: false,
+                handle_postgres_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

@@ -92,11 +92,16 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// The cache for conflict handling. `None` if conflict behavior is `NoCheck`.
     materialize_cache: Option<MaterializeCache>,
 
-    /// Indices of columns that may carry a Debezium unchanged-TOAST placeholder
-    /// (PostgreSQL CDC only). Mirrors the value passed into `MaterializeCache`.
-    /// Used at runtime to prevent the `Overwrite -> NoCheck` downgrade from
-    /// bypassing the placeholder replacement path.
-    toastable_column_indices: Option<Vec<usize>>,
+    /// Indices of columns whose value Debezium may replace with its placeholder when an UPDATE
+    /// leaves them unchanged and the upstream did not log them. On conflict, a placeholder in
+    /// these columns is replaced with the stored row's value.
+    ///
+    /// PostgreSQL TOAST values are one case. Oracle LOB, XML and extended string values are
+    /// another.
+    ///
+    /// Mirrors the value passed into `MaterializeCache`. Used at runtime to prevent the
+    /// `Overwrite -> NoCheck` downgrade from bypassing the placeholder replacement path.
+    placeholder_column_indices: Option<Vec<usize>>,
 
     conflict_behavior: ConflictBehavior,
 
@@ -248,16 +253,18 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
 
-        // Extract TOAST-able column indices from table columns.
-        // Only for PostgreSQL CDC tables.
-        let toastable_column_indices = if table_catalog.cdc_table_type()
-            == risingwave_pb::catalog::table::CdcTableType::Postgres
-        {
-            let toastable_indices: Vec<usize> = table_columns
+        // Extract placeholder column indices from table columns.
+        // Only for PostgreSQL and Oracle CDC tables.
+        let placeholder_column_indices = if matches!(
+            table_catalog.cdc_table_type(),
+            risingwave_pb::catalog::table::CdcTableType::Postgres
+                | risingwave_pb::catalog::table::CdcTableType::Oracle
+        ) {
+            let placeholder_column_indices: Vec<usize> = table_columns
                 .iter()
                 .enumerate()
                 .filter_map(|(index, column)| match &column.data_type {
-                    // Currently supports TOAST updates for:
+                    // Currently supports placeholders for:
                     // - jsonb (DataType::Jsonb)
                     // - varchar (DataType::Varchar)
                     // - bytea (DataType::Bytea)
@@ -265,7 +272,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // - One-dimensional arrays of the above types (DataType::List)
                     //   Note: Some array types may not be fully supported yet, see issue  https://github.com/risingwavelabs/risingwave/issues/22916 for details.
 
-                    // For details on how TOAST values are handled, see comments in `is_debezium_unavailable_value`.
+                    // For details on how placeholders are detected, see comments in `is_debezium_placeholder`.
                     DataType::Varchar
                     | DataType::List(_)
                     | DataType::Bytea
@@ -275,10 +282,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 })
                 .collect();
 
-            if toastable_indices.is_empty() {
+            if placeholder_column_indices.is_empty() {
                 None
             } else {
-                Some(toastable_indices)
+                Some(placeholder_column_indices)
             }
         } else {
             None
@@ -353,10 +360,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 row_serde,
                 version_column_indices.clone(),
                 conflict_behavior,
-                toastable_column_indices.clone(),
+                placeholder_column_indices.clone(),
                 cache_metrics,
             ),
-            toastable_column_indices,
+            placeholder_column_indices,
             conflict_behavior,
             cleaned_by_ttl_watermark,
             version_column_indices,
@@ -439,9 +446,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 // while outputting inconsistent changes to downstream which no one will subscribe to.
                                 // For tables with watermark TTL (indicated by `cleaned_by_ttl_watermark`), conflict check must be enabled.
                                 // TODO(ttl): differentiate between table consistency and downstream consistency.
-                                // When the table carries TOAST-able columns (PostgreSQL CDC), the
-                                // `MaterializeCache` is the only place where the Debezium
-                                // unchanged-TOAST placeholder is detected and swapped for the row's
+                                // When the table carries placeholder columns (PostgreSQL or Oracle
+                                // CDC), the `MaterializeCache` is the only place where the Debezium
+                                // placeholder is detected and swapped for the row's
                                 // previous value. Demoting to `NoCheck` here would skip the cache
                                 // entirely and let the placeholder land in state. Keep the original
                                 // `Overwrite` behavior in that case so the replacement path runs.
@@ -450,7 +457,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     && !self.state_table.is_consistent_op()
                                     && !self.cleaned_by_ttl_watermark
                                     && self.version_column_indices.is_empty()
-                                    && self.toastable_column_indices.is_none()
+                                    && self.placeholder_column_indices.is_none()
                                 {
                                     ConflictBehavior::NoCheck
                                 } else {
@@ -1223,7 +1230,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 None,
                 cache_metrics,
             ),
-            toastable_column_indices: None,
+            placeholder_column_indices: None,
             conflict_behavior,
             cleaned_by_ttl_watermark: ttl_column.is_some(),
             version_column_indices: vec![],
