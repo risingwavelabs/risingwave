@@ -191,9 +191,9 @@
           └─BatchProject { exprs: [items_sold.brand, null:Int32, 0:Int64] }
             └─BatchScan { table: items_sold, columns: [items_sold.brand], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [brand, sum], stream_key: [brand], pk_columns: [brand], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, Case((count(null:Int32) = 0:Int64), null:Int64, sum(null:Int32)) as $expr1] }
-      └─StreamHashAgg { group_key: [items_sold.brand], aggs: [sum(null:Int32), count(null:Int32), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand) }
-          └─StreamProject { exprs: [items_sold.brand, null:Int32, items_sold._row_id] }
+    StreamMaterialize { columns: [brand, sum, 0:Int64(hidden)], stream_key: [brand, 0:Int64], pk_columns: [brand, 0:Int64], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [items_sold.brand, Case((count(null:Int32) = 0:Int64), null:Int64, sum(null:Int32)) as $expr1, 0:Int64] }
+      └─StreamHashAgg { group_key: [items_sold.brand, 0:Int64], aggs: [sum(null:Int32), count(null:Int32), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand, 0:Int64) }
+          └─StreamProject { exprs: [items_sold.brand, null:Int32, 0:Int64, items_sold._row_id] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold._row_id], stream_scan_type: SnapshotBackfill, stream_key: [items_sold._row_id], pk: [_row_id], dist: UpstreamHashShard(items_sold._row_id) }

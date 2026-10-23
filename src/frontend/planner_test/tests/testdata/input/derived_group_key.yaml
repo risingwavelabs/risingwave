@@ -41,7 +41,7 @@
     select f, f::varchar as fs, d, d::varchar as ds, i, extract(day from i) as id, sum(v) as sv from t group by f, f::varchar, d, d::varchar, i, extract(day from i);
   expected_outputs:
     - stream_plan
-- name: constant group keys keep one key
+- name: constant group keys are kept
   sql: |
     create table t (v int);
     select 1 as x, 2 as y, sum(v) as sv from t group by 1, 2;

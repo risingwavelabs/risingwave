@@ -218,9 +218,10 @@
     select * from hop(t, ts, interval '1' minute, interval '3' minute);
   stream_plan: |-
     StreamMaterialize { columns: [ts, v1, v2, window_start, window_end, t._row_id(hidden)], stream_key: [t._row_id, window_start], pk_columns: [t._row_id, window_start], pk_conflict: NoCheck, watermark_columns: [ts, window_start, window_end] }
-    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [t.ts, t.v1, t.v2, window_start, window_end, t._row_id], output_watermarks: [[t.ts, window_start, window_end]] }
-      └─StreamFilter { predicate: IsNotNull(t.ts) }
-        └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.ts, t.v1, t.v2, window_start, AddWithTimeZone(window_start, '00:03:00':Interval, 'UTC':Varchar) as $expr1, t._row_id], output_watermarks: [[t.ts, window_start, $expr1]] }
+      └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [t.ts, t.v1, t.v2, window_start, t._row_id], output_watermarks: [[t.ts, window_start]] }
+        └─StreamFilter { predicate: IsNotNull(t.ts) }
+          └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: hop ts
   sql: |
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
@@ -235,10 +236,11 @@
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     select window_end from hop(t, ts, interval '1' minute, interval '3' minute);
   stream_plan: |-
-    StreamMaterialize { columns: [window_end, t._row_id(hidden)], stream_key: [t._row_id, window_end], pk_columns: [t._row_id, window_end], pk_conflict: NoCheck, watermark_columns: [window_end] }
-    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_end, t._row_id], output_watermarks: [[window_end]] }
-      └─StreamFilter { predicate: IsNotNull(t.ts) }
-        └─StreamTableScan { table: t, columns: [t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [window_end, t._row_id(hidden), window_start(hidden)], stream_key: [t._row_id, window_start], pk_columns: [t._row_id, window_start], pk_conflict: NoCheck, watermark_columns: [window_end, window_start(hidden)] }
+    └─StreamProject { exprs: [AddWithTimeZone(window_start, '00:03:00':Interval, 'UTC':Varchar) as $expr1, t._row_id, window_start], output_watermarks: [[$expr1, window_start]] }
+      └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_start, t._row_id], output_watermarks: [[window_start]] }
+        └─StreamFilter { predicate: IsNotNull(t.ts) }
+          └─StreamTableScan { table: t, columns: [t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: hop end
   sql: |
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;

@@ -172,20 +172,24 @@
     create table t1 (a int, b int, created_at timestamp);
     select a, window_end from hop(t1, created_at, interval '15' minute, interval '30' minute)
   logical_plan: |-
-    LogicalProject { exprs: [t1.a, window_end] }
-    └─LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
-      └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.created_at, t1._row_id, t1._rw_timestamp] }
+    LogicalProject { exprs: [t1.a, $expr1] }
+    └─LogicalProject { exprs: [t1.a, t1.b, t1.created_at, t1._row_id, t1._rw_timestamp, window_start, (window_start + '00:30:00':Interval) as $expr1] }
+      └─LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
+        └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
+          └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.created_at, t1._row_id, t1._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end] }
-    └─LogicalScan { table: t1, columns: [t1.a, t1.created_at], predicate: IsNotNull(t1.created_at) }
+    LogicalProject { exprs: [t1.a, (window_start + '00:30:00':Interval) as $expr1] }
+    └─LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_start] }
+      └─LogicalScan { table: t1, columns: [t1.a, t1.created_at], predicate: IsNotNull(t1.created_at) }
   batch_plan: |-
-    BatchHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end] }
-    └─BatchExchange { order: [], dist: Single }
-      └─BatchFilter { predicate: IsNotNull(t1.created_at) }
-        └─BatchScan { table: t1, columns: [t1.a, t1.created_at], distribution: SomeShard }
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t1.a, (window_start + '00:30:00':Interval) as $expr1] }
+      └─BatchHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_start] }
+        └─BatchFilter { predicate: IsNotNull(t1.created_at) }
+          └─BatchScan { table: t1, columns: [t1.a, t1.created_at], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [a, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_end], pk_columns: [t1._row_id, window_end], pk_conflict: NoCheck }
-    └─StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end, t1._row_id] }
-      └─StreamFilter { predicate: IsNotNull(t1.created_at) }
-        └─StreamTableScan { table: t1, columns: [t1.a, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+    StreamMaterialize { columns: [a, window_end, t1._row_id(hidden), window_start(hidden)], stream_key: [t1._row_id, window_start], pk_columns: [t1._row_id, window_start], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t1.a, (window_start + '00:30:00':Interval) as $expr1, t1._row_id, window_start] }
+      └─StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_start, t1._row_id] }
+        └─StreamFilter { predicate: IsNotNull(t1.created_at) }
+          └─StreamTableScan { table: t1, columns: [t1.a, t1.created_at, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }

@@ -364,18 +364,20 @@
       ├─LogicalProject { exprs: [auction, count, window_start] }
       │ └─LogicalAgg { group_key: [window_start, auction], aggs: [count] }
       │   └─LogicalProject { exprs: [window_start, auction] }
-      │     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
-      │       └─LogicalFilter { predicate: IsNotNull(date_time) }
-      │         └─LogicalSource { source: bid, is_shared: false, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+      │     └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id, window_start, (window_start + '00:00:10':Interval) as $expr1] }
+      │       └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
+      │         └─LogicalFilter { predicate: IsNotNull(date_time) }
+      │           └─LogicalSource { source: bid, is_shared: false, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
       └─LogicalProject { exprs: [max(count), window_start] }
         └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
           └─LogicalProject { exprs: [window_start, count] }
             └─LogicalProject { exprs: [count, window_start] }
               └─LogicalAgg { group_key: [auction, window_start], aggs: [count] }
                 └─LogicalProject { exprs: [auction, window_start] }
-                  └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
-                    └─LogicalFilter { predicate: IsNotNull(date_time) }
-                      └─LogicalSource { source: bid, is_shared: false, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+                  └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id, window_start, (window_start + '00:00:10':Interval) as $expr2] }
+                    └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
+                      └─LogicalFilter { predicate: IsNotNull(date_time) }
+                        └─LogicalSource { source: bid, is_shared: false, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [auction, count] }
@@ -716,16 +718,16 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: id = seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: [id, name, $expr1] }
-      ├─BatchExchange { order: [], dist: HashShard(id, $expr1, $expr2) }
-      │ └─BatchHashAgg { group_key: [id, name, $expr1, $expr2], aggs: [] }
-      │   └─BatchExchange { order: [], dist: HashShard(id, name, $expr1, $expr2) }
-      │     └─BatchProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
-      │       └─BatchProject { exprs: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr1] }
+      ├─BatchExchange { order: [], dist: HashShard(id, $expr1) }
+      │ └─BatchProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
+      │   └─BatchHashAgg { group_key: [id, name, $expr1], aggs: [] }
+      │     └─BatchExchange { order: [], dist: HashShard(id, name, $expr1) }
+      │       └─BatchProject { exprs: [id, name, TumbleStart(date_time, '00:00:10':Interval) as $expr1] }
       │         └─BatchSource { source: person, columns: [id, name, email_address, credit_card, city, state, date_time, extra, _row_id] }
-      └─BatchHashAgg { group_key: [seller, $expr3, $expr4], aggs: [] }
-        └─BatchExchange { order: [], dist: HashShard(seller, $expr3, $expr4) }
-          └─BatchProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
-            └─BatchProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr3] }
+      └─BatchProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
+        └─BatchHashAgg { group_key: [seller, $expr3], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(seller, $expr3) }
+            └─BatchProject { exprs: [seller, TumbleStart(date_time, '00:00:10':Interval) as $expr3] }
               └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), seller(hidden), $expr3(hidden)], stream_key: [id, name, starttime, $expr2], pk_columns: [id, name, starttime, $expr2], pk_conflict: NoCheck }

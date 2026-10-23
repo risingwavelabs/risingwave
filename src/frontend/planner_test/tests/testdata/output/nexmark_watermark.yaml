@@ -350,24 +350,26 @@
       ├─LogicalProject { exprs: [$expr1, count, window_start] }
       │ └─LogicalAgg { group_key: [window_start, $expr1], aggs: [count] }
       │   └─LogicalProject { exprs: [window_start, $expr1] }
-      │     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
-      │       └─LogicalFilter { predicate: IsNotNull(date_time) }
-      │         └─LogicalShare { id: 3 }
-      │           └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
-      │             └─LogicalFilter { predicate: (event_type = 2:Int32) }
-      │               └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
+      │     └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, window_start, (window_start + '00:00:10':Interval) as $expr7] }
+      │       └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
+      │         └─LogicalFilter { predicate: IsNotNull(date_time) }
+      │           └─LogicalShare { id: 3 }
+      │             └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
+      │               └─LogicalFilter { predicate: (event_type = 2:Int32) }
+      │                 └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
       └─LogicalProject { exprs: [max(count), window_start] }
         └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
           └─LogicalProject { exprs: [window_start, count] }
             └─LogicalProject { exprs: [count, window_start] }
               └─LogicalAgg { group_key: [$expr1, window_start], aggs: [count] }
                 └─LogicalProject { exprs: [$expr1, window_start] }
-                  └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
-                    └─LogicalFilter { predicate: IsNotNull(date_time) }
-                      └─LogicalShare { id: 3 }
-                        └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
-                          └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                            └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                  └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, window_start, (window_start + '00:00:10':Interval) as $expr8] }
+                    └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
+                      └─LogicalFilter { predicate: IsNotNull(date_time) }
+                        └─LogicalShare { id: 3 }
+                          └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
+                            └─LogicalFilter { predicate: (event_type = 2:Int32) }
+                              └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [$expr2, count] }
@@ -785,19 +787,19 @@
       AND P.endtime = A.endtime;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: $expr3 = $expr8 AND $expr2 = $expr7 AND $expr5 = $expr9, output: [$expr3, $expr4, $expr2] }
-      ├─BatchExchange { order: [], dist: HashShard($expr3, $expr2, $expr5) }
-      │ └─BatchHashAgg { group_key: [$expr3, $expr4, $expr2, $expr5], aggs: [] }
-      │   └─BatchExchange { order: [], dist: HashShard($expr3, $expr4, $expr2, $expr5) }
-      │     └─BatchProject { exprs: [Field(person, 0:Int32) as $expr3, Field(person, 1:Int32) as $expr4, $expr2, ($expr2 + '00:00:10':Interval) as $expr5] }
-      │       └─BatchProject { exprs: [event_type, person, auction, bid, $expr1, _row_id, TumbleStart($expr1, '00:00:10':Interval) as $expr2] }
+    └─BatchHashJoin { type: Inner, predicate: $expr2 = $expr7 AND $expr4 = $expr8 AND $expr5 = $expr9, output: [$expr2, $expr3, $expr4] }
+      ├─BatchExchange { order: [], dist: HashShard($expr2, $expr4) }
+      │ └─BatchProject { exprs: [$expr2, $expr3, $expr4, ($expr4 + '00:00:10':Interval) as $expr5] }
+      │   └─BatchHashAgg { group_key: [$expr2, $expr3, $expr4], aggs: [] }
+      │     └─BatchExchange { order: [], dist: HashShard($expr2, $expr3, $expr4) }
+      │       └─BatchProject { exprs: [Field(person, 0:Int32) as $expr2, Field(person, 1:Int32) as $expr3, TumbleStart($expr1, '00:00:10':Interval) as $expr4] }
       │         └─BatchFilter { predicate: (event_type = 0:Int32) }
       │           └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
       │             └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-      └─BatchHashAgg { group_key: [$expr8, $expr7, $expr9], aggs: [] }
-        └─BatchExchange { order: [], dist: HashShard($expr8, $expr7, $expr9) }
-          └─BatchProject { exprs: [Field(auction, 7:Int32) as $expr8, $expr7, ($expr7 + '00:00:10':Interval) as $expr9] }
-            └─BatchProject { exprs: [event_type, person, auction, bid, $expr6, _row_id, TumbleStart($expr6, '00:00:10':Interval) as $expr7] }
+      └─BatchProject { exprs: [$expr7, $expr8, ($expr8 + '00:00:10':Interval) as $expr9] }
+        └─BatchHashAgg { group_key: [$expr7, $expr8], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard($expr7, $expr8) }
+            └─BatchProject { exprs: [Field(auction, 7:Int32) as $expr7, TumbleStart($expr6, '00:00:10':Interval) as $expr8] }
               └─BatchFilter { predicate: (event_type = 1:Int32) }
                 └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr6, _row_id] }
                   └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }

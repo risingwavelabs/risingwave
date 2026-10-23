@@ -85,16 +85,16 @@
         └─StreamExchange { dist: HashShard(t.f, $expr1, t.d, $expr2, t.i, $expr3) }
           └─StreamProject { exprs: [t.f, t.f::Varchar as $expr1, t.d, t.d::Varchar as $expr2, t.i, Extract('DAY':Varchar, t.i) as $expr3, t.v, t._row_id] }
             └─StreamTableScan { table: t, columns: [t.f, t.d, t.i, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-- name: constant group keys keep one key
+- name: constant group keys are kept
   sql: |
     create table t (v int);
     select 1 as x, 2 as y, sum(v) as sv from t group by 1, 2;
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, sv, 2:Int32(hidden)], stream_key: [2:Int32], pk_columns: [2:Int32], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [1:Int32, 2:Int32, Case((count(t.v) = 0:Int64), null:Int64, sum(t.v)) as $expr1, 2:Int32] }
-      └─StreamHashAgg { group_key: [2:Int32], aggs: [sum(t.v), count(t.v), count] }
-        └─StreamExchange { dist: HashShard(2:Int32) }
-          └─StreamProject { exprs: [2:Int32, t.v, t._row_id] }
+    StreamMaterialize { columns: [x, y, sv, 1:Int32(hidden), 2:Int32(hidden)], stream_key: [1:Int32, 2:Int32], pk_columns: [1:Int32, 2:Int32], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [1:Int32, 2:Int32, Case((count(t.v) = 0:Int64), null:Int64, sum(t.v)) as $expr1, 1:Int32, 2:Int32] }
+      └─StreamHashAgg { group_key: [1:Int32, 2:Int32], aggs: [sum(t.v), count(t.v), count] }
+        └─StreamExchange { dist: HashShard(1:Int32, 2:Int32) }
+          └─StreamProject { exprs: [1:Int32, 2:Int32, t.v, t._row_id] }
             └─StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: group key computed from a key below another key that compares by value
   sql: |

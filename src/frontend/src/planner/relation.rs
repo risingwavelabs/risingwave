@@ -784,13 +784,31 @@ source: {:?}",
             return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
         }
 
-        Ok(LogicalHopWindow::create(
-            input,
-            time_col,
-            window_slide,
-            window_size,
-            window_offset,
-        ))
+        let hop =
+            LogicalHopWindow::create(input, time_col, window_slide, window_size, window_offset);
+        // Compute `window_end` from `window_start` in a project if possible, so that rules can see
+        // that it is derived from `window_start`, e.g., to remove it from group keys.
+        let Some(offset) = hop
+            .as_logical_hop_window()
+            .and_then(LogicalHopWindow::window_end_offset_from_start)
+        else {
+            return Ok(hop);
+        };
+        let window_start_idx = hop.schema().len() - 2;
+        let mut exprs: Vec<ExprImpl> = hop.schema().fields()[..=window_start_idx]
+            .iter()
+            .enumerate()
+            .map(|(idx, field)| InputRef::new(idx, field.data_type()).into())
+            .collect();
+        let window_end = FunctionCall::new(
+            ExprType::Add,
+            vec![
+                exprs[window_start_idx].clone(),
+                Literal::new(Some(offset.into()), DataType::Interval).into(),
+            ],
+        )?;
+        exprs.push(window_end.into());
+        Ok(LogicalProject::create(hop, exprs))
     }
 
     fn plan_iceberg_intermediate_scan(

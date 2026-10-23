@@ -346,18 +346,20 @@
       ├─LogicalProject { exprs: [bid.auction, count, window_start] }
       │ └─LogicalAgg { group_key: [window_start, bid.auction], aggs: [count] }
       │   └─LogicalProject { exprs: [window_start, bid.auction] }
-      │     └─LogicalHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: all }
-      │       └─LogicalFilter { predicate: IsNotNull(bid.date_time) }
-      │         └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+      │     └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, window_start, (window_start + '00:00:10':Interval) as $expr1] }
+      │       └─LogicalHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: all }
+      │         └─LogicalFilter { predicate: IsNotNull(bid.date_time) }
+      │           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
       └─LogicalProject { exprs: [max(count), window_start] }
         └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
           └─LogicalProject { exprs: [window_start, count] }
             └─LogicalProject { exprs: [count, window_start] }
               └─LogicalAgg { group_key: [bid.auction, window_start], aggs: [count] }
                 └─LogicalProject { exprs: [bid.auction, window_start] }
-                  └─LogicalHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: all }
-                    └─LogicalFilter { predicate: IsNotNull(bid.date_time) }
-                      └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
+                  └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp, window_start, (window_start + '00:00:10':Interval) as $expr2] }
+                    └─LogicalHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: all }
+                      └─LogicalFilter { predicate: IsNotNull(bid.date_time) }
+                        └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id, bid._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [bid.auction, count] }
@@ -758,15 +760,15 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: person.id = auction.seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: [person.id, internal_last_seen_value(person.name), $expr1] }
-      ├─BatchExchange { order: [], dist: HashShard(person.id, $expr1, $expr2) }
-      │ └─BatchHashAgg { group_key: [person.id, $expr1, $expr2], aggs: [internal_last_seen_value(person.name)] }
-      │   └─BatchProject { exprs: [person.id, person.name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
-      │     └─BatchProject { exprs: [person.id, person.name, person.date_time, TumbleStart(person.date_time, '00:00:10':Interval) as $expr1] }
+      ├─BatchExchange { order: [], dist: HashShard(person.id, $expr1) }
+      │ └─BatchProject { exprs: [person.id, internal_last_seen_value(person.name), $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
+      │   └─BatchHashAgg { group_key: [person.id, $expr1], aggs: [internal_last_seen_value(person.name)] }
+      │     └─BatchProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval) as $expr1] }
       │       └─BatchScan { table: person, columns: [person.id, person.name, person.date_time], distribution: UpstreamHashShard(person.id) }
-      └─BatchHashAgg { group_key: [auction.seller, $expr3, $expr4], aggs: [] }
-        └─BatchExchange { order: [], dist: HashShard(auction.seller, $expr3, $expr4) }
-          └─BatchProject { exprs: [auction.seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
-            └─BatchProject { exprs: [auction.date_time, auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval) as $expr3] }
+      └─BatchProject { exprs: [auction.seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
+        └─BatchHashAgg { group_key: [auction.seller, $expr3], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(auction.seller, $expr3) }
+            └─BatchProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval) as $expr3] }
               └─BatchScan { table: auction, columns: [auction.date_time, auction.seller], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), auction.seller(hidden), $expr3(hidden)], stream_key: [id, starttime, $expr2], pk_columns: [id, starttime, $expr2], pk_conflict: NoCheck }
@@ -1010,12 +1012,11 @@
     GROUP BY bidder, window_start, window_end
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [bid.bidder, count, $expr1, $expr2] }
-      └─BatchHashAgg { group_key: [bid.bidder, $expr1, $expr2], aggs: [count] }
-        └─BatchExchange { order: [], dist: HashShard(bid.bidder, $expr1, $expr2) }
-          └─BatchProject { exprs: [bid.bidder, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval, 'UTC':Varchar) as $expr2] }
-            └─BatchProject { exprs: [bid.bidder, bid.p_time, TumbleStart(bid.p_time, '00:00:10':Interval) as $expr1] }
-              └─BatchScan { table: bid, columns: [bid.bidder, bid.p_time], distribution: SomeShard }
+    └─BatchProject { exprs: [bid.bidder, count, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval, 'UTC':Varchar) as $expr2] }
+      └─BatchHashAgg { group_key: [bid.bidder, $expr1], aggs: [count] }
+        └─BatchExchange { order: [], dist: HashShard(bid.bidder, $expr1) }
+          └─BatchProject { exprs: [bid.bidder, TumbleStart(bid.p_time, '00:00:10':Interval) as $expr1] }
+            └─BatchScan { table: bid, columns: [bid.bidder, bid.p_time], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [bidder, bid_count, window_start, window_end], stream_key: [bidder, window_start], pk_columns: [bidder, window_start], pk_conflict: NoCheck, watermark_columns: [window_start, window_end] }
     └─StreamProject { exprs: [bid.bidder, count, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr1, $expr2]] }

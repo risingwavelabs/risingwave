@@ -48,15 +48,17 @@
     from hop(t, ts, interval '20 mins', interval '1 hour');
   stream_plan: |-
     StreamMaterialize { columns: [foo, window_start, window_end, t._row_id(hidden)], stream_key: [t._row_id, window_start], pk_columns: [t._row_id, window_start], pk_conflict: NoCheck, watermark_columns: [window_start, window_end] }
-    └─StreamHopWindow { time_col: t.ts, slide: 00:20:00, size: 01:00:00, output: [t.foo, window_start, window_end, t._row_id], output_watermarks: [[window_start, window_end]] }
-      └─StreamFilter { predicate: IsNotNull(t.ts) }
-        └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [t.foo, window_start, (window_start + '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[window_start, $expr1]] }
+      └─StreamHopWindow { time_col: t.ts, slide: 00:20:00, size: 01:00:00, output: [t.foo, window_start, t._row_id], output_watermarks: [[window_start]] }
+        └─StreamFilter { predicate: IsNotNull(t.ts) }
+          └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_plan: |-
     StreamMaterialize { columns: [foo, window_start, window_end, t._row_id(hidden)], stream_key: [t._row_id, window_start], pk_columns: [t._row_id, window_start], pk_conflict: NoCheck, watermark_columns: [window_start] }
     └─StreamEowcSort { sort_column: window_start }
-      └─StreamHopWindow { time_col: t.ts, slide: 00:20:00, size: 01:00:00, output: [t.foo, window_start, window_end, t._row_id], output_watermarks: [[window_start, window_end]] }
-        └─StreamFilter { predicate: IsNotNull(t.ts) }
-          └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamProject { exprs: [t.foo, window_start, (window_start + '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[window_start, $expr1]] }
+        └─StreamHopWindow { time_col: t.ts, slide: 00:20:00, size: 01:00:00, output: [t.foo, window_start, t._row_id], output_watermarks: [[window_start]] }
+          └─StreamFilter { predicate: IsNotNull(t.ts) }
+            └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: join window_start = window_start
   sql: |
     create table t (
