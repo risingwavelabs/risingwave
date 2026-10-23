@@ -343,8 +343,11 @@ impl Catalog for ReloadingTestCatalog {
         unreachable!("test only loads a table")
     }
 
-    async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<Table> {
-        unreachable!("test only loads a table")
+    async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
+        let mut table = self.table.lock().unwrap();
+        let updated = commit.apply(table.clone())?;
+        *table = updated.clone();
+        Ok(updated)
     }
 }
 
@@ -364,6 +367,7 @@ fn test_coordinator(
         retry_num: 0,
         waiting_commit: None,
         prev_committed_epoch: None,
+        committed_data_file_partitions: None,
     }
 }
 
@@ -1071,5 +1075,185 @@ async fn commit_one_epoch_reuses_pre_commit_table_on_first_attempt() -> Result<(
         CommitError::Commit(err) | CommitError::ReloadTable(err) => err,
     })?;
     assert_eq!(catalog.load_count(), 1);
+    Ok(())
+}
+
+fn committable_table(table: Table) -> Result<Table> {
+    let metadata_location = format!(
+        "{}/metadata/00000-00000000-0000-0000-0000-000000000000.metadata.json",
+        table.metadata().location()
+    );
+    Ok(Table::builder()
+        .identifier(table.identifier().clone())
+        .file_io(table.file_io().clone())
+        .runtime(Runtime::try_current()?)
+        .metadata(table.metadata().clone())
+        .metadata_location(metadata_location)
+        .build()?)
+}
+
+/// Same table and metadata with an empty object cache, so manifest reads must hit storage.
+fn without_object_cache(table: &Table) -> Result<Table> {
+    let mut builder = Table::builder()
+        .identifier(table.identifier().clone())
+        .file_io(table.file_io().clone())
+        .runtime(Runtime::try_current()?)
+        .metadata(table.metadata().clone());
+    if let Some(location) = table.metadata_location() {
+        builder = builder.metadata_location(location.to_owned());
+    }
+    Ok(builder.build()?)
+}
+
+async fn append_data_file(
+    catalog: &ReloadingTestCatalog,
+    table: &Table,
+    data_file: DataFile,
+    snapshot_id: i64,
+) -> Result<Table> {
+    let txn = Transaction::new(table);
+    let txn = txn
+        .fast_append()
+        .set_snapshot_id(snapshot_id)
+        .add_data_files(vec![data_file])
+        .apply(txn)?;
+    Ok(txn.commit(catalog).await?)
+}
+
+fn id_partition(id: i64) -> Struct {
+    Struct::from_iter([Some(Literal::long(id))])
+}
+
+/// A position delete as writers report it: the partition is left for meta to backfill.
+fn serialized_delete_without_partition(path: &str, referenced: &str) -> SerializedDataFile {
+    serde_json::from_value(serde_json::json!({
+        "content": 1,
+        "file_path": path,
+        "file_format": "PARQUET",
+        "partition": {},
+        "record_count": 1,
+        "file_size_in_bytes": 1,
+        "referenced_data_file": referenced
+    }))
+    .unwrap()
+}
+
+fn delete_only_aggregate(
+    table: &Table,
+    delete_files: Vec<SerializedDataFile>,
+) -> IcebergPkIndexSinkAggResult {
+    IcebergPkIndexSinkAggResult {
+        schema_id: 0,
+        partition_spec_id: table.metadata().default_partition_spec_id(),
+        format_version: Some(FormatVersion::V2),
+        data_files: vec![],
+        delete_files,
+        overwrite_files: vec![],
+    }
+}
+
+fn backfilled_partitions(materialized_add_files: Option<Vec<DataFile>>) -> Vec<Struct> {
+    materialized_add_files
+        .unwrap()
+        .into_iter()
+        .map(|file| file.partition().clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn committed_data_file_partitions_follow_own_commits() -> Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let table = committable_table(coalesce_test_table_with_partitioning(
+        &temp_dir,
+        FormatVersion::V2,
+        true,
+    )?)?;
+    let catalog = Arc::new(ReloadingTestCatalog::new(table.clone()));
+    let first = output_data_file_with_partition(&table, "first", id_partition(1))?;
+    let table = append_data_file(&catalog, &table, first.clone(), 1).await?;
+    let mut coordinator = test_coordinator(
+        table.clone(),
+        catalog.clone(),
+        coalesce_test_config(),
+        DatabaseConnection::Disconnected,
+    );
+
+    // The first probe builds the index from the committed snapshot.
+    let (_, materialized) = coordinator
+        .backfill_delete_file_partitions(delete_only_aggregate(
+            &table,
+            vec![serialized_delete_without_partition(
+                "delete-first",
+                first.file_path(),
+            )],
+        ))
+        .await?;
+    assert_eq!(backfilled_partitions(materialized), vec![id_partition(1)]);
+
+    // This coordinator's own commit advances the index without rescanning manifests.
+    let second = output_data_file_with_partition(&table, "second", id_partition(2))?;
+    let table = append_data_file(&catalog, &table, second.clone(), 2).await?;
+    let mut commit = empty_epoch_commit(2, true);
+    commit.materialized_add_files = Some(vec![second.clone()]);
+    let committed = coordinator
+        .committed_data_file_partitions
+        .take()
+        .and_then(|committed| committed.advance(&table, &commit))
+        .expect("own commit advances the index");
+    assert_eq!(committed.snapshot_id, 2);
+    coordinator.committed_data_file_partitions = Some(committed);
+    coordinator.table = without_object_cache(&table)?;
+    std::fs::remove_dir_all(temp_dir.path().join("metadata"))?;
+
+    let (_, materialized) = coordinator
+        .backfill_delete_file_partitions(delete_only_aggregate(
+            &table,
+            vec![
+                serialized_delete_without_partition("delete-first-again", first.file_path()),
+                serialized_delete_without_partition("delete-second", second.file_path()),
+            ],
+        ))
+        .await?;
+    assert_eq!(
+        backfilled_partitions(materialized),
+        vec![id_partition(1), id_partition(2)]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn committed_data_file_partitions_reset_on_foreign_or_compaction_commits() -> Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let table = committable_table(coalesce_test_table_with_partitioning(
+        &temp_dir,
+        FormatVersion::V2,
+        true,
+    )?)?;
+    let catalog = ReloadingTestCatalog::new(table.clone());
+    let first = output_data_file_with_partition(&table, "first", id_partition(1))?;
+    let table = append_data_file(&catalog, &table, first, 1).await?;
+    let index = || CommittedDataFilePartitions {
+        snapshot_id: 1,
+        partitions: HashMap::new(),
+    };
+
+    // Another writer produced the snapshot.
+    let second = output_data_file_with_partition(&table, "second", id_partition(2))?;
+    let foreign = append_data_file(&catalog, &table, second.clone(), 2).await?;
+    let mut commit = empty_epoch_commit(3, true);
+    commit.materialized_add_files = Some(vec![second.clone()]);
+    assert!(index().advance(&foreign, &commit).is_none());
+
+    // Compaction removed data files that the index cannot see.
+    let mut commit = empty_epoch_commit(2, true);
+    commit.materialized_add_files = Some(vec![second]);
+    let mut merged = (*commit.merged).clone();
+    merged.overwrite_files = vec![serialized_file("compacted-input")];
+    commit.merged = Arc::new(merged);
+    assert!(index().advance(&foreign, &commit).is_none());
+
+    // Recovered epochs carry no materialized files.
+    let commit = empty_epoch_commit(2, false);
+    assert!(index().advance(&foreign, &commit).is_none());
     Ok(())
 }
