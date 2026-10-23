@@ -79,7 +79,7 @@ tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
 twox-hash = "2.1.0"
 uuid = { version = "1", features = ["v4"] }
-zstd = { version = "0.13", default-features = false }
+zstd = { version = "0.14", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = { workspace = true }
