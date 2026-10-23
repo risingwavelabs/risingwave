@@ -10335,7 +10335,7 @@ dependencies = [
  "futures-util",
  "keyed_priority_queue",
  "lru 0.18.1",
- "mysql_common",
+ "mysql_common 0.37.3",
  "native-tls",
  "pem 3.0.6",
  "percent-encoding",
@@ -10361,7 +10361,6 @@ dependencies = [
  "btoi",
  "byteorder",
  "bytes",
- "chrono",
  "crc32fast",
  "flate2",
  "getrandom 0.3.1",
@@ -10375,6 +10374,34 @@ dependencies = [
  "serde_json",
  "sha1 0.10.6",
  "sha2 0.10.9",
+ "thiserror 2.0.17",
+ "uuid",
+]
+
+[[package]]
+name = "mysql_common"
+version = "0.38.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d11189bb0e285f58b71744ee23aa8b943bd5120ef0877555813d2107374d3970"
+dependencies = [
+ "base64 0.22.1",
+ "bitflags 2.13.1",
+ "btoi",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "crc32fast",
+ "flate2",
+ "getrandom 0.4.2",
+ "hex",
+ "num-bigint 0.5.1",
+ "num-traits",
+ "regex",
+ "saturating",
+ "serde",
+ "serde_json",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
  "thiserror 2.0.17",
  "uuid",
 ]
@@ -14697,7 +14724,7 @@ dependencies = [
  "moka",
  "mongodb",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.38.2",
  "nexmark",
  "num-bigint 0.4.6",
  "opendal 0.58.1",
@@ -15049,7 +15076,7 @@ dependencies = [
  "md-5 0.10.6",
  "memcomparable",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.38.2",
  "num-integer",
  "parking_lot 0.12.5",
  "parse-display",
