@@ -2642,14 +2642,16 @@ mod tests {
     #[tokio::test]
     async fn test_cdc_table_requires_select_privilege_on_source() {
         let frontend = LocalFrontend::new(Default::default()).await;
+        // PostgreSQL CDC with an explicit schema avoids querying upstream PK metadata,
+        // so this privilege test does not require an external database.
         frontend
             .run_sql(
                 r#"
                 CREATE SOURCE cdc_source WITH (
-                    connector = 'mysql-cdc',
+                    connector = 'postgres-cdc',
                     hostname = 'localhost',
-                    port = '3306',
-                    username = 'root',
+                    port = '5432',
+                    username = 'postgres',
                     password = '',
                     database.name = 'db'
                 ) FORMAT PLAIN ENCODE JSON
@@ -2677,7 +2679,7 @@ mod tests {
             user_id,
         );
         let create_table =
-            "CREATE TABLE cdc_table (id INT PRIMARY KEY) FROM cdc_source TABLE 'db.t'";
+            "CREATE TABLE cdc_table (id INT PRIMARY KEY) FROM cdc_source TABLE 'public.t'";
 
         let err = frontend
             .run_sql_with_session(user_session.clone(), create_table)
