@@ -150,6 +150,13 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
     pub hash_agg_max_dirty_groups_heap_size: usize,
 
+    /// Maximum number of groups kept in the group cache of each `HashAggExecutor` actor. When the
+    /// cache holds more, the least recently used groups are evicted, regardless of memory usage.
+    /// Evicted groups are reloaded from the state table when they are next updated. Set to 0 to
+    /// disable the limit.
+    #[serde(default = "default::developer::stream_hash_agg_group_cache_max_entries")]
+    pub hash_agg_group_cache_max_entries: usize,
+
     #[serde(default = "default::developer::memory_controller_threshold_aggressive")]
     pub memory_controller_threshold_aggressive: f64,
 
