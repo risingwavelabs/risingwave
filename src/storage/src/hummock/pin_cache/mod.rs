@@ -14,9 +14,9 @@
 
 //! Local whole-SST storage with separate read, membership, and refill protocols.
 //!
-//! The caller registers refill candidates and unregisters obsolete objects derived from version
-//! deltas. The refiller owns the ordering of these operations relative to version publication;
-//! this index does not track versions.
+//! Callers register referenced objects and unregister obsolete ones at their chosen lifecycle
+//! boundaries. The backend object registry does not track versions; the membership module
+//! independently computes version-derived logical SST references.
 //! A refill captures a `PinCacheRefillToken` with `prepare_refill` before it is queued;
 //! the caller checks it before I/O, and `publish` checks it atomically with the index update.
 //! Each object has an optional published file. The executor owns running attempts; downloads leave the
@@ -37,7 +37,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectResult, ObjectStoreRef};
 
 mod gc;
-mod membership;
+pub(crate) mod membership;
 mod read;
 mod recovery;
 mod refill;
