@@ -674,8 +674,8 @@ impl CompactionTrack {
 
         self.config.trigger_interval_sec = new_interval_sec;
         if self.round.is_some() {
-            // The new interval applies after the round drains. The current deadline
-            // already represents either immediate continuation or retry backoff.
+            // The new interval applies after the next successful batch or when the
+            // round drains. Preserve the current continuation/cooldown/retry deadline.
             return;
         }
 
@@ -704,8 +704,18 @@ impl CompactionTrack {
             // Success means this attempt made progress, but only `Drained`
             // proves that no work remains below this attempt's boundary.
             self.health.record_progress();
+            // Beneficial PK-index batches can advance their boundary on new commits,
+            // so continuous ingestion may prevent the round from ever draining.
+            // Pace successful batches even while the round remains active. Full
+            // retains a fixed boundary and can continue immediately until drained.
+            let delay =
+                if attempt.pk_index_coordinated && attempt.policy.task_type != TaskType::Full {
+                    Duration::from_secs(self.config.trigger_interval_sec)
+                } else {
+                    Duration::ZERO
+                };
             self.state = CompactionTrackState::Idle {
-                next_compaction_time: now,
+                next_compaction_time: now + delay,
                 manual_task_type: None,
             };
         } else {

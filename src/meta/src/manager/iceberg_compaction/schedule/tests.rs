@@ -2766,7 +2766,8 @@ fn test_pk_index_batches_include_new_writes_without_changing_active_attempt() {
     assert_eq!(track.round_boundary(), Some(10));
     assert!(!track.should_trigger(now));
     track.finish_success(now);
-    assert!(track.should_trigger(now));
+    assert!(!track.should_trigger(now));
+    assert!(track.should_trigger(now + Duration::from_secs(120)));
     let second = track.start_attempt();
     assert_eq!(second.max_file_sequence_number, Some(20));
     assert_eq!(
@@ -2780,6 +2781,57 @@ fn test_pk_index_batches_include_new_writes_without_changing_active_attempt() {
     track.finish_drained(now);
     assert_eq!(track.round_boundary(), None);
     assert_eq!(track.demand.commit_count, 1);
+}
+
+#[test]
+fn test_pk_index_successful_batches_wait_for_interval_under_continuous_commits() {
+    for task_type in [
+        TaskType::Auto,
+        TaskType::SmallFiles,
+        TaskType::FilesWithDelete,
+    ] {
+        for interval_sec in [1, 60, 120] {
+            for applying in [false, true] {
+                let mut now = Instant::now();
+                let mut track = new_round_track(now, interval_sec, 1, 1);
+                track.config.pk_index_coordinated = true;
+                track.config.policy.task_type = task_type;
+                track.record_observed_snapshot(committed_snapshot(10, 1000));
+
+                for batch in 0..3 {
+                    assert!(track.should_trigger(now));
+                    let boundary = track.latest_observed_snapshot.as_ref().unwrap().snapshot_id;
+                    let task_id = IcebergCompactionTaskId::new(9 + batch);
+                    start_in_flight(&mut track, task_id, now);
+                    assert_eq!(track.round_boundary(), Some(boundary));
+                    assert_eq!(track.demand.commit_count, 0);
+                    now += Duration::from_secs(5);
+                    commit_update(boundary + 1, 2000).apply_to_track(&mut track, now);
+                    if applying {
+                        let CompactionTrackState::InFlight { attempt, .. } = &track.state else {
+                            unreachable!()
+                        };
+                        track.state = CompactionTrackState::Applying {
+                            task_id,
+                            attempt: attempt.clone(),
+                        };
+                    }
+                    track.finish_success(now);
+                    assert!(!track.should_trigger(now));
+                    assert_eq!(track.round_boundary(), Some(boundary));
+                    assert_eq!(track.demand.commit_count, 1);
+
+                    let deadline = now + Duration::from_secs(interval_sec);
+                    let before_deadline = deadline - Duration::from_millis(1);
+                    commit_update(boundary + 2, 3000).apply_to_track(&mut track, before_deadline);
+                    assert_eq!(track.demand.commit_count, 2);
+                    assert!(!track.should_trigger(before_deadline));
+                    assert!(track.should_trigger(deadline));
+                    now = deadline;
+                }
+            }
+        }
+    }
 }
 
 #[test]
