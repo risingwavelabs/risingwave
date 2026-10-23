@@ -1,0 +1,73 @@
+control substitution on
+
+statement ok
+drop table if exists excl_t;
+
+statement ok
+drop source if exists excl_src;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'excl_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'excl_slot';
+    DROP PUBLICATION IF EXISTS excl_pub;
+    DROP TABLE IF EXISTS public.excl_e2e CASCADE;
+    CREATE TABLE public.excl_e2e (id int PRIMARY KEY, name text, payload text);
+    INSERT INTO public.excl_e2e VALUES (1, 'a', 'big');
+    "
+
+statement ok
+create source excl_src with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    publication.name = 'excl_pub',
+    slot.name = 'excl_slot',
+    auto.schema.change = 'true'
+);
+
+statement error primary key column `id` cannot be excluded
+create table excl_t (*) with (column.exclude.list = 'id')
+from excl_src table 'public.excl_e2e';
+
+statement error does not exist in the upstream table
+create table excl_t (*) with (column.exclude.list = 'nope')
+from excl_src table 'public.excl_e2e';
+
+statement ok
+create table excl_t (*) with (column.exclude.list = 'payload')
+from excl_src table 'public.excl_e2e';
+
+query IT retry 30 backoff 1s
+select * from excl_t order by id;
+----
+1 a
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    INSERT INTO public.excl_e2e VALUES (2, 'b', 'big2');
+    ALTER TABLE public.excl_e2e ADD COLUMN extra int;
+    INSERT INTO public.excl_e2e VALUES (3, 'c', 'big3', 7);
+    "
+
+query ITI retry 30 backoff 1s
+select * from excl_t order by id;
+----
+1 a NULL
+2 b NULL
+3 c 7
+
+statement ok
+drop table excl_t;
+
+statement ok
+drop source excl_src;

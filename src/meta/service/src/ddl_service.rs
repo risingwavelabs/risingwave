@@ -50,6 +50,8 @@ use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
+use risingwave_sqlparser::ast::{Statement, cdc_table_excluded_columns};
+use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -1416,11 +1418,19 @@ impl DdlService for DdlServiceImpl {
                     &original_columns_by_name,
                 );
 
+                let excluded_columns = match Parser::parse_exactly_one(&table.definition) {
+                    Ok(Statement::CreateTable { with_options, .. }) => {
+                        cdc_table_excluded_columns(&with_options)
+                    }
+                    _ => HashSet::new(),
+                };
+
                 let collect_new_columns = |table_change: &TableSchemaChange| {
                     let mut new_columns: HashSet<(String, DataType)> =
                         HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
                             let col = ColumnCatalog::from(col.clone());
                             cdc_auto_schema_change_comparable_column(&col)
+                                .filter(|(name, _)| !excluded_columns.contains(name))
                         }));
 
                     // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns.
