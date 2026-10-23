@@ -48,7 +48,7 @@ system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_oracle_sqls
 execute_oracle_sqls([
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
 ])
@@ -80,14 +80,14 @@ PY
 
 statement ok
 CREATE TABLE missing_oracle_hb_1 (
-    "ID" DECIMAL,
+    "ID" INT,
     "NAME" VARCHAR,
     PRIMARY KEY ("ID")
 ) FROM missing_oracle_hb_source_1 TABLE 'APP.CUSTOMERS';
 
 statement ok
 CREATE TABLE missing_oracle_hb_2 (
-    "ID" DECIMAL,
+    "ID" INT,
     "NAME" VARCHAR,
     PRIMARY KEY ("ID")
 ) FROM missing_oracle_hb_source_2 TABLE 'APP.CUSTOMERS';
@@ -134,7 +134,7 @@ system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_oracle_sqls
 execute_oracle_sqls([
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
     "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
@@ -168,14 +168,14 @@ PY
 
 statement ok
 CREATE TABLE empty_oracle_hb_1 (
-    "ID" DECIMAL,
+    "ID" INT,
     "NAME" VARCHAR,
     PRIMARY KEY ("ID")
 ) FROM empty_oracle_hb_source_1 TABLE 'APP.CUSTOMERS';
 
 statement ok
 CREATE TABLE empty_oracle_hb_2 (
-    "ID" DECIMAL,
+    "ID" INT,
     "NAME" VARCHAR,
     PRIMARY KEY ("ID")
 ) FROM empty_oracle_hb_source_2 TABLE 'APP.CUSTOMERS';
@@ -222,7 +222,7 @@ system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_oracle_sqls
 execute_oracle_sqls([
-    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER PRIMARY KEY, NAME VARCHAR2(100))",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS (ID, NAME) VALUES (1, 'RisingWave')",
     "CREATE TABLE $TEST_ORACLE_USER.$TEST_ORACLE_HEARTBEAT_TABLE "
@@ -260,14 +260,14 @@ PY
 
 statement ok
 CREATE TABLE seeded_oracle_hb_1 (
-    "ID" DECIMAL,
+    "ID" INT,
     "NAME" VARCHAR,
     PRIMARY KEY ("ID")
 ) FROM seeded_oracle_hb_source_1 TABLE 'APP.CUSTOMERS';
 
 statement ok
 CREATE TABLE seeded_oracle_hb_2 (
-    "ID" DECIMAL,
+    "ID" INT,
     "NAME" VARCHAR,
     PRIMARY KEY ("ID")
 ) FROM seeded_oracle_hb_source_2 TABLE 'APP.CUSTOMERS';

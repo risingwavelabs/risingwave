@@ -48,7 +48,7 @@ execute_oracle_sqls([
     "VALUES (TO_DATE('2024-01-01 00:00:01', 'YYYY-MM-DD HH24:MI:SS'), 'max')",
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE "
     "(TENANT_ID NUMBER(9) NOT NULL, ORDER_ID NUMBER(9) NOT NULL, "
-    "OTHER_COLUMN NUMBER, VALUE VARCHAR2(100), PRIMARY KEY (TENANT_ID, ORDER_ID))",
+    "OTHER_COLUMN NUMBER(9), VALUE VARCHAR2(100), PRIMARY KEY (TENANT_ID, ORDER_ID))",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_PK_NORMAL_COMPOSITE "
     "(TENANT_ID, ORDER_ID, OTHER_COLUMN, VALUE) VALUES (1, 42, 7, 'first')",
@@ -196,6 +196,11 @@ FROM oracle_pk_source TABLE 'APP.RW_PK_NONE';
 # invalid upstream primary key (NUMBER has no declared precision)
 statement error (?s).*requires a declared NUMBER precision.*
 CREATE TABLE oracle_pk_unbounded (*)
+FROM oracle_pk_source TABLE 'APP.RW_PK_UNBOUNDED';
+
+# Declared columns get the same primary-key check, even with the column type discovery derives.
+statement error (?s).*requires a declared NUMBER precision.*
+CREATE TABLE oracle_pk_unbounded ("ID" NUMERIC PRIMARY KEY, "VALUE" VARCHAR)
 FROM oracle_pk_source TABLE 'APP.RW_PK_UNBOUNDED';
 
 # invalid upstream primary key (NUMBER precision exceeds 28 digits)

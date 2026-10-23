@@ -280,7 +280,7 @@ mod tests {
                     timestamp_handling: None,
                     time_handling: None,
                     bigint_unsigned_handling: None,
-                    handle_toast_columns: false,
+                    handle_postgres_toast_columns: false,
                 }),
             },
             data_types,

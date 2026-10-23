@@ -38,8 +38,8 @@ use crate::handler::create_table::{bind_sql_columns, bind_sql_pk_names, bind_tab
 /// - For SQL Server: Normalizes 'db.schema.table' (3 parts) to 'schema.table' (2 parts),
 ///   because users can optionally include database name for verification, but it needs to be
 ///   stripped to match the format returned by Debezium's `extract_table_name()`.
-/// - For Oracle: Folds unquoted `schema.table` identifiers to match Oracle catalog names and
-///   Debezium's `schema.table` topic suffix.
+/// - For Oracle: Returns `schema.table` with both parts exactly as written, without case folding,
+///   to match Oracle catalog names and Debezium's `schema.table` topic suffix.
 /// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
 pub(crate) fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,

@@ -1295,7 +1295,7 @@ pub async fn transform_upstream(
             timestamptz_handling,
             time_handling,
             bigint_unsigned_handling,
-            handle_toast_columns: table_type == ExternalCdcTableType::Postgres,
+            handle_postgres_toast_columns: table_type == ExternalCdcTableType::Postgres,
         }),
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),

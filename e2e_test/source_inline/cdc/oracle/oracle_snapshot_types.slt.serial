@@ -17,7 +17,7 @@ execute_oracle_sqls([
     "BINARY_FLOAT_VALUE BINARY_FLOAT, BINARY_DOUBLE_VALUE BINARY_DOUBLE, "
     "CHAR_VALUE CHAR(5), NCHAR_VALUE NCHAR(4), VARCHAR_VALUE VARCHAR2(50), "
     "NVARCHAR_VALUE NVARCHAR2(20), CLOB_VALUE CLOB, NCLOB_VALUE NCLOB, "
-    "RAW_VALUE RAW(16), BLOB_VALUE BLOB, BOOLEAN_VALUE BOOLEAN, JSON_VALUE JSON, "
+    "RAW_VALUE RAW(16), BLOB_VALUE BLOB, BOOLEAN_VALUE BOOLEAN, "
     "DATE_VALUE DATE, TIMESTAMP_VALUE TIMESTAMP(6), "
     "TIMESTAMPTZ_VALUE TIMESTAMP(6) WITH TIME ZONE, "
     "TIMESTAMPLTZ_VALUE TIMESTAMP(6) WITH LOCAL TIME ZONE, "
@@ -28,7 +28,6 @@ execute_oracle_sqls([
     "1234567, 12345.67, 123456789012345678.9, 3.14159, 1.5f, 1.25d, "
     "'ab', N'ab', 'héllo, 世界', N'naïve 世界', TO_CLOB('clob text'), TO_NCLOB('nclob 文本'), "
     "HEXTORAW('DEADBEEF'), TO_BLOB(HEXTORAW('00FF10')), TRUE, "
-    """'{"a":1,"b":[true,null],"c":"x"}', """
     "TO_DATE('1999-12-31 08:30:00', 'YYYY-MM-DD HH24:MI:SS'), "
     "TIMESTAMP '2024-02-29 23:59:59.123456', "
     "TIMESTAMP '2024-03-10 08:00:00.25 +05:30', "
@@ -38,7 +37,7 @@ execute_oracle_sqls([
     "2, -9999, -999999999, -999999999999999999, -9223372036854775809, "
     "-1234549, -0.01, -0.000001, -2.5, -0.375f, -1e300d, "
     "'abcde', N'abcd', ' padded ', N'x', TO_CLOB(' '), TO_NCLOB('n'), "
-    "HEXTORAW('00'), TO_BLOB(HEXTORAW('FF')), FALSE, '[]', "
+    "HEXTORAW('00'), TO_BLOB(HEXTORAW('FF')), FALSE, "
     "TO_DATE('1965-07-04 12:00:00', 'YYYY-MM-DD HH24:MI:SS'), "
     "TIMESTAMP '1965-07-04 12:00:00.5', "
     "TIMESTAMP '1969-12-31 23:59:59.999999 -08:00', "
@@ -70,6 +69,9 @@ execute_oracle_sqls([
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_INTERVAL "
     "(ID NUMBER(9) PRIMARY KEY, INTERVAL_VALUE INTERVAL DAY TO SECOND)",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_INTERVAL ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_JSON "
+    "(ID NUMBER(9) PRIMARY KEY, JSON_VALUE JSON)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_JSON ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
 ])
 PY
 
@@ -112,6 +114,69 @@ SELECT count(*) FROM rw_catalog.rw_relations WHERE name = 'oracle_snapshot_inter
 ----
 0
 
+statement error (?s).*Unsupported Oracle data type: JSON.*
+CREATE TABLE oracle_snapshot_json (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_JSON';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations WHERE name = 'oracle_snapshot_json';
+----
+0
+
+# Declared columns must use the type discovery derives, so values are neither truncated nor
+# converted differently by the snapshot and the stream.
+statement error (?s).*Incompatible data type of column 'DATE_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "DATE_VALUE" DATE, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'TIMESTAMPTZ_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "TIMESTAMPTZ_VALUE" TIMESTAMP, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'N10_2'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "N10_2" INT, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'N18'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "N18" INT, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'BINARY_DOUBLE_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "BINARY_DOUBLE_VALUE" REAL, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'VARCHAR_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "VARCHAR_VALUE" INT, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'CLOB_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "CLOB_VALUE" BYTEA, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'RAW_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "RAW_VALUE" VARCHAR, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Unsupported Oracle data type: JSON.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "JSON_VALUE" JSONB, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_JSON';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations WHERE name = 'oracle_declared_wrong';
+----
+0
+
+statement ok
+CREATE TABLE oracle_declared_types (
+    "ID" INT,
+    "N18" BIGINT,
+    "N10_2" NUMERIC,
+    "DATE_VALUE" TIMESTAMP,
+    "TIMESTAMPTZ_VALUE" TIMESTAMPTZ,
+    "RAW_VALUE" BYTEA,
+    PRIMARY KEY ("ID")
+) FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
 # Discovered types match Debezium's mapping, so snapshot and CDC values agree.
 query TT
 SELECT column_name, data_type FROM information_schema.columns
@@ -138,7 +203,6 @@ NCLOB_VALUE character varying
 RAW_VALUE bytea
 BLOB_VALUE bytea
 BOOLEAN_VALUE boolean
-JSON_VALUE jsonb
 DATE_VALUE timestamp without time zone
 TIMESTAMP_VALUE timestamp without time zone
 TIMESTAMPTZ_VALUE timestamp with time zone
@@ -181,12 +245,12 @@ FROM oracle_snapshot_types ORDER BY "ID";
 3 NULL NULL NULL NULL NULL NULL
 
 query T
-SELECT "ID", "RAW_VALUE", "BLOB_VALUE", "BOOLEAN_VALUE", "JSON_VALUE"
+SELECT "ID", "RAW_VALUE", "BLOB_VALUE", "BOOLEAN_VALUE"
 FROM oracle_snapshot_types ORDER BY "ID";
 ----
-1 \xdeadbeef \x00ff10 t {"a": 1, "b": [true, null], "c": "x"}
-2 \x00 \xff f []
-3 NULL NULL NULL NULL
+1 \xdeadbeef \x00ff10 t
+2 \x00 \xff f
+3 NULL NULL NULL
 
 query T
 SELECT "ID", "DATE_VALUE", "TIMESTAMP_VALUE", "TIMESTAMPTZ_VALUE", "TIMESTAMPLTZ_VALUE"
@@ -195,6 +259,15 @@ FROM oracle_snapshot_types ORDER BY "ID";
 1 1999-12-31 08:30:00 2024-02-29 23:59:59.123456 2024-03-10 02:30:00.250+00:00 2024-03-10 02:30:00.250+00:00
 2 1965-07-04 12:00:00 1965-07-04 12:00:00.500 1970-01-01 07:59:59.999999+00:00 1970-01-01 07:59:59.999999+00:00
 3 NULL NULL NULL NULL
+
+# Declaring the discovered types reads the same values, including the time of an Oracle DATE.
+query T retry 30 backoff 1s
+SELECT "ID", "N18", "N10_2", "DATE_VALUE", "TIMESTAMPTZ_VALUE", "RAW_VALUE"
+FROM oracle_declared_types ORDER BY "ID";
+----
+1 999999999999999999 12345.67 1999-12-31 08:30:00 2024-03-10 02:30:00.250+00:00 \xdeadbeef
+2 -999999999999999999 -0.01 1965-07-04 12:00:00 1970-01-01 07:59:59.999999+00:00 \x00
+3 NULL NULL NULL NULL NULL
 
 query T retry 30 backoff 1s
 SELECT "ID", "LONG_VALUE" FROM oracle_snapshot_long ORDER BY "ID";

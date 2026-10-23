@@ -1,0 +1,113 @@
+include oracle_test_env.slt.part
+
+statement ok
+DROP SOURCE IF EXISTS oracle_lob_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+# Row 1 exists before the source is created, so its LOB values are read by the snapshot backfill.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES ("
+    "ID NUMBER(9) PRIMARY KEY, TITLE VARCHAR2(16), BODY CLOB, NBODY NCLOB, DATA BLOB)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES VALUES ("
+    "1, 'snapshot', TO_CLOB('body one'), TO_NCLOB('nbody 一'), TO_BLOB(HEXTORAW('0A0B')))",
+])
+PY
+
+statement ok
+CREATE SOURCE oracle_lob_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    heartbeat.table.auto.initialize = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE oracle_lob_updates (*)
+FROM oracle_lob_source TABLE 'APP.RW_LOB_UPDATES';
+
+query T retry 30 backoff 1s
+SELECT "ID", "TITLE", "BODY", "NBODY", "DATA" FROM oracle_lob_updates ORDER BY "ID";
+----
+1 snapshot body one nbody 一 \x0a0b
+
+# A streamed insert carries its LOB values. The 8000-character CLOB is stored out of line and
+# arrives through LOB write events.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES VALUES ("
+    "2, 'streamed', TO_CLOB(RPAD('x', 4000, 'x')) || TO_CLOB(RPAD('y', 4000, 'y')), "
+    "TO_NCLOB('nbody 二'), TO_BLOB(HEXTORAW('0C0D')))",
+])
+PY
+
+query T retry 30 backoff 1s
+SELECT "ID", "TITLE", length("BODY"), left("BODY", 2), right("BODY", 2), "NBODY", "DATA"
+FROM oracle_lob_updates ORDER BY "ID";
+----
+1 snapshot 8 bo ne nbody 一 \x0a0b
+2 streamed 8000 xx yy nbody 二 \x0c0d
+
+# Updating only TITLE leaves the LOB columns out of the redo, so Debezium sends its placeholder
+# for them. The stored LOB values must be kept, for both the backfilled and the streamed row.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "UPDATE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES SET TITLE = 'title-only' WHERE ID IN (1, 2)",
+])
+PY
+
+query T retry 30 backoff 1s
+SELECT "ID", "TITLE", length("BODY"), left("BODY", 2), right("BODY", 2), "NBODY", "DATA"
+FROM oracle_lob_updates ORDER BY "ID";
+----
+1 title-only 8 bo ne nbody 一 \x0a0b
+2 title-only 8000 xx yy nbody 二 \x0c0d
+
+# Changed LOB values are emitted, including a LOB set to NULL.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "UPDATE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES SET BODY = TO_CLOB('body changed'), "
+    "NBODY = TO_NCLOB('nbody 改'), DATA = TO_BLOB(HEXTORAW('FF00')) WHERE ID = 1",
+    "UPDATE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES SET BODY = NULL WHERE ID = 2",
+])
+PY
+
+query T retry 30 backoff 1s
+SELECT "ID", "TITLE", "BODY", "NBODY", "DATA" FROM oracle_lob_updates ORDER BY "ID";
+----
+1 title-only body changed nbody 改 \xff00
+2 title-only NULL nbody 二 \x0c0d
+
+# A later update of another column keeps the changed LOB values, not the backfilled ones.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "UPDATE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES SET TITLE = 'again' WHERE ID IN (1, 2)",
+    "DELETE FROM $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES WHERE ID = 2",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES (ID, TITLE) VALUES (3, 'marker')",
+])
+PY
+
+query T retry 30 backoff 1s
+SELECT "ID", "TITLE", "BODY", "NBODY", "DATA" FROM oracle_lob_updates ORDER BY "ID";
+----
+1 again body changed nbody 改 \xff00
+3 marker NULL NULL NULL
+
+statement ok
+DROP SOURCE oracle_lob_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
