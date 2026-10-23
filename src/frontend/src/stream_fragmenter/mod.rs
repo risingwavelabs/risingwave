@@ -567,6 +567,12 @@ fn build_fragment(
                     .add(FragmentTypeFlag::VectorIndexWrite);
             }
 
+            NodeBody::IcebergWithPkIndexWriter(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::IcebergWithPkIndexWriter);
+            }
+
             NodeBody::UpstreamSinkUnion(_) => {
                 current_fragment
                     .fragment_type_mask

@@ -65,16 +65,51 @@ CI runs `ci/scripts/e2e-iceberg-test.sh`. The main suite uses the `ci-iceberg-te
 
 ### Multi-batch compaction rounds
 
-CI runs `compaction_round.slt` first in its own profile, with one compactor worker and a
-one-plan admission budget. It checks that scheduled compaction rewrites all three
-partitions without further sink commits, excludes earlier batches' output, and drains.
-It only needs MinIO and the connector libs. Start it with fresh RiseDev data, as
-the profile uses an in-memory meta store:
+CI runs `compaction_round.slt` and `pk_index_compaction_round.slt` first in the
+`ci-iceberg-compaction-round` profile, with one compactor worker and a one-plan
+admission budget. They check that scheduled compaction rewrites all three partitions
+across multiple tasks without further sink commits, excludes earlier batches' output,
+and drains. The PK-index test also checks updates, deletes, and reinsertion after
+compaction. Both tests require this profile: with a larger admission budget, PK-index
+compaction can combine several partition rewrites into one snapshot.
+
+The PK-index test also covers `ALTER TABLE ... CONNECTOR WITH (...)` for compaction
+scheduling and maintenance options, including activation without new writes.
+It also reattaches a table with existing snapshots and verifies that reconciliation
+finishes without new ingestion after the independent job becomes ready.
+Alter the table, not its internal sink. Online changes to `commit_checkpoint_interval`
+and `compaction.write_parquet_*` are currently rejected for PK-index sinks because
+their running writers do not reload these options.
+The ordinary-sink knobs `compaction.max_snapshots_num` and
+`compaction.delete_files_count_threshold` are also rejected by this ALTER path;
+PK-index compaction uses `compaction.delete_ratio_percent` for delete selection.
+
+These tests only need MinIO and the connector libs. Start with fresh RiseDev data,
+as the profile uses an in-memory meta store:
 
 ```sh
 ./risedev d ci-iceberg-compaction-round
 ./risedev slt './e2e_test/iceberg/compaction_round.slt'
+./risedev slt './e2e_test/iceberg/pk_index_compaction_round.slt'
 ./risedev k
+```
+
+### PK-index compaction regressions
+
+The pure SLT suite includes `iceberg_pk_index/compaction_*.slt`. These use V2
+Parquet position deletes and read directly from Iceberg to check compaction,
+deletion, and reinsertion. They need MinIO and connector libs, but not Spark.
+
+Simulation coverage uses V3 deletion vectors and injects failures before the
+independent job's End barrier and after the Iceberg commit but before its metastore
+row becomes Committed. Recovery must replay the Pending epoch without another
+overwrite. A fixed-snapshot test also commits deletes after the simulated rewrite
+and reads the actual Iceberg rows to check conflict masking and reinsertion.
+Only the compactor rewrite is simulated; resolver, checkpoint, commit, and recovery
+paths are real:
+
+```sh
+./risedev sit-test iceberg_pk_index
 ```
 
 ## Key Config Files

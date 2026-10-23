@@ -248,7 +248,7 @@
                 └─BatchScan { table: bid, columns: [bid.auction, bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [auction.category, Case((count(max(bid.price)) = 0:Int32), null:Decimal, (sum(max(bid.price)) / count(max(bid.price))::Decimal)) as $expr1] }
+    └─StreamProject { exprs: [auction.category, Case((count(max(bid.price)) = 0:Int32), null:Decimal, (Case((count(max(bid.price)) = 0:Int64), null:Decimal, sum(max(bid.price))) / count(max(bid.price))::Decimal)) as $expr1] }
       └─StreamHashAgg { group_key: [auction.category], aggs: [sum(max(bid.price)), count(max(bid.price)), count] }
         └─StreamExchange { dist: HashShard(auction.category) }
           └─StreamProject { exprs: [auction.id, auction.category, max(bid.price)] }
@@ -263,7 +263,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [auction.category, Case((count(max(bid.price)) = 0:Int32), null:Decimal, (sum(max(bid.price)) / count(max(bid.price))::Decimal)) as $expr1] }
+    └── StreamProject { exprs: [auction.category, Case((count(max(bid.price)) = 0:Int32), null:Decimal, (Case((count(max(bid.price)) = 0:Int64), null:Decimal, sum(max(bid.price))) / count(max(bid.price))::Decimal)) as $expr1] }
         └── StreamHashAgg { group_key: [auction.category], aggs: [sum(max(bid.price)), count(max(bid.price)), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([1]) from 1
 
@@ -272,8 +272,7 @@
     └── StreamHashAgg { group_key: [auction.id, auction.category], aggs: [max(bid.price), count] } { tables: [ HashAggState: 2, HashAggCall0: 1 ] }
         └── StreamProject { exprs: [auction.id, auction.category, bid.price, bid._row_id] }
             └── StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
-                └── StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
-                    ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
+                └── StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all } { tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ] }
                     ├── StreamExchange Hash([0]) from 2
                     └── StreamExchange Hash([0]) from 3
 
@@ -291,12 +290,7 @@
 
     Table 0 { columns: [ auction_category, sum(max(bid_price)), count(max(bid_price)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1
-    ├── columns: [ auction_id, auction_category, bid_price, bid__row_id, _rw_timestamp ]
-    ├── primary key: [ $0 ASC, $1 ASC, $2 DESC, $3 ASC ]
-    ├── value indices: [ 0, 2, 3 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 2
+    Table 1 { columns: [ auction_id, auction_category, bid_price, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 DESC, $3 ASC ], value indices: [ 0, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
     Table 2 { columns: [ auction_id, auction_category, max(bid_price), count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
@@ -310,13 +304,7 @@
 
     Table 7 { columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 8
-    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
+    Table 8 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ category, avg, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 

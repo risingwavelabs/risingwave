@@ -53,6 +53,7 @@ use iceberg::writer::file_writer::location_generator::{
     DefaultLocationGenerator, FileNameGenerator, LocationGenerator,
 };
 use prost::Message;
+use risingwave_connector::connector_common::IcebergCommittedSnapshot;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError, CommitRetryLogContext};
 use risingwave_connector::sink::iceberg::{
@@ -88,6 +89,7 @@ struct EpochCommit {
     epoch: u64,
     merged: Arc<IcebergPkIndexSinkAggResult>,
     snapshot_id: i64,
+    has_new_data: bool,
     /// Data + delete files already materialized during pre-commit backfill (partitioned tables
     /// only), in the `add_data_files` order expected by the commit. Flows straight into the commit
     /// so the files are not deserialized again. `None` on the recovery path (and for unpartitioned
@@ -111,6 +113,27 @@ pub struct IcebergPkIndexSinkCoordinator {
 }
 
 impl IcebergPkIndexSinkCoordinator {
+    #[cfg(all(test, not(madsim)))]
+    pub(super) fn for_test(
+        sink_id: SinkId,
+        table: Table,
+        catalog: Arc<dyn Catalog>,
+        iceberg_config: IcebergConfig,
+        db: DatabaseConnection,
+    ) -> Self {
+        Self {
+            sink_id,
+            db,
+            catalog,
+            table,
+            iceberg_config,
+            target_branch: "main".to_owned(),
+            retry_num: 0,
+            waiting_commit: None,
+            prev_committed_epoch: None,
+        }
+    }
+
     /// Build a ready-to-serve coordinator: load the iceberg catalog/table, recover any persisted pending
     /// state, and drain recovered pending epochs to iceberg. Returns only once recovery is complete, so a
     /// successful return means the sink is ready to accept live pre-commit/commit calls.
@@ -180,6 +203,8 @@ impl IcebergPkIndexSinkCoordinator {
                 PbIcebergPkIndexSinkRole::try_from(report.role)
                     != Ok(PbIcebergPkIndexSinkRole::CompactionResolver)
             });
+        // Begin flushes foreground writes; the compaction End epoch only commits maintenance.
+        let has_new_data = compaction.is_none();
         let ordinary_aggregate = aggregate_ordinary_reports(
             &ordinary_reports,
             current_schema_id,
@@ -200,7 +225,9 @@ impl IcebergPkIndexSinkCoordinator {
                     prev_epoch
                 );
             }
-            return self.stage_pre_commit(prev_epoch, merged).await;
+            return self
+                .stage_pre_commit(prev_epoch, merged, has_new_data)
+                .await;
         };
         let CompactionOverwrite {
             sink_id,
@@ -296,7 +323,8 @@ impl IcebergPkIndexSinkCoordinator {
             delete_files: serialized_delete_files,
             ..merged
         };
-        self.stage_pre_commit(prev_epoch, merged).await?;
+        self.stage_pre_commit(prev_epoch, merged, has_new_data)
+            .await?;
         self.cleanup_discarded_uncommitted_paths(prev_epoch, discarded_paths)
             .await;
         Ok(())
@@ -317,6 +345,7 @@ impl IcebergPkIndexSinkCoordinator {
         &mut self,
         prev_epoch: u64,
         merged: IcebergPkIndexSinkAggResult,
+        has_new_data: bool,
     ) -> Result<()> {
         let (merged, materialized_add_files) = self.backfill_delete_file_partitions(merged).await?;
         let merged = Arc::new(merged);
@@ -329,6 +358,7 @@ impl IcebergPkIndexSinkCoordinator {
             epoch: prev_epoch,
             merged,
             snapshot_id,
+            has_new_data,
             materialized_add_files,
         });
         Ok(())
@@ -406,9 +436,9 @@ impl IcebergPkIndexSinkCoordinator {
             .map_err(Into::into)
     }
 
-    pub async fn commit(&mut self) -> Result<()> {
+    pub async fn commit(&mut self) -> Result<Option<(IcebergCommittedSnapshot, bool)>> {
         let Some(commit) = self.waiting_commit.take() else {
-            return Ok(());
+            return Ok(None);
         };
 
         let refreshed_table = commit_one_epoch(
@@ -431,6 +461,14 @@ impl IcebergPkIndexSinkCoordinator {
         })?;
         self.table = refreshed_table;
 
+        // Leave the durable overwrite's row Pending so recovery must replay it.
+        if !commit.merged.overwrite_files.is_empty() {
+            fail::fail_point!("iceberg_pk_index_compaction_after_commit_reached");
+            fail::fail_point!("iceberg_pk_index_compaction_after_commit", |_| Err(
+                anyhow!("injected failure after compaction commit, before marking Committed")
+            ));
+        }
+
         commit_and_prune_epoch(
             &self.db,
             self.sink_id,
@@ -446,7 +484,22 @@ impl IcebergPkIndexSinkCoordinator {
         })?;
 
         self.prev_committed_epoch = Some(commit.epoch);
-        Ok(())
+        Ok(self
+            .latest_observed_snapshot()
+            .map(|snapshot| (snapshot, commit.has_new_data)))
+    }
+
+    pub fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
+        let metadata = self.table.metadata();
+        metadata
+            .snapshot_for_ref(&self.target_branch)
+            .map(|snapshot| IcebergCommittedSnapshot {
+                branch: self.target_branch.clone(),
+                snapshot_id: snapshot.snapshot_id(),
+                timestamp_ms: snapshot.timestamp_ms(),
+                max_file_sequence_number: (metadata.format_version() >= FormatVersion::V2)
+                    .then_some(snapshot.sequence_number()),
+            })
     }
 
     pub fn current_snapshot_id(&self) -> Option<i64> {
@@ -638,6 +691,8 @@ async fn recovery(
                     epoch,
                     merged,
                     snapshot_id,
+                    // Registration seeds a fresh evaluation after recovery.
+                    has_new_data: true,
                     // Recovered from the persisted blob; the commit materializes files from
                     // `merged` once.
                     materialized_add_files: None,
@@ -710,6 +765,9 @@ async fn commit_one_epoch(
                     .snapshots()
                     .any(|s| s.snapshot_id() == snapshot_id)
                 {
+                    if !merged.overwrite_files.is_empty() {
+                        fail::fail_point!("iceberg_pk_index_compaction_replayed");
+                    }
                     return Ok(table);
                 }
 

@@ -48,6 +48,10 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
+    ReportTableChangeLogProgress {
+        epoch: EpochPair,
+        progress: progress::TableChangeLogProgress,
+    },
     ReportSourceListFinished {
         epoch: EpochPair,
         actor_id: ActorId,

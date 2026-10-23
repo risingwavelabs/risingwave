@@ -31,7 +31,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::metrics::UintGauge;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 use risingwave_pb::meta::{PbServingTableVnodeMappings, PbTableRefillRuntimeConfig};
@@ -42,10 +41,11 @@ use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
+use super::version_update::{VersionUpdateEvent, VersionUpdateQueue};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
-use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
+use crate::hummock::event_handler::refiller::SpawnRefillTask;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
 };
@@ -338,6 +338,7 @@ pub(crate) struct HummockEventHandler {
 
     uploader: HummockUploader,
     refiller: CacheRefiller,
+    version_updates: VersionUpdateQueue,
 
     last_instance_id: LocalInstanceId,
 
@@ -502,6 +503,7 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
+        let version_updates = VersionUpdateQueue::new(recent_versions.latest_version().clone());
         let refiller = CacheRefiller::new(role, refill_config, sstable_store, spawn_refill_task);
 
         Self {
@@ -514,6 +516,7 @@ impl HummockEventHandler {
             local_read_versions: Default::default(),
             uploader,
             refiller,
+            version_updates,
             last_instance_id: 0,
             metrics,
         }
@@ -713,62 +716,26 @@ impl HummockEventHandler {
             .metrics
             .event_handler_on_recv_version_update
             .start_timer();
-        let pinned_version = self
-            .refiller
-            .last_new_pinned_version()
-            .cloned()
-            .unwrap_or_else(|| self.uploader.hummock_version().clone());
-
-        let mut sst_delta_infos = vec![];
-        if let Some(new_pinned_version) = Self::resolve_version_update_info(
-            &pinned_version,
-            version_payload,
-            Some(&mut sst_delta_infos),
-        ) {
-            self.refiller
-                .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+        let mut sst_delta_infos = Vec::new();
+        if let Some(event) =
+            self.version_updates
+                .resolve_update(version_payload, |before, delta| {
+                    sst_delta_infos.extend(before.build_sst_delta_infos(delta));
+                })
+        {
+            let handle = self.refiller.start_cache_refill(sst_delta_infos);
+            // Preserve Foyer's JoinError and detach-on-drop behavior at the adapter boundary.
+            let condition = async move { handle.await.unwrap() }.boxed();
+            self.version_updates.enqueue(event, condition);
         }
     }
 
-    fn resolve_version_update_info(
-        pinned_version: &PinnedVersion,
-        version_payload: HummockVersionUpdate,
-        mut sst_delta_infos: Option<&mut Vec<SstDeltaInfo>>,
-    ) -> Option<PinnedVersion> {
-        match version_payload {
-            HummockVersionUpdate::VersionDeltas(version_deltas) => {
-                let mut version_to_apply = (**pinned_version).clone();
-                {
-                    for version_delta in version_deltas {
-                        assert_eq!(version_to_apply.id, version_delta.prev_id);
-                        if let Some(sst_delta_infos) = &mut sst_delta_infos {
-                            sst_delta_infos
-                                .extend(version_to_apply.build_sst_delta_infos(&version_delta));
-                        }
-
-                        version_to_apply.apply_version_delta(&version_delta);
-                    }
-                }
-
-                pinned_version.new_with_local_version(version_to_apply)
-            }
-            HummockVersionUpdate::PinnedVersion(version) => {
-                pinned_version.new_pin_version(*version)
-            }
-        }
-    }
-
-    fn apply_version_updates(&mut self, events: Vec<CacheRefillerEvent>) {
-        let Some(CacheRefillerEvent {
-            new_pinned_version: latest_pinned_version,
-            ..
-        }) = events.last()
-        else {
-            if cfg!(debug_assertions) {
-                panic!("empty events")
-            }
-            return;
-        };
+    /// Publishes a non-empty FIFO batch, keeping its targets pinned until all holders advance.
+    fn publish_version_updates(&mut self, events: Vec<VersionUpdateEvent>) {
+        let (first_event, remaining_events) = events
+            .split_first()
+            .expect("version update batch must not be empty");
+        let latest_pinned_version = &events.last().unwrap().new_pinned_version;
         if events.len() > 1 {
             warn!(
                 count = events.len(),
@@ -780,55 +747,34 @@ impl HummockEventHandler {
             .event_handler_on_apply_version_update
             .start_timer();
         self.recent_versions.rcu(|prev_recent_versions| {
-            let mut recent_versions = None;
-            for event in &events {
-                let CacheRefillerEvent {
-                    new_pinned_version, ..
-                } = event;
-                recent_versions = Some(
-                    recent_versions
-                        .as_ref()
-                        .unwrap_or(prev_recent_versions.as_ref())
-                        .with_new_version(new_pinned_version.clone()),
-                );
+            let mut recent_versions =
+                prev_recent_versions.with_new_version(first_event.new_pinned_version.clone());
+            for event in remaining_events {
+                recent_versions =
+                    recent_versions.with_new_version(event.new_pinned_version.clone());
             }
-            recent_versions.expect("non-empty events")
+            recent_versions
         });
 
-        {
-            self.for_each_read_version(
-                self.local_read_versions.instance_ids(),
-                |_, read_version| {
-                    for CacheRefillerEvent {
-                        new_pinned_version, ..
-                    } in &events
-                    {
-                        read_version
-                            .update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
-                    }
-                },
-            );
-        }
-
-        self.version_update_notifier_tx.send_if_modified(|state| {
-            let mut modified = false;
-            for CacheRefillerEvent {
-                pinned_version,
-                new_pinned_version,
-            } in &events
-            {
-                assert_eq!(pinned_version.id(), state.id());
-                if state.id() == new_pinned_version.id() {
-                    continue;
+        self.for_each_read_version(
+            self.local_read_versions.instance_ids(),
+            |_, read_version| {
+                for event in &events {
+                    read_version.update(VersionUpdate::CommittedSnapshot(
+                        event.new_pinned_version.clone(),
+                    ));
                 }
-                assert!(new_pinned_version.id() > state.id());
-                *state = new_pinned_version.clone();
-                modified = true;
-            }
-            modified
+            },
+        );
+
+        self.version_update_notifier_tx.send_modify(|state| {
+            assert_eq!(first_event.prev_version_id, state.id());
+            assert!(latest_pinned_version.id() > state.id());
+            // The queue enforces the chain; watch readers only observe the batch's final version.
+            *state = latest_pinned_version.clone();
         });
 
-        debug!("update to hummock version: {}", latest_pinned_version.id(),);
+        debug!("update to hummock version: {}", latest_pinned_version.id());
 
         self.uploader
             .update_pinned_version(latest_pinned_version.clone());
@@ -842,8 +788,8 @@ impl HummockEventHandler {
                 ssts = self.uploader.next_uploaded_ssts() => {
                     self.handle_uploaded_ssts(ssts);
                 }
-                events = self.refiller.next_events() => {
-                    self.apply_version_updates(events);
+                events = self.version_updates.next_events() => {
+                    self.publish_version_updates(events);
                 }
                 event = pin!(self.hummock_event_rx.recv()) => {
                     let Some(event) = event else { break };
@@ -1160,6 +1106,201 @@ mod tests {
     use crate::mem_table::ImmutableMemtable;
     use crate::monitor::HummockStateStoreMetrics;
     use crate::store::SealCurrentEpochOptions;
+
+    #[tokio::test]
+    async fn test_version_updates_wait_for_foyer_and_publish_in_order() {
+        use risingwave_hummock_sdk::version::HummockVersionDelta;
+        use risingwave_pb::hummock::StateTableInfoDelta;
+        use tokio::sync::Semaphore;
+
+        use super::HummockVersionUpdate;
+        use crate::hummock::local_version::pinned_version::PinVersionAction::{Pin, Unpin};
+
+        let metrics = Arc::new(HummockStateStoreMetrics::unused());
+        let opts = default_opts_for_test();
+        let (spawn_upload_task, _) = prepare_uploader_order_test_spawn_task_fn(false);
+        let (pin_tx, mut pin_rx) = unbounded_channel();
+        let version = PinnedVersion::new(
+            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+                id: 1.into(),
+                state_table_info: HashMap::from_iter([(
+                    TEST_TABLE_ID,
+                    StateTableInfo {
+                        committed_epoch: test_epoch(1),
+                        compaction_group_id: StaticCompactionGroupId::StateDefault,
+                    },
+                )]),
+                ..Default::default()
+            }),
+            pin_tx,
+        );
+        let permits = Arc::new([Semaphore::new(0), Semaphore::new(0), Semaphore::new(0)]);
+        let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (finished_tx, mut finished_rx) = unbounded_channel();
+        let mut handler = HummockEventHandler::new_inner(
+            Role::Streaming,
+            unbounded_channel().1,
+            mock_sstable_store().await,
+            metrics.clone(),
+            CacheRefillConfig::from_storage_opts(&opts),
+            RecentVersions::new(version, 10, metrics.clone()),
+            BufferTracker::from_storage_opts(&opts, &metrics),
+            spawn_upload_task,
+            Arc::new({
+                let permits = permits.clone();
+                let started = started.clone();
+                move |_, _| {
+                    let index = started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let permits = permits.clone();
+                    let finished_tx = finished_tx.clone();
+                    spawn(async move {
+                        let _permit = permits[index].acquire().await.unwrap();
+                        finished_tx.send(index).unwrap();
+                    })
+                }
+            }),
+        );
+        let (tx, rx) = oneshot::channel();
+        handler.handle_hummock_event(HummockEvent::RegisterReadVersion {
+            table_id: TEST_TABLE_ID,
+            new_read_version_sender: tx,
+            is_replicated: false,
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+        });
+        let (read_version, _guard) = rx.await.unwrap();
+        let reader_snapshot = read_version.read().committed().clone();
+        let mut version_updates_rx = handler.version_update_notifier_tx.subscribe();
+        // A full snapshot and a multi-delta payload both enter through the production handler.
+        handler.handle_version_update(HummockVersionUpdate::PinnedVersion(Box::new(
+            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+                id: 2.into(),
+                state_table_info: HashMap::from_iter([(
+                    TEST_TABLE_ID,
+                    StateTableInfo {
+                        committed_epoch: test_epoch(2),
+                        compaction_group_id: StaticCompactionGroupId::StateDefault,
+                    },
+                )]),
+                ..Default::default()
+            }),
+        )));
+        handler.handle_version_update(HummockVersionUpdate::VersionDeltas(
+            (3..=4)
+                .map(|id| {
+                    let mut delta = HummockVersionDelta::default();
+                    delta.id = id.into();
+                    delta.prev_id = (id - 1).into();
+                    delta.state_table_info_delta.insert(
+                        TEST_TABLE_ID,
+                        StateTableInfoDelta {
+                            committed_epoch: test_epoch(id),
+                            compaction_group_id: StaticCompactionGroupId::StateDefault,
+                        },
+                    );
+                    delta
+                })
+                .collect(),
+        ));
+        assert_eq!(started.load(std::sync::atomic::Ordering::Relaxed), 2);
+        for expected_id in [1, 2, 4] {
+            assert!(matches!(pin_rx.try_recv(), Ok(Pin(id)) if id.as_raw_id() == expected_id));
+        }
+        assert!(pin_rx.try_recv().is_err());
+        permits[1].add_permits(1);
+        assert_eq!(finished_rx.recv().await, Some(1));
+        assert!(
+            handler
+                .version_updates
+                .next_events()
+                .now_or_never()
+                .is_none()
+        );
+        assert_eq!(handler.uploader.hummock_version().id().as_raw_id(), 1);
+        assert_eq!(
+            handler.version_update_notifier_tx.borrow().id().as_raw_id(),
+            1
+        );
+        assert_eq!(read_version.read().committed().id().as_raw_id(), 1);
+        assert!(!version_updates_rx.has_changed().unwrap());
+        assert!(pin_rx.try_recv().is_err());
+
+        permits[0].add_permits(1);
+        assert_eq!(finished_rx.recv().await, Some(0));
+        let events = handler.version_updates.next_events().await;
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (
+                    event.prev_version_id.as_raw_id(),
+                    event.new_pinned_version.id().as_raw_id(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![(1, 2), (2, 4)]
+        );
+        // Dequeue transfers the target pins to `events`, including the intermediate version.
+        assert!(pin_rx.try_recv().is_err());
+        handler.publish_version_updates(events);
+        assert!(version_updates_rx.has_changed().unwrap());
+        assert_eq!(version_updates_rx.borrow_and_update().id().as_raw_id(), 4);
+        drop(version_updates_rx);
+        assert_eq!(read_version.read().committed().id().as_raw_id(), 4);
+        // History retains the committing intermediate version after publication.
+        assert!(pin_rx.try_recv().is_err());
+        assert_eq!(handler.uploader.hummock_version().id().as_raw_id(), 4);
+        assert_eq!(
+            handler.version_update_notifier_tx.borrow().id().as_raw_id(),
+            4
+        );
+        assert_eq!(
+            handler
+                .recent_versions
+                .load()
+                .latest_version()
+                .id()
+                .as_raw_id(),
+            4
+        );
+        assert_eq!(
+            handler
+                .recent_versions
+                .load()
+                .get_safe_version(TEST_TABLE_ID, test_epoch(2))
+                .unwrap()
+                .id()
+                .as_raw_id(),
+            2
+        );
+
+        let mut delta = HummockVersionDelta::default();
+        delta.prev_id = 4.into();
+        delta.id = 5.into();
+        handler.handle_version_update(HummockVersionUpdate::VersionDeltas(vec![delta]));
+        assert_eq!(started.load(std::sync::atomic::Ordering::Relaxed), 3);
+        assert!(matches!(pin_rx.try_recv(), Ok(Pin(id)) if id.as_raw_id() == 5));
+        assert!(pin_rx.try_recv().is_err());
+        // Main detaches already-started Foyer tasks when the handler shuts down.
+        drop(handler);
+        // Dropping history releases version 2; the unpublished version 5 is also released.
+        let unpinned_versions = (0..2)
+            .map(|_| {
+                let Unpin(id) = pin_rx.try_recv().unwrap() else {
+                    panic!("expected an unpin action");
+                };
+                id.as_raw_id()
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(unpinned_versions, HashSet::from([2, 5]));
+        assert!(pin_rx.try_recv().is_err());
+        permits[2].add_permits(1);
+        assert_eq!(finished_rx.recv().await, Some(2));
+        // Reader-owned snapshots outlive the queue and handler, until their last holder drops.
+        drop(read_version);
+        assert!(matches!(pin_rx.try_recv(), Ok(Unpin(id)) if id.as_raw_id() == 4));
+        assert!(pin_rx.try_recv().is_err());
+        drop(reader_snapshot);
+        assert!(matches!(pin_rx.try_recv(), Ok(Unpin(id)) if id.as_raw_id() == 1));
+        assert!(pin_rx.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn test_runtime_config_fields_are_independent_full_replacements() {

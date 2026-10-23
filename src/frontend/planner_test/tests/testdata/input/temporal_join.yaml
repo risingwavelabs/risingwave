@@ -247,3 +247,22 @@
     select stream.a, stream.b from stream join v_mv FOR SYSTEM_TIME AS OF PROCTIME() on stream.a = v_mv.a;
   expected_outputs:
     - stream_plan
+- name: Time travel in a streaming job is rejected instead of silently reading the latest data
+  sql: |
+    create table t(k int, v int, primary key (k));
+    select * from t FOR SYSTEM_TIME AS OF now() - '5' second;
+  expected_outputs:
+  - planner_error
+- name: Time travel to a timestamp in a streaming job is rejected
+  sql: |
+    create table t(k int, v int, primary key (k));
+    select * from t FOR SYSTEM_TIME AS OF '2000-02-20T12:13:14-08:30';
+  expected_outputs:
+  - planner_error
+- name: Time travel on the lookup side of a join is not a temporal join and is rejected in a streaming job
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream join version FOR SYSTEM_TIME AS OF now() on id1 = id2;
+  expected_outputs:
+  - planner_error

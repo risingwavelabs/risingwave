@@ -29,6 +29,12 @@
     explain create table t (v int, w int as v+1, watermark for w as w) append only
   expected_outputs:
   - explain_output
+# https://github.com/risingwavelabs/risingwave/issues/24081
+- name: subquery in generated column
+  sql: |
+    explain create table t (v text as (select 'a'));
+  expected_outputs:
+  - planner_error
 - name: NOT NULL on a generated column is checked on its computed value
   sql: |
     explain create table t (v int, g int not null as v + 1);

@@ -24,15 +24,20 @@
 use std::collections::BTreeMap;
 
 use anyhow::Context as _;
+use risingwave_common::bail;
 use risingwave_common::catalog::Field;
 use risingwave_connector_codec::JsonSchema;
+use risingwave_connector_codec::decoder::avro::avro_schema_to_fields;
 
-use super::utils::{bytes_from_url, get_kafka_topic};
+use super::utils::{bytes_from_url, get_kafka_topic, get_pulsar_topic};
 use super::{JsonProperties, SchemaRegistryConfig};
 use crate::error::ConnectorResult;
 use crate::parser::AccessBuilder;
 use crate::parser::unified::AccessImpl;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::schema::pulsar_schema::{
+    self, PulsarSchema, PulsarSchemaConfig, parse_partitioned_topic,
+};
 use crate::schema::schema_registry::{Client, handle_sr_list};
 
 #[derive(Debug)]
@@ -119,6 +124,22 @@ pub async fn fetch_json_schema_and_map_to_columns(
         .json_schema_to_columns(url.first().unwrap().clone())
         .await
         .map_err(Into::into)
+}
+
+/// Fetches the latest Pulsar `JSON` schema of the source topic and maps it to columns.
+///
+/// Pulsar stores `JSON` schemas as Avro record definitions, while payloads are plain JSON without
+/// a schema-registry header. JSON is self-describing, so only the latest schema is needed.
+pub async fn fetch_pulsar_json_schema_and_map_to_columns(
+    config: &PulsarSchemaConfig,
+    props: &BTreeMap<String, String>,
+) -> ConnectorResult<Vec<Field>> {
+    let client = pulsar_schema::Client::new(config)?;
+    let topic = parse_partitioned_topic(get_pulsar_topic(props)?)?;
+    match client.get_schema(&topic, None).await?.parse()? {
+        PulsarSchema::Json(schema) => Ok(avro_schema_to_fields(&schema, None)?),
+        PulsarSchema::Avro(_) => bail!("expected Pulsar JSON schema, got AVRO"),
+    }
 }
 
 #[cfg(test)]

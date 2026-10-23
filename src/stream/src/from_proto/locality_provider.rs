@@ -42,11 +42,7 @@ impl ExecutorBuilder for LocalityProviderBuilder {
 
         let input_schema = input.schema().clone();
 
-        let vnodes = Some(Arc::new(
-            params
-                .vnode_bitmap
-                .expect("vnodes not set for locality provider"),
-        ));
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
 
         // Create state table for buffering input data
         let state_table = StateTableBuilder::new(

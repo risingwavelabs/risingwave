@@ -56,10 +56,17 @@ pub struct BatchConfig {
     #[serde(default = "default::batch::mask_worker_temporary_secs")]
     pub mask_worker_temporary_secs: usize,
 
-    /// Keywords on which SQL option redaction is based in the query log.
-    /// A SQL option with a name containing any of these keywords will be redacted.
+    /// Keywords on which SQL option redaction is based in query logs and diagnostic reports.
+    /// Matching is case-insensitive. A SQL option with a name containing any of these keywords
+    /// will be redacted unless its full name is in `redact_sql_option_allowlist`.
     #[serde(default = "default::batch::redact_sql_option_keywords")]
     pub redact_sql_option_keywords: Vec<String>,
+
+    /// SQL option names exempt from keyword-based redaction in query logs and diagnostic reports.
+    /// Matching is exact and case-insensitive. This list takes precedence over
+    /// `redact_sql_option_keywords`. Set to an empty list to disable exemptions.
+    #[serde(default = "default::batch::redact_sql_option_allowlist")]
+    pub redact_sql_option_allowlist: Vec<String>,
 
     /// Enable the spill out to disk feature for batch queries.
     #[serde(default = "default::batch::enable_spill")]
@@ -140,6 +147,10 @@ pub mod default {
             .into_iter()
             .map(str::to_owned)
             .collect()
+        }
+
+        pub fn redact_sql_option_allowlist() -> Vec<String> {
+            vec!["primary_key".to_owned()]
         }
     }
 }

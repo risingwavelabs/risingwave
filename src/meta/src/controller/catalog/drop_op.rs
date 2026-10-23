@@ -163,20 +163,15 @@ impl CatalogController {
             })
             .collect();
 
-        // Iceberg sinks (and the pk-index subset) can be user-created with arbitrary
+        // Iceberg sinks can be user-created with arbitrary
         // names, so unlike the iceberg-table cleanup above, identify them by
         // inspecting properties rather than by name prefix.
         let mut removed_iceberg_sink_ids: Vec<SinkId> = Vec::new();
-        let mut removed_iceberg_pk_index_sink_ids: Vec<SinkId> = Vec::new();
         for object_info in &removed_catalog_models {
-            if let PbObjectInfo::Sink(sink) = object_info {
-                if crate::manager::iceberg_compaction::is_iceberg_sink(&sink.properties) {
-                    removed_iceberg_sink_ids.push(sink.id);
-                }
-                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
-                {
-                    removed_iceberg_pk_index_sink_ids.push(sink.id);
-                }
+            if let PbObjectInfo::Sink(sink) = object_info
+                && crate::manager::iceberg_compaction::is_iceberg_sink(&sink.properties)
+            {
+                removed_iceberg_sink_ids.push(sink.id);
             }
         }
 
@@ -293,22 +288,22 @@ impl CatalogController {
         txn.commit().await?;
 
         // notify about them.
-        self.notify_users_update(user_infos).await;
+        let mut notifications = self.frontend_notification_batch();
+        Self::add_users_update_notifications(&mut notifications, user_infos);
         inner
             .dropped_tables
             .extend(dropped_tables.map(|t| (t.id, t)));
 
-        let version = match object_type {
+        match object_type {
             ObjectType::Database => {
                 // TODO: Notify objects in other databases when the cross-database query is supported.
-                self.notify_frontend(
+                notifications.add(
                     NotificationOperation::Delete,
                     NotificationInfo::Database(PbDatabase {
                         id: database_id,
                         ..Default::default()
                     }),
-                )
-                .await
+                );
             }
             ObjectType::Schema => {
                 let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = removed_objects
@@ -319,18 +314,20 @@ impl CatalogController {
                 to_notify_objs.push(schema_obj);
 
                 let relation_group = build_object_group_for_delete(to_notify_objs);
-                self.notify_frontend(NotificationOperation::Delete, relation_group)
-                    .await
+                notifications.add(NotificationOperation::Delete, relation_group);
             }
             _ => {
                 // Hummock observers and compactor observers are notified once the corresponding barrier is completed.
                 // They only need RelationInfo::Table.
                 let relation_group =
                     build_object_group_for_delete(removed_objects.into_values().collect());
-                self.notify_frontend(NotificationOperation::Delete, relation_group)
-                    .await
+                notifications.add(NotificationOperation::Delete, relation_group);
             }
-        };
+        }
+        let version = notifications
+            .publish()
+            .await
+            .expect("the drop notification batch contains the dropped object");
 
         Ok((
             ReleaseContext {
@@ -344,7 +341,6 @@ impl CatalogController {
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
                 removed_iceberg_sink_ids,
-                removed_iceberg_pk_index_sink_ids,
             },
             version,
         ))

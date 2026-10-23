@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
@@ -27,12 +27,12 @@ use simd_json::prelude::ArrayTrait;
 use tiberius::numeric::Numeric;
 use tiberius::{AuthMethod, Client, ColumnData, Config, Query};
 use tokio::net::TcpStream;
-use tokio_util::compat::TokioAsyncWriteCompatExt;
 use with_options::WithOptions;
 
 use super::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
+use crate::connector_common::sql_server::create_mssql_client_with_config;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
@@ -546,40 +546,11 @@ impl SqlServerClient {
         Self::new_with_config(config).await
     }
 
-    pub async fn new_with_config(mut config: Config) -> Result<Self> {
-        let tcp = TcpStream::connect(config.get_addr())
+    pub async fn new_with_config(config: Config) -> Result<Self> {
+        let inner_client = create_mssql_client_with_config(config)
             .await
-            .context("failed to connect to sql server")
             .map_err(SinkError::SqlServer)?;
-        tcp.set_nodelay(true)
-            .context("failed to setting nodelay when connecting to sql server")
-            .map_err(SinkError::SqlServer)?;
-
-        let client = match Client::connect(config.clone(), tcp.compat_write()).await {
-            // Connection successful.
-            Ok(client) => client,
-            // The server wants us to redirect to a different address
-            Err(tiberius::error::Error::Routing { host, port }) => {
-                config.host(&host);
-                config.port(port);
-                let tcp = TcpStream::connect(config.get_addr())
-                    .await
-                    .context("failed to connect to sql server after routing")
-                    .map_err(SinkError::SqlServer)?;
-                tcp.set_nodelay(true)
-                    .context(
-                        "failed to setting nodelay when connecting to sql server after routing",
-                    )
-                    .map_err(SinkError::SqlServer)?;
-                // we should not have more than one redirect, so we'll short-circuit here.
-                Client::connect(config, tcp.compat_write()).await?
-            }
-            Err(e) => return Err(e.into()),
-        };
-
-        Ok(Self {
-            inner_client: client,
-        })
+        Ok(Self { inner_client })
     }
 }
 

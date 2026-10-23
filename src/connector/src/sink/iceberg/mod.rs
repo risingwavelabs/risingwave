@@ -279,6 +279,26 @@ impl Sink for IcebergSink {
         config: &BTreeMap<String, String>,
         alter_props: &BTreeMap<String, String>,
     ) -> Result<()> {
+        let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
+        if iceberg_config.enable_pk_index {
+            // PK-index executors do not rebuild their writers on ConnectorPropsChange.
+            // Maintenance options are consumed by Meta, but accepting writer options here
+            // would leave the running writer and the persisted configuration out of sync.
+            // The ordinary sink's backlog and delete-file-count knobs also have no consumer
+            // in the PK-index path, which commits each checkpoint and selects by delete ratio.
+            for key in [
+                "commit_checkpoint_interval",
+                COMPACTION_MAX_SNAPSHOTS_NUM,
+                COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
+                COMPACTION_WRITE_PARQUET_COMPRESSION,
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
+            ] {
+                if alter_props.contains_key(key) {
+                    bail!("altering `{key}` is not supported for Iceberg sinks with PK index");
+                }
+            }
+        }
         let compaction_type_changed = alter_props.contains_key(COMPACTION_TYPE);
         let compaction_options_changed = compaction_type_changed
             || alter_props.contains_key(COMPACTION_SMALL_FILES_THRESHOLD_MB)
@@ -288,7 +308,6 @@ impl Sink for IcebergSink {
             .is_some_and(|value| value.eq_ignore_ascii_case("true"));
 
         if compaction_options_changed || enabling_compaction {
-            let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
             let validate_explicit_type = compaction_type_changed
                 || (enabling_compaction
                     && iceberg_config.write_mode == IcebergWriteMode::MergeOnRead);

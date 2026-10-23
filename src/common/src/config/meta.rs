@@ -171,6 +171,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::iceberg_gc_interval_sec")]
     pub iceberg_gc_interval_sec: u64,
 
+    /// Interval of scanning Iceberg table locations for orphan files.
+    #[serde(default = "default::meta::iceberg_orphan_file_cleanup_interval_sec")]
+    pub iceberg_orphan_file_cleanup_interval_sec: u64,
+
     /// Maximum time to wait for an iceberg compaction task report before the lease expires.
     #[serde(default = "default::meta::iceberg_compaction_report_timeout_sec")]
     pub iceberg_compaction_report_timeout_sec: u64,
@@ -179,6 +183,13 @@ pub struct MetaConfig {
     /// meta catalog.
     #[serde(default = "default::meta::iceberg_compaction_config_refresh_interval_sec")]
     pub iceberg_compaction_config_refresh_interval_sec: u64,
+
+    /// Whether to schedule one compaction for every Iceberg sink with automatic compaction when
+    /// meta starts. Compaction schedules are kept only in meta memory and are otherwise created by
+    /// sink commits, so without it, a sink that receives no commit after a restart is not
+    /// compacted, and a copy-on-write sink leaves its latest commits unpublished on `main`.
+    #[serde(default)]
+    pub iceberg_compaction_schedule_on_startup: bool,
 
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
@@ -735,6 +746,10 @@ pub mod default {
 
         pub fn iceberg_gc_interval_sec() -> u64 {
             3600
+        }
+
+        pub fn iceberg_orphan_file_cleanup_interval_sec() -> u64 {
+            7 * 24 * 60 * 60
         }
 
         pub fn iceberg_compaction_report_timeout_sec() -> u64 {

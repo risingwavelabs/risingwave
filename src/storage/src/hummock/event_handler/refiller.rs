@@ -12,30 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::collections::hash_map::HashMap;
-use std::collections::{HashSet, VecDeque};
-use std::future::poll_fn;
 use std::hash::Hash;
 use std::ops::{Bound, Range};
-use std::sync::{Arc, LazyLock};
-use std::task::Poll;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use foyer::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
-use futures::{Future, FutureExt};
 use itertools::Itertools;
-use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
-use prometheus::{
-    Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
-};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::license::Feature;
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::key::{FullKey, vnode_range};
@@ -45,149 +36,13 @@ use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
-use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
     SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
+pub use crate::monitor::{CacheRefillMetrics, GLOBAL_CACHE_REFILL_METRICS};
 use crate::opts::StorageOpts;
-
-pub static GLOBAL_CACHE_REFILL_METRICS: LazyLock<CacheRefillMetrics> =
-    LazyLock::new(|| CacheRefillMetrics::new(&GLOBAL_METRICS_REGISTRY));
-
-pub struct CacheRefillMetrics {
-    pub refill_duration: HistogramVec,
-    pub refill_total: GenericCounterVec<AtomicU64>,
-    pub refill_bytes: GenericCounterVec<AtomicU64>,
-
-    pub data_refill_success_duration: Histogram,
-    pub meta_refill_success_duration: Histogram,
-
-    pub data_refill_filtered_total: GenericCounter<AtomicU64>,
-    pub data_refill_attempts_total: GenericCounter<AtomicU64>,
-    pub data_refill_started_total: GenericCounter<AtomicU64>,
-    pub meta_refill_attempts_total: GenericCounter<AtomicU64>,
-
-    pub data_refill_parent_meta_lookup_hit_total: GenericCounter<AtomicU64>,
-    pub data_refill_parent_meta_lookup_miss_total: GenericCounter<AtomicU64>,
-    pub data_refill_unit_inheritance_hit_total: GenericCounter<AtomicU64>,
-    pub data_refill_unit_inheritance_miss_total: GenericCounter<AtomicU64>,
-
-    pub data_refill_block_unfiltered_total: GenericCounter<AtomicU64>,
-    pub data_refill_block_success_total: GenericCounter<AtomicU64>,
-
-    pub data_refill_ideal_bytes: GenericCounter<AtomicU64>,
-    pub data_refill_success_bytes: GenericCounter<AtomicU64>,
-
-    pub refill_queue_total: IntGauge,
-}
-
-impl CacheRefillMetrics {
-    pub fn new(registry: &Registry) -> Self {
-        let refill_duration = register_histogram_vec_with_registry!(
-            "refill_duration",
-            "refill duration",
-            &["type", "op"],
-            registry,
-        )
-        .unwrap();
-        let refill_total = register_int_counter_vec_with_registry!(
-            "refill_total",
-            "refill total",
-            &["type", "op"],
-            registry,
-        )
-        .unwrap();
-        let refill_bytes = register_int_counter_vec_with_registry!(
-            "refill_bytes",
-            "refill bytes",
-            &["type", "op"],
-            registry,
-        )
-        .unwrap();
-
-        let data_refill_success_duration = refill_duration
-            .get_metric_with_label_values(&["data", "success"])
-            .unwrap();
-        let meta_refill_success_duration = refill_duration
-            .get_metric_with_label_values(&["meta", "success"])
-            .unwrap();
-
-        let data_refill_filtered_total = refill_total
-            .get_metric_with_label_values(&["data", "filtered"])
-            .unwrap();
-        let data_refill_attempts_total = refill_total
-            .get_metric_with_label_values(&["data", "attempts"])
-            .unwrap();
-        let data_refill_started_total = refill_total
-            .get_metric_with_label_values(&["data", "started"])
-            .unwrap();
-        let meta_refill_attempts_total = refill_total
-            .get_metric_with_label_values(&["meta", "attempts"])
-            .unwrap();
-
-        let data_refill_parent_meta_lookup_hit_total = refill_total
-            .get_metric_with_label_values(&["parent_meta", "hit"])
-            .unwrap();
-        let data_refill_parent_meta_lookup_miss_total = refill_total
-            .get_metric_with_label_values(&["parent_meta", "miss"])
-            .unwrap();
-        let data_refill_unit_inheritance_hit_total = refill_total
-            .get_metric_with_label_values(&["unit_inheritance", "hit"])
-            .unwrap();
-        let data_refill_unit_inheritance_miss_total = refill_total
-            .get_metric_with_label_values(&["unit_inheritance", "miss"])
-            .unwrap();
-
-        let data_refill_block_unfiltered_total = refill_total
-            .get_metric_with_label_values(&["block", "unfiltered"])
-            .unwrap();
-        let data_refill_block_success_total = refill_total
-            .get_metric_with_label_values(&["block", "success"])
-            .unwrap();
-
-        let data_refill_ideal_bytes = refill_bytes
-            .get_metric_with_label_values(&["data", "ideal"])
-            .unwrap();
-        let data_refill_success_bytes = refill_bytes
-            .get_metric_with_label_values(&["data", "success"])
-            .unwrap();
-
-        let refill_queue_total = register_int_gauge_with_registry!(
-            "refill_queue_total",
-            "refill queue total",
-            registry,
-        )
-        .unwrap();
-
-        Self {
-            refill_duration,
-            refill_total,
-            refill_bytes,
-
-            data_refill_success_duration,
-            meta_refill_success_duration,
-            data_refill_filtered_total,
-            data_refill_attempts_total,
-            data_refill_started_total,
-            meta_refill_attempts_total,
-
-            data_refill_parent_meta_lookup_hit_total,
-            data_refill_parent_meta_lookup_miss_total,
-            data_refill_unit_inheritance_hit_total,
-            data_refill_unit_inheritance_miss_total,
-
-            data_refill_block_unfiltered_total,
-            data_refill_block_success_total,
-
-            data_refill_ideal_bytes,
-            data_refill_success_bytes,
-
-            refill_queue_total,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct CacheRefillConfig {
@@ -250,18 +105,8 @@ impl CacheRefillConfig {
     }
 }
 
-struct Item {
-    handle: JoinHandle<()>,
-    event: CacheRefillerEvent,
-}
-
-pub(crate) type SpawnRefillTask = Arc<
-    // first current version, second new version
-    dyn Fn(Vec<SstDeltaInfo>, CacheRefillContext, PinnedVersion, PinnedVersion) -> JoinHandle<()>
-        + Send
-        + Sync
-        + 'static,
->;
+pub(crate) type SpawnRefillTask =
+    Arc<dyn Fn(Vec<SstDeltaInfo>, CacheRefillContext) -> JoinHandle<()> + Send + Sync + 'static>;
 
 pub type TableCacheRefillContextMap = HashMap<TableId, TableCacheRefillContext>;
 
@@ -384,9 +229,6 @@ fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize, usize) {
 
 /// A cache refiller for hummock data.
 pub(crate) struct CacheRefiller {
-    /// order: old => new
-    queue: VecDeque<Item>,
-
     spawn_refill_task: SpawnRefillTask,
 
     config: Arc<CacheRefillConfig>,
@@ -417,7 +259,6 @@ impl CacheRefiller {
             Some(Arc::new(Semaphore::new(config.meta_refill_concurrency)))
         };
         Self {
-            queue: VecDeque::new(),
             spawn_refill_task,
             config,
             meta_refill_concurrency,
@@ -432,18 +273,13 @@ impl CacheRefiller {
     }
 
     pub(crate) fn default_spawn_refill_task() -> SpawnRefillTask {
-        Arc::new(|deltas, context, _, _| {
+        Arc::new(|deltas, context| {
             let task = CacheRefillTask { deltas, context };
             tokio::spawn(task.run())
         })
     }
 
-    pub(crate) fn start_cache_refill(
-        &mut self,
-        mut deltas: Vec<SstDeltaInfo>,
-        pinned_version: PinnedVersion,
-        new_pinned_version: PinnedVersion,
-    ) {
+    pub(crate) fn start_cache_refill(&mut self, mut deltas: Vec<SstDeltaInfo>) -> JoinHandle<()> {
         for delta in &mut deltas {
             let for_serving = self.role.for_serving();
             // Writer-appended L0 SSTs are already warm on the streaming side. Their data refill
@@ -493,19 +329,7 @@ impl CacheRefiller {
             });
         }
         let context = self.new_cache_refill_context(&deltas);
-        let handle = (self.spawn_refill_task)(
-            deltas,
-            context,
-            pinned_version.clone(),
-            new_pinned_version.clone(),
-        );
-        let event = CacheRefillerEvent {
-            pinned_version,
-            new_pinned_version,
-        };
-        let item = Item { handle, event };
-        self.queue.push_back(item);
-        GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.add(1);
+        (self.spawn_refill_task)(deltas, context)
     }
 
     fn new_cache_refill_context(&self, deltas: &[SstDeltaInfo]) -> CacheRefillContext {
@@ -522,10 +346,6 @@ impl CacheRefiller {
             sstable_store: self.sstable_store.clone(),
             table_cache_refill_context_map: Arc::new(self.table_cache_refill_contexts(table_ids)),
         }
-    }
-
-    pub(crate) fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
-        self.queue.back().map(|item| &item.event.new_pinned_version)
     }
 
     /// Replaces the complete policy snapshot applicable to this worker.
@@ -563,15 +383,15 @@ impl CacheRefiller {
     ) -> TableCacheRefillContextMap {
         let for_streaming = self.role.for_streaming();
         let for_serving = self.role.for_serving();
-        table_ids
-            .into_iter()
-            .filter_map(|table_id| {
-                if for_serving
-                    && !for_streaming
-                    && !self.serving_table_vnode_mapping.contains_key(&table_id)
-                {
-                    return None;
-                }
+        let mut contexts = HashMap::new();
+        for table_id in table_ids {
+            if for_serving
+                && !for_streaming
+                && !self.serving_table_vnode_mapping.contains_key(&table_id)
+            {
+                continue;
+            }
+            contexts.entry(table_id).or_insert_with(|| {
                 let policy = self
                     .table_cache_refill_policies
                     .get(&table_id)
@@ -586,16 +406,14 @@ impl CacheRefiller {
                     && (policy.is_serving_scoped() || policy.is_unscoped_enabled()))
                 .then(|| self.serving_table_vnode_mapping.get(&table_id).cloned())
                 .flatten();
-                Some((
-                    table_id,
-                    TableCacheRefillContext {
-                        streaming_vnode_bitmap,
-                        serving_vnode_bitmap,
-                        policy,
-                    },
-                ))
-            })
-            .collect()
+                TableCacheRefillContext {
+                    streaming_vnode_bitmap,
+                    serving_vnode_bitmap,
+                    policy,
+                }
+            });
+        }
+        contexts
     }
 
     pub(crate) fn table_cache_refill_monitor_snapshot(&self) -> TableCacheRefillMonitorSnapshot {
@@ -613,37 +431,6 @@ impl CacheRefiller {
             serving_table_vnode_mapping: self.serving_table_vnode_mapping.clone(),
         }
     }
-}
-
-impl CacheRefiller {
-    pub(crate) fn next_events(&mut self) -> impl Future<Output = Vec<CacheRefillerEvent>> + '_ {
-        poll_fn(|cx| {
-            const MAX_BATCH_SIZE: usize = 16;
-            let mut events = None;
-            while let Some(item) = self.queue.front_mut()
-                && let Poll::Ready(result) = item.handle.poll_unpin(cx)
-            {
-                result.unwrap();
-                let item = self.queue.pop_front().unwrap();
-                GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
-                let events = events.get_or_insert_with(|| Vec::with_capacity(MAX_BATCH_SIZE));
-                events.push(item.event);
-                if events.len() >= MAX_BATCH_SIZE {
-                    break;
-                }
-            }
-            if let Some(events) = events {
-                Poll::Ready(events)
-            } else {
-                Poll::Pending
-            }
-        })
-    }
-}
-
-pub struct CacheRefillerEvent {
-    pub pinned_version: PinnedVersion,
-    pub new_pinned_version: PinnedVersion,
 }
 
 #[derive(Clone)]
@@ -1130,18 +917,14 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
     use risingwave_hummock_sdk::key::{FullKey, UserKey, prefix_slice_with_vnode};
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
-    use risingwave_pb::hummock::PbHummockVersion;
     use risingwave_pb::id::TableId;
-    use tokio::sync::mpsc::unbounded_channel;
 
     use super::{
         CacheRefillConfig, CacheRefillContext, CacheRefiller, DataCacheRefillTaskGenerator,
         SpawnRefillTask, SstDeltaInfo, block_vnode_range, vnode_range_overlaps_bitmap,
     };
     use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
-    use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::recent_filter::simple::SimpleRecentFilter;
     use crate::hummock::sstable_store::{SstableStore, SstableStoreConfig};
     use crate::hummock::test_utils::{
@@ -1205,13 +988,6 @@ mod tests {
             skip_inheritance_filter: true,
             table_cache_refill_default_policy: default_policy,
         }
-    }
-
-    fn pinned_version_for_test() -> PinnedVersion {
-        PinnedVersion::new(
-            HummockVersion::from(PbHummockVersion::default()),
-            unbounded_channel().0,
-        )
     }
 
     async fn gen_test_sst_with_object_id(
@@ -1308,14 +1084,6 @@ mod tests {
 
         fn normal_l0_delta(&self) -> SstDeltaInfo {
             self.normal_delta(0, self.deleted_sst_object_id)
-        }
-
-        fn l0_insert_only_delta(&self) -> SstDeltaInfo {
-            SstDeltaInfo {
-                insert_sst_infos: vec![self.sst_info.clone()],
-                delete_sst_object_ids: vec![],
-                insert_sst_level: 0,
-            }
         }
 
         async fn generate(
@@ -1444,7 +1212,14 @@ mod tests {
                 )]));
             }
 
-            let contexts = refiller.table_cache_refill_contexts([table_id]);
+            // Multiple SSTs in a delta may refer to the same table.
+            let contexts = refiller.table_cache_refill_contexts([table_id, table_id]);
+            assert_eq!(
+                contexts.len(),
+                usize::from(case.expected.is_some()),
+                "{}",
+                case.name
+            );
             let actual = contexts.get(&table_id).map(|context| {
                 (
                     context.policy,
@@ -1470,7 +1245,7 @@ mod tests {
         let new_vnodes = Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, 0..8);
         let captured_context = Arc::new(Mutex::new(None::<CacheRefillContext>));
         let captured_context_clone = captured_context.clone();
-        let spawn_refill_task: SpawnRefillTask = Arc::new(move |_, context, _, _| {
+        let spawn_refill_task: SpawnRefillTask = Arc::new(move |_, context| {
             *captured_context_clone.lock() = Some(context);
             tokio::spawn(async {})
         });
@@ -1488,17 +1263,13 @@ mod tests {
         refiller
             .replace_serving_table_vnode_mapping(HashMap::from([(table_id, old_vnodes.clone())]));
 
-        refiller.start_cache_refill(
-            vec![SstDeltaInfo {
-                insert_sst_infos: vec![SstableInfo::from(SstableInfoInner {
-                    table_ids: vec![table_id],
-                    ..Default::default()
-                })],
+        let _handle = refiller.start_cache_refill(vec![SstDeltaInfo {
+            insert_sst_infos: vec![SstableInfo::from(SstableInfoInner {
+                table_ids: vec![table_id],
                 ..Default::default()
-            }],
-            pinned_version_for_test(),
-            pinned_version_for_test(),
-        );
+            })],
+            ..Default::default()
+        }]);
         refiller.replace_table_cache_refill_policies(HashMap::from([(
             table_id,
             CacheRefillPolicy::Disabled,
@@ -1539,7 +1310,7 @@ mod tests {
                                         delta| {
             let captured_deltas = Arc::new(Mutex::new(None::<Vec<SstDeltaInfo>>));
             let captured_deltas_clone = captured_deltas.clone();
-            let spawn_refill_task: SpawnRefillTask = Arc::new(move |deltas, _, _, _| {
+            let spawn_refill_task: SpawnRefillTask = Arc::new(move |deltas, _| {
                 *captured_deltas_clone.lock() = Some(deltas);
                 tokio::spawn(async {})
             });
@@ -1554,11 +1325,7 @@ mod tests {
                 refiller.update_streaming_table_vnodes(table_id, Some(vnodes));
             }
             refiller.replace_serving_table_vnode_mapping(serving_table_vnodes);
-            refiller.start_cache_refill(
-                vec![delta],
-                pinned_version_for_test(),
-                pinned_version_for_test(),
-            );
+            let _handle = refiller.start_cache_refill(vec![delta]);
             captured_deltas
                 .lock()
                 .take()
@@ -1954,9 +1721,92 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_l0_insert_only_refill_policy_uses_serving_ownership() {
+    async fn test_l0_refill_after_truncation_uses_serving_ownership() {
+        use risingwave_hummock_sdk::level::Levels;
+        use risingwave_hummock_sdk::version::{
+            GroupDelta, GroupDeltas, HummockVersion, HummockVersionStateTableInfo,
+        };
+        use risingwave_pb::hummock::{StateTableInfo, StateTableInfoDelta};
+
         let fixture = DataRefillGeneratorTestFixture::new(None).await;
-        let delta = fixture.l0_insert_only_delta();
+        let group = 1.into();
+        let staging_table = TableId::new(234);
+        let mut version = HummockVersion::default();
+        version.levels.insert(
+            group,
+            Levels {
+                group_id: group,
+                ..Default::default()
+            },
+        );
+        version.state_table_info = HummockVersionStateTableInfo::from_protobuf_owned(
+            [fixture.table_id, staging_table]
+                .map(|table_id| {
+                    (
+                        table_id,
+                        StateTableInfo {
+                            compaction_group_id: group,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .into(),
+        );
+        let mut raw = version.version_delta_after();
+        for table_id in [fixture.table_id, staging_table] {
+            raw.state_table_info_delta.insert(
+                table_id,
+                StateTableInfoDelta {
+                    committed_epoch: test_epoch(233),
+                    compaction_group_id: group,
+                },
+            );
+        }
+        raw.group_deltas.insert(
+            group,
+            GroupDeltas {
+                group_deltas: vec![
+                    GroupDelta::NewL0SubLevel(vec![fixture.sst_info.clone()]),
+                    GroupDelta::PruneTableIdsFromSsts([staging_table].into()),
+                ],
+            },
+        );
+        let infos = version.build_sst_delta_infos(&raw);
+        let mut config = test_refill_config(CacheRefillPolicy::Serving);
+        config.data_refill_levels.insert(0);
+        let mut refiller = CacheRefiller::new(
+            Role::Serving,
+            config,
+            fixture.sstable_store.clone(),
+            CacheRefiller::default_spawn_refill_task(),
+        );
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(
+            fixture.table_id,
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+        )]));
+        fixture.sstable_store.clear_block_cache().await.unwrap();
+        let handle = refiller.start_cache_refill(infos.clone());
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .unwrap()
+            .unwrap();
+        for block_idx in 0..fixture.sst.block_count() {
+            let key = super::SstableBlockIndex {
+                sst_id: fixture.sst.id,
+                block_idx: block_idx as u64,
+            };
+            assert!(
+                fixture
+                    .sstable_store
+                    .block_cache()
+                    .get(&key)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "a staging-table truncation must not hide another table's L0 refill"
+            );
+        }
+        let delta = infos.into_iter().next().unwrap();
         let cases = [
             (
                 "Enabled + serving overlap",
