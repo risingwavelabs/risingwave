@@ -364,8 +364,12 @@ impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.cte_inner {
             CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
-            CteInner::ChangeLog(obj_name) => {
-                write!(f, "{} AS changelog from {}", self.alias, obj_name)?
+            CteInner::ChangeLog { from, key } => {
+                write!(f, "{} AS changelog from {}", self.alias, from)?;
+
+                if let Some(key) = key {
+                    write!(f, " KEY ({})", display_comma_separated(key))?;
+                }
             }
         }
         Ok(())
@@ -375,7 +379,10 @@ impl fmt::Display for Cte {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CteInner {
     Query(Box<Query>),
-    ChangeLog(ObjectName),
+    ChangeLog {
+        from: ObjectName,
+        key: Option<Vec<Ident>>,
+    },
 }
 
 /// One item of the comma-separated list following `SELECT`
@@ -576,18 +583,31 @@ impl fmt::Display for Join {
             }
             Suffix(constraint)
         }
+        let broadcast = if matches!(
+            self.relation,
+            TableFactor::Table {
+                as_of: Some(AsOf::ProcessTimeBroadcast),
+                ..
+            }
+        ) {
+            "BROADCAST "
+        } else {
+            ""
+        };
         match &self.join_operator {
             JoinOperator::Inner(constraint) => write!(
                 f,
-                " {}JOIN {}{}",
+                " {}{}JOIN {}{}",
                 prefix(constraint),
+                broadcast,
                 self.relation,
                 suffix(constraint)
             ),
             JoinOperator::LeftOuter(constraint) => write!(
                 f,
-                " {}LEFT JOIN {}{}",
+                " {}{}LEFT JOIN {}{}",
                 prefix(constraint),
+                broadcast,
                 self.relation,
                 suffix(constraint)
             ),

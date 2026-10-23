@@ -54,6 +54,7 @@ impl StreamChunk {
         (op, row, visible)
     }
 
+    /// Iterates over every physical row position, yielding `None` for invisible rows.
     pub fn rows_with_holes(&self) -> impl ExactSizeIterator<Item = Option<(Op, RowRef<'_>)>> {
         self.data_chunk().rows_with_holes().map(|row| {
             row.map(|row| {

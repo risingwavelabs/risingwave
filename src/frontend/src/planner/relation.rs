@@ -103,6 +103,7 @@ impl Planner {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
+                    | Some(AsOf::ProcessTimeBroadcast)
                     | Some(AsOf::TimestampNum(_))
                     | Some(AsOf::TimestampString(_))
                     | Some(AsOf::ProcessTimeWithInterval(_)) => {}
@@ -160,7 +161,9 @@ impl Planner {
             | Some(AsOf::VersionNum(_))
             | Some(AsOf::TimestampString(_))
             | Some(AsOf::TimestampNum(_)) => {}
-            Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+            Some(AsOf::ProcessTime)
+            | Some(AsOf::ProcessTimeBroadcast)
+            | Some(AsOf::ProcessTimeWithInterval(_)) => {
                 bail_not_implemented!("As Of ProcessTime() is not supported yet.")
             }
             Some(AsOf::VersionString(_)) => {
@@ -304,7 +307,9 @@ impl Planner {
                 | Some(AsOf::VersionNum(_))
                 | Some(AsOf::TimestampString(_))
                 | Some(AsOf::TimestampNum(_)) => {}
-                Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                Some(AsOf::ProcessTime)
+                | Some(AsOf::ProcessTimeBroadcast)
+                | Some(AsOf::ProcessTimeWithInterval(_)) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }
                 Some(AsOf::VersionString(_)) => {
@@ -470,9 +475,12 @@ source: {:?}",
                     Some(result) => Ok(result.clone()),
                 }
             }
-            BoundShareInput::ChangeLog(relation) => {
+            BoundShareInput::ChangeLog {
+                relation,
+                key_indices,
+            } => {
                 let id = share.share_id;
-                let result = self.plan_changelog(relation)?;
+                let result = self.plan_changelog(relation, key_indices)?;
                 let logical_share = LogicalShare::create(result);
                 self.share_cache.insert(id, logical_share.clone());
                 Ok(logical_share)
