@@ -245,12 +245,11 @@ impl CacheRefiller {
         metadata: &TableCacheMetadata,
         table_ids: impl IntoIterator<Item = TableId>,
     ) -> TableCacheRefillContextMap {
-        let for_streaming = metadata.role.for_streaming();
-        let for_serving = metadata.role.for_serving();
+        let ownership = metadata.ownership();
         let mut contexts = HashMap::new();
         for table_id in table_ids {
-            if for_serving
-                && !for_streaming
+            if ownership.serving.is_some()
+                && ownership.streaming.is_none()
                 && !metadata.serving_table_vnode_mapping.contains_key(&table_id)
             {
                 continue;
@@ -261,20 +260,17 @@ impl CacheRefiller {
                     .get(&table_id)
                     .copied()
                     .unwrap_or(metadata.default_policy);
-                let streaming_vnode_bitmap = (for_streaming && policy.is_streaming_scoped())
-                    .then(|| {
-                        metadata
-                            .streaming_table_vnode_mapping
-                            .get(&table_id)
-                            .cloned()
-                    })
-                    .flatten();
-                // `Enabled` normally does not use bitmap filtering. The only exception is L0
-                // insert-only refill, where serving workers still need serving-locality evidence.
-                let serving_vnode_bitmap = (for_serving
-                    && (policy.is_serving_scoped() || policy.is_unscoped_enabled()))
-                .then(|| metadata.serving_table_vnode_mapping.get(&table_id).cloned())
-                .flatten();
+                let streaming_vnode_bitmap = ownership
+                    .streaming
+                    .filter(|_| policy.is_streaming_scoped())
+                    .and_then(|map| map.get(&table_id))
+                    .cloned();
+                // Enabled still needs serving-locality evidence for L0 insert-only refill.
+                let serving_vnode_bitmap = ownership
+                    .serving
+                    .filter(|_| policy.is_serving_scoped() || policy.is_unscoped_enabled())
+                    .and_then(|map| map.get(&table_id))
+                    .cloned();
                 TableCacheRefillContext {
                     streaming_vnode_bitmap,
                     serving_vnode_bitmap,
