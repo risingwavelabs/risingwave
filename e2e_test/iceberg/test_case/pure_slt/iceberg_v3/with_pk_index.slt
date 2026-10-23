@@ -68,18 +68,25 @@ where schema_name = 'public'
 ----
 t
 
-query ??? rowsort retry 3 backoff 1s
+query ??? rowsort retry 6 backoff 1s
 select * from t_v3;
 ----
 1 alice 150
 3 charlie 300
 
-# generate eq deletes to test the reader of mixed delete files in v3
+# Another delete across a new checkpoint should still only use deletion vectors.
 statement ok
 delete from t_v3 where id = 1;
 
 statement ok
 FLUSH;
+
+# FLUSH does not wait for the three-checkpoint Iceberg commit interval.
+# Wait for the delete to be visible before checking the absence of equality deletes.
+query ??? rowsort retry 6 backoff 1s
+select * from t_v3;
+----
+3 charlie 300
 
 query ?? retry 6 backoff 1s
 select count(*) > 0 from rw_iceberg_files
@@ -88,11 +95,6 @@ where schema_name = 'public'
   and content = 'EqualityDeletes';
 ----
 f
-
-query ??? rowsort retry 3 backoff 1s
-select * from t_v3;
-----
-3 charlie 300
 
 # ---- Compaction havn't been supported for v3 ----
 # # This compaction won't clean up puffin files, but only generate new data files.
@@ -160,7 +162,7 @@ insert into t_v3_storage values(1, 'alice'), (2, 'bob');
 statement ok
 flush;
 
-query ??? rowsort retry 3 backoff 1s
+query ??? rowsort retry 6 backoff 1s
 select * from t_v3_storage;
 ----
 1 alice
