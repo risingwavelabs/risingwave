@@ -521,3 +521,79 @@ drop table t_m;
 
 statement ok
 drop table t_a;
+
+# target table with the primary key after a generated column
+
+statement ok
+create table t_gen_src (v int, w int primary key);
+
+statement ok
+insert into t_gen_src values (1, 10), (2, 20), (3, 30);
+
+statement ok
+create table t_gen_pk (v int, g int as v + 1, w int primary key);
+
+statement ok
+create sink s_gen_pk into t_gen_pk as select v, w from t_gen_src;
+
+statement ok
+create table t_gen_pk_cols (v int, g int as v + 1, w int primary key);
+
+statement ok
+create sink s_gen_pk_cols into t_gen_pk_cols (w, v) as select w, v from t_gen_src;
+
+statement ok
+flush;
+
+query III
+select * from t_gen_pk order by w;
+----
+1	2	10
+2	3	20
+3	4	30
+
+statement ok
+update t_gen_src set v = 100 where w = 10;
+
+statement ok
+delete from t_gen_src where w = 20;
+
+statement ok
+flush;
+
+query III
+select * from t_gen_pk order by w;
+----
+100	101	10
+3	4	30
+
+query III
+select * from t_gen_pk_cols order by w;
+----
+100	101	10
+3	4	30
+
+# A generated primary key can't come from the sink's output.
+statement ok
+create table t_gen_pk_generated (v int, g int primary key as v + 1, w int);
+
+statement error the primary key of the table must be included in the sink result
+create sink s_gen_pk_generated into t_gen_pk_generated as select v, w from t_gen_src;
+
+statement ok
+drop table t_gen_pk_generated;
+
+statement ok
+drop sink s_gen_pk_cols;
+
+statement ok
+drop sink s_gen_pk;
+
+statement ok
+drop table t_gen_pk_cols;
+
+statement ok
+drop table t_gen_pk;
+
+statement ok
+drop table t_gen_src;

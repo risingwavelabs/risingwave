@@ -962,12 +962,12 @@ impl LogicalPlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
-        let mut not_null_idxs = vec![];
-        for (idx, column) in column_descs.iter().enumerate() {
-            if !column.nullable {
-                not_null_idxs.push(idx);
-            }
-        }
+        // The NOT NULL filter goes on the union below, after generated columns are computed, so its
+        // schema has all `columns`, generated ones included, in order.
+        let not_null_idxs = columns
+            .iter()
+            .positions(|c| !c.column_desc.nullable)
+            .collect_vec();
 
         let version_column_indices = if !with_version_columns.is_empty() {
             find_version_column_indices(&columns, with_version_columns)?
@@ -1371,6 +1371,9 @@ impl LogicalPlanRoot {
 
 impl<P: PlanPhase> PlanRoot<P> {
     /// used when the plan has a target relation such as DML and sink into table, return the mapping from table's columns to the plan's schema
+    ///
+    /// The result has one entry per column in `tar_cols`, so it can be indexed by a column's position in
+    /// the table. Columns that the plan doesn't provide, including generated columns, map to `None`.
     pub fn target_columns_to_plan_mapping(
         &self,
         tar_cols: &[ColumnCatalog],
@@ -1389,16 +1392,22 @@ impl<P: PlanPhase> PlanRoot<P> {
             .map(|(i, name)| (name.as_ref(), *i))
             .collect::<BTreeMap<_, _>>();
 
+        // Without a column list, the plan's columns go to the target's DML columns by position,
+        // skipping generated columns.
+        let mut dml_i = 0;
         tar_cols
             .iter()
-            .enumerate()
-            .filter(|(_, tar_col)| tar_col.can_dml())
-            .map(|(tar_i, tar_col)| {
-                if user_specified_columns {
+            .map(|tar_col| {
+                if !tar_col.can_dml() {
+                    return None;
+                }
+                let plan_i = if user_specified_columns {
                     visible_col_idxes_by_name.get(tar_col.name()).cloned()
                 } else {
-                    (tar_i < visible_col_idxes.len()).then(|| visible_cols[tar_i].0)
-                }
+                    visible_col_idxes.get(dml_i).copied()
+                };
+                dml_i += 1;
+                plan_i
             })
             .collect()
     }
