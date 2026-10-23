@@ -24,9 +24,10 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 pub(crate) static GLOBAL_PIN_CACHE_METRICS: LazyLock<PinCacheMetrics> =
     LazyLock::new(|| PinCacheMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
-/// Metrics for the Hummock-local Pin Cache lifecycle and physical reclamation.
+/// Metrics for Hummock-local Pin Cache refill, lifecycle and physical reclamation.
 pub(crate) struct PinCacheMetrics {
     pub io_failures: IntCounterVec,
+    pub refill_outcomes: IntCounterVec,
     pub capacity_bytes: IntGauge,
     pub accounted_bytes: IntGauge,
     pub published_objects: IntGauge,
@@ -38,6 +39,22 @@ pub(crate) struct PinCacheMetrics {
 
 impl PinCacheMetrics {
     fn new(registry: &Registry) -> Self {
+        let refill_outcomes = register_int_counter_vec_with_registry!(
+            "pin_cache_refill_total",
+            "Pin whole-object refill attempt outcomes",
+            &["result"],
+            registry
+        )
+        .unwrap();
+        for result in [
+            "published",
+            "capacity_rejected",
+            "obsolete",
+            "error",
+            "panic",
+        ] {
+            let _ = refill_outcomes.with_label_values(&[result]);
+        }
         let io_failures = register_int_counter_vec_with_registry!(
             "pin_cache_io_failure_total",
             "Pin Cache refill I/O failures by phase",
@@ -85,6 +102,7 @@ impl PinCacheMetrics {
 
         Self {
             io_failures,
+            refill_outcomes,
             accounted_bytes: capacity_bytes.with_label_values(&["accounted"]),
             capacity_bytes: capacity_bytes.with_label_values(&["capacity"]),
             published_objects,
