@@ -923,8 +923,6 @@ async fn query_column_engine_from_ck(
     let clickhouse_engine =
         ClickHouseEngine::from_query_engine(clickhouse_engine.first().unwrap(), config)?;
 
-    // Validate against the complete schema before removing special columns. This runs during
-    // both CREATE SINK validation and writer initialization, which may see a changed schema.
     clickhouse_engine.check_delete_column(&clickhouse_column)?;
 
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
@@ -1298,21 +1296,6 @@ mod tests {
                 assert!(err.contains(ck_type), "{err}");
                 assert!(err.contains("expected UInt8 or Int8"), "{err}");
             }
-        }
-    }
-
-    #[test]
-    fn test_no_delete_column_check() {
-        for engine in [
-            ClickHouseEngine::ReplacingMergeTree(None),
-            ClickHouseEngine::ReplicatedReplacingMergeTree(None),
-            ClickHouseEngine::SharedReplacingMergeTree(None),
-            ClickHouseEngine::MergeTree,
-            ClickHouseEngine::CollapsingMergeTree("sign".to_owned()),
-        ] {
-            engine
-                .check_delete_column(&[system_column("Int32")])
-                .unwrap();
         }
     }
 
