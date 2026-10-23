@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
-use crate::binder::{Binder, Clause};
+use crate::binder::{BindContext, Binder, Clause, LateralBindContext};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{
+    CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal, ScopeId,
+};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -97,9 +100,9 @@ impl Binder {
         // Try to find a correlated column in the enclosing scopes, starting from the innermost one.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name));
 
-        for scope in self.correlation_scopes() {
+        for level in self.outer_context_levels() {
             let mut found = None;
-            for (context, depth) in scope {
+            for context in level {
                 if matches!(context.clause, Some(Clause::Insert)) {
                     continue;
                 }
@@ -120,7 +123,7 @@ impl Binder {
                             }
                             .into());
                         }
-                        found = Some((context, indices, depth));
+                        found = Some((context, indices));
                     }
                     Err(e @ ErrorCode::ItemNotFound(_)) => err = e,
                     // An ambiguous name must not fall through to an outer scope.
@@ -128,14 +131,18 @@ impl Binder {
                 }
             }
 
-            if let Some((context, mut indices, depth)) = found {
+            if let Some((context, mut indices)) = found {
                 indices.sort(); // make sure we have a consistent result
                 let mut inputs = indices
                     .iter()
                     .map(|index| {
                         let column = &context.columns[*index];
-                        CorrelatedInputRef::new(column.index, column.field.data_type.clone(), depth)
-                            .into()
+                        CorrelatedInputRef::new(
+                            column.index,
+                            column.field.data_type.clone(),
+                            context.scope,
+                        )
+                        .into()
                     })
                     .collect::<Vec<ExprImpl>>();
                 return if inputs.len() == 1 {
@@ -171,52 +178,40 @@ impl Binder {
         Err(err.into())
     }
 
-    /// Return visible outer column contexts grouped by name-resolution scope, innermost first.
-    /// Each context is paired with the semantic correlation depth at which it is owned.
+    /// Return visible outer column contexts grouped by query level, innermost first. A column found
+    /// in one of them is owned by that context's scope.
     ///
     /// An upper query context and its visible lateral contexts are the `FROM` items of one query
-    /// level, so they form one scope: a name found in more than one of them is ambiguous rather
+    /// level, so they form one namespace: a name found in more than one of them is ambiguous rather
     /// than resolved to whichever context comes first.
-    ///
-    /// A non-empty lateral context represents the left input of a potential `Apply`, so it adds a
-    /// depth boundary. Empty contexts are parser/binder isolation frames and do not. An upper
-    /// query or table-function context always contributes at least one boundary, even if its local
-    /// `FROM` context is empty.
-    fn correlation_scopes(&self) -> Vec<Vec<(&crate::binder::BindContext, usize)>> {
-        let mut scopes = vec![];
-        let mut depth = 1;
-
-        let mut scope = vec![];
-        for lateral_context in self.lateral_contexts.iter().rev() {
-            if lateral_context.is_visible {
-                scope.push((&lateral_context.context, depth));
-            }
-            if !lateral_context.context.columns.is_empty() {
-                depth += 1;
-            }
+    fn outer_context_levels(&self) -> Vec<Vec<&BindContext>> {
+        fn visible(lateral_contexts: &[LateralBindContext]) -> impl Iterator<Item = &BindContext> {
+            lateral_contexts
+                .iter()
+                .rev()
+                .filter(|lateral_context| lateral_context.is_visible)
+                .map(|lateral_context| &lateral_context.context)
         }
-        scopes.push(scope);
 
+        let mut levels = vec![visible(&self.lateral_contexts).collect_vec()];
         for (context, lateral_contexts) in self.visible_upper_subquery_contexts_rev() {
-            let entry_depth = depth;
-            let mut scope = vec![(context, depth)];
-            if !context.columns.is_empty() {
-                depth += 1;
-            }
-
-            for lateral_context in lateral_contexts.iter().rev() {
-                if lateral_context.is_visible {
-                    scope.push((&lateral_context.context, depth));
-                }
-                if !lateral_context.context.columns.is_empty() {
-                    depth += 1;
-                }
-            }
-
-            depth = depth.max(entry_depth + 1);
-            scopes.push(scope);
+            levels.push(
+                std::iter::once(context)
+                    .chain(visible(lateral_contexts))
+                    .collect(),
+            );
         }
+        levels
+    }
 
-        scopes
+    /// The scope of the nearest outer `FROM` item: the first non-empty context, walking outwards
+    /// through the visible lateral contexts and the innermost upper query level.
+    pub(in crate::binder) fn nearest_outer_scope(&self) -> Option<ScopeId> {
+        self.outer_context_levels()
+            .into_iter()
+            .take(2)
+            .flatten()
+            .find(|context| !context.columns.is_empty())
+            .map(|context| context.scope)
     }
 }

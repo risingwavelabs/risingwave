@@ -55,7 +55,7 @@ pub use table_or_source::{
 pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
-use crate::expr::{CorrelatedId, Depth};
+use crate::expr::{CorrelatedId, ScopeId};
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
@@ -104,36 +104,29 @@ impl RewriteExprsRecursive for Relation {
 }
 
 impl Relation {
-    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_scope(&self, scope: ScopeId) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated_by_depth(depth),
-            Relation::Join(join) => {
-                join.cond.has_correlated_input_ref_by_depth(depth)
-                    || join.left.is_correlated_by_depth(depth)
-                    || join.right.is_correlated_by_depth(depth)
-            }
-            // The right side of an `Apply` is bound in a scope extended by its left input. When
-            // looking for a reference owned by an enclosing `Apply`, cross that scope boundary.
-            Relation::Apply(join) => {
-                join.cond.has_correlated_input_ref_by_depth(depth)
-                    || join.left.is_correlated_by_depth(depth)
-                    || join.right.is_correlated_by_depth(depth + 1)
+            Relation::Subquery(subquery) => subquery.query.is_correlated_by_scope(scope),
+            Relation::Join(join) | Relation::Apply(join) => {
+                join.cond.has_correlated_input_ref_by_scope(scope)
+                    || join.left.is_correlated_by_scope(scope)
+                    || join.right.is_correlated_by_scope(scope)
             }
             Relation::TableFunction {
                 expr: table_function,
                 with_ordinality: _,
-            } => table_function.has_correlated_input_ref_by_depth(depth + 1),
+            } => table_function.has_correlated_input_ref_by_scope(scope),
             Relation::Share(share) => match &share.input {
-                BoundShareInput::Query(query) => query.is_correlated_by_depth(depth),
+                BoundShareInput::Query(query) => query.is_correlated_by_scope(scope),
                 BoundShareInput::ChangeLog { relation, .. } => {
-                    relation.is_correlated_by_depth(depth)
+                    relation.is_correlated_by_scope(scope)
                 }
             },
             Relation::MatchRecognize(inner) => {
-                inner.input.is_correlated_by_depth(depth)
+                inner.input.is_correlated_by_scope(scope)
                     || inner
                         .exprs()
-                        .any(|e| e.has_correlated_input_ref_by_depth(depth))
+                        .any(|e| e.has_correlated_input_ref_by_scope(scope))
             }
             _ => false,
         }
@@ -172,47 +165,28 @@ impl Relation {
         }
     }
 
-    pub fn collect_correlated_indices_by_depth_and_assign_id(
+    pub fn collect_correlated_indices_by_scope_and_assign_id(
         &mut self,
-        depth: Depth,
+        scope: ScopeId,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         match self {
             Relation::Subquery(subquery) => subquery
                 .query
-                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-            Relation::Join(join) => {
+                .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
+            Relation::Join(join) | Relation::Apply(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
                     join.cond
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                        .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                 );
                 correlated_indices.extend(
                     join.left
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                        .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                 );
                 correlated_indices.extend(
                     join.right
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                );
-                correlated_indices
-            }
-            Relation::Apply(join) => {
-                let mut correlated_indices = vec![];
-                correlated_indices.extend(
-                    join.cond
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                );
-                correlated_indices.extend(
-                    join.left
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                );
-                correlated_indices.extend(
-                    join.right
-                        .collect_correlated_indices_by_depth_and_assign_id(
-                            depth + 1,
-                            correlated_id,
-                        ),
+                        .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                 );
                 correlated_indices
             }
@@ -220,22 +194,22 @@ impl Relation {
                 expr: table_function,
                 with_ordinality: _,
             } => table_function
-                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
+                .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
             Relation::Share(share) => {
                 match &mut share.input {
                     BoundShareInput::Query(query) => query
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                        .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                     BoundShareInput::ChangeLog { relation, .. } => relation
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                        .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                 }
             }
             Relation::MatchRecognize(inner) => {
                 let mut indices = inner
                     .input
-                    .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
+                    .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id);
                 for e in inner.exprs_mut() {
                     indices.extend(
-                        e.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                        e.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                     );
                 }
                 indices
