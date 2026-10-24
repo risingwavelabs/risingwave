@@ -19,7 +19,7 @@ pub mod metrics;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
@@ -52,6 +52,7 @@ use crate::connector_common::{
 use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
+use crate::source::ingest_mode::BoundedInput;
 use crate::source::{
     BoxSourceChunkStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
@@ -71,6 +72,13 @@ pub struct IcebergProperties {
     pub jdbc_user: Option<String>,
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
+
+    /// Makes the read bounded. Only 'snapshot' is supported, which loads `scan.bounded.snapshot.id`.
+    #[serde(rename = "scan.bounded.mode")]
+    pub bounded_mode: Option<String>,
+    /// The snapshot to load when `scan.bounded.mode` is 'snapshot'.
+    #[serde(rename = "scan.bounded.snapshot.id")]
+    pub bounded_snapshot_id: Option<String>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -96,6 +104,39 @@ impl EnforceSecret for IcebergProperties {
 }
 
 impl IcebergProperties {
+    const BOUNDED_MODE_KEY: &'static str = "scan.bounded.mode";
+    const BOUNDED_MODE_SNAPSHOT: &'static str = "snapshot";
+    const BOUNDED_SNAPSHOT_ID_KEY: &'static str = "scan.bounded.snapshot.id";
+
+    /// Parses the `scan.bounded.*` options. Returns `None` for an unbounded read.
+    pub fn bounded_scan(&self) -> ConnectorResult<Option<IcebergBoundedScan>> {
+        let snapshot_id = match (self.bounded_mode.as_deref(), &self.bounded_snapshot_id) {
+            (None, None) => return Ok(None),
+            (Some(Self::BOUNDED_MODE_SNAPSHOT), Some(snapshot_id)) => snapshot_id,
+            (Some(mode), Some(_)) => bail!(
+                "Invalid key `{}`: {}, accepted values are '{}'",
+                Self::BOUNDED_MODE_KEY,
+                mode,
+                Self::BOUNDED_MODE_SNAPSHOT
+            ),
+            _ => bail!(
+                "`{}` and `{}` must be set together. Snapshot ids of an Iceberg table \
+                 can be found in `rw_catalog.rw_iceberg_snapshots` through an Iceberg source",
+                Self::BOUNDED_MODE_KEY,
+                Self::BOUNDED_SNAPSHOT_ID_KEY
+            ),
+        };
+        let snapshot_id = snapshot_id.parse::<i64>().with_context(|| {
+            format!(
+                "`{}` must be an integer, but got: {}",
+                Self::BOUNDED_SNAPSHOT_ID_KEY,
+                snapshot_id
+            )
+        })?;
+
+        Ok(Some(IcebergBoundedScan::Snapshot { snapshot_id }))
+    }
+
     fn java_catalog_props(&self) -> HashMap<String, String> {
         let mut java_catalog_props = iceberg_java_catalog_props_from_options(
             self.unknown_fields
@@ -132,6 +173,10 @@ impl SourceProperties for IcebergProperties {
     type SplitReader = IcebergFileReader;
 
     const SOURCE_NAME: &'static str = ICEBERG_CONNECTOR;
+
+    fn bounded_input(&self) -> ConnectorResult<Option<BoundedInput>> {
+        Ok(self.bounded_scan()?.map(BoundedInput::Iceberg))
+    }
 }
 
 impl UnknownFields for IcebergProperties {
