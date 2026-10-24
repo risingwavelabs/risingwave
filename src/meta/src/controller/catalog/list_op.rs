@@ -12,19 +12,78 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail;
 use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_common::id::JobId;
+use risingwave_connector::source::ingest_mode::IngestMode;
+use risingwave_meta_model::bounded_job::BoundedJobStatus;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
+use risingwave_meta_model::{SourceId, SourceIngestMode, bounded_job};
 use risingwave_pb::meta::ObjectDependency as PbObjectDependency;
+use risingwave_pb::meta::list_bounded_jobs_response::{
+    BoundedJob as PbBoundedJob, Status as PbBoundedJobStatus,
+};
 use sea_orm::prelude::DateTime;
 
 use super::*;
+use crate::barrier::bounded_progress::load_unfinished_bounded_jobs;
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::load_streaming_jobs_by_ids;
 
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.inner.read().await.list_time_travel_table_ids().await
+    }
+
+    pub async fn list_bounded_jobs(&self) -> MetaResult<Vec<PbBoundedJob>> {
+        let inner = self.inner.read().await;
+        let jobs = bounded_job::Entity::find()
+            .select_only()
+            .columns([
+                bounded_job::Column::JobId,
+                bounded_job::Column::SourceId,
+                bounded_job::Column::Status,
+                bounded_job::Column::CompletedAt,
+            ])
+            .column(source::Column::IngestMode)
+            .join(JoinType::InnerJoin, bounded_job::Relation::Source.def())
+            .join(JoinType::InnerJoin, object::Relation::Source.def())
+            .into_tuple::<(
+                JobId,
+                SourceId,
+                BoundedJobStatus,
+                Option<i64>,
+                Option<SourceIngestMode>,
+            )>()
+            .all(&inner.db)
+            .await?;
+
+        jobs.into_iter()
+            .map(|(job_id, source_id, status, completed_at, ingest_mode)| {
+                let mode = ingest_mode.as_ref().map(|mode| mode.to_protobuf());
+                let Some(input) = IngestMode::from_proto(mode.as_ref())?.bounded_input() else {
+                    bail!("bounded source {source_id} has no pinned input");
+                };
+
+                Ok(PbBoundedJob {
+                    job_id,
+                    source_id,
+                    input: Some(input.to_proto()),
+                    completed_at,
+                    status: match status {
+                        BoundedJobStatus::Loading => PbBoundedJobStatus::Loading,
+                        BoundedJobStatus::Completed => PbBoundedJobStatus::Completed,
+                        BoundedJobStatus::Failed => PbBoundedJobStatus::Failed,
+                    }
+                    .into(),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn list_unfinished_bounded_jobs(&self) -> MetaResult<HashMap<JobId, SourceId>> {
+        let inner = self.inner.read().await;
+        load_unfinished_bounded_jobs(&inner.db, None).await
     }
 
     pub async fn list_refresh_jobs(&self) -> MetaResult<Vec<refresh_job::Model>> {
