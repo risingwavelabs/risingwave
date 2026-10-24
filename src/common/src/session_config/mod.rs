@@ -37,7 +37,7 @@ pub use statement_timeout::StatementTimeout;
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
-use crate::config::mutate::TomlTableMutateExt;
+use crate::config::mutate::{ConfigMutateError, TomlTableMutateExt};
 use crate::config::streaming::{CacheRefillPolicy, JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
@@ -417,12 +417,12 @@ pub struct SessionConfig {
 
     /// Override the asynchronous projection chunk window for new streaming jobs in this session.
     /// Unset inherits the compute-node config (default 1); 0 means unlimited.
-    #[parameter(default = None)]
+    #[parameter(default = None, check_hook = check_projection_concurrency)]
     streaming_project_expr_concurrency: OptionConfig<usize>,
 
     /// Override the asynchronous projection visible-row budget for new streaming jobs in this
     /// session. Unset inherits the compute-node config (default 0); 0 means unlimited.
-    #[parameter(default = None)]
+    #[parameter(default = None, check_hook = check_projection_concurrency)]
     streaming_project_expr_inflight_request_concurrency: OptionConfig<usize>,
 
     /// Run DDL statements in background
@@ -633,6 +633,17 @@ fn check_streaming_parallelism_for_backfill(val: &ConfigBackfillParallelism) -> 
     }
 }
 
+fn check_projection_concurrency(val: &OptionConfig<usize>) -> Result<(), String> {
+    // Job overrides are stored as TOML, whose integers are signed 64-bit values.
+    if val.as_ref().is_some_and(|v| i64::try_from(*v).is_err()) {
+        return Err(format!(
+            "must not exceed {} for TOML job overrides",
+            i64::MAX
+        ));
+    }
+    Ok(())
+}
+
 impl SessionConfig {
     pub fn set_force_two_phase_agg(
         &mut self,
@@ -680,6 +691,7 @@ impl ConfigReporter for () {
 def_anyhow_newtype! {
     pub SessionConfigToOverrideError,
     toml::ser::Error => "failed to serialize session config",
+    ConfigMutateError => "failed to serialize session config",
     ConfigMergeError => transparent,
 }
 
@@ -718,20 +730,16 @@ impl SessionConfig {
                 .unwrap();
         }
         if let Some(v) = self.streaming_project_expr_concurrency.as_ref() {
-            table
-                .upsert("streaming.developer.project_expr_concurrency", v)
-                .unwrap();
+            table.upsert("streaming.developer.project_expr_concurrency", v)?;
         }
         if let Some(v) = self
             .streaming_project_expr_inflight_request_concurrency
             .as_ref()
         {
-            table
-                .upsert(
-                    "streaming.developer.project_expr_inflight_request_concurrency",
-                    v,
-                )
-                .unwrap();
+            table.upsert(
+                "streaming.developer.project_expr_inflight_request_concurrency",
+                v,
+            )?;
         }
 
         let res = toml::to_string(&table)?;
@@ -851,6 +859,63 @@ mod test {
             .set_streaming_project_expr_inflight_request_concurrency(None.into(), &mut ())
             .unwrap();
         assert_eq!(config.to_initial_streaming_config_override().unwrap(), "");
+    }
+
+    #[test]
+    fn test_projection_config_bounds() {
+        let max = usize::try_from(i64::MAX).unwrap_or(usize::MAX);
+        for (name, key) in [
+            (
+                "streaming_project_expr_concurrency",
+                "project_expr_concurrency",
+            ),
+            (
+                "streaming_project_expr_inflight_request_concurrency",
+                "project_expr_inflight_request_concurrency",
+            ),
+        ] {
+            let mut config = SessionConfig::default();
+            for value in [0, 1, max] {
+                config.set(name, value.to_string(), &mut ()).unwrap();
+                let override_str = config.to_initial_streaming_config_override().unwrap();
+                let table: toml::Table = override_str.parse().unwrap();
+                assert_eq!(
+                    table["streaming"]["developer"][key].as_integer(),
+                    Some(i64::try_from(value).unwrap())
+                );
+            }
+            for value in [
+                "-1",
+                "9223372036854775808",
+                "18446744073709551615",
+                "18446744073709551616",
+            ] {
+                let err = config.set(name, value.to_owned(), &mut ()).unwrap_err();
+                assert!(
+                    matches!(err, SessionConfigError::InvalidValue { entry, .. } if entry == name)
+                );
+                assert_eq!(config.get(name).unwrap(), max.to_string());
+                assert!(config.to_initial_streaming_config_override().is_ok());
+            }
+            config.set(name, String::new(), &mut ()).unwrap();
+            assert_eq!(config.to_initial_streaming_config_override().unwrap(), "");
+        }
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn test_projection_config_override_serialization_error() {
+        // Deserialization can bypass SET validation, e.g. for persisted session defaults.
+        for name in [
+            "streaming_project_expr_concurrency",
+            "streaming_project_expr_inflight_request_concurrency",
+        ] {
+            let mut value = serde_json::to_value(SessionConfig::default()).unwrap();
+            value[name] = "9223372036854775808".into();
+            let config: SessionConfig = serde_json::from_value(value).unwrap();
+            let err = config.to_initial_streaming_config_override().unwrap_err();
+            assert_eq!(err.to_string(), "failed to serialize session config");
+        }
     }
 
     #[test]

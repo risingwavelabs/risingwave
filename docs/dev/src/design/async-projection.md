@@ -39,6 +39,9 @@ SELECT id, openai_embedding('{"model":"text-embedding-3-small"}'::jsonb, text)
 FROM input;
 ```
 
+Session override values must be nonnegative and fit a TOML signed 64-bit integer
+(`0` through `9223372036854775807`). `SET` rejects larger values without changing the session.
+
 Changing those session settings later does not affect an existing job. Use the existing job
 configuration mechanism to change or remove its stored override:
 
