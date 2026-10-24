@@ -45,7 +45,7 @@ use iceberg::Catalog;
 use iceberg::delete_vector::DeleteVector;
 use iceberg::spec::{
     DataContentType, DataFile, DataFileFormat, FormatVersion, ManifestContentType, PartitionKey,
-    SerializedDataFile,
+    SerializedDataFile, SnapshotRef, Struct,
 };
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
@@ -114,6 +114,7 @@ pub struct IcebergPkIndexSinkCoordinator {
     /// The epoch pre-committed but not yet committed, carried from `pre_commit` to the next `commit`.
     waiting_commit: Option<EpochCommit>,
     prev_committed_epoch: Option<u64>,
+    committed_data_file_partitions: Option<CommittedDataFilePartitions>,
 }
 
 impl IcebergPkIndexSinkCoordinator {
@@ -135,6 +136,7 @@ impl IcebergPkIndexSinkCoordinator {
             retry_num: 0,
             waiting_commit: None,
             prev_committed_epoch: None,
+            committed_data_file_partitions: None,
         }
     }
 
@@ -179,6 +181,7 @@ impl IcebergPkIndexSinkCoordinator {
             retry_num,
             waiting_commit: None,
             prev_committed_epoch,
+            committed_data_file_partitions: None,
         };
 
         for commit in recovered {
@@ -467,6 +470,10 @@ impl IcebergPkIndexSinkCoordinator {
             ))
         })?;
         self.table = refreshed_table;
+        self.committed_data_file_partitions = self
+            .committed_data_file_partitions
+            .take()
+            .and_then(|committed| committed.advance(&self.table, &commit));
 
         // Leave the durable overwrite's row Pending so recovery must replay it.
         if !commit.merged.overwrite_files.is_empty() {
@@ -513,12 +520,30 @@ impl IcebergPkIndexSinkCoordinator {
         self.table.metadata().current_snapshot_id()
     }
 
-    /// Backfills missing partition values on the delete files (partitioned tables only) from the
-    /// referenced data files. Each delete file's partition is resolved from this epoch's
-    /// not-yet-committed writer data files and the current committed snapshot's data files, built
-    /// fresh per pre-commit (no persistent cache).
+    /// Returns the partition index for the current snapshot, rebuilding it when the snapshot
+    /// changed outside this coordinator's commits.
+    async fn committed_data_file_partitions(
+        &mut self,
+    ) -> Result<Option<&CommittedDataFilePartitions>> {
+        let Some(snapshot) = self.table.metadata().current_snapshot() else {
+            self.committed_data_file_partitions = None;
+            return Ok(None);
+        };
+        if self
+            .committed_data_file_partitions
+            .as_ref()
+            .is_none_or(|committed| committed.snapshot_id != snapshot.snapshot_id())
+        {
+            self.committed_data_file_partitions =
+                Some(load_committed_data_file_partitions(&self.table, snapshot).await?);
+        }
+        Ok(self.committed_data_file_partitions.as_ref())
+    }
+
+    /// Backfills missing partition values on the delete files (partitioned tables only) from the    /// referenced data files. Each delete file's partition is resolved from this epoch's
+    /// not-yet-committed writer data files and the current committed snapshot's data files.
     async fn backfill_delete_file_partitions(
-        &self,
+        &mut self,
         merged: IcebergPkIndexSinkAggResult,
     ) -> Result<(IcebergPkIndexSinkAggResult, Option<Vec<DataFile>>)> {
         let partition_spec = self
@@ -557,8 +582,16 @@ impl IcebergPkIndexSinkCoordinator {
                     }
                 }
             }
-            if !pending.is_empty() {
-                probe_committed_data_files(&self.table, &mut pending).await?;
+            if !pending.is_empty()
+                && let Some(committed) = self.committed_data_file_partitions().await?
+            {
+                pending.retain(|referenced, delete_file| {
+                    let Some(partition) = committed.partitions.get(referenced) else {
+                        return true;
+                    };
+                    delete_file.set_partition(partition.clone());
+                    false
+                });
             }
             if !pending.is_empty() {
                 anyhow::bail!(
@@ -609,23 +642,55 @@ pub fn pending_delete_files_by_referenced(
     Ok(pending)
 }
 
-/// Scan the table's current-snapshot data manifests, resolving pending delete-file
-/// partitions as their referenced data files are found. Stops as soon as every pending
-/// delete file has been resolved. Data-file references not present in the snapshot are
-/// left in `pending` for the caller to report.
-async fn probe_committed_data_files(
+/// Partitions of the live data files in the table's current snapshot, keyed by file path.
+/// Pre-commit resolves delete-file partitions from it instead of scanning every data manifest
+/// each epoch. It is only valid for `snapshot_id`: the coordinator advances it across its own
+/// commits and rebuilds it after any other snapshot change.
+struct CommittedDataFilePartitions {
+    snapshot_id: i64,
+    partitions: HashMap<String, Struct>,
+}
+
+impl CommittedDataFilePartitions {
+    /// Advances the index across the commit that produced `table`'s current snapshot. Returns
+    /// `None` when the index cannot be advanced locally and must be rebuilt by the next probe.
+    fn advance(mut self, table: &Table, commit: &EpochCommit) -> Option<Self> {
+        let snapshot = table.metadata().current_snapshot()?;
+        if snapshot.snapshot_id() == self.snapshot_id {
+            // The commit went to a branch other than the one the index reads.
+            return Some(self);
+        }
+        if snapshot.snapshot_id() != commit.snapshot_id
+            || snapshot.parent_snapshot_id() != Some(self.snapshot_id)
+            // Compaction removes data files, which are opaque in their serialized form.
+            || !commit.merged.overwrite_files.is_empty()
+        {
+            return None;
+        }
+        let added_files = commit.materialized_add_files.as_ref()?;
+        for file in added_files {
+            if file.content_type() == DataContentType::Data {
+                self.partitions
+                    .insert(file.file_path().to_owned(), file.partition().clone());
+            }
+        }
+        self.snapshot_id = commit.snapshot_id;
+        Some(self)
+    }
+}
+
+/// Scan the data manifests of `snapshot` and index every live data file's partition.
+async fn load_committed_data_file_partitions(
     table: &Table,
-    pending: &mut HashMap<String, &mut DataFile>,
-) -> Result<()> {
-    let Some(snapshot) = table.metadata().current_snapshot() else {
-        return Ok(());
-    };
+    snapshot: &SnapshotRef,
+) -> Result<CommittedDataFilePartitions> {
     let manifest_list = table
         .object_cache()
         .get_manifest_list(snapshot, &table.metadata_ref())
         .await
         .context("load manifest list for pk-index delete-file partition backfill")?;
 
+    let mut partitions = HashMap::new();
     for manifest_file in manifest_list.entries() {
         if manifest_file.content != ManifestContentType::Data {
             continue;
@@ -639,15 +704,13 @@ async fn probe_committed_data_files(
                 continue;
             }
             let f = entry.data_file();
-            if let Some(delete_file) = pending.remove(f.file_path()) {
-                delete_file.set_partition(f.partition().clone());
-                if pending.is_empty() {
-                    return Ok(());
-                }
-            }
+            partitions.insert(f.file_path().to_owned(), f.partition().clone());
         }
     }
-    Ok(())
+    Ok(CommittedDataFilePartitions {
+        snapshot_id: snapshot.snapshot_id(),
+        partitions,
+    })
 }
 
 async fn load_catalog_and_table(
