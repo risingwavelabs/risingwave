@@ -29,10 +29,11 @@ use thiserror_ext::AsReport;
 use tokio::fs;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::executor::LoadAction;
 use crate::executor::prelude::*;
 use crate::executor::source::{StreamSourceCore, barrier_to_message_stream};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::LocalBarrierManager;
+use crate::task::{LoadProgress, LocalBarrierManager};
 
 pub struct BatchPosixFsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -145,13 +146,14 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
         tracing::info!(
             ?epoch,
             source_id = %self.stream_source_core.source_id,
+            table_id = %self.associated_table_id,
             "reporting source list finished"
         );
-        self.barrier_manager.report_source_list_finished(
+        self.barrier_manager.report_load_progress(
             epoch,
             self.actor_ctx.id,
-            self.associated_table_id,
             self.stream_source_core.source_id,
+            LoadProgress::ListFinished,
         );
     }
 
@@ -251,17 +253,16 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                                 match mutation {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
-                                    Mutation::RefreshStart {
-                                        associated_source_id,
-                                        ..
-                                    } if associated_source_id
-                                        == &self.stream_source_core.source_id =>
-                                    {
+                                    Mutation::Load {
+                                        source_id,
+                                        action: LoadAction::Start,
+                                    } if *source_id == self.stream_source_core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
                                             source_id = %self.stream_source_core.source_id,
-                                            "RefreshStart triggered file re-listing"
+                                            table_id = %self.associated_table_id,
+                                            "load started, re-listing files"
                                         );
 
                                         // Re-list all files
@@ -280,7 +281,7 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                                             Err(e) => {
                                                 tracing::error!(
                                                     error = %e.as_report(),
-                                                    "Failed to refresh file listing during RefreshStart"
+                                                    "Failed to list files on load start"
                                                 );
                                             }
                                         }

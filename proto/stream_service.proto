@@ -94,37 +94,10 @@ message BarrierCompleteResponse {
   uint64 epoch = 9;
   reserved 10;
   reserved "database_id";
-  // Deprecated: replaced by `LoadProgress`. Removed later in this stack, once executors and
-  // meta use it.
-  // Used for refreshable batch source.
-  // SourceExecutor reports the source load is finished, and then
-  // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
-  message LoadFinishedSource {
-    // The actor that reported the completion event.
-    uint32 reporter_actor_id = 1;
-    // The table ID for the refreshable batch source.
-    uint32 table_id = 2;
-    // The source identifier associated with the finished load.
-    uint32 associated_source_id = 3;
-  }
-  repeated LoadFinishedSource load_finished_sources = 11;
   map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
   repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
-  reserved 14, 15;
-  reserved "truncate_tables", "refresh_finished_tables";
-  // Deprecated: replaced by `LoadProgress`. Removed later in this stack, once executors and
-  // meta use it.
-  // SourceExecutor reports the source list is finished, and then
-  // meta will issue a ListFinish barrier to notify the source to start loading.
-  message ListFinishedSource {
-    // The actor that reported the completion event.
-    uint32 reporter_actor_id = 1;
-    // The table ID for the refreshable batch source.
-    uint32 table_id = 2;
-    // The source identifier associated with the completed listing.
-    uint32 associated_source_id = 3;
-  }
-  repeated ListFinishedSource list_finished_sources = 16;
+  reserved 11, 14, 15, 16;
+  reserved "load_finished_sources", "truncate_tables", "refresh_finished_tables", "list_finished_sources";
   // Progress of a finite load, reported by its actors.
   message LoadProgress {
     // Lister only: all input has been assigned to the readers.

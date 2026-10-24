@@ -24,14 +24,13 @@ use risingwave_common::must_match;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{DatabaseId, PartialGraphId};
-use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
-};
+use risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedActor;
 use tokio::task::JoinHandle;
 
 use crate::barrier::checkpoint::CheckpointControl;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::info::BarrierInfo;
+use crate::barrier::load_progress::LoadReport;
 use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::from_partial_graph_id;
@@ -66,10 +65,8 @@ pub(super) struct CompleteBarrierTask {
     pub(super) finished_cdc_table_backfill: Vec<JobId>,
     /// `partial_graph_id` -> barrier info for post-collect processing
     pub(super) epoch_infos: HashMap<PartialGraphId, PartialGraphBarrierInfo>,
-    /// Source listing completion events that need `ListFinish` commands
-    pub(super) list_finished_source_ids: Vec<PbListFinishedSource>,
-    /// Source load completion events that need `LoadFinish` commands
-    pub(super) load_finished_source_ids: Vec<PbLoadFinishedSource>,
+    /// Load progress of refresh cycles, which schedules their `ListFinish` and `LoadFinish`
+    pub(super) refresh_load_progress: Vec<LoadReport>,
     /// Materialize actors that have finished their part of a table refresh
     pub(super) refresh_finished_actors: Vec<PbRefreshFinishedActor>,
     /// Iceberg pk-index sink reports and optional compaction overwrite metadata collected during
@@ -159,14 +156,9 @@ impl CompleteBarrierTask {
 
             // Refresh stage reports come after the commands of the barrier took effect: a stage
             // may finish within the barrier that started the cycle.
-            if !self.list_finished_source_ids.is_empty() {
+            if !self.refresh_load_progress.is_empty() {
                 context
-                    .handle_list_finished_source_ids(self.list_finished_source_ids)
-                    .await?;
-            }
-            if !self.load_finished_source_ids.is_empty() {
-                context
-                    .handle_load_finished_source_ids(self.load_finished_source_ids)
+                    .handle_refresh_load_progress(self.refresh_load_progress)
                     .await?;
             }
             if !self.refresh_finished_actors.is_empty() {

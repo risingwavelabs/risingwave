@@ -830,8 +830,7 @@ impl LocalBarrierWorker {
             epoch: event_epoch,
             create_mview_progress,
             table_change_log_progress,
-            list_finished_source_ids,
-            load_finished_source_ids,
+            load_progress,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
             iceberg_pk_index_sink_metadata,
@@ -892,9 +891,7 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(|sst| sst.sst_info.into())
                             .collect(),
-                        load_progress: Default::default(),
-                        list_finished_sources: list_finished_source_ids,
-                        load_finished_sources: load_finished_source_ids,
+                        load_progress,
                         cdc_source_offset_updated,
                         vector_index_adds: vector_index_adds
                             .into_iter()
