@@ -35,8 +35,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockVersionId;
 
 use super::SessionImpl;
-use crate::catalog::TableId;
-use crate::catalog::subscription_catalog::SubscriptionCatalog;
+use crate::catalog::{SchemaId, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::HandlerArgs;
@@ -406,8 +405,10 @@ impl FieldsManager {
 
 pub struct SubscriptionCursor {
     cursor_name: String,
-    subscription: Arc<SubscriptionCatalog>,
+    subscription_schema_id: SchemaId,
+    subscription_name: String,
     dependent_table_id: TableId,
+    retention_seconds: u64,
     cursor_need_drop_time: Instant,
     state: State,
     // fields will be set in the table's catalog when the cursor is created,
@@ -422,8 +423,10 @@ impl SubscriptionCursor {
     pub async fn new(
         cursor_name: String,
         start_timestamp: Option<u64>,
-        subscription: Arc<SubscriptionCatalog>,
+        subscription_schema_id: SchemaId,
+        subscription_name: String,
         dependent_table_id: TableId,
+        retention_seconds: u64,
         handler_args: &HandlerArgs,
         cursor_metrics: Arc<CursorMetrics>,
     ) -> Result<Self> {
@@ -482,12 +485,13 @@ impl SubscriptionCursor {
             )
         };
 
-        let cursor_need_drop_time =
-            Instant::now() + Duration::from_secs(subscription.retention_seconds);
+        let cursor_need_drop_time = Instant::now() + Duration::from_secs(retention_seconds);
         Ok(Self {
             cursor_name,
-            subscription,
+            subscription_schema_id,
+            subscription_name,
             dependent_table_id,
+            retention_seconds,
             cursor_need_drop_time,
             state,
             fields_manager,
@@ -516,7 +520,8 @@ impl SubscriptionCursor {
                         self.dependent_table_id,
                         *expected_timestamp,
                         handler_args.clone(),
-                        &self.subscription,
+                        self.subscription_schema_id,
+                        &self.subscription_name,
                     )
                     .await
                     {
@@ -540,8 +545,8 @@ impl SubscriptionCursor {
                                 handler_args.session.clone(),
                             );
 
-                            self.cursor_need_drop_time = Instant::now()
-                                + Duration::from_secs(self.subscription.retention_seconds);
+                            self.cursor_need_drop_time =
+                                Instant::now() + Duration::from_secs(self.retention_seconds);
                             let mut remaining_rows = VecDeque::new();
                             Self::try_refill_remaining_rows(&mut chunk_stream, &mut remaining_rows)
                                 .await?;
@@ -602,7 +607,7 @@ impl SubscriptionCursor {
                     } else {
                         self.cursor_metrics
                             .subscription_cursor_query_duration
-                            .with_label_values(&[&self.subscription.name])
+                            .with_label_values(&[&self.subscription_name])
                             .observe(init_query_timer.elapsed().as_millis() as _);
                         // 2. Reach EOF for the current query.
                         if let Some(expected_timestamp) = expected_timestamp {
@@ -668,7 +673,7 @@ impl SubscriptionCursor {
             let row = self.next_row(&handler_args, formats).await?;
             self.cursor_metrics
                 .subscription_cursor_fetch_duration
-                .with_label_values(&[&self.subscription.name])
+                .with_label_values(&[&self.subscription_name])
                 .observe(fetch_cursor_timer.elapsed().as_millis() as _);
             match row {
                 Some(row) => {
@@ -747,14 +752,13 @@ impl SubscriptionCursor {
         table_id: TableId,
         expected_timestamp: Option<u64>,
         handler_args: HandlerArgs,
-        dependent_subscription: &SubscriptionCatalog,
+        subscription_schema_id: SchemaId,
+        subscription_name: &str,
     ) -> Result<(Option<u64>, Option<u64>)> {
         let session = handler_args.session;
-        // Test subscription existence
-        session.get_subscription_by_schema_id_name(
-            dependent_subscription.schema_id,
-            &dependent_subscription.name,
-        )?;
+        // Re-resolve the subscription before each log query. A cursor must not continue after
+        // `DROP SUBSCRIPTION` removes the retention guarantee that protects its unread epochs.
+        session.get_subscription_by_schema_id_name(subscription_schema_id, subscription_name)?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
         let Some(new_epochs) = session
@@ -1075,7 +1079,7 @@ impl SubscriptionCursor {
     }
 
     pub fn subscription_name(&self) -> &str {
-        self.subscription.name.as_str()
+        self.subscription_name.as_str()
     }
 
     pub fn state_info_string(&self) -> String {
@@ -1101,16 +1105,19 @@ impl CursorManager {
         cursor_name: String,
         start_timestamp: Option<u64>,
         dependent_table_id: TableId,
-        subscription: Arc<SubscriptionCatalog>,
+        retention_seconds: u64,
+        subscription_schema_id: SchemaId,
+        subscription_name: String,
         handler_args: &HandlerArgs,
     ) -> Result<()> {
         let create_cursor_timer = Instant::now();
-        let subscription_name = subscription.name.clone();
         let cursor = SubscriptionCursor::new(
             cursor_name,
             start_timestamp,
-            subscription,
+            subscription_schema_id,
+            subscription_name.clone(),
             dependent_table_id,
+            retention_seconds,
             handler_args,
             self.cursor_metrics.clone(),
         )
@@ -1222,7 +1229,7 @@ impl CursorManager {
                     let fetch_duration =
                         subscription_cursor.last_fetch.elapsed().as_millis() as f64;
                     subscription_cursor_last_fetch_duration.insert(
-                        subscription_cursor.subscription.name.clone(),
+                        subscription_cursor.subscription_name.clone(),
                         fetch_duration,
                     );
                 }
