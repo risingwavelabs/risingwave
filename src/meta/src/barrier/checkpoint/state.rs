@@ -1616,7 +1616,7 @@ impl DatabaseCheckpointControl {
                 staging_table_id,
                 trigger_time,
             }) => {
-                let mutation = Some(Command::refresh_to_mutation(table_id, associated_source_id));
+                let mutation = Some(Command::start_load_mutation(associated_source_id));
                 let actors = RefreshCycleActors::from_fragments(
                     self.database_info.job_fragment_infos(table_id.as_job_id()),
                 );
@@ -1637,11 +1637,8 @@ impl DatabaseCheckpointControl {
                 )
             }
 
-            Some(Command::ListFinish {
-                table_id: _,
-                associated_source_id,
-            }) => {
-                let mutation = Some(Command::list_finish_to_mutation(associated_source_id));
+            Some(Command::ListFinish { source_id }) => {
+                let mutation = Some(Command::list_finish_mutation(source_id));
                 self.apply_simple_command(mutation, "ListFinish")
             }
 

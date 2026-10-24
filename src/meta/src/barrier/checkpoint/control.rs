@@ -49,6 +49,7 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
+use crate::barrier::load_progress::LoadReport;
 use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, PartialGraphStat};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
@@ -1203,22 +1204,10 @@ impl DatabaseCheckpointControl {
         task: &mut Option<CompleteBarrierTask>,
         resps: &HashMap<WorkerId, BarrierCompleteResponse>,
     ) {
-        let list_finished_info = resps
-            .values()
-            .flat_map(|resp| resp.list_finished_sources.clone())
-            .collect::<Vec<_>>();
-        if !list_finished_info.is_empty() {
+        let refresh_load_progress = LoadReport::from_responses(resps).collect::<Vec<_>>();
+        if !refresh_load_progress.is_empty() {
             let task = task.get_or_insert_default();
-            task.list_finished_source_ids.extend(list_finished_info);
-        }
-
-        let load_finished_info = resps
-            .values()
-            .flat_map(|resp| resp.load_finished_sources.clone())
-            .collect::<Vec<_>>();
-        if !load_finished_info.is_empty() {
-            let task = task.get_or_insert_default();
-            task.load_finished_source_ids.extend(load_finished_info);
+            task.refresh_load_progress.extend(refresh_load_progress);
         }
 
         let refresh_finished_actors = resps

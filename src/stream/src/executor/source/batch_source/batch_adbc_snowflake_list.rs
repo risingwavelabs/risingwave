@@ -27,10 +27,11 @@ use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::executor::LoadAction;
 use crate::executor::prelude::*;
 use crate::executor::source::{StreamSourceCore, barrier_to_message_stream};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::LocalBarrierManager;
+use crate::task::{LoadProgress, LocalBarrierManager};
 
 /// Split information for ADBC Snowflake batch source.
 ///
@@ -132,18 +133,16 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
                                 match mutation {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
-                                    Mutation::RefreshStart {
-                                        associated_source_id,
-                                        ..
-                                    } if associated_source_id
-                                        == &self.stream_source_core.source_id =>
-                                    {
+                                    Mutation::Load {
+                                        source_id,
+                                        action: LoadAction::Start,
+                                    } if *source_id == self.stream_source_core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
                                             source_id = %self.stream_source_core.source_id,
                                             table_id = %self.associated_table_id,
-                                            "RefreshStart triggered split generation"
+                                            "load started, generating splits"
                                         );
                                         is_refreshing = true;
                                         *is_list_finished.write() = false;
@@ -167,11 +166,11 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
                                     table_id = %self.associated_table_id,
                                     "reporting batch adbc snowflake list finished"
                                 );
-                                self.barrier_manager.report_source_list_finished(
+                                self.barrier_manager.report_load_progress(
                                     barrier.epoch,
                                     self.actor_ctx.id,
-                                    self.associated_table_id,
                                     self.stream_source_core.source_id,
+                                    LoadProgress::ListFinished,
                                 );
                                 is_refreshing = false;
                             }

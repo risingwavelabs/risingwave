@@ -36,6 +36,7 @@ mod complete_task;
 pub(super) mod context;
 mod edge_builder;
 mod info;
+mod load_progress;
 mod manager;
 mod partial_graph;
 mod progress;
