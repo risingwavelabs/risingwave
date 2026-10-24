@@ -146,6 +146,8 @@ kinesis_lag_latency_ms	histogram	source_id,source_name,fragment_id,shard_id	Lag 
 kinesis_rebuild_shard_iter_count	counter	source_id,source_name,fragment_id,shard_id	Total number of times rebuild shard iter in kinesis source		src/connector/src/source/monitor/metrics.rs
 kinesis_throughput_exceeded_count	counter	source_id,source_name,fragment_id,shard_id	Total number of times throughput exceeded in kinesis source		src/connector/src/source/monitor/metrics.rs
 kinesis_timeout_count	counter	source_id,source_name,fragment_id,shard_id	Total number of times timeout in kinesis source		src/connector/src/source/monitor/metrics.rs
+mariadb_cdc_binlog_file_seq_max	gauge	source_id,hostname,port	MariaDB CDC upstream binlog file sequence number (maximum/newest)		src/connector/src/source/monitor/metrics.rs
+mariadb_cdc_binlog_file_seq_min	gauge	source_id,hostname,port	MariaDB CDC upstream binlog file sequence number (minimum/oldest)		src/connector/src/source/monitor/metrics.rs
 mysql_cdc_binlog_file_seq_max	gauge	source_id,hostname,port	MySQL CDC upstream binlog file sequence number (maximum/newest)		src/connector/src/source/monitor/metrics.rs
 mysql_cdc_binlog_file_seq_min	gauge	source_id,hostname,port	MySQL CDC upstream binlog file sequence number (minimum/oldest)		src/connector/src/source/monitor/metrics.rs
 parquet_source_skip_row_count	counter	actor_id,source_id,source_name,fragment_id	Total number of rows that have been set to null in parquet source		src/connector/src/source/monitor/metrics.rs
@@ -479,6 +481,8 @@ stream_join_matched_join_keys	histogram	actor_id,fragment_id,table_id	The number
 stream_lookup_cache_miss_count	counter	actor_id,table_id,fragment_id	Lookup executor cache miss count		src/stream/src/executor/monitor/streaming_stats.rs
 stream_lookup_cached_entry_count	gauge	actor_id,table_id,fragment_id	Total entry counts in lookup executor cache		src/stream/src/executor/monitor/streaming_stats.rs
 stream_lookup_total_query_cache_count	counter	actor_id,table_id,fragment_id	Lookup executor query cache total count		src/stream/src/executor/monitor/streaming_stats.rs
+stream_mariadb_cdc_state_binlog_file_seq	gauge	source_id	Current binlog file sequence number stored in MariaDB CDC state table		src/stream/src/executor/monitor/streaming_stats.rs
+stream_mariadb_cdc_state_binlog_position	gauge	source_id	Current binlog position stored in MariaDB CDC state table		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_evicted_rows_count	counter	actor_id,table_id,fragment_id	Buffered rows evicted by the match recognize executor		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_matches_emitted_count	counter	actor_id,table_id,fragment_id	Matches emitted by the match recognize executor		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_retained_rows	gauge	actor_id,table_id,fragment_id	Rows currently retained in memory by the match recognize executor, summed over the actor's partitions		src/stream/src/executor/monitor/streaming_stats.rs

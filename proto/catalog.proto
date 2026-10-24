@@ -433,6 +433,7 @@ message Table {
     CDC_TABLE_TYPE_SQLSERVER = 3;
     CDC_TABLE_TYPE_MONGO = 4;
     CDC_TABLE_TYPE_CITUS = 5;
+    CDC_TABLE_TYPE_MARIADB = 6;
   }
 
   uint32 id = 1;

@@ -45,6 +45,7 @@ pub use crate::connector_common::SslMode as MySqlSslMode;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row_with_strict_pk;
 use crate::source::CdcTableSnapshotSplit;
+use crate::source::cdc::MARIADB_CDC_CONNECTOR;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
     ExternalTableConfig, ExternalTableReader, SchemaTableName,
@@ -74,25 +75,111 @@ pub fn build_mysql_connection_pool(
     database: Option<&str>,
     ssl_mode: SslMode,
 ) -> mysql_async::Pool {
-    let mut opts_builder = mysql_async::OptsBuilder::default()
+    let opts_builder = mysql_async::OptsBuilder::default()
         .user(Some(username))
         .pass(Some(password))
         .ip_or_hostname(host)
         .tcp_port(port)
-        .db_name(database);
-
-    opts_builder = match ssl_mode {
-        SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-        // verify-ca and verify-full are same as required for mysql now
-        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-            let ssl_without_verify = mysql_async::SslOpts::default()
-                .with_danger_accept_invalid_certs(true)
-                .with_danger_skip_domain_validation(true);
-            opts_builder.ssl_opts(Some(ssl_without_verify))
-        }
-    };
+        .db_name(database)
+        .ssl_opts(mysql_ssl_opts(ssl_mode));
 
     mysql_async::Pool::new(opts_builder)
+}
+
+/// Build a `MariaDB` pool with certificate verification for `verify-ca` and `verify-full`.
+/// Use `None` for server-wide queries and a concrete database for table access.
+pub fn build_mariadb_connection_pool(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+    database: Option<&str>,
+    ssl_mode: SslMode,
+    ssl_root_cert: Option<&str>,
+) -> mysql_async::Pool {
+    let opts_builder = mysql_async::OptsBuilder::default()
+        .user(Some(username))
+        .pass(Some(password))
+        .ip_or_hostname(host)
+        .tcp_port(port)
+        .db_name(database)
+        .ssl_opts(mariadb_ssl_opts(ssl_mode, ssl_root_cert));
+    mysql_async::Pool::new(opts_builder)
+}
+
+fn mysql_ssl_opts(ssl_mode: SslMode) -> Option<mysql_async::SslOpts> {
+    match ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => None,
+        // Preserve the existing MySQL behavior: all TLS modes skip verification.
+        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => Some(
+            mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true),
+        ),
+    }
+}
+
+fn mariadb_ssl_opts(
+    ssl_mode: SslMode,
+    ssl_root_cert: Option<&str>,
+) -> Option<mysql_async::SslOpts> {
+    match ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => None,
+        SslMode::Required => Some(
+            mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true),
+        ),
+        SslMode::VerifyCa | SslMode::VerifyFull => {
+            let mut ssl_opts = mysql_async::SslOpts::default();
+            if let Some(root_cert) = ssl_root_cert {
+                ssl_opts =
+                    ssl_opts.with_root_certs(vec![std::path::PathBuf::from(root_cert).into()]);
+            }
+            if matches!(ssl_mode, SslMode::VerifyCa) {
+                ssl_opts = ssl_opts.with_danger_skip_domain_validation(true);
+            }
+            Some(ssl_opts)
+        }
+    }
+}
+
+fn build_external_table_connection_pool(config: &ExternalTableConfig) -> mysql_async::Pool {
+    if config.connector == MARIADB_CDC_CONNECTOR {
+        build_mariadb_connection_pool(
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.username,
+            &config.password,
+            Some(&config.database),
+            config.ssl_mode.clone(),
+            config.ssl_root_cert.as_deref(),
+        )
+    } else {
+        build_mysql_connection_pool(
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.username,
+            &config.password,
+            Some(&config.database),
+            config.ssl_mode.clone(),
+        )
+    }
+}
+
+fn schema_ssl_mode(config: &ExternalTableConfig) -> ConnectorResult<sqlx::mysql::MySqlSslMode> {
+    Ok(match config.ssl_mode {
+        SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
+        SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
+        SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
+        SslMode::VerifyCa if config.connector == MARIADB_CDC_CONNECTOR => {
+            sqlx::mysql::MySqlSslMode::VerifyCa
+        }
+        SslMode::VerifyFull if config.connector == MARIADB_CDC_CONNECTOR => {
+            sqlx::mysql::MySqlSslMode::VerifyIdentity
+        }
+        _ => return Err(anyhow!("unsupported SSL mode").into()),
+    })
 }
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -134,20 +221,20 @@ pub struct MySqlExternalTable {
 impl MySqlExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         tracing::debug!("connect to mysql");
-        let options = MySqlConnectOptions::new()
+        let mut options = MySqlConnectOptions::new()
             .username(&config.username)
             .password(&config.password)
             .host(&config.host)
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
-            .ssl_mode(match config.ssl_mode {
-                SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
-                SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
-                SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
-                _ => {
-                    return Err(anyhow!("unsupported SSL mode").into());
-                }
-            });
+            .ssl_mode(schema_ssl_mode(&config)?);
+
+        if config.connector == MARIADB_CDC_CONNECTOR
+            && matches!(config.ssl_mode, SslMode::VerifyCa | SslMode::VerifyFull)
+            && let Some(root_cert) = &config.ssl_root_cert
+        {
+            options = options.ssl_ca(root_cert);
+        }
 
         let connection = MySqlPool::connect_with(options).await?;
         let mut schema_discovery = SchemaDiscovery::new(connection, config.database.as_str());
@@ -248,14 +335,7 @@ impl MySqlExternalTable {
         config: &ExternalTableConfig,
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
-        let pool = build_mysql_connection_pool(
-            &config.host,
-            config.port.parse::<u16>().unwrap(),
-            &config.username,
-            &config.password,
-            Some(&config.database),
-            config.ssl_mode.clone(),
-        );
+        let pool = build_external_table_connection_pool(config);
         let pk_infos = MySqlExternalTableReader::query_upstream_pk_infos(
             &pool,
             &config.database,
@@ -647,14 +727,7 @@ impl MySqlExternalTableReader {
     ) -> ConnectorResult<Self> {
         let database = config.database.clone();
         let table = config.table.clone();
-        let pool = build_mysql_connection_pool(
-            &config.host,
-            config.port.parse::<u16>().unwrap(),
-            &config.username,
-            &config.password,
-            Some(&config.database),
-            config.ssl_mode,
-        );
+        let pool = build_external_table_connection_pool(&config);
 
         let field_names = rw_schema
             .fields
@@ -981,14 +1054,84 @@ mod tests {
     use sea_schema::mysql::def::{ColumnType, IndexInfo, IndexOrder, IndexPart, IndexType};
 
     use super::{
-        mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, pk_column_comparisons_from_infos,
-        primary_key_names, type_name_to_mysql_type,
+        mariadb_ssl_opts, mysql_ssl_opts, mysql_type_is_unsigned_bigint, mysql_type_to_rw_type,
+        pk_column_comparisons_from_infos, primary_key_names, schema_ssl_mode,
+        type_name_to_mysql_type,
     };
+    use crate::connector_common::SslMode;
     use crate::source::cdc::external::mysql::MySqlExternalTable;
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
         SchemaTableName,
     };
+
+    #[test]
+    fn test_mysql_ssl_modes() {
+        assert!(mysql_ssl_opts(SslMode::Disabled).is_none());
+        assert!(mysql_ssl_opts(SslMode::Preferred).is_none());
+
+        for mode in [SslMode::Required, SslMode::VerifyCa, SslMode::VerifyFull] {
+            let opts = mysql_ssl_opts(mode).unwrap();
+            assert!(opts.accept_invalid_certs());
+            assert!(opts.skip_domain_validation());
+            assert!(opts.root_certs().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_mariadb_ssl_modes() {
+        assert!(mariadb_ssl_opts(SslMode::Disabled, None).is_none());
+        assert!(mariadb_ssl_opts(SslMode::Preferred, None).is_none());
+
+        let required = mariadb_ssl_opts(SslMode::Required, None).unwrap();
+        assert!(required.accept_invalid_certs());
+        assert!(required.skip_domain_validation());
+
+        let verify_ca = mariadb_ssl_opts(SslMode::VerifyCa, Some("/tmp/ca.pem")).unwrap();
+        assert!(!verify_ca.accept_invalid_certs());
+        assert!(verify_ca.skip_domain_validation());
+        assert_eq!(verify_ca.root_certs().len(), 1);
+
+        let verify_full = mariadb_ssl_opts(SslMode::VerifyFull, None).unwrap();
+        assert!(!verify_full.accept_invalid_certs());
+        assert!(!verify_full.skip_domain_validation());
+    }
+
+    #[test]
+    fn test_schema_ssl_modes_preserve_mysql_behavior() {
+        for (mode, expected) in [
+            (SslMode::Disabled, sqlx::mysql::MySqlSslMode::Disabled),
+            (SslMode::Preferred, sqlx::mysql::MySqlSslMode::Preferred),
+            (SslMode::Required, sqlx::mysql::MySqlSslMode::Required),
+            (SslMode::VerifyCa, sqlx::mysql::MySqlSslMode::VerifyCa),
+            (
+                SslMode::VerifyFull,
+                sqlx::mysql::MySqlSslMode::VerifyIdentity,
+            ),
+        ] {
+            let expected = std::mem::discriminant(&expected);
+            let config = ExternalTableConfig {
+                connector: "mysql-cdc".to_owned(),
+                ssl_mode: mode.clone(),
+                ..Default::default()
+            };
+            let mysql_mode = schema_ssl_mode(&config);
+            if matches!(mode, SslMode::VerifyCa | SslMode::VerifyFull) {
+                assert!(mysql_mode.is_err());
+            } else {
+                assert_eq!(std::mem::discriminant(&mysql_mode.unwrap()), expected);
+            }
+
+            let mariadb_config = ExternalTableConfig {
+                connector: "mariadb-cdc".to_owned(),
+                ..config
+            };
+            assert_eq!(
+                std::mem::discriminant(&schema_ssl_mode(&mariadb_config).unwrap()),
+                expected
+            );
+        }
+    }
 
     fn parse_mysql_type_name(ty_name: &str) -> ColumnType {
         type_name_to_mysql_type(ty_name).unwrap()

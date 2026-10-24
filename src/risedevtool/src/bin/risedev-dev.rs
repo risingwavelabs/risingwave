@@ -30,10 +30,10 @@ use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     ClickHouseService, CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask,
     DummyService, ElasticSearchService, EnsureStopService, ExecuteContext, FrontendService,
-    GrafanaService, KafkaService, LakekeeperService, MetaNodeService, MinioService, MoatService,
-    MongoDbService, MongoDbSetupTask, MotoService, MqttService, MySqlService, NatsService,
-    OpenSearchService, OracleService, PostgresService, PrometheusService, PubsubService,
-    PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
+    GrafanaService, KafkaService, LakekeeperService, MariaDbService, MetaNodeService, MinioService,
+    MoatService, MongoDbService, MongoDbSetupTask, MotoService, MqttService, MySqlService,
+    NatsService, OpenSearchService, OracleService, PostgresService, PrometheusService,
+    PubsubService, PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
     SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env,
     preflight_check,
 };
@@ -331,6 +331,22 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("mysql {}:{}", c.address, c.port));
+                }
+                ServiceConfig::MariaDb(c) => {
+                    MariaDbService::new(c.clone()).execute(&mut ctx)?;
+                    let connect_options = MySqlConnectOptions::new()
+                        .host(&c.address)
+                        .port(c.port)
+                        .username(&c.user);
+                    let connect_options = if c.password.is_empty() {
+                        connect_options
+                    } else {
+                        connect_options.password(&c.password)
+                    };
+                    let mut task = risedev::DbReadyCheckTask::new(connect_options);
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("mariadb {}:{}", c.address, c.port));
                 }
                 ServiceConfig::Postgres(c) => {
                     PostgresService::new(c.clone()).execute(&mut ctx)?;

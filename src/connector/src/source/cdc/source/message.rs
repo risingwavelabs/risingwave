@@ -160,7 +160,7 @@ impl DebeziumCdcMeta {
         let has_second_dot = full_table_name[first_dot + 1..].find('.').is_some();
         match source_type {
             // MySQL/MongoDB routing key keeps the full identifier (`db.table` / `db.collection`).
-            SourceType::Mysql | SourceType::Mongodb => (first_dot, 0),
+            SourceType::Mysql | SourceType::Mariadb | SourceType::Mongodb => (first_dot, 0),
 
             // Postgres/Citus/SQL Server/Oracle routing key is `schema.table` if database is present.
             // If `full_table_name` only contains one dot (e.g. `schema.table`), we can still route

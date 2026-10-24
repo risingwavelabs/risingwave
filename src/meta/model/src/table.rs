@@ -144,6 +144,8 @@ pub enum CdcTableType {
     Postgres,
     #[sea_orm(string_value = "MYSQL")]
     Mysql,
+    #[sea_orm(string_value = "MARIADB")]
+    Mariadb,
     #[sea_orm(string_value = "SQLSERVER")]
     Sqlserver,
     #[sea_orm(string_value = "MONGO")]
@@ -157,6 +159,7 @@ impl From<CdcTableType> for PbCdcTableType {
         match cdc_table_type {
             CdcTableType::Postgres => Self::Postgres,
             CdcTableType::Mysql => Self::Mysql,
+            CdcTableType::Mariadb => Self::Mariadb,
             CdcTableType::Sqlserver => Self::Sqlserver,
             CdcTableType::Mongo => Self::Mongo,
             CdcTableType::Citus => Self::Citus,
@@ -170,6 +173,7 @@ impl From<PbCdcTableType> for CdcTableType {
         match cdc_table_type {
             PbCdcTableType::Postgres => Self::Postgres,
             PbCdcTableType::Mysql => Self::Mysql,
+            PbCdcTableType::Mariadb => Self::Mariadb,
             PbCdcTableType::Sqlserver => Self::Sqlserver,
             PbCdcTableType::Mongo => Self::Mongo,
             PbCdcTableType::Citus => Self::Citus,
@@ -392,6 +396,8 @@ impl From<PbTable> for ActiveModel {
                     2 => CdcTableType::Mysql,
                     3 => CdcTableType::Sqlserver,
                     4 => CdcTableType::Mongo,
+                    5 => CdcTableType::Citus,
+                    6 => CdcTableType::Mariadb,
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),

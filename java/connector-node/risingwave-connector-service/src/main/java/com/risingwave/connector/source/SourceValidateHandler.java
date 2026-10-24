@@ -17,6 +17,7 @@
 package com.risingwave.connector.source;
 
 import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.StatusRuntimeException;
@@ -242,11 +243,17 @@ public class SourceValidateHandler {
 
                 break;
             case MYSQL:
+            case MARIADB:
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
                 validateQueueMemoryRatio(props);
                 try (var validator =
-                        new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
+                        new MySqlValidator(
+                                SourceTypeE.valueOf(request.getSourceType()),
+                                props,
+                                tableSchema,
+                                isCdcSourceJob,
+                                isBackfillTable)) {
                     validator.validateAll();
                 }
                 break;
