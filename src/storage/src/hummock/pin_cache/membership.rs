@@ -38,7 +38,7 @@ impl PinCache {
     }
 
     /// Unregisters objects, withdrawing their publications and revoking all refill tokens.
-    /// Existing read handles retain their files. The refiller decides when to apply delta
+    /// Existing read handles retain their files. The CN membership owner decides when to apply delta
     /// deletions relative to version publication; this method does not wait for a version.
     pub(crate) fn unregister_objects(
         &self,

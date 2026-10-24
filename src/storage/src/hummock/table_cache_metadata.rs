@@ -15,14 +15,19 @@
 //! Current table cache policies and vnode mappings for one Hummock instance.
 //! The event handler owns and updates this state; refill tasks consume immutable snapshots.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_pb::id::TableId;
 
 use super::refill_locality::RefillOwnership;
+
+/// Lock order: metadata, Pin batch state, executor/cache locks. Never hold across I/O or await.
+pub(crate) type SharedTableCacheMetadata = Arc<RwLock<TableCacheMetadata>>;
 
 pub(crate) struct TableCacheMetadata {
     pub role: Role,
@@ -33,6 +38,7 @@ pub(crate) struct TableCacheMetadata {
     pub streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
     /// Complete worker-specific serving mapping received from Meta.
     pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
+    pinned_table_ids: HashSet<TableId>,
 }
 
 impl TableCacheMetadata {
@@ -43,6 +49,7 @@ impl TableCacheMetadata {
             table_cache_refill_policies: HashMap::new(),
             streaming_table_vnode_mapping: HashMap::new(),
             serving_table_vnode_mapping: HashMap::new(),
+            pinned_table_ids: HashSet::new(),
         }
     }
 
@@ -59,16 +66,72 @@ impl TableCacheMetadata {
         }
     }
 
+    pub(crate) fn is_pinned(&self, table: &TableId) -> bool {
+        self.pinned_table_ids.contains(table)
+    }
+
+    pub(crate) fn pinned_tables(&self) -> &HashSet<TableId> {
+        &self.pinned_table_ids
+    }
+
+    pub(crate) fn replace_policy_snapshot(
+        &mut self,
+        policies: HashMap<TableId, CacheRefillPolicy>,
+        pinned: HashSet<TableId>,
+    ) -> HashSet<TableId> {
+        let changed = self
+            .pinned_table_ids
+            .symmetric_difference(&pinned)
+            .copied()
+            .collect();
+        self.table_cache_refill_policies = policies;
+        self.pinned_table_ids = pinned;
+        changed
+    }
+
+    pub(crate) fn replace_serving_mapping(
+        &mut self,
+        mapping: HashMap<TableId, Bitmap>,
+    ) -> HashSet<TableId> {
+        let previous = std::mem::replace(&mut self.serving_table_vnode_mapping, mapping);
+        let before = RefillOwnership {
+            streaming: self
+                .role
+                .for_streaming()
+                .then_some(&self.streaming_table_vnode_mapping),
+            serving: self.role.for_serving().then_some(&previous),
+        };
+        self.pinned_table_ids
+            .iter()
+            .copied()
+            .filter(|table| before.owned_vnodes(table) != self.ownership().owned_vnodes(table))
+            .collect()
+    }
+
     pub(crate) fn update_streaming_table_vnodes(
         &mut self,
-        table_id: TableId,
-        streaming_vnodes: Option<Bitmap>,
-    ) {
-        if let Some(streaming_vnodes) = streaming_vnodes {
-            self.streaming_table_vnode_mapping
-                .insert(table_id, streaming_vnodes);
+        table: TableId,
+        bitmap: Option<Bitmap>,
+    ) -> HashSet<TableId> {
+        let previous = self
+            .is_pinned(&table)
+            .then(|| {
+                self.ownership()
+                    .owned_vnodes(&table)
+                    .map(|bitmap| bitmap.into_owned())
+            })
+            .flatten();
+        if let Some(bitmap) = bitmap {
+            self.streaming_table_vnode_mapping.insert(table, bitmap);
         } else {
-            self.streaming_table_vnode_mapping.remove(&table_id);
+            self.streaming_table_vnode_mapping.remove(&table);
+        }
+        if self.is_pinned(&table)
+            && previous.as_ref() != self.ownership().owned_vnodes(&table).as_deref()
+        {
+            [table].into()
+        } else {
+            HashSet::new()
         }
     }
 }

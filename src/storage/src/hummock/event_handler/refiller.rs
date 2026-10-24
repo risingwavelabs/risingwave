@@ -12,31 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::bitmap::Bitmap;
+use futures::FutureExt;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::license::Feature;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
-use tokio::task::JoinHandle;
 
-use crate::hummock::SstableStoreRef;
-use crate::hummock::table_cache_metadata::TableCacheMetadata;
-pub use crate::monitor::{CacheRefillMetrics, GLOBAL_CACHE_REFILL_METRICS};
-use crate::opts::StorageOpts;
-
-// Foyer tasks consume immutable snapshots of the handler-owned policy and vnode maps.
 mod foyer;
+mod metadata;
+mod pin;
+
+use foyer::FoyerRefiller;
+pub(super) use foyer::table_cache_refill_monitor_snapshot;
+#[cfg(test)]
+use foyer::{SpawnRefillTask, default_spawn_refill_task};
+pub use foyer::{
+    TableCacheRefillContext, TableCacheRefillContextMap, TableCacheRefillMonitorSnapshot,
+};
+use pin::PinCacheRefiller;
+
+use super::ReadOnlyRwLockRef;
+use super::version_update::VersionUpdateCondition;
+use crate::hummock::SstableStoreRef;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::table_cache_metadata::TableCacheMetadata;
+use crate::opts::StorageOpts;
 
 #[derive(Debug)]
 pub struct CacheRefillConfig {
-    /// Cache refill timeout.
+    /// Timeout for each backend refill attempt, excluding pending Pin batches.
     pub timeout: Duration,
+
+    /// Maximum version events merged into one Pin Cache refill batch.
+    pub pin_cache_max_batch_size: usize,
 
     /// Data file cache refill levels.
     pub data_refill_levels: HashSet<u32>,
@@ -60,6 +75,9 @@ pub struct CacheRefillConfig {
 
     /// Skip inheritance filter.
     pub skip_inheritance_filter: bool,
+
+    /// Default table cache refill policy.
+    pub table_cache_refill_default_policy: CacheRefillPolicy,
 }
 
 impl CacheRefillConfig {
@@ -78,6 +96,7 @@ impl CacheRefillConfig {
 
         Self {
             timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+            pin_cache_max_batch_size: options.cache_refill_pin_cache_max_batch_size.max(1),
             data_refill_levels,
             concurrency: options.cache_refill_concurrency,
             meta_refill_concurrency: options.cache_refill_meta_refill_concurrency,
@@ -85,51 +104,25 @@ impl CacheRefillConfig {
             threshold: options.cache_refill_threshold,
             skip_recent_filter: options.cache_refill_skip_recent_filter,
             skip_inheritance_filter: options.cache_refill_skip_inheritance_filter,
+            table_cache_refill_default_policy: options
+                .cache_refill_table_cache_refill_default_policy,
         }
     }
 }
 
-#[cfg(test)]
-type SpawnRefillTask =
-    Arc<dyn Fn(Vec<SstDeltaInfo>, CacheRefillContext) -> JoinHandle<()> + Send + Sync + 'static>;
-
-pub type TableCacheRefillContextMap = HashMap<TableId, TableCacheRefillContext>;
-
-/// Per-table metadata captured for a refill task to decide whether an sstable block should be
-/// refilled. Mutable runtime state used to build this snapshot is owned by the event handler.
-#[derive(Clone)]
-pub struct TableCacheRefillContext {
-    /// Vnodes covered by local streaming read versions on this compute node.
-    pub streaming_vnode_bitmap: Option<Bitmap>,
-    /// Vnodes served by this compute node according to the serving vnode mapping.
-    pub serving_vnode_bitmap: Option<Bitmap>,
-    /// Effective refill policy after applying the default policy and per-table overrides.
-    pub policy: CacheRefillPolicy,
-}
-
-/// Current CN metadata and its Foyer projection for monitor/debugging APIs.
-#[derive(Clone)]
-pub struct TableCacheRefillMonitorSnapshot {
-    pub contexts: TableCacheRefillContextMap,
-    pub policies: HashMap<TableId, CacheRefillPolicy>,
-    pub default_policy: CacheRefillPolicy,
-    pub streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
-    pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
-}
-
-/// Admits SSTs using borrowed CN metadata, then runs Foyer tasks with immutable snapshots.
+/// Constructs independent refill backends and combines their publication conditions.
+/// Backends consume shared table policies and ownership; membership stays with the handler.
 pub(crate) struct CacheRefiller {
-    #[cfg(test)]
-    spawn_refill_task: Option<SpawnRefillTask>,
-
-    config: Arc<CacheRefillConfig>,
-    meta_refill_concurrency: Option<Arc<Semaphore>>,
-    concurrency: Arc<Semaphore>,
-    sstable_store: SstableStoreRef,
+    foyer: FoyerRefiller,
+    pin_cache_refill: Option<PinCacheRefiller>,
 }
 
 impl CacheRefiller {
-    pub(crate) fn new(config: CacheRefillConfig, sstable_store: SstableStoreRef) -> Self {
+    pub(crate) fn new(
+        config: CacheRefillConfig,
+        sstable_store: SstableStoreRef,
+        metadata: ReadOnlyRwLockRef<TableCacheMetadata>,
+    ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
         let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
@@ -137,174 +130,80 @@ impl CacheRefiller {
         } else {
             Some(Arc::new(Semaphore::new(config.meta_refill_concurrency)))
         };
-        Self {
-            #[cfg(test)]
-            spawn_refill_task: None,
+        let pin_cache_refill = sstable_store.pin_cache().map(|_| {
+            PinCacheRefiller::new(
+                sstable_store.clone(),
+                metadata,
+                concurrency.clone(),
+                meta_refill_concurrency.clone(),
+                config.pin_cache_max_batch_size,
+                config.timeout,
+            )
+        });
+        let foyer = FoyerRefiller::new(
             config,
+            sstable_store,
             meta_refill_concurrency,
             concurrency,
-            sstable_store,
+            pin_cache_refill.is_none(),
+        );
+        Self {
+            foyer,
+            pin_cache_refill,
         }
     }
 
     #[cfg(test)]
     pub(super) fn with_foyer_spawn_task(mut self, spawn: SpawnRefillTask) -> Self {
-        self.spawn_refill_task = Some(spawn);
+        self.foyer.spawn_refill_task = Some(spawn);
         self
     }
 
-    pub(crate) fn start_cache_refill(
-        &self,
-        mut deltas: Vec<SstDeltaInfo>,
+    pub(super) fn start_cache_refill(
+        &mut self,
+        deltas: Vec<SstDeltaInfo>,
+        new_pinned_version: PinnedVersion,
+        version_deltas: Option<&[HummockVersionDelta]>,
         metadata: &TableCacheMetadata,
-    ) -> JoinHandle<()> {
-        for delta in &mut deltas {
-            let for_serving = metadata.role.for_serving();
-            // Writer-appended L0 SSTs are already warm on the streaming side. Their data refill
-            // may therefore only be needed by serving workers.
-            let for_streaming =
-                metadata.role.for_streaming() && !delta.delete_sst_object_ids.is_empty();
-
-            if !for_serving && !for_streaming {
-                delta.insert_sst_infos.clear();
-                continue;
-            }
-
-            // This is deliberately a whole-SST admission check before Meta load. The serving
-            // mapping key set identifies result tables, but bitmap contents remain for the exact
-            // block/vnode decision in DataCacheRefillTaskGenerator after Meta load. An SST stays
-            // when any contained table matches either the serving or streaming refill lane.
-            delta.insert_sst_infos.retain(|sst| {
-                sst.table_ids.iter().any(|table_id| {
-                    // A missing entry means there is no table override, not that the table is
-                    // absent. Preserve the configured legacy/default policy in that case.
-                    let policy = metadata
-                        .table_cache_refill_policies
-                        .get(table_id)
-                        .copied()
-                        .unwrap_or(metadata.default_policy);
-
-                    // Enabled preserves legacy full refill. For scoped policies, mapping keys are
-                    // only a whole-SST coarse gate; bitmap bits still filter blocks post-Meta.
-                    match policy {
-                        CacheRefillPolicy::Enabled => for_streaming || for_serving,
-                        CacheRefillPolicy::Disabled => false,
-                        CacheRefillPolicy::Streaming => {
-                            for_streaming
-                                && metadata
-                                    .streaming_table_vnode_mapping
-                                    .contains_key(table_id)
-                        }
-                        CacheRefillPolicy::Serving => {
-                            for_serving
-                                && metadata.serving_table_vnode_mapping.contains_key(table_id)
-                        }
-                        CacheRefillPolicy::Both => {
-                            (for_streaming
-                                && metadata
-                                    .streaming_table_vnode_mapping
-                                    .contains_key(table_id))
-                                || (for_serving
-                                    && metadata.serving_table_vnode_mapping.contains_key(table_id))
-                        }
-                    }
-                })
-            });
-        }
-        let context = self.new_cache_refill_context(&deltas, metadata);
-        #[cfg(test)]
-        if let Some(spawn) = &self.spawn_refill_task {
-            return spawn(deltas, context);
-        }
-        foyer::spawn_refill_task(deltas, context)
-    }
-
-    fn new_cache_refill_context(
-        &self,
-        deltas: &[SstDeltaInfo],
-        metadata: &TableCacheMetadata,
-    ) -> CacheRefillContext {
-        let table_ids = deltas.iter().flat_map(|delta| {
-            delta
-                .insert_sst_infos
-                .iter()
-                .flat_map(|sst| sst.table_ids.iter().copied())
-        });
-        CacheRefillContext {
-            config: self.config.clone(),
-            meta_refill_concurrency: self.meta_refill_concurrency.clone(),
-            concurrency: self.concurrency.clone(),
-            sstable_store: self.sstable_store.clone(),
-            table_cache_refill_context_map: Arc::new(Self::table_cache_refill_contexts(
-                metadata, table_ids,
-            )),
-        }
-    }
-
-    fn table_cache_refill_contexts(
-        metadata: &TableCacheMetadata,
-        table_ids: impl IntoIterator<Item = TableId>,
-    ) -> TableCacheRefillContextMap {
-        let ownership = metadata.ownership();
-        let mut contexts = HashMap::new();
-        for table_id in table_ids {
-            if ownership.serving.is_some()
-                && ownership.streaming.is_none()
-                && !metadata.serving_table_vnode_mapping.contains_key(&table_id)
-            {
-                continue;
-            }
-            contexts.entry(table_id).or_insert_with(|| {
-                let policy = metadata
-                    .table_cache_refill_policies
-                    .get(&table_id)
-                    .copied()
-                    .unwrap_or(metadata.default_policy);
-                let streaming_vnode_bitmap = ownership
-                    .streaming
-                    .filter(|_| policy.is_streaming_scoped())
-                    .and_then(|map| map.get(&table_id))
-                    .cloned();
-                // Enabled still needs serving-locality evidence for L0 insert-only refill.
-                let serving_vnode_bitmap = ownership
-                    .serving
-                    .filter(|_| policy.is_serving_scoped() || policy.is_unscoped_enabled())
-                    .and_then(|map| map.get(&table_id))
-                    .cloned();
-                TableCacheRefillContext {
-                    streaming_vnode_bitmap,
-                    serving_vnode_bitmap,
-                    policy,
+    ) -> VersionUpdateCondition {
+        let pin = self
+            .pin_cache_refill
+            .as_mut()
+            .map(|refiller| refiller.submit(&deltas, new_pinned_version, version_deltas, metadata));
+        let foyer = self.foyer.start_cache_refill(deltas, metadata);
+        async move {
+            match pin {
+                Some(pin) => futures::join!(foyer, pin).1,
+                None => {
+                    foyer.await;
+                    true
                 }
-            });
+            }
         }
-        contexts
+        .boxed()
     }
 
-    pub(crate) fn table_cache_refill_monitor_snapshot(
+    pub(super) fn on_metadata_changed(
+        &self,
+        tables: &HashSet<TableId>,
         metadata: &TableCacheMetadata,
-    ) -> TableCacheRefillMonitorSnapshot {
-        let table_ids = metadata
-            .table_cache_refill_policies
-            .keys()
-            .chain(metadata.streaming_table_vnode_mapping.keys())
-            .chain(metadata.serving_table_vnode_mapping.keys())
-            .copied();
-        TableCacheRefillMonitorSnapshot {
-            contexts: Self::table_cache_refill_contexts(metadata, table_ids),
-            policies: metadata.table_cache_refill_policies.clone(),
-            default_policy: metadata.default_policy,
-            streaming_table_vnode_mapping: metadata.streaming_table_vnode_mapping.clone(),
-            serving_table_vnode_mapping: metadata.serving_table_vnode_mapping.clone(),
+    ) {
+        if let Some(refiller) = &self.pin_cache_refill {
+            refiller.on_metadata_changed(tables, metadata);
+        }
+    }
+
+    pub(super) fn cancel_objects(
+        &self,
+        objects: impl IntoIterator<Item = risingwave_hummock_sdk::HummockSstableObjectId>,
+    ) {
+        if let Some(refiller) = &self.pin_cache_refill {
+            refiller.cancel_objects(objects);
         }
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct CacheRefillContext {
-    config: Arc<CacheRefillConfig>,
-    meta_refill_concurrency: Option<Arc<Semaphore>>,
-    concurrency: Arc<Semaphore>,
-    sstable_store: SstableStoreRef,
-    table_cache_refill_context_map: Arc<TableCacheRefillContextMap>,
-}
+#[cfg(test)]
+mod test_utils;
+#[cfg(test)]
+mod tests;
