@@ -335,6 +335,7 @@ fn merge_pin_refill_plans(
     target: &PinnedVersion,
     pinned_tables: &HashSet<TableId>,
 ) -> PinCacheRefillPlan {
+    let merged_events = plans.len();
     let mut pin_plan = PinCacheRefillPlan::default();
     let mut input_pin_plan = PinRefillPlanStats::default();
     let mut retained_pin_plan = PinRefillPlanStats::default();
@@ -356,7 +357,11 @@ fn merge_pin_refill_plans(
             }
         }
     }
-    pin_plan.retain_in_version(target, pinned_tables);
+    // A single request was already filtered against this immutable target at receipt.
+    // Only merging requests can retire a candidate in a later target version.
+    if merged_events > 1 {
+        pin_plan.retain_in_version(target, pinned_tables);
+    }
     // Input counts event-scoped candidates; retained reflects the current pin policy.
     // Merged counts unique physical candidates before metadata admission, not download jobs.
     let mut merged_pin_plan = PinRefillPlanStats::default();
