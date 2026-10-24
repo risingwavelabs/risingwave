@@ -32,16 +32,17 @@ use risingwave_connector::source::iceberg::{
 use risingwave_connector::source::reader::desc::SourceDesc;
 use thiserror_ext::AsReport;
 
+use crate::executor::LoadAction;
 use crate::executor::prelude::*;
 use crate::executor::source::{ChunksWithState, StreamSourceCore, prune_additional_cols};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::LocalBarrierManager;
+use crate::task::{LoadProgress, LocalBarrierManager};
 
 /// Type alias for file entries in the queue: (`file_name`, `scan_task_json`)
 type FileEntry = (String, JsonbVal);
 
 struct FetchState {
-    /// Whether we are in a refresh cycle (started by `RefreshStart`, ended by load finished report)
+    /// Whether we are in a refresh cycle (started by `Load { Start }`, ended by load finished report)
     is_refreshing: bool,
 
     /// Whether the upstream list executor has finished listing all files
@@ -184,10 +185,10 @@ impl ColumnIndices {
 ///
 /// # Refresh Cycle
 ///
-/// 1. Receives `RefreshStart` mutation - clears state and starts new cycle
+/// 1. Receives `Load { Start }` - clears state and starts new cycle
 /// 2. Receives file chunks from upstream list executor - queues files for processing
 /// 3. On each barrier, starts batch reader if files are pending
-/// 4. Receives `ListFinish` mutation - marks listing as complete
+/// 4. Receives `Load { ListFinish }` - marks listing as complete
 /// 5. When all files processed, reports load finished
 ///
 /// # At-Least-Once Semantics
@@ -348,11 +349,11 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                 table_id = %self.associated_table_id,
                                 "Reporting load finished"
                             );
-                            self.barrier_manager.report_source_load_finished(
+                            self.barrier_manager.report_load_progress(
                                 barrier.epoch,
                                 self.actor_ctx.id,
-                                self.associated_table_id,
                                 core.source_id,
+                                LoadProgress::ReaderDone,
                             );
                             state.mark_refresh_complete();
                         }
@@ -420,27 +421,28 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 stream.resume_stream();
                 false
             }
-            Mutation::RefreshStart {
-                associated_source_id,
-                ..
-            } if associated_source_id == &core.source_id => {
+            Mutation::Load {
+                source_id,
+                action: LoadAction::Start,
+            } if *source_id == core.source_id => {
                 tracing::info!(
                     ?barrier.epoch,
                     source_id = %core.source_id,
                     is_checkpoint = barrier.is_checkpoint(),
-                    "RefreshStart: resetting state for new refresh cycle"
+                    "load started, resetting state for new refresh cycle"
                 );
                 state.reset_for_refresh();
                 true
             }
-            Mutation::ListFinish {
-                associated_source_id,
-            } if associated_source_id == &core.source_id => {
+            Mutation::Load {
+                source_id,
+                action: LoadAction::ListFinish,
+            } if *source_id == core.source_id => {
                 tracing::info!(
                     ?barrier.epoch,
                     source_id = %core.source_id,
                     is_checkpoint = barrier.is_checkpoint(),
-                    "ListFinish: upstream finished listing files"
+                    "listing finished, reading the remaining files"
                 );
                 state.is_list_finished = true;
                 false

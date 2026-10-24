@@ -30,10 +30,14 @@ use risingwave_common::id::{SinkId, SourceId};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::stream_plan::LoadId;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_service::barrier_complete_response::load_progress::{
+    Failed, ListFinished, Progress, ReaderDone,
+};
 use risingwave_pb::stream_service::barrier_complete_response::{
     IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata, PbCdcSourceOffsetUpdated,
-    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
+    PbLoadProgress, PbRefreshFinishedActor,
 };
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc;
@@ -45,8 +49,8 @@ use crate::executor::Barrier;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::progress::{BackfillState, TableChangeLogProgress};
 use crate::task::{
-    ActorId, LocalBarrierEvent, LocalBarrierManager, NewOutputRequest, PartialGraphId,
-    StreamActorManager, UpDownActorIds,
+    ActorId, LoadProgress, LocalBarrierEvent, LocalBarrierManager, NewOutputRequest,
+    PartialGraphId, StreamActorManager, UpDownActorIds,
 };
 
 struct IssuedState {
@@ -298,10 +302,8 @@ pub(crate) struct EpochBarrierEvent {
     pub(crate) create_mview_progress: HashMap<ActorId, (FragmentId, BackfillState)>,
     /// Change-log retention progress reported by snapshot-backfill actors.
     pub(crate) table_change_log_progress: Vec<TableChangeLogProgress>,
-    /// Source-list completion reports for refreshable batch sources.
-    pub(crate) list_finished_source_ids: Vec<PbListFinishedSource>,
-    /// Source-load completion reports for refreshable batch sources.
-    pub(crate) load_finished_source_ids: Vec<PbLoadFinishedSource>,
+    /// Load progress reported by the actors of batch sources.
+    pub(crate) load_progress: Vec<PbLoadProgress>,
     /// CDC table-backfill progress reported by each actor.
     pub(crate) cdc_table_backfill_progress: HashMap<ActorId, CdcTableBackfillState>,
     /// Reports that a CDC source has updated its offset at least once.
@@ -318,8 +320,7 @@ impl EpochBarrierEvent {
             epoch,
             create_mview_progress: Default::default(),
             table_change_log_progress: Default::default(),
-            list_finished_source_ids: Default::default(),
-            load_finished_source_ids: Default::default(),
+            load_progress: Default::default(),
             cdc_table_backfill_progress: Default::default(),
             cdc_source_offset_updated: Default::default(),
             iceberg_pk_index_sink_metadata: Default::default(),
@@ -943,31 +944,13 @@ impl PartialGraphState {
                 LocalBarrierEvent::ReportTableChangeLogProgress { epoch, progress } => {
                     self.update_table_change_log_progress(epoch, progress);
                 }
-                LocalBarrierEvent::ReportSourceListFinished {
+                LocalBarrierEvent::ReportLoadProgress {
                     epoch,
                     actor_id,
-                    table_id,
-                    associated_source_id,
+                    source_id,
+                    progress,
                 } => {
-                    self.report_source_list_finished(
-                        epoch,
-                        actor_id,
-                        table_id,
-                        associated_source_id,
-                    );
-                }
-                LocalBarrierEvent::ReportSourceLoadFinished {
-                    epoch,
-                    actor_id,
-                    table_id,
-                    associated_source_id,
-                } => {
-                    self.report_source_load_finished(
-                        epoch,
-                        actor_id,
-                        table_id,
-                        associated_source_id,
-                    );
+                    self.report_load_progress(epoch, actor_id, source_id, progress);
                 }
                 LocalBarrierEvent::RefreshFinished {
                     epoch,
@@ -1089,59 +1072,31 @@ impl PartialGraphState {
             .max_by_key(|e| e.score)
     }
 
-    /// Report that a source has finished listing for a specific epoch
-    pub(super) fn report_source_list_finished(
+    fn report_load_progress(
         &mut self,
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: TableId,
-        associated_source_id: SourceId,
+        source_id: SourceId,
+        progress: LoadProgress,
     ) {
-        // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
+            let progress = match progress {
+                LoadProgress::ListFinished => Progress::ListFinished(ListFinished {}),
+                LoadProgress::ReaderDone => Progress::ReaderDone(ReaderDone {}),
+                LoadProgress::Failed => Progress::Failed(Failed {}),
+            };
             self.graph_state
                 .event_mut(epoch)
-                .list_finished_source_ids
-                .push(PbListFinishedSource {
+                .load_progress
+                .push(PbLoadProgress {
                     reporter_actor_id: actor_id,
-                    table_id,
-                    associated_source_id,
+                    load_id: Some(LoadId { source_id }),
+                    progress: Some(progress),
                 });
         } else {
-            warn!(
-                ?epoch,
-                %actor_id, %table_id, %associated_source_id, "ignore source list finished"
-            );
-        }
-    }
-
-    /// Report that a source has finished loading for a specific epoch
-    pub(super) fn report_source_load_finished(
-        &mut self,
-        epoch: EpochPair,
-        actor_id: ActorId,
-        table_id: TableId,
-        associated_source_id: SourceId,
-    ) {
-        // Find the correct partial graph state by matching the actor's partial graph id
-        if let Some(actor_state) = self.actor_states.get(&actor_id)
-            && actor_state.inflight_barriers.contains(&epoch.prev)
-        {
-            self.graph_state
-                .event_mut(epoch)
-                .load_finished_source_ids
-                .push(PbLoadFinishedSource {
-                    reporter_actor_id: actor_id,
-                    table_id,
-                    associated_source_id,
-                });
-        } else {
-            warn!(
-                ?epoch,
-                %actor_id, %table_id, %associated_source_id, "ignore source load finished"
-            );
+            warn!(?epoch, %actor_id, %source_id, ?progress, "ignore load progress");
         }
     }
 
