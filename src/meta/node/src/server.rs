@@ -35,7 +35,7 @@ use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
-use risingwave_meta::stream::{GlobalRefreshManager, ScaleController};
+use risingwave_meta::stream::{BoundedLoadManager, GlobalRefreshManager, ScaleController};
 use risingwave_meta_service::AddressInfo;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
@@ -533,6 +533,11 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push((refresh_handle, refresh_shutdown));
 
     let (initial_workers_tx, initial_workers_rx) = tokio::sync::oneshot::channel();
+
+    let (bounded_load_manager, bounded_load_handle, bounded_load_shutdown) =
+        BoundedLoadManager::start(env.clone(), barrier_scheduler.clone());
+    sub_tasks.push((bounded_load_handle, bounded_load_shutdown));
+
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
@@ -545,6 +550,7 @@ pub async fn start_service_as_election_leader(
         scale_controller.clone(),
         refresh_manager.clone(),
         initial_workers_tx,
+        bounded_load_manager,
     )
     .await;
     tracing::info!("GlobalBarrierManager started");

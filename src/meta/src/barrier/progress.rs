@@ -24,6 +24,7 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::BackfillOrderState;
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{CreateStreamingJobCommandInfo, FragmentBackfillProgress};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -411,6 +412,7 @@ pub(super) struct StagingCommitInfo {
     /// Table IDs whose locality provider state tables need to be truncated
     pub table_ids_to_truncate: Vec<TableId>,
     pub finished_cdc_table_backfill: Vec<JobId>,
+    pub bounded_load_actions: Vec<BoundedLoadAction>,
 }
 
 pub(super) enum UpdateProgressResult {
@@ -964,7 +966,7 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
-    use risingwave_common::id::WorkerId;
+    use risingwave_common::id::{SourceId, WorkerId};
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
 
@@ -1194,7 +1196,7 @@ mod tests {
         };
 
         let source = PbSource {
-            id: risingwave_common::id::SourceId::new(100),
+            id: SourceId::new(100),
             info: Some(source_info),
             with_properties: BTreeMap::from([("connector".to_owned(), "fake-cdc".to_owned())]),
             ..Default::default()
@@ -1289,7 +1291,6 @@ mod tests {
     fn tracking_job_new_with_source_backfill_tracks_finished_fragments() {
         use std::collections::{BTreeMap, BTreeSet};
 
-        use risingwave_common::id::SourceId;
         use risingwave_pb::stream_plan::stream_node::NodeBody;
         use risingwave_pb::stream_plan::{MergeNode, SourceBackfillNode};
 

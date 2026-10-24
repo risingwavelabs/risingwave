@@ -963,6 +963,7 @@ impl PartialGraphRecoverer<'_> {
                         } else {
                             None
                         };
+
                     Ok((
                         job_id,
                         InflightStreamingJobInfo {
@@ -973,6 +974,7 @@ impl PartialGraphRecoverer<'_> {
                                 .unwrap_or_default(),
                             status,
                             cdc_table_backfill_tracker,
+                            bounded_load_tracker: None,
                         },
                     ))
                 })

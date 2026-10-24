@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod prelude;
 
+pub mod bounded_job;
 pub mod catalog_version;
 pub mod cdc_table_snapshot_split;
 pub mod cluster;
@@ -77,6 +78,7 @@ pub mod worker_property;
 macro_rules! for_all_meta_model_entities {
     ($macro:ident) => {
         $macro! {
+            bounded_job,
             catalog_version,
             cdc_table_snapshot_split,
             cluster,
