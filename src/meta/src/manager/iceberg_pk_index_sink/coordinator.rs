@@ -95,6 +95,10 @@ struct EpochCommit {
     /// so the files are not deserialized again. `None` on the recovery path (and for unpartitioned
     /// tables that skip backfill), where the commit materializes them from `merged` once.
     materialized_add_files: Option<Vec<DataFile>>,
+    /// Whether the coordinator's table was loaded by this epoch's pre-commit, so the first commit
+    /// attempt can skip reloading it. Recovered epochs reload first: their `snapshot_id` may
+    /// already be committed, and the idempotency check must see the latest snapshots.
+    staged_on_current_table: bool,
 }
 
 /// Per-sink iceberg pk-index commit coordinator. Owns the loaded iceberg catalog/table (reused across commits)
@@ -360,6 +364,7 @@ impl IcebergPkIndexSinkCoordinator {
             snapshot_id,
             has_new_data,
             materialized_add_files,
+            staged_on_current_table: true,
         });
         Ok(())
     }
@@ -441,9 +446,11 @@ impl IcebergPkIndexSinkCoordinator {
             return Ok(None);
         };
 
+        let initial_table = commit.staged_on_current_table.then(|| self.table.clone());
         let refreshed_table = commit_one_epoch(
             self.catalog.clone(),
             self.table.identifier().clone(),
+            initial_table,
             self.target_branch.clone(),
             self.sink_id,
             &commit,
@@ -696,6 +703,7 @@ async fn recovery(
                     // Recovered from the persisted blob; the commit materializes files from
                     // `merged` once.
                     materialized_add_files: None,
+                    staged_on_current_table: false,
                 });
             }
             SinkState::Aborted => {
@@ -726,6 +734,7 @@ async fn recovery(
 async fn commit_one_epoch(
     catalog: Arc<dyn Catalog>,
     table_ident: iceberg::TableIdent,
+    initial_table: Option<Table>,
     target_branch: String,
     sink_id: SinkId,
     commit: &EpochCommit,
@@ -735,7 +744,8 @@ async fn commit_one_epoch(
     let snapshot_id = commit.snapshot_id;
     let materialized_add_files = commit.materialized_add_files.clone();
 
-    commit_retry::run_with_retry(
+    commit_retry::run_with_retry_from_table(
+        initial_table,
         catalog.clone(),
         table_ident.clone(),
         merged.schema_id,
@@ -806,11 +816,13 @@ async fn commit_one_epoch(
                     .map(&materialize)
                     .collect::<Result<Vec<_>, _>>()?;
 
+                let enable_delete_filter_manager = removes_data_files(&overwrite_files);
                 let txn = Transaction::new(&table);
                 let action = txn
                     .overwrite_files()
                     .set_snapshot_id(snapshot_id)
                     .set_target_branch(target_branch)
+                    .set_enable_delete_filter_manager(enable_delete_filter_manager)
                     .add_data_files(add_files)
                     .delete_files(overwrite_files);
                 let txn = action.apply(txn).map_err(|err| {
@@ -829,6 +841,16 @@ async fn commit_one_epoch(
     )
     .await
     .map_err(CommitError::Commit)
+}
+
+/// The delete filter manager re-reads every live delete manifest to drop dangling or
+/// sequence-expired delete files. Both only change when data files leave the table, which for
+/// this sink happens only in compaction commits. Ordinary epochs replace deletion vectors only,
+/// and `overwrite_files` already removes the replaced ones.
+fn removes_data_files(overwrite_files: &[DataFile]) -> bool {
+    overwrite_files
+        .iter()
+        .any(|file| file.content_type() == DataContentType::Data)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
