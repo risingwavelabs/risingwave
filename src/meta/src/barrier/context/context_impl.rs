@@ -31,6 +31,7 @@ use risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedA
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
 
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{
@@ -212,8 +213,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
-        // The scheduler re-runs the cycles abandoned by the recovery.
+        // The schedulers re-run the cycles and loads abandoned by the recovery.
         self.refresh_manager.notify_scheduler();
+        self.bounded_load_manager.notify_scheduler();
         Ok(())
     }
 
@@ -316,6 +318,29 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.env
             .notification_manager()
             .notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+
+        self.bounded_load_manager.notify_scheduler();
+        Ok(())
+    }
+
+    async fn apply_bounded_load_action(&self, action: BoundedLoadAction) -> MetaResult<()> {
+        match action {
+            BoundedLoadAction::ListFinish {
+                database_id,
+                source_id,
+            } => {
+                self.bounded_load_manager
+                    .list_finish(database_id, source_id);
+            }
+            BoundedLoadAction::Complete { job_id, source_id } => {
+                self.bounded_load_manager
+                    .complete(job_id, source_id)
+                    .await?;
+            }
+            BoundedLoadAction::Fail { job_id, source_id } => {
+                self.bounded_load_manager.fail(job_id, source_id).await?;
+            }
+        }
         Ok(())
     }
 

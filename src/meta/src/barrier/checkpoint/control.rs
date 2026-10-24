@@ -361,6 +361,7 @@ impl CheckpointControl {
                     | Command::ConnectorPropsChange(_)
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
+                    | Command::StartBoundedLoad { .. }
                     | Command::LoadFinish { .. }
                     | Command::FinishRefresh { .. }
                     | Command::ResetSource { .. }
@@ -1160,6 +1161,8 @@ impl DatabaseCheckpointControl {
                 );
                 self.completing_barrier = Some(info.barrier_info.epoch());
                 task.finished_jobs.extend(staging_commit_info.finished_jobs);
+                task.bounded_load_actions
+                    .extend(staging_commit_info.bounded_load_actions);
                 task.finished_cdc_table_backfill
                     .extend(staging_commit_info.finished_cdc_table_backfill);
                 task.epoch_infos
@@ -1230,7 +1233,9 @@ impl DatabaseCheckpointControl {
         task: &mut Option<CompleteBarrierTask>,
         resps: &HashMap<WorkerId, BarrierCompleteResponse>,
     ) {
-        let refresh_load_progress = LoadReport::from_responses(resps).collect::<Vec<_>>();
+        let refresh_load_progress = LoadReport::from_responses(resps)
+            .filter(|report| !self.database_info.is_bounded_load(report.source_id))
+            .collect::<Vec<_>>();
         if !refresh_load_progress.is_empty() {
             let task = task.get_or_insert_default();
             task.refresh_load_progress.extend(refresh_load_progress);
