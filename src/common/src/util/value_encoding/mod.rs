@@ -137,7 +137,6 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Float32(_) => Some(4),
         ArrayImpl::Float64(_) => Some(8),
         ArrayImpl::Bool(_) => Some(1),
-        ArrayImpl::Decimal(_) => Some(estimate_serialize_decimal_size()),
         ArrayImpl::Interval(_) => Some(estimate_serialize_interval_size()),
         ArrayImpl::Date(_) => Some(estimate_serialize_date_size()),
         ArrayImpl::Timestamp(_) => Some(estimate_serialize_timestamp_size()),
@@ -251,7 +250,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Utf8(v) => estimate_serialize_str_size(v.as_bytes()),
         ScalarRefImpl::Bytea(v) => estimate_serialize_str_size(v),
         ScalarRefImpl::Bool(_) => 1,
-        ScalarRefImpl::Decimal(_) => estimate_serialize_decimal_size(),
+        ScalarRefImpl::Decimal(v) => v.encoded_len(),
         ScalarRefImpl::Interval(_) => estimate_serialize_interval_size(),
         ScalarRefImpl::Date(_) => estimate_serialize_date_size(),
         ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
@@ -342,11 +341,7 @@ fn estimate_serialize_time_size() -> usize {
 }
 
 fn serialize_decimal(decimal: &Decimal, buf: &mut impl BufMut) {
-    buf.put_slice(&decimal.unordered_serialize());
-}
-
-fn estimate_serialize_decimal_size() -> usize {
-    16
+    decimal.encode_unordered(buf);
 }
 
 fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
@@ -484,9 +479,7 @@ fn deserialize_date(data: &mut impl Buf) -> Result<Date> {
 }
 
 fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
-    let mut bytes = [0; 16];
-    data.copy_to_slice(&mut bytes);
-    Ok(Decimal::unordered_deserialize(bytes))
+    Decimal::decode_unordered(data).map_err(|_| ValueEncodingError::InvalidDecimalEncoding)
 }
 
 #[cfg(test)]
