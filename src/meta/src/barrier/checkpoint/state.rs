@@ -1642,6 +1642,14 @@ impl DatabaseCheckpointControl {
                 self.apply_simple_command(mutation, "ListFinish")
             }
 
+            Some(Command::StartBoundedLoad { job_id, source_id }) => {
+                let mutation = self
+                    .database_info
+                    .install_bounded_load_tracker(job_id, source_id)
+                    .then(|| Command::start_load_mutation(source_id));
+                self.apply_simple_command(mutation, "StartBoundedLoad")
+            }
+
             Some(Command::LoadFinish {
                 table_id: _,
                 associated_source_id,
@@ -1964,6 +1972,7 @@ impl DatabaseCheckpointControl {
                             fragment_infos: new_fragment_info,
                             subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
                             status: CreateStreamingJobStatus::Created,
+                            bounded_load_tracker: None, // no bounded ingestion for snapshot backfill
                             cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
                         });
                     }

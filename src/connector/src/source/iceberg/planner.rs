@@ -297,6 +297,18 @@ impl IcebergScanPlanner {
             .map(Some)
     }
 
+    pub async fn plan_bounded_scan(
+        &self,
+        scan: IcebergBoundedScan,
+    ) -> ConnectorResult<IcebergScanPlan> {
+        let table = self.properties.load_table().await?;
+        match scan {
+            IcebergBoundedScan::Snapshot { snapshot_id } => {
+                self.plan_snapshot(&table, snapshot_id).await
+            }
+        }
+    }
+
     pub async fn plan_incremental(
         &self,
         last_snapshot: Option<i64>,
