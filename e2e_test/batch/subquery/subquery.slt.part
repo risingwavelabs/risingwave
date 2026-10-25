@@ -211,6 +211,14 @@ where exists (select 1 from correlated_ref_t3 where y = x);
 1
 3
 
+# A correlated CTE keeps its outer reference when it is read from a nested subquery.
+query II rowsort
+select x, (with c as (select x as v) select (select v from c)) from correlated_ref_t1;
+----
+1 1
+2 2
+NULL NULL
+
 statement ok
 drop table correlated_ref_t1;
 

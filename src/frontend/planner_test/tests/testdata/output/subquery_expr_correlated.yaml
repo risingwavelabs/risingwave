@@ -2398,6 +2398,24 @@
               └─StreamProject { exprs: [t2.y, t2.x, t2._row_id] }
                 └─StreamFilter { predicate: IsNotNull(t2.y) }
                   └─StreamTableScan { table: t2, columns: [t2.x, t2.y, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: correlated CTE referenced from a nested subquery
+  sql: |
+    create table t1(x int);
+    select x, (with cte as (select x as v) select (select v from cte)) from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: t1.x IS NOT DISTINCT FROM t1.x, output: [t1.x, t1.x] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.x) }
+      │ └─BatchScan { table: t1, columns: [t1.x], distribution: SomeShard }
+      └─BatchHashJoin { type: LeftOuter, predicate: t1.x IS NOT DISTINCT FROM t1.x, output: [t1.x, t1.x] }
+        ├─BatchHashAgg { group_key: [t1.x], aggs: [] }
+        │ └─BatchExchange { order: [], dist: HashShard(t1.x) }
+        │   └─BatchScan { table: t1, columns: [t1.x], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(t1.x) }
+          └─BatchProject { exprs: [t1.x, t1.x] }
+            └─BatchHashAgg { group_key: [t1.x], aggs: [] }
+              └─BatchExchange { order: [], dist: HashShard(t1.x) }
+                └─BatchScan { table: t1, columns: [t1.x], distribution: SomeShard }
 - name: subqueries in case when exprs
   sql: "WITH input AS (\n    SELECT\n        'Empty JSON item' AS test_case,\n        ('{}'::JSONB) AS item\n)\n\nSELECT\n    test_case,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST(JSONB_PATH_QUERY_FIRST(item, '$.binary_set_attribute'), '$.BS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT DECODE(((nested_item) #>> '{}'), 'base64') AS parsed_item\n                FROM (\n                    SELECT nested_item\n                    FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.binary_set_attribute')), '$.BS'))\n                    AS t(nested_item)\n                )\n            )\n            ORDER BY parsed_item\n        )\n    END AS binary_set_attribute,\n\n    CASE\n        WHEN JSONB_PATH_QUERY_FIRST(JSONB_PATH_QUERY_FIRST(item, '$.number_set_attribute'), '$.NS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT CAST(nested_item #>> '{}' AS BIGINT) AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n    \t\t\t\tFROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.number_set_attribute')), '$.NS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS number_set_attribute,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.float_set_attribute')), '$.NS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT CAST(nested_item #>> '{}' AS FLOAT)\n                AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n\t\t\t\t    FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.float_set_attribute')), '$.NS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS float_set_attribute,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.string_set_attribute')), '$.SS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT nested_item #>> '{}' AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n    \t\t\t\tFROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.string_set_attribute')), '$.SS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS string_set_attribute\nFROM input\n"
   batch_plan: |-

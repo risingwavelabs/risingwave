@@ -29,7 +29,7 @@ use crate::binder::expr::function::is_sys_function_without_args;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     Expr as _, ExprImpl, ExprRewriter as _, ExprType, FunctionCall, InputRef,
-    InputRefDepthRewriter, Parameter, SubqueryKind,
+    InputRefScopeRewriter, Parameter, SubqueryKind,
 };
 
 mod binary_op;
@@ -468,7 +468,7 @@ impl Binder {
 
     /// Bind a parameter for SQL UDF.
     fn bind_sql_udf_parameter(&mut self, name: &str) -> Result<ExprImpl> {
-        for (depth, context) in std::iter::once(&self.context)
+        for (level, context) in std::iter::once(&self.context)
             .chain((self.upper_subquery_contexts.iter().rev()).map(|(context, _)| context))
             .enumerate()
         {
@@ -476,9 +476,12 @@ impl Binder {
             // current context, we will continue to the upper context.
             if let Some(args) = &context.sql_udf_arguments {
                 if let Some(expr) = args.get(name) {
-                    // The arguments recorded in the context is relative to the that context.
-                    // We need to shift the depth to the current context.
-                    let mut rewriter = InputRefDepthRewriter::new(depth);
+                    // The arguments are bound in the calling context. From a subquery, its
+                    // columns are correlated references owned by that context.
+                    if level == 0 {
+                        return Ok(expr.clone());
+                    }
+                    let mut rewriter = InputRefScopeRewriter::new(context.scope);
                     return Ok(rewriter.rewrite_expr(expr.clone()));
                 } else {
                     // A UDF cannot access parameters from outer UDFs. Do not continue but directly
