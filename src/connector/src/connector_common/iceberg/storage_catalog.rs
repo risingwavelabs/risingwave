@@ -436,6 +436,7 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
     #[tokio::test]
     async fn test_list_tables() {
         let catalog = StorageCatalog {
