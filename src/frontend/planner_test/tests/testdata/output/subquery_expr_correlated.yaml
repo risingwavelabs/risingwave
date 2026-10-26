@@ -112,15 +112,12 @@
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND ($expr1 > count(1:Int32)), output: [t1.x, t1.y] }
-    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64 as $expr1] }
-    │ └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, 1:Int32] }
-        ├─LogicalAgg { group_key: [t1.y], aggs: [] }
-        │ └─LogicalScan { table: t1, columns: [t1.y] }
-        └─LogicalProject { exprs: [t2.y, 1:Int32] }
-          └─LogicalScan { table: t2, columns: [t2.y], predicate: IsNotNull(t2.y) }
+    LogicalProject { exprs: [t1.x, t1.y] }
+    └─LogicalFilter { predicate: (t1.x > Coalesce(count, 0:Int64)) }
+      └─LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t1.x, t1.y, count] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+        └─LogicalAgg { group_key: [t2.y], aggs: [count] }
+          └─LogicalScan { table: t2, columns: [t2.y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -136,16 +133,12 @@
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND ($expr1 > $expr2), output: [t1.x, t1.y] }
-    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64 as $expr1] }
-    │ └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalProject { exprs: [t1.y, (count(1:Int32) + count(1:Int32)) as $expr2] }
-      └─LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32)] }
-        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, 1:Int32] }
-          ├─LogicalAgg { group_key: [t1.y], aggs: [] }
-          │ └─LogicalScan { table: t1, columns: [t1.y] }
-          └─LogicalProject { exprs: [t2.y, 1:Int32] }
-            └─LogicalScan { table: t2, columns: [t2.y], predicate: IsNotNull(t2.y) }
+    LogicalProject { exprs: [t1.x, t1.y] }
+    └─LogicalFilter { predicate: (t1.x > (Coalesce(count, 0:Int64) + Coalesce(count, 0:Int64))) }
+      └─LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t1.x, t1.y, count] }
+        ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+        └─LogicalAgg { group_key: [t2.y], aggs: [count] }
+          └─LogicalScan { table: t2, columns: [t2.y] }
 - name: 'Like `count(*)`, SimpleAgg also need to rewrite `array_agg` for the extra null row due to outer join #14735'
   sql: |
     create table t1(a int, b int);
@@ -482,19 +475,13 @@
                     └─LogicalScan { table: c, columns: [c.c1, c.c2, c.c3, c._row_id, c._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a3, internal_last_seen_value(a.a3)) AND IsNotDistinctFrom(b.b2, b.b2), output: [] }
-      ├─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
-      │ ├─LogicalScan { table: a, columns: [a.a3] }
-      │ └─LogicalScan { table: b, columns: [b.b2] }
-      └─LogicalFilter { predicate: (3:Int32 = count(1:Int32)) }
-        └─LogicalAgg { group_key: [internal_last_seen_value(a.a3), b.b2], aggs: [count(1:Int32)] }
-          └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(internal_last_seen_value(a.a3), c.c3) AND IsNotDistinctFrom(b.b2, c.c2), output: [internal_last_seen_value(a.a3), b.b2, 1:Int32] }
-            ├─LogicalAgg { group_key: [b.b2], aggs: [internal_last_seen_value(a.a3)] }
-            │ └─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
-            │   ├─LogicalScan { table: a, columns: [a.a3] }
-            │   └─LogicalScan { table: b, columns: [b.b2] }
-            └─LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
-              └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: (c.c3 = c.c2) AND IsNotNull(c.c3) AND IsNotNull(c.c2) }
+    └─LogicalFilter { predicate: (3:Int32 = Coalesce(count, 0:Int64)) }
+      └─LogicalJoin { type: LeftOuter, on: (b.b2 = c.c2) AND (a.a3 = c.c3), output: [count] }
+        ├─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
+        │ ├─LogicalScan { table: a, columns: [a.a3] }
+        │ └─LogicalScan { table: b, columns: [b.b2] }
+        └─LogicalAgg { group_key: [c.c2, c.c3], aggs: [count] }
+          └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: (c.c3 = c.c2) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
@@ -519,15 +506,11 @@
     select count(*) from a where a.x=3 and a.y = (select count(*) from b where b.z = a.z);
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.z, a.z) AND ($expr1 = count(1:Int32)), output: [] }
-      ├─LogicalProject { exprs: [a.z, a.y::Int64 as $expr1] }
-      │ └─LogicalScan { table: a, output_columns: [a.y, a.z], required_columns: [a.y, a.z, a.x], predicate: (a.x = 3:Int32) }
-      └─LogicalAgg { group_key: [a.z], aggs: [count(1:Int32)] }
-        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.z, b.z), output: [a.z, 1:Int32] }
-          ├─LogicalAgg { group_key: [a.z], aggs: [] }
-          │ └─LogicalScan { table: a, output_columns: [a.z], required_columns: [a.z, a.x], predicate: (a.x = 3:Int32) }
-          └─LogicalProject { exprs: [b.z, 1:Int32] }
-            └─LogicalScan { table: b, columns: [b.z], predicate: IsNotNull(b.z) }
+    └─LogicalFilter { predicate: (a.y = Coalesce(count, 0:Int64)) }
+      └─LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.y, count] }
+        ├─LogicalScan { table: a, output_columns: [a.y, a.z], required_columns: [a.y, a.z, a.x], predicate: (a.x = 3:Int32) }
+        └─LogicalAgg { group_key: [b.z], aggs: [count] }
+          └─LogicalScan { table: b, columns: [b.z] }
 - sql: |
     create table a(x int, y varchar, z int);
     create table b(x varchar, y int, z int);
@@ -545,31 +528,23 @@
     select count(*) from a where a.y = (select count(distinct x) from b where b.z = a.z);
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.z, a.z) AND ($expr1 = count(b.x)), output: [] }
-      ├─LogicalProject { exprs: [a.z, a.y::Int64 as $expr1] }
-      │ └─LogicalScan { table: a, columns: [a.y, a.z] }
-      └─LogicalAgg { group_key: [a.z], aggs: [count(b.x)] }
-        └─LogicalAgg { group_key: [a.z, b.x], aggs: [] }
-          └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.z, b.z), output: [a.z, b.x] }
-            ├─LogicalAgg { group_key: [a.z], aggs: [] }
-            │ └─LogicalScan { table: a, columns: [a.z] }
-            └─LogicalProject { exprs: [b.z, b.x] }
-              └─LogicalScan { table: b, columns: [b.x, b.z], predicate: IsNotNull(b.z) }
+    └─LogicalFilter { predicate: (a.y = Coalesce(count(b.x), 0:Int64)) }
+      └─LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.y, count(b.x)] }
+        ├─LogicalScan { table: a, columns: [a.y, a.z] }
+        └─LogicalAgg { group_key: [b.z], aggs: [count(b.x)] }
+          └─LogicalAgg { group_key: [b.x, b.z], aggs: [] }
+            └─LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
     select count(*) from a where a.y = (select count(x) filter(where x < 100) from b where b.z = a.z);
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.z, a.z) AND ($expr1 = count(b.x) filter((b.x < 100:Int32))), output: [] }
-      ├─LogicalProject { exprs: [a.z, a.y::Int64 as $expr1] }
-      │ └─LogicalScan { table: a, columns: [a.y, a.z] }
-      └─LogicalAgg { group_key: [a.z], aggs: [count(b.x) filter((b.x < 100:Int32))] }
-        └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.z, b.z), output: [a.z, b.x] }
-          ├─LogicalAgg { group_key: [a.z], aggs: [] }
-          │ └─LogicalScan { table: a, columns: [a.z] }
-          └─LogicalProject { exprs: [b.z, b.x] }
-            └─LogicalScan { table: b, columns: [b.x, b.z], predicate: IsNotNull(b.z) }
+    └─LogicalFilter { predicate: (a.y = Coalesce(count(b.x) filter((b.x < 100:Int32)), 0:Int64)) }
+      └─LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.y, count(b.x) filter((b.x < 100:Int32))] }
+        ├─LogicalScan { table: a, columns: [a.y, a.z] }
+        └─LogicalAgg { group_key: [b.z], aggs: [count(b.x) filter((b.x < 100:Int32))] }
+          └─LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -998,36 +973,23 @@
     select Array(select c from t2 where b = d) arr from t1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: [$expr1] }
-      ├─BatchExchange { order: [], dist: HashShard(t1.b) }
-      │ └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
-      └─BatchProject { exprs: [t1.b, Coalesce(array_agg(t2.c) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr1] }
-        └─BatchHashAgg { group_key: [t1.b], aggs: [array_agg(t2.c) filter(IsNotNull(1:Int32))] }
-          └─BatchHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t2.d, output: [t1.b, t2.c, 1:Int32] }
-            ├─BatchHashAgg { group_key: [t1.b], aggs: [] }
-            │ └─BatchExchange { order: [], dist: HashShard(t1.b) }
-            │   └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
-            └─BatchExchange { order: [], dist: HashShard(t2.d) }
-              └─BatchProject { exprs: [t2.d, t2.c, 1:Int32] }
-                └─BatchFilter { predicate: IsNotNull(t2.d) }
-                  └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+    └─BatchProject { exprs: [Coalesce(array_agg(t2.c), ARRAY[]:List(Int32)) as $expr1] }
+      └─BatchHashJoin { type: LeftOuter, predicate: t1.b = t2.d, output: [array_agg(t2.c)] }
+        ├─BatchExchange { order: [], dist: HashShard(t1.b) }
+        │ └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
+        └─BatchHashAgg { group_key: [t2.d], aggs: [array_agg(t2.c)] }
+          └─BatchExchange { order: [], dist: HashShard(t2.d) }
+            └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [arr, t1._row_id(hidden), t1.b(hidden), t1.b#1(hidden)], stream_key: [t1._row_id, t1.b], pk_columns: [t1._row_id, t1.b], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t1._row_id, t1.b) }
-      └─StreamHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t1.b, output: [$expr1, t1._row_id, t1.b, t1.b] }
+    StreamMaterialize { columns: [arr, t1._row_id(hidden), t1.b(hidden)], stream_key: [t1._row_id, t1.b], pk_columns: [t1._row_id, t1.b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [Coalesce(array_agg(t2.c), ARRAY[]:List(Int32)) as $expr1, t1._row_id, t1.b] }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.b = t2.d, output: [array_agg(t2.c), t1._row_id, t1.b, t2.d] }
         ├─StreamExchange { dist: HashShard(t1.b) }
         │ └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamProject { exprs: [t1.b, Coalesce(array_agg(t2.c) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int32)) as $expr1] }
-          └─StreamHashAgg { group_key: [t1.b], aggs: [array_agg(t2.c) filter(IsNotNull(1:Int32)), count] }
-            └─StreamHashJoin { type: LeftOuter, predicate: t1.b IS NOT DISTINCT FROM t2.d, output: [t1.b, t2.c, 1:Int32, t2._row_id] }
-              ├─StreamProject { exprs: [t1.b], noop_update_hint: true }
-              │ └─StreamHashAgg { group_key: [t1.b], aggs: [count] }
-              │   └─StreamExchange { dist: HashShard(t1.b) }
-              │     └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-              └─StreamExchange { dist: HashShard(t2.d) }
-                └─StreamProject { exprs: [t2.d, t2.c, 1:Int32, t2._row_id] }
-                  └─StreamFilter { predicate: IsNotNull(t2.d) }
-                    └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        └─StreamProject { exprs: [t2.d, array_agg(t2.c)] }
+          └─StreamHashAgg { group_key: [t2.d], aggs: [array_agg(t2.c), count] }
+            └─StreamExchange { dist: HashShard(t2.d) }
+              └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: correlated array subquery \du
   sql: |
     SELECT r.rolname, r.rolsuper, r.rolinherit,
@@ -1044,34 +1006,19 @@
     ORDER BY 1;
   batch_plan: |-
     BatchExchange { order: [rw_users.name ASC], dist: Single }
-    └─BatchProject { exprs: [rw_users.name, rw_users.is_super, true:Boolean, rw_users.create_user, rw_users.create_db, rw_users.can_login, -1:Int32, null:Timestamptz, $expr1, true:Boolean, true:Boolean] }
+    └─BatchProject { exprs: [rw_users.name, rw_users.is_super, true:Boolean, rw_users.create_user, rw_users.create_db, rw_users.can_login, -1:Int32, null:Timestamptz, Coalesce(array_agg(rw_users.name), ARRAY[]:List(Varchar)) as $expr1, true:Boolean, true:Boolean] }
       └─BatchSort { order: [rw_users.name ASC] }
-        └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: all }
+        └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id = null:Int32, output: all }
           ├─BatchExchange { order: [], dist: HashShard(rw_users.id) }
           │ └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
           │   └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login], distribution: Single }
-          └─BatchProject { exprs: [rw_users.id, Coalesce(array_agg(rw_users.name) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1] }
-            └─BatchHashAgg { group_key: [rw_users.id], aggs: [array_agg(rw_users.name) filter(IsNotNull(1:Int32))] }
-              └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: [rw_users.id, rw_users.name, 1:Int32] }
-                ├─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
-                │ └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                │   └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
-                │     └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+          └─BatchHashAgg { group_key: [null:Int32], aggs: [array_agg(rw_users.name)] }
+            └─BatchExchange { order: [], dist: HashShard(null:Int32) }
+              └─BatchHashJoin { type: Inner, predicate: null:Int32 = rw_users.id, output: [rw_users.name, null:Int32] }
+                ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
+                │ └─BatchValues { rows: [] }
                 └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                  └─BatchProject { exprs: [rw_users.id, rw_users.name, 1:Int32] }
-                    └─BatchHashJoin { type: Inner, predicate: null:Int32 = rw_users.id, output: [rw_users.id, rw_users.name] }
-                      ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
-                      │ └─BatchProject { exprs: [rw_users.id, null:Int32] }
-                      │   └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-                      │     ├─BatchExchange { order: [], dist: Single }
-                      │     │ └─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
-                      │     │   └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                      │     │     └─BatchFilter { predicate: false:Boolean }
-                      │     │       └─BatchSysScan { table: rw_users, columns: [rw_users.id], distribution: Single }
-                      │     └─BatchFilter { predicate: false:Boolean }
-                      │       └─BatchValues { rows: [] }
-                      └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                        └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+                  └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
 - name: correlated array subquery (issue 14423)
   sql: |
     CREATE TABLE array_types ( x BIGINT[] );
@@ -1097,150 +1044,50 @@
                 └─BatchHashAgg { group_key: [array_types.x], aggs: [] }
                   └─BatchExchange { order: [], dist: HashShard(array_types.x) }
                     └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+- name: PullUpCorrelatedPredicateAggRule fills in the COUNT of an empty group
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- count is not null-propagating
+    -- count is 0, not null, for an empty group
     WHERE T.A > (SELECT COUNT(*) FROM T2 WHERE B = D);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b AND ($expr1 > count(1:Int32)), output: [t.a, t.b] }
-      ├─BatchExchange { order: [], dist: HashShard(t.b) }
-      │ └─BatchProject { exprs: [t.a, t.b, t.a::Int64 as $expr1] }
-      │   └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
-      └─BatchHashAgg { group_key: [t.b], aggs: [count(1:Int32)] }
-        └─BatchHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, 1:Int32] }
-          ├─BatchHashAgg { group_key: [t.b], aggs: [] }
-          │ └─BatchExchange { order: [], dist: HashShard(t.b) }
-          │   └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
-          └─BatchExchange { order: [], dist: HashShard(t2.d) }
-            └─BatchProject { exprs: [t2.d, 1:Int32] }
-              └─BatchFilter { predicate: IsNotNull(t2.d) }
-                └─BatchScan { table: t2, columns: [t2.d], distribution: SomeShard }
+    └─BatchProject { exprs: [t.a, t.b] }
+      └─BatchFilter { predicate: (t.a > Coalesce(count, 0:Int64)) }
+        └─BatchHashJoin { type: LeftOuter, predicate: t.b = t2.d, output: [t.a, t.b, count] }
+          ├─BatchExchange { order: [], dist: HashShard(t.b) }
+          │ └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+          └─BatchHashAgg { group_key: [t2.d], aggs: [count] }
+            └─BatchExchange { order: [], dist: HashShard(t2.d) }
+              └─BatchScan { table: t2, columns: [t2.d], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [a, b, t._row_id(hidden), t.b(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.a, t.b, t._row_id, t.b] }
-      └─StreamFilter { predicate: ($expr1 > count(1:Int32)) }
-        └─StreamHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b, output: all }
+    StreamMaterialize { columns: [a, b, t._row_id(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, t._row_id] }
+      └─StreamFilter { predicate: (t.a > Coalesce(count, 0:Int64)) }
+        └─StreamHashJoin { type: LeftOuter, predicate: t.b = t2.d, output: [t.a, t.b, count, t._row_id, t2.d] }
           ├─StreamExchange { dist: HashShard(t.b) }
-          │ └─StreamProject { exprs: [t.a, t.b, t.a::Int64 as $expr1, t._row_id] }
-          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-          └─StreamProject { exprs: [t.b, count(1:Int32)] }
-            └─StreamHashAgg { group_key: [t.b], aggs: [count(1:Int32), count] }
-              └─StreamHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, 1:Int32, t2._row_id] }
-                ├─StreamProject { exprs: [t.b], noop_update_hint: true }
-                │ └─StreamHashAgg { group_key: [t.b], aggs: [count] }
-                │   └─StreamExchange { dist: HashShard(t.b) }
-                │     └─StreamTableScan { table: t, columns: [t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-                └─StreamExchange { dist: HashShard(t2.d) }
-                  └─StreamProject { exprs: [t2.d, 1:Int32, t2._row_id] }
-                    └─StreamFilter { predicate: IsNotNull(t2.d) }
-                      └─StreamTableScan { table: t2, columns: [t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
-- name: a case could be optimized by PullUpCorrelatedPredicateAggRule
+          │ └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamHashAgg { group_key: [t2.d], aggs: [count] }
+            └─StreamExchange { dist: HashShard(t2.d) }
+              └─StreamTableScan { table: t2, columns: [t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: PullUpCorrelatedPredicateAggRule joins AVG directly
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- avg is null-propagating
+    -- avg is null for an empty group
     WHERE T.A > (SELECT avg(c) FROM T2 WHERE B = D);
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b AND ($expr1 > $expr2), output: [t.a, t.b] }
-      ├─BatchExchange { order: [], dist: HashShard(t.b) }
-      │ └─BatchProject { exprs: [t.a, t.b, t.a::Decimal as $expr1] }
-      │   └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
-      └─BatchProject { exprs: [t.b, Case((count(t2.c) = 0:Int32), null:Decimal, (sum(t2.c)::Decimal / count(t2.c)::Decimal)) as $expr2] }
-        └─BatchHashAgg { group_key: [t.b], aggs: [sum(t2.c), count(t2.c)] }
-          └─BatchHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, t2.c] }
-            ├─BatchHashAgg { group_key: [t.b], aggs: [] }
-            │ └─BatchExchange { order: [], dist: HashShard(t.b) }
-            │   └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
-            └─BatchExchange { order: [], dist: HashShard(t2.d) }
-              └─BatchProject { exprs: [t2.d, t2.c] }
-                └─BatchFilter { predicate: IsNotNull(t2.d) }
-                  └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
-  stream_plan: |-
-    StreamMaterialize { columns: [a, b, t._row_id(hidden), t.b(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.a, t.b, t._row_id, t.b] }
-      └─StreamFilter { predicate: ($expr1 > $expr2) }
-        └─StreamHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b, output: all }
-          ├─StreamExchange { dist: HashShard(t.b) }
-          │ └─StreamProject { exprs: [t.a, t.b, t.a::Decimal as $expr1, t._row_id] }
-          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-          └─StreamProject { exprs: [t.b, Case((count(t2.c) = 0:Int32), null:Decimal, (Case((count(t2.c) = 0:Int64), null:Int64, sum(t2.c))::Decimal / count(t2.c)::Decimal)) as $expr2] }
-            └─StreamHashAgg { group_key: [t.b], aggs: [sum(t2.c), count(t2.c), count] }
-              └─StreamHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, t2.c, t2._row_id] }
-                ├─StreamProject { exprs: [t.b], noop_update_hint: true }
-                │ └─StreamHashAgg { group_key: [t.b], aggs: [count] }
-                │   └─StreamExchange { dist: HashShard(t.b) }
-                │     └─StreamTableScan { table: t, columns: [t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-                └─StreamExchange { dist: HashShard(t2.d) }
-                  └─StreamProject { exprs: [t2.d, t2.c, t2._row_id] }
-                    └─StreamFilter { predicate: IsNotNull(t2.d) }
-                      └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
-  sql: |
-    CREATE TABLE T (A INT, B INT);
-    CREATE TABLE T2 (C INT, D INT);
-    SELECT * FROM T
-    -- Coalesce is not null-propagating
-    WHERE T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b AND ($expr1 > $expr2), output: [t.a, t.b] }
-      ├─BatchExchange { order: [], dist: HashShard(t.b) }
-      │ └─BatchProject { exprs: [t.a, t.b, t.a::Decimal as $expr1] }
-      │   └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
-      └─BatchProject { exprs: [t.b, Coalesce(Case((count(t2.c) = 0:Int32), null:Decimal, (sum(t2.c)::Decimal / count(t2.c)::Decimal)), 114514:Decimal) as $expr2] }
-        └─BatchHashAgg { group_key: [t.b], aggs: [sum(t2.c), count(t2.c)] }
-          └─BatchHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, t2.c] }
-            ├─BatchHashAgg { group_key: [t.b], aggs: [] }
-            │ └─BatchExchange { order: [], dist: HashShard(t.b) }
-            │   └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
-            └─BatchExchange { order: [], dist: HashShard(t2.d) }
-              └─BatchProject { exprs: [t2.d, t2.c] }
-                └─BatchFilter { predicate: IsNotNull(t2.d) }
-                  └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
-  stream_plan: |-
-    StreamMaterialize { columns: [a, b, t._row_id(hidden), t.b(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.a, t.b, t._row_id, t.b] }
-      └─StreamFilter { predicate: ($expr1 > $expr2) }
-        └─StreamHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b, output: all }
-          ├─StreamExchange { dist: HashShard(t.b) }
-          │ └─StreamProject { exprs: [t.a, t.b, t.a::Decimal as $expr1, t._row_id] }
-          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-          └─StreamProject { exprs: [t.b, Coalesce(Case((count(t2.c) = 0:Int32), null:Decimal, (Case((count(t2.c) = 0:Int64), null:Int64, sum(t2.c))::Decimal / count(t2.c)::Decimal)), 114514:Decimal) as $expr2] }
-            └─StreamHashAgg { group_key: [t.b], aggs: [sum(t2.c), count(t2.c), count] }
-              └─StreamHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, t2.c, t2._row_id] }
-                ├─StreamProject { exprs: [t.b], noop_update_hint: true }
-                │ └─StreamHashAgg { group_key: [t.b], aggs: [count] }
-                │   └─StreamExchange { dist: HashShard(t.b) }
-                │     └─StreamTableScan { table: t, columns: [t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-                └─StreamExchange { dist: HashShard(t2.d) }
-                  └─StreamProject { exprs: [t2.d, t2.c, t2._row_id] }
-                    └─StreamFilter { predicate: IsNotNull(t2.d) }
-                      └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
-  sql: |
-    CREATE TABLE T (A INT, B INT);
-    CREATE TABLE T2 (C INT, D INT);
-    SELECT * FROM T
-    -- Can apply if any of the conjunction is null
-    WHERE null AND T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: t.b = t2.d AND ($expr1 > $expr2), output: [t.a, t.b] }
       ├─BatchExchange { order: [], dist: HashShard(t.b) }
       │ └─BatchProject { exprs: [t.a, t.b, t.a::Decimal as $expr1] }
-      │   └─BatchFilter { predicate: null:Boolean }
-      │     └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
-      └─BatchProject { exprs: [Coalesce(Case((count(t2.c) = 0:Int32), null:Decimal, (sum(t2.c)::Decimal / count(t2.c)::Decimal)), 114514:Decimal) as $expr2, t2.d] }
+      │   └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+      └─BatchProject { exprs: [Case((count(t2.c) = 0:Int32), null:Decimal, (sum(t2.c)::Decimal / count(t2.c)::Decimal)) as $expr2, t2.d] }
         └─BatchHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c)] }
           └─BatchExchange { order: [], dist: HashShard(t2.d) }
-            └─BatchFilter { predicate: null:Boolean }
-              └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+            └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, t._row_id(hidden), t2.d(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.a, t.b, t._row_id, t2.d] }
@@ -1248,9 +1095,101 @@
         └─StreamHashJoin { type: Inner, predicate: t.b = t2.d, output: all }
           ├─StreamExchange { dist: HashShard(t.b) }
           │ └─StreamProject { exprs: [t.a, t.b, t.a::Decimal as $expr1, t._row_id] }
-          │   └─StreamFilter { predicate: null:Boolean }
-          │     └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-          └─StreamProject { exprs: [Coalesce(Case((count(t2.c) = 0:Int32), null:Decimal, (Case((count(t2.c) = 0:Int64), null:Int64, sum(t2.c))::Decimal / count(t2.c)::Decimal)), 114514:Decimal) as $expr2, t2.d] }
+          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamProject { exprs: [Case((count(t2.c) = 0:Int32), null:Decimal, (Case((count(t2.c) = 0:Int64), null:Int64, sum(t2.c))::Decimal / count(t2.c)::Decimal)) as $expr2, t2.d] }
+            └─StreamHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c), count] }
+              └─StreamExchange { dist: HashShard(t2.d) }
+                └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: PullUpCorrelatedPredicateAggRule evaluates COALESCE above the join
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    -- coalesce is not null for an empty group
+    WHERE T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.a, t.b] }
+      └─BatchFilter { predicate: (t.a::Decimal > Coalesce(Case((Coalesce(count(t2.c), 0:Int64) = 0:Int32), null:Decimal, (sum(t2.c)::Decimal / Coalesce(count(t2.c), 0:Int64)::Decimal)), 114514:Decimal)) }
+        └─BatchHashJoin { type: LeftOuter, predicate: t.b = t2.d, output: [t.a, t.b, sum(t2.c), count(t2.c)] }
+          ├─BatchExchange { order: [], dist: HashShard(t.b) }
+          │ └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+          └─BatchHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c)] }
+            └─BatchExchange { order: [], dist: HashShard(t2.d) }
+              └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, t._row_id(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, t._row_id] }
+      └─StreamFilter { predicate: (t.a::Decimal > Coalesce(Case((Coalesce(count(t2.c), 0:Int64) = 0:Int32), null:Decimal, ($expr1::Decimal / Coalesce(count(t2.c), 0:Int64)::Decimal)), 114514:Decimal)) }
+        └─StreamHashJoin { type: LeftOuter, predicate: t.b = t2.d, output: [t.a, t.b, $expr1, count(t2.c), t._row_id, t2.d] }
+          ├─StreamExchange { dist: HashShard(t.b) }
+          │ └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamProject { exprs: [t2.d, Case((count(t2.c) = 0:Int64), null:Int64, sum(t2.c)) as $expr1, count(t2.c)] }
+            └─StreamHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c), count] }
+              └─StreamExchange { dist: HashShard(t2.d) }
+                └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: PullUpCorrelatedPredicateAggRule keeps outer rows without a group for EXISTS over an aggregate
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    -- an aggregate without GROUP BY returns one row for an empty group
+    WHERE EXISTS (SELECT sum(c) FROM T2 WHERE B = D);
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftOuter, on: (t.b = t2.d), output: [t.a, t.b] }
+    ├─LogicalScan { table: t, columns: [t.a, t.b] }
+    └─LogicalAgg { group_key: [t2.d], aggs: [] }
+      └─LogicalScan { table: t2, columns: [t2.d] }
+- name: PullUpCorrelatedPredicateAggRule fills in the COUNT of an empty group for inner LATERAL
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT T.A, x.n, x.total FROM T,
+    LATERAL (SELECT count(*) AS n, sum(c) AS total FROM T2 WHERE B = D) x;
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [t.a, Coalesce(count, 0:Int64) as $expr1, sum(t2.c)] }
+    └─LogicalJoin { type: LeftOuter, on: (t.b = t2.d), output: [t.a, count, sum(t2.c)] }
+      ├─LogicalScan { table: t, columns: [t.a, t.b] }
+      └─LogicalAgg { group_key: [t2.d], aggs: [count, sum(t2.c)] }
+        └─LogicalScan { table: t2, columns: [t2.c, t2.d] }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, n, total, t._row_id(hidden), t.b(hidden)], stream_key: [t._row_id, t.b], pk_columns: [t._row_id, t.b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, Coalesce(count, 0:Int64) as $expr2, $expr1, t._row_id, t.b] }
+      └─StreamHashJoin { type: LeftOuter, predicate: t.b = t2.d, output: [t.a, count, $expr1, t._row_id, t.b, t2.d] }
+        ├─StreamExchange { dist: HashShard(t.b) }
+        │ └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamProject { exprs: [t2.d, count, Case((count(t2.c) = 0:Int64), null:Int64, sum(t2.c)) as $expr1] }
+          └─StreamHashAgg { group_key: [t2.d], aggs: [count, sum(t2.c), count(t2.c)] }
+            └─StreamExchange { dist: HashShard(t2.d) }
+              └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: PullUpCorrelatedPredicateAggRule with a null conjunction in the top filter
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    -- The top filter is never true
+    WHERE null AND T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.a, t.b] }
+      └─BatchFilter { predicate: (t.a::Decimal > Coalesce(Case((Coalesce(count(t2.c), 0:Int64) = 0:Int32), null:Decimal, (sum(t2.c)::Decimal / Coalesce(count(t2.c), 0:Int64)::Decimal)), 114514:Decimal)) }
+        └─BatchHashJoin { type: LeftOuter, predicate: t.b = t2.d, output: [t.a, t.b, sum(t2.c), count(t2.c)] }
+          ├─BatchExchange { order: [], dist: HashShard(t.b) }
+          │ └─BatchFilter { predicate: null:Boolean }
+          │   └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+          └─BatchHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c)] }
+            └─BatchExchange { order: [], dist: HashShard(t2.d) }
+              └─BatchFilter { predicate: null:Boolean }
+                └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, t._row_id(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, t._row_id] }
+      └─StreamFilter { predicate: (t.a::Decimal > Coalesce(Case((Coalesce(count(t2.c), 0:Int64) = 0:Int32), null:Decimal, ($expr1::Decimal / Coalesce(count(t2.c), 0:Int64)::Decimal)), 114514:Decimal)) }
+        └─StreamHashJoin { type: LeftOuter, predicate: t.b = t2.d, output: [t.a, t.b, $expr1, count(t2.c), t._row_id, t2.d] }
+          ├─StreamExchange { dist: HashShard(t.b) }
+          │ └─StreamFilter { predicate: null:Boolean }
+          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamProject { exprs: [t2.d, Case((count(t2.c) = 0:Int64), null:Int64, sum(t2.c)) as $expr1, count(t2.c)] }
             └─StreamHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c), count] }
               └─StreamExchange { dist: HashShard(t2.d) }
                 └─StreamFilter { predicate: null:Boolean }

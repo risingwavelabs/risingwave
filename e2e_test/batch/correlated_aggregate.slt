@@ -74,6 +74,135 @@ LEFT JOIN LATERAL (
 3 NULL
 NULL NULL
 
+# Aggregates that are not null over empty input, such as COUNT, keep that value for outer rows
+# without matching rows, including NULL outer keys. So do expressions over the aggregates.
+query II rowsort
+SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id)
+FROM correlated_aggregate_outer s;
+----
+1 2
+1 2
+2 1
+3 0
+NULL 0
+
+query IIIII rowsort
+SELECT s.id, a.n, a.n_big, a.total, a.n_plus_one
+FROM correlated_aggregate_outer s,
+LATERAL (
+  SELECT count(*) AS n,
+    count(f.amount) FILTER (WHERE f.amount > 10) AS n_big,
+    coalesce(sum(f.amount), 0) AS total,
+    count(*) + 1 AS n_plus_one
+  FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a;
+----
+1 2 1 30 3
+1 2 1 30 3
+2 1 0 5 2
+3 0 0 0 1
+NULL 0 0 0 1
+
+query IBR rowsort
+SELECT s.id, a.no_distinct, a.average
+FROM correlated_aggregate_outer s,
+LATERAL (
+  SELECT approx_count_distinct(f.amount) = 0 AS no_distinct, avg(f.amount) AS average
+  FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a;
+----
+1 f 15
+1 f 15
+2 f 5
+3 t NULL
+NULL t NULL
+
+query IT rowsort
+SELECT s.id,
+  ARRAY(SELECT f.amount FROM correlated_aggregate_facts f WHERE f.id = s.id ORDER BY f.amount)
+FROM correlated_aggregate_outer s;
+----
+1 {10,20}
+1 {10,20}
+2 {5}
+3 {}
+NULL {}
+
+query I rowsort
+SELECT s.id FROM correlated_aggregate_outer s
+WHERE (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id) = 0;
+----
+3
+NULL
+
+query I rowsort
+SELECT s.id FROM correlated_aggregate_outer s
+WHERE 0 IN (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id);
+----
+3
+NULL
+
+# An aggregate without GROUP BY returns one row even for empty input, so EXISTS is always true.
+query I rowsort
+SELECT s.id FROM correlated_aggregate_outer s
+WHERE EXISTS (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id);
+----
+1
+1
+2
+3
+NULL
+
+query I rowsort
+SELECT s.id FROM correlated_aggregate_outer s
+WHERE NOT EXISTS (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id);
+----
+
+statement ok
+CREATE MATERIALIZED VIEW correlated_count_mv AS
+SELECT s.id, a.n, a.total
+FROM correlated_aggregate_outer s,
+LATERAL (
+  SELECT count(*) AS n, coalesce(sum(f.amount), 0) AS total
+  FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a;
+
+query III rowsort
+SELECT * FROM correlated_count_mv;
+----
+1 2 30
+1 2 30
+2 1 5
+3 0 0
+NULL 0 0
+
+statement ok
+INSERT INTO correlated_aggregate_facts VALUES (3, 7);
+
+query III rowsort
+SELECT * FROM correlated_count_mv;
+----
+1 2 30
+1 2 30
+2 1 5
+3 1 7
+NULL 0 0
+
+statement ok
+DELETE FROM correlated_aggregate_facts WHERE id = 3;
+
+query III rowsort
+SELECT * FROM correlated_count_mv;
+----
+1 2 30
+1 2 30
+2 1 5
+3 0 0
+NULL 0 0
+
+statement ok
+DROP MATERIALIZED VIEW correlated_count_mv;
+
 # Broadening the domain must preserve duplicate and NULL outer keys.
 query III rowsort
 SELECT s.id,
@@ -184,7 +313,7 @@ FROM (
 ----
 50 50 5 5
 
-# COUNT still needs general decorrelation, but its domain can come from before sampling.
+# COUNT joins its grouped aggregate, so the random sample is evaluated once.
 query IIII
 SELECT count(*), count(n), min(n), max(n)
 FROM (
@@ -211,7 +340,7 @@ FROM (
 statement ok
 SET query_mode TO distributed;
 
-# SUM uses aggregate pull-up while COUNT uses the broadened domain.
+# SUM and COUNT both join their grouped aggregates.
 query IIIII
 SELECT count(*), count(total), min(total), count(n), min(n)
 FROM (
@@ -257,13 +386,14 @@ FROM (
 ----
 25 t
 
-# Impure scan predicates cannot be independently re-evaluated.
+# A non-equality correlation still needs general decorrelation, which cannot independently
+# re-evaluate impure scan predicates.
 statement error correlated subquery would evaluate the impure outer expression
-SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id)
+SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id <= s.id)
 FROM (SELECT id FROM correlated_aggregate_outer WHERE random() < 0.5 LIMIT 50) s;
 
 statement error correlated subquery would evaluate the impure outer expression
-SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id)
+SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id <= s.id)
 FROM correlated_aggregate_outer s WHERE random() < 0.5;
 
 query III
@@ -277,11 +407,11 @@ FROM (
 50 2 2
 
 statement error correlated subquery would evaluate an outer LIMIT or TopN more than once
-SELECT s.max_id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.max_id)
+SELECT s.max_id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id <= s.max_id)
 FROM (SELECT max(id) AS max_id FROM (SELECT id FROM correlated_aggregate_outer LIMIT 5) t) s;
 
 statement error correlated subquery would evaluate an outer LIMIT or TopN more than once
-SELECT s.max_id, (SELECT count(*) FROM correlated_aggregate_outer t WHERE t.id = s.max_id)
+SELECT s.max_id, (SELECT count(*) FROM correlated_aggregate_outer t WHERE t.id <= s.max_id)
 FROM (
   SELECT max(id) AS max_id FROM (
     SELECT id FROM correlated_aggregate_facts ORDER BY amount LIMIT 5

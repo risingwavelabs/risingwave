@@ -490,42 +490,60 @@
     FROM array_types AS t0;
   expected_outputs:
     - batch_plan
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+- name: PullUpCorrelatedPredicateAggRule fills in the COUNT of an empty group
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- count is not null-propagating
+    -- count is 0, not null, for an empty group
     WHERE T.A > (SELECT COUNT(*) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: a case could be optimized by PullUpCorrelatedPredicateAggRule
+- name: PullUpCorrelatedPredicateAggRule joins AVG directly
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- avg is null-propagating
+    -- avg is null for an empty group
     WHERE T.A > (SELECT avg(c) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+- name: PullUpCorrelatedPredicateAggRule evaluates COALESCE above the join
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- Coalesce is not null-propagating
+    -- coalesce is not null for an empty group
     WHERE T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+- name: PullUpCorrelatedPredicateAggRule keeps outer rows without a group for EXISTS over an aggregate
   sql: |
     CREATE TABLE T (A INT, B INT);
     CREATE TABLE T2 (C INT, D INT);
     SELECT * FROM T
-    -- Can apply if any of the conjunction is null
+    -- an aggregate without GROUP BY returns one row for an empty group
+    WHERE EXISTS (SELECT sum(c) FROM T2 WHERE B = D);
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- name: PullUpCorrelatedPredicateAggRule fills in the COUNT of an empty group for inner LATERAL
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT T.A, x.n, x.total FROM T,
+    LATERAL (SELECT count(*) AS n, sum(c) AS total FROM T2 WHERE B = D) x;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - stream_plan
+- name: PullUpCorrelatedPredicateAggRule with a null conjunction in the top filter
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    -- The top filter is never true
     WHERE null AND T.A > (SELECT coalesce(avg(c), 114514) FROM T2 WHERE B = D);
   expected_outputs:
     - batch_plan

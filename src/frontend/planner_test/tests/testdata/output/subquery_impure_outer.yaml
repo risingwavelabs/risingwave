@@ -105,7 +105,7 @@
   sql: |
     create table outer_rows (id int);
     create table facts (id int, amount int);
-    select s.id, (select count(*) from facts f where f.id = s.id)
+    select s.id, (select count(*) from facts f where f.id <= s.id)
     from (select id from outer_rows order by random() limit 50) s;
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, count(1:Int32)] }
@@ -113,11 +113,14 @@
     │ └─LogicalProject { exprs: [outer_rows.id, Random as $expr1] }
     │   └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
     └─LogicalAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, facts.id), output: [outer_rows.id, 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, 1:Int32] }
         ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
         │ └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
-        └─LogicalProject { exprs: [facts.id, 1:Int32] }
-          └─LogicalScan { table: facts, columns: [facts.id], predicate: IsNotNull(facts.id) }
+        └─LogicalProject { exprs: [outer_rows.id, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+            ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
+            │ └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
+            └─LogicalScan { table: facts, columns: [facts.id] }
   optimized_logical_plan_for_stream: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, count(1:Int32)] }
     ├─LogicalShare { id: 4 }
@@ -126,15 +129,22 @@
     │     └─LogicalProject { exprs: [outer_rows.id, Random as $expr1] }
     │       └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
     └─LogicalAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, facts.id), output: [outer_rows.id, 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, 1:Int32] }
         ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
         │ └─LogicalShare { id: 4 }
         │   └─LogicalProject { exprs: [outer_rows.id] }
         │     └─LogicalTopN { order: [$expr1 ASC], limit: 50, offset: 0 }
         │       └─LogicalProject { exprs: [outer_rows.id, Random as $expr1] }
         │         └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
-        └─LogicalProject { exprs: [facts.id, 1:Int32] }
-          └─LogicalScan { table: facts, columns: [facts.id], predicate: IsNotNull(facts.id) }
+        └─LogicalProject { exprs: [outer_rows.id, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+            ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
+            │ └─LogicalShare { id: 4 }
+            │   └─LogicalProject { exprs: [outer_rows.id] }
+            │     └─LogicalTopN { order: [$expr1 ASC], limit: 50, offset: 0 }
+            │       └─LogicalProject { exprs: [outer_rows.id, Random as $expr1] }
+            │         └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
+            └─LogicalScan { table: facts, columns: [facts.id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM outer_rows.id, output: [outer_rows.id, count(1:Int32)] }
@@ -145,19 +155,46 @@
       │       └─BatchProject { exprs: [outer_rows.id, Random as $expr1] }
       │         └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
       └─BatchHashAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-        └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM facts.id, output: [outer_rows.id, 1:Int32] }
+        └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM outer_rows.id, output: [outer_rows.id, 1:Int32] }
           ├─BatchHashAgg { group_key: [outer_rows.id], aggs: [] }
           │ └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
           │   └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
-          └─BatchExchange { order: [], dist: HashShard(facts.id) }
-            └─BatchProject { exprs: [facts.id, 1:Int32] }
-              └─BatchFilter { predicate: IsNotNull(facts.id) }
-                └─BatchScan { table: facts, columns: [facts.id], distribution: SomeShard }
-- name: impurity in a nested filter also prevents general decorrelation
+          └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
+            └─BatchProject { exprs: [outer_rows.id, 1:Int32] }
+              └─BatchNestedLoopJoin { type: Inner, predicate: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+                ├─BatchExchange { order: [], dist: Single }
+                │ └─BatchHashAgg { group_key: [outer_rows.id], aggs: [] }
+                │   └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
+                │     └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
+                └─BatchExchange { order: [], dist: Single }
+                  └─BatchScan { table: facts, columns: [facts.id], distribution: SomeShard }
+- name: COUNT with an equality correlation reads the random outer sample once without a domain
   sql: |
     create table outer_rows (id int);
     create table facts (id int, amount int);
     select s.id, (select count(*) from facts f where f.id = s.id)
+    from (select id from outer_rows order by random() limit 50) s;
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [outer_rows.id, Coalesce(count, 0:Int64) as $expr2] }
+    └─LogicalJoin { type: LeftOuter, on: (outer_rows.id = facts.id), output: [outer_rows.id, count] }
+      ├─LogicalTopN { order: [$expr1 ASC], limit: 50, offset: 0 }
+      │ └─LogicalProject { exprs: [outer_rows.id, Random as $expr1] }
+      │   └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
+      └─LogicalAgg { group_key: [facts.id], aggs: [count] }
+        └─LogicalScan { table: facts, columns: [facts.id] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [outer_rows.id, Coalesce(count, 0:Int64) as $expr2] }
+    └─LogicalJoin { type: LeftOuter, on: (outer_rows.id = facts.id), output: [outer_rows.id, count] }
+      ├─LogicalTopN { order: [$expr1 ASC], limit: 50, offset: 0 }
+      │ └─LogicalProject { exprs: [outer_rows.id, Random as $expr1] }
+      │   └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
+      └─LogicalAgg { group_key: [facts.id], aggs: [count] }
+        └─LogicalScan { table: facts, columns: [facts.id] }
+- name: impurity in a nested filter also prevents general decorrelation
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, (select count(*) from facts f where f.id <= s.id)
     from (select id from outer_rows where random() < 0.5 limit 50) s;
   batch_error: |-
     Not supported: correlated subquery would evaluate the impure outer expression (RANDOM) more than once
@@ -166,7 +203,7 @@
   sql: |
     create table outer_rows (id int);
     create table facts (id int, amount int);
-    select s.id, (select count(*) from facts f where f.id = s.id)
+    select s.id, (select count(*) from facts f where f.id <= s.id)
     from (select floor(random() * 10)::int as id from outer_rows) s;
   batch_error: |-
     Not supported: correlated subquery would evaluate the impure outer expression (RANDOM) more than once
@@ -175,48 +212,60 @@
   sql: |
     create table outer_rows (id int primary key);
     create table facts (id int, amount int);
-    select s.id, (select count(*) from facts f where f.id = s.id)
+    select s.id, (select count(*) from facts f where f.id <= s.id)
     from (select id from outer_rows order by id limit 50) s;
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, count(1:Int32)] }
     ├─LogicalTopN { order: [outer_rows.id ASC], limit: 50, offset: 0 }
     │ └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
     └─LogicalAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, facts.id), output: [outer_rows.id, 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, 1:Int32] }
         ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
         │ └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
-        └─LogicalProject { exprs: [facts.id, 1:Int32] }
-          └─LogicalScan { table: facts, columns: [facts.id], predicate: IsNotNull(facts.id) }
+        └─LogicalProject { exprs: [outer_rows.id, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+            ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
+            │ └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
+            └─LogicalScan { table: facts, columns: [facts.id] }
   optimized_logical_plan_for_stream: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, count(1:Int32)] }
     ├─LogicalShare { id: 2 }
     │ └─LogicalTopN { order: [outer_rows.id ASC], limit: 50, offset: 0 }
     │   └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
     └─LogicalAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, facts.id), output: [outer_rows.id, 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, 1:Int32] }
         ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
         │ └─LogicalShare { id: 2 }
         │   └─LogicalTopN { order: [outer_rows.id ASC], limit: 50, offset: 0 }
         │     └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
-        └─LogicalProject { exprs: [facts.id, 1:Int32] }
-          └─LogicalScan { table: facts, columns: [facts.id], predicate: IsNotNull(facts.id) }
+        └─LogicalProject { exprs: [outer_rows.id, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+            ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
+            │ └─LogicalShare { id: 2 }
+            │   └─LogicalTopN { order: [outer_rows.id ASC], limit: 50, offset: 0 }
+            │     └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
+            └─LogicalScan { table: facts, columns: [facts.id] }
 - name: a random predicate pushed into the scan also needs shared evaluation
   sql: |
     create table outer_rows (id int);
     create table facts (id int, amount int);
-    select s.id, (select count(*) from facts f where f.id = s.id)
+    select s.id, (select count(*) from facts f where f.id <= s.id)
     from outer_rows s where random() < 0.5;
   optimized_logical_plan_for_stream: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, count(1:Int32)] }
     ├─LogicalShare { id: 1 }
     │ └─LogicalScan { table: outer_rows, columns: [outer_rows.id], predicate: (Random < 0.5:Decimal::Float64) }
     └─LogicalAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, facts.id), output: [outer_rows.id, 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, 1:Int32] }
         ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
         │ └─LogicalShare { id: 1 }
         │   └─LogicalScan { table: outer_rows, columns: [outer_rows.id], predicate: (Random < 0.5:Decimal::Float64) }
-        └─LogicalProject { exprs: [facts.id, 1:Int32] }
-          └─LogicalScan { table: facts, columns: [facts.id], predicate: IsNotNull(facts.id) }
+        └─LogicalProject { exprs: [outer_rows.id, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+            ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
+            │ └─LogicalShare { id: 1 }
+            │   └─LogicalScan { table: outer_rows, columns: [outer_rows.id], predicate: (Random < 0.5:Decimal::Float64) }
+            └─LogicalScan { table: facts, columns: [facts.id] }
   batch_error: |-
     Not supported: correlated subquery would evaluate the impure outer expression (RANDOM) more than once
     HINT: Store the outer query result in a table before running this correlated subquery.
@@ -225,7 +274,7 @@
     create table outer_rows (id int);
     create table other_rows (id int);
     create table facts (id int, amount int);
-    select s.id, (select count(*) from facts f where f.id = s.id)
+    select s.id, (select count(*) from facts f where f.id <= s.id)
     from outer_rows s join other_rows o on random() < (s.id + o.id)::double precision;
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, count(1:Int32)] }
@@ -233,16 +282,19 @@
     │ ├─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
     │ └─LogicalScan { table: other_rows, columns: [other_rows.id] }
     └─LogicalAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, facts.id), output: [outer_rows.id, 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, 1:Int32] }
         ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
         │ └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
-        └─LogicalProject { exprs: [facts.id, 1:Int32] }
-          └─LogicalScan { table: facts, columns: [facts.id], predicate: IsNotNull(facts.id) }
+        └─LogicalProject { exprs: [outer_rows.id, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+            ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
+            │ └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
+            └─LogicalScan { table: facts, columns: [facts.id] }
 - name: COUNT over an unordered LIMIT with offset
   sql: |
     create table outer_rows (id int);
     create table facts (id int);
-    select s.id, (select count(*) from facts f where f.id = s.id)
+    select s.id, (select count(*) from facts f where f.id <= s.id)
     from (select id from outer_rows limit 50 offset 10) s;
   optimized_logical_plan_for_stream: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, count(1:Int32)] }
@@ -250,13 +302,18 @@
     │ └─LogicalLimit { limit: 50, offset: 10 }
     │   └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
     └─LogicalAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, facts.id), output: [outer_rows.id, 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(outer_rows.id, outer_rows.id), output: [outer_rows.id, 1:Int32] }
         ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
         │ └─LogicalShare { id: 2 }
         │   └─LogicalLimit { limit: 50, offset: 10 }
         │     └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
-        └─LogicalProject { exprs: [facts.id, 1:Int32] }
-          └─LogicalScan { table: facts, columns: [facts.id], predicate: IsNotNull(facts.id) }
+        └─LogicalProject { exprs: [outer_rows.id, 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+            ├─LogicalAgg { group_key: [outer_rows.id], aggs: [] }
+            │ └─LogicalShare { id: 2 }
+            │   └─LogicalLimit { limit: 50, offset: 10 }
+            │     └─LogicalScan { table: outer_rows, columns: [outer_rows.id] }
+            └─LogicalScan { table: facts, columns: [facts.id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM outer_rows.id, output: [outer_rows.id, count(1:Int32)] }
@@ -266,19 +323,24 @@
       │     └─BatchLimit { limit: 60, offset: 0 }
       │       └─BatchScan { table: outer_rows, columns: [outer_rows.id], limit: 60, distribution: SomeShard }
       └─BatchHashAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-        └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM facts.id, output: [outer_rows.id, 1:Int32] }
+        └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM outer_rows.id, output: [outer_rows.id, 1:Int32] }
           ├─BatchHashAgg { group_key: [outer_rows.id], aggs: [] }
           │ └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
           │   └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
-          └─BatchExchange { order: [], dist: HashShard(facts.id) }
-            └─BatchProject { exprs: [facts.id, 1:Int32] }
-              └─BatchFilter { predicate: IsNotNull(facts.id) }
-                └─BatchScan { table: facts, columns: [facts.id], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
+            └─BatchProject { exprs: [outer_rows.id, 1:Int32] }
+              └─BatchNestedLoopJoin { type: Inner, predicate: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+                ├─BatchExchange { order: [], dist: Single }
+                │ └─BatchHashAgg { group_key: [outer_rows.id], aggs: [] }
+                │   └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
+                │     └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
+                └─BatchExchange { order: [], dist: Single }
+                  └─BatchScan { table: facts, columns: [facts.id], distribution: SomeShard }
 - name: COUNT over a TopN with non-unique ordering
   sql: |
     create table outer_rows (id int, priority int);
     create table facts (id int);
-    select s.id, (select count(*) from facts f where f.id = s.id)
+    select s.id, (select count(*) from facts f where f.id <= s.id)
     from (select id from outer_rows order by priority limit 50) s;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
@@ -289,21 +351,26 @@
       │     └─BatchTopN { order: [outer_rows.priority ASC], limit: 50, offset: 0 }
       │       └─BatchScan { table: outer_rows, columns: [outer_rows.id, outer_rows.priority], distribution: SomeShard }
       └─BatchHashAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-        └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM facts.id, output: [outer_rows.id, 1:Int32] }
+        └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM outer_rows.id, output: [outer_rows.id, 1:Int32] }
           ├─BatchHashAgg { group_key: [outer_rows.id], aggs: [] }
           │ └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
           │   └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
-          └─BatchExchange { order: [], dist: HashShard(facts.id) }
-            └─BatchProject { exprs: [facts.id, 1:Int32] }
-              └─BatchFilter { predicate: IsNotNull(facts.id) }
-                └─BatchScan { table: facts, columns: [facts.id], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
+            └─BatchProject { exprs: [outer_rows.id, 1:Int32] }
+              └─BatchNestedLoopJoin { type: Inner, predicate: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+                ├─BatchExchange { order: [], dist: Single }
+                │ └─BatchHashAgg { group_key: [outer_rows.id], aggs: [] }
+                │   └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
+                │     └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
+                └─BatchExchange { order: [], dist: Single }
+                  └─BatchScan { table: facts, columns: [facts.id], distribution: SomeShard }
 - name: multiple scalar aggregates over a random sample
   sql: |
     create table outer_rows (id int);
     create table facts (id int, amount int);
     select s.id,
       (select sum(f.amount) from facts f where f.id = s.id),
-      (select count(*) from facts f where f.id = s.id)
+      (select count(*) from facts f where f.id <= s.id)
     from (select id from outer_rows order by random() limit 50) s;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
@@ -325,14 +392,19 @@
           │     └─BatchFilter { predicate: IsNotNull(facts.id) }
           │       └─BatchScan { table: facts, columns: [facts.id, facts.amount], distribution: SomeShard }
           └─BatchHashAgg { group_key: [outer_rows.id], aggs: [count(1:Int32)] }
-            └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM facts.id, output: [outer_rows.id, 1:Int32] }
+            └─BatchHashJoin { type: LeftOuter, predicate: outer_rows.id IS NOT DISTINCT FROM outer_rows.id, output: [outer_rows.id, 1:Int32] }
               ├─BatchHashAgg { group_key: [outer_rows.id], aggs: [] }
               │ └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
               │   └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
-              └─BatchExchange { order: [], dist: HashShard(facts.id) }
-                └─BatchProject { exprs: [facts.id, 1:Int32] }
-                  └─BatchFilter { predicate: IsNotNull(facts.id) }
-                    └─BatchScan { table: facts, columns: [facts.id], distribution: SomeShard }
+              └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
+                └─BatchProject { exprs: [outer_rows.id, 1:Int32] }
+                  └─BatchNestedLoopJoin { type: Inner, predicate: (facts.id <= outer_rows.id), output: [outer_rows.id] }
+                    ├─BatchExchange { order: [], dist: Single }
+                    │ └─BatchHashAgg { group_key: [outer_rows.id], aggs: [] }
+                    │   └─BatchExchange { order: [], dist: HashShard(outer_rows.id) }
+                    │     └─BatchScan { table: outer_rows, columns: [outer_rows.id], distribution: SomeShard }
+                    └─BatchExchange { order: [], dist: Single }
+                      └─BatchScan { table: facts, columns: [facts.id], distribution: SomeShard }
 - name: remap duplicate correlated columns on both sides of a join
   sql: |
     create table t(id int);
@@ -381,7 +453,7 @@
 - name: an unordered LIMIT that cannot be removed needs sharing
   sql: |
     create table t(id int);
-    select s.max_id, (select count(*) from t where t.id = s.max_id)
+    select s.max_id, (select count(*) from t where t.id <= s.max_id)
     from (select max(id) as max_id from (select id from t limit 5) t) s;
   optimized_logical_plan_for_stream: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), max(t.id)), output: [max(t.id), count(1:Int32)] }
@@ -390,21 +462,27 @@
     │   └─LogicalLimit { limit: 5, offset: 0 }
     │     └─LogicalScan { table: t, columns: [t.id] }
     └─LogicalAgg { group_key: [max(t.id)], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), t.id), output: [max(t.id), 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), max(t.id)), output: [max(t.id), 1:Int32] }
         ├─LogicalAgg { group_key: [max(t.id)], aggs: [] }
         │ └─LogicalShare { id: 3 }
         │   └─LogicalAgg { aggs: [max(t.id)] }
         │     └─LogicalLimit { limit: 5, offset: 0 }
         │       └─LogicalScan { table: t, columns: [t.id] }
-        └─LogicalProject { exprs: [t.id, 1:Int32] }
-          └─LogicalScan { table: t, columns: [t.id], predicate: IsNotNull(t.id) }
+        └─LogicalProject { exprs: [max(t.id), 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (t.id <= max(t.id)), output: [max(t.id)] }
+            ├─LogicalAgg { group_key: [max(t.id)], aggs: [] }
+            │ └─LogicalShare { id: 3 }
+            │   └─LogicalAgg { aggs: [max(t.id)] }
+            │     └─LogicalLimit { limit: 5, offset: 0 }
+            │       └─LogicalScan { table: t, columns: [t.id] }
+            └─LogicalScan { table: t, columns: [t.id] }
   batch_error: |-
     Not supported: correlated subquery would evaluate an outer LIMIT or TopN more than once
     HINT: Store the outer query result in a table before running this correlated subquery.
 - name: a TopN that cannot be removed needs sharing
   sql: |
     create table t(id int, priority int);
-    select s.max_id, (select count(*) from t where t.id = s.max_id)
+    select s.max_id, (select count(*) from t where t.id <= s.max_id)
     from (select max(id) as max_id from (select id from t order by priority limit 5) t) s;
   optimized_logical_plan_for_stream: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), max(t.id)), output: [max(t.id), count(1:Int32)] }
@@ -413,14 +491,20 @@
     │   └─LogicalTopN { order: [t.priority ASC], limit: 5, offset: 0 }
     │     └─LogicalScan { table: t, columns: [t.id, t.priority] }
     └─LogicalAgg { group_key: [max(t.id)], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), t.id), output: [max(t.id), 1:Int32] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), max(t.id)), output: [max(t.id), 1:Int32] }
         ├─LogicalAgg { group_key: [max(t.id)], aggs: [] }
         │ └─LogicalShare { id: 3 }
         │   └─LogicalAgg { aggs: [max(t.id)] }
         │     └─LogicalTopN { order: [t.priority ASC], limit: 5, offset: 0 }
         │       └─LogicalScan { table: t, columns: [t.id, t.priority] }
-        └─LogicalProject { exprs: [t.id, 1:Int32] }
-          └─LogicalScan { table: t, columns: [t.id], predicate: IsNotNull(t.id) }
+        └─LogicalProject { exprs: [max(t.id), 1:Int32] }
+          └─LogicalJoin { type: Inner, on: (t.id <= max(t.id)), output: [max(t.id)] }
+            ├─LogicalAgg { group_key: [max(t.id)], aggs: [] }
+            │ └─LogicalShare { id: 3 }
+            │   └─LogicalAgg { aggs: [max(t.id)] }
+            │     └─LogicalTopN { order: [t.priority ASC], limit: 5, offset: 0 }
+            │       └─LogicalScan { table: t, columns: [t.id, t.priority] }
+            └─LogicalScan { table: t, columns: [t.id] }
   batch_error: |-
     Not supported: correlated subquery would evaluate an outer LIMIT or TopN more than once
     HINT: Store the outer query result in a table before running this correlated subquery.

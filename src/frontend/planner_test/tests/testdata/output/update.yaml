@@ -214,19 +214,13 @@
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [$4, $1, $2] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: [t.v1, t.v2, t._row_id, t._rw_timestamp, count(1:Int32)::Int32 as $expr1] }
-          └─BatchHashJoin { type: LeftOuter, predicate: t.v2 IS NOT DISTINCT FROM t.v2, output: [t.v1, t.v2, t._row_id, t._rw_timestamp, count(1:Int32)] }
+        └─BatchProject { exprs: [t.v1, t.v2, t._row_id, t._rw_timestamp, Coalesce(count, 0:Int64)::Int32 as $expr1] }
+          └─BatchHashJoin { type: LeftOuter, predicate: t.v2 = t.v2, output: [t.v1, t.v2, t._row_id, t._rw_timestamp, count] }
             ├─BatchExchange { order: [], dist: HashShard(t.v2) }
             │ └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
-            └─BatchHashAgg { group_key: [t.v2], aggs: [count(1:Int32)] }
-              └─BatchHashJoin { type: LeftOuter, predicate: t.v2 IS NOT DISTINCT FROM t.v2, output: [t.v2, 1:Int32] }
-                ├─BatchHashAgg { group_key: [t.v2], aggs: [] }
-                │ └─BatchExchange { order: [], dist: HashShard(t.v2) }
-                │   └─BatchScan { table: t, columns: [t.v2], distribution: SomeShard }
-                └─BatchExchange { order: [], dist: HashShard(t.v2) }
-                  └─BatchProject { exprs: [t.v2, 1:Int32] }
-                    └─BatchFilter { predicate: IsNotNull(t.v2) }
-                      └─BatchScan { table: t, columns: [t.v2], distribution: SomeShard }
+            └─BatchHashAgg { group_key: [t.v2], aggs: [count] }
+              └─BatchExchange { order: [], dist: HashShard(t.v2) }
+                └─BatchScan { table: t, columns: [t.v2], distribution: SomeShard }
 - name: update table to subquery with multiple assignments
   sql: |
     create table t (v1 int, v2 int);
