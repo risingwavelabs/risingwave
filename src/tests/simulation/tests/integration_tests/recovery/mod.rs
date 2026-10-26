@@ -22,4 +22,5 @@ mod locality_backfill;
 mod nexmark_recovery;
 mod serving_mapping;
 mod serving_mapping_start_order;
+mod source_split;
 mod time_travel;
