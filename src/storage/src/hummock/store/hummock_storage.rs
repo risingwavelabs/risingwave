@@ -934,8 +934,7 @@ impl HummockStorage {
                             Err(HummockError::wait_epoch(format!(
                                 "table id {} has been dropped",
                                 table_id
-                            ))
-                            .into())
+                            )))
                         }
                     },
                     || {
