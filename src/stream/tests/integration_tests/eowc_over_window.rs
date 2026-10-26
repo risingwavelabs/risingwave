@@ -23,13 +23,22 @@ async fn create_executor<S: StateStore>(
     calls: Vec<WindowFuncCall>,
     store: S,
 ) -> (MessageSender, BoxedMessageStream) {
+    create_executor_with_stream_key(calls, store, vec![2]).await
+}
+
+/// The state table pk is `partition key | order key | pk` for any `input_stream_key` among
+/// `[pk]` and `[order key, pk]`.
+async fn create_executor_with_stream_key<S: StateStore>(
+    calls: Vec<WindowFuncCall>,
+    store: S,
+    input_stream_key: Vec<usize>,
+) -> (MessageSender, BoxedMessageStream) {
     let input_schema = Schema::new(vec![
         Field::unnamed(DataType::Int64),   // order key
         Field::unnamed(DataType::Varchar), // partition key
         Field::unnamed(DataType::Int64),   // pk
         Field::unnamed(DataType::Int32),   // x
     ]);
-    let input_stream_key = vec![2];
     let partition_key_indices = vec![1];
     let order_key_index = 0;
 
@@ -279,6 +288,78 @@ async fn test_over_window() {
             - input: !barrier 3
               output:
               - !barrier 3
+        "#]],
+        SnapshotOptions::default(),
+    )
+    .await;
+}
+
+/// The input stream key `order key | pk` shares the order key with the state table pk, so evicting
+/// row `(1, p1, 0)` must not delete row `(1, p1, 1)`, whose pk equals the order key.
+#[tokio::test]
+async fn test_over_window_stream_key_overlapping_order_key() {
+    let store = MemoryStateStore::new();
+    let calls = vec![
+        // lead(x, 1)
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
+        },
+    ];
+
+    check_with_script(
+        || create_executor_with_stream_key(calls.clone(), store.clone(), vec![0, 2]),
+        r###"
+- !barrier 1
+- !chunk |2
+      I T  I i
+    + 1 p1 0 10
+    + 1 p1 1 20
+- !barrier 2
+- recovery
+- !barrier 3
+- !chunk |2
+      I T  I i
+    + 2 p1 2 30
+- !barrier 4
+"###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+---+----+---+----+
+                | + | 1 | p1 | 0 | 10 |
+                | + | 1 | p1 | 1 | 20 |
+                +---+---+----+---+----+
+              output:
+              - !chunk |-
+                +---+---+----+---+----+----+
+                | + | 1 | p1 | 0 | 10 | 20 |
+                +---+---+----+---+----+----+
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: recovery
+              output: []
+            - input: !barrier 3
+              output:
+              - !barrier 3
+            - input: !chunk |-
+                +---+---+----+---+----+
+                | + | 2 | p1 | 2 | 30 |
+                +---+---+----+---+----+
+              output:
+              - !chunk |-
+                +---+---+----+---+----+----+
+                | + | 1 | p1 | 1 | 20 | 30 |
+                +---+---+----+---+----+----+
+            - input: !barrier 4
+              output:
+              - !barrier 4
         "#]],
         SnapshotOptions::default(),
     )
