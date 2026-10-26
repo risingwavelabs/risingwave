@@ -413,5 +413,89 @@ macro_rules! impl_cdc_source_type {
             }
         }
 
+        impl From<&$crate::source::ConnectorProperties> for CdcSourceType {
+            fn from(props: &$crate::source::ConnectorProperties) -> Self {
+                $crate::paste! {
+                    match props {
+                        $(
+                            $crate::source::ConnectorProperties::[<$cdc_source_type Cdc>](_) => CdcSourceType::$cdc_source_type,
+                        )*
+                        _ => CdcSourceType::Unspecified,
+                    }
+                }
+            }
+        }
+
+        impl From<&$crate::source::SplitImpl> for CdcSourceType {
+            fn from(split: &$crate::source::SplitImpl) -> Self {
+                $crate::paste! {
+                    match split {
+                        $(
+                            $crate::source::SplitImpl::[<$cdc_source_type Cdc>](_) => CdcSourceType::$cdc_source_type,
+                        )*
+                        _ => CdcSourceType::Unspecified,
+                    }
+                }
+            }
+        }
+
     }
+}
+
+#[macro_export]
+macro_rules! dispatch_cdc_source_type_inner {
+    (
+        {$({$cdc_source_type:ident}),*},
+        {$($_ignore:tt),*},
+        $source_type:tt,
+        $T:ident,
+        $body:expr,
+        $on_unspecified:expr
+    ) => {
+        match $source_type {
+            $(
+                $crate::source::cdc::CdcSourceType::$cdc_source_type => {
+                    #[allow(dead_code)]
+                    type $T = $crate::source::cdc::$cdc_source_type;
+                    {
+                        $body
+                    }
+                }
+            )*
+            $crate::source::cdc::CdcSourceType::Unspecified => $on_unspecified,
+        }
+    };
+}
+
+/// Template for a `match` over [`CdcSourceType`](crate::source::cdc::CdcSourceType) with one arm
+/// per CDC connector in the registry, plus a hardcoded `Unspecified` arm. In each arm `$T` is
+/// bound to that connector's marker type.
+///
+/// ```ignore
+/// dispatch_cdc_source_type!(source_type, T, {
+///     let must_wait = T::MUST_WAIT_OFFSET_BEFORE_REPORT;
+///     must_wait && rate_limit == Some(0)
+/// }, false)
+/// // expands to
+/// match source_type {
+///     CdcSourceType::Mysql => {
+///         type T = Mysql;
+///         let must_wait = T::MUST_WAIT_OFFSET_BEFORE_REPORT;
+///         must_wait && rate_limit == Some(0)
+///     }
+///     // ... one arm per registered connector
+///     CdcSourceType::Unspecified => false,
+/// }
+/// ```
+#[macro_export]
+macro_rules! dispatch_cdc_source_type {
+    ($source_type:expr, $T:ident, $body:expr, $on_unspecified:expr) => {{
+        $crate::for_all_classified_sources! {
+            $crate::dispatch_cdc_source_type_inner,
+            { $source_type },
+            $T,
+            { $body },
+            { $on_unspecified }
+        }
+    }};
 }
