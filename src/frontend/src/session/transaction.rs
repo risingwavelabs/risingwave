@@ -106,6 +106,10 @@ impl Drop for ImplicitAutoCommitGuard {
 }
 
 impl SessionImpl {
+    pub(crate) fn in_explicit_transaction(&self) -> bool {
+        matches!(*self.txn.lock(), State::Explicit(_))
+    }
+
     /// Starts an implicit transaction if there's no explicit transaction in progress. Called at the
     /// beginning of handling each statement.
     ///

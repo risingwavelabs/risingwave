@@ -34,10 +34,14 @@ use crate::binder::{Binder, BoundCreateView, BoundStatement};
 #[cfg(feature = "datafusion")]
 use crate::datafusion::DfBatchQueryPlanResult;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::expr::NowProcTimeFinder;
 use crate::handler::HandlerArgs;
 use crate::handler::flush::do_flush;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
-use crate::optimizer::plan_node::{BatchPlanRef, Explain};
+use crate::optimizer::plan_node::{
+    BatchPlanNodeType, BatchPlanRef, Explain, LogicalPlanNodeType, LogicalPlanRef,
+    VisitExprsRecursive,
+};
 use crate::optimizer::{
     BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef, SysTableVisitor,
 };
@@ -323,6 +327,19 @@ fn gen_batch_query_plan(
 
     let logical = planner.plan(bound)?;
     let schema = logical.schema();
+    // Inspect before optimization inlines now()/proctime() or removes query operators.
+    // This runs for each execution, including already-bound prepared statements.
+    let read_latest_local = session.config().batch_point_get_read_latest_local()
+        && stmt_type == StatementType::SELECT
+        && !session.in_explicit_transaction()
+        && !session.is_barrier_read()
+        && session.config().query_epoch().0.is_none()
+        && latest_local_logical_shape(&logical.plan)
+        && {
+            let mut time_finder = NowProcTimeFinder::default();
+            logical.plan.visit_exprs_recursive(&mut time_finder);
+            !time_finder.has()
+        };
     let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
 
     #[cfg(feature = "datafusion")]
@@ -377,6 +394,12 @@ fn gen_batch_query_plan(
         QueryMode::Distributed => batch_plan.gen_batch_distributed_plan()?,
     };
 
+    let physical = if read_latest_local && query_mode == QueryMode::Local {
+        mark_latest_local_point_get(&physical).unwrap_or(physical)
+    } else {
+        physical
+    };
+
     let result = RwBatchQueryPlanResult {
         plan: physical,
         query_mode,
@@ -384,6 +407,44 @@ fn gen_batch_query_plan(
         stmt_type,
     };
     Ok(BatchPlanChoice::Rw(result))
+}
+
+/// Restrict the original query too: optimization must not turn a join into an opt-in read.
+fn latest_local_logical_shape(plan: &LogicalPlanRef) -> bool {
+    match plan.node_type() {
+        LogicalPlanNodeType::LogicalScan => plan.as_logical_scan().unwrap().as_of().is_none(),
+        LogicalPlanNodeType::LogicalProject
+        | LogicalPlanNodeType::LogicalFilter
+        | LogicalPlanNodeType::LogicalLimit => {
+            let inputs = plan.inputs();
+            inputs.len() == 1 && latest_local_logical_shape(&inputs[0])
+        }
+        _ => false,
+    }
+}
+
+/// Validate the entire physical plan before returning a marked copy. Local scheduling inserts
+/// exchanges, but every other operator must be a projection, filter, or limit above one scan.
+fn mark_latest_local_point_get(plan: &BatchPlanRef) -> Option<BatchPlanRef> {
+    match plan.node_type() {
+        BatchPlanNodeType::BatchSeqScan => {
+            let scan = plan.as_batch_seq_scan().unwrap();
+            scan.can_read_latest_local()
+                .then(|| scan.with_read_latest_local().into())
+        }
+        BatchPlanNodeType::BatchProject
+        | BatchPlanNodeType::BatchFilter
+        | BatchPlanNodeType::BatchLimit
+        | BatchPlanNodeType::BatchExchange => {
+            let inputs = plan.inputs();
+            if inputs.len() != 1 {
+                return None;
+            }
+            let input = mark_latest_local_point_get(&inputs[0])?;
+            Some(plan.clone_root_with_inputs(&[input]))
+        }
+        _ => None,
+    }
 }
 
 fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
@@ -646,4 +707,161 @@ pub async fn local_execute(
     );
 
     Ok(execution.stream_rows())
+}
+
+#[cfg(test)]
+mod latest_local_tests {
+    use risingwave_sqlparser::parser::Parser;
+
+    use super::*;
+    use crate::handler::extended_handle::{Portal, handle_bind};
+    use crate::session::transaction::AccessMode;
+    use crate::test_utils::LocalFrontend;
+
+    fn plan(session: &Arc<SessionImpl>, sql: &str, bound: Option<BoundResult>) -> BatchPlanRef {
+        let stmt = Parser::parse_sql(sql).unwrap().remove(0);
+        let args = HandlerArgs::new(session.clone(), &stmt, sql.into()).unwrap();
+        let context = OptimizerContext::from_handler_args(args).into();
+        let result = if let Some(bound) = bound {
+            gen_batch_query_plan(session, context, bound)
+        } else {
+            gen_batch_plan_by_statement(session, context, stmt)
+        };
+        result.unwrap().unwrap_rw().unwrap().plan
+    }
+
+    fn marked(plan: &BatchPlanRef) -> bool {
+        if let Some(scan) = plan.as_batch_seq_scan() {
+            if !scan.read_latest_local() {
+                return false;
+            }
+            use crate::optimizer::plan_node::TryToBatchPb;
+            let risingwave_pb::batch_plan::plan_node::NodeBody::RowSeqScan(scan) =
+                scan.try_to_batch_prost_body().unwrap()
+            else {
+                unreachable!()
+            };
+            return scan.read_latest_local;
+        }
+        plan.inputs().iter().any(marked)
+    }
+
+    #[tokio::test]
+    async fn test_latest_local_eligibility() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("create table t (k int primary key, v int)")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("create table c (a int, b int, v int, primary key(a, b))")
+            .await
+            .unwrap();
+        let session = frontend.session_ref();
+        session
+            .set_config("visibility_mode", "checkpoint".into())
+            .unwrap();
+        session.set_config("query_mode", "local".into()).unwrap();
+        let _guard = session.txn_begin_implicit();
+        assert!(!marked(&plan(
+            &session,
+            "select * from t where k = 1",
+            None
+        )));
+        session
+            .set_config("batch_point_get_read_latest_local", "true".into())
+            .unwrap();
+        for sql in [
+            "select * from t where k = 1",
+            "select v + 1 from t where k = 1 and v > 0 limit 1",
+            "select v from c where a = 1 and b = 2",
+        ] {
+            assert!(marked(&plan(&session, sql, None)), "{sql}");
+        }
+        for sql in [
+            "select * from t",
+            "select * from t where k > 1",
+            "select * from t where k in (1, 2)",
+            "select * from c where a = 1",
+            "select t.v from t join c on t.k = c.a where t.k = 1 and c.b = 2",
+            "select count(*) from t where k = 1",
+            "select now(), v from t where k = 1",
+            "select v from t where k = 1 and now() is not null",
+            "select v from t for system_time as of 1 where k = 1",
+            "update t set v = 2 where k = 1",
+            "delete from t where k = 1",
+            "insert into c select k, k, v from t where k = 1",
+        ] {
+            assert!(!marked(&plan(&session, sql, None)), "{sql}");
+        }
+        // SQL proctime() is rejected by the binder for SELECT, before eligibility is evaluated.
+        let proctime = Parser::parse_sql("select proctime(), v from t where k = 1")
+            .unwrap()
+            .remove(0);
+        assert!(gen_bound(Binder::new_for_batch(&session), proctime).is_err());
+        session
+            .set_config("query_mode", "distributed".into())
+            .unwrap();
+        assert!(!marked(&plan(
+            &session,
+            "select * from t where k = 1",
+            None
+        )));
+        session.set_config("query_mode", "local".into()).unwrap();
+        session.set_config("visibility_mode", "all".into()).unwrap();
+        assert!(!marked(&plan(
+            &session,
+            "select * from t where k = 1",
+            None
+        )));
+        session
+            .set_config("visibility_mode", "checkpoint".into())
+            .unwrap();
+        session.set_config("query_epoch", "65536".into()).unwrap();
+        assert!(!marked(&plan(
+            &session,
+            "select * from t where k = 1",
+            None
+        )));
+        session.reset_config("query_epoch").unwrap();
+        session.txn_begin_explicit(AccessMode::ReadOnly);
+        assert!(!marked(&plan(
+            &session,
+            "select * from t where k = 1",
+            None
+        )));
+        session.txn_commit_explicit();
+    }
+
+    #[tokio::test]
+    async fn test_latest_local_prepared_setting_changes() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("create table t (k int primary key, v int)")
+            .await
+            .unwrap();
+        let session = frontend.session_ref();
+        session
+            .set_config("visibility_mode", "checkpoint".into())
+            .unwrap();
+        let _guard = session.txn_begin_implicit();
+        let sql = "select v from t where k = $1";
+        let stmt = Parser::parse_sql(sql).unwrap().remove(0);
+        let args = HandlerArgs::new(session.clone(), &stmt, sql.into()).unwrap();
+        let prepared = handle_parse_for_batch(args, stmt, vec![]).unwrap();
+        let Portal::Portal(portal) =
+            handle_bind(prepared, vec![Some("1".into())], vec![Format::Text], vec![]).unwrap()
+        else {
+            unreachable!()
+        };
+        for enabled in [false, true, false, true] {
+            session
+                .set_config("batch_point_get_read_latest_local", enabled.to_string())
+                .unwrap();
+            assert_eq!(
+                marked(&plan(&session, sql, Some(portal.bound_result.clone()))),
+                enabled
+            );
+        }
+    }
 }

@@ -37,6 +37,7 @@ pub struct BatchSeqScan {
     scan_ranges: Vec<ScanRange>,
     limit: Option<u64>,
     as_of: Option<AsOf>,
+    read_latest_local: bool,
 }
 
 impl BatchSeqScan {
@@ -91,6 +92,7 @@ impl BatchSeqScan {
             scan_ranges,
             limit,
             as_of,
+            read_latest_local: false,
         }
     }
 
@@ -148,6 +150,25 @@ impl BatchSeqScan {
         &self.scan_ranges
     }
 
+    pub(crate) fn read_latest_local(&self) -> bool {
+        self.read_latest_local
+    }
+
+    pub(crate) fn can_read_latest_local(&self) -> bool {
+        self.as_of.is_none()
+            && self.scan_ranges.len() == 1
+            && !self.core.table_catalog.pk.is_empty()
+            && self.scan_ranges[0].eq_conds.len() == self.core.table_catalog.pk.len()
+            && is_full_range(&self.scan_ranges[0].range)
+    }
+
+    pub(crate) fn with_read_latest_local(&self) -> Self {
+        assert!(self.can_read_latest_local());
+        let mut scan = self.clone();
+        scan.read_latest_local = true;
+        scan
+    }
+
     pub fn limit(&self) -> &Option<u64> {
         &self.limit
     }
@@ -176,6 +197,10 @@ impl Distill for BatchSeqScan {
 
         if let Some(limit) = &self.limit {
             vec.push(("limit", Pretty::display(limit)));
+        }
+
+        if self.read_latest_local {
+            vec.push(("read_latest_local", Pretty::display(&true)));
         }
 
         if verbose {
@@ -212,6 +237,7 @@ impl TryToBatchPb for BatchSeqScan {
             ordered: !self.order().is_any(),
             limit: *self.limit(),
             query_epoch: to_batch_query_epoch(&self.as_of)?,
+            read_latest_local: self.read_latest_local(),
         }))
     }
 }

@@ -112,6 +112,7 @@ impl InnerSideExecutorBuilder {
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
             limit: None,
             query_epoch: Some(self.query_epoch),
+            read_latest_local: false,
         });
 
         Ok(row_seq_scan_node)

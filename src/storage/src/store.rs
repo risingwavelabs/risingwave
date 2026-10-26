@@ -29,11 +29,11 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::{Epoch, EpochPair, MAX_EPOCH};
 use risingwave_common::vector::distance::DistanceMeasurement;
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::{
     VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
@@ -359,6 +359,21 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
         epoch: HummockReadEpoch,
         options: NewReadSnapshotOptions,
     ) -> impl StorageFuture<'_, Self::ReadSnapshot>;
+
+    /// Acquires the latest locally applied committed snapshot without waiting for readiness.
+    /// The returned epoch belongs to the retained version, not to the caller's metadata snapshot.
+    /// Backends without committed-version tracking must not expose uncommitted data here.
+    fn new_read_snapshot_latest_committed(
+        &self,
+        _options: NewReadSnapshotOptions,
+    ) -> impl StorageFuture<'_, (Self::ReadSnapshot, HummockEpoch)> {
+        async {
+            Err(crate::hummock::HummockError::other(
+                "latest locally committed snapshots are unsupported by this state store",
+            )
+            .into())
+        }
+    }
 
     fn new_vector_writer(
         &self,

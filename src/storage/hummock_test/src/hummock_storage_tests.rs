@@ -3850,3 +3850,222 @@ async fn test_commit_with_truncate_tables() {
         assert_eq!(2, cg3.compaction_group_version_id);
     }
 }
+
+/// A reader whose version updates are delivered explicitly by the test. Meta may commit new
+/// epochs while this reader still holds the old version, just as with delayed cache refill.
+struct LatestLocalNotificationClient(risingwave_pb::meta::MetaSnapshot);
+struct LatestLocalNotificationChannel(Option<risingwave_pb::meta::SubscribeResponse>);
+
+#[async_trait::async_trait]
+impl risingwave_common_service::NotificationClient for LatestLocalNotificationClient {
+    type Channel = LatestLocalNotificationChannel;
+
+    async fn subscribe(
+        &self,
+        _: risingwave_pb::meta::SubscribeType,
+    ) -> Result<Self::Channel, risingwave_common_service::ObserverError> {
+        Ok(LatestLocalNotificationChannel(Some(
+            risingwave_pb::meta::SubscribeResponse {
+                operation: risingwave_pb::meta::subscribe_response::Operation::Snapshot as i32,
+                info: Some(risingwave_pb::meta::subscribe_response::Info::Snapshot(
+                    self.0.clone(),
+                )),
+                ..Default::default()
+            },
+        )))
+    }
+}
+
+#[async_trait::async_trait]
+impl risingwave_common_service::Channel for LatestLocalNotificationChannel {
+    type Item = risingwave_pb::meta::SubscribeResponse;
+
+    async fn message(
+        &mut self,
+    ) -> Result<Option<Self::Item>, risingwave_meta::manager::MessageStatus> {
+        if let Some(snapshot) = self.0.take() {
+            Ok(Some(snapshot))
+        } else {
+            futures::future::pending().await
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_latest_local_committed_snapshot() {
+    let table_id = TableId::new(233);
+    let env = prepare_hummock_test_env().await;
+    env.register_table_id(table_id).await;
+    let storage = &env.storage;
+    let options = NewReadSnapshotOptions {
+        table_id,
+        table_option: TableOption::default(),
+    };
+    let key = |s| gen_key_from_str(VirtualNode::ZERO, s);
+    let mut local = storage.new_local(NewLocalOptions::for_test(table_id)).await;
+    let epoch1 = test_epoch(1);
+    let epoch2 = epoch1.next_epoch();
+    let epoch3 = epoch2.next_epoch();
+    storage.start_epoch(epoch1, HashSet::from([table_id]));
+    local.init_for_test(epoch1).await.unwrap();
+    local
+        .ingest_batch(vec![(key("a"), StorageValue::new_put("old"))])
+        .await
+        .unwrap();
+    storage.start_epoch(epoch2, HashSet::from([table_id]));
+    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    env.commit_epoch(epoch1).await;
+
+    let reader = HummockStorage::for_test(
+        storage.storage_opts().clone(),
+        storage.sstable_store(),
+        env.meta_client.clone(),
+        LatestLocalNotificationClient(risingwave_pb::meta::MetaSnapshot {
+            hummock_version: Some(storage.get_pinned_version().to_protobuf()),
+            version: Some(Default::default()),
+            meta_backup_manifest_id: Some(Default::default()),
+            hummock_write_limits: Some(Default::default()),
+            cluster_resource: Some(Default::default()),
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap();
+
+    // An uncommitted update is not visible through the new API, even on the writer itself.
+    local
+        .ingest_batch(vec![(key("a"), StorageValue::new_put("new"))])
+        .await
+        .unwrap();
+    let (uncommitted, epoch) = storage
+        .new_read_snapshot_latest_committed(options)
+        .await
+        .unwrap();
+    assert_eq!(epoch, epoch1);
+    assert_eq!(
+        uncommitted
+            .on_key_value(key("a"), Default::default(), |_, v| Ok(
+                Bytes::copy_from_slice(v)
+            ))
+            .await
+            .unwrap(),
+        Some(Bytes::from("old"))
+    );
+    storage.start_epoch(epoch3, HashSet::from([table_id]));
+    local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+    env.commit_epoch(epoch2).await;
+
+    let requested =
+        HummockReadEpoch::BatchQueryCommitted(epoch2, storage.get_pinned_version().id());
+    let ordinary = reader.new_read_snapshot(requested, options);
+    let wait = reader.try_wait_epoch(requested, TryWaitEpochOptions::for_test(table_id));
+    futures::pin_mut!(ordinary, wait);
+    assert!(futures::poll!(&mut ordinary).is_pending());
+    assert!(futures::poll!(&mut wait).is_pending());
+    let (snapshot, epoch) = reader
+        .new_read_snapshot_latest_committed(options)
+        .now_or_never()
+        .expect("latest-local acquisition must not wait")
+        .unwrap();
+    assert_eq!(epoch, epoch1);
+    for (k, expected) in [("a", Some(Bytes::from("old"))), ("missing", None)] {
+        assert_eq!(
+            snapshot
+                .on_key_value(key(k), Default::default(), |_, v| Ok(
+                    Bytes::copy_from_slice(v)
+                ))
+                .await
+                .unwrap(),
+            expected
+        );
+    }
+    let absent = reader
+        .new_read_snapshot_latest_committed(NewReadSnapshotOptions {
+            table_id: TableId::new(999),
+            ..options
+        })
+        .now_or_never()
+        .expect("absent tables must fail immediately");
+    let error = absent.err().unwrap().to_string();
+    assert!(error.contains("999"));
+    assert!(error.contains(&format!("{:?}", reader.get_pinned_version().id())));
+
+    reader
+        .update_version_and_wait(HummockVersion::from_rpc_protobuf(
+            &storage.get_pinned_version().to_protobuf(),
+        ))
+        .await;
+    ordinary.await.unwrap();
+    wait.await.unwrap();
+    let (updated, epoch) = reader
+        .new_read_snapshot_latest_committed(options)
+        .await
+        .unwrap();
+    assert_eq!(epoch, epoch2);
+    assert_eq!(
+        updated
+            .on_key_value(key("a"), Default::default(), |_, v| Ok(
+                Bytes::copy_from_slice(v)
+            ))
+            .await
+            .unwrap(),
+        Some(Bytes::from("new"))
+    );
+
+    local
+        .ingest_batch(vec![(key("a"), StorageValue::new_delete())])
+        .await
+        .unwrap();
+    storage.start_epoch(epoch3.next_epoch(), HashSet::from([table_id]));
+    local.seal_current_epoch(epoch3.next_epoch(), SealCurrentEpochOptions::for_test());
+    env.commit_epoch(epoch3).await;
+    reader
+        .update_version_and_wait(HummockVersion::from_rpc_protobuf(
+            &storage.get_pinned_version().to_protobuf(),
+        ))
+        .await;
+    let (deleted, epoch) = reader
+        .new_read_snapshot_latest_committed(options)
+        .await
+        .unwrap();
+    assert_eq!(epoch, epoch3);
+    assert_eq!(
+        deleted
+            .on_key_value(key("a"), Default::default(), |_, v| Ok(
+                Bytes::copy_from_slice(v)
+            ))
+            .await
+            .unwrap(),
+        None
+    );
+
+    // Evict every earlier version from the reader's recent history. The retained snapshot must
+    // still read its original SSTs without consulting recent history or time-travel metadata.
+    let mut version = reader.get_pinned_version().to_protobuf();
+    for _ in 0..=reader.storage_opts().max_cached_recent_versions_number {
+        version.id += 1;
+        let info = version.state_table_info.get_mut(&table_id).unwrap();
+        info.committed_epoch = info.committed_epoch.next_epoch();
+        reader
+            .update_version_and_wait(HummockVersion::from_rpc_protobuf(&version))
+            .await;
+    }
+    assert_eq!(
+        snapshot
+            .on_key_value(key("a"), Default::default(), |_, v| Ok(
+                Bytes::copy_from_slice(v)
+            ))
+            .await
+            .unwrap(),
+        Some(Bytes::from("old"))
+    );
+    assert_eq!(
+        updated
+            .on_key_value(key("a"), Default::default(), |_, v| Ok(
+                Bytes::copy_from_slice(v)
+            ))
+            .await
+            .unwrap(),
+        Some(Bytes::from("new"))
+    );
+}
