@@ -14,9 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
 use risingwave_common::catalog::Schema;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use tonic::async_trait;
 
 use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
@@ -96,56 +94,5 @@ impl Sink for OpenSearchSink {
             self.is_append_only,
         )?
         .into_log_sinker(self.config.concurrent_requests))
-    }
-
-    fn set_default_commit_checkpoint_interval(
-        desc: &mut crate::sink::catalog::desc::SinkDesc,
-        user_specified: &risingwave_common::session_config::sink_decouple::SinkDecouple,
-    ) -> Result<()> {
-        if crate::sink::is_sink_support_commit_checkpoint_interval(Self::SINK_NAME) {
-            match desc
-                .properties
-                .get(crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL)
-            {
-                Some(commit_checkpoint_interval) => {
-                    let commit_checkpoint_interval = commit_checkpoint_interval
-                        .parse::<u64>()
-                        .map_err(|e| SinkError::Config(anyhow!(e)))?;
-                    if std::matches!(user_specified, SinkDecouple::Disable)
-                        && commit_checkpoint_interval > 1
-                    {
-                        return Err(SinkError::Config(anyhow!(
-                            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-                        )));
-                    }
-                }
-                None => match user_specified {
-                    risingwave_common::session_config::sink_decouple::SinkDecouple::Default
-                    | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => {
-                        desc.properties.insert(
-                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_owned(),
-                            crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
-                        );
-                    }
-                    risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => {
-                        desc.properties.insert(
-                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_owned(),
-                            crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
-                        );
-                    }
-                },
-            }
-        }
-        Ok(())
-    }
-
-    fn is_sink_decouple(
-        user_specified: &risingwave_common::session_config::sink_decouple::SinkDecouple,
-    ) -> Result<bool> {
-        match user_specified {
-            risingwave_common::session_config::sink_decouple::SinkDecouple::Default
-            | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => Ok(true),
-            risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => Ok(false),
-        }
     }
 }
