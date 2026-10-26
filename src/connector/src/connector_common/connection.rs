@@ -40,7 +40,7 @@ use crate::connector_common::{
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
-use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
+use crate::sink::elasticsearch_opensearch::config::ElasticSearchOpenSearchConfig;
 use crate::source::build_connection;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 

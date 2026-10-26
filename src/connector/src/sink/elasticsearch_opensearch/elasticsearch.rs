@@ -19,8 +19,8 @@ use tonic::async_trait;
 
 use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
 use super::super::{Sink, SinkError, SinkParam, SinkWriterParam};
-use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchSinkWriter;
-use super::elasticsearch_opensearch_config::{ElasticSearchConfig, ElasticSearchOpenSearchConfig};
+use super::client::ElasticSearchOpenSearchSinkWriter;
+use super::config::{ElasticSearchConfig, ElasticSearchOpenSearchConfig};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
 

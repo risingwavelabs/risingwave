@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod client;
+pub mod config;
 pub mod elasticsearch;
-pub mod elasticsearch_converter;
-pub mod elasticsearch_opensearch_client;
-pub mod elasticsearch_opensearch_config;
-pub mod elasticsearch_opensearch_formatter;
+pub mod formatter;
 pub mod opensearch;
+pub mod remote_converter;
