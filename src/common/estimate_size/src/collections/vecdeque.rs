@@ -75,8 +75,7 @@ impl<T: EstimateSize> std::ops::Index<usize> for EstimatedVecDeque<T> {
 
 impl<T: EstimateSize> EstimateSize for EstimatedVecDeque<T> {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: Add `VecDeque` internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
+        // Only counts the elements, not the overhead of the `VecDeque` itself.
         self.heap_size.size()
     }
 }

@@ -252,8 +252,7 @@ where
     W: WindowImpl<Key = StateKey, Value = StateValue>,
 {
     fn estimated_heap_size(&self) -> usize {
-        // estimate `VecDeque` of `StreamWindowBuffer` internal size
-        // https://github.com/risingwavelabs/risingwave/issues/9713
+        // Only counts the buffered values, not the overhead of the `VecDeque` in the buffer itself.
         self.arg_data_types.estimated_heap_size() + self.buffer_heap_size.size()
     }
 }
