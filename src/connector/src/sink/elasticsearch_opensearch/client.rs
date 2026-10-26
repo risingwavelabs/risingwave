@@ -22,8 +22,8 @@ use risingwave_common::catalog::Schema;
 use serde_json::{Value, json};
 
 use super::super::SinkError;
-use super::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
-use super::elasticsearch_opensearch_formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
+use super::config::ElasticSearchOpenSearchConfig;
+use super::formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
 use crate::sink::Result;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::AsyncTruncateSinkWriter;

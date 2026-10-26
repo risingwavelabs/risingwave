@@ -24,8 +24,8 @@ use url::Url;
 use with_options::WithOptions;
 
 use super::super::SinkError;
+use super::client::ElasticSearchOpenSearchClient;
 use super::elasticsearch::ES_SINK;
-use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchClient;
 use super::opensearch::OPENSEARCH_SINK;
 use crate::connector_common::ElasticsearchConnection;
 use crate::enforce_secret::EnforceSecret;
