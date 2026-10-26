@@ -252,7 +252,7 @@ where
     W: WindowImpl<Key = StateKey, Value = StateValue>,
 {
     fn estimated_heap_size(&self) -> usize {
-        // Only counts the buffered values, not the overhead of the `VecDeque` in the buffer itself.
+        // Does not count the overhead of the `VecDeque` in the buffer itself.
         self.arg_data_types.estimated_heap_size() + self.buffer_heap_size.size()
     }
 }
