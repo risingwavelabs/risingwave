@@ -258,7 +258,8 @@ impl PartialEq for LocalSstableInfo {
 pub enum HummockReadEpoch {
     /// We need to wait the `committed_epoch` of the read table
     Committed(HummockEpoch),
-    /// We need to wait the `committed_epoch` of the read table and also the hummock version to the version id
+    /// Wait for the table's committed epoch. The version ID is used only when the table is
+    /// absent, to distinguish delayed registration from a dropped table.
     BatchQueryCommitted(HummockEpoch, HummockVersionId),
     /// We don't need to wait epoch, we usually do stream reading with it.
     NoWait(HummockEpoch),
