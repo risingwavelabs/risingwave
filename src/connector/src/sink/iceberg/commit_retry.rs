@@ -25,7 +25,6 @@ use anyhow::{Result, anyhow, bail};
 use iceberg::spec::FormatVersion;
 use iceberg::table::Table;
 use iceberg::{Catalog, TableIdent};
-use parking_lot::Mutex;
 use risingwave_common::util::retry::exponential_backoff;
 use thiserror_ext::AsReport;
 use tokio_retry::RetryIf;
@@ -174,7 +173,7 @@ where
 /// Same as [`run_with_retry`], but when `initial_table` is set the first attempt runs against it
 /// (after the same metadata validation) instead of reloading it from the catalog. Use this when
 /// the caller loaded the table right before the commit: a stale table only costs a commit
-/// conflict, and every retry reloads.
+/// conflict, and every retry reloads. `initial_table` must be the table named by `table_ident`.
 pub async fn run_with_retry_from_table<F, Fut, Out>(
     initial_table: Option<Table>,
     catalog: Arc<dyn Catalog>,
@@ -190,11 +189,20 @@ where
     F: Fn(Table) -> Fut + Send + Sync,
     Fut: Future<Output = Result<Out, CommitError>> + Send,
 {
+    if let Some(table) = &initial_table
+        && table.identifier() != &table_ident
+    {
+        bail!(
+            "iceberg commit: initial table {} does not match commit target {}",
+            table.identifier(),
+            table_ident
+        );
+    }
     let retry_strategy =
         exponential_backoff(Duration::from_millis(10), 10, Duration::from_secs(60))
             .map(jitter)
             .take(retry_num);
-    let initial_table = Mutex::new(initial_table);
+    let mut initial_table = initial_table;
 
     RetryIf::spawn(
         retry_strategy,
@@ -202,7 +210,7 @@ where
             let catalog = catalog.clone();
             let table_ident = table_ident.clone();
             let commit_action = &commit_action;
-            let initial_table = initial_table.lock().take();
+            let initial_table = initial_table.take();
             async move {
                 let table = match initial_table {
                     Some(table) => {
@@ -269,7 +277,7 @@ where
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(madsim)))]
 mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -477,6 +485,37 @@ mod tests {
         .expect_err("schema mismatch must fail");
 
         assert!(error.to_string().contains("schema evolution not supported"));
+        assert_eq!(catalog.loads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn initial_table_must_match_commit_target() {
+        let table = test_table();
+        let catalog = Arc::new(CountingCatalog {
+            table: table.clone(),
+            loads: AtomicUsize::new(0),
+        });
+        let attempts = AtomicUsize::new(0);
+
+        let error = run_with_retry_from_table(
+            Some(table),
+            catalog.clone(),
+            TableIdent::new(NamespaceIdent::new("db".to_owned()), "other".to_owned()),
+            0,
+            0,
+            None,
+            3,
+            log_context(),
+            |_table| {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<_, CommitError>(()) }
+            },
+        )
+        .await
+        .expect_err("a table with another identifier must be rejected");
+
+        assert!(error.to_string().contains("does not match commit target"));
+        assert_eq!(attempts.load(Ordering::SeqCst), 0);
         assert_eq!(catalog.loads.load(Ordering::SeqCst), 0);
     }
 }
