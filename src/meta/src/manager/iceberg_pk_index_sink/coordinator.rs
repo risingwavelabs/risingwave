@@ -385,7 +385,7 @@ impl IcebergPkIndexSinkCoordinator {
         };
 
         let initial_table = commit.staged_on_current_table.then(|| self.table.clone());
-        let refreshed_table = commit_one_epoch(
+        let (refreshed_table, removed_data_files) = commit_one_epoch(
             self.catalog.clone(),
             self.table.identifier().clone(),
             initial_table,
@@ -408,7 +408,7 @@ impl IcebergPkIndexSinkCoordinator {
         self.committed_data_file_partitions = self
             .committed_data_file_partitions
             .take()
-            .and_then(|committed| committed.advance(&self.table, &commit));
+            .and_then(|committed| committed.advance(&self.table, &commit, removed_data_files));
 
         // Leave the durable overwrite's row Pending so recovery must replay it.
         if !commit.merged.overwrite_files.is_empty() {
@@ -591,7 +591,12 @@ struct CommittedDataFilePartitions {
 impl CommittedDataFilePartitions {
     /// Advances the index across the commit that produced `table`'s current snapshot. Returns
     /// `None` when the index cannot be advanced locally and must be rebuilt by the next probe.
-    fn advance(mut self, table: &Table, commit: &EpochCommit) -> Option<Self> {
+    fn advance(
+        mut self,
+        table: &Table,
+        commit: &EpochCommit,
+        removed_data_files: bool,
+    ) -> Option<Self> {
         let snapshot = table.metadata().current_snapshot()?;
         if snapshot.snapshot_id() == self.snapshot_id {
             // The commit went to a branch other than the one the index reads.
@@ -599,8 +604,8 @@ impl CommittedDataFilePartitions {
         }
         if snapshot.snapshot_id() != commit.snapshot_id
             || snapshot.parent_snapshot_id() != Some(self.snapshot_id)
-            // Compaction removes data files, which are opaque in their serialized form.
-            || !commit.merged.overwrite_files.is_empty()
+            // Ordinary epochs only replace deletion vectors; only compaction removes data files.
+            || removed_data_files
         {
             return None;
         }
@@ -739,7 +744,7 @@ async fn commit_one_epoch(
     sink_id: SinkId,
     commit: &EpochCommit,
     retry_num: usize,
-) -> Result<Table, CommitError> {
+) -> Result<(Table, bool), CommitError> {
     let merged = commit.merged.clone();
     let snapshot_id = commit.snapshot_id;
     let materialized_add_files = commit.materialized_add_files.clone();
@@ -778,7 +783,8 @@ async fn commit_one_epoch(
                     if !merged.overwrite_files.is_empty() {
                         fail::fail_point!("iceberg_pk_index_compaction_replayed");
                     }
-                    return Ok(table);
+                    // The overwrite files were not materialized, so assume data files may have left.
+                    return Ok((table, true));
                 }
 
                 let schema = table.metadata().current_schema();
@@ -816,13 +822,13 @@ async fn commit_one_epoch(
                     .map(&materialize)
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let enable_delete_filter_manager = removes_data_files(&overwrite_files);
+                let removed_data_files = removes_data_files(&overwrite_files);
                 let txn = Transaction::new(&table);
                 let action = txn
                     .overwrite_files()
                     .set_snapshot_id(snapshot_id)
                     .set_target_branch(target_branch)
-                    .set_enable_delete_filter_manager(enable_delete_filter_manager)
+                    .set_enable_delete_filter_manager(removed_data_files)
                     .add_data_files(add_files)
                     .delete_files(overwrite_files);
                 let txn = action.apply(txn).map_err(|err| {
@@ -835,7 +841,7 @@ async fn commit_one_epoch(
                         anyhow!(err).context("commit iceberg pk-index sink transaction"),
                     )
                 })?;
-                Ok(table)
+                Ok((table, removed_data_files))
             }
         },
     )

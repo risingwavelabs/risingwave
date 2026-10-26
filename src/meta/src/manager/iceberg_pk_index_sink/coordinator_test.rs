@@ -640,7 +640,7 @@ async fn committed_data_file_partitions_follow_own_commits() -> Result<()> {
     let committed = coordinator
         .committed_data_file_partitions
         .take()
-        .and_then(|committed| committed.advance(&table, &commit))
+        .and_then(|committed| committed.advance(&table, &commit, false))
         .expect("own commit advances the index");
     assert_eq!(committed.snapshot_id, 2);
     coordinator.committed_data_file_partitions = Some(committed);
@@ -664,7 +664,7 @@ async fn committed_data_file_partitions_follow_own_commits() -> Result<()> {
 }
 
 #[tokio::test]
-async fn committed_data_file_partitions_reset_on_foreign_or_compaction_commits() -> Result<()> {
+async fn committed_data_file_partitions_reset_on_foreign_or_data_file_removals() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let table = committable_table(coalesce_test_table_with_partitioning(
         &temp_dir,
@@ -684,18 +684,25 @@ async fn committed_data_file_partitions_reset_on_foreign_or_compaction_commits()
     let foreign = append_data_file(&catalog, &table, second.clone(), 2).await?;
     let mut commit = empty_epoch_commit(3, true);
     commit.materialized_add_files = Some(vec![second.clone()]);
-    assert!(index().advance(&foreign, &commit).is_none());
+    assert!(index().advance(&foreign, &commit, false).is_none());
+
+    // Replacing deletion vectors leaves every data file in place, so the index advances.
+    let mut commit = empty_epoch_commit(2, true);
+    commit.materialized_add_files = Some(vec![second.clone()]);
+    let mut merged = (*commit.merged).clone();
+    merged.overwrite_files = vec![serialized_delete_without_partition("old-dv", "first")];
+    commit.merged = Arc::new(merged);
+    let advanced = index()
+        .advance(&foreign, &commit, false)
+        .expect("deletion-vector replacement keeps the index");
+    assert_eq!(advanced.snapshot_id, 2);
+    assert!(advanced.partitions.contains_key(second.file_path()));
 
     // Compaction removed data files that the index cannot see.
-    let mut commit = empty_epoch_commit(2, true);
-    commit.materialized_add_files = Some(vec![second]);
-    let mut merged = (*commit.merged).clone();
-    merged.overwrite_files = vec![serialized_file("compacted-input")];
-    commit.merged = Arc::new(merged);
-    assert!(index().advance(&foreign, &commit).is_none());
+    assert!(index().advance(&foreign, &commit, true).is_none());
 
     // Recovered epochs carry no materialized files.
     let commit = empty_epoch_commit(2, false);
-    assert!(index().advance(&foreign, &commit).is_none());
+    assert!(index().advance(&foreign, &commit, false).is_none());
     Ok(())
 }
