@@ -23,6 +23,7 @@ use risingwave_object_store::object::{
 };
 
 use super::PinCache;
+use crate::hummock::SstableStoreRef;
 use crate::monitor::ObjectStoreMetrics;
 
 pub(super) fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
@@ -51,7 +52,23 @@ pub(in crate::hummock) async fn download_and_publish_for_test(
     Ok(())
 }
 
-pub(super) fn in_memory_object_store() -> ObjectStoreRef {
+pub(in crate::hummock) async fn publish_pin_cache(
+    store: SstableStoreRef,
+    object_id: HummockSstableObjectId,
+    local_store: ObjectStoreRef,
+) -> (SstableStoreRef, Arc<PinCache>) {
+    let pin = PinCache::new(local_store, u64::MAX, 1, []).await.unwrap();
+    let path = store.get_sst_data_path(object_id);
+    let size = store.store().metadata(&path).await.unwrap().total_size as u64;
+    pin.register_objects([object_id]);
+    download_and_publish_for_test(&pin, store.store(), path, object_id, size)
+        .await
+        .unwrap();
+    let store = Arc::new(Arc::into_inner(store).unwrap().with_pin_cache(pin.clone()));
+    (store, pin)
+}
+
+pub(in crate::hummock) fn in_memory_object_store() -> ObjectStoreRef {
     Arc::new(ObjectStoreImpl::InMem(
         InMemObjectStore::for_test().monitored(
             Arc::new(ObjectStoreMetrics::unused()),
