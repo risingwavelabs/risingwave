@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use iceberg::io::FileIO;
@@ -24,6 +25,7 @@ use iceberg::{
     Catalog, Namespace, NamespaceIdent, Runtime, TableCommit, TableCreation, TableIdent,
 };
 use risingwave_pb::connector_service::SinkMetadata;
+use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 use tempfile::TempDir;
 
 use super::*;
@@ -115,13 +117,23 @@ fn test_table_at_location(location: &str, format_version: FormatVersion) -> Resu
 #[derive(Debug)]
 struct ReloadingTestCatalog {
     table: Mutex<Table>,
+    loads: AtomicUsize,
 }
 
 impl ReloadingTestCatalog {
     fn new(table: Table) -> Self {
         Self {
             table: Mutex::new(table),
+            loads: AtomicUsize::new(0),
         }
+    }
+
+    fn table(&self) -> Table {
+        self.table.lock().unwrap().clone()
+    }
+
+    fn load_count(&self) -> usize {
+        self.loads.load(Ordering::SeqCst)
     }
 
     fn set_table(&self, table: Table) {
@@ -132,6 +144,7 @@ impl ReloadingTestCatalog {
 #[async_trait]
 impl Catalog for ReloadingTestCatalog {
     async fn load_table(&self, _table: &TableIdent) -> iceberg::Result<Table> {
+        self.loads.fetch_add(1, Ordering::SeqCst);
         Ok(self.table.lock().unwrap().clone())
     }
 
@@ -580,26 +593,61 @@ fn serialized_delete_without_partition(path: &str, referenced: &str) -> Serializ
     .unwrap()
 }
 
-fn delete_only_aggregate(
-    table: &Table,
-    delete_files: Vec<SerializedDataFile>,
-) -> IcebergPkIndexSinkAggResult {
-    IcebergPkIndexSinkAggResult {
-        schema_id: 0,
-        partition_spec_id: table.metadata().default_partition_spec_id(),
-        format_version: Some(FormatVersion::V2),
-        data_files: vec![],
-        delete_files,
-        overwrite_files: vec![],
+async fn pending_sink_state_db() -> Result<DatabaseConnection> {
+    let db = Database::connect("sqlite::memory:").await?;
+    for sql in [
+        "CREATE TABLE object (oid INTEGER PRIMARY KEY)",
+        "CREATE TABLE pending_sink_state (\
+            sink_id INTEGER NOT NULL, \
+            epoch BIGINT NOT NULL, \
+            sink_state STRING NOT NULL, \
+            metadata BLOB, \
+            schema_change BLOB, \
+            PRIMARY KEY (sink_id, epoch), \
+            FOREIGN KEY (sink_id) REFERENCES object(oid) ON DELETE CASCADE\
+        )",
+        // `test_coordinator` uses sink 42.
+        "INSERT INTO object (oid) VALUES (42)",
+    ] {
+        db.execute(Statement::from_string(DbBackend::Sqlite, sql))
+            .await?;
     }
+    Ok(db)
 }
 
-fn backfilled_partitions(materialized_add_files: Option<Vec<DataFile>>) -> Vec<Struct> {
-    materialized_add_files
-        .unwrap()
-        .into_iter()
-        .map(|file| file.partition().clone())
-        .collect()
+fn writer_report(table: &Table, data_files: Vec<DataFile>) -> Result<PbIcebergPkIndexSinkMetadata> {
+    Ok(report(
+        PbIcebergPkIndexSinkRole::Writer,
+        Some(writer_metadata(
+            0,
+            table.metadata().default_partition_spec_id(),
+            serialize_data_files_default_spec(table, data_files)?,
+        )),
+    ))
+}
+
+fn merger_report(
+    table: &Table,
+    delete_files: Vec<SerializedDataFile>,
+    overwrite_files: Vec<DataFile>,
+) -> Result<PbIcebergPkIndexSinkMetadata> {
+    Ok(report(
+        PbIcebergPkIndexSinkRole::PositionDeleteMerger,
+        Some(merger_metadata(
+            0,
+            table.metadata().default_partition_spec_id(),
+            delete_files,
+            serialize_data_files_default_spec(table, overwrite_files)?,
+        )),
+    ))
+}
+
+fn staged_add_files(coordinator: &IcebergPkIndexSinkCoordinator) -> Vec<DataFile> {
+    coordinator
+        .waiting_commit
+        .as_ref()
+        .and_then(|commit| commit.materialized_add_files.clone())
+        .expect("pre-commit stages materialized files for a partitioned table")
 }
 
 #[tokio::test]
@@ -617,52 +665,88 @@ async fn committed_data_file_partitions_follow_own_commits() -> Result<()> {
         table.clone(),
         catalog.clone(),
         coalesce_test_config(),
-        DatabaseConnection::Disconnected,
+        pending_sink_state_db().await?,
     );
+    let loads = catalog.load_count();
 
-    // The first probe builds the index from the committed snapshot.
-    let (_, materialized) = coordinator
-        .backfill_delete_file_partitions(delete_only_aggregate(
-            &table,
-            vec![serialized_delete_without_partition(
-                "delete-first",
-                first.file_path(),
-            )],
-        ))
+    // Epoch 1 builds the index from the committed snapshot and adds a deletion vector.
+    coordinator
+        .pre_commit(
+            1,
+            vec![merger_report(
+                &table,
+                vec![serialized_delete_without_partition(
+                    "dv-1",
+                    first.file_path(),
+                )],
+                vec![],
+            )?],
+            None,
+        )
         .await?;
-    assert_eq!(backfilled_partitions(materialized), vec![id_partition(1)]);
+    let first_dv = staged_add_files(&coordinator)
+        .pop()
+        .expect("epoch 1 stages its deletion vector");
+    assert_eq!(first_dv.partition(), &id_partition(1));
+    coordinator.commit().await?;
+    // Pre-commit loads the table and the transaction refreshes it once on commit. The commit
+    // itself starts from the pre-commit table instead of loading it again.
+    assert_eq!(catalog.load_count(), loads + 2);
 
-    // This coordinator's own commit advances the index without rescanning manifests.
+    // Epoch 2 adds a data file and replaces the deletion vector of `first`.
     let second = output_data_file_with_partition(&table, "second", id_partition(2))?;
-    let table = append_data_file(&catalog, &table, second.clone(), 2).await?;
-    let mut commit = empty_epoch_commit(2, true);
-    commit.materialized_add_files = Some(vec![second.clone()]);
+    coordinator
+        .pre_commit(
+            2,
+            vec![
+                writer_report(&table, vec![second.clone()])?,
+                merger_report(
+                    &table,
+                    vec![serialized_delete_without_partition(
+                        "dv-2",
+                        first.file_path(),
+                    )],
+                    vec![first_dv],
+                )?,
+            ],
+            None,
+        )
+        .await?;
+    coordinator.commit().await?;
+    assert_eq!(catalog.load_count(), loads + 4);
     let committed = coordinator
         .committed_data_file_partitions
-        .take()
-        .and_then(|committed| committed.advance(&table, &commit, false))
-        .expect("own commit advances the index");
-    assert_eq!(committed.snapshot_id, 2);
-    coordinator.committed_data_file_partitions = Some(committed);
-    coordinator.table = without_object_cache(&table)?;
-    std::fs::remove_dir_all(temp_dir.path().join("metadata"))?;
-
-    let (_, materialized) = coordinator
-        .backfill_delete_file_partitions(delete_only_aggregate(
-            &table,
-            vec![
-                serialized_delete_without_partition("delete-first-again", first.file_path()),
-                serialized_delete_without_partition("delete-second", second.file_path()),
-            ],
-        ))
-        .await?;
+        .as_ref()
+        .expect("replacing a deletion vector keeps the index");
     assert_eq!(
-        backfilled_partitions(materialized),
-        vec![id_partition(1), id_partition(2)]
+        Some(committed.snapshot_id),
+        coordinator.current_snapshot_id()
     );
+
+    // Epoch 3 can only succeed by resolving both partitions from the advanced index.
+    catalog.set_table(without_object_cache(&catalog.table())?);
+    std::fs::remove_dir_all(temp_dir.path().join("metadata"))?;
+    coordinator
+        .pre_commit(
+            3,
+            vec![merger_report(
+                &table,
+                vec![
+                    serialized_delete_without_partition("dv-3", first.file_path()),
+                    serialized_delete_without_partition("dv-4", second.file_path()),
+                ],
+                vec![],
+            )?],
+            None,
+        )
+        .await?;
+    let partitions = staged_add_files(&coordinator)
+        .iter()
+        .map(|file| file.partition().clone())
+        .collect::<Vec<_>>();
+    assert_eq!(partitions, vec![id_partition(1), id_partition(2)]);
     Ok(())
 }
-
 #[tokio::test]
 async fn committed_data_file_partitions_reset_on_foreign_or_data_file_removals() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
@@ -686,19 +770,9 @@ async fn committed_data_file_partitions_reset_on_foreign_or_data_file_removals()
     commit.materialized_add_files = Some(vec![second.clone()]);
     assert!(index().advance(&foreign, &commit, false).is_none());
 
-    // Replacing deletion vectors leaves every data file in place, so the index advances.
-    let mut commit = empty_epoch_commit(2, true);
-    commit.materialized_add_files = Some(vec![second.clone()]);
-    let mut merged = (*commit.merged).clone();
-    merged.overwrite_files = vec![serialized_delete_without_partition("old-dv", "first")];
-    commit.merged = Arc::new(merged);
-    let advanced = index()
-        .advance(&foreign, &commit, false)
-        .expect("deletion-vector replacement keeps the index");
-    assert_eq!(advanced.snapshot_id, 2);
-    assert!(advanced.partitions.contains_key(second.file_path()));
-
     // Compaction removed data files that the index cannot see.
+    let mut commit = empty_epoch_commit(2, true);
+    commit.materialized_add_files = Some(vec![second]);
     assert!(index().advance(&foreign, &commit, true).is_none());
 
     // Recovered epochs carry no materialized files.
