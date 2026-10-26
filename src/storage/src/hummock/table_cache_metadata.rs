@@ -22,6 +22,8 @@ use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_pb::id::TableId;
 
+use super::refill_locality::RefillOwnership;
+
 pub(crate) struct TableCacheMetadata {
     pub role: Role,
     pub default_policy: CacheRefillPolicy,
@@ -41,6 +43,19 @@ impl TableCacheMetadata {
             table_cache_refill_policies: HashMap::new(),
             streaming_table_vnode_mapping: HashMap::new(),
             serving_table_vnode_mapping: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn ownership(&self) -> RefillOwnership<'_> {
+        RefillOwnership {
+            streaming: self
+                .role
+                .for_streaming()
+                .then_some(&self.streaming_table_vnode_mapping),
+            serving: self
+                .role
+                .for_serving()
+                .then_some(&self.serving_table_vnode_mapping),
         }
     }
 
