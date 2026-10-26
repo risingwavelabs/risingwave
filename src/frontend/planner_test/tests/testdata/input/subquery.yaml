@@ -281,6 +281,39 @@
     select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
   expected_outputs:
     - optimizer_error
+- name: a range predicate on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk > t1.a) from t1;
+  expected_outputs:
+    - optimizer_error
+- name: a disjunction on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1 or pk = 2);
+  expected_outputs:
+    - batch_plan
+- name: an equality between the primary key and another column does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = v);
+  expected_outputs:
+    - batch_plan
+- name: a correlated equality on the primary key bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk = t1.a) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: an equality on a primary key cast to decimal bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1.5);
+  expected_outputs:
+    - batch_plan
 
 - name: test grouping sets subquery 1
   sql: |

@@ -15,15 +15,19 @@
 use std::collections::HashSet;
 use std::ops::{Mul, Sub};
 
+use itertools::Itertools;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor, PlanVisitor};
+use crate::expr::{Expr, ExprImpl, ExprType};
 use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{
     self, LogicalPlanRef as PlanRef, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
 use crate::optimizer::plan_visitor::LogicalPlanNode;
 use crate::optimizer::property::Cardinality;
+use crate::utils::Condition;
 
 /// A visitor that computes the cardinality of a plan node.
 pub struct CardinalityVisitor;
@@ -49,6 +53,67 @@ impl CardinalityVisitor {
             input_card.min(0..=1)
         } else {
             input_card.min(0..)
+        }
+    }
+
+    /// Returns the columns that `predicate` fixes to a single value: those compared by `=` or
+    /// `IS NOT DISTINCT FROM` with a pure expression that references no input column, such as a
+    /// constant, a parameter, or a correlated input ref.
+    ///
+    /// Other conjunctions, such as `pk > 1`, `pk = other_col`, or `pk = 1 OR pk = 2`, can keep
+    /// several rows even when they reference every unique key column, so they are ignored.
+    fn fixed_columns(predicate: &Condition) -> HashSet<usize> {
+        let is_fixed_value = |e: &ExprImpl| !e.has_input_ref() && !e.has_subquery() && e.is_pure();
+        predicate
+            .conjunctions
+            .iter()
+            .filter_map(|conjunction| {
+                let ExprImpl::FunctionCall(call) = conjunction else {
+                    return None;
+                };
+                if !matches!(
+                    call.func_type(),
+                    ExprType::Equal | ExprType::IsNotDistinctFrom
+                ) {
+                    return None;
+                }
+                let [lhs, rhs] = call.inputs() else {
+                    return None;
+                };
+                if is_fixed_value(rhs) {
+                    Self::as_injective_input_ref(lhs)
+                } else if is_fixed_value(lhs) {
+                    Self::as_injective_input_ref(rhs)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Returns the column referenced by `expr` if `expr` is the column itself or a lossless cast
+    /// of it, so that equal results imply equal column values. The binder adds such casts when
+    /// comparing an integer column with a decimal, e.g. `CAST(int_pk AS DECIMAL) = 1.5`.
+    fn as_injective_input_ref(expr: &ExprImpl) -> Option<usize> {
+        match expr {
+            ExprImpl::InputRef(input_ref) => Some(input_ref.index()),
+            ExprImpl::FunctionCall(call)
+                if call.func_type() == ExprType::Cast
+                    && call.return_type() == DataType::Decimal =>
+            {
+                match call.inputs() {
+                    [input @ ExprImpl::InputRef(input_ref)]
+                        if matches!(
+                            input.return_type(),
+                            DataType::Int16 | DataType::Int32 | DataType::Int64
+                        ) =>
+                    {
+                        Some(input_ref.index())
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 }
@@ -129,19 +194,17 @@ impl LogicalPlanVisitor for CardinalityVisitor {
     }
 
     fn visit_logical_filter(&mut self, plan: &plan_node::LogicalFilter) -> Cardinality {
-        let eq_set = plan
-            .predicate()
-            .collect_input_refs(plan.input().schema().len())
-            .ones()
-            .collect();
+        let eq_set = Self::fixed_columns(plan.predicate());
         Self::visit_predicate(&*plan.input(), self.visit(plan.input()), eq_set)
     }
 
     fn visit_logical_scan(&mut self, plan: &plan_node::LogicalScan) -> Cardinality {
+        // The predicate refers to table columns, while the stream key refers to output columns.
+        let fixed_table_columns = Self::fixed_columns(plan.predicate());
         let eq_set = plan
-            .predicate()
-            .collect_input_refs(plan.table().columns.len())
-            .ones()
+            .output_col_idx()
+            .iter()
+            .positions(|table_column| fixed_table_columns.contains(table_column))
             .collect();
         Self::visit_predicate(plan, plan.table_cardinality(), eq_set)
     }

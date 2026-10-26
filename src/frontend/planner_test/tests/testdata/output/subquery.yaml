@@ -726,6 +726,64 @@
     CREATE TABLE t2(j INT);
     select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
   optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+- name: a range predicate on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk > t1.a) from t1;
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+- name: a disjunction on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1 or pk = 2);
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchMaxOneRow
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t2, columns: [t2.v], scan_ranges: [t2.pk = Int32(1), t2.pk = Int32(2)], distribution: SomeShard }
+- name: an equality between the primary key and another column does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = v);
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchMaxOneRow
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t2.v] }
+          └─BatchFilter { predicate: (t2.pk = t2.v) }
+            └─BatchScan { table: t2, columns: [t2.v, t2.pk], distribution: UpstreamHashShard(t2.pk) }
+- name: a correlated equality on the primary key bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk = t1.a) as v from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t2.pk AND IsNotNull(t2.pk), output: [t1.a, t2.v], lookup table: t2 }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(t1.a) }
+        └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, v, t1._row_id(hidden), t2.pk(hidden)], stream_key: [t1._row_id, a], pk_columns: [t1._row_id, a], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.a, t1._row_id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.a IS NOT DISTINCT FROM t2.pk, output: [t1.a, t2.v, t1._row_id, t2.pk] }
+        ├─StreamExchange { dist: HashShard(t1.a) }
+        │ └─StreamTableScan { table: t1, columns: [t1.a, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.pk) }
+          └─StreamFilter { predicate: IsNotNull(t2.pk) }
+            └─StreamTableScan { table: t2, columns: [t2.pk, t2.v], stream_scan_type: SnapshotBackfill, stream_key: [t2.pk], pk: [pk], dist: UpstreamHashShard(t2.pk) }
+- name: an equality on a primary key cast to decimal bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1.5);
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchValues { rows: [[]] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t2.v] }
+        └─BatchFilter { predicate: (t2.pk::Decimal = 1.5:Decimal) }
+          └─BatchScan { table: t2, columns: [t2.v, t2.pk], distribution: UpstreamHashShard(t2.pk) }
 - name: test grouping sets subquery 1
   sql: |
     CREATE TABLE integers(i INTEGER);
