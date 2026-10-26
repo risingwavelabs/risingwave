@@ -175,12 +175,11 @@ async fn bind_columns_from_source_for_non_cdc(
         | (Format::DebeziumMongo, Encode::Json) => None,
         (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
             if format_encode_options_to_consume.contains_key(PULSAR_SCHEMA_URL_KEY) {
-                if let Some(message_name) = try_consume_string_from_options(
+                let message_name = consume_string_from_options(
                     &mut format_encode_options_to_consume,
                     MESSAGE_NAME_KEY,
-                ) {
-                    stream_source_info.proto_message_name = message_name.0;
-                }
+                )?;
+                stream_source_info.proto_message_name = message_name.0;
             } else {
                 let (row_schema_location, use_schema_registry) =
                     get_schema_location(&mut format_encode_options_to_consume)?;

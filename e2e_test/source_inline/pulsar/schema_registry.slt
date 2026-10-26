@@ -206,6 +206,19 @@ with (
   scan.startup.mode = 'earliest'
 )
 format plain encode protobuf (
+  schema.pulsar.url = '${PULSAR_HTTP_URL}',
+  message = 'test.SchemaTestRecord'
+);
+
+statement error missing field message in options
+create source pulsar_protobuf_schema
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/rw-schema-protobuf',
+  scan.startup.mode = 'earliest'
+)
+format plain encode protobuf (
   schema.pulsar.url = '${PULSAR_HTTP_URL}'
 );
 
@@ -218,7 +231,8 @@ with (
   scan.startup.mode = 'earliest'
 )
 format plain encode protobuf (
-  schema.pulsar.url = '${PULSAR_HTTP_URL}'
+  schema.pulsar.url = '${PULSAR_HTTP_URL}',
+  message = 'test.SchemaTestRecord'
 );
 
 query T

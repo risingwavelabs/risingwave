@@ -111,7 +111,7 @@ pub struct ProtobufParserConfig {
 impl ProtobufParserConfig {
     pub async fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
-        let mut message_name = protobuf_config.message_name.clone();
+        let message_name = &protobuf_config.message_name;
 
         let wire_type = (&protobuf_config.schema_location).try_into()?;
         if protobuf_config.key_message_name.is_some() {
@@ -166,15 +166,12 @@ impl ProtobufParserConfig {
                         raw_schema.r#type
                     );
                 };
-                if message_name.is_empty() {
-                    message_name = root_message.full_name().to_owned();
-                }
                 root_message.parent_pool().clone()
             }
         };
 
         let message_descriptor = pool
-            .get_message_by_name(&message_name)
+            .get_message_by_name(message_name)
             .with_context(|| format!("cannot find message `{message_name}` in schema"))?;
 
         Ok(Self {
