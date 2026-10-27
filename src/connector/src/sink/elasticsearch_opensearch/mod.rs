@@ -19,3 +19,4 @@ pub mod elasticsearch;
 pub mod formatter;
 pub mod opensearch;
 pub mod remote_converter;
+pub mod sink;
