@@ -168,10 +168,10 @@ impl ElasticSearchOpenSearchSinkWriter {
         config: ElasticSearchOpenSearchConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        connector: &str,
+        client: ElasticSearchOpenSearchClient,
         is_append_only: bool,
     ) -> Result<Self> {
-        let client = Arc::new(config.build_client(connector)?);
+        let client = Arc::new(client);
         let formatter = ElasticSearchOpenSearchFormatter::new(
             pk_indices,
             &schema,
