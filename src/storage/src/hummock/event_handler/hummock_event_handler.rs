@@ -762,7 +762,7 @@ impl HummockEventHandler {
         {
             let metadata = &self.cache_metadata;
             if let Some(membership) = &mut self.pin_membership {
-                membership.advance_version(
+                membership.on_version_received(
                     &sst_delta_infos,
                     event.new_pinned_version.clone(),
                     version_deltas.as_deref(),
