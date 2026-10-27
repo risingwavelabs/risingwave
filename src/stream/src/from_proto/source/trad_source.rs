@@ -36,7 +36,7 @@ use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
     BatchAdbcSnowflakeListExecutor, BatchIcebergListExecutor, BatchOpendalFsListExecutor,
     BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
-    LoadRetryPolicy, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    LoadRetryPolicy, SourceExecutor, SourceStateTableHandler, StartKind, StreamSourceCore,
 };
 
 pub struct SourceExecutorBuilder;
@@ -272,6 +272,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             associated_table_id,
                             IcebergLoadTarget::from_ingest_mode(&ingest_mode),
                             LoadRetryPolicy::from_ingest_mode(&ingest_mode),
+                            StartKind::from_ingest_mode(&ingest_mode),
                         )
                         .boxed()
                     } else {

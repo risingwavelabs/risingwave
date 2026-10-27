@@ -30,7 +30,7 @@ use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::{Backoff, LoadRetryPolicy};
+use super::{Backoff, LoadRetryPolicy, StartKind};
 use crate::executor::LoadAction;
 use crate::executor::prelude::*;
 use crate::executor::source::{StreamSourceCore, barrier_to_message_stream};
@@ -44,15 +44,22 @@ enum ListState {
         backoff: Backoff,
     },
     /// Every file task has gone downstream.
-    Exhausted,
+    Exhausted {
+        snapshot_id: Option<i64>,
+    },
     /// The load gave up after repeated errors.
     Failed,
 }
 
 impl ListState {
-    fn start_load(&mut self, retry_policy: LoadRetryPolicy) {
-        *self = Self::Listing {
-            backoff: retry_policy.backoff(),
+    fn start_load(&mut self, retry_policy: LoadRetryPolicy, persisted_snapshot: Option<i64>) {
+        *self = match persisted_snapshot {
+            Some(snapshot_id) => Self::Exhausted {
+                snapshot_id: Some(snapshot_id),
+            },
+            None => Self::Listing {
+                backoff: retry_policy.backoff(),
+            },
         };
     }
 
@@ -61,7 +68,7 @@ impl ListState {
     }
 
     fn is_exhausted(&self) -> bool {
-        matches!(self, Self::Exhausted)
+        matches!(self, Self::Exhausted { .. })
     }
 
     fn is_failed(&self) -> bool {
@@ -80,15 +87,26 @@ impl ListState {
         *self = Self::Failed;
     }
 
-    fn mark_exhausted(&mut self) {
+    fn mark_exhausted(&mut self, snapshot_id: Option<i64>) {
         if self.is_listing() {
-            *self = Self::Exhausted;
+            *self = Self::Exhausted { snapshot_id };
         }
     }
 
     fn mark_idle(&mut self) {
         *self = Self::Idle;
     }
+}
+
+/// Output of the listing stream.
+enum ListingEvent {
+    File(Box<FileScanTask>),
+    Finished(Option<i64>),
+}
+
+/// The single row of the list state table, recording that listing `snapshot_id` has finished.
+fn marker_row(snapshot_id: i64) -> OwnedRow {
+    OwnedRow::new(vec![Some(ScalarImpl::Int64(snapshot_id))])
 }
 
 pub struct BatchIcebergListExecutor<S: StateStore> {
@@ -105,6 +123,7 @@ pub struct BatchIcebergListExecutor<S: StateStore> {
     associated_table_id: TableId,
     load_target: IcebergLoadTarget,
     retry_policy: LoadRetryPolicy,
+    start_kind: StartKind,
     /// Metrics for monitor.
     _metrics: Arc<StreamingMetrics>,
 }
@@ -121,6 +140,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         associated_table_id: Option<TableId>,
         load_target: IcebergLoadTarget,
         retry_policy: LoadRetryPolicy,
+        start_kind: StartKind,
     ) -> Self {
         assert!(associated_table_id.is_some());
         Self {
@@ -132,6 +152,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
             associated_table_id: associated_table_id.unwrap(),
             load_target,
             retry_policy,
+            start_kind,
             _metrics: metrics,
         }
     }
@@ -173,7 +194,16 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         );
 
         let pause_on_startup = first_barrier.is_pause_on_startup();
+        let first_epoch = first_barrier.epoch;
+
         yield Message::Barrier(first_barrier);
+
+        let state_table = self.stream_source_core.split_state_store.state_table_mut();
+        state_table.init_epoch(first_epoch).await?;
+        let mut persisted_snapshot = state_table
+            .get_from_one_value_table()
+            .await?
+            .map(|value| *value.as_int64());
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
 
         let mut stream = StreamReaderWithPause::<true, _>::new(
@@ -250,15 +280,28 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                             table_id = %self.associated_table_id,
                                             "load started, listing iceberg scan tasks"
                                         );
-                                        state.start_load(self.retry_policy);
-                                        // re-list iceberg scan tasks
-                                        let iceberg_list_stream = Self::list_iceberg_scan_task(
-                                            scan_planner.clone(),
-                                            self.load_target,
-                                            None,
-                                        )
-                                        .boxed();
-                                        stream.replace_data_stream(iceberg_list_stream);
+                                        if self.start_kind == StartKind::Reset
+                                            && let Some(snapshot_id) = persisted_snapshot.take()
+                                        {
+                                            state_table.delete(marker_row(snapshot_id));
+                                        }
+
+                                        state.start_load(self.retry_policy, persisted_snapshot);
+
+                                        if state.is_exhausted() {
+                                            stream.replace_data_stream(
+                                                futures::stream::pending().boxed(),
+                                            );
+                                        } else {
+                                            stream.replace_data_stream(
+                                                Self::list_iceberg_scan_task(
+                                                    scan_planner.clone(),
+                                                    self.load_target,
+                                                    None,
+                                                )
+                                                .boxed(),
+                                            );
+                                        }
                                     }
                                     _ => (),
                                 }
@@ -273,6 +316,19 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                 );
                                 state.mark_idle();
                             }
+
+                            if barrier.is_checkpoint()
+                                && persisted_snapshot.is_none()
+                                && let ListState::Exhausted {
+                                    snapshot_id: Some(snapshot_id),
+                                } = &state
+                            {
+                                state_table.insert(marker_row(*snapshot_id));
+                                persisted_snapshot = Some(*snapshot_id);
+                            }
+                            state_table
+                                .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                                .await?;
 
                             if barrier.is_checkpoint() && state.is_exhausted() {
                                 tracing::info!(
@@ -294,10 +350,12 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                         }
                         _ => unreachable!(),
                     },
-                    Either::Right(None) => state.mark_exhausted(),
-                    Either::Right(Some(file_scan_task)) => {
+                    Either::Right(ListingEvent::Finished(snapshot_id)) => {
+                        state.mark_exhausted(snapshot_id)
+                    }
+                    Either::Right(ListingEvent::File(file_scan_task)) => {
                         let data_file_path = file_scan_task.data_file_path.clone();
-                        let persisted_task = PersistedFileScanTask::encode(file_scan_task)?;
+                        let persisted_task = PersistedFileScanTask::encode(*file_scan_task)?;
                         let chunk = StreamChunk::from_rows(
                             &[(
                                 Op::Insert,
@@ -316,9 +374,9 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         }
     }
 
-    /// Waits for `delay` if set, then yields `Some(task)` for each file task, then `None` once
-    /// every task has been yielded.
-    #[try_stream(ok = Option<FileScanTask>, error = StreamExecutorError)]
+    /// Waits for `delay` if set, then yields a `File` for each file task, then `Finished` with
+    /// the listed snapshot id, or `None` for an empty table.
+    #[try_stream(ok = ListingEvent, error = StreamExecutorError)]
     async fn list_iceberg_scan_task(
         scan_planner: IcebergScanPlanner,
         load_target: IcebergLoadTarget,
@@ -329,6 +387,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         }
 
         let snapshot_plan = scan_planner.plan_load(load_target).await?;
+        let snapshot_id = snapshot_plan.as_ref().map(|plan| plan.snapshot_id);
 
         if let Some(snapshot_plan) = snapshot_plan {
             #[for_await]
@@ -339,10 +398,11 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                     scan_task.data_file_path,
                     scan_task
                 );
-                yield Some(scan_task);
+                yield ListingEvent::File(Box::new(scan_task));
             }
         }
-        yield None;
+
+        yield ListingEvent::Finished(snapshot_id);
     }
 }
 

@@ -24,7 +24,7 @@ use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
+use risingwave_common::types::{Scalar, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::{
     GLOBAL_ICEBERG_SCAN_METRICS, IcebergFileScanMetrics, IcebergScanMetricsLabels, IcebergScanOpts,
@@ -33,15 +33,13 @@ use risingwave_connector::source::iceberg::{
 use risingwave_connector::source::reader::desc::SourceDesc;
 use thiserror_ext::AsReport;
 
-use super::{Backoff, LoadRetryPolicy};
+use super::batch_iceberg_state::{FileAssignments, FileEntry};
+use super::{Backoff, LoadRetryPolicy, StartKind};
 use crate::executor::LoadAction;
 use crate::executor::prelude::*;
 use crate::executor::source::{ChunksWithState, StreamSourceCore, prune_additional_cols};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::{LoadProgress, LocalBarrierManager};
-
-/// Type alias for file entries in the queue: (`file_name`, `scan_task_json`)
-type FileEntry = (String, JsonbVal);
 
 #[derive(PartialEq, Eq)]
 enum FetchPhase {
@@ -64,8 +62,8 @@ struct FetchState {
     /// Queue of files waiting to be processed
     file_queue: VecDeque<FileEntry>,
 
-    /// Files currently being fetched by the batch reader.
-    /// Used for at-least-once recovery: on error, these files are re-queued.
+    /// Files the current batch reader has not finished yet. On a fetch error they are re-queued;
+    /// finished files are already marked done and are never read again.
     in_flight_files: Vec<FileEntry>,
 
     /// Delays retries after consecutive errors; once the backoff runs out, the load fails.
@@ -84,19 +82,24 @@ impl FetchState {
         }
     }
 
-    /// Clear previous work and start a new load.
-    fn start_load(&mut self) {
+    /// Clear previous work and start a new load from the persisted pending files.
+    fn start_load(&mut self, pending: Vec<FileEntry>) {
         tracing::info!(
-            "start_load: clearing file_queue_len={}, in_flight_files_len={}, splits_on_fetch={}",
+            "start_load: clearing file_queue_len={}, in_flight_files_len={}, splits_on_fetch={}, resuming pending_len={}",
             self.file_queue.len(),
             self.in_flight_files.len(),
-            self.splits_on_fetch
+            self.splits_on_fetch,
+            pending.len()
         );
-        self.file_queue.clear();
-        self.in_flight_files.clear();
-        self.splits_on_fetch = 0;
+        self.replace_pending(pending);
         self.backoff = self.retry_policy.backoff();
         self.phase = FetchPhase::Loading;
+    }
+
+    fn replace_pending(&mut self, pending: Vec<FileEntry>) {
+        self.file_queue = pending.into();
+        self.in_flight_files.clear();
+        self.splits_on_fetch = 0;
     }
 
     fn finish_listing(&mut self) {
@@ -136,20 +139,15 @@ impl FetchState {
             && (need_rebuild || (self.splits_on_fetch == 0 && !self.file_queue.is_empty()))
     }
 
-    /// Mark one file as successfully fetched and resets the backoff
-    fn mark_file_fetched(&mut self) {
+    /// Records that `path` was read in full and resets the backoff.
+    fn mark_file_fetched(&mut self, path: &str) {
         self.splits_on_fetch -= 1;
+        self.in_flight_files.retain(|(file, _)| file != path);
         self.backoff = self.retry_policy.backoff();
-
-        // When all files in the current batch complete successfully, clear in-flight tracking.
-        if self.splits_on_fetch == 0 {
-            tracing::info!("All files fetched successfully, clearing in_flight_files");
-            self.in_flight_files.clear();
-        }
     }
 
     /// Handle fetch error with at-least-once recovery.
-    /// Re-queues in-flight files to ensure no file is skipped.
+    /// Re-queues the unfinished in-flight files to ensure no file is skipped.
     fn handle_error_recovery(&mut self) {
         if !self.in_flight_files.is_empty() {
             // Re-queue in-flight files to the front (reverse to maintain original order)
@@ -208,16 +206,19 @@ impl ColumnIndices {
 ///
 /// # Load
 ///
-/// 1. Receives `Load { Start }` - clears state and starts a new load
-/// 2. Receives file chunks from upstream list executor - queues files for processing
-/// 3. On each barrier, starts batch reader if files are pending
-/// 4. Receives `Load { ListFinish }` - marks listing as complete
-/// 5. When all files processed, reports `ReaderDone`
+/// 1. Receives `Load { Start }`. A bounded load resumes from its persisted assignments; a full
+///    reload clears them and starts over.
+/// 2. Receives file chunks from the upstream list executor. Each file is persisted as pending and
+///    queued, unless it is already assigned (pending or done).
+/// 3. On each barrier, starts a batch reader if files are pending.
+/// 4. Marks a file done in the same epoch that emits its rows, so each file is emitted once.
+/// 5. Receives `Load { ListFinish }`, which marks listing as complete.
+/// 6. When all queued files are read, reports `ReaderDone`.
 ///
 /// # At-Least-Once Semantics
 ///
-/// On fetch errors, in-flight files are re-queued to ensure no file is skipped.
-/// This may cause duplicate reads, but guarantees data completeness.
+/// On fetch errors, unfinished in-flight files are re-queued to ensure no file is skipped.
+/// A file that failed partway may be read again, but a file marked done is never re-read.
 pub struct BatchIcebergFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -234,12 +235,14 @@ pub struct BatchIcebergFetchExecutor<S: StateStore> {
 
     associated_table_id: TableId,
     retry_policy: LoadRetryPolicy,
+    start_kind: StartKind,
 
     scan_metrics: Option<IcebergScanMetricsLabels>,
     file_scan_metrics: Option<IcebergFileScanMetrics>,
 }
 
 impl<S: StateStore> BatchIcebergFetchExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
@@ -248,6 +251,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         streaming_config: Arc<StreamingConfig>,
         associated_table_id: Option<TableId>,
         retry_policy: LoadRetryPolicy,
+        start_kind: StartKind,
     ) -> Self {
         assert!(associated_table_id.is_some());
         Self {
@@ -258,6 +262,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             streaming_config,
             associated_table_id: associated_table_id.unwrap(),
             retry_policy,
+            start_kind,
             scan_metrics: None,
             file_scan_metrics: None,
         }
@@ -271,10 +276,13 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         let mut upstream = self.upstream.take().unwrap().execute();
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let pause_on_startup = first_barrier.is_pause_on_startup();
+        let mut core = self.stream_source_core.take().unwrap();
+        let mut assignments = FileAssignments::new(core.split_state_store);
+        let first_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier);
+        assignments.handler.init_epoch(first_epoch).await?;
 
         // Initialize source description
-        let mut core = self.stream_source_core.take().unwrap();
         let source_desc = core
             .source_desc_builder
             .take()
@@ -356,7 +364,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             source_id = %core.source_id,
                             table_id = %self.associated_table_id,
                             in_flight_count = %in_flight_count,
-                            "re-queued in-flight files for retry to ensure at-least-once semantics"
+                            "re-queued unfinished files for retry"
                         );
                     }
 
@@ -384,12 +392,15 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 // ----- Upstream Messages (barriers, file assignments) -----
                 Ok(Either::Left(msg)) => match msg {
                     Message::Barrier(barrier) => {
-                        let need_rebuild = Self::handle_barrier_mutations(
+                        let mut need_rebuild = Self::handle_barrier_mutations(
                             &barrier,
                             core.source_id,
+                            self.start_kind,
                             &mut state,
                             &mut stream,
-                        );
+                            &mut assignments,
+                        )
+                        .await?;
 
                         if barrier.is_checkpoint() && state.is_failed() {
                             self.barrier_manager.report_load_progress(
@@ -401,7 +412,10 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             state.mark_idle();
                         }
 
-                        if barrier.is_checkpoint() && state.should_report_finished() {
+                        if barrier.is_checkpoint()
+                            && state.should_report_finished()
+                            && barrier.as_update_vnode_bitmap(self.actor_ctx.id).is_none()
+                        {
                             tracing::info!(
                                 ?barrier.epoch,
                                 actor_id = %self.actor_ctx.id,
@@ -418,7 +432,25 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             state.mark_idle();
                         }
 
+                        let post_commit = assignments
+                            .handler
+                            .commit_may_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        let update_vnodes = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
+
                         yield Message::Barrier(barrier);
+
+                        // Our vnodes changed mid-load: requeue from the pending files we now own,
+                        // and restart the reader so it stops reading files that moved to another actor.
+                        if post_commit
+                            .post_yield_barrier(update_vnodes)
+                            .await?
+                            .is_some()
+                            && matches!(state.phase, FetchPhase::Loading | FetchPhase::Draining)
+                        {
+                            state.replace_pending(assignments.pending().await?);
+                            need_rebuild = true;
+                        }
 
                         if state.should_start_batch_reader(need_rebuild) {
                             Self::start_batch_reader(
@@ -437,15 +469,26 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     Message::Chunk(chunk) => {
                         let files = Self::parse_file_assignments(&chunk);
                         tracing::debug!("Received {} file assignments from upstream", files.len());
-                        state.enqueue_files(files);
+                        for (path, task) in files {
+                            if assignments.assign(&path, task.clone()).await? {
+                                state.enqueue_files([(path, task)]);
+                            }
+                        }
+                        assignments.handler.try_flush().await?;
                     }
 
                     Message::Watermark(_) => unreachable!(),
                 },
 
                 // ----- Fetched Data from Iceberg Files -----
-                Ok(Either::Right(ChunksWithState { chunks, .. })) => {
-                    state.mark_file_fetched();
+                Ok(Either::Right(ChunksWithState {
+                    chunks,
+                    data_file_path,
+                    ..
+                })) => {
+                    assignments.mark_done(&data_file_path).await?;
+                    state.mark_file_fetched(&data_file_path);
+                    tracing::debug!(file = %data_file_path, "finished batch iceberg file");
 
                     scan_metrics.set_inflight_file_count(state.splits_on_fetch);
 
@@ -463,17 +506,19 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
     }
 
     /// Handle barrier mutations and return whether reader needs to be rebuilt.
-    fn handle_barrier_mutations(
+    async fn handle_barrier_mutations(
         barrier: &Barrier,
         source_id: SourceId,
+        start_kind: StartKind,
         state: &mut FetchState,
         stream: &mut StreamReaderWithPause<true, ChunksWithState>,
-    ) -> bool {
+        assignments: &mut FileAssignments<S>,
+    ) -> StreamExecutorResult<bool> {
         let Some(mutation) = barrier.mutation.as_deref() else {
-            return false;
+            return Ok(false);
         };
 
-        match mutation {
+        Ok(match mutation {
             Mutation::Pause => {
                 stream.pause_stream();
                 false
@@ -493,7 +538,11 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                         is_checkpoint = barrier.is_checkpoint(),
                         "load started"
                     );
-                    state.start_load();
+                    if start_kind == StartKind::Reset {
+                        assignments.clear().await?;
+                    }
+                    state.start_load(assignments.pending().await?);
+                    stream.replace_data_stream(stream::pending().boxed());
                     true
                 }
                 LoadAction::ListFinish => {
@@ -508,7 +557,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 }
             },
             _ => false,
-        }
+        })
     }
 
     /// Parse file assignments from an upstream chunk.
@@ -589,6 +638,8 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         let table = properties.load_table().await?;
 
         for task in tasks {
+            let data_file_path = task.data_file_path.clone();
+            tracing::debug!(file = %data_file_path, "reading batch iceberg file");
             let mut chunks = vec![];
             #[for_await]
             for chunk_result in scan_task_to_chunk_with_deletes(
@@ -604,7 +655,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
             yield ChunksWithState {
                 chunks,
-                data_file_path: String::new(), // Not needed for refreshable iceberg fetch
+                data_file_path,
                 last_read_pos: None,
             };
         }
