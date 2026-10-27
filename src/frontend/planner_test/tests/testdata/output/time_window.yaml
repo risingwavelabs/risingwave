@@ -338,3 +338,12 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: IsNotNull(t1.created_at) }
         └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
+- name: window_end must not be merged with a calendar-month addition
+  sql: |
+    create table t1 (id int, created_at timestamp);
+    select window_start + interval '1' month as cal, window_end from tumble(t1, created_at, interval '1' month);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [($expr1 + '1 mon':Interval) as $expr2, ($expr1 + '720:00:00':Interval) as $expr3] }
+      └─BatchProject { exprs: [t1.created_at, TumbleStart(t1.created_at, '720:00:00':Interval) as $expr1] }
+        └─BatchScan { table: t1, columns: [t1.created_at], distribution: SomeShard }

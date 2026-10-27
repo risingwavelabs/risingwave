@@ -169,3 +169,9 @@
     select * from hop(t1, created_at, interval '10' day, interval '1' month);
   expected_outputs:
   - batch_plan
+- name: window_end must not be merged with a calendar-month addition
+  sql: |
+    create table t1 (id int, created_at timestamp);
+    select window_start + interval '1' month as cal, window_end from tumble(t1, created_at, interval '1' month);
+  expected_outputs:
+  - batch_plan
