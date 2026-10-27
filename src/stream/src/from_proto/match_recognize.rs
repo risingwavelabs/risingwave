@@ -208,7 +208,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             .into());
         }
 
-        let vnode_bitmap = params.vnode_bitmap.clone().map(std::sync::Arc::new);
+        let vnode_bitmap = Some(std::sync::Arc::new(params.vnode_bitmap.clone()));
         let state_table_catalog = node
             .state_table
             .as_ref()

@@ -56,7 +56,11 @@ struct EdgeBuilderFragmentInfo {
 #[derive(Debug)]
 enum FragmentStatus {
     Existing(EdgeBuilderFragmentInfo),
+    /// Actors that will be newly instantiated, including actors of a persisted dormant fragment.
     New(EdgeBuilderFragmentInfo),
+    /// The fragment remains persisted, but its edges are removed from the runtime graph.
+    /// The caller remains responsible for adding its actors to the mutation's drop list.
+    Stopping(EdgeBuilderFragmentInfo),
     Changed {
         before: EdgeBuilderFragmentInfo,
         after: EdgeBuilderFragmentInfo,
@@ -168,8 +172,12 @@ impl FragmentEdgeBuildResult {
         }
     }
 
-    /// Apply the remaining edge updates after newly created actors have been collected.
+    /// Apply the remaining edge updates after newly instantiated actors have collected their
+    /// edges. Any remaining upstreams target existing actors and therefore become merge updates.
+    /// Actor lifecycle is caller-owned, so this method does not modify `dropped_actors` for either
+    /// changed or stopping fragments.
     pub(crate) fn apply_to_update_mutation(mut self, mutation: &mut UpdateMutation) {
+        let upstreams = take(&mut self.upstreams);
         let dispatchers = take(&mut self.dispatchers);
         let dispatcher_updates = take(&mut self.dispatcher_updates);
         let merge_updates = take(&mut self.merge_updates);
@@ -178,6 +186,18 @@ impl FragmentEdgeBuildResult {
         mutation
             .merge_update
             .extend(merge_updates.into_values().flatten());
+        for actor_upstreams in upstreams.into_values().flat_map(HashMap::into_iter) {
+            let (actor_id, actor_upstreams) = actor_upstreams;
+            for (upstream_fragment_id, added_upstream_actors) in actor_upstreams {
+                mutation.merge_update.push(MergeUpdate {
+                    actor_id,
+                    upstream_fragment_id,
+                    new_upstream_fragment_id: None,
+                    added_upstream_actors: added_upstream_actors.into_values().collect(),
+                    removed_upstream_actor_id: vec![],
+                });
+            }
+        }
         for (actor_id, dispatchers) in dispatchers.into_values().flatten() {
             mutation
                 .actor_new_dispatchers
@@ -363,6 +383,26 @@ impl FragmentEdgeBuilder<RegisteringFragments> {
         self
     }
 
+    /// Mark persisted fragments whose edges will be removed from the runtime graph.
+    /// The caller remains responsible for adding their actors to the mutation's drop list.
+    pub(crate) fn stop_existing_fragments(
+        mut self,
+        fragment_ids: impl IntoIterator<Item = FragmentId>,
+    ) -> Self {
+        for fragment_id in fragment_ids {
+            let status = self
+                .fragments
+                .remove(&fragment_id)
+                .expect("stopped fragment must already be registered");
+            let FragmentStatus::Existing(info) = status else {
+                panic!("fragment {fragment_id} must be existing before it is stopped");
+            };
+            self.fragments
+                .insert(fragment_id, FragmentStatus::Stopping(info));
+        }
+        self
+    }
+
     pub(crate) fn add_new_logical_fragments<'a>(
         mut self,
         fragments: impl IntoIterator<Item = (PartialGraphId, &'a Fragment)>,
@@ -468,8 +508,54 @@ impl FragmentEdgeBuilder<AddingRelations> {
         fragment_id: FragmentId,
         downstream: &DownstreamFragmentRelation,
     ) -> MetaResult<Self> {
-        self.add_edge_inner(fragment_id, downstream)?;
+        let installs_existing_relation = matches!(
+            (
+                self.fragments.get(&fragment_id),
+                self.fragments.get(&downstream.downstream_fragment_id),
+            ),
+            (
+                Some(FragmentStatus::Existing(_)),
+                Some(FragmentStatus::Existing(_)),
+            )
+        );
+        if installs_existing_relation {
+            self.add_existing_relation(fragment_id, downstream);
+        } else {
+            self.add_edge_inner(fragment_id, downstream)?;
+        }
         Ok(self)
+    }
+
+    fn add_existing_relation(
+        &mut self,
+        fragment_id: FragmentId,
+        downstream: &DownstreamFragmentRelation,
+    ) {
+        let FragmentStatus::Existing(fragment) = &self.fragments[&fragment_id] else {
+            unreachable!("checked existing source fragment")
+        };
+        let FragmentStatus::Existing(downstream_fragment) =
+            &self.fragments[&downstream.downstream_fragment_id]
+        else {
+            unreachable!("checked existing downstream fragment")
+        };
+        let (dispatchers, upstreams, no_shuffle_map) =
+            Self::compose_edge(fragment_id, fragment, downstream, downstream_fragment);
+        Self::add_no_shuffle_mapping(
+            &mut self.actor_new_no_shuffle,
+            fragment_id,
+            downstream.downstream_fragment_id,
+            no_shuffle_map,
+        );
+        Self::add_dispatchers(&mut self.result.dispatchers, fragment_id, dispatchers);
+        Self::add_merge_updates(
+            &mut self.result.merge_updates,
+            fragment_id,
+            downstream.downstream_fragment_id,
+            downstream_fragment,
+            upstreams,
+            [],
+        );
     }
 
     fn add_edge_inner(
@@ -555,10 +641,28 @@ impl FragmentEdgeBuilder<AddingRelations> {
                     before.actors.keys().copied(),
                 );
             }
+            (FragmentStatus::Stopping(fragment), FragmentStatus::Existing(downstream_fragment)) => {
+                Self::add_merge_updates(
+                    &mut self.result.merge_updates,
+                    fragment_id,
+                    downstream.downstream_fragment_id,
+                    downstream_fragment,
+                    HashMap::new(),
+                    fragment.actors.keys().copied(),
+                );
+            }
+            (FragmentStatus::Stopping(_), FragmentStatus::Stopping(_)) => {}
             (FragmentStatus::New(_), FragmentStatus::Changed { .. })
-            | (FragmentStatus::Changed { .. }, FragmentStatus::New(_)) => {
+            | (FragmentStatus::Changed { .. }, FragmentStatus::New(_))
+            | (FragmentStatus::Existing(_), FragmentStatus::Stopping(_))
+            | (FragmentStatus::New(_), FragmentStatus::Stopping(_))
+            | (FragmentStatus::Changed { .. }, FragmentStatus::Stopping(_))
+            | (
+                FragmentStatus::Stopping(_),
+                FragmentStatus::New(_) | FragmentStatus::Changed { .. },
+            ) => {
                 return Err(anyhow!(
-                    "an edge cannot connect new and changed fragments: {} -> {}",
+                    "unsupported fragment lifecycle edge: {} -> {}",
                     fragment_id,
                     downstream.downstream_fragment_id,
                 )
@@ -784,6 +888,7 @@ mod tests {
     enum TestStatus {
         Existing,
         New,
+        Stopping,
         Changed,
     }
 
@@ -856,6 +961,9 @@ mod tests {
                 TestStatus::New => {
                     builder.add_new_fragment_infos([(fragment_id, single_info(actor_id))]);
                 }
+                TestStatus::Stopping => {
+                    builder = builder.stop_existing_fragments([fragment_id]);
+                }
                 TestStatus::Changed => {
                     builder.replace_existing_fragment_actor_infos([(
                         fragment_id,
@@ -876,12 +984,27 @@ mod tests {
 
     #[test]
     fn test_endpoint_status_matrix() {
-        for source in [TestStatus::Existing, TestStatus::New, TestStatus::Changed] {
-            for target in [TestStatus::Existing, TestStatus::New, TestStatus::Changed] {
+        for source in [
+            TestStatus::Existing,
+            TestStatus::New,
+            TestStatus::Stopping,
+            TestStatus::Changed,
+        ] {
+            for target in [
+                TestStatus::Existing,
+                TestStatus::New,
+                TestStatus::Stopping,
+                TestStatus::Changed,
+            ] {
                 let result = build_status_pair(source, target);
                 if matches!(
                     (source, target),
-                    (TestStatus::New, TestStatus::Changed) | (TestStatus::Changed, TestStatus::New)
+                    (
+                        TestStatus::Existing | TestStatus::New | TestStatus::Changed,
+                        TestStatus::Stopping
+                    ) | (TestStatus::Stopping, TestStatus::New | TestStatus::Changed)
+                        | (TestStatus::New, TestStatus::Changed)
+                        | (TestStatus::Changed, TestStatus::New)
                 ) {
                     assert!(result.is_err(), "source={source:?}, target={target:?}");
                     continue;
@@ -914,7 +1037,10 @@ mod tests {
                         .any(|updates| !updates.is_empty()),
                     matches!(
                         (source, target),
-                        (TestStatus::Changed, TestStatus::Existing)
+                        (
+                            TestStatus::Stopping | TestStatus::Changed,
+                            TestStatus::Existing
+                        )
                     ),
                     "source={source:?}, target={target:?}"
                 );
@@ -1169,6 +1295,80 @@ mod tests {
     }
 
     #[test]
+    fn test_update_mutation_does_not_infer_dropped_actors() {
+        let caller_owned_drop = actor(99);
+
+        let mut changed = build_status_pair(TestStatus::Changed, TestStatus::Existing).unwrap();
+        let changed_actor = StreamActor {
+            actor_id: actor(2),
+            fragment_id: fragment(1),
+            vnode_bitmap: None,
+            mview_definition: Default::default(),
+            expr_context: None,
+            config_override: Default::default(),
+        };
+        changed.collect_actors_to_create(std::iter::once((
+            fragment(1),
+            &StreamNode::default(),
+            std::iter::once((&changed_actor, 1.into())),
+            [],
+        )));
+        let mut changed_mutation = UpdateMutation {
+            dropped_actors: vec![caller_owned_drop],
+            ..Default::default()
+        };
+        changed.apply_to_update_mutation(&mut changed_mutation);
+        assert_eq!(changed_mutation.dropped_actors, vec![caller_owned_drop]);
+
+        let stopping = build_status_pair(TestStatus::Stopping, TestStatus::Existing).unwrap();
+        let mut stopping_mutation = UpdateMutation {
+            dropped_actors: vec![caller_owned_drop],
+            ..Default::default()
+        };
+        stopping.apply_to_update_mutation(&mut stopping_mutation);
+        assert_eq!(stopping_mutation.dropped_actors, vec![caller_owned_drop]);
+    }
+
+    #[test]
+    fn test_update_mutation_lowers_new_to_existing_upstreams() {
+        let source = fragment(1);
+        let mut result = build_status_pair(TestStatus::New, TestStatus::Existing).unwrap();
+        let source_actor = StreamActor {
+            actor_id: actor(2),
+            fragment_id: source,
+            vnode_bitmap: None,
+            mview_definition: Default::default(),
+            expr_context: None,
+            config_override: Default::default(),
+        };
+        let node = StreamNode::default();
+        result.collect_actors_to_create(std::iter::once((
+            source,
+            &node,
+            std::iter::once((&source_actor, 1.into())),
+            [],
+        )));
+        let mut mutation = UpdateMutation::default();
+
+        result.apply_to_update_mutation(&mut mutation);
+
+        assert_eq!(mutation.merge_update.len(), 1);
+        let update = &mutation.merge_update[0];
+        assert_eq!(update.actor_id, actor(11));
+        assert_eq!(update.upstream_fragment_id, source);
+        assert_eq!(
+            update
+                .added_upstream_actors
+                .iter()
+                .map(|actor| actor.actor_id)
+                .collect::<Vec<_>>(),
+            vec![actor(2)]
+        );
+        assert!(update.removed_upstream_actor_id.is_empty());
+        assert_eq!(update.new_upstream_fragment_id, None);
+    }
+
+    #[test]
     fn test_attach_new_relation_dispatcher_to_add_mutation() {
         let source = fragment(1);
         let target = fragment(2);
@@ -1252,5 +1452,32 @@ mod tests {
         let mut builder = FragmentEdgeBuilder::new();
         builder.add_existing_fragment_infos([(fragment, single_info(1))]);
         builder.replace_existing_fragment_actor_infos([(fragment, single_info(1))]);
+    }
+    #[test]
+    fn test_attach_new_relation_between_existing_fragments() {
+        let source = fragment(1);
+        let target = fragment(2);
+        let mut builder = FragmentEdgeBuilder::new();
+        builder.add_existing_fragment_infos([(source, single_info(1)), (target, single_info(11))]);
+        let mut mutation = UpdateMutation::default();
+
+        let (edges, _) = builder
+            .finish_fragments()
+            .add_edge(source, &relation(target, DispatcherType::Broadcast))
+            .unwrap()
+            .build();
+        edges.apply_to_update_mutation(&mut mutation);
+
+        assert!(mutation.dispatcher_update.is_empty());
+        assert_eq!(
+            mutation.actor_new_dispatchers[&actor(1)].dispatchers[0].downstream_actor_id,
+            vec![actor(11)]
+        );
+        assert_eq!(mutation.merge_update.len(), 1);
+        let merge_update = &mutation.merge_update[0];
+        assert_eq!(merge_update.actor_id, actor(11));
+        assert_eq!(merge_update.upstream_fragment_id, source);
+        assert_eq!(merge_update.added_upstream_actors[0].actor_id, actor(1));
+        assert!(merge_update.removed_upstream_actor_id.is_empty());
     }
 }

@@ -21,6 +21,7 @@ indexmap = { workspace = true }
 itertools = { workspace = true }
 madsim = { workspace = true }
 maplit = "1"
+parquet = { workspace = true }
 paste = "1"
 pin-project = "1.1"
 pretty_assertions = "1"

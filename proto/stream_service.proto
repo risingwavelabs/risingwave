@@ -60,7 +60,8 @@ message BarrierCompleteResponse {
     uint64 consumed_epoch = 3;
     // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
-    uint64 pending_epoch_lag = 5;
+    reserved 5;
+    reserved "pending_epoch_lag";
     // Buffered rows that are yet to be consumed (used by locality backfill to report precise progress)
     uint64 buffered_rows = 6;
     uint32 fragment_id = 7;
@@ -144,6 +145,16 @@ message BarrierCompleteResponse {
     uint32 table_id = 2;
   }
   repeated RefreshFinishedActor refresh_finished_actors = 19;
+  message TableChangeLogProgress {
+    uint32 fragment_id = 1;
+    uint32 upstream_table_id = 2;
+    uint32 progress_table_id = 3;
+    // Minimum truncate epoch across the vnodes covered by this report.
+    uint64 min_truncate_epoch = 4;
+    // Vnodes covered by this compute node's locally aggregated progress.
+    common.Buffer vnode_bitmap = 5;
+  }
+  repeated TableChangeLogProgress table_change_log_progress = 20;
 }
 
 message StreamingControlStreamRequest {

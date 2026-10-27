@@ -47,10 +47,7 @@ pub use self::postgres::{
     postgres_cell_to_scalar_impl, postgres_cell_to_scalar_impl_strict, postgres_row_to_owned_row,
     postgres_row_to_owned_row_with_strict_pk,
 };
-pub use self::sql_server::{
-    ScalarImplTiberiusWrapper, sql_server_row_to_owned_row,
-    sql_server_row_to_owned_row_with_strict_pk,
-};
+pub use self::sql_server::{ScalarImplTiberiusWrapper, SqlServerRowDecoder};
 pub use self::unified::Access;
 pub use self::unified::json::{
     BigintUnsignedHandlingMode, JsonAccess, TimeHandling, TimestampHandling, TimestamptzHandling,

@@ -361,6 +361,12 @@ SELECT * FROM refresh_fs_t_mv;
 
 
 # ----
+# Test 8: DROP CONNECTOR is not supported on a refreshable table yet
+statement error DROP CONNECTOR on a refreshable table
+ALTER TABLE refresh_fs_t_on_conflict_ignore DROP CONNECTOR;
+
+
+# ----
 # Cleanup
 statement ok
 DROP TABLE refresh_fs_t cascade;

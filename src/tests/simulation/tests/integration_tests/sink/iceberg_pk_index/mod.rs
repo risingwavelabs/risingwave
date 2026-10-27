@@ -55,6 +55,9 @@
 //! - `iceberg_v3_persist_pre_commit_fail`  (F5; via `fail::cfg`)
 //! - `iceberg_v3_commit_prune_fail`        (F12; via `fail::cfg`)
 //! - `iceberg_v3_recovery_fail`            (recovery panic; via `fail::cfg`)
+//! - `iceberg_pk_index_compaction_before_end` (after independent Begin commits, before End)
+//! - `iceberg_pk_index_compaction_after_commit` (after Iceberg commits, before marking Committed)
+//! - `iceberg_pk_index_compaction_replayed` (idempotent replay of an already committed snapshot)
 //! - `MockIcebergV3Catalog::set_err_rate_txn_commit` (F11; mock catalog state)
 //!
 //! ## Test cases
@@ -169,15 +172,32 @@
 //! - **Asserts:**
 //!   - a fresh commit lands after the second recovery attempt
 //!
+//! ### 11. `failpoint_limited_test_pk_index_compaction_abandons_before_end`
+//!
+//! Fail after the independent Begin checkpoint is durable but before End is
+//! injected. The failed task must not overwrite Iceberg. A later manual
+//! compaction and a subsequent sink commit must both succeed.
+//!
+//! ### 12. `failpoint_limited_test_pk_index_compaction_recovers_after_commit`
+//!
+//! Fail after the Iceberg overwrite is durable but its metastore row is still Pending.
+//! Assert that recovery replays the pending epoch through the snapshot-id guard
+//! without a duplicate overwrite, and the sink keeps committing afterward.
+//!
+//! ### 13. `failpoint_limited_test_pk_index_compaction_resolves_concurrent_deletes`
+//!
+//! Pin read snapshot R in the simulated rewrite, then commit deletes before VACUUM FULL.
+//! Read the actual Parquet rows and position-delete artifacts to verify the resolver masks
+//! rows deleted after R, and that subsequent deletes and reinsertion still work.
+//!
 //! ## Known coverage gaps
 //!
 //! The current suite is strictly weaker than a "full 2PC fault matrix"
-//! spec would imply. Notable gaps, all of which would require new event
-//! emission hooks or a row-level data comparison helper to close:
+//! spec would imply. Notable gaps:
 //!
-//! - **No source-vs-sink data comparison.** Tests only count commit events;
-//!   they do not verify that every row inserted upstream actually landed in
-//!   the iceberg snapshots.
+//! - **No general source-vs-sink data comparison.** The deterministic compaction
+//!   conflict test compares actual Iceberg rows, but continuous-workload tests only
+//!   count commit events and do not compare all upstream rows against Iceberg.
 //! - **F5 and F12 firings are not directly asserted.** Their effect is
 //!   verified only indirectly (recovery progress + invariants).
 //! - **No `'P'` / `'C'` / `'R'` events.** Tests that want to "kill during
@@ -195,20 +215,108 @@ mod utils;
 // state: `fail::cfg` is process-wide and `MockCatalogGuard::register` panics
 // on double-register.
 mod failpoint_limited {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use anyhow::Result;
+    use risingwave_compactor::set_simulated_pk_index_compaction_result;
+    use risingwave_connector::sink::iceberg::IcebergCommitResult;
+    use risingwave_pb::connector_service::SinkMetadata;
+    use risingwave_pb::iceberg_compaction::PkIndexCompactionResult;
+    use risingwave_simulation::cluster::Session;
 
     use super::utils::{
-        WorkloadConfig, assert_invariants, spawn_continuous_workload,
-        start_v3_test_cluster_with_sink,
+        WorkloadConfig, assert_compaction_pending, assert_invariants, spawn_continuous_workload,
+        start_v3_test_cluster_with_compaction, start_v3_test_cluster_with_sink,
     };
+
+    struct CompactionTestGuard;
+
+    impl Drop for CompactionTestGuard {
+        fn drop(&mut self) {
+            fail::remove("iceberg_pk_index_compaction_before_end");
+            fail::remove("iceberg_pk_index_compaction_after_commit");
+            fail::remove("iceberg_pk_index_compaction_before_end_reached");
+            fail::remove("iceberg_pk_index_compaction_after_commit_reached");
+            fail::remove("iceberg_pk_index_compaction_replayed");
+            fail::remove("iceberg_pk_index_simulated_compaction_report");
+            set_simulated_pk_index_compaction_result(None);
+        }
+    }
+
+    async fn wait_for_counter(counter: &AtomicUsize, target: usize) -> Result<()> {
+        loop {
+            if counter.load(Ordering::SeqCst) >= target {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn wait_for_compaction_idle(session: &mut Session) -> Result<()> {
+        loop {
+            let status = session
+                .run(
+                    "SELECT schedule_state, pending_snapshot_count \
+                     FROM rw_catalog.rw_iceberg_compaction_schedules",
+                )
+                .await?;
+            if status == "idle 0" {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn wait_for_sink_commits_quiescent(
+        mock: &super::mock_catalog::MockIcebergV3Catalog,
+    ) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            let mut last_count = mock.committed_snapshot_count();
+            let mut stable_rounds = 0;
+            while stable_rounds < 20 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let count = mock.committed_snapshot_count();
+                if count == last_count {
+                    stable_rounds += 1;
+                } else {
+                    last_count = count;
+                    stable_rounds = 0;
+                }
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("sink commits did not quiesce"))?;
+        Ok(())
+    }
+
+    async fn install_simulated_compaction_report(
+        mock: &super::mock_catalog::MockIcebergV3Catalog,
+    ) -> Result<usize> {
+        let (output_files, input_file_paths, schema_id, partition_spec_id, read_snapshot_id) =
+            mock.rewrite_data_files().await?;
+        anyhow::ensure!(!output_files.is_empty(), "mock table has no data files");
+        let input_count = input_file_paths.len();
+        let output_files = SinkMetadata::try_from(&IcebergCommitResult {
+            schema_id,
+            partition_spec_id,
+            data_files: output_files,
+        })?;
+        set_simulated_pk_index_compaction_result(Some(PkIndexCompactionResult {
+            output_files: Some(output_files),
+            input_file_paths,
+            read_snapshot_id,
+        }));
+        fail::cfg("iceberg_pk_index_simulated_compaction_report", "return").unwrap();
+        Ok(input_count)
+    }
 
     /// No-fault sanity: continuous workload (mixed insert/upsert/delete)
     /// streams into the TABLE, V3 sink must commit at least one snapshot
     /// and remain consistent.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_basic_no_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -246,7 +354,6 @@ mod failpoint_limited {
     /// `recovery()`) and continue committing snapshots once the fault is
     /// cleared. Data must remain consistent (no duplicate file paths).
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_persist_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -305,7 +412,6 @@ mod failpoint_limited {
     /// probability during a fault window. V3's internal commit-retry path
     /// must reissue the commit; once the fault clears, snapshots resume.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_iceberg_commit_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -377,7 +483,6 @@ mod failpoint_limited {
     /// V3 must redrive `handle_commit` on recovery, hit iceberg's idempotency
     /// check, and eventually mark the row Committed once the fault clears.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_commit_prune_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -427,7 +532,6 @@ mod failpoint_limited {
     /// persisted: the `metadata().snapshots()` idempotency check at
     /// `coordinator_worker.rs` short-circuits the retry before any catalog call.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_idempotent_on_retry() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -492,7 +596,6 @@ mod failpoint_limited {
     /// repeated re-commits, etc.) without ever producing a duplicate
     /// snapshot.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_random_failures_corner_case() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -571,7 +674,6 @@ mod failpoint_limited {
     /// the kill and fault clear, V3 must re-register the sink, re-load the
     /// catalog, and resume committing.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_during_pre_commit() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -626,7 +728,6 @@ mod failpoint_limited {
     /// so neither a fresh iceberg write nor a duplicate `'r'` may appear
     /// after the kill. Once the fault clears, fresh commits resume.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_during_commit() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -693,7 +794,6 @@ mod failpoint_limited {
     /// Chaos: kill+restart meta several times back-to-back. Workload + sink
     /// must converge in the end without producing duplicate snapshots.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_repeatedly() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -742,7 +842,6 @@ mod failpoint_limited {
     /// case where a panic in the recovery task deadlocks meta — if that
     /// happens, this test will hang/fail rather than hide the bug.
     #[tokio::test]
-    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_recovery_during_recovery() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -786,6 +885,315 @@ mod failpoint_limited {
         })??;
 
         workload.shutdown().await;
+        assert_invariants(&mut handle).await?;
+        Ok(())
+    }
+
+    /// Failure after Begin is durable but before End is injected must
+    /// abandon that resolve, preserve the compaction backlog, and retry after
+    /// recovery. No Iceberg overwrite may be committed during the fault window.
+    #[tokio::test]
+    async fn failpoint_limited_test_pk_index_compaction_abandons_before_end() -> Result<()> {
+        let _guard = CompactionTestGuard;
+        let mut handle = start_v3_test_cluster_with_compaction(4).await?;
+        let resolver_failures = Arc::new(AtomicUsize::new(0));
+        fail::cfg("iceberg_pk_index_compaction_before_end", "return").unwrap();
+        fail::cfg_callback("iceberg_pk_index_compaction_before_end_reached", {
+            let resolver_failures = resolver_failures.clone();
+            move || {
+                resolver_failures.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+        let workload = spawn_continuous_workload(
+            &mut handle.cluster,
+            WorkloadConfig {
+                seed: 10,
+                pk_count: 1_000_000,
+                delete_ratio: 0.0,
+                ..WorkloadConfig::default()
+            },
+        );
+
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', 3),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("fewer than three sink commits before resolver retry"))??;
+        workload.shutdown().await;
+        wait_for_sink_commits_quiescent(&handle.mock).await?;
+
+        install_simulated_compaction_report(&handle.mock).await?;
+        let overwritten_before_fault = handle.mock.total_data_files_overwritten();
+
+        // Use the same deterministic manual-compaction entry point as the
+        // Iceberg PK-index SLTs. The automatic threshold is deliberately high
+        // so no unrelated in-flight compaction can affect this fault window.
+        let mut session = handle.cluster.start_session();
+        let mut vacuum_session = handle.cluster.start_session();
+        let vacuum_task =
+            tokio::spawn(async move { vacuum_session.run("VACUUM FULL test_v3_sink").await });
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            wait_for_counter(&resolver_failures, 1),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("resolver-start failpoint was not reached"))??;
+        anyhow::ensure!(
+            handle.mock.total_data_files_overwritten() == overwritten_before_fault,
+            "resolver start failure committed an overwrite; trace = {}",
+            handle.mock.get_event_trace()
+        );
+
+        let first_vacuum_result = tokio::time::timeout(Duration::from_secs(60), vacuum_task)
+            .await
+            .map_err(|_| anyhow::anyhow!("VACUUM did not return after resolver-start failure"))??;
+        anyhow::ensure!(
+            first_vacuum_result.is_err(),
+            "failed compaction reported success"
+        );
+
+        fail::remove("iceberg_pk_index_compaction_before_end");
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            wait_for_compaction_idle(&mut session),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("compaction did not settle after Begin failure"))??;
+        let input_count = install_simulated_compaction_report(&handle.mock).await?;
+        session.run("VACUUM FULL test_v3_sink").await?;
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            wait_for_compaction_idle(&mut session),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "compaction did not retry to completion after resolver-start failure; trace = {}",
+                handle.mock.get_event_trace()
+            )
+        })??;
+        anyhow::ensure!(
+            handle.mock.total_data_files_overwritten() == overwritten_before_fault + input_count,
+            "fresh compaction after abandonment must rewrite its inputs exactly once"
+        );
+
+        let committed = handle.mock.count_events('I');
+        session
+            .run("INSERT INTO test_v3_table VALUES (10001, 'after-resolve-retry')")
+            .await?;
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', committed + 1),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("sink did not commit after compaction retry"))??;
+        fail::remove("iceberg_pk_index_simulated_compaction_report");
+        set_simulated_pk_index_compaction_result(None);
+        assert_invariants(&mut handle).await?;
+        Ok(())
+    }
+
+    /// Fail after Iceberg commits but before its Pending row becomes Committed.
+    /// Recovery must actually replay that epoch without duplicating the overwrite.
+    #[tokio::test]
+    async fn failpoint_limited_test_pk_index_compaction_recovers_after_commit() -> Result<()> {
+        let _guard = CompactionTestGuard;
+        let mut handle = start_v3_test_cluster_with_compaction(4).await?;
+        let commit_prune_failures = Arc::new(AtomicUsize::new(0));
+        let replays = Arc::new(AtomicUsize::new(0));
+        fail::cfg_callback("iceberg_pk_index_compaction_replayed", {
+            let replays = replays.clone();
+            move || {
+                replays.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+        fail::cfg("iceberg_pk_index_compaction_after_commit", "return").unwrap();
+        fail::cfg_callback("iceberg_pk_index_compaction_after_commit_reached", {
+            let commit_prune_failures = commit_prune_failures.clone();
+            move || {
+                commit_prune_failures.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+        let workload = spawn_continuous_workload(
+            &mut handle.cluster,
+            WorkloadConfig {
+                seed: 11,
+                pk_count: 1_000_000,
+                delete_ratio: 0.0,
+                ..WorkloadConfig::default()
+            },
+        );
+
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', 3),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("fewer than three sink commits before compaction"))??;
+        workload.shutdown().await;
+        wait_for_sink_commits_quiescent(&handle.mock).await?;
+        let input_count = install_simulated_compaction_report(&handle.mock).await?;
+        let overwritten_before_compaction = handle.mock.total_data_files_overwritten();
+        let mut session = handle.cluster.start_session();
+        let mut vacuum_session = handle.cluster.start_session();
+        let vacuum_task =
+            tokio::spawn(async move { vacuum_session.run("VACUUM FULL test_v3_sink").await });
+        let post_commit_reached = tokio::time::timeout(
+            Duration::from_secs(30),
+            wait_for_counter(&commit_prune_failures, 1),
+        )
+        .await;
+        if post_commit_reached.is_err() {
+            let schedule = session
+                .run(
+                    "SELECT schedule_state, pending_snapshot_count \
+                     FROM rw_catalog.rw_iceberg_compaction_schedules",
+                )
+                .await?;
+            anyhow::bail!(
+                "coordinator did not reach the post-commit failpoint; schedule = {}; trace = {}",
+                schedule,
+                handle.mock.get_event_trace()
+            );
+        }
+        post_commit_reached.unwrap()?;
+        anyhow::ensure!(
+            handle.mock.total_data_files_overwritten() > overwritten_before_compaction,
+            "post-commit failpoint fired before the Iceberg overwrite became durable"
+        );
+        let first_vacuum_result = tokio::time::timeout(Duration::from_secs(60), vacuum_task)
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("VACUUM did not return after commit-and-prune failure")
+            })??;
+        anyhow::ensure!(
+            first_vacuum_result.is_err(),
+            "failed commit-and-prune reported success"
+        );
+        assert_compaction_pending(&mut handle).await?;
+        tokio::time::timeout(Duration::from_secs(60), wait_for_counter(&replays, 1))
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("recovery did not replay the Pending compaction epoch")
+            })??;
+        anyhow::ensure!(
+            handle.mock.count_events('r') == 0,
+            "replay bypassed the snapshot-id guard and reached the catalog twice"
+        );
+        fail::remove("iceberg_pk_index_compaction_after_commit");
+
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            wait_for_compaction_idle(&mut session),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("compaction did not converge after Pending epoch replay"))??;
+        anyhow::ensure!(
+            handle.mock.total_data_files_overwritten()
+                == overwritten_before_compaction + input_count,
+            "recovery duplicated the compaction overwrite"
+        );
+
+        let committed = handle.mock.count_events('I');
+        session
+            .run("INSERT INTO test_v3_table VALUES (10002, 'after-pending-replay')")
+            .await?;
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', committed + 1),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "sink did not resume after Pending epoch replay; trace = {}",
+                handle.mock.get_event_trace()
+            )
+        })??;
+        fail::remove("iceberg_pk_index_simulated_compaction_report");
+        set_simulated_pk_index_compaction_result(None);
+        assert_invariants(&mut handle).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn failpoint_limited_test_pk_index_compaction_resolves_concurrent_deletes() -> Result<()>
+    {
+        let _guard = CompactionTestGuard;
+        let mut handle = start_v3_test_cluster_with_compaction(4).await?;
+        let mut session = handle.cluster.start_session();
+        session
+            .run(
+                "INSERT INTO test_v3_table SELECT id, 'row-' || id \
+                 FROM generate_series(0, 11) AS t(id)",
+            )
+            .await?;
+        session.run("FLUSH").await?;
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', 1),
+        )
+        .await??;
+        wait_for_sink_commits_quiescent(&handle.mock).await?;
+        let mut expected: BTreeMap<_, _> = (0..12).map(|id| (id, format!("row-{id}"))).collect();
+        assert_eq!(handle.mock.live_rows().await?, expected);
+
+        // The report's read snapshot R and copied outputs must precede these durable deletes.
+        let input_count = install_simulated_compaction_report(&handle.mock).await?;
+        let committed = handle.mock.count_events('I');
+        session
+            .run("DELETE FROM test_v3_table WHERE id IN (1, 4, 9)")
+            .await?;
+        session.run("FLUSH").await?;
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', committed + 1),
+        )
+        .await??;
+        wait_for_sink_commits_quiescent(&handle.mock).await?;
+        for id in [1, 4, 9] {
+            expected.remove(&id);
+        }
+        assert_eq!(handle.mock.live_rows().await?, expected);
+
+        let overwritten = handle.mock.total_data_files_overwritten();
+        session.run("VACUUM FULL test_v3_sink").await?;
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            wait_for_compaction_idle(&mut session),
+        )
+        .await??;
+        assert_eq!(
+            handle.mock.total_data_files_overwritten(),
+            overwritten + input_count
+        );
+        assert_eq!(
+            handle.mock.live_rows().await?,
+            expected,
+            "compaction resurrected rows deleted after read snapshot R"
+        );
+
+        // Both surviving and previously deleted keys must use the rebuilt index.
+        let committed = handle.mock.count_events('I');
+        session
+            .run("DELETE FROM test_v3_table WHERE id = 2")
+            .await?;
+        session
+            .run("INSERT INTO test_v3_table VALUES (1, 'reinserted')")
+            .await?;
+        session.run("FLUSH").await?;
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', committed + 1),
+        )
+        .await??;
+        wait_for_sink_commits_quiescent(&handle.mock).await?;
+        expected.remove(&2);
+        expected.insert(1, "reinserted".to_owned());
+        assert_eq!(handle.mock.live_rows().await?, expected);
         assert_invariants(&mut handle).await?;
         Ok(())
     }

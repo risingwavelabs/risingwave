@@ -714,6 +714,12 @@ seed_old_cluster() {
   echo "--- ASOF JOIN TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/asof-join/validate_original.slt"
 
+  echo "--- DECIMAL TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/decimal/seed.slt"
+
+  echo "--- DECIMAL TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/decimal/validate_original.slt"
+
   echo "--- CDC TEST: Seeding old cluster with data"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/seed.slt"
 
@@ -792,6 +798,9 @@ validate_new_cluster() {
 
   echo "--- ASOF JOIN TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/asof-join/validate_restart.slt"
+
+  echo "--- DECIMAL TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/decimal/validate_restart.slt"
 
   echo "--- CDC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"

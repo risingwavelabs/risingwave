@@ -61,7 +61,7 @@ use crate::source::cdc::external::{
 /// * `port` - MySQL server port
 /// * `username` - MySQL username
 /// * `password` - MySQL password
-/// * `database` - Database name
+/// * `database` - Optional default database; omit for server-wide queries
 /// * `ssl_mode` - SSL mode configuration (disabled, preferred, required, verify-ca, verify-full)
 ///
 /// # Returns
@@ -71,7 +71,7 @@ pub fn build_mysql_connection_pool(
     port: u16,
     username: &str,
     password: &str,
-    database: &str,
+    database: Option<&str>,
     ssl_mode: SslMode,
 ) -> mysql_async::Pool {
     let mut opts_builder = mysql_async::OptsBuilder::default()
@@ -79,7 +79,7 @@ pub fn build_mysql_connection_pool(
         .pass(Some(password))
         .ip_or_hostname(host)
         .tcp_port(port)
-        .db_name(Some(database));
+        .db_name(database);
 
     opts_builder = match ssl_mode {
         SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
@@ -253,7 +253,7 @@ impl MySqlExternalTable {
             config.port.parse::<u16>().unwrap(),
             &config.username,
             &config.password,
-            &config.database,
+            Some(&config.database),
             config.ssl_mode.clone(),
         );
         let pk_infos = MySqlExternalTableReader::query_upstream_pk_infos(
@@ -652,7 +652,7 @@ impl MySqlExternalTableReader {
             config.port.parse::<u16>().unwrap(),
             &config.username,
             &config.password,
-            &config.database,
+            Some(&config.database),
             config.ssl_mode,
         );
 
@@ -666,6 +666,7 @@ impl MySqlExternalTableReader {
         // Query MySQL primary key infos for type casting.
         let upstream_mysql_pk_infos =
             Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+        Self::validate_upstream_pk_columns(&upstream_mysql_pk_infos, &rw_schema, &pk_indices)?;
         // Get MySQL version
         let (major_version, minor_version, is_mariadb) = Self::get_mysql_version(&pool).await?;
         let mysql_version = (major_version, minor_version);
@@ -689,7 +690,11 @@ impl MySqlExternalTableReader {
 
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         // schema name is the database name in mysql
-        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
+        format!(
+            "`{}`.`{}`",
+            table_name.schema_name.replace('`', "``"),
+            table_name.table_name.replace('`', "``")
+        )
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -709,12 +714,16 @@ impl MySqlExternalTableReader {
         let mut conn = pool.get_conn().await?;
 
         // Query primary key columns and their data types.
-        let sql = "SELECT COLUMN_NAME, COLUMN_TYPE
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = ?
-            AND TABLE_NAME = ?
-            AND COLUMN_KEY = 'PRI'
-            ORDER BY ORDINAL_POSITION";
+        let sql = "SELECT s.COLUMN_NAME, c.COLUMN_TYPE
+            FROM INFORMATION_SCHEMA.STATISTICS AS s
+            JOIN INFORMATION_SCHEMA.COLUMNS AS c
+              ON c.TABLE_SCHEMA = s.TABLE_SCHEMA
+             AND c.TABLE_NAME = s.TABLE_NAME
+             AND c.COLUMN_NAME = s.COLUMN_NAME
+            WHERE s.TABLE_SCHEMA = ?
+              AND s.TABLE_NAME = ?
+              AND s.INDEX_NAME = 'PRIMARY'
+            ORDER BY s.SEQ_IN_INDEX";
 
         let rs: Vec<mysql_async::Row> = conn.exec(sql, (database, table)).await?;
 
@@ -730,6 +739,45 @@ impl MySqlExternalTableReader {
         drop(conn);
 
         Ok(column_infos)
+    }
+
+    fn validate_upstream_pk_columns(
+        upstream_pk_infos: &[(String, ColumnType)],
+        rw_schema: &Schema,
+        pk_indices: &[usize],
+    ) -> ConnectorResult<()> {
+        let expected_pk_names = pk_indices
+            .iter()
+            .map(|&index| rw_schema.fields[index].name.as_str())
+            .collect_vec();
+        let upstream_pk_names = upstream_pk_infos
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect_vec();
+
+        if upstream_pk_names.is_empty() {
+            return Err(anyhow!(
+                "upstream MySQL primary key metadata is empty; expected columns {:?}",
+                expected_pk_names
+            )
+            .into());
+        }
+
+        if upstream_pk_names.len() != expected_pk_names.len()
+            || upstream_pk_names
+                .iter()
+                .zip_eq_fast(&expected_pk_names)
+                .any(|(upstream, expected)| !upstream.eq_ignore_ascii_case(expected))
+        {
+            return Err(anyhow!(
+                "upstream MySQL primary key columns {:?} do not match expected columns {:?}",
+                upstream_pk_names,
+                expected_pk_names
+            )
+            .into());
+        }
+
+        Ok(())
     }
 
     /// Check whether a column is `BIGINT UNSIGNED`.
@@ -807,8 +855,9 @@ impl MySqlExternalTableReader {
             // fill in start primary key params
             let params: Vec<_> = primary_keys
                 .iter()
+                .enumerate()
                 .zip_eq_fast(start_pk_row.into_iter())
-                .map(|(pk, datum)| {
+                .map(|((idx, pk), datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
                         let val = match ty {
@@ -840,7 +889,7 @@ impl MySqlExternalTableReader {
                             }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
-                        ConnectorResult::Ok((pk.to_lowercase(), val))
+                        ConnectorResult::Ok((format!("p{}", idx), val))
                     } else {
                         bail!("primary key {} cannot be null", pk);
                     }
@@ -889,34 +938,22 @@ impl MySqlExternalTableReader {
     fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
-        conditions.push(format!(
-            "({} > :{})",
-            Self::quote_column(&columns[0]),
-            columns[0].to_lowercase()
-        ));
+        conditions.push(format!("({} > :p0)", Self::quote_column(&columns[0])));
         for i in 2..=columns.len() {
             // '=' condition
             let mut condition = String::new();
             for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
-                    condition.push_str(&format!(
-                        "({} = :{})",
-                        Self::quote_column(col),
-                        col.to_lowercase()
-                    ));
+                    condition.push_str(&format!("({} = :p{})", Self::quote_column(col), j));
                 } else {
-                    condition.push_str(&format!(
-                        " AND ({} = :{})",
-                        Self::quote_column(col),
-                        col.to_lowercase()
-                    ));
+                    condition.push_str(&format!(" AND ({} = :p{})", Self::quote_column(col), j));
                 }
             }
             // '>' condition
             condition.push_str(&format!(
-                " AND ({} > :{})",
+                " AND ({} > :p{})",
                 Self::quote_column(&columns[i - 1]),
-                columns[i - 1].to_lowercase()
+                i - 1
             ));
             conditions.push(format!("({})", condition));
         }
@@ -928,7 +965,7 @@ impl MySqlExternalTableReader {
     }
 
     fn quote_column(column: &str) -> String {
-        format!("`{}`", column)
+        format!("`{}`", column.replace('`', "``"))
     }
 }
 
@@ -1032,6 +1069,45 @@ mod tests {
                 CdcKeyComparison::Native,
             ]
         );
+    }
+
+    #[test]
+    fn test_validate_upstream_pk_columns() {
+        let rw_schema = Schema::new(vec![
+            Field::with_name(DataType::Int64, "id"),
+            Field::with_name(DataType::Varchar, "tenant"),
+        ]);
+        let int_type = || ColumnType::BigInt(Default::default());
+        let validate = |pk_infos: &[(String, ColumnType)]| {
+            MySqlExternalTableReader::validate_upstream_pk_columns(pk_infos, &rw_schema, &[0, 1])
+        };
+
+        let valid_pk_infos = vec![
+            ("id".to_owned(), int_type()),
+            ("tenant".to_owned(), int_type()),
+        ];
+        assert!(validate(&valid_pk_infos).is_ok());
+
+        for invalid_pk_infos in [
+            // incorrect order
+            vec![
+                ("tenant".to_owned(), int_type()),
+                ("id".to_owned(), int_type()),
+            ],
+            // incomplete
+            vec![("id".to_owned(), int_type())],
+            // extra index
+            vec![
+                ("id".to_owned(), int_type()),
+                ("tenant".to_owned(), int_type()),
+                ("extra".to_owned(), int_type()),
+            ],
+        ] {
+            assert!(
+                validate(&invalid_pk_infos).is_err(),
+                "unexpectedly accepted {invalid_pk_infos:?}"
+            );
+        }
     }
 
     #[test]
@@ -1146,13 +1222,13 @@ mod tests {
     fn test_mysql_filter_expr() {
         let cols = vec!["id".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(`id` > :id)");
+        assert_eq!(expr, "(`id` > :p0)");
 
         let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
-            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+            "(`aa` > :p0) OR ((`aa` = :p0) AND (`bb` > :p1)) OR ((`aa` = :p0) AND (`bb` = :p1) AND (`cc` > :p2))"
         );
     }
 

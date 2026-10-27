@@ -18,6 +18,18 @@ drop source if exists pulsar_avro_schema_mismatch;
 statement ok
 drop source if exists pulsar_avro_schema_upsert;
 
+statement ok
+drop materialized view if exists pulsar_json_schema_mv;
+
+statement ok
+drop source if exists pulsar_json_schema;
+
+statement ok
+drop source if exists pulsar_json_schema_mismatch;
+
+statement ok
+drop source if exists pulsar_json_schema_upsert;
+
 system ok
 python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/default/rw-schema-avro' --force
 
@@ -41,7 +53,7 @@ EOF
 
 system ok
 python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-type json --topic 'persistent://public/default/rw-schema-json' <<EOF
-{"id":3,"name":"Carol"}
+{"id":1,"name":"Alice"}
 EOF
 
 statement error expected Pulsar AVRO schema, got JSON
@@ -91,6 +103,88 @@ select id, name, category from pulsar_avro_schema_mv;
 2 Bob premium
 3 Carol unknown
 
+
+statement error expected Pulsar JSON schema, got AVRO
+create source pulsar_json_schema_mismatch
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/rw-schema-avro',
+  scan.startup.mode = 'earliest'
+)
+format plain encode json (
+  schema.pulsar.url = '${PULSAR_HTTP_URL}'
+);
+
+statement error Pulsar schema requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO or JSON
+create source pulsar_json_schema_upsert
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/rw-schema-json',
+  scan.startup.mode = 'earliest'
+)
+format upsert encode json (
+  schema.pulsar.url = '${PULSAR_HTTP_URL}'
+);
+
+statement ok
+create source pulsar_json_schema
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/rw-schema-json',
+  scan.startup.mode = 'earliest'
+)
+format plain encode json (
+  schema.pulsar.url = '${PULSAR_HTTP_URL}'
+);
+
+query T
+select substring(definition, 1, position(' WITH' in definition) - 1) from rw_sources where name = 'pulsar_json_schema';
+----
+CREATE SOURCE pulsar_json_schema (id INT, name CHARACTER VARYING)
+
+statement error alter source with schema registry
+alter source pulsar_json_schema add column category varchar;
+
+system ok
+python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-type json --schema-version 1 --topic 'persistent://public/default/rw-schema-json' <<EOF
+{"id":2,"name":"Bob","category":"premium"}
+EOF
+
+system ok
+python3 e2e_test/source_inline/pulsar/produce_schema_test_records.py --schema-type json --topic 'persistent://public/default/rw-schema-json' <<EOF
+{"id":3,"name":"Carol"}
+EOF
+
+statement ok
+alter source pulsar_json_schema refresh schema;
+
+query T
+select substring(definition, 1, position(' WITH' in definition) - 1) from rw_sources where name = 'pulsar_json_schema';
+----
+CREATE SOURCE pulsar_json_schema (id INT, name CHARACTER VARYING, category CHARACTER VARYING)
+
+statement ok
+create materialized view pulsar_json_schema_mv as
+select id, name, category from pulsar_json_schema;
+
+# JSON payloads are decoded as-is, so fields missing from older messages are NULL rather than
+# the schema default.
+query ITT rowsort retry 10 backoff 1s
+select id, name, category from pulsar_json_schema_mv;
+----
+1 Alice NULL
+2 Bob premium
+3 Carol NULL
+
+
+statement ok
+drop materialized view pulsar_json_schema_mv;
+
+statement ok
+drop source pulsar_json_schema;
 
 statement ok
 drop materialized view pulsar_avro_schema_mv;

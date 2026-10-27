@@ -32,6 +32,8 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
     static final Logger LOG = LoggerFactory.getLogger(SqlServerValidator.class);
     private static final int CDC_TABLE_TYPE =
             Catalog.Table.CdcTableType.CDC_TABLE_TYPE_SQLSERVER.getNumber();
+    // `status` of a running service in `sys.dm_server_services`.
+    private static final int SERVICE_STATUS_RUNNING = 4;
 
     private final TableSchema tableSchema;
 
@@ -98,21 +100,59 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             throw ValidatorUtils.internalError(e.getMessage());
         }
         if (isCdcSourceJob) {
-            try (var stmt =
-                    jdbcConnection.prepareStatement(
-                            ValidatorUtils.getSql("sqlserver.sql.agent.enabled"))) {
-                // check whether sql server agent is enabled. It's required to run
-                // fn_cdc_get_max_lsn
-                var res = stmt.executeQuery();
-                while (res.next()) {
-                    if (res.wasNull()) {
-                        throw ValidatorUtils.invalidArgument(
-                                "Sql Server's sql server agent is not activated.\nYou can check it by running `SELECT servicename, startup_type_desc, status_desc FROM sys.dm_server_services WHERE servicename LIKE 'SQL Server Agent%'` in Sql Server.");
-                    }
-                }
+            try {
+                validateCaptureJob();
             } catch (SQLException e) {
                 throw ValidatorUtils.internalError(e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Changes are recorded by the CDC capture job, which SQL Server Agent runs. Without it, the
+     * source would start but never receive any change.
+     */
+    private void validateCaptureJob() throws SQLException {
+        if (checkAgentStatus()) {
+            return;
+        }
+        // Without the Agent status, a NULL max LSN means that the capture job has never run in
+        // this database.
+        try (var stmt =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("sqlserver.max.lsn"));
+                var res = stmt.executeQuery()) {
+            if (res.next() && res.getBytes(1) == null) {
+                throw ValidatorUtils.invalidArgument(
+                        "No change has been captured in Sql Server database '"
+                                + dbName
+                                + "' yet: sys.fn_cdc_get_max_lsn() returns NULL.\nPlease make sure SQL Server Agent is running. If CDC was just enabled, retry after its capture job has run.");
+            }
+        }
+    }
+
+    /**
+     * Throws if SQL Server Agent is not running. Returns false if its status cannot be read, which
+     * needs VIEW SERVER STATE.
+     */
+    private boolean checkAgentStatus() {
+        try (var stmt =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("sqlserver.agent.status"));
+                var res = stmt.executeQuery()) {
+            if (!res.next()) {
+                return false;
+            }
+            if (res.getInt("status") != SERVICE_STATUS_RUNNING) {
+                throw ValidatorUtils.invalidArgument(
+                        "SQL Server Agent is not running (status: "
+                                + res.getString("status_desc")
+                                + ").\nSql Server CDC needs it to run the capture job. Please start SQL Server Agent.");
+            }
+            return true;
+        } catch (SQLException e) {
+            LOG.info("Cannot read the status of SQL Server Agent: {}", e.getMessage());
+            return false;
         }
     }
 
@@ -148,13 +188,28 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             var res = stmt.executeQuery();
+            boolean tableExists = false;
             while (res.next()) {
-                if (res.getInt(1) == 0) {
+                tableExists = true;
+                var catalogSchemaName = res.getString(1);
+                var catalogTableName = res.getString(2);
+                if (!schemaName.equals(catalogSchemaName) || !tableName.equals(catalogTableName)) {
                     throw ValidatorUtils.invalidArgument(
                             String.format(
-                                    "Sql Server table '%s'.'%s' doesn't exist in '%s'",
-                                    schemaName, tableName, dbName));
+                                    "SQL Server table '%s'.'%s' matches catalog table '%s'.'%s' under the database collation, but the casing differs; use the exact table name '%s.%s'",
+                                    schemaName,
+                                    tableName,
+                                    catalogSchemaName,
+                                    catalogTableName,
+                                    catalogSchemaName,
+                                    catalogTableName));
                 }
+            }
+            if (!tableExists) {
+                throw ValidatorUtils.invalidArgument(
+                        String.format(
+                                "Sql Server table '%s'.'%s' doesn't exist in '%s'",
+                                schemaName, tableName, dbName));
             }
         }
 

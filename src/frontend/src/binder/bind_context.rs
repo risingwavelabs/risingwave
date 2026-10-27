@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{TableAlias, WindowSpec};
 
 use crate::binder::Relation;
 use crate::error::{ErrorCode, Result};
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, ScopeId};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
@@ -126,6 +126,8 @@ pub struct BindContext {
     /// Bound arguments for the current SQL UDF, if any.
     // TODO: use enum for named or positional arguments
     pub sql_udf_arguments: Option<HashMap<String, ExprImpl>>,
+    /// Identifies this context as the owner of correlated references to its columns.
+    pub scope: ScopeId,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.
@@ -164,8 +166,8 @@ impl BindContext {
         match &self.get_column_binding_indices(schema_name, table_name, column_name)?[..] {
             [] => unreachable!(),
             [idx] => Ok(*idx),
-            _ => Err(ErrorCode::InternalError(format!(
-                "Ambiguous column name: {}",
+            _ => Err(ErrorCode::InvalidReference(format!(
+                "column reference \"{}\" is ambiguous",
                 column_name
             ))),
         }
@@ -225,10 +227,23 @@ impl BindContext {
         group_id: u32,
         column_name: &String,
     ) -> LiteResult<Vec<usize>> {
-        let group = self.column_group_context.groups.get(&group_id).unwrap();
-        if let Some(name) = &group.column_name {
-            debug_assert_eq!(name, column_name);
-        }
+        // The group-id qualifier is also reachable from a quoted user identifier, so a missing
+        // group or a group of another column is "not found" rather than an internal invariant.
+        let Some(group) = self
+            .column_group_context
+            .groups
+            .get(&group_id)
+            .filter(|group| {
+                group
+                    .column_name
+                    .as_ref()
+                    .is_none_or(|name| name == column_name)
+            })
+        else {
+            return Err(ErrorCode::ItemNotFound(format!(
+                "Invalid column: {column_name}"
+            )));
+        };
         if let Some(non_nullable) = &group.non_nullable_column {
             Ok(vec![*non_nullable])
         } else {
@@ -258,8 +273,8 @@ impl BindContext {
                     }
                 }
             }
-            Err(ErrorCode::InternalError(format!(
-                "Ambiguous column name: {}",
+            Err(ErrorCode::InvalidReference(format!(
+                "column reference \"{}\" is ambiguous",
                 column_name
             )))
         } else {

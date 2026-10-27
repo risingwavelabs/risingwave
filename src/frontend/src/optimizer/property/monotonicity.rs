@@ -181,8 +181,29 @@ impl MonotonicityAnalyzer {
             time_zone.is_some_and(|time_zone| time_zone.eq_ignore_ascii_case("UTC")) // conservative
         }
 
+        fn shifts_timestamp_by_months(func_call: &FunctionCall) -> bool {
+            let [lhs, rhs] = func_call.inputs() else {
+                return false;
+            };
+
+            let interval = match (lhs.return_type(), rhs.return_type()) {
+                (DataType::Timestamp, DataType::Interval) => rhs,
+                (DataType::Interval, DataType::Timestamp) => lhs,
+                _ => return false,
+            };
+
+            interval.as_literal().is_none_or(|lit| {
+                lit.get_data()
+                    .as_ref()
+                    .is_some_and(|v| v.as_interval().months() != 0)
+            })
+        }
+
         match func_call.func_type() {
             ExprType::Unspecified => unreachable!(),
+            ExprType::Add | ExprType::Subtract if shifts_timestamp_by_months(func_call) => {
+                Inherent(Unknown)
+            }
             ExprType::Add => match self.visit_binary_op(func_call.inputs()) {
                 (Inherent(Constant), any) | (any, Inherent(Constant)) => any,
                 (Inherent(NonDecreasing), Inherent(NonDecreasing)) => Inherent(NonDecreasing),

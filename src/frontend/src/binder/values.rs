@@ -23,7 +23,7 @@ use super::bind_context::Clause;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{CorrelatedId, Depth, ExprImpl, align_types};
+use crate::expr::{CorrelatedId, ExprImpl, ScopeId, align_types};
 
 #[derive(Debug, Clone)]
 pub struct BoundValues {
@@ -60,9 +60,9 @@ impl BoundValues {
         self.rows.iter_mut().flatten()
     }
 
-    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_scope(&self, scope: ScopeId) -> bool {
         self.exprs()
-            .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
+            .any(|expr| expr.has_correlated_input_ref_by_scope(scope))
     }
 
     pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
@@ -70,14 +70,14 @@ impl BoundValues {
             .any(|expr| expr.has_correlated_input_ref_by_correlated_id(correlated_id))
     }
 
-    pub fn collect_correlated_indices_by_depth_and_assign_id(
+    pub fn collect_correlated_indices_by_scope_and_assign_id(
         &mut self,
-        depth: Depth,
+        scope: ScopeId,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         self.exprs_mut()
             .flat_map(|expr| {
-                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+                expr.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id)
             })
             .collect()
     }
@@ -150,7 +150,9 @@ impl Binder {
         {
             bail_not_implemented!("Subquery in VALUES");
         }
-        if bound_values.is_correlated_by_depth(1) {
+        if let Some(scope) = self.nearest_outer_scope()
+            && bound_values.is_correlated_by_scope(scope)
+        {
             bail_not_implemented!("CorrelatedInputRef in VALUES");
         }
         Ok(bound_values)

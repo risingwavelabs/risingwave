@@ -910,9 +910,9 @@ impl HummockStorage {
                 {
                     let recent_versions = self.recent_versions.load();
                     let latest_version = recent_versions.latest_version();
-                    if latest_version.id >= wait_version_id
-                        && let Some(committed_epoch) =
-                            latest_version.table_committed_epoch(table_id)
+                    // An existing table is readable once its committed epoch is sufficient,
+                    // even if unrelated version updates have not been applied locally yet.
+                    if let Some(committed_epoch) = latest_version.table_committed_epoch(table_id)
                         && committed_epoch >= wait_epoch
                     {
                         return Ok(());
@@ -921,20 +921,20 @@ impl HummockStorage {
                 wait_for_update(
                     &self.version_update_notifier_tx,
                     |version| {
-                        if wait_version_id > version.id() {
-                            return Ok(false);
+                        if let Some(committed_epoch) = version.table_committed_epoch(table_id) {
+                            return Ok(committed_epoch >= wait_epoch);
                         }
-                        let committed_epoch =
-                            version.table_committed_epoch(table_id).ok_or_else(|| {
-                                // In batch query, since we have ensured that the current version must be after the
-                                // `wait_version_id`, when seeing that the table_id not exist in the latest version,
-                                // the table must have been dropped.
-                                HummockError::wait_epoch(format!(
-                                    "table id {} has been dropped",
-                                    table_id
-                                ))
-                            })?;
-                        Ok(committed_epoch >= wait_epoch)
+                        // The table existed in `wait_version_id`. Before reaching that version,
+                        // its absence may mean registration has not arrived yet; afterwards,
+                        // the table must have been dropped.
+                        if version.id() < wait_version_id {
+                            Ok(false)
+                        } else {
+                            Err(HummockError::wait_epoch(format!(
+                                "table id {} has been dropped",
+                                table_id
+                            )))
+                        }
                     },
                     || {
                         format!(

@@ -308,12 +308,12 @@ impl Planner {
         };
         let correlated_id = self.ctx.next_correlated_id();
         let mut subquery = expr.into_subquery().unwrap();
-        // we should call `subquery.query.collect_correlated_indices_by_depth_and_assign_id`
-        // instead of `subquery.collect_correlated_indices_by_depth_and_assign_id`.
+        // we should call `subquery.query.collect_correlated_indices_by_scope_and_assign_id`
+        // instead of `subquery.collect_correlated_indices_by_scope_and_assign_id`.
         // because current subquery containing struct `kind` expr which should never be correlated with the current subquery.
         let mut correlated_indices = subquery
             .query
-            .collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+            .collect_correlated_indices_by_scope_and_assign_id(subquery.outer_scope, correlated_id);
         correlated_indices.sort();
         correlated_indices.dedup();
         let output_column_type = subquery.query.data_types()[0].clone();
@@ -382,7 +382,10 @@ impl Planner {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id),
+                    subquery.collect_correlated_indices_by_scope_and_assign_id(
+                        subquery.outer_scope,
+                        correlated_id,
+                    ),
                 );
                 self.subqueries.push(subquery);
                 input_ref
@@ -492,8 +495,8 @@ impl Planner {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery.collect_correlated_indices_by_depth_and_assign_id(
-                        0,
+                    subquery.collect_correlated_indices_by_scope_and_assign_id(
+                        subquery.outer_scope,
                         self.correlated_id.unwrap(),
                     ),
                 );

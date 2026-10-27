@@ -23,6 +23,12 @@ final class OracleHeartbeatTable {
     static final String ID_COLUMN = "ID";
     static final String HEARTBEAT_COLUMN = "HEARTBEAT";
 
+    enum ManualSetup {
+        TABLE_AND_SEED_ROW,
+        SEED_ROW,
+        ACCESS_GRANTS
+    }
+
     private static final Pattern ORACLE_UNQUOTED_IDENTIFIER =
             Pattern.compile("[A-Za-z][A-Za-z0-9_$#]*");
 
@@ -72,5 +78,44 @@ final class OracleHeartbeatTable {
         return String.format(
                 "UPDATE %s SET %s = CASE %s WHEN 0 THEN 1 ELSE 0 END WHERE %s = 1",
                 qualifiedName(), HEARTBEAT_COLUMN, HEARTBEAT_COLUMN, ID_COLUMN);
+    }
+
+    String createTableSql() {
+        return String.format(
+                "CREATE TABLE %s (%s NUMBER(1) PRIMARY KEY, %s NUMBER(1) NOT NULL)",
+                qualifiedName(), ID_COLUMN, HEARTBEAT_COLUMN);
+    }
+
+    String insertSeedRowSql() {
+        return String.format(
+                "INSERT INTO %s (%s, %s) VALUES (1, 0)",
+                qualifiedName(), ID_COLUMN, HEARTBEAT_COLUMN);
+    }
+
+    /** Builds setup SQL for a DBA; {@code sessionUser} is the connector login and grantee. */
+    String manualSetupSql(String pdbName, String sessionUser, ManualSetup setup) {
+        var sql = new StringBuilder();
+        sql.append("ALTER SESSION SET CONTAINER = ").append(pdbName).append(";\n");
+        if (setup == ManualSetup.TABLE_AND_SEED_ROW) {
+            sql.append(createTableSql()).append(";\n");
+        }
+        if (setup != ManualSetup.ACCESS_GRANTS) {
+            sql.append(insertSeedRowSql()).append(";\nCOMMIT;\n");
+        }
+        if (!owner.equalsIgnoreCase(sessionUser)) {
+            var grantee = quoteIdentifier(sessionUser);
+            sql.append("GRANT UPDATE (")
+                    .append(HEARTBEAT_COLUMN)
+                    .append(") ON ")
+                    .append(qualifiedName())
+                    .append(" TO ")
+                    .append(grantee)
+                    .append(';');
+        }
+        return sql.toString().stripTrailing();
+    }
+
+    private static String quoteIdentifier(String value) {
+        return '"' + value.replace("\"", "\"\"") + '"';
     }
 }
