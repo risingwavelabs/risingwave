@@ -52,6 +52,290 @@ use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{TestIngestBatch, gen_key_from_str, prepare_hummock_test_env};
 
 #[tokio::test]
+async fn test_latest_committed_snapshot() {
+    let table_id = TableId::new(233);
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(table_id).await;
+    let storage = &test_env.storage;
+    let mut local = storage.new_local(NewLocalOptions::for_test(table_id)).await;
+    let epoch1 = test_epoch(1);
+    let epoch2 = epoch1.next_epoch();
+    let epoch3 = epoch2.next_epoch();
+    storage.start_epoch(epoch1, HashSet::from([table_id]));
+    local.init_for_test(epoch1).await.unwrap();
+    let key = |s: &str| gen_key_from_str(VirtualNode::ZERO, s);
+    local
+        .ingest_batch(vec![
+            (key("a"), StorageValue::new_put("old")),
+            (key("b"), StorageValue::new_put("deleted")),
+        ])
+        .await
+        .unwrap();
+    storage.start_epoch(epoch2, HashSet::from([table_id]));
+    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    test_env.commit_epoch(epoch1).await;
+
+    // These writes must remain invisible to latest-committed snapshots until committed.
+    local
+        .ingest_batch(vec![
+            (key("a"), StorageValue::new_put("new")),
+            (key("b"), StorageValue::new_delete()),
+            (key("c"), StorageValue::new_put("inserted")),
+        ])
+        .await
+        .unwrap();
+    storage.start_epoch(epoch3, HashSet::from([table_id]));
+    local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+
+    let future_epoch =
+        HummockReadEpoch::BatchQueryCommitted(epoch2, storage.get_pinned_version().id);
+    let wait = storage.new_read_snapshot(
+        future_epoch,
+        NewReadSnapshotOptions {
+            table_id,
+            table_option: TableOption::default(),
+        },
+    );
+    futures::pin_mut!(wait);
+    assert!(futures::poll!(&mut wait).is_pending());
+    storage
+        .try_wait_epoch(
+            HummockReadEpoch::LatestCommitted,
+            TryWaitEpochOptions::for_test(table_id),
+        )
+        .now_or_never()
+        .expect("latest committed must never wait")
+        .unwrap();
+    let snapshot = storage
+        .new_read_snapshot(
+            HummockReadEpoch::LatestCommitted,
+            NewReadSnapshotOptions {
+                table_id,
+                table_option: TableOption::default(),
+            },
+        )
+        .now_or_never()
+        .expect("snapshot must be captured immediately")
+        .unwrap();
+
+    let check =
+        async |snapshot: &risingwave_storage::hummock::store::HummockStorageReadSnapshot,
+               expected: &[(&str, &str)]| {
+            for name in ["a", "b", "c"] {
+                let actual = snapshot.get(key(name), Default::default()).await.unwrap();
+                let expected = expected
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, value)| Bytes::copy_from_slice(value.as_bytes()));
+                assert_eq!(actual, expected);
+            }
+            let range = prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::ZERO,
+            );
+            let rows: Vec<_> = snapshot
+                .iter(range.clone(), Default::default())
+                .await
+                .unwrap()
+                .into_stream(to_owned_item)
+                .try_collect()
+                .await
+                .unwrap();
+            let actual: Vec<_> = rows
+                .iter()
+                .map(|(k, v)| (k.user_key.table_key.clone(), v.clone()))
+                .collect();
+            let expected: Vec<_> = expected
+                .iter()
+                .map(|(k, v)| (key(k), Bytes::copy_from_slice(v.as_bytes())))
+                .collect();
+            assert_eq!(actual, expected);
+            let mut reverse: Vec<_> = snapshot
+                .rev_iter(range, Default::default())
+                .await
+                .unwrap()
+                .into_stream(to_owned_item)
+                .try_collect()
+                .await
+                .unwrap();
+            reverse.reverse();
+            assert_eq!(rows, reverse);
+        };
+    assert_eq!(snapshot.read_epoch(), Some(epoch1));
+    check(&snapshot, &[("a", "old"), ("b", "deleted")]).await;
+    assert!(futures::poll!(&mut wait).is_pending());
+    test_env.commit_epoch(epoch2).await;
+    wait.await.unwrap();
+
+    // Reads started after the version update still use the original snapshot's version and epoch.
+    assert_eq!(snapshot.read_epoch(), Some(epoch1));
+    check(&snapshot, &[("a", "old"), ("b", "deleted")]).await;
+    let newer = storage
+        .new_read_snapshot(
+            HummockReadEpoch::LatestCommitted,
+            NewReadSnapshotOptions {
+                table_id,
+                table_option: TableOption::default(),
+            },
+        )
+        .now_or_never()
+        .unwrap()
+        .unwrap();
+    assert_eq!(newer.read_epoch(), Some(epoch2));
+    check(&newer, &[("a", "new"), ("c", "inserted")]).await;
+}
+
+#[tokio::test]
+async fn test_latest_committed_watermark_and_retention() {
+    for use_watermark in [false, true] {
+        let table_id = TableId::new(233);
+        let test_env = prepare_hummock_test_env().await;
+        test_env.register_table_id(table_id).await;
+        let storage = &test_env.storage;
+        let mut local = storage.new_local(NewLocalOptions::for_test(table_id)).await;
+        let epoch1 = test_epoch(1000);
+        let epoch2 = test_epoch(3000);
+        let epoch3 = test_epoch(5000);
+        let key = |s: &str| gen_key_from_str(VirtualNode::ZERO, s);
+        let seal_options = |watermark: &'static [u8]| SealCurrentEpochOptions {
+            table_watermarks: use_watermark.then(|| {
+                (
+                    WatermarkDirection::Ascending,
+                    vec![VnodeWatermark::new(
+                        Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                        Bytes::from_static(watermark),
+                    )],
+                    WatermarkSerdeType::PkPrefix,
+                )
+            }),
+            switch_op_consistency_level: None,
+        };
+        storage.start_epoch(epoch1, HashSet::from([table_id]));
+        local
+            .init_for_test_with_prev_epoch(epoch1, 0)
+            .await
+            .unwrap();
+        local
+            .ingest_batch(vec![
+                (key("a"), StorageValue::new_put("a")),
+                (key("b"), StorageValue::new_put("b")),
+            ])
+            .await
+            .unwrap();
+        storage.start_epoch(epoch2, HashSet::from([table_id]));
+        local.seal_current_epoch(epoch2, seal_options(b"b"));
+        test_env.commit_epoch(epoch1).await;
+        let snapshot = || {
+            storage
+                .new_read_snapshot(
+                    HummockReadEpoch::LatestCommitted,
+                    NewReadSnapshotOptions {
+                        table_id,
+                        table_option: TableOption {
+                            retention_seconds: (!use_watermark).then_some(1),
+                        },
+                    },
+                )
+                .now_or_never()
+                .unwrap()
+                .unwrap()
+        };
+        let captured = snapshot();
+        let read =
+            async |snapshot: &risingwave_storage::hummock::store::HummockStorageReadSnapshot| {
+                let range = prefixed_range_with_vnode(
+                    (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                    VirtualNode::ZERO,
+                );
+                let forward: Vec<_> = snapshot
+                    .iter(range.clone(), Default::default())
+                    .await
+                    .unwrap()
+                    .into_stream(to_owned_item)
+                    .map_ok(|(_, v)| v)
+                    .try_collect()
+                    .await
+                    .unwrap();
+                let mut reverse: Vec<_> = snapshot
+                    .rev_iter(range, Default::default())
+                    .await
+                    .unwrap()
+                    .into_stream(to_owned_item)
+                    .map_ok(|(_, v)| v)
+                    .try_collect()
+                    .await
+                    .unwrap();
+                reverse.reverse();
+                assert_eq!(forward, reverse);
+                for name in ["a", "b", "c"] {
+                    let value = snapshot.get(key(name), Default::default()).await.unwrap();
+                    assert_eq!(
+                        value.is_some(),
+                        forward.contains(&Bytes::copy_from_slice(name.as_bytes()))
+                    );
+                }
+                forward
+            };
+        let original = if use_watermark {
+            vec![Bytes::from("b")]
+        } else {
+            vec![Bytes::from("a"), Bytes::from("b")]
+        };
+        assert_eq!(read(&captured).await, original);
+        local
+            .ingest_batch(vec![(key("c"), StorageValue::new_put("c"))])
+            .await
+            .unwrap();
+        storage.start_epoch(epoch3, HashSet::from([table_id]));
+        local.seal_current_epoch(epoch3, seal_options(b"c"));
+        test_env.commit_epoch(epoch2).await;
+        assert_eq!(read(&captured).await, original);
+        assert_eq!(read(&snapshot()).await, vec![Bytes::from("c")]);
+    }
+}
+
+#[tokio::test]
+async fn test_latest_committed_absent_table() {
+    let table_id = TableId::new(233);
+    let test_env = prepare_hummock_test_env().await;
+    let storage = &test_env.storage;
+    let future_version = storage.get_pinned_version().id + 100;
+    let wait = storage.try_wait_epoch(
+        HummockReadEpoch::BatchQueryCommitted(0, future_version),
+        TryWaitEpochOptions::for_test(table_id),
+    );
+    futures::pin_mut!(wait);
+    assert!(futures::poll!(&mut wait).is_pending());
+    let snapshot = || {
+        storage.new_read_snapshot(
+            HummockReadEpoch::LatestCommitted,
+            NewReadSnapshotOptions {
+                table_id,
+                table_option: TableOption::default(),
+            },
+        )
+    };
+    let error = snapshot()
+        .now_or_never()
+        .expect("missing tables must fail immediately")
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("table 233 is not available"));
+    test_env.register_table_id(table_id).await;
+    snapshot().now_or_never().unwrap().unwrap();
+    wait.await.unwrap();
+
+    let version = storage.get_pinned_version();
+    let mut dropped = version.to_protobuf();
+    dropped.id = version.id + 1;
+    dropped.state_table_info.remove(&table_id);
+    storage
+        .update_version_and_wait(HummockVersion::from_rpc_protobuf(&dropped))
+        .await;
+    assert!(snapshot().now_or_never().unwrap().is_err());
+}
+
+#[tokio::test]
 async fn test_batch_query_wait_epoch_ignores_unrelated_versions() {
     let table_id = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;

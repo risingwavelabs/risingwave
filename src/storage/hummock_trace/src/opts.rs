@@ -215,6 +215,7 @@ pub enum TracedHummockReadEpoch {
     NoWait(TracedHummockEpoch),
     Backup(TracedHummockEpoch),
     TimeTravel(TracedHummockEpoch),
+    LatestCommitted,
 }
 
 impl From<HummockReadEpoch> for TracedHummockReadEpoch {
@@ -227,6 +228,7 @@ impl From<HummockReadEpoch> for TracedHummockReadEpoch {
             HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
             HummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
+            HummockReadEpoch::LatestCommitted => Self::LatestCommitted,
         }
     }
 }
@@ -241,6 +243,7 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
             TracedHummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
             TracedHummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
+            TracedHummockReadEpoch::LatestCommitted => Self::LatestCommitted,
         }
     }
 }
@@ -304,5 +307,28 @@ impl From<TracedBitmap> for Bitmap {
             body: value.body,
         };
         Bitmap::from(&pb)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_latest_committed_trace_compatibility() {
+        let epochs = [
+            TracedHummockReadEpoch::Committed(0),
+            TracedHummockReadEpoch::BatchQueryReadCommitted(0, 0),
+            TracedHummockReadEpoch::NoWait(0),
+            TracedHummockReadEpoch::Backup(0),
+            TracedHummockReadEpoch::TimeTravel(0),
+            TracedHummockReadEpoch::LatestCommitted,
+        ];
+        for (discriminant, epoch) in epochs.into_iter().enumerate() {
+            let bytes = bincode::encode_to_vec(&epoch, bincode::config::standard()).unwrap();
+            assert_eq!(bytes[0], discriminant as u8);
+            let hummock_epoch = HummockReadEpoch::from(epoch.clone());
+            assert_eq!(TracedHummockReadEpoch::from(hummock_epoch), epoch);
+        }
     }
 }

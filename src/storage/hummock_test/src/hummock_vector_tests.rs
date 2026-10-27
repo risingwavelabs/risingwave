@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 
 use bytes::Bytes;
+use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::array::VectorDistanceType;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -37,6 +38,81 @@ use risingwave_storage::vector::{NearestBuilder, Vector, VectorDistance, VectorR
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::prepare_hummock_test_env;
+
+#[tokio::test]
+async fn test_latest_committed_vector_snapshot() {
+    let table_id = TableId::new(233);
+    let base_epoch = test_epoch(233);
+    let epoch1 = base_epoch.next_epoch();
+    let epoch2 = epoch1.next_epoch();
+    let epoch3 = epoch2.next_epoch();
+    let test_env = prepare_hummock_test_env().await;
+    test_env
+        .register_vector_index(
+            table_id,
+            base_epoch,
+            PbVectorIndexInit {
+                info: Some(PbVectorIndexInfo {
+                    dimension: 4,
+                    distance_type: PbDistanceType::InnerProduct as _,
+                    config: Some(vector_index_info::PbConfig::Flat(PbFlatIndexConfig {})),
+                }),
+            },
+        )
+        .await;
+    test_env.wait_sync_committed_version().await;
+    let storage = &test_env.storage;
+    let mut writer = storage
+        .new_vector_writer(NewVectorWriterOptions { table_id })
+        .await;
+    storage.start_epoch(epoch1, HashSet::from([table_id]));
+    writer.init_for_test(epoch1).await.unwrap();
+    let query = gen_vector(4);
+    writer.insert(query.to_ref(), gen_info(0)).unwrap();
+    writer.flush().await.unwrap();
+    storage.start_epoch(epoch2, HashSet::from([table_id]));
+    writer.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    test_env.commit_epoch(epoch1).await;
+    writer.insert(gen_vector(4).to_ref(), gen_info(1)).unwrap();
+    writer.flush().await.unwrap();
+    storage.start_epoch(epoch3, HashSet::from([table_id]));
+    writer.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
+
+    let snapshot = || {
+        storage
+            .new_read_snapshot(
+                HummockReadEpoch::LatestCommitted,
+                NewReadSnapshotOptions {
+                    table_id,
+                    table_option: TableOption::default(),
+                },
+            )
+            .now_or_never()
+            .expect("latest committed vector snapshots must not wait")
+            .unwrap()
+    };
+    let captured = snapshot();
+    let read = async |snapshot: &risingwave_storage::hummock::store::HummockStorageReadSnapshot| {
+        let mut items = snapshot
+            .nearest(
+                query.to_ref(),
+                VectorNearestOptions {
+                    top_n: 10,
+                    measure: DistanceMeasurement::InnerProduct,
+                    hnsw_ef_search: 40,
+                },
+                |_, _, info: &[u8]| Bytes::copy_from_slice(info),
+            )
+            .await
+            .unwrap();
+        items.sort();
+        items
+    };
+    assert_eq!(read(&captured).await, vec![gen_info(0)]);
+    test_env.commit_epoch(epoch2).await;
+    assert_eq!(read(&captured).await, vec![gen_info(0)]);
+    assert_eq!(read(&snapshot()).await, vec![gen_info(0), gen_info(1)]);
+}
 
 #[tokio::test]
 async fn test_flat_vector() {

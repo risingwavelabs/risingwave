@@ -1442,7 +1442,11 @@ impl SessionImpl {
     }
 
     pub fn is_barrier_read(&self) -> bool {
-        match self.config().visibility_mode() {
+        let config = self.config();
+        if config.query_epoch().0.is_some() || config.batch_read_latest_committed() {
+            return false;
+        }
+        match config.visibility_mode() {
             VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
             VisibilityMode::All => true,
             VisibilityMode::Checkpoint => false,
