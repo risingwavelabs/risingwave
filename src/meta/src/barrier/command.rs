@@ -574,6 +574,7 @@ pub enum Command {
     /// input is read.
     ListFinish {
         source_id: SourceId,
+        attempt: u64,
     },
     LoadFinish {
         table_id: TableId,
@@ -690,7 +691,9 @@ impl std::fmt::Display for Command {
                 "Refresh: {} (source: {}, cycle: {})",
                 table_id, associated_source_id, trigger_time
             ),
-            Command::ListFinish { source_id } => write!(f, "ListFinish: {source_id}"),
+            Command::ListFinish { source_id, attempt } => {
+                write!(f, "ListFinish: {source_id} (attempt: {attempt})")
+            }
             Command::LoadFinish {
                 table_id,
                 associated_source_id,
@@ -782,6 +785,7 @@ pub enum PostCollectCommand {
         associated_source_id: SourceId,
         staging_table_id: TableId,
         trigger_time: NaiveDateTime,
+        attempt: u64,
         actors: RefreshCycleActors,
     },
     FinishRefresh {
@@ -1448,19 +1452,23 @@ impl Command {
         }
     }
 
-    /// Build the `Load { Start }` mutation for the load of `source_id`.
-    pub(super) fn start_load_mutation(source_id: SourceId) -> Mutation {
-        Self::load_mutation(source_id, PbLoadAction::Start(Default::default()))
+    /// Build the `Load { Start }` mutation for load `attempt` of `source_id`.
+    pub(super) fn start_load_mutation(source_id: SourceId, attempt: u64) -> Mutation {
+        Self::load_mutation(source_id, attempt, PbLoadAction::Start(Default::default()))
     }
 
-    /// Build the `Load { ListFinish }` mutation for the load of `source_id`.
-    pub(super) fn list_finish_mutation(source_id: SourceId) -> Mutation {
-        Self::load_mutation(source_id, PbLoadAction::ListFinish(Default::default()))
+    /// Build the `Load { ListFinish }` mutation for load `attempt` of `source_id`.
+    pub(super) fn list_finish_mutation(source_id: SourceId, attempt: u64) -> Mutation {
+        Self::load_mutation(
+            source_id,
+            attempt,
+            PbLoadAction::ListFinish(Default::default()),
+        )
     }
 
-    fn load_mutation(source_id: SourceId, action: PbLoadAction) -> Mutation {
+    fn load_mutation(source_id: SourceId, attempt: u64, action: PbLoadAction) -> Mutation {
         Mutation::Load(LoadMutation {
-            load_id: Some(LoadId { source_id }),
+            load_id: Some(LoadId { source_id, attempt }),
             action: Some(action),
         })
     }

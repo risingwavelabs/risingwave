@@ -29,6 +29,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::id::{SinkId, SourceId};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_connector::source::ingest_mode::INVALID_LOAD_ATTEMPT;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::stream_plan::LoadId;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -1092,7 +1093,10 @@ impl PartialGraphState {
                 .load_progress
                 .push(PbLoadProgress {
                     reporter_actor_id: actor_id,
-                    load_id: Some(LoadId { source_id }),
+                    load_id: Some(LoadId {
+                        source_id,
+                        attempt: INVALID_LOAD_ATTEMPT,
+                    }),
                     progress: Some(progress),
                 });
         } else {

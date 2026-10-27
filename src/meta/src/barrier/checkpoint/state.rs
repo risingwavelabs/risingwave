@@ -24,6 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::source::ingest_mode::BOUNDED_LOAD_ATTEMPT;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{DispatcherType, WorkerId, streaming_job};
 use risingwave_pb::common::WorkerNode;
@@ -1639,7 +1640,8 @@ impl DatabaseCheckpointControl {
                 staging_table_id,
                 trigger_time,
             }) => {
-                let mutation = Some(Command::start_load_mutation(associated_source_id));
+                let attempt = barrier_info.curr_epoch();
+                let mutation = Some(Command::start_load_mutation(associated_source_id, attempt));
                 let actors = RefreshCycleActors::from_fragments(
                     self.database_info.job_fragment_infos(table_id.as_job_id()),
                 );
@@ -1655,13 +1657,14 @@ impl DatabaseCheckpointControl {
                         associated_source_id,
                         staging_table_id,
                         trigger_time,
+                        attempt,
                         actors,
                     },
                 )
             }
 
-            Some(Command::ListFinish { source_id }) => {
-                let mutation = Some(Command::list_finish_mutation(source_id));
+            Some(Command::ListFinish { source_id, attempt }) => {
+                let mutation = Some(Command::list_finish_mutation(source_id, attempt));
                 self.apply_simple_command(mutation, "ListFinish")
             }
 
@@ -2005,7 +2008,9 @@ impl DatabaseCheckpointControl {
 
                         self.database_info
                             .take_pending_bounded_load_start()
-                            .map(Command::start_load_mutation)
+                            .map(|source_id| {
+                                Command::start_load_mutation(source_id, BOUNDED_LOAD_ATTEMPT)
+                            })
                     } else {
                         Some(PbMutation::StartFragmentBackfill(
                             PbStartFragmentBackfillMutation { fragment_ids },

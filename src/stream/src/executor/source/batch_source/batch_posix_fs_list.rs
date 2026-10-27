@@ -256,6 +256,7 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                                     Mutation::Load {
                                         source_id,
                                         action: LoadAction::Start,
+                                        ..
                                     } if *source_id == self.stream_source_core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,

@@ -760,6 +760,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             Some(Mutation::Load {
                                 source_id,
                                 action: LoadAction::Start,
+                                ..
                             }) if *source_id == refresh_args.associated_source_id => {
                                 if refresh_args.is_refreshing() {
                                     consistency_panic!(
