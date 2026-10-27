@@ -41,7 +41,7 @@ use crate::hummock::{
 use crate::monitor::{GLOBAL_CACHE_REFILL_METRICS, StoreLocalStatistic};
 
 #[cfg(test)]
-pub(super) type SpawnRefillTask =
+pub(in crate::hummock::event_handler) type SpawnRefillTask =
     Arc<dyn Fn(Vec<SstDeltaInfo>, CacheRefillContext) -> JoinHandle<()> + Send + Sync + 'static>;
 
 #[cfg(test)]

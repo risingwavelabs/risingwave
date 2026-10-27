@@ -14,7 +14,7 @@
 
 //! Shared fixtures for backend and coordinator tests; each helper has multiple test owners.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,128 +22,34 @@ use ::foyer::{
     BlockEngineConfig, CacheBuilder, DeviceBuilder, FsDeviceBuilder, HybridCacheBuilder,
     PsyncIoEngineConfig,
 };
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::config::MetricLevel;
 use risingwave_common::config::streaming::CacheRefillPolicy;
-use risingwave_common::config::{MetricLevel, Role};
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
+use risingwave_hummock_sdk::version::{
+    GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta,
+};
+use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::hummock::hummock_version::PbLevels;
-use risingwave_pb::hummock::{PbHummockVersion, PbLevel, PbOverlappingLevel, PbStateTableInfo};
+use risingwave_pb::hummock::{
+    PbHummockVersion, PbLevel, PbOverlappingLevel, PbStateTableInfo, StateTableInfoDelta,
+};
 use risingwave_pb::id::TableId;
 use tokio::sync::mpsc::unbounded_channel;
 
-use super::{CacheRefillConfig, CacheRefiller, SpawnRefillTask, SstDeltaInfo};
-use crate::hummock::event_handler::pin_cache_membership::PinCacheMembership;
-use crate::hummock::event_handler::version_update::{VersionUpdateEvent, VersionUpdateQueue};
+use super::CacheRefillConfig;
+pub(super) use crate::hummock::event_handler::hummock_event_handler::tests::RefillTest;
+use crate::hummock::event_handler::version_update::VersionUpdateEvent;
 use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::pin_cache::PinCache;
 use crate::hummock::pin_cache::test_utils::in_memory_object_store;
 use crate::hummock::sstable_store::{SstableStore, SstableStoreConfig};
-use crate::hummock::table_cache_metadata::TableCacheMetadata;
 use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_with_table_ids};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{RecentFilter, SstableStoreRef, TableHolder};
 use crate::monitor::global_hummock_state_store_metrics;
-
-pub(super) struct RefillTest {
-    pub(super) cache: CacheRefiller,
-    pub(super) versions: VersionUpdateQueue,
-    pub(super) metadata: TableCacheMetadata,
-    membership: Option<PinCacheMembership>,
-}
-
-impl RefillTest {
-    pub(super) fn new(
-        role: Role,
-        config: CacheRefillConfig,
-        store: SstableStoreRef,
-        spawn: SpawnRefillTask,
-        version: PinnedVersion,
-    ) -> Self {
-        let versions = VersionUpdateQueue::new(version.clone());
-        let membership = store
-            .pin_cache()
-            .map(|cache| PinCacheMembership::new(cache.clone(), version));
-        let metadata = TableCacheMetadata::new(role, config.table_cache_refill_default_policy);
-        let cache = CacheRefiller::new(config, store).with_foyer_spawn_task(spawn);
-        Self {
-            cache,
-            versions,
-            metadata,
-            membership,
-        }
-    }
-
-    pub(super) fn replace_table_cache_refill_runtime_snapshot(
-        &mut self,
-        policies: HashMap<TableId, CacheRefillPolicy>,
-        mut pinned: HashSet<TableId>,
-    ) {
-        let metadata = &mut self.metadata;
-        if let Some(membership) = &mut self.membership {
-            membership.replace_pinned_tables(metadata.pinned_tables(), &pinned);
-        } else {
-            pinned.clear();
-        }
-        let changed = metadata.replace_policy_snapshot(policies, pinned);
-        self.cache.invalidate_pin_refills(&changed);
-    }
-
-    pub(super) fn replace_serving_table_vnode_mapping(
-        &mut self,
-        mapping: HashMap<TableId, Bitmap>,
-    ) {
-        let metadata = &mut self.metadata;
-        let changed = metadata.replace_serving_mapping(mapping);
-        self.cache.invalidate_pin_refills(&changed);
-    }
-
-    pub(super) fn update_streaming_table_vnodes(&mut self, table: TableId, bitmap: Option<Bitmap>) {
-        let metadata = &mut self.metadata;
-        let changed = metadata.update_streaming_table_vnodes(table, bitmap);
-        self.cache.invalidate_pin_refills(&changed);
-    }
-
-    pub(super) fn start_cache_refill(
-        &mut self,
-        deltas: Vec<SstDeltaInfo>,
-        pinned_version: PinnedVersion,
-        new_pinned_version: PinnedVersion,
-        raw: Option<&[HummockVersionDelta]>,
-    ) {
-        let metadata = &self.metadata;
-        if let Some(membership) = &mut self.membership {
-            membership.advance_version(
-                &deltas,
-                new_pinned_version.clone(),
-                raw,
-                metadata.pinned_tables(),
-            );
-        }
-        let condition =
-            self.cache
-                .start_cache_refill(deltas, new_pinned_version.clone(), raw, metadata);
-        self.versions.enqueue(
-            VersionUpdateEvent {
-                prev_version_id: pinned_version.id(),
-                new_pinned_version,
-            },
-            condition,
-        );
-    }
-
-    pub(super) fn on_versions_published(&mut self, events: &[VersionUpdateEvent]) {
-        let applied = events.last().unwrap().new_pinned_version.id();
-        if let Some(membership) = &mut self.membership {
-            let removed = membership.on_version_published(applied);
-            self.cache.cancel_objects(removed);
-        }
-    }
-}
 
 pub(super) async fn mock_sstable_store_with_disk_cache(
     recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
@@ -220,7 +126,7 @@ pub(super) async fn wait_for_pin_downloads(
     tokio::time::timeout(Duration::from_secs(1), async {
         while !objects.iter().all(|object| {
             refiller
-                .cache
+                .cache()
                 .pin_cache_refill
                 .as_ref()
                 .unwrap()
@@ -235,10 +141,10 @@ pub(super) async fn wait_for_pin_downloads(
 }
 
 pub(super) async fn apply_next_events(refiller: &mut RefillTest) -> Vec<VersionUpdateEvent> {
-    let events = tokio::time::timeout(Duration::from_secs(5), refiller.versions.next_events())
+    let events = tokio::time::timeout(Duration::from_secs(5), refiller.versions().next_events())
         .await
         .expect("cache refill must release the next version batch");
-    refiller.on_versions_published(&events);
+    refiller.publish(&events);
     events
 }
 
@@ -258,7 +164,7 @@ pub(super) async fn mock_sstable_store_with_pin_cache() -> (SstableStoreRef, Arc
     (store, cache)
 }
 
-pub(super) fn pinned_version_with_ssts(
+pub(in crate::hummock::event_handler) fn pinned_version_with_ssts(
     table_ids: &[TableId],
     ssts: &[SstableInfo],
 ) -> PinnedVersion {
@@ -324,4 +230,34 @@ pub(super) async fn gen_test_sst_with_object_id(
         vec![table_id.as_raw_id()],
     )
     .await
+}
+
+pub(super) fn l0_insert_delta(
+    prev_id: HummockVersionId,
+    committed_epoch: u64,
+    ssts: Vec<SstableInfo>,
+) -> HummockVersionDelta {
+    let mut delta = HummockVersionDelta::default();
+    delta.prev_id = prev_id;
+    delta.id = (prev_id.as_raw_id() + 1).into();
+    delta.state_table_info_delta = ssts
+        .iter()
+        .flat_map(|sst| &sst.table_ids)
+        .map(|&table| {
+            (
+                table,
+                StateTableInfoDelta {
+                    compaction_group_id: 1.into(),
+                    committed_epoch,
+                },
+            )
+        })
+        .collect();
+    delta.group_deltas.insert(
+        1.into(),
+        GroupDeltas {
+            group_deltas: vec![GroupDelta::NewL0SubLevel(ssts)],
+        },
+    );
+    delta
 }
