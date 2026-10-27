@@ -164,7 +164,8 @@ async fn test_cancelled_attempt_preserves_new_registration_without_restarting() 
             .unwrap(),
     );
     // Exercise stale-work isolation defensively; ordinary cancellation need not re-register.
-    executor.unregister_objects([object]);
+    cache.unregister_objects([object]);
+    executor.cancel_objects([object]);
     cache.register_objects([object]);
     let token = cache.prepare_refill(object);
     executor.cancel_tables(&candidate.admitted_tables);
@@ -328,8 +329,9 @@ async fn test_pin_executor_uses_shared_budget_and_targeted_removal() {
             .is_pending()
     );
     let survivor_token = cache.prepare_refill(survivor);
-    executor.unregister_objects([]);
-    executor.unregister_objects(removed);
+    cache.unregister_objects(removed.iter().copied());
+    executor.cancel_objects([]);
+    executor.cancel_objects(removed);
     assert!(removed_wakes.0.load(Ordering::Relaxed) > 0);
     assert_eq!(
         survivor_wakes.0.load(Ordering::Relaxed),

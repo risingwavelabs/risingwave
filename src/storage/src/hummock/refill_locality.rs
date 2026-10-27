@@ -22,12 +22,25 @@ use risingwave_pb::id::TableId;
 
 use super::Sstable;
 
-/// Borrows the CN table metadata ownership maps, projected by worker role.
+/// Borrows the single ownership source in CN `TableCacheMetadata`, projected by worker role.
 /// Keep both lanes: Foyer's policies distinguish them, while Pin uses their union.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct RefillOwnership<'a> {
     pub streaming: Option<&'a HashMap<TableId, Bitmap>>,
     pub serving: Option<&'a HashMap<TableId, Bitmap>>,
+}
+
+impl<'a> RefillOwnership<'a> {
+    /// Checks coarse table admission without constructing a union bitmap.
+    pub(crate) fn has_vnodes(self, table: &TableId) -> bool {
+        self.streaming
+            .and_then(|map| map.get(table))
+            .is_some_and(Bitmap::any)
+            || self
+                .serving
+                .and_then(|map| map.get(table))
+                .is_some_and(Bitmap::any)
+    }
 }
 
 pub(crate) fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> bool {
