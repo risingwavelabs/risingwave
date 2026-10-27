@@ -16,13 +16,18 @@
 //! The event handler owns and updates this state; refill tasks consume immutable snapshots.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_pb::id::TableId;
 
 use super::refill_locality::RefillOwnership;
+
+/// Lock order: metadata, Pin pending queue, executor/cache locks. Never hold across I/O or await.
+pub(crate) type SharedTableCacheMetadata = Arc<RwLock<TableCacheMetadata>>;
 
 pub(crate) struct TableCacheMetadata {
     pub role: Role,
@@ -69,57 +74,35 @@ impl TableCacheMetadata {
         &self.pinned_table_ids
     }
 
+    /// Replaces policy metadata and returns the previous Pin table set.
+    /// Consumers decide whether the change invalidates their work.
     pub(crate) fn replace_policy_snapshot(
         &mut self,
         policies: HashMap<TableId, CacheRefillPolicy>,
         pinned: HashSet<TableId>,
     ) -> HashSet<TableId> {
-        let changed = self
-            .pinned_table_ids
-            .symmetric_difference(&pinned)
-            .copied()
-            .collect();
         self.table_cache_refill_policies = policies;
-        self.pinned_table_ids = pinned;
-        changed
+        std::mem::replace(&mut self.pinned_table_ids, pinned)
     }
 
-    // Pin admission is table-scoped. Changes within a nonempty local vnode set do not
-    // invalidate downloads; Foyer still consumes the full updated mappings.
+    /// Returns the replaced mapping without interpreting the ownership change.
     pub(crate) fn replace_serving_mapping(
         &mut self,
         mapping: HashMap<TableId, Bitmap>,
-    ) -> HashSet<TableId> {
-        let previous = std::mem::replace(&mut self.serving_table_vnode_mapping, mapping);
-        let before = RefillOwnership {
-            streaming: self
-                .role
-                .for_streaming()
-                .then_some(&self.streaming_table_vnode_mapping),
-            serving: self.role.for_serving().then_some(&previous),
-        };
-        self.pinned_table_ids
-            .iter()
-            .copied()
-            .filter(|table| before.has_vnodes(table) != self.ownership().has_vnodes(table))
-            .collect()
+    ) -> HashMap<TableId, Bitmap> {
+        std::mem::replace(&mut self.serving_table_vnode_mapping, mapping)
     }
 
+    /// Returns the table's previous vnode bitmap, if present.
     pub(crate) fn update_streaming_table_vnodes(
         &mut self,
         table: TableId,
         bitmap: Option<Bitmap>,
-    ) -> HashSet<TableId> {
-        let was_owned = self.ownership().has_vnodes(&table);
+    ) -> Option<Bitmap> {
         if let Some(bitmap) = bitmap {
-            self.streaming_table_vnode_mapping.insert(table, bitmap);
+            self.streaming_table_vnode_mapping.insert(table, bitmap)
         } else {
-            self.streaming_table_vnode_mapping.remove(&table);
-        }
-        if self.is_pinned(&table) && was_owned != self.ownership().has_vnodes(&table) {
-            [table].into()
-        } else {
-            HashSet::new()
+            self.streaming_table_vnode_mapping.remove(&table)
         }
     }
 }

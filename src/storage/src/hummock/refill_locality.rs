@@ -31,6 +31,15 @@ pub(crate) struct RefillOwnership<'a> {
 }
 
 impl<'a> RefillOwnership<'a> {
+    /// Tests the role-projected union without allocating a combined bitmap.
+    pub(crate) fn contains_vnode(self, table: &TableId, vnode: usize) -> bool {
+        [self.streaming, self.serving]
+            .into_iter()
+            .flatten()
+            .filter_map(|map| map.get(table))
+            .any(|bitmap| vnode < bitmap.len() && bitmap.is_set(vnode))
+    }
+
     /// Checks coarse table admission without constructing a union bitmap.
     pub(crate) fn has_vnodes(self, table: &TableId) -> bool {
         self.streaming

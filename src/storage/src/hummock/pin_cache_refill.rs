@@ -32,7 +32,8 @@ use crate::hummock::pin_cache::membership::PinCacheMembershipIndex;
 /// This is independent of membership changes: a full snapshot can add membership without
 /// refill intent, and an already-referenced object can acquire new refill intent.
 /// Candidates retain only table projections referenced by this event's target version.
-/// The caller checks current table ownership before constructing download jobs.
+/// Pending plans may only lose admitted tables; the caller checks current table ownership
+/// before constructing download jobs.
 #[derive(Default)]
 pub(crate) struct PinCacheRefillPlan {
     pub objects: HashMap<HummockSstableObjectId, PinCacheRefillObject>,
@@ -143,6 +144,15 @@ impl PinCacheRefillPlan {
                 .admitted_tables
                 .retain(|table| required[object].contains(table));
             !candidate.admitted_tables.is_empty()
+        });
+    }
+
+    pub(crate) fn retain_tables(&mut self, pinned_tables: &HashSet<TableId>) {
+        self.objects.retain(|_, object| {
+            object
+                .admitted_tables
+                .retain(|table| pinned_tables.contains(table));
+            !object.admitted_tables.is_empty()
         });
     }
 }
