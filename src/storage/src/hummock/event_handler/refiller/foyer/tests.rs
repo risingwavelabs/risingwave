@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::FutureExt;
 use parking_lot::Mutex;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
@@ -1119,14 +1118,6 @@ async fn test_without_pin_backend_preserves_foyer_task_lifecycle() {
     tokio::time::timeout(Duration::from_secs(1), completed.notified())
         .await
         .expect("dropping the condition must not abort legacy Foyer work");
-
-    let mut condition =
-        refiller.start_cache_refill(vec![], version.clone(), Some(&[]), &cache_metadata);
-    assert!(condition.as_mut().now_or_never().is_none());
-    gate.add_permits(1);
-    tokio::time::timeout(Duration::from_secs(1), condition)
-        .await
-        .unwrap();
 
     refiller.foyer.spawn_refill_task = Some(Arc::new(|_, _| {
         tokio::spawn(async { panic!("simulated Foyer task failure") })

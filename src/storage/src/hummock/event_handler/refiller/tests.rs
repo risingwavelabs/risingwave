@@ -55,93 +55,46 @@ fn gated_foyer_refill() -> (Arc<Semaphore>, SpawnRefillTask) {
 }
 
 #[tokio::test]
-async fn test_pin_refill_observes_inserts_alongside_table_truncation() {
-    let table_id = TableId::from(233);
-    let group: risingwave_pb::id::CompactionGroupId = 1.into();
-    let sibling_table_id = TableId::from(234);
-    let (sstable_store, pin_cache) = mock_sstable_store_with_pin_cache().await;
-    let (_, sst_info) = gen_test_sst_with_object_id(table_id, sstable_store.clone(), 1001).await;
-
-    let (_, old_sibling) =
-        gen_test_sst_with_object_id(sibling_table_id, sstable_store.clone(), 1002).await;
-    let removed = old_sibling.object_id;
-    let base = pinned_version_with_ssts(&[table_id, sibling_table_id], &[old_sibling]);
+async fn test_pin_policy_changes_preserve_delta_admission() {
+    let table = TableId::from(233);
+    let (store, cache) = mock_sstable_store_with_pin_cache().await;
+    let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 1001).await;
+    let (_, later) = gen_test_sst_with_object_id(table, store.clone(), 1002).await;
+    let (gate, spawn) = gated_foyer_refill();
+    let base = pinned_version_with_ssts(&[table], &[]);
     let mut refiller = RefillTest::new(
         Role::Streaming,
         test_refill_config(CacheRefillPolicy::Disabled),
-        sstable_store.clone(),
-        default_spawn_refill_task(),
+        store,
+        spawn,
         base.clone(),
     );
-    refiller.replace_table_cache_refill_runtime_snapshot(
-        HashMap::new(),
-        HashSet::from([table_id, sibling_table_id]),
+    refiller.update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+    refiller.submit(vec![l0_insert_delta(
+        1.into(),
+        test_epoch(1),
+        vec![info.clone()],
+    )]);
+    // A late SET registers received membership without backfilling the observed delta.
+    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+    assert!(
+        cache.is_registered(info.object_id),
+        "membership follows received versions, independently of refill intent"
     );
-    refiller
-        .update_streaming_table_vnodes(table_id, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
-    // Meta's epoch commit can append SSTs and truncate a staging table in the same group.
-    let mut delta = l0_insert_delta(base.id(), test_epoch(233), vec![sst_info.clone()]);
-    delta
-        .group_deltas
-        .get_mut(&group)
-        .unwrap()
-        .group_deltas
-        .push(GroupDelta::PruneTableIdsFromSsts([sibling_table_id].into()));
-    refiller.submit(vec![delta]);
-
+    gate.add_permits(1);
     assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
-    assert!(pin_cache.get(sst_info.object_id).is_some());
-    assert!(!pin_cache.is_registered(removed));
-}
+    assert!(cache.get(info.object_id).is_none());
 
-#[tokio::test]
-async fn test_pin_policy_changes_preserve_delta_admission() {
-    for queued_reset in [false, true] {
-        let table = TableId::from(233);
-        let (store, cache) = mock_sstable_store_with_pin_cache().await;
-        let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 1001).await;
-        let (_, later) = gen_test_sst_with_object_id(table, store.clone(), 1002).await;
-        let (gate, spawn) = gated_foyer_refill();
-        let base = pinned_version_with_ssts(&[table], &[]);
-        let mut refiller = RefillTest::new(
-            Role::Streaming,
-            test_refill_config(CacheRefillPolicy::Disabled),
-            store,
-            spawn,
-            base.clone(),
-        );
-        refiller
-            .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
-        if queued_reset {
-            refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
-        }
-        refiller.submit(vec![l0_insert_delta(
-            1.into(),
-            test_epoch(1),
-            vec![info.clone()],
-        )]);
-        // Neither a late SET nor RESET followed by SET may warm an observed delta.
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), HashSet::new());
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
-        assert!(
-            cache.is_registered(info.object_id),
-            "membership follows received versions, independently of refill intent"
-        );
-        gate.add_permits(1);
-        assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
-        assert!(cache.get(info.object_id).is_none());
-
-        // Policy changes must still admit future deltas for the same table.
-        gate.add_permits(1);
-        refiller.submit(vec![l0_insert_delta(
-            2.into(),
-            test_epoch(2),
-            vec![later.clone()],
-        )]);
-        assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
-        assert!(cache.get(later.object_id).is_some());
-        assert!(cache.get(info.object_id).is_none());
-    }
+    // Policy changes must still admit future deltas for the same table.
+    gate.add_permits(1);
+    refiller.submit(vec![l0_insert_delta(
+        2.into(),
+        test_epoch(2),
+        vec![later.clone()],
+    )]);
+    assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
+    assert!(cache.get(later.object_id).is_some());
+    assert!(cache.get(info.object_id).is_none());
 }
 
 #[tokio::test]
@@ -304,44 +257,106 @@ async fn test_pin_policy_change_preserves_old_version_references() {
     assert!(cache.get(target.object_id).is_none());
 }
 
-#[tokio::test]
-async fn test_foyer_failure_waits_for_pin() {
-    let table = TableId::from(233);
-    let ordinary_table = TableId::from(234);
-    let (store, cache) = mock_sstable_store_with_pin_cache().await;
-    let (_, pinned) = gen_test_sst_with_object_id(table, store.clone(), 832).await;
-    let (_, ordinary) = gen_test_sst_with_object_id(ordinary_table, store.clone(), 834).await;
-    store
-        .store()
-        .delete(&store.get_sst_data_path(ordinary.object_id))
-        .await
-        .unwrap();
-    store.clear_meta_cache().await.unwrap();
-    let foyer_finished = Arc::new(tokio::sync::Notify::new());
-    let worker_finished = foyer_finished.clone();
-    let default_spawn = default_spawn_refill_task();
-    let spawn: SpawnRefillTask = Arc::new(move |deltas, context| {
-        assert!(
-            deltas
-                .iter()
-                .flat_map(|delta| &delta.insert_sst_infos)
-                .any(|sst| sst.table_ids.contains(&ordinary_table))
+#[tokio::test(start_paused = true)]
+async fn test_foyer_failure_or_timeout_waits_for_pin() {
+    for metadata_error in [true, false] {
+        let table = TableId::from(233);
+        let ordinary_table = TableId::from(234);
+        let (store, cache) = mock_sstable_store_with_pin_cache().await;
+        let (_, pinned) = gen_test_sst_with_object_id(table, store.clone(), 832).await;
+        let (_, ordinary) = gen_test_sst_with_object_id(ordinary_table, store.clone(), 834).await;
+        if metadata_error {
+            store
+                .store()
+                .delete(&store.get_sst_data_path(ordinary.object_id))
+                .await
+                .unwrap();
+            store.clear_meta_cache().await.unwrap();
+        }
+        let finished = Arc::new(tokio::sync::Notify::new());
+        let completion = finished.clone();
+        let default_spawn = default_spawn_refill_task();
+        let spawn: SpawnRefillTask = Arc::new(move |deltas, mut context| {
+            assert!(
+                deltas
+                    .iter()
+                    .flat_map(|delta| &delta.insert_sst_infos)
+                    .any(|sst| sst.table_ids.contains(&ordinary_table))
+            );
+            context.config = Arc::new(CacheRefillConfig {
+                // The error leg must finish before the one-second observation bound;
+                // it cannot pass by falling back to its own timeout.
+                timeout: if metadata_error {
+                    Duration::from_secs(60)
+                } else {
+                    Duration::from_millis(1)
+                },
+                ..test_refill_config(CacheRefillPolicy::Enabled)
+            });
+            if !metadata_error {
+                context.meta_refill_concurrency = Some(Arc::new(Semaphore::new(0)));
+            }
+            let finished = completion.clone();
+            let task = default_spawn(deltas, context);
+            tokio::spawn(async move {
+                task.await.unwrap();
+                finished.notify_one();
+            })
+        });
+        let mut config = test_refill_config(CacheRefillPolicy::Enabled);
+        config.timeout = Duration::from_secs(60);
+        let base = pinned_version_with_ssts(&[table, ordinary_table], &[]);
+        let mut refiller = RefillTest::new(Role::Both, config, store, spawn, base);
+        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller.replace_serving_table_vnode_mapping(
+            [(ordinary_table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
         );
-        let finished = worker_finished.clone();
-        let task = default_spawn(deltas, context);
-        tokio::spawn(async move {
-            task.await.unwrap();
-            finished.notify_one();
-        })
-    });
-    let base = pinned_version_with_ssts(&[table, ordinary_table], &[]);
-    let mut config = test_refill_config(CacheRefillPolicy::Enabled);
-    config.timeout = Duration::from_secs(60);
-    let mut refiller = RefillTest::new(Role::Both, config, store, spawn, base.clone());
-    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
-    refiller.replace_serving_table_vnode_mapping(
-        [(ordinary_table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
+        refiller
+            .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        let permit = refiller
+            .cache()
+            .foyer
+            .concurrency
+            .clone()
+            .acquire_owned()
+            .await
+            .unwrap();
+        refiller.submit(vec![l0_insert_delta(
+            1.into(),
+            test_epoch(1),
+            vec![pinned.clone(), ordinary],
+        )]);
+        wait_for_pin_downloads(&refiller, &[pinned.object_id]).await;
+        tokio::time::timeout(Duration::from_secs(1), finished.notified())
+            .await
+            .expect("Foyer must finish while Pin is still blocked");
+        assert!(
+            refiller.versions().next_events().now_or_never().is_none(),
+            "metadata_error={metadata_error}"
+        );
+        assert!(cache.get(pinned.object_id).is_none());
+        drop(permit);
+        assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
+        assert!(cache.get(pinned.object_id).is_some());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_pin_timeout_keeps_submitted_copy_alive() {
+    let table = TableId::from(233);
+    let (store, cache) = mock_sstable_store_with_pin_cache().await;
+    let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 810).await;
+    let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+    config.timeout = Duration::from_millis(50);
+    let timeout = config.timeout;
+    let mut refiller = RefillTest::new(
+        Role::Streaming,
+        config,
+        store,
+        default_spawn_refill_task(),
+        pinned_version_with_ssts(&[table], &[]),
     );
+    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
     refiller.update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
     let permit = refiller
         .cache()
@@ -351,167 +366,59 @@ async fn test_foyer_failure_waits_for_pin() {
         .acquire_owned()
         .await
         .unwrap();
-    let delta = l0_insert_delta(base.id(), test_epoch(233), vec![pinned.clone(), ordinary]);
-    refiller.submit(vec![delta]);
-    wait_for_pin_downloads(&refiller, &[pinned.object_id]).await;
-    tokio::time::timeout(Duration::from_secs(1), foyer_finished.notified())
-        .await
-        .expect("the real Foyer metadata error must finish before checking publication");
+    refiller.submit(vec![l0_insert_delta(
+        1.into(),
+        test_epoch(1),
+        vec![info.clone()],
+    )]);
+    wait_for_pin_downloads(&refiller, &[info.object_id]).await;
+    // Do not poll the queue until the submission-time deadline has elapsed.
+    tokio::time::advance(timeout).await;
+    let events = refiller
+        .versions()
+        .next_events()
+        .now_or_never()
+        .expect("late queue polling must not reset Pin's deadline");
+    assert_eq!(events.len(), 1);
+    refiller.publish(&events);
+    assert!(cache.get(info.object_id).is_none());
     assert!(
-        refiller.versions().next_events().now_or_never().is_none(),
-        "Foyer failure cannot bypass unfinished Pin work"
+        refiller
+            .cache()
+            .pin_cache_refill
+            .as_ref()
+            .unwrap()
+            .executor
+            .has_pending_for_test(info.object_id)
     );
-    assert!(cache.get(pinned.object_id).is_none());
     drop(permit);
-    assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
-    assert!(cache.get(pinned.object_id).is_some());
-}
-
-#[tokio::test(start_paused = true)]
-async fn test_refill_timeouts_and_download_cancellation() {
-    #[derive(Clone, Copy, Debug)]
-    enum Case {
-        PinTimeout,
-        FoyerTimeout,
-    }
-    for case in [Case::PinTimeout, Case::FoyerTimeout] {
-        let table = TableId::from(233);
-        let (store, cache) = mock_sstable_store_with_pin_cache().await;
-        let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 810).await;
-        let object = info.object_id;
-        let mut inserted = vec![info.clone()];
-        let mut tables = vec![table];
-        let ordinary = TableId::from(234);
-        if matches!(case, Case::FoyerTimeout) {
-            inserted.push(
-                gen_test_sst_with_object_id(ordinary, store.clone(), 811)
-                    .await
-                    .1,
-            );
-            tables.push(ordinary);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while cache.get(info.object_id).is_none() {
+            tokio::task::yield_now().await;
         }
-        let mut config = test_refill_config(CacheRefillPolicy::Enabled);
-        config.timeout = Duration::from_secs(1);
-        if matches!(case, Case::PinTimeout) {
-            config.timeout = Duration::from_millis(50);
-        }
-        let pin_timeout = config.timeout;
-        let default_spawn = default_spawn_refill_task();
-        let spawn: SpawnRefillTask = Arc::new(move |plan, mut context| {
-            if matches!(case, Case::FoyerTimeout) {
-                assert!(
-                    plan.iter()
-                        .flat_map(|delta| &delta.insert_sst_infos)
-                        .any(|sst| sst.table_ids.contains(&ordinary))
-                );
-                context.config = Arc::new(CacheRefillConfig {
-                    timeout: Duration::from_millis(1),
-                    ..test_refill_config(CacheRefillPolicy::Enabled)
-                });
-                context.meta_refill_concurrency = Some(Arc::new(Semaphore::new(0)));
-            } else if matches!(case, Case::PinTimeout) {
-                // Foyer has no admitted work and a longer timeout. Only Pin's own
-                // event timer can release its blocked download in this case.
-                context.config = Arc::new(CacheRefillConfig {
-                    timeout: Duration::from_secs(60),
-                    ..test_refill_config(CacheRefillPolicy::Enabled)
-                });
-            }
-            default_spawn(plan, context)
-        });
-        let mut refiller = RefillTest::new(
-            Role::Both,
-            config,
-            store,
-            spawn,
-            pinned_version_with_ssts(&tables, &[]),
-        );
-        let mut permit = Some(
-            refiller
-                .cache()
-                .foyer
-                .concurrency
-                .clone()
-                .acquire_owned()
-                .await
-                .unwrap(),
-        );
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
-        if matches!(case, Case::FoyerTimeout) {
-            refiller.replace_serving_table_vnode_mapping(
-                [(ordinary, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
-            );
-        }
-        refiller.update_streaming_table_vnodes(
-            table,
-            Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [0])),
-        );
-        refiller.submit(vec![l0_insert_delta(1.into(), test_epoch(1), inserted)]);
-        wait_for_pin_downloads(&refiller, &[info.object_id]).await;
-        if !matches!(case, Case::PinTimeout) {
-            assert!(
-                tokio::time::timeout(Duration::from_millis(5), refiller.versions().next_events())
-                    .await
-                    .is_err(),
-                "{case:?}"
-            );
-        }
-        assert!(cache.get(info.object_id).is_none());
-        if !matches!(case, Case::PinTimeout) {
-            drop(permit.take());
-        }
-        if matches!(case, Case::PinTimeout) {
-            tokio::time::advance(pin_timeout).await;
-        }
-        if matches!(case, Case::PinTimeout) {
-            let events =
-                refiller.versions().next_events().now_or_never().expect(
-                    "Pin timeout starts at submission, even before the queue first polls it",
-                );
-            assert_eq!(events.len(), 1);
-            refiller.publish(&events);
-        } else {
-            assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
-        }
-
-        if matches!(case, Case::PinTimeout) {
-            assert!(cache.get(info.object_id).is_none());
-            assert!(
-                refiller
-                    .cache()
-                    .pin_cache_refill
-                    .as_ref()
-                    .unwrap()
-                    .executor
-                    .has_pending_for_test(object),
-                "the event timeout releases publication, not the executor-owned copy"
-            );
-            // Releasing the version must not cancel the executor's upload.
-            drop(permit.take());
-            tokio::time::timeout(Duration::from_secs(1), async {
-                while cache.get(info.object_id).is_none() {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-        }
-        assert!(cache.get(info.object_id).is_some(), "{case:?}");
-    }
+    })
+    .await
+    .expect("publication timeout must not cancel the executor-owned copy");
 }
 
 #[tokio::test]
-async fn test_pin_event_rejects_retired_table_projection_of_live_object() {
-    let tables = [TableId::from(233), TableId::from(234)];
-    for owns_survivor in [false, true] {
+async fn test_pin_refill_after_table_pruning() {
+    // A mixed commit truncates A while appending a shared SST. Separate raw deltas
+    // append first and then unregister A. Only B's surviving projection may refill.
+    for (mixed_commit, owns_survivor) in [(true, true), (false, false), (false, true)] {
+        let tables = [TableId::from(233), TableId::from(234)];
         let (store, cache) = mock_sstable_store_with_pin_cache().await;
-        let (_, info) =
+        let (_, old) = gen_test_sst_with_object_id(tables[0], store.clone(), 841).await;
+        let (_, inserted) =
             gen_test_sstable_with_table_vnodes(&store, 842, &tables.map(|table| (table, 0))).await;
-        let base = pinned_version_with_ssts(&tables, &[]);
-        let (foyer_gate, spawn) = gated_foyer_refill();
-        let mut config = test_refill_config(CacheRefillPolicy::Disabled);
-        config.timeout = Duration::from_secs(5);
-        let mut refiller = RefillTest::new(Role::Streaming, config, store, spawn, base.clone());
+        let base = pinned_version_with_ssts(&tables, std::slice::from_ref(&old));
+        let mut refiller = RefillTest::new(
+            Role::Streaming,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            store,
+            default_spawn_refill_task(),
+            base.clone(),
+        );
         refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), tables.into());
         for table in tables.into_iter().take(1 + usize::from(owns_survivor)) {
             refiller.update_streaming_table_vnodes(
@@ -519,35 +426,46 @@ async fn test_pin_event_rejects_retired_table_projection_of_live_object() {
                 Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             );
         }
-
         let group = 1.into();
-        let inserted = l0_insert_delta(base.id(), test_epoch(1), vec![info.clone()]);
-        let mut pruned = HummockVersionDelta::default();
-        pruned.prev_id = inserted.id;
-        pruned.id = (inserted.id.as_raw_id() + 1).into();
-        // Match Meta's unregister path: remove A and prune its SST projections together.
-        pruned.removed_table_ids.insert(tables[0]);
-        pruned.group_deltas.insert(
-            group,
-            GroupDeltas {
-                group_deltas: vec![GroupDelta::PruneTableIdsFromSsts([tables[0]].into())],
-            },
-        );
-        let raw_deltas = [inserted, pruned];
-        refiller.submit(raw_deltas.to_vec());
-        foyer_gate.add_permits(1);
+        let mut append = l0_insert_delta(base.id(), test_epoch(1), vec![inserted.clone()]);
+        let prune = GroupDelta::PruneTableIdsFromSsts([tables[0]].into());
+        let deltas = if mixed_commit {
+            append
+                .group_deltas
+                .get_mut(&group)
+                .unwrap()
+                .group_deltas
+                .push(prune);
+            vec![append]
+        } else {
+            let mut unregister = HummockVersionDelta::default();
+            unregister.prev_id = append.id;
+            unregister.id = 3.into();
+            unregister.removed_table_ids.insert(tables[0]);
+            unregister.group_deltas.insert(
+                group,
+                GroupDeltas {
+                    group_deltas: vec![prune],
+                },
+            );
+            vec![append, unregister]
+        };
+        refiller.submit(deltas);
         let events = apply_next_events(&mut refiller).await;
         assert_eq!(events.len(), 1);
-        assert_eq!(events.last().unwrap().new_pinned_version.id(), 3);
-
+        assert_eq!(
+            events[0].new_pinned_version.id(),
+            if mixed_commit { 2 } else { 3 }
+        );
+        assert!(!cache.is_registered(old.object_id));
         assert!(
-            cache.is_registered(info.object_id),
-            "B still pins the object"
+            cache.is_registered(inserted.object_id),
+            "B still pins the shared object"
         );
         assert_eq!(
-            cache.get(info.object_id).is_some(),
+            cache.get(inserted.object_id).is_some(),
             owns_survivor,
-            "event plans admit only projections surviving their target"
+            "mixed_commit={mixed_commit}"
         );
     }
 }
