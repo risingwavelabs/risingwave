@@ -294,7 +294,9 @@ impl HummockStorageReadSnapshot {
         self.hummock_version_reader
             .get(
                 key,
-                self.epoch.get_epoch(),
+                self.epoch
+                    .get_epoch()
+                    .expect("snapshot epoch must be resolved"),
                 self.table_id,
                 self.table_option,
                 read_options,
@@ -315,7 +317,9 @@ impl HummockStorageReadSnapshot {
         self.hummock_version_reader
             .iter(
                 key_range,
-                self.epoch.get_epoch(),
+                self.epoch
+                    .get_epoch()
+                    .expect("snapshot epoch must be resolved"),
                 self.table_id,
                 self.table_option,
                 read_options,
@@ -335,7 +339,9 @@ impl HummockStorageReadSnapshot {
         self.hummock_version_reader
             .rev_iter(
                 key_range,
-                self.epoch.get_epoch(),
+                self.epoch
+                    .get_epoch()
+                    .expect("snapshot epoch must be resolved"),
                 self.table_id,
                 self.table_option,
                 read_options,
@@ -380,7 +386,16 @@ impl HummockStorageReadSnapshot {
         epoch: HummockReadEpoch,
         key_range: TableKeyRange,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
+        if let Some(version) = &self.latest_committed_version {
+            return Ok(get_committed_read_version_tuple(
+                version.clone(),
+                self.table_id,
+                key_range,
+                epoch.get_epoch().expect("snapshot epoch must be resolved"),
+            ));
+        }
         match epoch {
+            HummockReadEpoch::LatestCommitted => unreachable!("snapshot epoch must be resolved"),
             HummockReadEpoch::Backup(epoch) => {
                 self.build_read_version_tuple_from_backup(epoch, self.table_id, key_range)
                     .await
@@ -450,6 +465,9 @@ impl HummockStorageReadSnapshot {
         epoch: u64,
         table_id: TableId,
     ) -> StorageResult<PinnedVersion> {
+        if let Some(version) = &self.latest_committed_version {
+            return Ok(version.clone());
+        }
         match self
             .recent_versions
             .load()
@@ -689,6 +707,8 @@ impl HummockStorage {
 #[derive(Clone)]
 pub struct HummockStorageReadSnapshot {
     epoch: HummockReadEpoch,
+    /// The version captured atomically with the epoch for a latest-committed request.
+    latest_committed_version: Option<PinnedVersion>,
     table_id: TableId,
     table_option: TableOption,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
@@ -713,6 +733,10 @@ impl StateStoreGet for HummockStorageReadSnapshot {
 impl StateStoreRead for HummockStorageReadSnapshot {
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
+
+    fn read_epoch(&self) -> Option<u64> {
+        self.epoch.get_epoch()
+    }
 
     fn iter(
         &self,
@@ -755,6 +779,7 @@ impl StateStoreReadVector for HummockStorageReadSnapshot {
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
         let version = match self.epoch {
+            HummockReadEpoch::LatestCommitted => unreachable!("snapshot epoch must be resolved"),
             HummockReadEpoch::Committed(epoch)
             | HummockReadEpoch::BatchQueryCommitted(epoch, _)
             | HummockReadEpoch::TimeTravel(epoch) => {
@@ -901,6 +926,7 @@ impl HummockStorage {
             table_id
         );
         match wait_epoch {
+            HummockReadEpoch::LatestCommitted => return Ok(()),
             HummockReadEpoch::Committed(wait_epoch) => {
                 assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
                 wait_for_epoch(&self.version_update_notifier_tx, wait_epoch, table_id).await?;
@@ -977,8 +1003,25 @@ impl StateStore for HummockStorage {
         options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
         self.try_wait_epoch_impl(epoch, options.table_id).await?;
+        let (epoch, latest_committed_version) =
+            if matches!(epoch, HummockReadEpoch::LatestCommitted) {
+                let version = self.recent_versions.load().latest_version().clone();
+                let committed_epoch =
+                    version
+                        .table_committed_epoch(options.table_id)
+                        .ok_or_else(|| {
+                            HummockError::other(format!(
+                                "table {} is not available in the local committed version",
+                                options.table_id
+                            ))
+                        })?;
+                (HummockReadEpoch::Committed(committed_epoch), Some(version))
+            } else {
+                (epoch, None)
+            };
         Ok(HummockStorageReadSnapshot {
             epoch,
+            latest_committed_version,
             table_id: options.table_id,
             table_option: options.table_option,
             recent_versions: self.recent_versions.clone(),

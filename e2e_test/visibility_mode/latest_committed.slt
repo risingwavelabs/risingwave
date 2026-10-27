@@ -1,0 +1,208 @@
+# Serving nodes choose their local committed epoch, even when barrier reads are enabled.
+query T
+SHOW batch_read_latest_committed;
+----
+false
+
+statement ok
+SET batch_read_latest_committed = true;
+
+query T
+SHOW batch_read_latest_committed;
+----
+true
+
+statement ok
+SET visibility_mode = all;
+
+statement ok
+CREATE TABLE latest_committed_reads (id INT PRIMARY KEY, v INT);
+
+statement ok
+CREATE TABLE latest_committed_keys (id INT PRIMARY KEY);
+
+statement ok
+INSERT INTO latest_committed_reads VALUES (1, 10), (2, 20), (3, 30);
+
+statement ok
+INSERT INTO latest_committed_keys VALUES (1), (3);
+
+statement ok
+FLUSH;
+
+statement ok
+SET query_mode = local;
+
+query II retry 30 backoff 1s
+SELECT * FROM latest_committed_reads ORDER BY id;
+----
+1 10
+2 20
+3 30
+
+query I retry 30 backoff 1s
+SELECT v FROM latest_committed_reads WHERE id = 2;
+----
+20
+
+query II retry 30 backoff 1s
+SELECT * FROM latest_committed_reads WHERE id IN (1, 3) ORDER BY id DESC;
+----
+3 30
+1 10
+
+query II retry 30 backoff 1s
+SELECT r.id, r.v FROM latest_committed_keys k JOIN latest_committed_reads r ON k.id = r.id ORDER BY r.id;
+----
+1 10
+3 30
+
+# The full subscription snapshot must use its frontend-pinned epoch, including with visibility=all.
+statement ok
+CREATE TABLE latest_committed_subscription (id INT PRIMARY KEY, v INT);
+
+statement ok
+CREATE SUBSCRIPTION latest_committed_sub FROM latest_committed_subscription WITH (retention = '1D');
+
+statement ok
+INSERT INTO latest_committed_subscription VALUES (1, 10);
+
+statement ok
+FLUSH;
+
+statement ok
+DECLARE latest_committed_cursor SUBSCRIPTION CURSOR FOR latest_committed_sub FULL;
+
+# Commit after DECLARE: the original row belongs to the snapshot and the new row to the log.
+statement ok
+INSERT INTO latest_committed_subscription VALUES (2, 20);
+
+statement ok
+FLUSH;
+
+query IITI
+FETCH 1 FROM latest_committed_cursor;
+----
+1 10 Insert NULL
+
+# Only the new row is returned after transitioning to the log. Its timestamp is variable.
+statement count 1 retry 30 backoff 1s
+FETCH 1 FROM latest_committed_cursor WITH (timeout = '1s');
+
+statement count 0
+FETCH 1 FROM latest_committed_cursor;
+
+query T
+SHOW batch_read_latest_committed;
+----
+true
+
+statement ok
+CLOSE latest_committed_cursor;
+
+statement ok
+DROP SUBSCRIPTION latest_committed_sub;
+
+statement ok
+DROP TABLE latest_committed_subscription;
+
+statement ok
+SET query_mode = distributed;
+
+query II retry 30 backoff 1s
+SELECT * FROM latest_committed_reads ORDER BY id;
+----
+1 10
+2 20
+3 30
+
+query I retry 30 backoff 1s
+SELECT v FROM latest_committed_reads WHERE id = 2;
+----
+20
+
+query II retry 30 backoff 1s
+SELECT * FROM latest_committed_reads WHERE id IN (1, 3) ORDER BY id DESC;
+----
+3 30
+1 10
+
+query II retry 30 backoff 1s
+SELECT r.id, r.v FROM latest_committed_keys k JOIN latest_committed_reads r ON k.id = r.id ORDER BY r.id;
+----
+1 10
+3 30
+
+# The full subscription snapshot must use its frontend-pinned epoch, including with visibility=all.
+statement ok
+CREATE TABLE latest_committed_subscription (id INT PRIMARY KEY, v INT);
+
+statement ok
+CREATE SUBSCRIPTION latest_committed_sub FROM latest_committed_subscription WITH (retention = '1D');
+
+statement ok
+INSERT INTO latest_committed_subscription VALUES (1, 10);
+
+statement ok
+FLUSH;
+
+statement ok
+DECLARE latest_committed_cursor SUBSCRIPTION CURSOR FOR latest_committed_sub FULL;
+
+# Commit after DECLARE: the original row belongs to the snapshot and the new row to the log.
+statement ok
+INSERT INTO latest_committed_subscription VALUES (2, 20);
+
+statement ok
+FLUSH;
+
+query IITI
+FETCH 1 FROM latest_committed_cursor;
+----
+1 10 Insert NULL
+
+# Only the new row is returned after transitioning to the log. Its timestamp is variable.
+statement count 1 retry 30 backoff 1s
+FETCH 1 FROM latest_committed_cursor WITH (timeout = '1s');
+
+statement count 0
+FETCH 1 FROM latest_committed_cursor;
+
+query T
+SHOW batch_read_latest_committed;
+----
+true
+
+statement ok
+CLOSE latest_committed_cursor;
+
+statement ok
+DROP SUBSCRIPTION latest_committed_sub;
+
+statement ok
+DROP TABLE latest_committed_subscription;
+
+statement ok
+SET batch_read_latest_committed TO DEFAULT;
+
+query T
+SHOW batch_read_latest_committed;
+----
+false
+
+query I
+SELECT count(*) FROM latest_committed_reads;
+----
+3
+
+statement ok
+DROP TABLE latest_committed_keys;
+
+statement ok
+DROP TABLE latest_committed_reads;
+
+statement ok
+SET query_mode TO DEFAULT;
+
+statement ok
+SET visibility_mode TO DEFAULT;

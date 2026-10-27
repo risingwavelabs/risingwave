@@ -128,12 +128,16 @@ message BatchQueryCommittedEpoch {
   uint64 hummock_version_id = 2;
 }
 
+// Resolve the committed epoch from the serving node at storage snapshot creation.
+message BatchQueryLatestCommittedEpoch {}
+
 message BatchQueryEpoch {
   oneof epoch {
     BatchQueryCommittedEpoch committed = 1;
     uint64 current = 2;
     uint64 backup = 3;
     uint64 time_travel = 4;
+    BatchQueryLatestCommittedEpoch latest_committed = 5;
   }
 }
 

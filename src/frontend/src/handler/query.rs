@@ -46,7 +46,7 @@ use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    LocalQueryExecution, LocalQueryStream,
+    LocalQueryExecution, LocalQueryStream, ReadSnapshot,
 };
 use crate::session::SessionImpl;
 
@@ -447,11 +447,21 @@ pub struct BatchPlanFragmenterResult {
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
+    /// Per-query override, used to keep subscription snapshots pinned through execution.
+    pub(crate) snapshot_override: Option<ReadSnapshot>,
 }
 
 pub fn gen_batch_plan_fragmenter(
     session: &SessionImpl,
     plan_result: RwBatchQueryPlanResult,
+) -> Result<BatchPlanFragmenterResult> {
+    gen_batch_plan_fragmenter_with_snapshot(session, plan_result, None)
+}
+
+pub fn gen_batch_plan_fragmenter_with_snapshot(
+    session: &SessionImpl,
+    plan_result: RwBatchQueryPlanResult,
+    snapshot_override: Option<ReadSnapshot>,
 ) -> Result<BatchPlanFragmenterResult> {
     let RwBatchQueryPlanResult {
         plan,
@@ -468,7 +478,13 @@ pub fn gen_batch_plan_fragmenter(
     );
     let worker_node_manager_reader = WorkerNodeSelector::new(
         session.env().worker_node_manager_ref(),
-        session.is_barrier_read(),
+        snapshot_override
+            .as_ref()
+            .or(session.get_pinned_snapshot().as_ref())
+            .map_or_else(
+                || session.is_barrier_read(),
+                ReadSnapshot::support_barrier_read,
+            ),
     );
     let plan_fragmenter = BatchPlanFragmenter::new(
         worker_node_manager_reader,
@@ -482,6 +498,7 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
+        snapshot_override,
     })
 }
 
@@ -495,7 +512,7 @@ pub async fn create_stream(
         query_mode,
         schema,
         stmt_type,
-        ..
+        snapshot_override,
     } = plan_fragmenter_result;
 
     let mut can_timeout_cancel = true;
@@ -526,7 +543,13 @@ pub async fn create_stream(
     let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(session.clone(), query, can_timeout_cancel).await?,
+            local_execute(
+                session.clone(),
+                query,
+                can_timeout_cancel,
+                snapshot_override,
+            )
+            .await?,
             column_types,
             formats,
             session.clone(),
@@ -534,7 +557,13 @@ pub async fn create_stream(
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
+                distribute_execute(
+                    session.clone(),
+                    query,
+                    can_timeout_cancel,
+                    snapshot_override,
+                )
+                .await?,
                 column_types,
                 formats,
                 session.clone(),
@@ -614,6 +643,7 @@ pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
+    snapshot_override: Option<ReadSnapshot>,
 ) -> Result<DistributedQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -627,7 +657,7 @@ pub async fn distribute_execute(
     let query_manager = session.env().query_manager().clone();
 
     query_manager
-        .schedule(execution_context, query)
+        .schedule(execution_context, query, snapshot_override)
         .await
         .map_err(|err| err.into())
 }
@@ -636,6 +666,7 @@ pub async fn local_execute(
     session: Arc<SessionImpl>,
     mut query: Query,
     can_timeout_cancel: bool,
+    snapshot_override: Option<ReadSnapshot>,
 ) -> Result<LocalQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -646,7 +677,7 @@ pub async fn local_execute(
     };
     let front_env = session.env();
 
-    let snapshot = session.pinned_snapshot();
+    let snapshot = snapshot_override.unwrap_or_else(|| session.pinned_snapshot());
 
     snapshot.fill_batch_query_epoch(&mut query)?;
 
