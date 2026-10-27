@@ -10,6 +10,9 @@ statement ok
 DROP TABLE IF EXISTS bounded_latest;
 
 statement ok
+DROP TABLE IF EXISTS bounded_no_pk;
+
+statement ok
 DROP SOURCE IF EXISTS bounded_upstream_src;
 
 statement ok
@@ -134,32 +137,15 @@ CREATE TABLE bounded_invalid (v INT) WITH (
     scan.bounded.snapshot.id = '1'
 ) FORMAT PLAIN ENCODE JSON;
 
-system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
-    SELECT snapshot_id FROM rw_iceberg_snapshots
-    WHERE source_name = 'bounded_upstream_src'
-    ORDER BY timestamp_ms LIMIT 1
-") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -c "
-CREATE TABLE bounded_invalid WITH (
-    connector = 'iceberg',
-    warehouse.path = 's3://hummock001/bounded_iceberg',
-    s3.endpoint = 'http://127.0.0.1:9301',
-    s3.region = 'us-east-1',
-    s3.access.key = 'hummockadmin',
-    s3.secret.key = 'hummockadmin',
-    catalog.type = 'storage',
-    database.name = 'bounded_db',
-    table.name = 'bounded_t',
-    scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '$snapshot_id'
-)" 2>&1 | grep -q "Bounded tables must have a PRIMARY KEY"
+control substitution on
 
-system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
-    SELECT snapshot_id FROM rw_iceberg_snapshots
-    WHERE source_name = 'bounded_upstream_src'
-    ORDER BY timestamp_ms LIMIT 1
-") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -c "
+let first_snapshot_id
+SELECT snapshot_id FROM rw_iceberg_snapshots
+WHERE source_name = 'bounded_upstream_src'
+ORDER BY timestamp_ms
+LIMIT 1
+
+statement error A bounded read cannot be combined with `refresh_mode`
 CREATE TABLE bounded_invalid (PRIMARY KEY (id)) WITH (
     connector = 'iceberg',
     warehouse.path = 's3://hummock001/bounded_iceberg',
@@ -172,15 +158,10 @@ CREATE TABLE bounded_invalid (PRIMARY KEY (id)) WITH (
     table.name = 'bounded_t',
     refresh_mode = 'FULL_RELOAD',
     scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '$snapshot_id'
-)" 2>&1 | grep -q "A bounded read cannot be combined with \`refresh_mode\`"
+    scan.bounded.snapshot.id = '${first_snapshot_id}'
+);
 
-system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
-    SELECT snapshot_id FROM rw_iceberg_snapshots
-    WHERE source_name = 'bounded_upstream_src'
-    ORDER BY timestamp_ms LIMIT 1
-") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -c "
+statement error Bounded reads are only supported for CREATE TABLE
 CREATE SOURCE bounded_invalid_src WITH (
     connector = 'iceberg',
     warehouse.path = 's3://hummock001/bounded_iceberg',
@@ -192,18 +173,13 @@ CREATE SOURCE bounded_invalid_src WITH (
     database.name = 'bounded_db',
     table.name = 'bounded_t',
     scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '$snapshot_id'
-)" 2>&1 | grep -q "Bounded reads are only supported for CREATE TABLE"
+    scan.bounded.snapshot.id = '${first_snapshot_id}'
+);
 
 # ==== load pinned snapshots
 
 # Pin the first snapshot, which only contains the first batch.
-system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
-    SELECT snapshot_id FROM rw_iceberg_snapshots
-    WHERE source_name = 'bounded_upstream_src'
-    ORDER BY timestamp_ms LIMIT 1
-") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+statement ok
 CREATE TABLE bounded_first (PRIMARY KEY (id)) WITH (
     connector = 'iceberg',
     warehouse.path = 's3://hummock001/bounded_iceberg',
@@ -215,16 +191,17 @@ CREATE TABLE bounded_first (PRIMARY KEY (id)) WITH (
     database.name = 'bounded_db',
     table.name = 'bounded_t',
     scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '$snapshot_id'
-)"
+    scan.bounded.snapshot.id = '${first_snapshot_id}'
+);
 
 # Pin the latest snapshot, which contains both batches.
-system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
-    SELECT snapshot_id FROM rw_iceberg_snapshots
-    WHERE source_name = 'bounded_upstream_src'
-    ORDER BY timestamp_ms DESC LIMIT 1
-") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+let latest_snapshot_id
+SELECT snapshot_id FROM rw_iceberg_snapshots
+WHERE source_name = 'bounded_upstream_src'
+ORDER BY timestamp_ms DESC
+LIMIT 1
+
+statement ok
 CREATE TABLE bounded_latest (PRIMARY KEY (id)) WITH (
     connector = 'iceberg',
     warehouse.path = 's3://hummock001/bounded_iceberg',
@@ -236,8 +213,8 @@ CREATE TABLE bounded_latest (PRIMARY KEY (id)) WITH (
     database.name = 'bounded_db',
     table.name = 'bounded_t',
     scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '$snapshot_id'
-)"
+    scan.bounded.snapshot.id = '${latest_snapshot_id}'
+);
 
 query TT retry 30 backoff 1s
 SELECT status, completed_at IS NOT NULL FROM rw_bounded_jobs ORDER BY job_id;
@@ -280,6 +257,39 @@ SELECT id, v FROM bounded_latest ORDER BY id;
 
 statement error altering connector properties of a bounded table is not supported
 ALTER TABLE bounded_latest CONNECTOR WITH (s3.region = 'us-west-2');
+
+# ==== tables without a primary key
+
+statement ok
+CREATE TABLE bounded_no_pk WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '${first_snapshot_id}'
+);
+
+query T retry 30 backoff 1s
+SELECT status FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_tables WHERE name = 'bounded_no_pk');
+----
+COMPLETED
+
+query IT
+SELECT id, v FROM bounded_no_pk ORDER BY id;
+----
+1 a
+2 b
+3 c
+
+statement ok
+DROP TABLE bounded_no_pk;
 
 # ==== cleanup
 

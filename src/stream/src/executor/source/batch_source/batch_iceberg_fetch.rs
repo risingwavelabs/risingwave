@@ -20,7 +20,9 @@ use futures::stream;
 use iceberg::scan::FileScanTask;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME};
+use risingwave_common::catalog::{
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
+};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
@@ -37,7 +39,9 @@ use super::batch_iceberg_state::{FileAssignments, FileEntry};
 use super::{Backoff, LoadRetryPolicy, StartKind};
 use crate::executor::LoadAction;
 use crate::executor::prelude::*;
-use crate::executor::source::{ChunksWithState, StreamSourceCore, prune_additional_cols};
+use crate::executor::source::{
+    ChunksWithState, StreamSourceCore, pad_row_id, prune_additional_cols,
+};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::{LoadProgress, LocalBarrierManager};
 
@@ -172,6 +176,8 @@ impl FetchState {
 struct ColumnIndices {
     file_path_idx: usize,
     file_pos_idx: usize,
+    /// Set for tables without a primary key
+    row_id_idx: Option<usize>,
 }
 
 impl ColumnIndices {
@@ -186,9 +192,15 @@ impl ColumnIndices {
             .iter()
             .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
             .expect("file pos column not found");
+        let row_id_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ROW_ID_COLUMN_NAME);
+
         Self {
             file_path_idx,
             file_pos_idx,
+            row_id_idx,
         }
     }
 
@@ -498,7 +510,13 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             &column_indices.to_prune(),
                             &source_desc.columns,
                         );
-                        yield Message::Chunk(pruned);
+
+                        let chunk = match column_indices.row_id_idx {
+                            Some(row_id_idx) => pad_row_id(pruned, row_id_idx),
+                            None => pruned,
+                        };
+
+                        yield Message::Chunk(chunk);
                     }
                 }
             }

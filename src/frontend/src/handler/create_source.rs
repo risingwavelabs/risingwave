@@ -1136,15 +1136,6 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     let (mut columns, pk_col_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
-    // A bounded load restarts from scratch on recovery, so rows must be deduplicated by key.
-    if ingest_mode.is_bounded() && row_id_index.is_some() {
-        return Err(ErrorCode::BindError(
-            "Bounded tables must have a PRIMARY KEY. Please define a primary key for the table."
-                .to_owned(),
-        )
-        .into());
-    }
-
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
