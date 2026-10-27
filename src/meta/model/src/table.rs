@@ -401,3 +401,26 @@ impl From<PbTable> for ActiveModel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cdc_table_type_persisted_names() {
+        for (cdc_table_type, sea_orm_value, serde_name) in [
+            (CdcTableType::Unspecified, "UNSPECIFIED", "Unspecified"),
+            (CdcTableType::Postgres, "POSTGRES", "Postgres"),
+            (CdcTableType::Mysql, "MYSQL", "Mysql"),
+            (CdcTableType::SqlServer, "SQLSERVER", "Sqlserver"),
+            (CdcTableType::Mongodb, "MONGO", "Mongo"),
+            (CdcTableType::Citus, "CITUS", "Citus"),
+        ] {
+            assert_eq!(cdc_table_type.to_value(), sea_orm_value);
+            assert_eq!(
+                serde_json::to_string(&cdc_table_type).unwrap(),
+                format!("\"{serde_name}\"")
+            );
+        }
+    }
+}

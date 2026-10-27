@@ -615,3 +615,16 @@ impl ExternalTableImpl {
 }
 
 pub const CDC_TABLE_SPLIT_ID_START: i64 = 1;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cdc_offset_persisted_mysql_tag() {
+        let json = r#"{"MySql":{"filename":"binlog.000001","position":4}}"#;
+        let offset = CdcOffset::Mysql(MysqlOffset::new("binlog.000001".to_owned(), 4));
+        assert_eq!(serde_json::to_string(&offset).unwrap(), json);
+        assert_eq!(serde_json::from_str::<CdcOffset>(json).unwrap(), offset);
+    }
+}
