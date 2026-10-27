@@ -387,7 +387,7 @@ mod tests {
             epoch: Some(batch_query_epoch::Epoch::TimeTravel(123)),
         };
         // Include every epoch-bearing read node, at both stage roots and nested children.
-        let nodes = vec![
+        let nodes = [
             NodeBody::RowSeqScan(RowSeqScanNode {
                 table_desc: Some(Default::default()),
                 ..Default::default()
