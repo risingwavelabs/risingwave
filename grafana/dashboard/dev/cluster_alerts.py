@@ -30,6 +30,28 @@ mysql_cdc_binlog_retention_risk = (
     f"{alert_when(mysql_cdc_binlog_file_lag)} and "
     f"{alert_threshold(mysql_cdc_binlog_retention_risk_margin, 0)}"
 )
+mariadb_cdc_binlog_file_seq_min = metric(
+    "mariadb_cdc_binlog_file_seq_min", node_filter_enabled=False
+)
+mariadb_cdc_binlog_file_seq_max = metric(
+    "mariadb_cdc_binlog_file_seq_max", node_filter_enabled=False
+)
+stream_mariadb_cdc_state_binlog_file_seq = metric(
+    "stream_mariadb_cdc_state_binlog_file_seq", node_filter_enabled=False
+)
+mariadb_cdc_binlog_file_lag = (
+    f"clamp_min({mariadb_cdc_binlog_file_seq_max} - on(source_id) "
+    f"{stream_mariadb_cdc_state_binlog_file_seq}, 0)"
+)
+mariadb_cdc_binlog_retention_risk_margin = (
+    f"(({mariadb_cdc_binlog_file_seq_max} + "
+    f"{mariadb_cdc_binlog_file_seq_min}) / 2 - on(source_id) "
+    f"{stream_mariadb_cdc_state_binlog_file_seq})"
+)
+mariadb_cdc_binlog_retention_risk = (
+    f"{alert_when(mariadb_cdc_binlog_file_lag)} and "
+    f"{alert_threshold(mariadb_cdc_binlog_retention_risk_margin, 0)}"
+)
 
 @section
 def _(outer_panels: Panels):
@@ -55,6 +77,7 @@ def _(outer_panels: Panels):
 - Cross-DB Log Retention Expiring: a cross-database MV changelog consumer's last consumed changelog epoch will expire within 12 hours.
 - PG CDC WAL Lag Too High: the PostgreSQL CDC WAL lag (upstream_max_lsn - state_table_lsn) exceeds 20 GiB. Check `Streaming CDC` > `PostgreSQL CDC State Table WAL Lag` and verify replication slot health.
 - MySQL CDC Binlog File Lag Too High: the MySQL CDC checkpoint is at least 20 files behind the upstream newest file, or it is behind the newest file and has entered the older half of the retained binlog range. Check `Streaming CDC` > `MySQL CDC Binlog File Lag` and `MySQL CDC Binlog Retention Risk Margin`.
+- MariaDB CDC Binlog File Lag Too High: the MariaDB CDC checkpoint is at least 20 files behind the upstream newest file, or it is behind the newest file and has entered the older half of the retained binlog range. Check the corresponding `Streaming CDC` MariaDB panels.
 """,
                     height=10,
                 ),
@@ -92,6 +115,11 @@ def _(outer_panels: Panels):
                             f"{alert_threshold(mysql_cdc_binlog_file_lag, 20)} or "
                             f"({mysql_cdc_binlog_retention_risk})",
                             "MySQL CDC Binlog File Lag Too High source {{source_id}} {{hostname}}:{{port}}",
+                        ),
+                        panels.target(
+                            f"{alert_threshold(mariadb_cdc_binlog_file_lag, 20)} or "
+                            f"({mariadb_cdc_binlog_retention_risk})",
+                            "MariaDB CDC Binlog File Lag Too High source {{source_id}} {{hostname}}:{{port}}",
                         ),
                     ],
                     ["last"],

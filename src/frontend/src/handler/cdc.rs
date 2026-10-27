@@ -23,7 +23,7 @@ use risingwave_connector::source::cdc::external::{
     TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::{
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    MARIADB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
 use thiserror_ext::AsReport;
@@ -51,7 +51,7 @@ pub(crate) fn derive_with_options_for_cdc_table(
     let mut with_options = source_with_properties.clone();
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
         match connector.as_str() {
-            MYSQL_CDC_CONNECTOR => {
+            MYSQL_CDC_CONNECTOR | MARIADB_CDC_CONNECTOR => {
                 // MySQL doesn't allow '.' in database name and table name, so we can split the
                 // external table name by '.' to get the table name
                 let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {

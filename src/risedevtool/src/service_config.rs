@@ -426,6 +426,23 @@ pub struct MySqlConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct MariaDbConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub port: u16,
+    pub address: String,
+    pub user: String,
+    pub password: String,
+    pub database: String,
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct PostgresConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -631,6 +648,7 @@ pub enum ServiceConfig {
     Redis(RedisConfig),
     ClickHouse(ClickHouseConfig),
     MySql(MySqlConfig),
+    MariaDb(MariaDbConfig),
     Postgres(PostgresConfig),
     Oracle(OracleConfig),
     SqlServer(SqlServerConfig),
@@ -651,6 +669,7 @@ pub enum TaskGroup {
     Pubsub,
     Pulsar,
     MySql,
+    MariaDb,
     Postgres,
     Oracle,
     SqlServer,
@@ -686,6 +705,7 @@ impl ServiceConfig {
             Self::ClickHouse(c) => &c.id,
             Self::Opendal(c) => &c.id,
             Self::MySql(c) => &c.id,
+            Self::MariaDb(c) => &c.id,
             Self::Postgres(c) => &c.id,
             Self::Oracle(c) => &c.id,
             Self::SqlServer(c) => &c.id,
@@ -721,6 +741,7 @@ impl ServiceConfig {
             Self::ClickHouse(c) => Some(c.http_port),
             Self::Opendal(_) => None,
             Self::MySql(c) => Some(c.port),
+            Self::MariaDb(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
             Self::Oracle(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
@@ -755,6 +776,7 @@ impl ServiceConfig {
             Self::ClickHouse(c) => c.user_managed,
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
+            Self::MariaDb(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
             Self::Oracle(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
@@ -795,6 +817,7 @@ impl ServiceConfig {
                     MySql
                 }
             }
+            ServiceConfig::MariaDb(_) => MariaDb,
             ServiceConfig::Postgres(postgres_config) => {
                 if matches!(postgres_config.application, Application::Metastore) {
                     RisingWave

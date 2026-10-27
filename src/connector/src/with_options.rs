@@ -21,8 +21,8 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
 use crate::sink::catalog::SinkFormatDesc;
-use crate::source::cdc::MYSQL_CDC_CONNECTOR;
 use crate::source::cdc::external::ExternalCdcTableType;
+use crate::source::cdc::{MARIADB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR};
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     ADBC_SNOWFLAKE_CONNECTOR, AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR,
@@ -143,6 +143,14 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
             return false;
         };
         connector == MYSQL_CDC_CONNECTOR
+    }
+
+    #[inline(always)]
+    fn is_mysql_family_cdc_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == MYSQL_CDC_CONNECTOR || connector == MARIADB_CDC_CONNECTOR
     }
 
     #[inline(always)]

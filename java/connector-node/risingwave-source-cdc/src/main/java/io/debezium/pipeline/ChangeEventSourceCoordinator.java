@@ -445,6 +445,13 @@ public class ChangeEventSourceCoordinator<P extends Partition, O extends OffsetC
             mysqlSource.setOnConnectedCallback(() -> streamingConnected(true));
             deferConnectedSignal = true;
         } else if (streamingSource
+                instanceof io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource) {
+            io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource mariaDbSource =
+                    (io.debezium.connector.mariadb.MariaDbStreamingChangeEventSource)
+                            streamingSource;
+            mariaDbSource.setOnConnectedCallback(() -> streamingConnected(true));
+            deferConnectedSignal = true;
+        } else if (streamingSource
                 instanceof io.debezium.connector.sqlserver.SqlServerStreamingChangeEventSource) {
             io.debezium.connector.sqlserver.SqlServerStreamingChangeEventSource sqlServerSource =
                     (io.debezium.connector.sqlserver.SqlServerStreamingChangeEventSource)
