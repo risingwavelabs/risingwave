@@ -427,11 +427,21 @@ message Table {
   }
 
   enum CdcTableType {
+    // `SQL_SERVER` and `MONGODB` were renamed to match the names in
+    // `connector_service.SourceType`. The numbers are unchanged, so the binary
+    // format is unaffected. The old names are kept as deprecated aliases for
+    // generated code that still refers to them (e.g. Java); Rust only knows the
+    // new names.
+    // buf:lint:ignore ENUM_NO_ALLOW_ALIAS
+    option allow_alias = true;
+
     CDC_TABLE_TYPE_UNSPECIFIED = 0;
     CDC_TABLE_TYPE_POSTGRES = 1;
     CDC_TABLE_TYPE_MYSQL = 2;
-    CDC_TABLE_TYPE_SQLSERVER = 3;
-    CDC_TABLE_TYPE_MONGO = 4;
+    CDC_TABLE_TYPE_SQL_SERVER = 3;
+    CDC_TABLE_TYPE_SQLSERVER = 3 [deprecated = true];
+    CDC_TABLE_TYPE_MONGODB = 4;
+    CDC_TABLE_TYPE_MONGO = 4 [deprecated = true];
     CDC_TABLE_TYPE_CITUS = 5;
   }
 
