@@ -40,7 +40,11 @@ use crate::connector_common::{
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
-use crate::sink::elasticsearch_opensearch::config::ElasticSearchOpenSearchConfig;
+use crate::sink::elasticsearch_opensearch::backend::SearchBackend;
+use crate::sink::elasticsearch_opensearch::config::{
+    ElasticSearchConfig, ElasticSearchOpenSearchConfig,
+};
+use crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchBackend;
 use crate::source::build_connection;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 
@@ -352,10 +356,10 @@ pub struct ElasticsearchConnection(pub BTreeMap<String, String>);
 #[async_trait]
 impl Connection for ElasticsearchConnection {
     async fn validate_connection(&self) -> ConnectorResult<()> {
-        const CONNECTOR: &str = "elasticsearch";
-
-        let config = ElasticSearchOpenSearchConfig::try_from(self)?;
-        let client = config.build_client(CONNECTOR)?;
+        let config = ElasticSearchConfig {
+            inner: ElasticSearchOpenSearchConfig::try_from(self)?,
+        };
+        let client = ElasticSearchBackend::build_client(&config)?;
         client.ping().await?;
         Ok(())
     }
