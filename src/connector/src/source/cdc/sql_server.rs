@@ -19,4 +19,7 @@ use crate::source::cdc::{CdcSourceRuntimeFlags, SqlServer};
 impl CdcSourceRuntimeFlags for SqlServer {
     const CAN_BACKFILL: bool = true;
     const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = true;
+    // `CAN_USE_TRANSACTION_METADATA` stays false: Debezium only sends a transaction's `END` event
+    // when the next transaction starts, which delays the newest events.
+    // See https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
 }

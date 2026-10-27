@@ -473,15 +473,15 @@ macro_rules! dispatch_cdc_source_type_inner {
 ///
 /// ```ignore
 /// dispatch_cdc_source_type!(source_type, T, {
-///     let must_wait = T::MUST_WAIT_OFFSET_BEFORE_REPORT;
-///     must_wait && rate_limit == Some(0)
+///     let needs_offset = T::NEEDS_NON_EMPTY_INITIAL_OFFSET;
+///     needs_offset && rate_limit == Some(0)
 /// }, false)
 /// // expands to
 /// match source_type {
 ///     CdcSourceType::Mysql => {
 ///         type T = Mysql;
-///         let must_wait = T::MUST_WAIT_OFFSET_BEFORE_REPORT;
-///         must_wait && rate_limit == Some(0)
+///         let needs_offset = T::NEEDS_NON_EMPTY_INITIAL_OFFSET;
+///         needs_offset && rate_limit == Some(0)
 ///     }
 ///     // ... one arm per registered connector
 ///     CdcSourceType::Unspecified => false,
