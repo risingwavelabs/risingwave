@@ -15,10 +15,11 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use serde_json::Value;
 use url::Url;
 
 use super::backend::SearchBackend;
-use super::client::ElasticSearchOpenSearchClient;
+use super::client::SearchClient;
 use super::config::{ElasticSearchConfig, ElasticSearchOpenSearchConfig};
 use super::sink::SearchSink;
 use crate::sink::{Result, SinkError};
@@ -29,6 +30,7 @@ pub const ES_SINK: &str = "elasticsearch";
 pub struct ElasticSearchBackend;
 
 impl SearchBackend for ElasticSearchBackend {
+    type Client = elasticsearch::Elasticsearch;
     type Config = ElasticSearchConfig;
 
     const SINK_NAME: &'static str = ES_SINK;
@@ -42,7 +44,7 @@ impl SearchBackend for ElasticSearchBackend {
         &config.inner
     }
 
-    fn build_client(config: &Self::Config) -> Result<ElasticSearchOpenSearchClient> {
+    fn build_client(config: &Self::Config) -> Result<Self::Client> {
         let config = Self::common_config(config);
         let url =
             Url::parse(&config.url).map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
@@ -61,10 +63,58 @@ impl SearchBackend for ElasticSearchBackend {
         let transport = transport_builder
             .build()
             .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
-        Ok(ElasticSearchOpenSearchClient::ElasticSearch(
-            elasticsearch::Elasticsearch::new(transport),
-        ))
+        Ok(elasticsearch::Elasticsearch::new(transport))
     }
 }
 
 pub type ElasticSearchSink = SearchSink<ElasticSearchBackend>;
+
+impl SearchClient for elasticsearch::Elasticsearch {
+    type BulkOperation = elasticsearch::BulkOperation<Value>;
+
+    async fn send(&self, bulks: Vec<Self::BulkOperation>) -> Result<Value> {
+        let result = self
+            .bulk(elasticsearch::BulkParts::None)
+            .body(bulks)
+            .send()
+            .await?;
+        Ok(result.json::<Value>().await?)
+    }
+
+    async fn ping(&self) -> Result<()> {
+        self.ping().send().await?;
+        Ok(())
+    }
+
+    fn new_update(
+        &self,
+        key: String,
+        index: String,
+        retry_on_conflict: i32,
+        routing_column: Option<String>,
+        value: Value,
+    ) -> Self::BulkOperation {
+        let bulk = elasticsearch::BulkOperation::update(key, value)
+            .index(index)
+            .retry_on_conflict(retry_on_conflict);
+        if let Some(routing_column) = routing_column {
+            bulk.routing(routing_column).into()
+        } else {
+            bulk.into()
+        }
+    }
+
+    fn new_delete(
+        &self,
+        key: String,
+        index: String,
+        routing_column: Option<String>,
+    ) -> Self::BulkOperation {
+        let bulk = elasticsearch::BulkOperation::delete(key).index(index);
+        if let Some(routing_column) = routing_column {
+            bulk.routing(routing_column).into()
+        } else {
+            bulk.into()
+        }
+    }
+}

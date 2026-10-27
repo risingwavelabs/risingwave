@@ -41,6 +41,7 @@ use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::sink::elasticsearch_opensearch::backend::SearchBackend;
+use crate::sink::elasticsearch_opensearch::client::SearchClient;
 use crate::sink::elasticsearch_opensearch::config::{
     ElasticSearchConfig, ElasticSearchOpenSearchConfig,
 };
@@ -360,7 +361,7 @@ impl Connection for ElasticsearchConnection {
             inner: ElasticSearchOpenSearchConfig::try_from(self)?,
         };
         let client = ElasticSearchBackend::build_client(&config)?;
-        client.ping().await?;
+        SearchClient::ping(&client).await?;
         Ok(())
     }
 }

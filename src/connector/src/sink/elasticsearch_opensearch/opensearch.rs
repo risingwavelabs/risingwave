@@ -15,10 +15,11 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use serde_json::Value;
 use url::Url;
 
 use super::backend::SearchBackend;
-use super::client::ElasticSearchOpenSearchClient;
+use super::client::SearchClient;
 use super::config::{ElasticSearchOpenSearchConfig, OpenSearchConfig};
 use super::sink::SearchSink;
 use crate::sink::{Result, SinkError};
@@ -29,6 +30,7 @@ pub const OPENSEARCH_SINK: &str = "opensearch";
 pub struct OpenSearchBackend;
 
 impl SearchBackend for OpenSearchBackend {
+    type Client = opensearch::OpenSearch;
     type Config = OpenSearchConfig;
 
     const SINK_NAME: &'static str = OPENSEARCH_SINK;
@@ -42,7 +44,7 @@ impl SearchBackend for OpenSearchBackend {
         &config.inner
     }
 
-    fn build_client(config: &Self::Config) -> Result<ElasticSearchOpenSearchClient> {
+    fn build_client(config: &Self::Config) -> Result<Self::Client> {
         let config = Self::common_config(config);
         let url =
             Url::parse(&config.url).map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
@@ -61,9 +63,7 @@ impl SearchBackend for OpenSearchBackend {
         let transport = transport_builder
             .build()
             .map_err(|e| SinkError::ElasticSearchOpenSearch(anyhow!(e)))?;
-        Ok(ElasticSearchOpenSearchClient::OpenSearch(
-            opensearch::OpenSearch::new(transport),
-        ))
+        Ok(opensearch::OpenSearch::new(transport))
     }
 
     fn check_available() -> Result<()> {
@@ -75,3 +75,53 @@ impl SearchBackend for OpenSearchBackend {
 }
 
 pub type OpenSearchSink = SearchSink<OpenSearchBackend>;
+
+impl SearchClient for opensearch::OpenSearch {
+    type BulkOperation = opensearch::BulkOperation<Value>;
+
+    async fn send(&self, bulks: Vec<Self::BulkOperation>) -> Result<Value> {
+        let result = self
+            .bulk(opensearch::BulkParts::None)
+            .body(bulks)
+            .send()
+            .await?;
+        Ok(result.json::<Value>().await?)
+    }
+
+    async fn ping(&self) -> Result<()> {
+        self.ping().send().await?;
+        Ok(())
+    }
+
+    fn new_update(
+        &self,
+        key: String,
+        index: String,
+        retry_on_conflict: i32,
+        routing_column: Option<String>,
+        value: Value,
+    ) -> Self::BulkOperation {
+        let bulk = opensearch::BulkOperation::update(key, value)
+            .index(index)
+            .retry_on_conflict(retry_on_conflict);
+        if let Some(routing_column) = routing_column {
+            bulk.routing(routing_column).into()
+        } else {
+            bulk.into()
+        }
+    }
+
+    fn new_delete(
+        &self,
+        key: String,
+        index: String,
+        routing_column: Option<String>,
+    ) -> Self::BulkOperation {
+        let bulk = opensearch::BulkOperation::delete(key).index(index);
+        if let Some(routing_column) = routing_column {
+            bulk.routing(routing_column).into()
+        } else {
+            bulk.into()
+        }
+    }
+}

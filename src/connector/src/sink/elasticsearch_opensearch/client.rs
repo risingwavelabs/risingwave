@@ -15,8 +15,8 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::{FutureExt, TryFuture};
-use itertools::Itertools;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_json::{Value, json};
@@ -28,74 +28,13 @@ use crate::sink::Result;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::AsyncTruncateSinkWriter;
 
-pub enum ElasticSearchOpenSearchClient {
-    ElasticSearch(elasticsearch::Elasticsearch),
-    OpenSearch(opensearch::OpenSearch),
-}
-enum ElasticSearchOpenSearchBulk {
-    ElasticSearch(elasticsearch::BulkOperation<serde_json::Value>),
-    OpenSearch(opensearch::BulkOperation<serde_json::Value>),
-}
+/// Binds each search client to the bulk operations accepted by its SDK.
+pub trait SearchClient: Send + Sync + 'static {
+    type BulkOperation: Send + 'static;
 
-impl ElasticSearchOpenSearchBulk {
-    pub fn into_elasticsearch_bulk(self) -> elasticsearch::BulkOperation<serde_json::Value> {
-        if let ElasticSearchOpenSearchBulk::ElasticSearch(bulk) = self {
-            bulk
-        } else {
-            panic!("not a elasticsearch bulk")
-        }
-    }
+    fn send(&self, bulks: Vec<Self::BulkOperation>) -> impl Future<Output = Result<Value>> + Send;
 
-    pub fn into_opensearch_bulk(self) -> opensearch::BulkOperation<serde_json::Value> {
-        if let ElasticSearchOpenSearchBulk::OpenSearch(bulk) = self {
-            bulk
-        } else {
-            panic!("not a opensearch bulk")
-        }
-    }
-}
-
-impl ElasticSearchOpenSearchClient {
-    async fn send(&self, bulks: Vec<ElasticSearchOpenSearchBulk>) -> Result<Value> {
-        match self {
-            ElasticSearchOpenSearchClient::ElasticSearch(client) => {
-                let bulks = bulks
-                    .into_iter()
-                    .map(ElasticSearchOpenSearchBulk::into_elasticsearch_bulk)
-                    .collect_vec();
-                let result = client
-                    .bulk(elasticsearch::BulkParts::None)
-                    .body(bulks)
-                    .send()
-                    .await?;
-                Ok(result.json::<Value>().await?)
-            }
-            ElasticSearchOpenSearchClient::OpenSearch(client) => {
-                let bulks = bulks
-                    .into_iter()
-                    .map(ElasticSearchOpenSearchBulk::into_opensearch_bulk)
-                    .collect_vec();
-                let result = client
-                    .bulk(opensearch::BulkParts::None)
-                    .body(bulks)
-                    .send()
-                    .await?;
-                Ok(result.json::<Value>().await?)
-            }
-        }
-    }
-
-    pub async fn ping(&self) -> Result<()> {
-        match self {
-            ElasticSearchOpenSearchClient::ElasticSearch(client) => {
-                client.ping().send().await?;
-            }
-            ElasticSearchOpenSearchClient::OpenSearch(client) => {
-                client.ping().send().await?;
-            }
-        }
-        Ok(())
-    }
+    fn ping(&self) -> impl Future<Output = Result<()>> + Send;
 
     fn new_update(
         &self,
@@ -103,72 +42,30 @@ impl ElasticSearchOpenSearchClient {
         index: String,
         retry_on_conflict: i32,
         routing_column: Option<String>,
-        value: serde_json::Value,
-    ) -> ElasticSearchOpenSearchBulk {
-        match self {
-            ElasticSearchOpenSearchClient::ElasticSearch(_) => {
-                let bulk = elasticsearch::BulkOperation::update(key, value)
-                    .index(index)
-                    .retry_on_conflict(retry_on_conflict);
-                if let Some(routing_column) = routing_column {
-                    ElasticSearchOpenSearchBulk::ElasticSearch(bulk.routing(routing_column).into())
-                } else {
-                    ElasticSearchOpenSearchBulk::ElasticSearch(bulk.into())
-                }
-            }
-            ElasticSearchOpenSearchClient::OpenSearch(_) => {
-                let bulk = opensearch::BulkOperation::update(key, value)
-                    .index(index)
-                    .retry_on_conflict(retry_on_conflict);
-                if let Some(routing_column) = routing_column {
-                    ElasticSearchOpenSearchBulk::OpenSearch(bulk.routing(routing_column).into())
-                } else {
-                    ElasticSearchOpenSearchBulk::OpenSearch(bulk.into())
-                }
-            }
-        }
-    }
+        value: Value,
+    ) -> Self::BulkOperation;
 
     fn new_delete(
         &self,
         key: String,
         index: String,
         routing_column: Option<String>,
-    ) -> ElasticSearchOpenSearchBulk {
-        match self {
-            ElasticSearchOpenSearchClient::ElasticSearch(_) => {
-                let bulk = elasticsearch::BulkOperation::delete(key).index(index);
-                if let Some(routing_column) = routing_column {
-                    ElasticSearchOpenSearchBulk::ElasticSearch(bulk.routing(routing_column).into())
-                } else {
-                    ElasticSearchOpenSearchBulk::ElasticSearch(bulk.into())
-                }
-            }
-            ElasticSearchOpenSearchClient::OpenSearch(_) => {
-                let bulk = opensearch::BulkOperation::delete(key).index(index);
-                if let Some(routing_column) = routing_column {
-                    ElasticSearchOpenSearchBulk::OpenSearch(bulk.routing(routing_column).into())
-                } else {
-                    ElasticSearchOpenSearchBulk::OpenSearch(bulk.into())
-                }
-            }
-        }
-    }
+    ) -> Self::BulkOperation;
 }
 
-pub struct ElasticSearchOpenSearchSinkWriter {
-    client: Arc<ElasticSearchOpenSearchClient>,
+pub struct SearchWriter<C: SearchClient> {
+    client: Arc<C>,
     formatter: ElasticSearchOpenSearchFormatter,
     config: ElasticSearchOpenSearchConfig,
     is_append_only: bool,
 }
 
-impl ElasticSearchOpenSearchSinkWriter {
+impl<C: SearchClient> SearchWriter<C> {
     pub fn new(
         config: ElasticSearchOpenSearchConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        client: ElasticSearchOpenSearchClient,
+        client: C,
         is_append_only: bool,
     ) -> Result<Self> {
         let client = Arc::new(client);
@@ -189,21 +86,17 @@ impl ElasticSearchOpenSearchSinkWriter {
     }
 }
 
-pub type ElasticSearchOpenSearchSinkDeliveryFuture =
-    impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+impl<C: SearchClient> AsyncTruncateSinkWriter for SearchWriter<C> {
+    type DeliveryFuture = BoxFuture<'static, Result<()>>;
 
-impl AsyncTruncateSinkWriter for ElasticSearchOpenSearchSinkWriter {
-    type DeliveryFuture = ElasticSearchOpenSearchSinkDeliveryFuture;
-
-    #[define_opaque(ElasticSearchOpenSearchSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
         mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
         let chunk_capacity = chunk.capacity();
-        let mut all_bulks: Vec<Vec<ElasticSearchOpenSearchBulk>> = vec![];
-        let mut bulks: Vec<ElasticSearchOpenSearchBulk> = Vec::with_capacity(chunk_capacity);
+        let mut all_bulks: Vec<Vec<C::BulkOperation>> = vec![];
+        let mut bulks: Vec<C::BulkOperation> = Vec::with_capacity(chunk_capacity);
 
         let mut bulks_size = 0;
         for build_bulk_para in self.formatter.convert_chunk(chunk, self.is_append_only)? {

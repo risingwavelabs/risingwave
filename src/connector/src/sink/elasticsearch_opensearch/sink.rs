@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use risingwave_common::catalog::Schema;
 
 use super::backend::SearchBackend;
-use super::client::ElasticSearchOpenSearchSinkWriter;
+use super::client::{SearchClient, SearchWriter};
 use super::config::ElasticSearchOpenSearchConfig;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
@@ -59,7 +59,7 @@ impl<B: SearchBackend> TryFrom<SinkParam> for SearchSink<B> {
 }
 
 impl<B: SearchBackend> Sink for SearchSink<B> {
-    type LogSinker = AsyncTruncateLogSinkerOf<ElasticSearchOpenSearchSinkWriter>;
+    type LogSinker = AsyncTruncateLogSinkerOf<SearchWriter<B::Client>>;
 
     const SINK_NAME: &'static str = B::SINK_NAME;
 
@@ -87,7 +87,7 @@ impl<B: SearchBackend> Sink for SearchSink<B> {
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let client = B::build_client(&self.config)?;
         let config = B::common_config(&self.config);
-        Ok(ElasticSearchOpenSearchSinkWriter::new(
+        Ok(SearchWriter::new(
             config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
