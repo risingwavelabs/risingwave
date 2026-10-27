@@ -15,17 +15,13 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::Schema;
-use tonic::async_trait;
 use url::Url;
 
-use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
-use super::super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use super::backend::SearchBackend;
-use super::client::{ElasticSearchOpenSearchClient, ElasticSearchOpenSearchSinkWriter};
+use super::client::ElasticSearchOpenSearchClient;
 use super::config::{ElasticSearchConfig, ElasticSearchOpenSearchConfig};
-use crate::enforce_secret::EnforceSecret;
-use crate::sink::Result;
+use super::sink::SearchSink;
+use crate::sink::{Result, SinkError};
 
 pub const ES_SINK: &str = "elasticsearch";
 
@@ -71,78 +67,4 @@ impl SearchBackend for ElasticSearchBackend {
     }
 }
 
-#[derive(Debug)]
-pub struct ElasticSearchSink {
-    config: ElasticSearchConfig,
-    schema: Schema,
-    pk_indices: Vec<usize>,
-    is_append_only: bool,
-}
-
-impl EnforceSecret for ElasticSearchSink {
-    fn enforce_secret<'a>(
-        prop_iter: impl Iterator<Item = &'a str>,
-    ) -> crate::error::ConnectorResult<()> {
-        for prop in prop_iter {
-            ElasticSearchOpenSearchConfig::enforce_one(prop)?;
-        }
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl TryFrom<SinkParam> for ElasticSearchSink {
-    type Error = SinkError;
-
-    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let schema = param.schema();
-        let pk_indices = param.downstream_pk_or_empty();
-        let config = ElasticSearchBackend::parse_config(param.properties)?;
-        Ok(Self {
-            config,
-            schema,
-            pk_indices,
-            is_append_only: param.sink_type.is_append_only(),
-        })
-    }
-}
-
-impl Sink for ElasticSearchSink {
-    type LogSinker = AsyncTruncateLogSinkerOf<ElasticSearchOpenSearchSinkWriter>;
-
-    const SINK_NAME: &'static str = ElasticSearchBackend::SINK_NAME;
-
-    fn validate_unknown_fields(&self) -> Result<()> {
-        crate::sink::validate_sink_unknown_fields(ElasticSearchBackend::common_config(&self.config))
-    }
-
-    fn support_schema_change() -> bool {
-        ElasticSearchBackend::SUPPORT_SCHEMA_CHANGE
-    }
-
-    async fn validate(&self) -> Result<()> {
-        ElasticSearchBackend::check_available()?;
-        ElasticSearchBackend::common_config(&self.config).validate_config(&self.schema)?;
-        let client = ElasticSearchBackend::build_client(&self.config)?;
-        client.ping().await?;
-        Ok(())
-    }
-
-    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        ElasticSearchBackend::parse_config(config.clone())?;
-        Ok(())
-    }
-
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let client = ElasticSearchBackend::build_client(&self.config)?;
-        let config = ElasticSearchBackend::common_config(&self.config);
-        Ok(ElasticSearchOpenSearchSinkWriter::new(
-            config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            client,
-            self.is_append_only,
-        )?
-        .into_log_sinker(config.concurrent_requests))
-    }
-}
+pub type ElasticSearchSink = SearchSink<ElasticSearchBackend>;
