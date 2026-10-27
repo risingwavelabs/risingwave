@@ -29,9 +29,11 @@ mod foyer;
 mod pin;
 
 use foyer::FoyerRefiller;
-pub(super) use foyer::table_cache_refill_monitor_snapshot;
 #[cfg(test)]
-use foyer::{SpawnRefillTask, default_spawn_refill_task};
+pub(super) use foyer::SpawnRefillTask;
+#[cfg(test)]
+use foyer::default_spawn_refill_task;
+pub(super) use foyer::table_cache_refill_monitor_snapshot;
 pub use foyer::{
     TableCacheRefillContext, TableCacheRefillContextMap, TableCacheRefillMonitorSnapshot,
 };
@@ -187,6 +189,6 @@ impl CacheRefiller {
 }
 
 #[cfg(test)]
-mod test_utils;
+pub(super) mod test_utils;
 #[cfg(test)]
 mod tests;

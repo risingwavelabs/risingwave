@@ -20,14 +20,16 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_pb::id::TableId;
 
+use super::super::default_spawn_refill_task;
 use super::super::test_utils::{
-    RefillTest, apply_next_events, gen_test_sst_with_object_id, mock_sstable_store_with_pin_cache,
-    pinned_version_with_ssts, test_refill_config, wait_for_pin_downloads,
+    RefillTest, apply_next_events, gen_test_sst_with_object_id, l0_insert_delta,
+    mock_sstable_store_with_pin_cache, pinned_version_with_ssts, test_refill_config,
+    wait_for_pin_downloads,
 };
-use super::super::{SstDeltaInfo, default_spawn_refill_task};
 use crate::hummock::test_utils::gen_test_sstable_with_table_vnodes;
 
 #[tokio::test]
@@ -88,7 +90,7 @@ async fn test_pin_admission_uses_logical_tables_and_current_ownership() {
             );
         }
         let _metadata_permit = refiller
-            .cache
+            .cache()
             .foyer
             .meta_refill_concurrency
             .as_ref()
@@ -97,16 +99,7 @@ async fn test_pin_admission_uses_logical_tables_and_current_ownership() {
             .acquire_owned()
             .await
             .unwrap();
-        let target = pinned_version_with_ssts(&[a, b], &inserted);
-        refiller.start_cache_refill(
-            vec![SstDeltaInfo {
-                insert_sst_infos: inserted,
-                ..Default::default()
-            }],
-            base,
-            target,
-            Some(&[]),
-        );
+        refiller.submit(vec![l0_insert_delta(1.into(), test_epoch(1), inserted)]);
         apply_next_events(&mut refiller).await;
 
         let actual = [702, 703].map(|object| cache.get(object.into()).is_some());
@@ -136,33 +129,20 @@ async fn test_pin_owner_drop() {
     refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
     refiller.update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
     let permit = refiller
-        .cache
+        .cache()
         .foyer
         .concurrency
         .clone()
         .acquire_owned()
         .await
         .unwrap();
-    let target = pinned_version_with_ssts(&[table], std::slice::from_ref(&info));
-    refiller.start_cache_refill(
-        vec![SstDeltaInfo {
-            insert_sst_infos: vec![info.clone()],
-            ..Default::default()
-        }],
-        base,
-        target.clone(),
-        Some(&[]),
-    );
-    refiller.start_cache_refill(
-        vec![SstDeltaInfo {
-            insert_sst_infos: vec![queued.clone()],
-            ..Default::default()
-        }],
-        target,
-        pinned_version_with_ssts(&[table], &[info, queued.clone()]),
-        Some(&[]),
-    );
-    let pin = refiller.cache.pin_cache_refill.as_ref().unwrap();
+    refiller.submit(vec![l0_insert_delta(1.into(), test_epoch(1), vec![info])]);
+    refiller.submit(vec![l0_insert_delta(
+        2.into(),
+        test_epoch(2),
+        vec![queued.clone()],
+    )]);
+    let pin = refiller.cache().pin_cache_refill.as_ref().unwrap();
     assert!(
         cache.is_registered(queued.object_id),
         "received membership is registered before waiting for I/O"
@@ -225,23 +205,14 @@ async fn test_pin_changes_after_submission() {
             );
         }
         let permit = refiller
-            .cache
+            .cache()
             .foyer
             .concurrency
             .clone()
             .acquire_owned()
             .await
             .unwrap();
-        let target = pinned_version_with_ssts(&tables, std::slice::from_ref(&info));
-        refiller.start_cache_refill(
-            vec![SstDeltaInfo {
-                insert_sst_infos: vec![info],
-                ..Default::default()
-            }],
-            base,
-            target,
-            Some(&[]),
-        );
+        refiller.submit(vec![l0_insert_delta(1.into(), test_epoch(1), vec![info])]);
         wait_for_pin_downloads(&refiller, &[object]).await;
         let original_token = cache.prepare_refill(object);
         match change {
@@ -287,7 +258,7 @@ async fn test_pin_changes_after_submission() {
         }
         tokio::time::timeout(Duration::from_secs(1), async {
             while refiller
-                .cache
+                .cache()
                 .pin_cache_refill
                 .as_ref()
                 .unwrap()
