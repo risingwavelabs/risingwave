@@ -56,7 +56,7 @@ use crate::hummock::event_handler::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, VersionUpdate};
-use crate::hummock::table_cache_metadata::TableCacheMetadata;
+use crate::hummock::table_cache_metadata::{SharedTableCacheMetadata, TableCacheMetadata};
 use crate::hummock::{HummockResult, MemoryLimiter, ObjectIdManager};
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
@@ -339,7 +339,7 @@ pub(crate) struct HummockEventHandler {
 
     uploader: HummockUploader,
     refiller: CacheRefiller,
-    cache_metadata: TableCacheMetadata,
+    cache_metadata: SharedTableCacheMetadata,
     pin_membership: Option<PinCacheMembership>,
     version_updates: VersionUpdateQueue,
 
@@ -387,27 +387,29 @@ impl HummockEventHandler {
         policies: HashMap<TableId, CacheRefillPolicy>,
         mut pinned: HashSet<TableId>,
     ) {
-        let metadata = &mut self.cache_metadata;
+        let mut metadata = self.cache_metadata.write();
         if let Some(membership) = &mut self.pin_membership {
             membership.replace_pinned_tables(metadata.pinned_tables(), &pinned);
         } else {
             pinned.clear();
         }
-        let changed = metadata.replace_policy_snapshot(policies, pinned);
-        self.refiller.invalidate_pin_refills(&changed);
+        let previous = metadata.replace_policy_snapshot(policies, pinned);
+        self.refiller.on_pinned_tables_changed(&previous, &metadata);
     }
 
     fn replace_serving_table_vnode_mapping(&mut self, mapping: HashMap<TableId, Bitmap>) {
-        let metadata = &mut self.cache_metadata;
-        let changed = metadata.replace_serving_mapping(mapping);
-        self.refiller.invalidate_pin_refills(&changed);
+        let mut metadata = self.cache_metadata.write();
+        let previous = metadata.replace_serving_mapping(mapping);
+        self.refiller
+            .on_serving_mapping_changed(&previous, &metadata);
     }
 
     fn update_streaming_table_vnodes(&mut self, table: TableId) {
         let bitmap = self.streaming_table_vnodes(table);
-        let metadata = &mut self.cache_metadata;
-        let changed = metadata.update_streaming_table_vnodes(table, bitmap);
-        self.refiller.invalidate_pin_refills(&changed);
+        let mut metadata = self.cache_metadata.write();
+        let previous = metadata.update_streaming_table_vnodes(table, bitmap);
+        self.refiller
+            .on_streaming_vnodes_changed(table, previous.as_ref(), &metadata);
     }
 
     pub fn new(
@@ -437,9 +439,15 @@ impl HummockEventHandler {
         let pin_membership = refill_store
             .pin_cache()
             .map(|cache| PinCacheMembership::new(cache.clone(), refill_version));
-        let cache_metadata =
-            TableCacheMetadata::new(role, refill_config.table_cache_refill_default_policy);
-        let refiller = CacheRefiller::new(refill_config, refill_store);
+        let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
+            role,
+            refill_config.table_cache_refill_default_policy,
+        )));
+        let refiller = CacheRefiller::new(
+            refill_config,
+            refill_store,
+            ReadOnlyRwLockRef::new(cache_metadata.clone()),
+        );
         Self::new_inner(
             observer_event_rx,
             state_store_metrics,
@@ -502,7 +510,7 @@ impl HummockEventHandler {
         buffer_tracker: BufferTracker,
         spawn_upload_task: SpawnUploadTask,
         refiller: CacheRefiller,
-        cache_metadata: TableCacheMetadata,
+        cache_metadata: SharedTableCacheMetadata,
         pin_membership: Option<PinCacheMembership>,
     ) -> Self {
         let (hummock_event_tx, hummock_event_rx) =
@@ -760,7 +768,7 @@ impl HummockEventHandler {
                 sst_delta_infos.extend(before.build_sst_delta_infos(delta));
             })
         {
-            let metadata = &self.cache_metadata;
+            let metadata = self.cache_metadata.read();
             if let Some(membership) = &mut self.pin_membership {
                 membership.on_version_received(
                     &sst_delta_infos,
@@ -774,7 +782,7 @@ impl HummockEventHandler {
                 sst_delta_infos,
                 event.new_pinned_version.clone(),
                 version_deltas.as_deref(),
-                metadata,
+                &metadata,
             );
             self.version_updates.enqueue(event, condition);
         }
@@ -1018,7 +1026,9 @@ impl HummockEventHandler {
             }
             HummockEvent::GetTableCacheRefillMonitorSnapshot { result_tx } => {
                 let _ = result_tx
-                    .send(table_cache_refill_monitor_snapshot(&self.cache_metadata))
+                    .send(table_cache_refill_monitor_snapshot(
+                        &self.cache_metadata.read(),
+                    ))
                     .inspect_err(|_| {
                         error!("unable to send table cache refill monitor snapshot result");
                     });
@@ -1156,7 +1166,7 @@ pub(super) mod tests {
     };
     use crate::hummock::event_handler::{
         HummockEvent, HummockEventHandler, HummockObserverEvent, HummockReadVersionRef,
-        HummockVersionUpdate, LocalInstanceGuard,
+        HummockVersionUpdate, LocalInstanceGuard, ReadOnlyRwLockRef,
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -1187,8 +1197,13 @@ pub(super) mod tests {
             let membership = store
                 .pin_cache()
                 .map(|cache| PinCacheMembership::new(cache.clone(), version.clone()));
-            let metadata = TableCacheMetadata::new(role, config.table_cache_refill_default_policy);
-            let refiller = CacheRefiller::new(config, store).with_foyer_spawn_task(spawn);
+            let metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
+                role,
+                config.table_cache_refill_default_policy,
+            )));
+            let refiller =
+                CacheRefiller::new(config, store, ReadOnlyRwLockRef::new(metadata.clone()))
+                    .with_foyer_spawn_task(spawn);
             Self {
                 handler: HummockEventHandler::new_inner(
                     unbounded_channel().1,
@@ -1311,24 +1326,28 @@ pub(super) mod tests {
         let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let (finished_tx, mut finished_rx) = unbounded_channel();
         let refill_config = CacheRefillConfig::from_storage_opts(&opts);
-        let metadata = TableCacheMetadata::new(
+        let metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             Role::Streaming,
             opts.cache_refill_table_cache_refill_default_policy,
-        );
-        let refiller = CacheRefiller::new(refill_config, mock_sstable_store().await)
-            .with_foyer_spawn_task(Arc::new({
+        )));
+        let refiller = CacheRefiller::new(
+            refill_config,
+            mock_sstable_store().await,
+            ReadOnlyRwLockRef::new(metadata.clone()),
+        )
+        .with_foyer_spawn_task(Arc::new({
+            let permits = permits.clone();
+            let started = started.clone();
+            move |_, _| {
+                let index = started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let permits = permits.clone();
-                let started = started.clone();
-                move |_, _| {
-                    let index = started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let permits = permits.clone();
-                    let finished_tx = finished_tx.clone();
-                    spawn(async move {
-                        let _permit = permits[index].acquire().await.unwrap();
-                        finished_tx.send(index).unwrap();
-                    })
-                }
-            }));
+                let finished_tx = finished_tx.clone();
+                spawn(async move {
+                    let _permit = permits[index].acquire().await.unwrap();
+                    finished_tx.send(index).unwrap();
+                })
+            }
+        }));
         let mut handler = HummockEventHandler::new_inner(
             unbounded_channel().1,
             metrics.clone(),
@@ -1548,7 +1567,11 @@ pub(super) mod tests {
             },
         ));
         // Pin activation is a sidecar test input; ordinary policy still comes from the Meta event.
-        let policies = handler.cache_metadata.table_cache_refill_policies.clone();
+        let policies = handler
+            .cache_metadata
+            .read()
+            .table_cache_refill_policies
+            .clone();
         handler.replace_table_cache_refill_runtime_snapshot(policies, [table].into());
         let notifier = handler.version_update_notifier_tx.clone();
         let recent_versions = handler.recent_versions.clone();
@@ -1569,7 +1592,7 @@ pub(super) mod tests {
             vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
         });
         let (ordinary_read_version, ordinary_guard) = rx.await.unwrap();
-        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata);
+        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata.read());
         assert!(!snapshot.contexts.contains_key(&table));
         assert_eq!(
             snapshot.contexts[&ordinary_table].policy,
@@ -1671,9 +1694,15 @@ pub(super) mod tests {
         let storage_opt = default_opts_for_test();
         let refill_config = CacheRefillConfig::from_storage_opts(&storage_opt);
         let refill_store = mock_sstable_store().await;
-        let cache_metadata =
-            TableCacheMetadata::new(Role::Both, refill_config.table_cache_refill_default_policy);
-        let refiller = CacheRefiller::new(refill_config, refill_store);
+        let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
+            Role::Both,
+            refill_config.table_cache_refill_default_policy,
+        )));
+        let refiller = CacheRefiller::new(
+            refill_config,
+            refill_store,
+            ReadOnlyRwLockRef::new(cache_metadata.clone()),
+        );
         let metrics = Arc::new(HummockStateStoreMetrics::unused());
         let (spawn_upload_task, _) = prepare_uploader_order_test_spawn_task_fn(false);
         let mut handler = HummockEventHandler::new_inner(
@@ -1710,7 +1739,7 @@ pub(super) mod tests {
             }),
             ..Default::default()
         });
-        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata);
+        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata.read());
         assert_eq!(
             snapshot.policies,
             HashMap::from([
@@ -1732,7 +1761,7 @@ pub(super) mod tests {
             }),
             ..Default::default()
         });
-        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata);
+        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata.read());
         assert_eq!(
             snapshot.policies,
             HashMap::from([
@@ -1749,7 +1778,7 @@ pub(super) mod tests {
             table_cache_refill_policies: Some(TableCacheRefillPolicies::default()),
             ..Default::default()
         });
-        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata);
+        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata.read());
         assert!(snapshot.policies.is_empty());
         assert_eq!(
             snapshot.serving_table_vnode_mapping,
@@ -1760,7 +1789,7 @@ pub(super) mod tests {
             serving_table_vnode_mappings: Some(PbServingTableVnodeMappings::default()),
             ..Default::default()
         });
-        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata);
+        let snapshot = table_cache_refill_monitor_snapshot(&handler.cache_metadata.read());
         assert!(snapshot.policies.is_empty());
         assert!(snapshot.serving_table_vnode_mapping.is_empty());
     }
@@ -1809,11 +1838,15 @@ pub(super) mod tests {
         );
         let refill_config = CacheRefillConfig::from_storage_opts(&storage_opt);
         let refill_store = mock_sstable_store().await;
-        let cache_metadata = TableCacheMetadata::new(
+        let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             Role::Streaming,
             refill_config.table_cache_refill_default_policy,
+        )));
+        let refiller = CacheRefiller::new(
+            refill_config,
+            refill_store,
+            ReadOnlyRwLockRef::new(cache_metadata.clone()),
         );
-        let refiller = CacheRefiller::new(refill_config, refill_store);
         let mut event_handler = HummockEventHandler::new_inner(
             observer_event_rx,
             metrics.clone(),
@@ -1852,7 +1885,7 @@ pub(super) mod tests {
         });
         let (_other_read_version, mut other_guard) = rx.await.unwrap();
 
-        let snapshot = table_cache_refill_monitor_snapshot(&event_handler.cache_metadata);
+        let snapshot = table_cache_refill_monitor_snapshot(&event_handler.cache_metadata.read());
         let vnodes = snapshot
             .streaming_table_vnode_mapping
             .get(&table_id)
@@ -1870,7 +1903,7 @@ pub(super) mod tests {
         event_handler.handle_hummock_event(HummockEvent::DestroyReadVersion {
             instance_id: guard_1.instance_id,
         });
-        let snapshot = table_cache_refill_monitor_snapshot(&event_handler.cache_metadata);
+        let snapshot = table_cache_refill_monitor_snapshot(&event_handler.cache_metadata.read());
         assert_vnodes(
             snapshot
                 .streaming_table_vnode_mapping
@@ -1883,7 +1916,7 @@ pub(super) mod tests {
         event_handler.handle_hummock_event(HummockEvent::DestroyReadVersion {
             instance_id: guard_2.instance_id,
         });
-        let snapshot = table_cache_refill_monitor_snapshot(&event_handler.cache_metadata);
+        let snapshot = table_cache_refill_monitor_snapshot(&event_handler.cache_metadata.read());
         assert!(
             !snapshot
                 .streaming_table_vnode_mapping
@@ -1934,9 +1967,15 @@ pub(super) mod tests {
 
         let refill_config = CacheRefillConfig::from_storage_opts(&storage_opt);
         let refill_store = mock_sstable_store().await;
-        let cache_metadata =
-            TableCacheMetadata::new(Role::None, refill_config.table_cache_refill_default_policy);
-        let refiller = CacheRefiller::new(refill_config, refill_store);
+        let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
+            Role::None,
+            refill_config.table_cache_refill_default_policy,
+        )));
+        let refiller = CacheRefiller::new(
+            refill_config,
+            refill_store,
+            ReadOnlyRwLockRef::new(cache_metadata.clone()),
+        );
         let event_handler = HummockEventHandler::new_inner(
             observer_event_rx,
             metrics.clone(),
@@ -2116,9 +2155,15 @@ pub(super) mod tests {
 
         let refill_config = CacheRefillConfig::from_storage_opts(&storage_opt);
         let refill_store = mock_sstable_store().await;
-        let cache_metadata =
-            TableCacheMetadata::new(Role::None, refill_config.table_cache_refill_default_policy);
-        let refiller = CacheRefiller::new(refill_config, refill_store);
+        let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
+            Role::None,
+            refill_config.table_cache_refill_default_policy,
+        )));
+        let refiller = CacheRefiller::new(
+            refill_config,
+            refill_store,
+            ReadOnlyRwLockRef::new(cache_metadata.clone()),
+        );
         let event_handler = HummockEventHandler::new_inner(
             observer_event_rx,
             metrics.clone(),

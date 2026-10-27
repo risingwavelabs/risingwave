@@ -1,68 +1,87 @@
-# Per-event Pin refill and version publication
+# Pin cache refill and version publication
 
-## Responsibilities
+## Review contract
 
-The version update queue applies incoming deltas once to construct unpublished
-versions. Raw deltas remain available only until refill planning and membership
-updates finish. Every event has a completion condition; the existing FIFO queue
-publishes at most 16 completed events without bypassing an unfinished predecessor.
+These acceptance conditions govern the implementation; tests must not redefine them.
 
-The event handler owns `TableCacheMetadata` as a plain value: table policies,
-Pin table IDs, role and streaming/serving vnode mappings. Both backends borrow it
-synchronously during submission. They keep no shared mutable metadata or policy
-copy. Foyer captures immutable inputs for its existing asynchronous tasks.
+| Boundary | Required behavior |
+| --- | --- |
+| Version input | Apply complete deltas once; membership sees the complete version independently of refill filtering. |
+| Common admission | Both backends consume the same logical-table and block vnode-range selection result. Sharing table metadata alone is insufficient. |
+| Backend policy | Preserve main's ordinary Enabled and scoped-policy semantics. Pin enablement is independent; Foyer's L0, level, recent and inheritance rules cannot veto Pin. |
+| Pin preparation | Process each event against its own target before loading metadata. After I/O, intersect surviving receipt-time intent with current ownership before submitting downloads. RESET then SET cannot revive withdrawn intent. |
+| Ownership lifetime | Foyer owns inputs retained across asynchronous work. Pin borrows current bitmap inputs while holding the metadata read guard through synchronous admission/submission; no bitmap snapshot is needed inside that scope. |
+| Foyer metadata-only work | Continue warming admitted SST metadata when disk data refill is disabled or the level is excluded, but skip block locality computation and data jobs. |
+| Independence and publication | Each backend executes and times out independently. Every event becomes publishable after both attempts settle; the queue publishes settled FIFO prefixes. Shared I/O limits do not create shared completion scheduling. |
+| Scope | No cross-event merging, endpoint predicates, retries, GC scans or production activation. Locality bounds remain conservative; downloads retain unit/whole-object granularity. |
 
-The handler separately owns `PinCacheMembership`. Received versions register
-objects before any download admission. Publication retires deletions while
-protecting references in received unpublished versions. Policy changes rebuild
-this protection across published and received snapshots, without creating refill
-intent. Refiller success or failure does not decide logical membership.
+## Responsibilities and admission
 
-`CacheRefiller` starts independent Foyer and Pin attempts and combines their
-completion futures. Foyer retains per-event spawning and existing block admission.
-Pin performs table admission and submits downloads directly to the existing
-executor. There is no Pin event queue, batch worker, metadata-preparation stage,
-shared metadata lock, or publication-endpoint predicate in this layer.
+The event handler is the only writer of shared `TableCacheMetadata`: table cache
+policies, the effective Pin table set, role and streaming/serving vnode ownership.
+It separately owns `PinCacheMembership`, which registers received versions before
+refill and retires removals after publication while protecting later received versions.
+Neither refiller maintains membership. Snapshots and policy changes update membership
+without creating download intent; only observed delta insertions create intent.
 
-## Admission, execution and cancellation
+`CacheRefiller` applies shared table admission before dispatch. Ordinary Disabled
+and scoped tables without local vnodes are rejected before job/snapshot allocation.
+Pin has independent enablement and uses the union of role-projected ownership lanes.
+Ordinary Enabled retains main's unscoped normal-refill behavior.
 
-Pin plans contain only observed insertions and surviving logical table projections
-in this event's target. A full version snapshot restores membership without
-creating refill intent. Each admitted Pin table must have at least one local vnode
-under the worker role. This coarse admission can download objects with no actual
-locally owned rows; block-level precision is deferred.
+`admission::prepare_foyer_refill` excludes Pin projections and applies Foyer's L0
+serving rule before capturing immutable task contexts. These rules do not narrow
+Pin input. A mixed physical SST can supply logical projections to both backends.
+Foyer receives task inputs rather than CN metadata. It warms metadata through the
+shared loader, then checks disk-cache and target-level eligibility before computing
+locality. Metadata warming still happens when data refill is disabled.
 
-Admission and executor submission happen synchronously before the handler can
-process a metadata replacement. Download jobs execute independently of polling
-publication conditions. The timeout is constructed at submission, so a delayed
-first poll does not grant the event a fresh timeout window. Ordinary errors,
-executor-caught panics and timeouts allow remote fallback; neither backend's
-failure bypasses the other backend's unfinished condition.
+Both backends consume `admission::select_local_blocks` and its `SstLocality` result:
+a metadata holder and eligible block bitmap intersected with logical projections.
+Foyer groups eligible blocks into table-bounded units, applies recent/inheritance
+filters and downloads blocks. Pin downloads a whole physical object only if at least
+one admitted logical projection has a local block. Main's conservative vnode range
+bounds are preserved; this is not an exact per-row residency guarantee.
 
-Policy withdrawal or losing all local vnodes for an admitted table revokes its
-executor work. A nonempty-to-nonempty vnode change does not invalidate coarse
-admission. Copies may outlive the event's waiter timeout; cancellation still finds
-them in the executor. There is no automatic retry or ownership-gain backfill.
+## Pin event lifecycle
 
-Dropping a completion waiter does not stop physical copies. Dropping the refiller
-owner drops the executor and stops its driver. The handler owns the publication
-queue and refillers together. Without a Pin backend, Foyer retains its original
-JoinError and detach-on-drop behavior.
+Pin submission captures event intent, enqueues it and wakes a single consumer on the
+existing Tokio runtime. This consumer prepares one event at a time, independently
+of Foyer and publication. There is no cross-event merging or batching configuration.
+The executor owns physical downloads, deduplication and cancellation.
 
-## Publication and scope
+The selected request stays queued during metadata preparation so Pin withdrawal can
+permanently narrow its intent. A later SET cannot recreate it. The worker releases
+all guards for I/O, then borrows current ownership and intersects surviving intent
+under the same read guard as synchronous executor submission. Metadata replacement
+and invalidation share the writer guard; updates cannot miss a newly admitted job.
+Lock order is metadata, pending requests, executor/cache locks. No guard crosses await.
 
-The queue sees only completion, not refiller-specific success, batch IDs or
-required version ranges. Every event may become a published endpoint once both
-attempts settle. This layer does not skip a commit's objects because of a later
-compaction event: cross-event plan merging and its publication contract are a
-separate capability.
+Loss of any local vnode conservatively cancels dependent copies. Added ownership or
+transfers between local streaming and serving lanes do not revoke a still-valid union.
+No per-job vnode bitmap or new GC metadata read is introduced. Preparation may finish
+after withdrawal but cannot submit withdrawn intent. Published files are not swept.
 
-Existing per-event local read-version and history updates remain intact; watch
-readers and the uploader receive the completed prefix's final version. The CN
-membership owner then retires obsolete registrations.
+The event timeout covers metadata preparation and waiting for submitted downloads.
+Failure and timeout allow remote fallback. Dropping a submitted waiter leaves its
+executor-owned copy running; subsequent cancellation still finds it in the executor.
+When an attempt settles, the worker removes its request, completes it and starts the
+next event without waiting for publication. Later compaction cannot suppress an
+intermediate event's downloads in this layer.
 
-Ownership-driven reclamation and periodic physical GC scheduling are deferred.
-Version deletion and Pin withdrawal still unregister routes through the existing
-backend, but this PR adds no physical cleanup driver or disk-reclamation guarantee.
-Final production activation must address GC separately. No read-through refill,
-LRU, retry debt, batch configuration or pressure-forced publication is introduced.
+Dropping the refiller aborts the preparation worker and drops the executor owner.
+Only the worker removes requests; owner shutdown must not concurrently clear its queue.
+The handler drops refillers and publication queue together. Without Pin, Foyer retains
+its original timeout, JoinError and detach-on-drop behavior.
+
+## Publication and deferred work
+
+The queue sees completion only, not backend success, batch IDs or endpoint predicates.
+Every event can be published once both attempts settle, up to main's existing
+16-event ready-prefix limit. Existing history and per-event local read-version updates
+remain intact; watch readers and the uploader receive the prefix's final version.
+
+Cross-event Pin merging and the corresponding publication endpoints belong to the
+next layer. Ownership-driven published-file reclamation, physical GC scheduling and
+production activation remain separate work. No read-through refill or automatic retry
+is introduced.

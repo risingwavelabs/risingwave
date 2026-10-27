@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::license::Feature;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
@@ -25,30 +26,31 @@ use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 
+mod admission;
 mod foyer;
 mod pin;
 
+pub(super) use admission::table_cache_refill_monitor_snapshot;
+pub use admission::{
+    TableCacheRefillContext, TableCacheRefillContextMap, TableCacheRefillMonitorSnapshot,
+};
 use foyer::FoyerRefiller;
 #[cfg(test)]
 pub(super) use foyer::SpawnRefillTask;
 #[cfg(test)]
 use foyer::default_spawn_refill_task;
-pub(super) use foyer::table_cache_refill_monitor_snapshot;
-pub use foyer::{
-    TableCacheRefillContext, TableCacheRefillContextMap, TableCacheRefillMonitorSnapshot,
-};
 use pin::PinCacheRefiller;
 
+use super::ReadOnlyRwLockRef;
 use super::version_update::VersionUpdateCondition;
 use crate::hummock::SstableStoreRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::pin_cache_refill::PinCacheRefillPlan;
 use crate::hummock::table_cache_metadata::TableCacheMetadata;
 use crate::opts::StorageOpts;
 
 #[derive(Debug)]
 pub struct CacheRefillConfig {
-    /// Timeout for each backend refill attempt, starting at event submission.
+    /// Timeout for each backend refill attempt, excluding queued Pin events.
     pub timeout: Duration,
 
     /// Data file cache refill levels.
@@ -107,15 +109,19 @@ impl CacheRefillConfig {
     }
 }
 
-/// Constructs independent refill backends and combines their publication conditions.
-/// Backends consume shared table policies and ownership; membership stays with the handler.
+/// Applies shared admission, dispatches independent backends and combines their conditions.
+/// Version application and membership stay with the handler and always see complete deltas.
 pub(crate) struct CacheRefiller {
     foyer: FoyerRefiller,
     pin_cache_refill: Option<PinCacheRefiller>,
 }
 
 impl CacheRefiller {
-    pub(crate) fn new(config: CacheRefillConfig, sstable_store: SstableStoreRef) -> Self {
+    pub(crate) fn new(
+        config: CacheRefillConfig,
+        sstable_store: SstableStoreRef,
+        metadata: ReadOnlyRwLockRef<TableCacheMetadata>,
+    ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
         let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
@@ -123,16 +129,16 @@ impl CacheRefiller {
         } else {
             Some(Arc::new(Semaphore::new(config.meta_refill_concurrency)))
         };
-        let pin_cache_refill = sstable_store
-            .pin_cache()
-            .map(|_| PinCacheRefiller::new(&config, sstable_store.clone(), concurrency.clone()));
-        let foyer = FoyerRefiller::new(
-            config,
-            sstable_store,
-            meta_refill_concurrency,
-            concurrency,
-            pin_cache_refill.is_none(),
-        );
+        let pin_cache_refill = sstable_store.pin_cache().map(|_| {
+            PinCacheRefiller::new(
+                config.clone(),
+                sstable_store.clone(),
+                metadata,
+                concurrency.clone(),
+                meta_refill_concurrency.clone(),
+            )
+        });
+        let foyer = FoyerRefiller::new(config, sstable_store, meta_refill_concurrency, concurrency);
         Self {
             foyer,
             pin_cache_refill,
@@ -147,34 +153,85 @@ impl CacheRefiller {
 
     pub(super) fn start_cache_refill(
         &self,
-        deltas: Vec<SstDeltaInfo>,
+        mut deltas: Vec<SstDeltaInfo>,
         new_pinned_version: PinnedVersion,
         version_deltas: Option<&[HummockVersionDelta]>,
         metadata: &TableCacheMetadata,
     ) -> VersionUpdateCondition {
+        // Resolve shared admission in each backend's input preparation below. Filtering
+        // whole SSTs first would repeat those checks and cannot replace table projection.
         let pin = self.pin_cache_refill.as_ref().map(|refiller| {
-            let plan = PinCacheRefillPlan::from_version_update(
+            // Raw structural deltas can supply insertions absent from the summary. Bound
+            // their table admission too, before Pin constructs per-object intent.
+            let admitted_pin_tables = metadata
+                .pinned_tables()
+                .iter()
+                .copied()
+                .filter(|table| admission::admits_table(metadata, table))
+                .collect();
+            refiller.start_cache_refill(
                 &deltas,
-                &new_pinned_version,
+                new_pinned_version,
                 version_deltas,
-                metadata.pinned_tables(),
-            );
-            refiller.start_cache_refill(plan, metadata)
+                &admitted_pin_tables,
+            )
         });
-        let foyer = self.foyer.start_cache_refill(deltas, metadata);
+        let table_contexts = admission::prepare_foyer_refill(&mut deltas, metadata);
+        let foyer = self.foyer.start_cache_refill(deltas, table_contexts);
+        // Preserve main's detached-on-drop behavior without Pin. A composite condition owns
+        // its Foyer waiter; install cleanup before polling so queue shutdown also aborts it.
+        let abort_on_drop = pin.is_some();
+        let mut foyer = scopeguard::guard(foyer, move |handle| {
+            if abort_on_drop {
+                handle.abort();
+            }
+        });
         async move {
-            if let Some(pin) = pin {
-                futures::join!(foyer, pin);
-            } else {
-                foyer.await;
+            match pin {
+                // Owner shutdown closes receivers and drops their publication queue together.
+                Some(pin) => {
+                    let (foyer, pin) = futures::join!(&mut *foyer, pin);
+                    if let Err(error) = foyer {
+                        tracing::warn!(error = %error.as_report(), "Foyer refill task failed; using remote fallback");
+                    }
+                    let _ = pin;
+                }
+                None => {
+                    (&mut *foyer).await.unwrap();
+                }
             }
         }
         .boxed()
     }
 
-    pub(super) fn invalidate_pin_refills(&self, changed_tables: &HashSet<TableId>) {
+    pub(super) fn on_pinned_tables_changed(
+        &self,
+        previous: &HashSet<TableId>,
+        metadata: &TableCacheMetadata,
+    ) {
         if let Some(refiller) = &self.pin_cache_refill {
-            refiller.invalidate_refills(changed_tables);
+            refiller.on_pinned_tables_changed(previous, metadata);
+        }
+    }
+
+    pub(super) fn on_serving_mapping_changed(
+        &self,
+        previous: &HashMap<TableId, Bitmap>,
+        metadata: &TableCacheMetadata,
+    ) {
+        if let Some(refiller) = &self.pin_cache_refill {
+            refiller.on_serving_mapping_changed(previous, metadata);
+        }
+    }
+
+    pub(super) fn on_streaming_vnodes_changed(
+        &self,
+        table: TableId,
+        previous: Option<&Bitmap>,
+        metadata: &TableCacheMetadata,
+    ) {
+        if let Some(refiller) = &self.pin_cache_refill {
+            refiller.on_streaming_vnodes_changed(table, previous, metadata);
         }
     }
 
