@@ -50,7 +50,8 @@ impl PinCacheMembership {
         }
     }
 
-    pub(crate) fn advance_version(
+    /// Registers additions from an already-applied target and defers removals until publication.
+    pub(crate) fn on_version_received(
         &mut self,
         deltas: &[SstDeltaInfo],
         target: PinnedVersion,
