@@ -69,12 +69,14 @@ pub struct KinesisReaderConfig {
         rename = "kinesis.reader.eof_retry_interval_ms",
         default = "kinesis_reader_default_eof_retry_interval_ms"
     )]
+    #[serde_as(as = "DisplayFromStr")]
     pub eof_retry_interval_ms: u64,
 
     #[serde(
         rename = "kinesis.reader.error_retry_interval_ms",
         default = "kinesis_reader_default_error_retry_interval_ms"
     )]
+    #[serde_as(as = "DisplayFromStr")]
     pub error_retry_interval_ms: u64,
 }
 
@@ -129,6 +131,29 @@ mod test {
         let kinesis_props: KinesisProperties =
             serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
         assert_eq!(kinesis_props.start_timestamp_millis, Some(123456789));
+    }
+
+    #[test]
+    fn test_parse_kinesis_reader_config() {
+        let props: HashMap<String, String> = hashmap! {
+            "stream".to_owned() => "sample_stream".to_owned(),
+            "aws.region".to_owned() => "us-east-1".to_owned(),
+        };
+        let kinesis_props: KinesisProperties =
+            serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
+        assert_eq!(kinesis_props.reader_config.eof_retry_interval_ms, 1000);
+        assert_eq!(kinesis_props.reader_config.error_retry_interval_ms, 200);
+
+        let props: HashMap<String, String> = hashmap! {
+            "stream".to_owned() => "sample_stream".to_owned(),
+            "aws.region".to_owned() => "us-east-1".to_owned(),
+            "kinesis.reader.eof_retry_interval_ms".to_owned() => "5000".to_owned(),
+            "kinesis.reader.error_retry_interval_ms".to_owned() => "1000".to_owned(),
+        };
+        let kinesis_props: KinesisProperties =
+            serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
+        assert_eq!(kinesis_props.reader_config.eof_retry_interval_ms, 5000);
+        assert_eq!(kinesis_props.reader_config.error_retry_interval_ms, 1000);
     }
 
     #[test]
