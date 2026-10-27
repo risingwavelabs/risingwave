@@ -467,7 +467,10 @@ impl SubscriptionCursor {
                     return Err(ErrorCode::InternalError("Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`".to_owned()).into());
                 }
                 ReadSnapshot::LatestCommitted => {
-                    unreachable!("subscription snapshot must be pinned")
+                    return Err(ErrorCode::InternalError(
+                        "Subscription snapshot must be frontend-pinned".to_owned(),
+                    )
+                    .into());
                 }
                 ReadSnapshot::ReadUncommitted => {
                     return Err(ErrorCode::InternalError(
