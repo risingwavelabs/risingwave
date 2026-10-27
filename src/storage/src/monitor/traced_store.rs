@@ -343,6 +343,27 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
             })
     }
 
+    async fn new_read_snapshot_latest_committed(
+        &self,
+        options: NewReadSnapshotOptions,
+    ) -> StorageResult<(Self::ReadSnapshot, HummockEpoch)> {
+        let (snapshot, epoch) = self
+            .inner
+            .new_read_snapshot_latest_committed(options)
+            .await?;
+        Ok((
+            TracedStateStore::new_with_snapshot_epoch(
+                snapshot,
+                (
+                    options.table_id,
+                    Some(HummockReadEpoch::Committed(epoch)),
+                    options.table_option,
+                ),
+            ),
+            epoch,
+        ))
+    }
+
     fn new_vector_writer(
         &self,
         options: NewVectorWriterOptions,

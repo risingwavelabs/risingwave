@@ -374,6 +374,20 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         ))
     }
 
+    async fn new_read_snapshot_latest_committed(
+        &self,
+        options: NewReadSnapshotOptions,
+    ) -> StorageResult<(Self::ReadSnapshot, HummockEpoch)> {
+        let (snapshot, epoch) = self
+            .inner
+            .new_read_snapshot_latest_committed(options)
+            .await?;
+        Ok((
+            MonitoredTableStateStore::new(snapshot, self.storage_metrics.clone(), options.table_id),
+            epoch,
+        ))
+    }
+
     async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
         let table_id = options.table_id;
         MonitoredTableStateStore::new(

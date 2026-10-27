@@ -1,0 +1,167 @@
+# Latest-local reads are an explicit session opt-in. Use committed visibility even on
+# CI profiles that enable barrier reads by default.
+statement ok
+SET visibility_mode = checkpoint;
+
+statement ok
+SET query_mode = local;
+
+query T
+SHOW batch_point_get_read_latest_local;
+----
+false
+
+statement ok
+SET batch_point_get_read_latest_local = true;
+
+query T
+SHOW batch_point_get_read_latest_local;
+----
+true
+
+statement ok
+CREATE TABLE latest_local_t (k int PRIMARY KEY, v int);
+
+statement ok
+CREATE TABLE latest_local_c (a int, b int, v int, PRIMARY KEY (a, b));
+
+statement ok
+INSERT INTO latest_local_t VALUES (1, 10), (2, 20);
+
+statement ok
+INSERT INTO latest_local_c VALUES (1, 1, 11), (1, 2, 12);
+
+statement ok
+FLUSH;
+
+query II retry 30 backoff 1s
+SELECT * FROM latest_local_t WHERE k = 1;
+----
+1 10
+
+query I retry 30 backoff 1s
+SELECT v + 1 FROM latest_local_t WHERE k = 1 AND v > 0 LIMIT 1;
+----
+11
+
+query I retry 30 backoff 1s
+SELECT v FROM latest_local_c WHERE a = 1 AND b = 2;
+----
+12
+
+query I
+SELECT v FROM latest_local_t WHERE k = 999;
+----
+
+# Multiple keys, range scans, joins, aggregates and snapshot-dependent expressions.
+query I rowsort
+SELECT v FROM latest_local_t WHERE k IN (1, 2);
+----
+10
+20
+
+query I rowsort
+SELECT v FROM latest_local_c WHERE a = 1;
+----
+11
+12
+
+query I rowsort
+SELECT v FROM latest_local_t WHERE k >= 1;
+----
+10
+20
+
+query I
+SELECT t.v + c.v FROM latest_local_t t JOIN latest_local_c c ON t.k = c.a WHERE t.k = 1 AND c.b = 2;
+----
+22
+
+query I
+SELECT count(*) FROM latest_local_t WHERE k = 1;
+----
+1
+
+query I
+SELECT v FROM latest_local_t WHERE k = 1 AND now() IS NOT NULL;
+----
+10
+
+statement ok
+BEGIN READ ONLY;
+
+query I
+SELECT v FROM latest_local_t WHERE k = 1;
+----
+10
+
+statement ok
+COMMIT;
+
+statement ok
+SET query_mode = distributed;
+
+query I
+SELECT v FROM latest_local_t WHERE k = 1;
+----
+10
+
+statement ok
+SET query_mode = local;
+
+statement ok
+SET visibility_mode = all;
+
+query I
+SELECT v FROM latest_local_t WHERE k = 1;
+----
+10
+
+statement ok
+SET visibility_mode = checkpoint;
+
+statement ok
+UPDATE latest_local_t SET v = 30 WHERE k = 1;
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT v FROM latest_local_t WHERE k = 1;
+----
+30
+
+statement ok
+DELETE FROM latest_local_t WHERE k = 1;
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT v FROM latest_local_t WHERE k = 1;
+----
+
+statement ok
+SET batch_point_get_read_latest_local = DEFAULT;
+
+query T
+SHOW batch_point_get_read_latest_local;
+----
+false
+
+query I
+SELECT v FROM latest_local_c WHERE a = 1 AND b = 2;
+----
+12
+
+statement ok
+DROP TABLE latest_local_t;
+
+statement ok
+DROP TABLE latest_local_c;
+
+statement ok
+SET query_mode = DEFAULT;
+
+statement ok
+SET visibility_mode = DEFAULT;

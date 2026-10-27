@@ -141,6 +141,11 @@ pub struct SessionConfig {
     #[parameter(default = "", rename = "datestyle")]
     date_style: String,
 
+    /// Read eligible autocommit local point queries from the latest locally applied committed
+    /// snapshot without waiting for the frontend epoch. This snapshot has no staleness bound.
+    #[parameter(default = false)]
+    batch_point_get_read_latest_local: bool,
+
     /// Force the use of lookup join instead of hash join when possible for local batch execution.
     #[parameter(default = true, alias = "rw_batch_enable_lookup_join")]
     batch_enable_lookup_join: bool,

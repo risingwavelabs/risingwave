@@ -54,6 +54,34 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     ordered: bool,
     query_epoch: BatchQueryEpoch,
     limit: Option<u64>,
+    read_latest_local: bool,
+}
+
+fn validate_latest_local_scan(
+    scan_ranges: &[ScanRange],
+    pk_len: usize,
+    query_epoch: BatchQueryEpoch,
+) -> Result<()> {
+    ensure!(
+        scan_ranges.len() == 1
+            && pk_len > 0
+            && scan_ranges[0].pk_prefix.len() == pk_len
+            && matches!(
+                scan_ranges[0].range_bounds,
+                (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+            ),
+        "latest-local reads require exactly one full-primary-key point lookup"
+    );
+    ensure!(
+        matches!(
+            query_epoch.epoch,
+            Some(risingwave_pb::common::batch_query_epoch::Epoch::Committed(
+                _
+            ))
+        ),
+        "latest-local reads require a committed query epoch"
+    );
+    Ok(())
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
@@ -76,6 +104,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             query_epoch,
             limit,
+            read_latest_local: false,
         }
     }
 }
@@ -127,7 +156,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
-            Ok(Box::new(RowSeqScanExecutor::new(
+            let mut executor = RowSeqScanExecutor::new(
                 table,
                 scan_ranges,
                 ordered,
@@ -136,7 +165,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 source.plan_node().get_identity().clone(),
                 limit,
                 metrics,
-            )))
+            );
+            executor.read_latest_local = seq_scan_node.read_latest_local;
+            Ok(Box::new(executor))
         })
     }
 }
@@ -166,8 +197,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             query_epoch,
             limit,
+            read_latest_local,
             ..
         } = *self;
+        if read_latest_local {
+            validate_latest_local_scan(&scan_ranges, table.pk_indices().len(), query_epoch)?;
+        }
         let table = Arc::new(table);
 
         // Create collector.
@@ -198,7 +233,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
+                Self::execute_point_get(table, point_get, query_epoch, read_latest_local, histogram)
+                    .await?
                 && let Some(chunk) = data_chunk_builder.append_one_row(row)
             {
                 returned += chunk.cardinality() as u64;
@@ -251,6 +287,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: Arc<BatchTable<S>>,
         scan_range: ScanRange,
         query_epoch: BatchQueryEpoch,
+        read_latest_local: bool,
         histogram: Option<impl Deref<Target = Histogram>>,
     ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
@@ -259,7 +296,11 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
         // Point Get.
-        let row = table.get_row(&pk_prefix, query_epoch.into()).await?;
+        let row = if read_latest_local {
+            table.get_row_latest_committed(&pk_prefix).await?
+        } else {
+            table.get_row(&pk_prefix, query_epoch.into()).await?
+        };
 
         if let Some(timer) = timer {
             timer.observe_duration()
@@ -308,6 +349,51 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             } else {
                 break;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Bound::{Included, Unbounded};
+
+    use risingwave_pb::common::batch_query_epoch::Epoch;
+
+    use super::*;
+
+    #[test]
+    fn test_latest_local_scan_validation() {
+        let point = ScanRange {
+            pk_prefix: OwnedRow::new(vec![Some(1i32.into())]),
+            range_bounds: (Unbounded, Unbounded),
+        };
+        let committed = BatchQueryEpoch {
+            epoch: Some(Epoch::Committed(Default::default())),
+        };
+        assert!(validate_latest_local_scan(std::slice::from_ref(&point), 1, committed).is_ok());
+        assert!(validate_latest_local_scan(&[], 1, committed).is_err());
+        assert!(validate_latest_local_scan(&[point.clone(), point.clone()], 1, committed).is_err());
+        assert!(validate_latest_local_scan(std::slice::from_ref(&point), 2, committed).is_err());
+        assert!(validate_latest_local_scan(std::slice::from_ref(&point), 0, committed).is_err());
+        let bounded = ScanRange {
+            range_bounds: (Included(OwnedRow::empty()), Unbounded),
+            ..point.clone()
+        };
+        assert!(validate_latest_local_scan(&[bounded], 1, committed).is_err());
+        for epoch in [
+            None,
+            Some(Epoch::Current(1)),
+            Some(Epoch::Backup(1)),
+            Some(Epoch::TimeTravel(1)),
+        ] {
+            assert!(
+                validate_latest_local_scan(
+                    std::slice::from_ref(&point),
+                    1,
+                    BatchQueryEpoch { epoch }
+                )
+                .is_err()
+            );
         }
     }
 }

@@ -579,6 +579,37 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 },
             )
             .await?;
+        let read_snapshot = self
+            .store
+            .new_read_snapshot(
+                wait_epoch,
+                NewReadSnapshotOptions {
+                    table_id: self.table_id,
+                    table_option: self.table_option,
+                },
+            )
+            .await?;
+        self.get_row_from_snapshot(pk, read_snapshot).await
+    }
+
+    /// Read one full primary key from the latest locally applied committed version.
+    pub async fn get_row_latest_committed(&self, pk: impl Row) -> StorageResult<Option<OwnedRow>> {
+        assert_eq!(pk.len(), self.pk_indices.len());
+        let (snapshot, _) = self
+            .store
+            .new_read_snapshot_latest_committed(NewReadSnapshotOptions {
+                table_id: self.table_id,
+                table_option: self.table_option,
+            })
+            .await?;
+        self.get_row_from_snapshot(pk, snapshot).await
+    }
+
+    async fn get_row_from_snapshot(
+        &self,
+        pk: impl Row,
+        read_snapshot: S::ReadSnapshot,
+    ) -> StorageResult<Option<OwnedRow>> {
         let serialized_pk = serialize_pk_with_vnode(
             &pk,
             &self.pk_serializer,
@@ -598,16 +629,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
-        let read_snapshot = self
-            .store
-            .new_read_snapshot(
-                wait_epoch,
-                NewReadSnapshotOptions {
-                    table_id: self.table_id,
-                    table_option: self.table_option,
-                },
-            )
-            .await?;
         match read_snapshot
             .on_key_value(serialized_pk, read_options, move |key, value| {
                 let row = self.row_serde.deserialize(value)?;

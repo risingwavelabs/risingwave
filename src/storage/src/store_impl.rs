@@ -388,8 +388,8 @@ pub mod verify {
     use risingwave_common::array::VectorRef;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+    use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -761,6 +761,33 @@ pub mod verify {
             })
         }
 
+        async fn new_read_snapshot_latest_committed(
+            &self,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<(Self::ReadSnapshot, HummockEpoch)> {
+            let (actual, epoch) = self
+                .actual
+                .new_read_snapshot_latest_committed(options)
+                .await?;
+            let expected = if let Some(expected) = &self.expected {
+                Some(
+                    expected
+                        .new_read_snapshot(HummockReadEpoch::Committed(epoch), options)
+                        .await?,
+                )
+            } else {
+                None
+            };
+            Ok((
+                VerifyStateStore {
+                    actual,
+                    expected,
+                    _phantom: PhantomData::<()>,
+                },
+                epoch,
+            ))
+        }
+
         fn new_vector_writer(
             &self,
             options: NewVectorWriterOptions,
@@ -1057,8 +1084,8 @@ mod dyn_state_store {
     use risingwave_common::array::VectorRef;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+    use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
@@ -1460,6 +1487,10 @@ mod dyn_state_store {
             epoch: HummockReadEpoch,
             options: NewReadSnapshotOptions,
         ) -> StorageResult<StateStoreReadSnapshotDynRef>;
+        async fn new_read_snapshot_latest_committed(
+            &self,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<(StateStoreReadSnapshotDynRef, HummockEpoch)>;
         async fn new_vector_writer(
             &self,
             options: NewVectorWriterOptions,
@@ -1488,6 +1519,14 @@ mod dyn_state_store {
             Ok(StateStorePointer(Arc::new(
                 self.new_read_snapshot(epoch, options).await?,
             )))
+        }
+
+        async fn new_read_snapshot_latest_committed(
+            &self,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<(StateStoreReadSnapshotDynRef, HummockEpoch)> {
+            let (snapshot, epoch) = self.new_read_snapshot_latest_committed(options).await?;
+            Ok((StateStorePointer(Arc::new(snapshot)), epoch))
         }
 
         async fn new_vector_writer(
@@ -1636,6 +1675,13 @@ mod dyn_state_store {
             options: NewReadSnapshotOptions,
         ) -> StorageResult<Self::ReadSnapshot> {
             (*self.0).new_read_snapshot(epoch, options).await
+        }
+
+        async fn new_read_snapshot_latest_committed(
+            &self,
+            options: NewReadSnapshotOptions,
+        ) -> StorageResult<(Self::ReadSnapshot, HummockEpoch)> {
+            (*self.0).new_read_snapshot_latest_committed(options).await
         }
 
         fn new_vector_writer(

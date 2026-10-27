@@ -1524,6 +1524,18 @@ mod tests {
     use crate::memory::sled::SledStateStore;
 
     #[tokio::test]
+    async fn test_latest_local_snapshot_unsupported() {
+        let store = MemoryStateStore::new();
+        let result = store
+            .new_read_snapshot_latest_committed(NewReadSnapshotOptions {
+                table_id: TableId::new(1),
+                table_option: Default::default(),
+            })
+            .await;
+        assert!(result.err().unwrap().to_string().contains("unsupported"));
+    }
+
+    #[tokio::test]
     async fn test_snapshot_isolation_memory() {
         let state_store = MemoryStateStore::new();
         test_snapshot_isolation_inner(state_store).await;

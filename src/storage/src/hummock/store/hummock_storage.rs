@@ -450,6 +450,11 @@ impl HummockStorageReadSnapshot {
         epoch: u64,
         table_id: TableId,
     ) -> StorageResult<PinnedVersion> {
+        if let Some(version) = &self.retained_version {
+            debug_assert_eq!(table_id, self.table_id);
+            debug_assert_eq!(epoch, self.epoch.get_epoch());
+            return Ok(version.clone());
+        }
         match self
             .recent_versions
             .load()
@@ -689,6 +694,7 @@ impl HummockStorage {
 #[derive(Clone)]
 pub struct HummockStorageReadSnapshot {
     epoch: HummockReadEpoch,
+    retained_version: Option<PinnedVersion>,
     table_id: TableId,
     table_option: TableOption,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
@@ -977,17 +983,27 @@ impl StateStore for HummockStorage {
         options: NewReadSnapshotOptions,
     ) -> StorageResult<Self::ReadSnapshot> {
         self.try_wait_epoch_impl(epoch, options.table_id).await?;
-        Ok(HummockStorageReadSnapshot {
+        Ok(self.read_snapshot(epoch, options, None))
+    }
+
+    async fn new_read_snapshot_latest_committed(
+        &self,
+        options: NewReadSnapshotOptions,
+    ) -> StorageResult<(Self::ReadSnapshot, HummockEpoch)> {
+        let version = self.recent_versions.load().latest_version().clone();
+        let epoch = version
+            .table_committed_epoch(options.table_id)
+            .ok_or_else(|| {
+                HummockError::other(format!(
+                    "table {} is unavailable in latest locally applied version {:?}",
+                    options.table_id,
+                    version.id(),
+                ))
+            })?;
+        Ok((
+            self.read_snapshot(HummockReadEpoch::Committed(epoch), options, Some(version)),
             epoch,
-            table_id: options.table_id,
-            table_option: options.table_option,
-            recent_versions: self.recent_versions.clone(),
-            hummock_version_reader: self.hummock_version_reader.clone(),
-            read_version_mapping: self.read_version_mapping.clone(),
-            backup_reader: self.backup_reader.clone(),
-            hummock_meta_client: self.hummock_meta_client.clone(),
-            simple_time_travel_version_cache: self.simple_time_travel_version_cache.clone(),
-        })
+        ))
     }
 
     async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
@@ -1000,6 +1016,28 @@ impl StateStore for HummockStorage {
             self.hummock_version_reader.stats().clone(),
             self.context.storage_opts.clone(),
         )
+    }
+}
+
+impl HummockStorage {
+    fn read_snapshot(
+        &self,
+        epoch: HummockReadEpoch,
+        options: NewReadSnapshotOptions,
+        retained_version: Option<PinnedVersion>,
+    ) -> HummockStorageReadSnapshot {
+        HummockStorageReadSnapshot {
+            epoch,
+            retained_version,
+            table_id: options.table_id,
+            table_option: options.table_option,
+            recent_versions: self.recent_versions.clone(),
+            hummock_version_reader: self.hummock_version_reader.clone(),
+            read_version_mapping: self.read_version_mapping.clone(),
+            backup_reader: self.backup_reader.clone(),
+            hummock_meta_client: self.hummock_meta_client.clone(),
+            simple_time_travel_version_cache: self.simple_time_travel_version_cache.clone(),
+        }
     }
 }
 

@@ -29,6 +29,8 @@ message RowSeqScanNode {
   // The pushed down `batch_limit`. Max rows needed to return.
   optional uint64 limit = 6;
   common.BatchQueryEpoch query_epoch = 7;
+  // Opt-in single-key local SELECT using a locally applied committed snapshot.
+  bool read_latest_local = 8;
 }
 
 message SysRowSeqScanNode {

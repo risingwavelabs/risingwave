@@ -29,6 +29,7 @@ user batch_enable_sort_agg
 user batch_expr_strict_mode
 user batch_hnsw_ef_search
 user batch_parallelism
+user batch_point_get_read_latest_local
 user bypass_cluster_limits
 user bytea_output
 user cdc_source_wait_streaming_start_timeout
