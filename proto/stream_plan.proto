@@ -157,6 +157,7 @@ message LoadFinishMutation {
 // Identifies one finite load of a batch source.
 message LoadId {
   uint32 source_id = 1;
+  uint64 attempt = 2;
 }
 
 // Drives a finite load. Only the actors reading `load_id.source_id` act on it.

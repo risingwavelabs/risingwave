@@ -23,6 +23,7 @@ pub use batch_opendal_fs_fetch::*;
 mod batch_iceberg_list;
 pub use batch_iceberg_list::*;
 mod batch_iceberg_fetch;
+mod batch_iceberg_state;
 use std::time::Duration;
 
 pub use batch_iceberg_fetch::*;
