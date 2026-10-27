@@ -19,15 +19,14 @@ use futures::{StreamExt, TryStreamExt, stream};
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Op, SerialArray};
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::array::Op;
 use risingwave_common::catalog::{
     ColumnId, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
-use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
+use risingwave_common::types::{JsonbVal, ScalarRef, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{
     GLOBAL_ICEBERG_SCAN_METRICS, IcebergFileScanMetrics, IcebergScanMetricsLabels, IcebergScanOpts,
     PersistedFileScanTask, scan_task_to_chunk_with_deletes,
@@ -38,7 +37,7 @@ use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
-use super::{SourceStateTableHandler, StreamSourceCore, prune_additional_cols};
+use super::{SourceStateTableHandler, StreamSourceCore, pad_row_id, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -488,24 +487,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     &[file_path_idx, file_pos_idx],
                                     &source_desc.columns,
                                 );
-                                // pad row_id
-                                let (chunk, op) = chunk.into_parts();
-                                let (mut columns, visibility) = chunk.into_parts();
-                                columns.insert(
-                                    row_id_idx,
-                                    Arc::new(
-                                        SerialArray::from_iter_bitmap(
-                                            itertools::repeat_n(Serial::from(0), columns[0].len()),
-                                            Bitmap::zeros(columns[0].len()),
-                                        )
-                                        .into(),
-                                    ),
-                                );
-                                let chunk = StreamChunk::from_parts(
-                                    op,
-                                    DataChunk::from_parts(columns.into(), visibility),
-                                );
-
+                                let chunk = pad_row_id(chunk, row_id_idx);
                                 yield Message::Chunk(chunk);
                             }
                         }
