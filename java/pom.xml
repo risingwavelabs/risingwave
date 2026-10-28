@@ -70,7 +70,7 @@
         <debezium.version>3.2.4.Final</debezium.version>
         <oracle.jdbc.version>21.15.0.0</oracle.jdbc.version>
         <bouncycastle.version>1.84</bouncycastle.version>
-        <jackson.version>2.22.1</jackson.version>
+        <jackson.version>2.22.3</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <!-- Iceberg's HiveCatalog is compiled against Hive 2.3.x. -->
         <hive.version>2.3.10</hive.version>
