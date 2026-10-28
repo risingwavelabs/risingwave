@@ -19,10 +19,10 @@ use std::time::Duration;
 use risingwave_pb::id::SecretId;
 use risingwave_pb::secret::PbSecretRef;
 
+use crate::dispatch_cdc_source_type;
 use crate::error::ConnectorResult;
 use crate::sink::catalog::SinkFormatDesc;
-use crate::source::cdc::MYSQL_CDC_CONNECTOR;
-use crate::source::cdc::external::ExternalCdcTableType;
+use crate::source::cdc::{CdcSourceRuntimeFlags, CdcSourceType, MYSQL_CDC_CONNECTOR};
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     ADBC_SNOWFLAKE_CONNECTOR, AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR,
@@ -161,13 +161,22 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         connector.contains("-cdc")
     }
 
+    fn cdc_source_type(&self) -> CdcSourceType {
+        CdcSourceType::from(self.get_connector().unwrap_or_default().as_str())
+    }
+
     /// It is shared when `CREATE SOURCE`, and not shared when `CREATE TABLE`. So called "shareable".
     fn is_shareable_cdc_connector(&self) -> bool {
-        self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).can_backfill()
+        dispatch_cdc_source_type!(self.cdc_source_type(), T, T::CAN_BACKFILL, false)
     }
 
     fn enable_transaction_metadata(&self) -> bool {
-        ExternalCdcTableType::from_properties(self).enable_transaction_metadata()
+        dispatch_cdc_source_type!(
+            self.cdc_source_type(),
+            T,
+            T::CAN_USE_TRANSACTION_METADATA,
+            false
+        )
     }
 
     fn is_shareable_non_cdc_connector(&self) -> bool {

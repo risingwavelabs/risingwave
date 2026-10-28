@@ -384,14 +384,14 @@
     select s.max_id, (select count(*) from t where t.id = s.max_id)
     from (select max(id) as max_id from (select id from t limit 5) t) s;
   optimized_logical_plan_for_stream: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), internal_last_seen_value(max(t.id))), output: [max(t.id), count(1:Int32)] }
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), max(t.id)), output: [max(t.id), count(1:Int32)] }
     ├─LogicalShare { id: 3 }
     │ └─LogicalAgg { aggs: [max(t.id)] }
     │   └─LogicalLimit { limit: 5, offset: 0 }
     │     └─LogicalScan { table: t, columns: [t.id] }
-    └─LogicalAgg { group_key: [internal_last_seen_value(max(t.id))], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(internal_last_seen_value(max(t.id)), t.id), output: [internal_last_seen_value(max(t.id)), 1:Int32] }
-        ├─LogicalAgg { aggs: [internal_last_seen_value(max(t.id))] }
+    └─LogicalAgg { group_key: [max(t.id)], aggs: [count(1:Int32)] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), t.id), output: [max(t.id), 1:Int32] }
+        ├─LogicalAgg { group_key: [max(t.id)], aggs: [] }
         │ └─LogicalShare { id: 3 }
         │   └─LogicalAgg { aggs: [max(t.id)] }
         │     └─LogicalLimit { limit: 5, offset: 0 }
@@ -407,14 +407,14 @@
     select s.max_id, (select count(*) from t where t.id = s.max_id)
     from (select max(id) as max_id from (select id from t order by priority limit 5) t) s;
   optimized_logical_plan_for_stream: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), internal_last_seen_value(max(t.id))), output: [max(t.id), count(1:Int32)] }
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), max(t.id)), output: [max(t.id), count(1:Int32)] }
     ├─LogicalShare { id: 3 }
     │ └─LogicalAgg { aggs: [max(t.id)] }
     │   └─LogicalTopN { order: [t.priority ASC], limit: 5, offset: 0 }
     │     └─LogicalScan { table: t, columns: [t.id, t.priority] }
-    └─LogicalAgg { group_key: [internal_last_seen_value(max(t.id))], aggs: [count(1:Int32)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(internal_last_seen_value(max(t.id)), t.id), output: [internal_last_seen_value(max(t.id)), 1:Int32] }
-        ├─LogicalAgg { aggs: [internal_last_seen_value(max(t.id))] }
+    └─LogicalAgg { group_key: [max(t.id)], aggs: [count(1:Int32)] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(max(t.id), t.id), output: [max(t.id), 1:Int32] }
+        ├─LogicalAgg { group_key: [max(t.id)], aggs: [] }
         │ └─LogicalShare { id: 3 }
         │   └─LogicalAgg { aggs: [max(t.id)] }
         │     └─LogicalTopN { order: [t.priority ASC], limit: 5, offset: 0 }

@@ -430,6 +430,56 @@ impl IncrementalMatcher {
     ) -> StreamExecutorResult<()> {
         let n_rows = self.seq_index.len();
 
+        // The cursor invariant every mutation site maintains: `next_pos <= matchless_upto <=
+        // dead_upto`, and the resumable cursors inside the fed rows. Checked at runtime, not only in
+        // debug builds: production has no overflow checks, so a breached invariant would wrap the
+        // suffix arithmetic below into a scan window past the buffer, and the rescan would silently
+        // find nothing — permanent match loss with no signal. Two shapes, two answers:
+        // - a frozen prefix longer than the buffer references rows that do not exist; nothing in
+        //   place can recover that, so fail the actor and let recovery rebuild from state (the
+        //   `MustRebuild` answer of the eviction rebase);
+        // - cursors outside `[next_pos, n_rows]` are forgotten verdicts: drop them all, as
+        //   truncation does, and rescan from the frozen boundary. Re-walking starts is
+        //   conservative; skipping them is not. The truncation flags go with the cursors — a kept
+        //   `incomplete` would re-attach the retained provisional prefix in front of a scan that
+        //   finds it again.
+        if self.next_pos > n_rows {
+            crate::consistency::consistency_panic!(
+                next_pos = self.next_pos,
+                n_rows,
+                "MATCH_RECOGNIZE frozen prefix is longer than the fed buffer",
+            );
+            return Err(anyhow::anyhow!(
+                "MATCH_RECOGNIZE matcher state references rows past the buffer (next_pos {} > \
+                 n_rows {}); restarting to rebuild from state",
+                self.next_pos,
+                n_rows
+            )
+            .into());
+        }
+        let cursors_in_range = |m: &Self| {
+            m.next_pos <= m.matchless_upto
+                && m.matchless_upto <= m.dead_upto
+                && m.dead_upto <= n_rows
+                && m.next_pos <= m.scan_cursor
+                && m.scan_cursor <= n_rows
+        };
+        if !cursors_in_range(self) {
+            crate::consistency::consistency_panic!(
+                next_pos = self.next_pos,
+                matchless_upto = self.matchless_upto,
+                dead_upto = self.dead_upto,
+                scan_cursor = self.scan_cursor,
+                n_rows,
+                "MATCH_RECOGNIZE scan cursors left the buffer; rescanning from the frozen boundary",
+            );
+            self.matchless_upto = self.next_pos;
+            self.dead_upto = self.next_pos;
+            self.scan_cursor = self.next_pos;
+            self.incomplete = false;
+            self.freeze_truncated = false;
+        }
+
         // Rescan the mutable suffix only. The offset matcher maps suffix-relative positions produced
         // by the scan back onto absolute buffer positions the real matcher understands.
         let offset = self.next_pos;
@@ -442,15 +492,8 @@ impl IncrementalMatcher {
         // loop stops early and the tail is INCOMPLETE: the freeze loop below holds (it treats
         // `budget.hit` as "alive"), the executor's emission gate holds, and the next visit
         // rescans with a fresh budget — degraded latency, never a wrong or lost match.
-        debug_assert!(
-            self.next_pos <= self.matchless_upto && self.matchless_upto <= self.dead_upto,
-            "next_pos {} <= matchless_upto {} <= dead_upto {}",
-            self.next_pos,
-            self.matchless_upto,
-            self.dead_upto
-        );
-        let continuing_scan = self.incomplete;
-        let resume_freeze = !continuing_scan && self.freeze_truncated;
+        let mut continuing_scan = self.incomplete;
+        let mut resume_freeze = !continuing_scan && self.freeze_truncated;
         let mut tail_abs: Vec<LabeledMatch> = if continuing_scan || resume_freeze {
             // Preserve the already-scanned leftmost prefix. Matches are seq-anchored in storage, so
             // recover their current buffer positions before appending the resumed scan's suffix.
@@ -474,6 +517,31 @@ impl IncrementalMatcher {
         } else {
             Vec::new()
         };
+        // A resumed scan continues AFTER the retained provisional prefix: on the healthy path
+        // `scan_cursor` is where the truncated pull stopped, at or past the last retained match's
+        // resume position. A cursor inside the buffer but before that point passed the range
+        // check above and would re-find the retained matches and append them a second time —
+        // so it is treated like any other stray cursor: forget the verdicts and the truncation
+        // flags, drop the retained prefix, and rescan from the frozen boundary.
+        if continuing_scan && let Some(last) = tail_abs.last() {
+            let (resume, _) = self.skip.next_pos(last.start, last.end, &last.labels);
+            if self.scan_cursor < resume {
+                crate::consistency::consistency_panic!(
+                    scan_cursor = self.scan_cursor,
+                    last_retained_resume = resume,
+                    "MATCH_RECOGNIZE resumed scan would re-find its retained prefix; rescanning \
+                     from the frozen boundary",
+                );
+                self.matchless_upto = self.next_pos;
+                self.dead_upto = self.next_pos;
+                self.scan_cursor = self.next_pos;
+                self.incomplete = false;
+                self.freeze_truncated = false;
+                tail_abs.clear();
+                continuing_scan = false;
+                resume_freeze = false;
+            }
+        }
         let mut scan_truncated = false;
         if !resume_freeze {
             // A truncated refresh resumes after the successful matches already retained above.
@@ -483,6 +551,8 @@ impl IncrementalMatcher {
             } else {
                 self.matchless_upto
             };
+            // Both cursors were checked against `[next_pos, n_rows]` above, so the suffix
+            // arithmetic cannot wrap.
             debug_assert!(self.next_pos <= scan_start && scan_start <= n_rows);
             let mut scan = MatchScan::starting_at(scan_start - offset);
             while let Some(m) = self
@@ -780,13 +850,26 @@ impl IncrementalMatcher {
         // into a completed-scan verdict and the deadline prune deleted the rows of matches the
         // truncated scan never reached. Truncation (`truncate`) still resets all three: there the
         // rows a verdict was computed over do change.
-        debug_assert!(
-            final_pos <= self.next_pos
-                && self.next_pos <= self.matchless_upto
-                && self.matchless_upto <= self.dead_upto
-                && self.next_pos <= self.scan_cursor,
-            "cursor invariant violated before rebase"
-        );
+        // Checked at runtime, not only in debug builds: production has no overflow checks, and a
+        // breached invariant would wrap one of the four shifts below into a cursor past the
+        // buffer — a rescan that silently finds nothing, or a freeze that never completes.
+        // Nothing has been mutated yet, so declining is clean: the caller rebuilds the matcher
+        // from the surviving rows, which needs no cursor at all.
+        if !(final_pos <= self.next_pos
+            && self.next_pos <= self.matchless_upto
+            && self.matchless_upto <= self.dead_upto
+            && self.next_pos <= self.scan_cursor)
+        {
+            crate::consistency::consistency_panic!(
+                final_pos,
+                next_pos = self.next_pos,
+                matchless_upto = self.matchless_upto,
+                dead_upto = self.dead_upto,
+                scan_cursor = self.scan_cursor,
+                "MATCH_RECOGNIZE cursor invariant violated before the eviction rebase; rebuilding",
+            );
+            return Finalized::MustRebuild;
+        }
         self.matched.drain(..finalized);
         self.frozen_count -= finalized;
         self.next_pos -= final_pos;
@@ -3113,5 +3196,156 @@ mod tests {
             starts.windows(2).all(|w| w[0] < w[1]),
             "a resumed scan must not duplicate the kept prefix: starts {starts:?}"
         );
+    }
+
+    /// The rescan's runtime cursor guards, in the non-strict mode where they take their
+    /// conservative branch instead of panicking.
+    mod cursor_guards {
+        use super::*;
+
+        async fn non_strict<F: std::future::Future>(f: F) -> F::Output {
+            let config = risingwave_common::config::StreamingConfig {
+                unsafe_disable_strict_consistency: true,
+                ..Default::default()
+            };
+            crate::CONFIG.scope(std::sync::Arc::new(config), f).await
+        }
+
+        fn loaded(rows: &str) -> (IncrementalMatcher, Nfa, SetMatcher, Vec<BTreeSet<String>>) {
+            let pat = Pattern::Concat(vec![
+                quant(Pattern::Var("a".into()), Quantifier::Plus, false),
+                Pattern::Var("b".into()),
+            ]);
+            let nfa = Nfa::compile(&pat);
+            let rows = from_str(rows);
+            let matcher = SetMatcher::new(rows.clone());
+            let inc =
+                IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), SkipMode::PastLastRow);
+            (inc, nfa, matcher, rows)
+        }
+
+        /// A stray cursor is forgotten together with the truncation flags, and the rescan from
+        /// the frozen boundary reproduces the batch oracle exactly — in particular without
+        /// duplicating the provisional matches a kept `incomplete` would have re-attached.
+        #[tokio::test]
+        async fn stray_cursor_rescans_from_the_frozen_boundary_without_duplicates() {
+            non_strict(async {
+                let (mut inc, nfa, matcher, rows) = loaded("aabaab");
+                let seqs: Vec<Seq> = (0..rows.len() as i64).map(Seq).collect();
+                inc.advance(&seqs, &matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                let truth = batch_triples(&nfa, &SkipMode::PastLastRow, &rows).await;
+                assert_eq!(provisional_triples(&inc), truth);
+
+                // Corrupt the resumable state: a cursor past the buffer, flagged as a truncated
+                // scan that would resume there.
+                inc.scan_cursor = 99;
+                inc.incomplete = true;
+                inc.refresh(&matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    provisional_triples(&inc),
+                    truth,
+                    "no lost and no duplicated match"
+                );
+                assert!(!inc.is_incomplete());
+                assert!(inc.scan_cursor <= rows.len());
+            })
+            .await;
+        }
+
+        /// A cursor inside the buffer but before the retained provisional tail's resume point
+        /// passes the range check; the resumed scan would re-find the tail and duplicate it. It
+        /// is rejected like a stray cursor: the tail is dropped and the rescan from the frozen
+        /// boundary reproduces the batch oracle exactly.
+        #[tokio::test]
+        async fn cursor_before_the_retained_tail_is_rejected() {
+            non_strict(async {
+                // `(a+ b+)`: over "aabaab" the first match freezes (a following `a` ends its
+                // `b+`), the second ends at the boundary with `b+` still open — a retained
+                // provisional match with a resume position of 6.
+                let pat = Pattern::Concat(vec![
+                    quant(Pattern::Var("a".into()), Quantifier::Plus, false),
+                    quant(Pattern::Var("b".into()), Quantifier::Plus, false),
+                ]);
+                let nfa = Nfa::compile(&pat);
+                let rows = from_str("aabaab");
+                let matcher = SetMatcher::new(rows.clone());
+                let mut inc = IncrementalMatcher::new(
+                    std::sync::Arc::new(nfa.clone()),
+                    SkipMode::PastLastRow,
+                );
+                let seqs: Vec<Seq> = (0..rows.len() as i64).map(Seq).collect();
+                inc.advance(&seqs, &matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                let truth = batch_triples(&nfa, &SkipMode::PastLastRow, &rows).await;
+                assert_eq!(provisional_triples(&inc), truth);
+                assert!(
+                    inc.provisional().len() > inc.frozen(),
+                    "setup: a provisional match must be retained past the frozen prefix"
+                );
+
+                // Corrupt: a "truncated" scan whose cursor sits at the frozen boundary, inside the
+                // buffer, before the retained match's resume point.
+                inc.incomplete = true;
+                inc.scan_cursor = inc.resume_pos();
+                inc.refresh(&matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                assert_eq!(provisional_triples(&inc), truth, "no duplicated match");
+                assert!(!inc.is_incomplete());
+            })
+            .await;
+        }
+
+        /// A frozen prefix longer than the buffer has no in-place recovery: the rescan fails so
+        /// the actor restarts and rebuilds from state.
+        #[tokio::test]
+        async fn frozen_prefix_past_the_buffer_is_an_error() {
+            non_strict(async {
+                let (mut inc, _nfa, matcher, rows) = loaded("aab");
+                let seqs: Vec<Seq> = (0..rows.len() as i64).map(Seq).collect();
+                inc.advance(&seqs, &matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                inc.next_pos = rows.len() + 1;
+                assert!(
+                    inc.refresh(&matcher, &mut ScanBudget::unlimited(), false)
+                        .await
+                        .is_err()
+                );
+            })
+            .await;
+        }
+
+        /// A stray cursor at the eviction rebase declines the in-place shift before mutating
+        /// anything; the caller then rebuilds from the surviving rows.
+        #[tokio::test]
+        async fn stray_cursor_at_rebase_declines_in_place() {
+            non_strict(async {
+                let (mut inc, _nfa, matcher, rows) = loaded("aabaab");
+                let seqs: Vec<Seq> = (0..rows.len() as i64).map(Seq).collect();
+                inc.advance(&seqs, &matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                let resume = inc.resume_pos();
+                assert!(resume > 0, "setup: the first match must have frozen");
+                let before = inc.provisional().to_vec();
+                inc.scan_cursor = resume - 1;
+                assert!(matches!(
+                    inc.finalize_evicted_prefix(Seq(resume as i64)),
+                    Finalized::MustRebuild
+                ));
+                assert_eq!(
+                    inc.provisional(),
+                    before.as_slice(),
+                    "declined without mutating"
+                );
+            })
+            .await;
+        }
     }
 }

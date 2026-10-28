@@ -48,12 +48,15 @@ pub struct MaterializeCache {
 type CacheValue = Option<CompactedRow>;
 type ChangeBuffer = crate::common::change_buffer::ChangeBuffer<Vec<u8>, OwnedRow>;
 
-/// Check whether the given row is below the committed watermark. If so, we may want to treat
-/// them as non-existent. This extra step is necessary for TTL-ed tables because:
+/// Check whether the given row is below the latest watermark of the table. If so, we may want to
+/// treat them as non-existent. This extra step is necessary for TTL-ed tables because:
 ///
 /// - the storage may clean expired rows asynchronously
 /// - an expired row may still be in the cache while we expect a consistent view
-fn row_below_committed_watermark<S: StateStore, SD: ValueRowSerde>(
+///
+/// The watermark is forwarded downstream once it is fed into the table, so the rows below it are
+/// expired before the commit.
+fn row_below_watermark<S: StateStore, SD: ValueRowSerde>(
     row_serde: &BasicSerde,
     table: &StateTableInner<S, SD>,
     row: &CompactedRow,
@@ -61,13 +64,16 @@ fn row_below_committed_watermark<S: StateStore, SD: ValueRowSerde>(
     let Some(clean_watermark_index) = table.clean_watermark_index else {
         return Ok(false);
     };
-    let Some(committed_watermark) = table.get_committed_watermark() else {
+    let Some(watermark) = table
+        .get_pending_watermark()
+        .or(table.get_committed_watermark())
+    else {
         return Ok(false);
     };
     let deserialized = row_serde.deserializer.deserialize(row.row.clone())?;
     Ok(cmp_datum(
         deserialized.datum_at(clean_watermark_index),
-        Some(committed_watermark.as_scalar_ref_impl()),
+        Some(watermark.as_scalar_ref_impl()),
         OrderType::ascending(),
     ) == std::cmp::Ordering::Less)
 }
@@ -352,7 +358,7 @@ impl MaterializeCache {
             if let Some(cached) = self.lru_cache.get(key) {
                 self.metrics.materialize_cache_hit_count.inc();
                 if let Some(row) = cached {
-                    if row_below_committed_watermark(&self.row_serde, table, row)? {
+                    if row_below_watermark(&self.row_serde, table, row)? {
                         self.lru_cache.put(key.to_vec(), None);
                     } else {
                         self.metrics.materialize_data_exist_count.inc();
@@ -366,7 +372,7 @@ impl MaterializeCache {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 let row = table.get_row(key_row).await?.map(CompactedRow::from);
                 let row = match row {
-                    Some(row) if row_below_committed_watermark(&row_serde, table, &row)? => None,
+                    Some(row) if row_below_watermark(&row_serde, table, &row)? => None,
                     other => other,
                 };
                 StreamExecutorResult::Ok((key.to_vec(), row))

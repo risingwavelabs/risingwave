@@ -241,12 +241,12 @@ select
 ----
 string string string
 
-# Variant objects require unique field names while RisingWave struct types do not.
+# Duplicate struct field names are rejected by the shared SQL type binder before conversion.
 
-statement error duplicate field name
+statement error struct field "a" specified more than once
 select to_variant(row(1, 'x')::struct<a int, a varchar>);
 
-statement error duplicate field name
+statement error struct field "a" specified more than once
 select to_variant(row(row(1, 'x')::struct<a int, a varchar>)::struct<s struct<a int, a varchar>>);
 
 statement ok

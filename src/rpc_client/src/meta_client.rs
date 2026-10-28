@@ -924,6 +924,14 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn remove_iceberg_table_orphan_files(
+        &self,
+        sink_id: SinkId,
+    ) -> Result<RemoveIcebergTableOrphanFilesResponse> {
+        let request = RemoveIcebergTableOrphanFilesRequest { sink_id };
+        self.inner.remove_iceberg_table_orphan_files(request).await
+    }
+
     pub async fn drop_view(&self, view_id: ViewId, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
@@ -1761,6 +1769,21 @@ impl MetaClient {
         Ok(mappings)
     }
 
+    pub async fn warm_up_table_cache(
+        &self,
+        table_id: TableId,
+        concurrency: u32,
+    ) -> Result<(u64, u32)> {
+        let response = self
+            .inner
+            .warm_up_table_cache(WarmUpTableCacheRequest {
+                table_id,
+                concurrency,
+            })
+            .await?;
+        Ok((response.key_count, response.worker_count))
+    }
+
     pub async fn risectl_list_compaction_status(
         &self,
     ) -> Result<(
@@ -2320,8 +2343,12 @@ impl GrpcMetaClientCore {
             DdlServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let hummock_client =
             HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
-        let notification_client =
-            NotificationServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        // Accept zstd-compressed notifications: the initial `MetaSnapshot` on `Subscribe`
+        // carries the full hummock version, and a single uncompressed gRPC message larger
+        // than `i32::MAX` bytes is silently reset by hyper/h2 and can never be delivered.
+        let notification_client = NotificationServiceClient::new(channel.clone())
+            .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
+            .max_decoding_message_size(usize::MAX);
         let stream_client =
             StreamManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let user_client = UserServiceClient::new(channel.clone());
@@ -2784,6 +2811,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
             ,{ ddl_client, rewrite_iceberg_table_manifests, RewriteIcebergTableManifestsRequest, RewriteIcebergTableManifestsResponse }
             ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
+            ,{ ddl_client, remove_iceberg_table_orphan_files, RemoveIcebergTableOrphanFilesRequest, RemoveIcebergTableOrphanFilesResponse }
             ,{ ddl_client, create_iceberg_table, CreateIcebergTableRequest, CreateIcebergTableResponse }
             ,{ ddl_client, wait_iceberg_pk_index_sink_epoch, WaitIcebergPkIndexSinkEpochRequest, WaitIcebergPkIndexSinkEpochResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
@@ -2838,6 +2866,7 @@ macro_rules! for_all_meta_rpc {
             ,{ session_params_client, get_session_params, GetSessionParamsRequest, GetSessionParamsResponse }
             ,{ session_params_client, set_session_param, SetSessionParamRequest, SetSessionParamResponse }
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
+            ,{ serving_client, warm_up_table_cache, WarmUpTableCacheRequest, WarmUpTableCacheResponse }
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }

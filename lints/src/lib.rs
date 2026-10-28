@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(rustc_private)]
-
 #![warn(unused_extern_crates)]
 
 extern crate rustc_ast;
@@ -25,6 +24,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 mod format_error;
+mod temporary_guarded_metric;
 mod utils;
 
 dylint_linting::dylint_library!();
@@ -45,9 +45,11 @@ pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lin
 
     // Actual lints.
     lint_store.register_lints(&[format_error::FORMAT_ERROR]);
+    lint_store.register_lints(&[temporary_guarded_metric::TEMPORARY_GUARDED_METRIC]);
     let format_args = format_args_storage.clone();
     lint_store
         .register_late_pass(move |_| Box::new(format_error::FormatError::new(format_args.clone())));
+    lint_store.register_late_pass(|_| Box::new(temporary_guarded_metric::TemporaryGuardedMetric));
 
     // --  End lint registration  --
 

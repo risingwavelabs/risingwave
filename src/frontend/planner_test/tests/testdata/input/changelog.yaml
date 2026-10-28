@@ -32,3 +32,12 @@
     with c as changelog from t key (missing) select * from c;
   expected_outputs:
   - binder_error
+
+- name: changelog over a singleton input
+  sql: |
+    create table t (v int);
+    create materialized view mv as select count(*) as c from t;
+    with x as changelog from mv select * from x;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan

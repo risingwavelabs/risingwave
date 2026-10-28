@@ -380,10 +380,16 @@ impl Parser<'_> {
     }
 
     pub fn parse_vacuum(&mut self) -> ModalResult<Statement> {
-        let full = self.parse_keyword(Keyword::FULL);
+        let mode = if self.parse_keyword(Keyword::FULL) {
+            VacuumMode::Full
+        } else if self.parse_keyword(Keyword::ORPHAN) {
+            VacuumMode::OrphanFiles
+        } else {
+            VacuumMode::Default
+        };
         let object_name = self.parse_object_name()?;
 
-        Ok(Statement::Vacuum { object_name, full })
+        Ok(Statement::Vacuum { object_name, mode })
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -1383,11 +1389,11 @@ impl Parser<'_> {
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::NULL]) {
                         Ok(Expr::IsNotNull(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::DISTINCT, Keyword::FROM]) {
-                        let expr2 = self.parse_expr()?;
+                        let expr2 = self.parse_is_distinct_from_rhs()?;
                         Ok(Expr::IsDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::DISTINCT, Keyword::FROM])
                     {
-                        let expr2 = self.parse_expr()?;
+                        let expr2 = self.parse_is_distinct_from_rhs()?;
                         Ok(Expr::IsNotDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else {
                         let negated = self.parse_keyword(Keyword::NOT);
@@ -1567,6 +1573,20 @@ impl Parser<'_> {
         } else {
             Ok(new_expr)
         }
+    }
+
+    /// Parses the right operand of `IS [NOT] DISTINCT FROM`.
+    ///
+    /// Like PostgreSQL, where `IS` is non-associative, rejects another `IS`, `ISNULL`, or
+    /// `NOTNULL` right after the operand.
+    fn parse_is_distinct_from_rhs(&mut self) -> ModalResult<Expr> {
+        let expr = self.parse_subexpr(Precedence::Is)?;
+
+        if self.get_next_precedence()? == Precedence::Is {
+            parser_err!("syntax error at or near {}", self.peek_token().token);
+        }
+
+        Ok(expr)
     }
 
     /// Parses the optional constraints following the `IS [NOT] JSON` predicate

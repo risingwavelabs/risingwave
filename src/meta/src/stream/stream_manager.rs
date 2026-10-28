@@ -50,9 +50,11 @@ use crate::barrier::{
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::streaming_job::AbortCreatingJobResult;
 use crate::error::bail_invalid_parameter;
 use crate::hummock::HummockManagerRef;
-use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
@@ -77,14 +79,39 @@ pub type CreateStreamingJobResult =
 /// that, prioritize eventual completion by continuing to wait through transient errors.
 const FOREGROUND_DDL_EARLY_FAILURE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Stop sink runtimes after catalog deletion, even when the drop barrier fails.
+pub(crate) async fn cleanup_dropped_sink_runtimes(
+    sink_manager: &SinkCoordinatorManager,
+    iceberg_pk_index_sink_manager: &IcebergPkIndexSinkManager,
+    streaming_job_ids: impl IntoIterator<Item = JobId>,
+) {
+    let streaming_job_ids = streaming_job_ids.into_iter().collect::<Vec<_>>();
+    iceberg_pk_index_sink_manager.retire_sinks(streaming_job_ids.iter().map(|id| id.as_sink_id()));
+    if !streaming_job_ids.is_empty() {
+        sink_manager
+            .stop_sink_coordinators_for_jobs(streaming_job_ids)
+            .await;
+    }
+}
+
 pub(crate) async fn cleanup_dropped_streaming_jobs(
     refresh_manager: &GlobalRefreshManagerRef,
     hummock_manager: &HummockManagerRef,
     metadata_manager: &MetadataManager,
+    sink_manager: &SinkCoordinatorManager,
+    iceberg_pk_index_sink_manager: &IcebergPkIndexSinkManager,
     streaming_job_ids: impl IntoIterator<Item = JobId>,
     state_table_ids: Vec<TableId>,
     progress_status: &str,
 ) -> MetaResult<()> {
+    let streaming_job_ids = streaming_job_ids.into_iter().collect::<Vec<_>>();
+    // Coordinators may still access state tables until their workers have exited.
+    cleanup_dropped_sink_runtimes(
+        sink_manager,
+        iceberg_pk_index_sink_manager,
+        streaming_job_ids.iter().copied(),
+    )
+    .await;
     for job_id in streaming_job_ids {
         refresh_manager.remove_progress_tracker(job_id.as_mv_table_id(), progress_status);
     }
@@ -331,7 +358,9 @@ pub struct GlobalStreamManager {
 
     pub refresh_manager: GlobalRefreshManagerRef,
 
-    pub iceberg_compaction_manager: IcebergCompactionManagerRef,
+    pub sink_manager: SinkCoordinatorManager,
+
+    pub iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
@@ -347,7 +376,8 @@ impl GlobalStreamManager {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         refresh_manager: GlobalRefreshManagerRef,
-        iceberg_compaction_manager: IcebergCompactionManagerRef,
+        sink_manager: SinkCoordinatorManager,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
         scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
         Ok(Self {
@@ -357,7 +387,8 @@ impl GlobalStreamManager {
             hummock_manager,
             source_manager,
             refresh_manager,
-            iceberg_compaction_manager,
+            sink_manager,
+            iceberg_pk_index_sink_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             scale_controller,
         })
@@ -411,7 +442,7 @@ impl GlobalStreamManager {
                     stream_manager
                         .metadata_manager
                         .catalog_controller
-                        .notify_frontend_trivial()
+                        .current_notification_version()
                         .await
                 }
                 CreateType::Foreground => {
@@ -667,7 +698,36 @@ impl GlobalStreamManager {
             refresh_interval_sec,
         };
 
-        let create_job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+        let create_job_type = if matches!(
+            &streaming_job,
+            StreamingJob::Sink(sink, _)
+                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(
+                    &sink.properties
+                )
+        ) {
+            if refresh_interval_sec.is_some() || since_timestamp_epoch.is_some() {
+                bail!("Iceberg V3 sinks do not support batch refresh or since_timestamp");
+            }
+            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
+                anyhow::anyhow!("Iceberg V3 sinks must be planned with snapshot backfill")
+            })?;
+            for fragment in info.stream_job_fragments.inner.fragments.values() {
+                let mask = fragment.fragment_type_mask;
+                if mask.contains(FragmentTypeFlag::Source)
+                    || mask.contains(FragmentTypeFlag::SourceScan)
+                {
+                    bail!(
+                        "Iceberg V3 sinks must not contain source or source-backfill fragments; \
+                         fragment {} has source/source-backfill nodes",
+                        fragment.fragment_id
+                    );
+                }
+            }
+            CreateStreamingJobType::Independent {
+                snapshot_backfill_info,
+                kind: IndependentStreamingJobType::IcebergV3,
+            }
+        } else if let Some(refresh_interval_sec) = refresh_interval_sec {
             if since_timestamp_epoch.is_some() {
                 bail!("since_timestamp should not be specified when no snapshot backfill");
             }
@@ -792,7 +852,7 @@ impl GlobalStreamManager {
                     tmp_id,
                     to_drop_state_table_ids: {
                         if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
-                            vec![drop_table_connector_ctx.to_remove_state_table_id]
+                            drop_table_connector_ctx.to_remove_state_table_ids.clone()
                         } else {
                             Vec::new()
                         }
@@ -835,18 +895,82 @@ impl GlobalStreamManager {
                         &self.refresh_manager,
                         &self.hummock_manager,
                         &self.metadata_manager,
+                        &self.sink_manager,
+                        &self.iceberg_pk_index_sink_manager,
                         cleanup_streaming_job_ids,
                         cleanup_state_table_ids,
                         "drop_streaming_jobs",
                     )
                     .await
                 }
-                Err(err) => Err(err),
+                Err(err) => {
+                    cleanup_dropped_sink_runtimes(
+                        &self.sink_manager,
+                        &self.iceberg_pk_index_sink_manager,
+                        cleanup_streaming_job_ids,
+                    )
+                    .await;
+                    Err(err)
+                }
             };
             let _ = result.inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
         }
+    }
+
+    /// Clean the runtimes of an aborted job and release its state only after the drop barrier.
+    #[await_tree::instrument(boxed)]
+    pub(crate) async fn cleanup_aborted_streaming_job(
+        &self,
+        abort_result: AbortCreatingJobResult,
+    ) -> MetaResult<()> {
+        if !abort_result.aborted {
+            return Ok(());
+        }
+        self.iceberg_pk_index_sink_manager
+            .retire_sinks(abort_result.aborted_sink_ids.iter().copied());
+        if let (Some(database_id), Some(cancel_info)) =
+            (abort_result.database_id, abort_result.cancel_info)
+        {
+            let result = self
+                .barrier_scheduler
+                .run_command(database_id, cancel_info.command)
+                .await;
+            if let Err(err) = result {
+                // Catalog deletion has committed. Recovery will release state, but must not be
+                // required to stop the coordinator of a job no longer present in the catalog.
+                cleanup_dropped_sink_runtimes(
+                    &self.sink_manager,
+                    &self.iceberg_pk_index_sink_manager,
+                    cancel_info.streaming_job_ids,
+                )
+                .await;
+                return Err(err);
+            }
+            cleanup_dropped_streaming_jobs(
+                &self.refresh_manager,
+                &self.hummock_manager,
+                &self.metadata_manager,
+                &self.sink_manager,
+                &self.iceberg_pk_index_sink_manager,
+                cancel_info.streaming_job_ids,
+                cancel_info.state_table_ids,
+                "cancel_streaming_job",
+            )
+            .await?;
+        } else {
+            cleanup_dropped_sink_runtimes(
+                &self.sink_manager,
+                &self.iceberg_pk_index_sink_manager,
+                abort_result
+                    .aborted_sink_ids
+                    .iter()
+                    .map(|id| id.as_job_id()),
+            )
+            .await;
+        }
+        Ok(())
     }
 
     /// Cancel streaming jobs and return the canceled table ids.
@@ -887,25 +1011,10 @@ impl GlobalStreamManager {
                 .catalog_controller
                 .try_abort_creating_streaming_job(id, true)
                 .await?;
-            self.iceberg_compaction_manager
-                .clear_maintenance_for_aborted_job(&abort_result);
-            let Some(cancel_info) = abort_result.cancel_info else {
+            let cancelled = abort_result.cancel_info.is_some();
+            self.cleanup_aborted_streaming_job(abort_result).await?;
+            if !cancelled {
                 return Ok(None);
-            };
-
-            if let Some(database_id) = abort_result.database_id {
-                self.barrier_scheduler
-                    .run_command(database_id, cancel_info.command)
-                    .await?;
-                cleanup_dropped_streaming_jobs(
-                    &self.refresh_manager,
-                    &self.hummock_manager,
-                    &self.metadata_manager,
-                    cancel_info.streaming_job_ids,
-                    cancel_info.state_table_ids,
-                    "cancel_streaming_job",
-                )
-                .await?;
             }
 
             tracing::info!(?id, "cancelled background streaming job");

@@ -1,0 +1,369 @@
+# Run with the ci-iceberg-compaction-round profile: each task admits only one plan.
+# PK-index compaction can otherwise combine multiple groups in one commit.
+
+statement ok
+DROP TABLE IF EXISTS pk_compaction_round;
+
+statement ok
+DROP CONNECTION IF EXISTS pk_compaction_round_conn;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/pk_compaction_round/
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/pk_compaction_round_saved/
+
+statement ok
+CREATE CONNECTION pk_compaction_round_conn WITH (
+    type = 'iceberg',
+    catalog.type = 'storage',
+    warehouse.path = 's3://hummock001/pk_compaction_round',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+statement ok
+SET iceberg_engine_connection = 'public.pk_compaction_round_conn';
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+SET iceberg_query_storage_mode = 'iceberg';
+
+statement ok
+CREATE TABLE pk_compaction_round(id INT, part INT, v INT, PRIMARY KEY (part, id)) WITH (
+    format_version = 3,
+    enable_pk_index = 'true',
+    partition_by = 'part',
+    commit_checkpoint_interval = 1,
+    enable_compaction = 'false',
+    compaction.type = 'full',
+    compaction.trigger_snapshot_count = '2',
+    compaction_interval_sec = '3600',
+    enable_snapshot_expiration = 'false'
+) ENGINE = iceberg;
+
+# Internal sink definitions belong to the table; altering them directly must not panic.
+statement error use ALTER TABLE
+ALTER SINK __iceberg_sink_pk_compaction_round CONNECTOR WITH (enable_compaction = 'true');
+
+# Options that require rebuilding the running writer must fail before catalog changes.
+statement error not supported for Iceberg sinks with PK index
+ALTER TABLE pk_compaction_round CONNECTOR WITH (commit_checkpoint_interval = '2');
+
+statement error not supported for Iceberg sinks with PK index
+ALTER TABLE pk_compaction_round CONNECTOR WITH (compaction.write_parquet_compression = 'snappy');
+
+query T
+SELECT connector_props->'enable_compaction'->>'value'
+FROM rw_sinks
+WHERE name = '__iceberg_sink_pk_compaction_round';
+----
+false
+
+# Enabling an empty table must not bypass the first two-commit threshold.
+statement ok
+ALTER TABLE pk_compaction_round CONNECTOR WITH (enable_compaction = 'true');
+
+statement ok
+INSERT INTO pk_compaction_round VALUES (1, 1, 10), (2, 2, 20), (3, 3, 30);
+
+statement ok
+FLUSH;
+
+# A new table must respect the two-commit threshold, without a registration rewrite.
+query TI retry 30 backoff 1s
+SELECT task_type, pending_snapshot_count
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_pk_compaction_round';
+----
+full 1
+
+query II retry 30 backoff 1s
+SELECT count(*), sum(record_count)
+FROM rw_iceberg_files
+WHERE source_name = '__iceberg_source_pk_compaction_round' AND content = 'Data';
+----
+3 3
+
+statement ok
+INSERT INTO pk_compaction_round VALUES (4, 1, 40), (5, 2, 50), (6, 3, 60);
+
+statement ok
+FLUSH;
+
+# Three groups must complete without further writes. Synthetic apply checkpoints
+# must not create new scheduling backlog or allow a previous output to be selected.
+query I rowsort retry 60 backoff 1s
+SELECT record_count
+FROM rw_iceberg_files
+WHERE source_name = '__iceberg_source_pk_compaction_round' AND content = 'Data';
+----
+2
+2
+2
+
+query TIT retry 60 backoff 1s
+SELECT schedule_state, pending_snapshot_count,
+       NOT is_triggerable AND next_compaction_after_sec > 1800
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_pk_compaction_round';
+----
+idle 0 t
+
+# Two ingestion commits plus exactly three coordinated rewrites. The fixed round
+# boundary must exclude earlier batches' outputs from subsequent attempts.
+query III
+SELECT count(*), max(sequence_number),
+       sum(coalesce((summary->>'deleted-data-files')::INT, 0))
+FROM rw_iceberg_snapshots
+WHERE source_name = '__iceberg_source_pk_compaction_round';
+----
+5 5 6
+
+query III
+SELECT count(*), sum(id), sum(v) FROM pk_compaction_round;
+----
+6 21 210
+
+# Exercise the index after all three replacements, then rewrite deletion vectors.
+statement ok
+UPDATE pk_compaction_round SET v = v + 100;
+
+statement ok
+FLUSH;
+
+query III retry 30 backoff 1s
+SELECT count(*), sum(id), sum(v) FROM pk_compaction_round;
+----
+6 21 810
+
+# Only one ingestion commit has arrived since the round finished.
+query TI retry 30 backoff 1s
+SELECT schedule_state, pending_snapshot_count
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_pk_compaction_round';
+----
+idle 1
+
+statement ok
+VACUUM FULL pk_compaction_round;
+
+query III
+SELECT count(*), sum(id), sum(v) FROM pk_compaction_round;
+----
+6 21 810
+
+statement ok
+DELETE FROM pk_compaction_round WHERE id % 2 = 0;
+
+statement ok
+FLUSH;
+
+query III retry 30 backoff 1s
+SELECT count(*), sum(id), sum(v) FROM pk_compaction_round;
+----
+3 9 390
+
+statement ok
+VACUUM FULL pk_compaction_round;
+
+query III
+SELECT count(*), sum(id), sum(v) FROM pk_compaction_round;
+----
+3 9 390
+
+# An all-deleted rewrite still needs to remove its inputs and apply the index update.
+statement ok
+DELETE FROM pk_compaction_round;
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(id) FROM pk_compaction_round;
+----
+0
+
+# Manual Full waits for one task, not an entire round. With one partition plan per
+# task, issue one request per partition to clear all old files before inserting again.
+statement ok
+VACUUM FULL pk_compaction_round;
+
+statement ok
+VACUUM FULL pk_compaction_round;
+
+statement ok
+VACUUM FULL pk_compaction_round;
+
+query I
+SELECT count(id) FROM pk_compaction_round;
+----
+0
+
+query I
+SELECT count(*)
+FROM rw_iceberg_files
+WHERE source_name = '__iceberg_source_pk_compaction_round' AND content = 'Data';
+----
+0
+
+statement ok
+INSERT INTO pk_compaction_round VALUES (1, 1, 1000), (2, 2, 2000), (3, 3, 3000);
+
+statement ok
+FLUSH;
+
+query III retry 30 backoff 1s
+SELECT count(*), sum(id), sum(v) FROM pk_compaction_round;
+----
+3 6 6000
+
+# Disable compaction and update scheduling while the sink is idle.
+statement ok
+ALTER TABLE pk_compaction_round CONNECTOR WITH (
+    enable_compaction = 'false',
+    compaction.trigger_snapshot_count = '10',
+    compaction_interval_sec = '7200'
+);
+
+query II
+SELECT trigger_snapshot_count, trigger_interval_sec
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_pk_compaction_round';
+----
+10 7200
+
+query TTT
+SELECT connector_props->'enable_compaction'->>'value',
+       connector_props->'compaction.trigger_snapshot_count'->>'value',
+       connector_props->'compaction_interval_sec'->>'value'
+FROM rw_sinks
+WHERE name = '__iceberg_sink_pk_compaction_round';
+----
+false 10 7200
+
+statement ok
+INSERT INTO pk_compaction_round VALUES (4, 1, 4000), (5, 2, 5000), (6, 3, 6000);
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*)
+FROM rw_iceberg_files
+WHERE source_name = '__iceberg_source_pk_compaction_round' AND content = 'Data';
+----
+6
+
+# Re-enabling reconciles existing data without waiting for another ingestion commit,
+# even though the new snapshot threshold has not been reached.
+statement ok
+ALTER TABLE pk_compaction_round CONNECTOR WITH (enable_compaction = 'true');
+
+query I rowsort retry 60 backoff 1s
+SELECT record_count
+FROM rw_iceberg_files
+WHERE source_name = '__iceberg_source_pk_compaction_round' AND content = 'Data';
+----
+2
+2
+2
+
+query TI retry 60 backoff 1s
+SELECT schedule_state, pending_snapshot_count
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_pk_compaction_round';
+----
+idle 0
+
+statement ok
+UPDATE pk_compaction_round SET v = v + 1 WHERE id = 1;
+
+statement ok
+DELETE FROM pk_compaction_round WHERE id = 6;
+
+statement ok
+FLUSH;
+
+query III retry 30 backoff 1s
+SELECT count(*), sum(id), sum(v) FROM pk_compaction_round;
+----
+5 15 15001
+
+statement ok
+ALTER TABLE pk_compaction_round CONNECTOR WITH (enable_compaction = 'false');
+
+query TT retry 60 backoff 1s
+SELECT schedule_state, NOT is_triggerable
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_pk_compaction_round';
+----
+idle t
+
+# DROP of an engine table also drops its external catalog entry. Preserve the
+# fixture so the next CREATE really attaches to existing snapshots.
+system ok
+./risedev mc mirror --overwrite hummock-minio/hummock001/pk_compaction_round/ hummock-minio/hummock001/pk_compaction_round_saved/
+
+statement ok
+DROP TABLE pk_compaction_round;
+
+system ok
+./risedev mc mirror --overwrite hummock-minio/hummock001/pk_compaction_round_saved/ hummock-minio/hummock001/pk_compaction_round/
+
+# Reattach the existing external table. Reconciliation must wait until the new
+# independent job is ready, then complete without any new ingestion.
+statement ok
+CREATE TABLE pk_compaction_round(id INT, part INT, v INT, PRIMARY KEY (part, id)) WITH (
+    format_version = 3,
+    enable_pk_index = 'true',
+    partition_by = 'part',
+    commit_checkpoint_interval = 1,
+    enable_compaction = 'true',
+    compaction.type = 'full',
+    compaction.trigger_snapshot_count = '1000',
+    compaction_interval_sec = '3600',
+    enable_snapshot_expiration = 'false'
+) ENGINE = iceberg;
+
+query T
+SELECT count(*) > 0
+FROM rw_iceberg_snapshots
+WHERE source_name = '__iceberg_source_pk_compaction_round';
+----
+t
+
+query TI retry 60 backoff 1s
+SELECT schedule_state, pending_snapshot_count
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_pk_compaction_round';
+----
+idle 0
+
+query TTT retry 60 backoff 1s
+SELECT last_success_at IS NOT NULL, last_failure_at IS NULL, last_error IS NULL
+FROM rw_iceberg_compaction_schedules
+WHERE sink_name = '__iceberg_sink_pk_compaction_round';
+----
+t t t
+
+query III
+SELECT count(*), sum(id), sum(v) FROM pk_compaction_round;
+----
+5 15 15001
+
+statement ok
+DROP TABLE pk_compaction_round;
+
+statement ok
+DROP CONNECTION pk_compaction_round_conn;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/pk_compaction_round/
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/pk_compaction_round_saved/

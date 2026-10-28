@@ -232,7 +232,7 @@
                       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr4, Case((count(max($expr6)) = 0:Int32), null:Decimal, (sum(max($expr6)) / count(max($expr6))::Decimal)) as $expr7] }
+    └─StreamProject { exprs: [$expr4, Case((count(max($expr6)) = 0:Int32), null:Decimal, (Case((count(max($expr6)) = 0:Int64), null:Decimal, sum(max($expr6))) / count(max($expr6))::Decimal)) as $expr7] }
       └─StreamHashAgg { group_key: [$expr4], aggs: [sum(max($expr6)), count(max($expr6)), count] }
         └─StreamExchange { dist: HashShard($expr4) }
           └─StreamProject { exprs: [$expr2, $expr4, max($expr6)] }
@@ -261,7 +261,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [$expr4, Case((count(max($expr6)) = 0:Int32), null:Decimal, (sum(max($expr6)) / count(max($expr6))::Decimal)) as $expr7] }
+    └── StreamProject { exprs: [$expr4, Case((count(max($expr6)) = 0:Int32), null:Decimal, (Case((count(max($expr6)) = 0:Int64), null:Decimal, sum(max($expr6))) / count(max($expr6))::Decimal)) as $expr7] }
         └── StreamHashAgg { group_key: [$expr4], aggs: [sum(max($expr6)), count(max($expr6)), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([1]) from 1
 

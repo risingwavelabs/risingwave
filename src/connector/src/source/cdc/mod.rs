@@ -12,11 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod citus;
 pub mod enumerator;
 pub mod external;
 pub mod jni_source;
+pub mod mongodb;
+pub mod mysql;
+pub mod oracle;
+pub mod postgres;
 pub mod source;
 pub mod split;
+pub mod sql_server;
 
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
@@ -89,6 +95,23 @@ pub fn normalize_simple_postgres_quoted_table_name(table_name: &str) -> Option<S
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
     fn source_type() -> CdcSourceType;
+}
+
+/// Behavior switches.
+pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
+    /// When true, only shared sources are supported; otherwise only direct sources are supported.
+    const CAN_BACKFILL: bool = false;
+    /// When true, the planner may choose parallelized backfill.
+    const CAN_BACKFILL_IN_PARALLEL: bool = false;
+    /// When true, a shared source sets Debezium's `provide.transaction.metadata`, so that all rows
+    /// of one upstream transaction go into a single chunk.
+    const CAN_USE_TRANSACTION_METADATA: bool = false;
+    /// When true, the source executor waits for a non-empty split offset before reporting the
+    /// initial CDC offset.
+    const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = false;
+    /// When true, the consumed offset is committed back to the upstream database on each
+    /// checkpoint via a JNI call.
+    const NEEDS_OFFSET_COMMIT_ON_CHECKPOINT: bool = false;
 }
 
 for_all_classified_sources!(impl_cdc_source_type);
