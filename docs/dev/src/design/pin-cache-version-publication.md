@@ -15,6 +15,32 @@ These acceptance conditions govern the implementation; tests must not redefine t
 | Independence and publication | Each backend executes and times out independently. Every event becomes publishable after both attempts settle; the queue publishes settled FIFO prefixes. Shared I/O limits do not create shared completion scheduling. |
 | Scope | No cross-event merging, endpoint predicates, retries, GC scans or production activation. Locality bounds remain conservative; downloads retain unit/whole-object granularity. |
 
+## Preparation boundary
+
+Cheap table/role/ownership checks run before backend planning. Full block locality
+needs metadata. Pin selects the next event and discards unowned or cached candidates
+before loading metadata, then rechecks current authority before download submission.
+
+Common algorithms and backend adapters have separate source boundaries:
+`admission.rs` loads SST metadata and selects local blocks from resolved inputs;
+`admission/foyer.rs` adapts ordinary policies, snapshots and L0 serving-only rules;
+`admission/pin.rs` adapts selected plans and surviving intent. The common algorithms
+import no Pin plan/object, version delta or CN metadata owner. Both adapters call
+the same loader and selector; neither runtime implements vnode overlap.
+
+| Entry | Output and consumer |
+| --- | --- |
+| `foyer::load_metadata_and_select_blocks` | Loads metadata, preserves metadata-only warming, and returns `SstLocality` for Foyer unit generation. Foyer supplies only its data-refill eligibility and immutable contexts. |
+| `pin::retain_owned_candidates` / `pin::load_metadata` | Coarse ownership is checked under the selection guard; metadata is loaded afterward for surviving candidates. No download jobs are constructed. |
+| `pin::iter_admitted_objects` | Rechecks current authority and surviving request intent, then yields only eligible objects with narrowed cancellation dependencies. Pin submits them synchronously under the same metadata guard. |
+
+The `iter_` name denotes lazy admission: the iterator is consumed inside the same
+metadata guard as submission, not collected or used after releasing it. Pin retains
+the two phases because no metadata guard may cross I/O, and admission
+must remain serialized with submission and invalidation. The worker owns their
+lifecycle and timeout, but does not inspect block metadata or compute vnode overlap.
+There is no new preparation worker, queue, mutable policy snapshot or retry loop.
+
 ## Responsibilities and admission
 
 The event handler is the only writer of shared `TableCacheMetadata`: table cache
@@ -29,7 +55,7 @@ and scoped tables without local vnodes are rejected before job/snapshot allocati
 Pin has independent enablement and uses the union of role-projected ownership lanes.
 Ordinary Enabled retains main's unscoped normal-refill behavior.
 
-`admission::prepare_foyer_refill` excludes Pin projections and applies Foyer's L0
+`admission::foyer::select_table_inputs` excludes Pin projections and applies Foyer's L0
 serving rule before capturing immutable task contexts. These rules do not narrow
 Pin input. A mixed physical SST can supply logical projections to both backends.
 Foyer receives task inputs rather than CN metadata. It warms metadata through the

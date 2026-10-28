@@ -21,7 +21,6 @@ use std::time::Instant;
 use ::foyer::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use thiserror_ext::AsReport;
@@ -29,10 +28,10 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use super::CacheRefillConfig;
-use super::admission::{self, SstLocality, TableCacheRefillContextMap};
+use super::admission::SstLocality;
+use super::admission::foyer::{TableCacheRefillContextMap, load_metadata_and_select_blocks};
 use crate::hummock::{
-    Block, HummockError, HummockResult, RecentFilterTrait, SstableBlockIndex, SstableStoreRef,
-    TableHolder,
+    Block, HummockError, RecentFilterTrait, SstableBlockIndex, SstableStoreRef, TableHolder,
 };
 use crate::monitor::GLOBAL_CACHE_REFILL_METRICS;
 
@@ -342,40 +341,29 @@ impl CacheRefillTask {
             .map(|delta| {
                 let context = &self.context;
                 async move {
-                    let holders = match Self::meta_cache_refill(context, delta).await {
-                        Ok(holders) => holders,
+                    let refill_data = context.sstable_store.block_cache().is_hybrid()
+                        && context
+                            .config
+                            .data_refill_levels
+                            .contains(&delta.insert_sst_level);
+                    let localities = match load_metadata_and_select_blocks(
+                        &context.sstable_store,
+                        context.meta_refill_concurrency.as_deref(),
+                        delta,
+                        &context.table_cache_refill_context_map,
+                        refill_data,
+                    )
+                    .await
+                    {
+                        Ok(localities) => localities,
                         Err(e) => {
                             tracing::warn!(error = %e.as_report(), "meta cache refill error");
                             return;
                         }
                     };
-                    // Metadata warming is independent of data refill. Reject data work before
-                    // scanning block ranges or allocating locality bitmaps.
-                    if !context.sstable_store.block_cache().is_hybrid()
-                        || !context
-                            .config
-                            .data_refill_levels
-                            .contains(&delta.insert_sst_level)
-                    {
+                    if localities.is_empty() {
                         return;
                     }
-                    let localities = holders
-                        .into_iter()
-                        .zip_eq_fast(&delta.insert_sst_infos)
-                        .map(|(sst, info)| {
-                            admission::select_local_blocks(
-                                sst,
-                                |table| info.table_ids.binary_search(table).is_ok(),
-                                |table| {
-                                    context
-                                        .table_cache_refill_context_map
-                                        .get(table)
-                                        .map(|context| context.locality())
-                                },
-                                delta.delete_sst_infos.is_empty(),
-                            )
-                        })
-                        .collect_vec();
                     let generator = DataCacheRefillTaskGenerator {
                         context,
                         delta,
@@ -397,20 +385,6 @@ impl CacheRefillTask {
             .collect_vec();
         // Await every Foyer delta. Its task timeout bounds this work independently of Pin.
         join_all(tasks).await;
-    }
-
-    async fn meta_cache_refill(
-        context: &CacheRefillContext,
-        delta: &SstDeltaInfo,
-    ) -> HummockResult<Vec<TableHolder>> {
-        let tasks = delta.insert_sst_infos.iter().map(|info| {
-            admission::load_sst(
-                &context.sstable_store,
-                info,
-                context.meta_refill_concurrency.as_deref(),
-            )
-        });
-        try_join_all(tasks).await
     }
 
     async fn data_cache_refill(context: &CacheRefillContext, tasks: Vec<DataCacheRefillTask>) {
