@@ -548,11 +548,14 @@ async fn test_pin_recovery_keeps_local_files_without_remote_backfill() {
     );
     refiller.replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
     assert!(cache.get(recovered.object_id).is_some());
-    // Block downloads to prove a full snapshot does not schedule missing-object backfill.
+    // Block metadata preparation so an erroneous snapshot backfill cannot hide behind
+    // a fast missing-object error before it reaches the data-download semaphore.
     let _permit = refiller
         .cache()
         .foyer
-        .concurrency
+        .meta_refill_concurrency
+        .as_ref()
+        .unwrap()
         .clone()
         .acquire_owned()
         .await
