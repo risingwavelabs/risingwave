@@ -1683,7 +1683,15 @@ impl IcebergCompactionManager {
                         ..
                     } = &track.state
                 {
-                    candidates.push((*sink_id, *next_compaction_time));
+                    // Active PK-index work can be eligible before its cooldown.
+                    // Sort it as ready now without changing the stored deadline.
+                    let eligible_at = if track.round.is_some() && track.config.pk_index_coordinated
+                    {
+                        (*next_compaction_time).min(now)
+                    } else {
+                        *next_compaction_time
+                    };
+                    candidates.push((*sink_id, eligible_at));
                 }
             }
 

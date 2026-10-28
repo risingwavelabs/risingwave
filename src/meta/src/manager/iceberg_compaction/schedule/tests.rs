@@ -4145,6 +4145,106 @@ async fn test_compaction_selection_orders_pk_index_and_legacy_by_deadline() {
     assert_eq!(next[0].sink_id, SinkId::new(3));
 }
 
+#[tokio::test]
+async fn test_pk_index_ready_continuations_sort_before_future_deadlines() {
+    let manager = build_test_manager().await;
+    let now = Instant::now();
+    let mut tracks = Vec::new();
+    for (id, interval_sec, pending_commits) in [(3, 60, 0), (4, 120, 0), (5, 3600, 0), (6, 7200, 3)]
+    {
+        let mut track = new_round_track(now, interval_sec, 3, 1);
+        track.config.pk_index_coordinated = true;
+        track.config.policy.task_type = TaskType::Auto;
+        track.record_observed_snapshot(committed_snapshot(10, 1000));
+        start_in_flight(&mut track, 9, now);
+        track.finish_success(now);
+        record_commits(&mut track, pending_commits);
+        assert!(track.should_trigger(now));
+        tracks.push((SinkId::new(id), track));
+    }
+
+    // Already overdue tracks keep their original ordering, ahead of continuations
+    // that became eligible before their stored cooldown deadline.
+    for (id, pk_index_coordinated, finished_at) in [
+        (8, true, now - Duration::from_secs(120)),
+        (9, false, now - Duration::from_secs(30)),
+    ] {
+        let mut track = new_round_track(finished_at, 60, 3, 1);
+        track.config.pk_index_coordinated = pk_index_coordinated;
+        track.config.policy.task_type = TaskType::Auto;
+        track.record_observed_snapshot(committed_snapshot(10, 1000));
+        start_in_flight(&mut track, 9, finished_at);
+        track.finish_success(finished_at);
+        tracks.push((SinkId::new(id), track));
+    }
+
+    // New rounds eligible through the commit threshold retain their future keys.
+    for (id, pk_index_coordinated, interval_sec) in [(1, false, 10), (2, true, 30)] {
+        let mut track = new_round_track(now, interval_sec, 1, 1);
+        track.config.pk_index_coordinated = pk_index_coordinated;
+        track.record_observed_snapshot(committed_snapshot(10, 1000));
+        tracks.push((SinkId::new(id), track));
+    }
+    manager.inner.write().sink_schedules.extend(tracks);
+
+    let first = manager.get_top_n_iceberg_commit_sink_ids(3);
+    assert_eq!(
+        first
+            .iter()
+            .map(|handle| handle.sink_id)
+            .collect::<Vec<_>>(),
+        vec![SinkId::new(8), SinkId::new(9), SinkId::new(3)]
+    );
+    let second = manager.get_top_n_iceberg_commit_sink_ids(3);
+    assert_eq!(
+        second
+            .iter()
+            .map(|handle| handle.sink_id)
+            .collect::<Vec<_>>(),
+        vec![SinkId::new(4), SinkId::new(5), SinkId::new(6)]
+    );
+    let third = manager.get_top_n_iceberg_commit_sink_ids(2);
+    assert_eq!(
+        third
+            .iter()
+            .map(|handle| handle.sink_id)
+            .collect::<Vec<_>>(),
+        vec![SinkId::new(1), SinkId::new(2)]
+    );
+}
+
+#[tokio::test]
+async fn test_pk_index_selection_preserves_continuation_cooldown() {
+    let manager = build_test_manager().await;
+    let now = Instant::now();
+    let sink_id = SinkId::new(42);
+    let mut track = new_round_track(now, 3600, 3, 1);
+    track.config.pk_index_coordinated = true;
+    track.config.policy.task_type = TaskType::Auto;
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    start_in_flight(&mut track, 9, now);
+    track.finish_success(now);
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+
+    // Evaluate the ready continuation without dispatching it. Its sort key must
+    // not replace the cooldown that applies if a commit arrives before dispatch.
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(0).is_empty());
+    {
+        let mut guard = manager.inner.write();
+        let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
+        assert!(matches!(
+            track.state,
+            CompactionTrackState::Idle { next_compaction_time, .. }
+                if next_compaction_time == now + Duration::from_secs(3600)
+        ));
+        commit_update(20, 2000).apply_to_track(track, now);
+        assert!(!track.should_trigger(now));
+        assert!(!track.should_trigger(now + Duration::from_secs(3599)));
+        assert!(track.should_trigger(now + Duration::from_secs(3600)));
+    }
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(1).is_empty());
+}
+
 #[test]
 fn test_compaction_policy_serializes_selection_properties_at_dispatch() {
     let policy = CompactionPolicy {
