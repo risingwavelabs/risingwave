@@ -57,8 +57,9 @@ use risingwave_connector::schema::schema_registry::{
 use risingwave_connector::source::cdc::{
     CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
     CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, CdcSourceRuntimeFlags,
+    MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -72,7 +73,7 @@ use risingwave_connector::source::{
     KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
     OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
-use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt, dispatch_cdc_source_type};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
@@ -835,13 +836,6 @@ pub fn bind_connector_props(
     Ok((with_properties, refresh_mode))
 }
 
-fn must_wait_cdc_offset_before_report(with_properties: &WithOptions) -> bool {
-    matches!(
-        with_properties.get_connector().as_deref(),
-        Some(MYSQL_CDC_CONNECTOR) | Some(SQL_SERVER_CDC_CONNECTOR)
-    )
-}
-
 /// When the schema can be inferred from external system (like schema registry),
 /// how to handle the regular columns (i.e., non-generated) defined in SQL?
 pub enum SqlColumnStrategy {
@@ -1221,7 +1215,12 @@ pub async fn handle_create_source(
     }
 
     if overwrite_options.source_rate_limit == Some(0)
-        && must_wait_cdc_offset_before_report(&handler_args.with_options)
+        && dispatch_cdc_source_type!(
+            handler_args.with_options.cdc_source_type(),
+            T,
+            T::NEEDS_NON_EMPTY_INITIAL_OFFSET,
+            false
+        )
     {
         let connector = handler_args.with_options.get_connector().unwrap();
         return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(

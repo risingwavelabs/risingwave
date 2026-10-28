@@ -26,9 +26,11 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_connector::dispatch_cdc_source_type;
 use risingwave_connector::source::cdc::split::{
     extract_postgres_lsn_from_offset_str, extract_sql_server_commit_lsn_from_offset_str,
 };
+use risingwave_connector::source::cdc::{CdcSourceRuntimeFlags, CdcSourceType};
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -628,17 +630,20 @@ impl<S: StateStore> SourceExecutor<S> {
             })?;
         let first_epoch = first_barrier.epoch;
         // must_report_cdc_offset is true if and only if the source is a CDC source.
-        // must_wait_cdc_offset_before_report is true if and only if the source is a MySQL or SQL Server CDC source.
         let (mut boot_state, mut must_report_cdc_offset_once, must_wait_cdc_offset_before_report) =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
                 // CDC source must reach this branch.
                 tracing::debug!(?splits, "boot with splits");
                 // Skip report for non-CDC.
                 let must_report_cdc_offset_once = splits.iter().any(|split| split.is_cdc_split());
-                // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
                 let must_wait_cdc_offset_before_report = must_report_cdc_offset_once
                     && splits.iter().any(|split| {
-                        matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                        dispatch_cdc_source_type!(
+                            CdcSourceType::from(split),
+                            T,
+                            T::NEEDS_NON_EMPTY_INITIAL_OFFSET,
+                            false
+                        )
                     });
                 (
                     splits.to_vec(),

@@ -70,17 +70,6 @@ impl ExternalCdcTableType {
         }
     }
 
-    pub fn can_backfill(&self) -> bool {
-        matches!(self, Self::Mysql | Self::Postgres | Self::SqlServer)
-    }
-
-    pub fn enable_transaction_metadata(&self) -> bool {
-        // In Debezium, transactional metadata cause delay of the newest events, as the `END` message is never sent unless a new transaction starts.
-        // So we only allow transactional metadata for MySQL and Postgres.
-        // See more in https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
-        matches!(self, Self::Mysql | Self::Postgres)
-    }
-
     pub fn get_cdc_offset_parser(&self) -> ConnectorResult<CdcOffsetParseFunc> {
         match self {
             Self::Mysql => Ok(MysqlExternalTableReader::get_cdc_offset_parser()),
