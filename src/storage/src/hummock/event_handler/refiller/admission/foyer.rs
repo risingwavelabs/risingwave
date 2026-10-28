@@ -95,6 +95,9 @@ fn admits_metadata_refill(
     table: &TableId,
     insert_only: bool,
 ) -> bool {
+    if !metadata.role.for_streaming() && !metadata.role.for_serving() {
+        return false;
+    }
     let serving = metadata
         .serving_table_vnode_mapping
         .get(table)
