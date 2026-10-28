@@ -2889,6 +2889,150 @@ fn test_pk_index_successful_batches_trigger_at_commit_threshold_before_interval(
 }
 
 #[test]
+fn test_pk_index_commits_after_success_wait_for_original_batch_deadline() {
+    for task_type in [
+        TaskType::Auto,
+        TaskType::SmallFiles,
+        TaskType::FilesWithDelete,
+    ] {
+        for interval_sec in [1, 60, 120, 3600] {
+            for trigger_snapshot_count in [3, usize::MAX] {
+                for applying in [false, true] {
+                    let now = Instant::now();
+                    let interval = Duration::from_secs(interval_sec);
+                    let mut track = new_round_track(now, interval_sec, trigger_snapshot_count, 1);
+                    track.config.pk_index_coordinated = true;
+                    track.config.policy.task_type = task_type;
+                    track.record_observed_snapshot(committed_snapshot(10, 1000));
+                    start_in_flight(&mut track, 9, now);
+                    if applying {
+                        let CompactionTrackState::InFlight {
+                            task_id, attempt, ..
+                        } = &track.state
+                        else {
+                            unreachable!()
+                        };
+                        track.state = CompactionTrackState::Applying {
+                            task_id: *task_id,
+                            attempt: attempt.clone(),
+                        };
+                    }
+                    let finished_at = now + Duration::from_secs(5);
+                    track.finish_success(finished_at);
+                    assert_eq!(track.demand.commit_count, 0);
+                    assert!(track.should_trigger(finished_at));
+
+                    let deadline = finished_at + interval;
+                    let mut expired = track.clone();
+                    commit_update(20, 2000).apply_to_track(&mut expired, deadline);
+                    assert!(expired.should_trigger(deadline));
+                    assert_eq!(expired.start_attempt().max_file_sequence_number, Some(20));
+
+                    // New writes arriving before the final scan must not turn its
+                    // immediate continuation into an unpaced boundary advance.
+                    let committed_at = finished_at + interval / 2;
+                    commit_update(20, 2000).apply_to_track(&mut track, committed_at);
+                    assert_eq!(track.round_boundary(), Some(10));
+                    assert_eq!(track.demand.commit_count, 1);
+                    assert!(!track.should_trigger(committed_at));
+
+                    let before_deadline = deadline - Duration::from_millis(1);
+                    commit_update(30, 3000).apply_to_track(&mut track, before_deadline);
+                    assert_eq!(track.demand.commit_count, 2);
+                    assert!(!track.should_trigger(before_deadline));
+                    assert!(track.should_trigger(deadline));
+                    assert_eq!(track.start_attempt().max_file_sequence_number, Some(30));
+                    assert_eq!(track.demand.commit_count, 0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_pk_index_commits_after_success_preserve_threshold_and_force_triggers() {
+    for task_type in [
+        TaskType::Auto,
+        TaskType::SmallFiles,
+        TaskType::FilesWithDelete,
+    ] {
+        for applying in [false, true] {
+            let now = Instant::now();
+            let mut track = new_round_track(now, 120, 3, 1);
+            track.config.pk_index_coordinated = true;
+            track.config.policy.task_type = task_type;
+            track.record_observed_snapshot(committed_snapshot(10, 1000));
+            start_in_flight(&mut track, 9, now);
+            if applying {
+                let CompactionTrackState::InFlight {
+                    task_id, attempt, ..
+                } = &track.state
+                else {
+                    unreachable!()
+                };
+                track.state = CompactionTrackState::Applying {
+                    task_id: *task_id,
+                    attempt: attempt.clone(),
+                };
+            }
+            track.finish_success(now);
+
+            let committed_at = now + Duration::from_secs(1);
+            let mut forced_before_commit = track.clone();
+            forced_before_commit.record_force_compaction(now, None);
+            commit_update(20, 2000).apply_to_track(&mut forced_before_commit, committed_at);
+            assert!(forced_before_commit.should_trigger(committed_at));
+
+            commit_update(20, 2000).apply_to_track(&mut track, committed_at);
+            assert!(!track.should_trigger(committed_at));
+            let mut forced_after_commit = track.clone();
+            forced_after_commit.record_force_compaction(committed_at, None);
+            assert!(forced_after_commit.should_trigger(committed_at));
+
+            for commit in 2..=3 {
+                let committed_at = now + Duration::from_secs(commit as u64);
+                commit_update(10 + commit * 10, 2000 + commit)
+                    .apply_to_track(&mut track, committed_at);
+                assert_eq!(track.demand.commit_count, commit as usize);
+                assert_eq!(track.should_trigger(committed_at), commit == 3);
+            }
+            assert_eq!(track.start_attempt().max_file_sequence_number, Some(40));
+            assert_eq!(track.demand.commit_count, 0);
+        }
+    }
+}
+
+#[test]
+fn test_pk_index_no_commit_continuation_respects_retry_gates() {
+    for status in [
+        IcebergReportTaskStatus::Failed,
+        IcebergReportTaskStatus::Busy,
+        IcebergReportTaskStatus::BlockedCapacity,
+        IcebergReportTaskStatus::BlockedStatistics,
+    ] {
+        let now = Instant::now();
+        let mut track = new_round_track(now, 120, 3, 1);
+        track.config.pk_index_coordinated = true;
+        track.config.policy.task_type = TaskType::Auto;
+        track.record_observed_snapshot(committed_snapshot(10, 1000));
+        start_in_flight(&mut track, 9, now);
+        track.finish_success(now);
+        assert!(track.should_trigger(now));
+        start_in_flight(&mut track, 10, now);
+        if status == IcebergReportTaskStatus::Failed {
+            track.finish_failed(now, "boom".to_owned());
+        } else {
+            track.finish_blocked(status, now);
+        }
+        assert_eq!(track.demand.commit_count, 0);
+        let retry_at = track.retry.not_before.unwrap();
+        assert!(!track.should_trigger(now));
+        assert!(!track.should_trigger(retry_at - Duration::from_millis(1)));
+        assert!(track.should_trigger(retry_at));
+    }
+}
+
+#[test]
 fn test_pk_index_successful_batches_continue_without_new_commits() {
     for task_type in [
         TaskType::Auto,

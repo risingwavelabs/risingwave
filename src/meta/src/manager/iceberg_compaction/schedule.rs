@@ -337,8 +337,8 @@ impl CompactionTrack {
     /// Determines if compaction should be triggered.
     ///
     /// Trigger conditions:
-    /// - An active automatic round is controlled by its next-attempt time, with
-    ///   the pending commit threshold as an early trigger for PK-index batches.
+    /// - An active automatic round follows its next-attempt time. PK-index batches
+    ///   can also continue without new commits or trigger early at the commit threshold.
     /// - Otherwise, pending commit threshold or an interval with pending commits
     ///   can trigger a task.
     ///
@@ -372,15 +372,16 @@ impl CompactionTrack {
 
         let time_ready = now >= next_compaction_time;
         let commit_ready = self.demand.commit_count >= self.config.trigger_snapshot_count;
+        let has_commits = self.demand.commit_count > 0;
         if self.round.is_some() {
-            // Active work remains schedulable without new commits. PK-index batches
-            // consume new demand when they advance their boundary, so the commit
-            // threshold can trigger them early. Legacy rounds retain a fixed
-            // boundary. Neither can bypass failure backoff.
-            return time_ready || (self.config.pk_index_coordinated && commit_ready);
+            // Continue immediately below the same PK-index boundary when no new
+            // commits are pending. Advancing the boundary must honor the cooldown
+            // or commit threshold, including commits received after success.
+            // Neither continuation nor new demand can bypass failure backoff.
+            return time_ready
+                || (self.config.pk_index_coordinated && (commit_ready || !has_commits));
         }
 
-        let has_commits = self.demand.commit_count > 0;
         if self.config.pk_index_coordinated {
             // An empty manual Full can finish before the first snapshot is observed.
             return self.latest_observed_snapshot.is_some()
@@ -708,17 +709,15 @@ impl CompactionTrack {
             self.health.record_progress();
             // Beneficial PK-index batches can advance their boundary on new commits,
             // so continuous ingestion may prevent the round from ever draining.
-            // Pace successful batches only when new commits would advance the
-            // boundary. Otherwise, continue immediately to finish deferred plans
-            // and the empty scan needed to drain. Full always keeps a fixed boundary.
-            let delay = if attempt.pk_index_coordinated
-                && attempt.policy.task_type != TaskType::Full
-                && self.demand.commit_count > 0
-            {
-                Duration::from_secs(self.config.trigger_interval_sec)
-            } else {
-                Duration::ZERO
-            };
+            // Keep the cooldown even if commits arrive only after this success.
+            // should_trigger still allows immediate continuation without new commits
+            // to finish deferred plans and the empty scan. Full keeps a fixed boundary.
+            let delay =
+                if attempt.pk_index_coordinated && attempt.policy.task_type != TaskType::Full {
+                    Duration::from_secs(self.config.trigger_interval_sec)
+                } else {
+                    Duration::ZERO
+                };
             self.state = CompactionTrackState::Idle {
                 next_compaction_time: now + delay,
                 manual_task_type: None,
