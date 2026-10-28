@@ -24,9 +24,7 @@ import com.risingwave.proto.PlanCommon;
 import java.io.ByteArrayInputStream;
 import java.lang.reflect.Proxy;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.TimeZone;
@@ -60,9 +58,9 @@ public class OracleArrowBatchWriterTest {
                 tableSchema(
                         Map.of(
                                 "TIMESTAMP_VALUE", Data.DataType.TypeName.TIMESTAMP,
-                                "TIMESTAMPLTZ_VALUE", Data.DataType.TypeName.TIMESTAMPTZ),
+                                "TIMESTAMPTZ_VALUE", Data.DataType.TypeName.TIMESTAMPTZ),
                         "TIMESTAMP_VALUE",
-                        "TIMESTAMPLTZ_VALUE");
+                        "TIMESTAMPTZ_VALUE");
 
         try (var allocator = new RootAllocator();
                 var writer = new OracleArrowBatchWriter(allocator, schema)) {
@@ -94,8 +92,7 @@ public class OracleArrowBatchWriterTest {
 
     /**
      * A result row whose legacy getters follow the JDBC rule for zone-less values: they interpret
-     * the wall-clock value in the JVM default time zone. TIMESTAMP WITH LOCAL TIME ZONE columns do
-     * not convert to {@code OffsetDateTime}, as with the Oracle driver.
+     * the wall-clock value in the JVM default time zone.
      */
     private static ResultSet resultSet(Map<Integer, Object> values) {
         return (ResultSet)
@@ -104,12 +101,8 @@ public class OracleArrowBatchWriterTest {
                         new Class<?>[] {ResultSet.class},
                         (proxy, method, args) ->
                                 switch (method.getName()) {
-                                    case "getObject" -> {
-                                        if (args[1] == OffsetDateTime.class) {
-                                            throw new SQLException("unsupported conversion");
-                                        }
-                                        yield ((Class<?>) args[1]).cast(values.get(args[0]));
-                                    }
+                                    case "getObject" ->
+                                            ((Class<?>) args[1]).cast(values.get(args[0]));
                                     case "getTimestamp" ->
                                             java.sql.Timestamp.valueOf(
                                                     (LocalDateTime) values.get(args[0]));
