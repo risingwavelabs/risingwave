@@ -166,6 +166,7 @@ limit 1
 
 statement ok
 alter materialized view cf_pin_mv set config (
+    streaming.developer.cache_refill_policy = 'pin',
     streaming.developer.pin_cache_table_id = ${pin_cache_table_id}
 );
 
@@ -173,13 +174,16 @@ query I
 select count(*)
 from rw_streaming_job_config
 where name = 'cf_pin_mv'
-  and key = 'streaming.developer.pin_cache_table_id'
-  and value = '${pin_cache_table_id}';
+  and (
+    (key = 'streaming.developer.cache_refill_policy' and value = '"pin"')
+    or (key = 'streaming.developer.pin_cache_table_id' and value = '${pin_cache_table_id}')
+  );
 ----
-1
+2
 
 statement ok
 alter materialized view cf_pin_mv reset config (
+    streaming.developer.cache_refill_policy,
     streaming.developer.pin_cache_table_id
 );
 
@@ -187,28 +191,9 @@ query I
 select count(*)
 from rw_streaming_job_config
 where name = 'cf_pin_mv'
-  and key = 'streaming.developer.pin_cache_table_id';
+  and key in ('streaming.developer.cache_refill_policy', 'streaming.developer.pin_cache_table_id');
 ----
 0
-
-statement ok
-alter materialized view cf_pin_mv set config (
-    streaming.developer.cache_refill_policy = 'pin'
-);
-
-query I
-select count(*)
-from rw_streaming_job_config
-where name = 'cf_pin_mv'
-  and key = 'streaming.developer.cache_refill_policy'
-  and value = '"pin"';
-----
-1
-
-statement ok
-alter materialized view cf_pin_mv reset config (
-    streaming.developer.cache_refill_policy
-);
 
 statement ok
 drop materialized view cf_pin_mv;

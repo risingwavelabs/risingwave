@@ -258,28 +258,19 @@ impl CatalogControllerInner {
             .into_tuple::<(JobId, Option<String>)>()
             .all(&self.db)
             .await?;
-        let mut policies_by_job = HashMap::new();
-        let mut pinned_table_by_job = HashMap::new();
+        let mut configs_by_job = HashMap::new();
         for (job_id, config_override) in job_configs {
             let config = explicit_table_cache_refill_config(&config_override.unwrap_or_default())?;
-            if let Some(policy) = config.policy {
-                policies_by_job.insert(job_id, policy);
-            }
-            if let Some(table_id) = config.pinned_table_id {
-                pinned_table_by_job.insert(job_id, table_id);
+            if config.policy.is_some() || config.pinned_table_id.is_some() {
+                configs_by_job.insert(job_id, config);
             }
         }
-        if policies_by_job.is_empty() && pinned_table_by_job.is_empty() {
+        if configs_by_job.is_empty() {
             return Ok(PbTableCacheRefillPolicies::default());
         }
 
-        let job_ids = policies_by_job
+        let result_table_ids = configs_by_job
             .keys()
-            .chain(pinned_table_by_job.keys())
-            .copied()
-            .collect::<HashSet<_>>();
-        let result_table_ids = job_ids
-            .iter()
             .map(|job_id| job_id.as_mv_table_id())
             .collect_vec();
         let tables: Vec<(TableId, TableType, Option<JobId>)> = Table::find()
@@ -290,7 +281,7 @@ impl CatalogControllerInner {
             .filter(
                 table::Column::TableType
                     .eq(TableType::Internal)
-                    .and(table::Column::BelongsToJobId.is_in(job_ids.iter().copied()))
+                    .and(table::Column::BelongsToJobId.is_in(configs_by_job.keys().copied()))
                     .or(table::Column::TableId.is_in(result_table_ids)),
             )
             .into_tuple()
@@ -308,10 +299,13 @@ impl CatalogControllerInner {
             } else {
                 table_id.as_job_id()
             };
-            let policy = if pinned_table_by_job.get(&job_id) == Some(&table_id) {
+            let Some(config) = configs_by_job.get(&job_id) else {
+                continue;
+            };
+            let policy = if config.pinned_table_id == Some(table_id) {
                 Some(CacheRefillPolicy::Pin)
             } else {
-                policies_by_job.get(&job_id).copied()
+                config.policy
             };
             let Some(policy) = policy else {
                 continue;
