@@ -363,6 +363,11 @@ statement ok
 DROP TABLE t_dynamic_url_as_select_src;
 
 # ---- Success: batched payloads are line-separated ----
+# Keep the input chunk on one table actor and one sink writer so the request
+# count assertion checks a full batch and a partial batch deterministically.
+statement ok
+SET streaming_parallelism = 1;
+
 statement ok
 CREATE TABLE t_batched_payload (payload jsonb);
 
@@ -386,3 +391,6 @@ DROP SINK s_batched_payload;
 
 statement ok
 DROP TABLE t_batched_payload;
+
+statement ok
+RESET streaming_parallelism;
