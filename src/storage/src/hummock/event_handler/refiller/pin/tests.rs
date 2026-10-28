@@ -25,12 +25,12 @@ use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_
 use risingwave_pb::id::TableId;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
-use super::super::default_spawn_refill_task;
 use super::super::test_utils::{
     RefillTest, apply_next_events, gen_test_sst_with_object_id, l0_insert_delta,
     mock_sstable_store_with_pin_cache, pinned_version_with_ssts, test_refill_config,
     wait_for_pin_downloads,
 };
+use super::super::{SstDeltaInfo, default_spawn_refill_task};
 use crate::hummock::test_utils::gen_test_sstable_with_table_vnodes;
 
 // With Pin-only inputs, the worker is the only metadata waiter. A failed try_acquire
@@ -189,7 +189,7 @@ async fn test_pin_owner_drop() {
         drop(refiller);
         assert!(
             weak_executor.upgrade().is_none(),
-            "the event waiter must not retain the executor owner"
+            "the batch waiter must not retain the executor owner"
         );
         tokio::time::timeout(Duration::from_secs(1), async {
             while weak_store.upgrade().is_some() {
@@ -277,6 +277,78 @@ async fn test_pin_preparation_rechecks_policy_and_vnode_range() {
                 .unwrap()
                 .executor
                 .has_pending_for_test(object)
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_selected_batch_endpoint_on_timeout_or_revocation() {
+    for revoke_ownership in [false, true] {
+        let table = TableId::from(233);
+        let (store, cache) = mock_sstable_store_with_pin_cache().await;
+        let (_, first_sst) = gen_test_sst_with_object_id(table, store.clone(), 877).await;
+        let first_target = pinned_version_with_ssts(&[table], std::slice::from_ref(&first_sst));
+        let mut last_version = (*first_target).clone();
+        last_version.id = 2.into();
+        let last_target = first_target.new_with_local_version(last_version).unwrap();
+        let mut config = test_refill_config();
+        config.timeout = Duration::from_secs(if revoke_ownership { 60 } else { 1 });
+        let mut refiller = RefillTest::new(
+            Role::Streaming,
+            CacheRefillPolicy::Disabled,
+            config,
+            store,
+            default_spawn_refill_task(),
+            pinned_version_with_ssts(&[table], &[]),
+        );
+        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller
+            .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        let _permit = refiller
+            .cache()
+            .foyer
+            .concurrency
+            .clone()
+            .acquire_owned()
+            .await
+            .unwrap();
+        let object = first_sst.object_id;
+        // Register received membership as the handler does before backend submission.
+        cache.register_objects([first_sst.object_id]);
+        let pin = refiller.cache().pin_cache_refill.as_ref().unwrap();
+        let first = {
+            let metadata = refiller.metadata().read();
+            pin.start_cache_refill(
+                &[SstDeltaInfo {
+                    insert_sst_infos: vec![first_sst],
+                    ..Default::default()
+                }],
+                first_target,
+                Some(&[]),
+                metadata.pinned_tables(),
+            )
+        };
+        // Empty intent still belongs to the selected batch and supplies its endpoint.
+        let last = pin.start_cache_refill(
+            &[],
+            last_target,
+            Some(&[]),
+            refiller.metadata().read().pinned_tables(),
+        );
+        wait_for_pin_downloads(&refiller, &[object]).await;
+        if revoke_ownership {
+            refiller.update_streaming_table_vnodes(table, None);
+        } else {
+            tokio::time::advance(Duration::from_secs(1)).await;
+        }
+        let endpoints =
+            tokio::time::timeout(Duration::from_secs(1), async { (first.await, last.await) })
+                .await
+                .unwrap();
+        assert_eq!(
+            endpoints,
+            (Ok(false), Ok(true)),
+            "revoke_ownership={revoke_ownership}"
         );
     }
 }

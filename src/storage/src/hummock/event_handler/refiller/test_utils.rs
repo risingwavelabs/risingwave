@@ -93,6 +93,7 @@ pub(super) async fn mock_sstable_store_with_disk_cache(
 pub(super) fn test_refill_config() -> CacheRefillConfig {
     CacheRefillConfig {
         timeout: Duration::from_secs(1),
+        pin_cache_max_batch_size: 16,
         data_refill_levels: HashSet::new(),
         meta_refill_concurrency: 1,
         concurrency: 1,
