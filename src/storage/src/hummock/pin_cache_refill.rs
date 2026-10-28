@@ -32,8 +32,8 @@ use crate::hummock::pin_cache::membership::PinCacheMembershipIndex;
 /// This is independent of membership changes: a full snapshot can add membership without
 /// refill intent, and an already-referenced object can acquire new refill intent.
 /// Candidates retain only table projections referenced by this event's target version.
-/// Pending plans may only lose admitted tables; metadata admission resolves vnode ownership
-/// before the caller constructs download jobs.
+/// Pending plans may only lose admitted tables; the caller checks current table ownership
+/// before constructing download jobs.
 #[derive(Default)]
 pub(crate) struct PinCacheRefillPlan {
     pub objects: HashMap<HummockSstableObjectId, PinCacheRefillObject>,

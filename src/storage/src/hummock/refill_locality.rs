@@ -12,23 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::ops::Bound;
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, vnode_range};
-use risingwave_pb::id::TableId;
 
 use super::Sstable;
-
-/// Borrows the CN table metadata ownership maps, projected by worker role.
-/// Keep both lanes: Foyer's policies distinguish them, while Pin uses their union.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct RefillOwnership<'a> {
-    pub streaming: Option<&'a HashMap<TableId, Bitmap>>,
-    pub serving: Option<&'a HashMap<TableId, Bitmap>>,
-}
 
 pub(crate) fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> bool {
     assert!(vnode_range.0 <= vnode_range.1);

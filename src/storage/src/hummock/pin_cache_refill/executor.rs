@@ -82,7 +82,7 @@ struct Work {
 }
 
 /// Downloads each admitted object once under the shared data concurrency limit.
-/// The gate loads metadata and checks ownership before submitting a download.
+/// The Pin refiller checks policy and ownership before submitting a download.
 /// Dropping a waiter leaves its copy running; errors finish without background retries.
 pub(crate) struct PinCacheRefillExecutor {
     // Lock order: executor work -> PinCache shard. Never hold work across await.
@@ -113,8 +113,8 @@ impl PinCacheRefillExecutor {
         Self { work, jobs, store }
     }
 
-    /// Submits a gate-deduplicated object after metadata and ownership admission.
-    /// The token must have been captured before asynchronous preparation; do not recapture it.
+    /// Submits an object after policy and ownership admission, deduplicating active copies.
+    /// The token identifies that admission; a later revocation must make it obsolete.
     /// Submission is synchronous; the owned future only waits for its result.
     /// True includes published/cached and obsolete work, not a cache-hit guarantee.
     /// False means failure or cancellation, including a duplicate whose previous physical
@@ -138,7 +138,7 @@ impl PinCacheRefillExecutor {
         if cache.prepare_refill(object) != Some(cache_token) {
             return Either::Left(ready(true));
         }
-        // The gate filters cached objects too; defensively avoid duplicate publication.
+        // The Pin refiller filters cached objects too; defensively avoid duplicate publication.
         if cache.get(object).is_some() {
             return Either::Left(ready(true));
         }
@@ -158,17 +158,9 @@ impl PinCacheRefillExecutor {
         Either::Right(async move { matches!(receiver.await, Ok(true)) })
     }
 
-    /// Withdraws backend membership before completing waiters. Physical attempts retain
+    /// Completes waiters after the CN withdraws backend membership. Physical attempts retain
     /// their entries until they exit; an old token can never publish after unregistration.
-    pub(crate) fn unregister_objects(
-        &self,
-        objects: impl IntoIterator<Item = HummockSstableObjectId>,
-    ) {
-        let objects: Vec<_> = objects.into_iter().collect();
-        self.store
-            .pin_cache()
-            .expect("pin refill requires a local backend")
-            .unregister_objects(objects.iter().copied());
+    pub(crate) fn cancel_objects(&self, objects: impl IntoIterator<Item = HummockSstableObjectId>) {
         let mut work = self.work.lock();
         for object in objects {
             if let Some(work) = work.get_mut(&object) {
@@ -177,7 +169,7 @@ impl PinCacheRefillExecutor {
         }
     }
 
-    /// The gate identifies changed tables from its authoritative policy/ownership maps.
+    /// CN metadata identifies changed tables from its authoritative policy/ownership maps.
     /// Cancel only dependent downloads; updates never submit jobs or sweep published files.
     pub(crate) fn cancel_tables(&self, changed_tables: &HashSet<TableId>) {
         let cache = self
