@@ -17,13 +17,13 @@
 
 use std::time::Instant;
 
+use futures::future::try_join_all;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_pb::id::TableId;
 use tokio::sync::Semaphore;
 
-use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
+use crate::hummock::refill_locality::block_vnode_range;
 use crate::hummock::{HummockResult, SstableStoreRef, TableHolder};
 use crate::monitor::{GLOBAL_CACHE_REFILL_METRICS, StoreLocalStatistic};
 
@@ -40,68 +40,48 @@ pub(super) struct SstLocality {
 }
 
 /// Runs the common table/vnode decision after metadata preparation and before download jobs.
-pub(super) fn select_local_blocks<'a>(
+pub(super) fn select_local_blocks(
     sst: TableHolder,
     admits_projection: impl Fn(&TableId) -> bool,
-    context_for: impl Fn(&TableId) -> Option<TableLocality<'a>>,
+    allows_vnode_range: impl Fn(&TableId, (usize, usize)) -> bool,
 ) -> SstLocality {
     let blocks = (0..sst.block_count())
         .map(|index| {
             let table = sst.meta.block_metas[index].table_id();
-            admits_projection(&table)
-                && context_for(&table).is_some_and(|context| {
-                    let range = block_vnode_range(&sst, index);
-                    context.allows_vnode_range(range)
-                })
+            admits_projection(&table) && allows_vnode_range(&table, block_vnode_range(&sst, index))
         })
         .collect();
     SstLocality { sst, blocks }
 }
 
-/// Shared metadata preparation uses the store's metadata cache and the refill limit.
-/// Callers retain their own timeout and batching boundaries.
-pub(super) async fn load_sst_metadata(
+/// Loads physical metadata while retaining each input's association with its result.
+/// Input order and all-or-error preparation are preserved. Each backend chooses its
+/// inputs before calling this loader and retains its own timeout boundary.
+pub(super) async fn load_sst_metadata<T>(
     store: &SstableStoreRef,
-    info: &SstableInfo,
+    inputs: impl Iterator<Item = T>,
+    sst_info: impl Fn(&T) -> &SstableInfo,
     concurrency: Option<&Semaphore>,
-) -> HummockResult<TableHolder> {
-    GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
-    let _permit = match concurrency {
-        Some(concurrency) => Some(concurrency.acquire().await.unwrap()),
-        None => None,
-    };
-    let mut stats = StoreLocalStatistic::default();
-    let now = Instant::now();
-    let result = store.sstable(info, &mut stats).await;
-    stats.discard();
-    if result.is_ok() {
-        GLOBAL_CACHE_REFILL_METRICS
-            .meta_refill_success_duration
-            .observe(now.elapsed().as_secs_f64());
-    }
-    result
-}
-
-/// Borrowed admission inputs, from a Foyer snapshot or Pin's guarded CN metadata.
-#[derive(Clone, Copy)]
-pub(super) struct TableLocality<'a> {
-    policy: CacheRefillPolicy,
-    streaming_vnode_bitmap: Option<&'a Bitmap>,
-    serving_vnode_bitmap: Option<&'a Bitmap>,
-}
-
-impl TableLocality<'_> {
-    /// Refine shared admission when the caller has a vnode range (e.g. block metadata).
-    /// Enabled keeps main's unscoped normal-refill semantics.
-    fn allows_vnode_range(&self, range: (usize, usize)) -> bool {
-        self.policy.is_unscoped_enabled()
-            || (self.policy.is_streaming_scoped()
-                && self
-                    .streaming_vnode_bitmap
-                    .is_some_and(|bitmap| vnode_range_overlaps_bitmap(range, bitmap)))
-            || (self.policy.is_serving_scoped()
-                && self
-                    .serving_vnode_bitmap
-                    .is_some_and(|bitmap| vnode_range_overlaps_bitmap(range, bitmap)))
-    }
+) -> HummockResult<Vec<(T, TableHolder)>> {
+    try_join_all(inputs.map(|input| {
+        let sst_info = &sst_info;
+        async move {
+            GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
+            let _permit = match concurrency {
+                Some(concurrency) => Some(concurrency.acquire().await.unwrap()),
+                None => None,
+            };
+            let mut stats = StoreLocalStatistic::default();
+            let now = Instant::now();
+            let result = store.sstable(sst_info(&input), &mut stats).await;
+            stats.discard();
+            if result.is_ok() {
+                GLOBAL_CACHE_REFILL_METRICS
+                    .meta_refill_success_duration
+                    .observe(now.elapsed().as_secs_f64());
+            }
+            result.map(|sst| (input, sst))
+        }
+    }))
+    .await
 }

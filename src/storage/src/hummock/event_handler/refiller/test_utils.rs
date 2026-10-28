@@ -23,7 +23,6 @@ use ::foyer::{
     PsyncIoEngineConfig,
 };
 use risingwave_common::config::MetricLevel;
-use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
@@ -91,7 +90,7 @@ pub(super) async fn mock_sstable_store_with_disk_cache(
     (sstable_store, cache_dir)
 }
 
-pub(super) fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
+pub(super) fn test_refill_config() -> CacheRefillConfig {
     CacheRefillConfig {
         timeout: Duration::from_secs(1),
         data_refill_levels: HashSet::new(),
@@ -101,7 +100,6 @@ pub(super) fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefi
         threshold: 0.0,
         skip_recent_filter: true,
         skip_inheritance_filter: true,
-        table_cache_refill_default_policy: default_policy,
     }
 }
 

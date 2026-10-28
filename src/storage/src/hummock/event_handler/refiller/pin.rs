@@ -26,7 +26,8 @@ use tokio::sync::{Notify, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 
 use super::CacheRefillConfig;
-use super::admission::pin::{iter_admitted_objects, load_metadata, select_owned_candidates};
+use super::admission::load_sst_metadata;
+use super::admission::pin::{iter_admitted_objects, select_owned_candidates};
 use crate::hummock::SstableStoreRef;
 use crate::hummock::event_handler::ReadOnlyRwLockRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -145,15 +146,21 @@ impl PinCacheRefiller {
                 continue;
             };
             let attempt = async {
-                let prepared =
-                    match load_metadata(&store, meta_concurrency.as_deref(), candidates).await {
-                        Ok(prepared) => prepared,
-                        Err(error) => {
-                            tracing::warn!(version_id = %target_id, error = %error,
+                let prepared = match load_sst_metadata(
+                    &store,
+                    candidates.into_iter(),
+                    |candidate| &candidate.source_sst,
+                    meta_concurrency.as_deref(),
+                )
+                .await
+                {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        tracing::warn!(version_id = %target_id, error = %error,
                             "Pin metadata preparation failed; using remote fallback");
-                            return Err(());
-                        }
-                    };
+                        return Err(());
+                    }
+                };
                 if prepared.is_empty() {
                     return Ok(());
                 }
@@ -240,7 +247,7 @@ impl PinCacheRefiller {
                     && previous.get(table).is_some_and(|bitmap| {
                         bitmap
                             .iter_ones()
-                            .any(|vnode| !metadata.ownership().contains_vnode(table, vnode))
+                            .any(|vnode| !metadata.contains_vnode(table, vnode))
                     })
             })
             .collect();
@@ -261,7 +268,7 @@ impl PinCacheRefiller {
             && previous.is_some_and(|bitmap| {
                 bitmap
                     .iter_ones()
-                    .any(|vnode| !metadata.ownership().contains_vnode(&table, vnode))
+                    .any(|vnode| !metadata.contains_vnode(&table, vnode))
             })
         {
             self.invalidate_refills(&[table].into(), metadata.pinned_tables());

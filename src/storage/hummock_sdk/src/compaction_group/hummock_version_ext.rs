@@ -417,9 +417,8 @@ impl HummockVersionCommon<SstableInfo> {
                 continue;
             }
 
-            // TODO(MrCroxx): At most one insert delta is allowed here. It's okay for now with the
-            // current `hummock::manager::gen_version_delta` implementation. Better refactor the
-            // struct to reduce conventions.
+            // One summary has one insertion level: commits can append multiple L0 sublevels,
+            // while compaction appends its outputs at one target level.
             for group_delta in &group_deltas.group_deltas {
                 match group_delta {
                     GroupDeltaCommon::NewL0SubLevel(inserted_table_infos) => {

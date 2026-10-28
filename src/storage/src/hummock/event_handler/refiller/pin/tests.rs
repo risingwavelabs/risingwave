@@ -90,7 +90,8 @@ async fn test_pin_admission_uses_logical_tables_and_current_ownership() {
         let base = pinned_version_with_ssts(&[a, b], &[]);
         let mut refiller = RefillTest::new(
             Role::Streaming,
-            test_refill_config(CacheRefillPolicy::Disabled),
+            CacheRefillPolicy::Disabled,
+            test_refill_config(),
             store,
             default_spawn_refill_task(),
             base.clone(),
@@ -132,7 +133,8 @@ async fn test_pin_owner_drop() {
         let base = pinned_version_with_ssts(&[table], &[]);
         let mut refiller = RefillTest::new(
             Role::Streaming,
-            test_refill_config(CacheRefillPolicy::Disabled),
+            CacheRefillPolicy::Disabled,
+            test_refill_config(),
             store,
             default_spawn_refill_task(),
             base.clone(),
@@ -213,7 +215,8 @@ async fn test_pin_preparation_rechecks_policy_and_vnode_range() {
         let object = info.object_id;
         let mut refiller = RefillTest::new(
             Role::Serving,
-            test_refill_config(CacheRefillPolicy::Disabled),
+            CacheRefillPolicy::Disabled,
+            test_refill_config(),
             store,
             default_spawn_refill_task(),
             pinned_version_with_ssts(&[sibling, table], &[]),
@@ -306,7 +309,8 @@ async fn test_pin_changes_before_and_after_submission() {
         let base = pinned_version_with_ssts(&tables, &[]);
         let mut refiller = RefillTest::new(
             Role::Both,
-            test_refill_config(CacheRefillPolicy::Disabled),
+            CacheRefillPolicy::Disabled,
+            test_refill_config(),
             store,
             default_spawn_refill_task(),
             base.clone(),

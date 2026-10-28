@@ -441,7 +441,9 @@ impl HummockEventHandler {
             .map(|cache| PinCacheMembership::new(cache.clone(), refill_version));
         let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             role,
-            refill_config.table_cache_refill_default_policy,
+            compactor_context
+                .storage_opts
+                .cache_refill_table_cache_refill_default_policy,
         )));
         let refiller = CacheRefiller::new(
             refill_config,
@@ -1188,6 +1190,7 @@ pub(super) mod tests {
     impl RefillTest {
         pub(in crate::hummock::event_handler) fn new(
             role: Role,
+            default_policy: CacheRefillPolicy,
             config: CacheRefillConfig,
             store: crate::hummock::SstableStoreRef,
             spawn: crate::hummock::event_handler::refiller::SpawnRefillTask,
@@ -1199,7 +1202,7 @@ pub(super) mod tests {
                 .map(|cache| PinCacheMembership::new(cache.clone(), version.clone()));
             let metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
                 role,
-                config.table_cache_refill_default_policy,
+                default_policy,
             )));
             let refiller =
                 CacheRefiller::new(config, store, ReadOnlyRwLockRef::new(metadata.clone()))
@@ -1532,6 +1535,7 @@ pub(super) mod tests {
         // Isolate handler publication behind one controlled backend completion.
         let mut handler = RefillTest::new(
             Role::Streaming,
+            options.cache_refill_table_cache_refill_default_policy,
             refill_config,
             store,
             Arc::new(move |deltas, _| {
@@ -1696,7 +1700,7 @@ pub(super) mod tests {
         let refill_store = mock_sstable_store().await;
         let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             Role::Both,
-            refill_config.table_cache_refill_default_policy,
+            storage_opt.cache_refill_table_cache_refill_default_policy,
         )));
         let refiller = CacheRefiller::new(
             refill_config,
@@ -1840,7 +1844,7 @@ pub(super) mod tests {
         let refill_store = mock_sstable_store().await;
         let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             Role::Streaming,
-            refill_config.table_cache_refill_default_policy,
+            storage_opt.cache_refill_table_cache_refill_default_policy,
         )));
         let refiller = CacheRefiller::new(
             refill_config,
@@ -1969,7 +1973,7 @@ pub(super) mod tests {
         let refill_store = mock_sstable_store().await;
         let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             Role::None,
-            refill_config.table_cache_refill_default_policy,
+            storage_opt.cache_refill_table_cache_refill_default_policy,
         )));
         let refiller = CacheRefiller::new(
             refill_config,
@@ -2157,7 +2161,7 @@ pub(super) mod tests {
         let refill_store = mock_sstable_store().await;
         let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             Role::None,
-            refill_config.table_cache_refill_default_policy,
+            storage_opt.cache_refill_table_cache_refill_default_policy,
         )));
         let refiller = CacheRefiller::new(
             refill_config,

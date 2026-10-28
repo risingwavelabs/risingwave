@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::license::Feature;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
@@ -75,9 +74,6 @@ pub struct CacheRefillConfig {
 
     /// Skip inheritance filter.
     pub skip_inheritance_filter: bool,
-
-    /// Default table cache refill policy.
-    pub table_cache_refill_default_policy: CacheRefillPolicy,
 }
 
 impl CacheRefillConfig {
@@ -103,8 +99,6 @@ impl CacheRefillConfig {
             threshold: options.cache_refill_threshold,
             skip_recent_filter: options.cache_refill_skip_recent_filter,
             skip_inheritance_filter: options.cache_refill_skip_inheritance_filter,
-            table_cache_refill_default_policy: options
-                .cache_refill_table_cache_refill_default_policy,
         }
     }
 }
@@ -167,7 +161,7 @@ impl CacheRefiller {
                 .pinned_tables()
                 .iter()
                 .copied()
-                .filter(|table| metadata.ownership().has_vnodes(table))
+                .filter(|table| metadata.has_vnodes(table))
                 .collect();
             refiller.start_cache_refill(
                 &deltas,

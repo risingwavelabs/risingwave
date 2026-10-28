@@ -25,13 +25,23 @@ Common algorithms and backend adapters have separate source boundaries:
 `admission.rs` loads SST metadata and selects local blocks from resolved inputs;
 `admission/foyer.rs` adapts ordinary policies, snapshots and L0 serving-only rules;
 `admission/pin.rs` adapts selected plans and surviving intent. The common algorithms
-import no Pin plan/object, version delta or CN metadata owner. Both adapters call
-the same loader and selector; neither runtime implements vnode overlap.
+import no Pin plan/object, version delta or CN metadata owner. Both runtimes call
+the same metadata loader, and both adapters use the common locality selector;
+neither runtime implements vnode overlap.
+
+The CN fields and Foyer task snapshot follow the ownership boundary in #27614.
+Role-projected ownership is queried directly on `TableCacheMetadata`; no separate
+ownership or per-table locality view is maintained. Foyer's existing snapshot
+interprets ordinary policy and the L0 serving rule. Pin checks its surviving table
+intent and the current owned bitmaps under the metadata guard. The common selector
+computes physical block ranges and applies these admission predicates without
+interpreting `CacheRefillPolicy`.
 
 | Entry | Output and consumer |
 | --- | --- |
-| `foyer::load_metadata_and_select_blocks` | Loads metadata, preserves metadata-only warming, and returns `SstLocality` for Foyer unit generation. Foyer supplies only its data-refill eligibility and immutable contexts. |
-| `pin::select_owned_candidates` / `pin::load_metadata` | Cached objects are rejected first; only owned candidates are copied under the selection guard. Metadata is loaded afterward. No download jobs are constructed. |
+| `admission::load_sst_metadata` | Loads a batch through the shared store metadata cache, retaining each input alongside its metadata. Both callers preserve their own preparation/error and timeout boundaries. No additional result cache or scheduler is introduced. |
+| `foyer::select_blocks` | Adapts logical projections and L0 serving rules to the common locality selector after metadata preparation. Metadata-only warming completes without generating Foyer data work. |
+| `pin::select_owned_candidates` | Cached objects are rejected first; only owned candidates are copied under the selection guard. The common loader prepares metadata afterward. No download jobs are constructed. |
 | `pin::iter_admitted_objects` | Rechecks current authority and surviving request intent, then yields only eligible objects with narrowed cancellation dependencies. Pin submits them synchronously under the same metadata guard. |
 
 The `iter_` name denotes lazy admission: the iterator is consumed inside the same
@@ -45,6 +55,9 @@ There is no new preparation worker, queue, mutable policy snapshot or retry loop
 
 The event handler is the only writer of shared `TableCacheMetadata`: table cache
 policies, the effective Pin table set, role and streaming/serving vnode ownership.
+The default table policy initializes this metadata directly from storage options;
+`CacheRefillConfig` contains only execution settings. Shared read access is needed
+by Pin's asynchronous worker; the handler remains the sole writer.
 It separately owns `PinCacheMembership`, which registers received versions before
 refill and retires removals after publication while protecting later received versions.
 Neither refiller maintains membership. Snapshots and policy changes update membership
