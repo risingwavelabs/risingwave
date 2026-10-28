@@ -34,7 +34,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
 iceberg = { workspace = true }
-iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "ca8fdf921bf8a8fdf13ed0e151a30a53542caf64" }
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "2358f8e314a701f4208105346133b0f774736782" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
