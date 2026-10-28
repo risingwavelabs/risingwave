@@ -451,13 +451,9 @@ final class OracleExternalTable {
                                     "NVARCHAR2",
                                     "CLOB",
                                     "NCLOB",
-                                    "LONG",
-                                    "ROWID",
-                                    "UROWID",
-                                    "XMLTYPE" ->
+                                    "ROWID" ->
                             TypeName.VARCHAR;
-                    case "RAW", "LONG RAW", "BLOB" -> TypeName.BYTEA;
-                    case "BOOLEAN" -> TypeName.BOOLEAN;
+                    case "RAW", "BLOB" -> TypeName.BYTEA;
                     case "DATE" -> TypeName.TIMESTAMP;
                     default -> {
                         if (oracleType.startsWith("TIMESTAMP")) {
