@@ -31,7 +31,7 @@ use risingwave_pb::id::TableId;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::unbounded_channel;
 
-use super::super::admission::{select_local_blocks, table_cache_refill_contexts};
+use super::super::admission::foyer::{select_blocks, table_cache_refill_contexts};
 use super::super::test_utils::{
     deleted_sst, gen_test_sst_with_object_id, mock_sstable_store_with_disk_cache,
     pinned_version_for_test, test_refill_config,
@@ -123,15 +123,10 @@ impl DataRefillGeneratorTestFixture {
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
     ) -> Vec<DataCacheRefillTask> {
-        let locality = select_local_blocks(
+        let locality = select_blocks(
             self.sst.clone(),
-            |table| delta.insert_sst_infos[0].table_ids.contains(table),
-            |table| {
-                context
-                    .table_cache_refill_context_map
-                    .get(table)
-                    .map(|context| context.locality())
-            },
+            &delta.insert_sst_infos[0],
+            &context.table_cache_refill_context_map,
             delta.delete_sst_infos.is_empty(),
         );
         let generator = DataCacheRefillTaskGenerator {
@@ -776,15 +771,10 @@ async fn test_normal_refill_applies_recent_and_inheritance_filters() {
     });
 
     recent_filter.insert((parent_sst_info.object_id, usize::MAX));
-    let locality = select_local_blocks(
+    let locality = select_blocks(
         fixture.sst.clone(),
-        |table| non_l0_delta.insert_sst_infos[0].table_ids.contains(table),
-        |table| {
-            non_l0_context
-                .table_cache_refill_context_map
-                .get(table)
-                .map(|context| context.locality())
-        },
+        &non_l0_delta.insert_sst_infos[0],
+        &non_l0_context.table_cache_refill_context_map,
         false,
     );
     let generator = DataCacheRefillTaskGenerator {
@@ -1057,15 +1047,10 @@ async fn test_refill_units_do_not_cross_table_projection_boundaries() {
         let tasks = deltas
             .iter()
             .map(|delta| {
-                let locality = select_local_blocks(
+                let locality = select_blocks(
                     sst.clone(),
-                    |table| delta.insert_sst_infos[0].table_ids.contains(table),
-                    |table| {
-                        context
-                            .table_cache_refill_context_map
-                            .get(table)
-                            .map(|context| context.locality())
-                    },
+                    &delta.insert_sst_infos[0],
+                    &context.table_cache_refill_context_map,
                     delta.delete_sst_infos.is_empty(),
                 );
                 DataCacheRefillTaskGenerator {
@@ -1158,15 +1143,10 @@ async fn test_scoped_refill_handles_multi_table_vnode_boundary() {
                 },
             )]),
         };
-        let locality = select_local_blocks(
+        let locality = select_blocks(
             sst.clone(),
-            |table| delta.insert_sst_infos[0].table_ids.contains(table),
-            |table| {
-                context
-                    .table_cache_refill_context_map
-                    .get(table)
-                    .map(|context| context.locality())
-            },
+            &delta.insert_sst_infos[0],
+            &context.table_cache_refill_context_map,
             false,
         );
         DataCacheRefillTaskGenerator {

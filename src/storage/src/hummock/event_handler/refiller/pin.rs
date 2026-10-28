@@ -24,7 +24,8 @@ use risingwave_pb::id::TableId;
 use tokio::sync::{Notify, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 
-use super::{CacheRefillConfig, admission};
+use super::CacheRefillConfig;
+use super::admission::pin::{iter_admitted_objects, load_metadata, retain_owned_candidates};
 use crate::hummock::SstableStoreRef;
 use crate::hummock::event_handler::ReadOnlyRwLockRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -145,14 +146,10 @@ impl PinCacheRefiller {
                             })
                             .collect(),
                     };
-                    // The plan was pruned at receipt. Reject unowned/cached objects before
-                    // metadata I/O; later events cannot narrow this event's target.
-                    plan.objects.retain(|object, candidate| {
-                        candidate
-                            .admitted_tables
-                            .retain(|table| metadata.ownership().has_vnodes(table));
-                        !candidate.admitted_tables.is_empty() && cache.get(*object).is_none()
-                    });
+                    retain_owned_candidates(&mut plan, &metadata);
+                    // Only surviving, uncached candidates enter common metadata preparation.
+                    plan.objects
+                        .retain(|object, _| cache.get(*object).is_none());
                     (request.target.id(), plan)
                 })
             };
@@ -161,17 +158,8 @@ impl PinCacheRefiller {
                 continue;
             };
             let attempt = async {
-                let loads = plan.objects.into_values().map(|candidate| {
-                    let store = &store;
-                    let meta_concurrency = meta_concurrency.as_deref();
-                    async move {
-                        let sst =
-                            admission::load_sst(store, &candidate.source_sst, meta_concurrency)
-                                .await?;
-                        Ok::<_, crate::hummock::HummockError>((candidate, sst))
-                    }
-                });
-                let prepared = match try_join_all(loads).await {
+                let prepared = match load_metadata(&store, meta_concurrency.as_deref(), plan).await
+                {
                     Ok(prepared) => prepared,
                     Err(error) => {
                         tracing::warn!(version_id = %target_id, error = %error,
@@ -187,7 +175,8 @@ impl PinCacheRefiller {
                     let requests = requests.lock();
                     // The selected request remains authoritative during preparation. RESET then
                     // SET cannot recreate tables removed from its captured plan.
-                    let contexts = admission::pin_refill_contexts(
+                    let admitted = iter_admitted_objects(
+                        prepared,
                         &metadata,
                         requests
                             .front()
@@ -200,28 +189,11 @@ impl PinCacheRefiller {
                     let Some(executor) = executor.upgrade() else {
                         return Err(());
                     };
-                    prepared
-                        .into_iter()
-                        .filter_map(|(mut candidate, sst)| {
-                            let locality = admission::select_local_blocks(
-                                sst,
-                                |table| candidate.admitted_tables.contains(table),
-                                |table| contexts.get(table).copied(),
-                                false,
-                            );
-                            if !locality.blocks.any()
-                                || cache.get(candidate.source_sst.object_id).is_some()
-                            {
+                    admitted
+                        .filter_map(|candidate| {
+                            if cache.get(candidate.source_sst.object_id).is_some() {
                                 return None;
                             }
-                            // Cancellation depends only on table projections which passed locality.
-                            candidate.admitted_tables.clear();
-                            candidate.admitted_tables.extend(
-                                locality
-                                    .blocks
-                                    .iter_ones()
-                                    .map(|index| locality.sst.meta.block_metas[index].table_id()),
-                            );
                             cache
                                 .prepare_refill(candidate.source_sst.object_id)
                                 .map(|token| executor.submit(&candidate, token))

@@ -30,8 +30,8 @@ mod admission;
 mod foyer;
 mod pin;
 
-pub(super) use admission::table_cache_refill_monitor_snapshot;
-pub use admission::{
+pub(super) use admission::foyer::table_cache_refill_monitor_snapshot;
+pub use admission::foyer::{
     TableCacheRefillContext, TableCacheRefillContextMap, TableCacheRefillMonitorSnapshot,
 };
 use foyer::FoyerRefiller;
@@ -167,7 +167,7 @@ impl CacheRefiller {
                 .pinned_tables()
                 .iter()
                 .copied()
-                .filter(|table| admission::admits_table(metadata, table))
+                .filter(|table| metadata.ownership().has_vnodes(table))
                 .collect();
             refiller.start_cache_refill(
                 &deltas,
@@ -176,7 +176,7 @@ impl CacheRefiller {
                 &admitted_pin_tables,
             )
         });
-        let table_contexts = admission::prepare_foyer_refill(&mut deltas, metadata);
+        let table_contexts = admission::foyer::select_table_inputs(&mut deltas, metadata);
         let foyer = self.foyer.start_cache_refill(deltas, table_contexts);
         // Preserve main's detached-on-drop behavior without Pin. A composite condition owns
         // its Foyer waiter; install cleanup before polling so queue shutdown also aborts it.
