@@ -88,9 +88,12 @@ pub(crate) struct PinCacheMembershipIndex {
 }
 
 impl PinCacheMembershipIndex {
-    pub(crate) fn new(tracked_version: PinnedVersion, pinned_table_ids: &HashSet<TableId>) -> Self {
+    pub(crate) fn new(
+        tracked_version: PinnedVersion,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
+    ) -> Self {
         Self {
-            object_ref_counts: Self::count_pinned_objects(&tracked_version, pinned_table_ids),
+            object_ref_counts: Self::count_pinned_objects(&tracked_version, is_pinned),
             tracked_version,
         }
     }
@@ -104,13 +107,13 @@ impl PinCacheMembershipIndex {
         sst_deltas: &[SstDeltaInfo],
         new_version: PinnedVersion,
         version_deltas: Option<&[HummockVersionDelta]>,
-        pinned_table_ids: &HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) -> PinCacheMembershipChanges {
         let changes = match version_deltas {
             Some(raw) if !self.requires_membership_rebuild(raw) => {
-                self.apply_sst_deltas(sst_deltas, pinned_table_ids)
+                self.apply_sst_deltas(sst_deltas, is_pinned)
             }
-            _ => self.rebuild_membership(&new_version, pinned_table_ids),
+            _ => self.rebuild_membership(&new_version, is_pinned),
         };
         self.tracked_version = new_version;
         changes
@@ -120,10 +123,10 @@ impl PinCacheMembershipIndex {
     fn rebuild_membership(
         &mut self,
         version: &HummockVersion,
-        pinned_table_ids: &HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) -> PinCacheMembershipChanges {
         let before = self.object_ref_counts.keys().copied().collect();
-        self.object_ref_counts = Self::count_pinned_objects(version, pinned_table_ids);
+        self.object_ref_counts = Self::count_pinned_objects(version, is_pinned);
         let after = self.object_ref_counts.keys().copied().collect();
         PinCacheMembershipChanges::between_objects(before, after)
     }
@@ -133,18 +136,14 @@ impl PinCacheMembershipIndex {
     fn apply_sst_deltas(
         &mut self,
         deltas: &[SstDeltaInfo],
-        pinned_table_ids: &HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) -> PinCacheMembershipChanges {
-        if pinned_table_ids.is_empty() {
-            return PinCacheMembershipChanges::default();
-        }
-
         let mut initial_counts = HashMap::new();
         for delta in deltas {
             for sst in delta
                 .delete_sst_infos
                 .iter()
-                .filter(|sst| Self::is_pinned(sst, pinned_table_ids))
+                .filter(|sst| Self::is_pinned(sst, is_pinned))
             {
                 let count = self
                     .object_ref_counts
@@ -159,7 +158,7 @@ impl PinCacheMembershipIndex {
             for sst in delta
                 .insert_sst_infos
                 .iter()
-                .filter(|sst| Self::is_pinned(sst, pinned_table_ids))
+                .filter(|sst| Self::is_pinned(sst, is_pinned))
             {
                 let count = self.object_ref_counts.entry(sst.object_id).or_insert(0);
                 initial_counts.entry(sst.object_id).or_insert(*count);
@@ -219,26 +218,22 @@ impl PinCacheMembershipIndex {
     }
 
     /// Rebuilds derived reference counts at the tracked version after a policy change.
-    pub(crate) fn rebuild_for_policy(&mut self, pinned_table_ids: &HashSet<TableId>) {
-        self.object_ref_counts =
-            Self::count_pinned_objects(&self.tracked_version, pinned_table_ids);
+    pub(crate) fn rebuild_for_policy(&mut self, is_pinned: impl Fn(&TableId) -> bool + Copy) {
+        self.object_ref_counts = Self::count_pinned_objects(&self.tracked_version, is_pinned);
     }
 
     /// Enumerates pinned logical SST references from a version without reading object storage.
     /// Startup recovery and subsequent policy rebuilds use the same membership selection.
     pub(crate) fn pinned_ssts<'a>(
         version: &'a HummockVersion,
-        pinned_table_ids: &'a HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy + 'a,
     ) -> impl Iterator<Item = &'a SstableInfo> {
-        let compaction_group_ids = pinned_table_ids
+        let compaction_group_ids = version
+            .state_table_info
+            .info()
             .iter()
-            .filter_map(|table_id| {
-                version
-                    .state_table_info
-                    .info()
-                    .get(table_id)
-                    .map(|info| info.compaction_group_id)
-            })
+            .filter(|(table, _)| is_pinned(table))
+            .map(|(_, info)| info.compaction_group_id)
             .collect::<HashSet<_>>();
         compaction_group_ids
             .into_iter()
@@ -247,33 +242,31 @@ impl PinCacheMembershipIndex {
                 levels.l0.sub_levels.iter().chain(levels.levels.iter())
             })
             .flat_map(|level| &level.table_infos)
-            .filter(move |sst| Self::is_pinned(sst, pinned_table_ids))
+            .filter(move |sst| Self::is_pinned(sst, is_pinned))
     }
 
     fn pinned_objects(
         version: &HummockVersion,
-        tables: &HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) -> HashSet<HummockSstableObjectId> {
-        Self::pinned_ssts(version, tables)
+        Self::pinned_ssts(version, is_pinned)
             .map(|sst| sst.object_id)
             .collect()
     }
 
     fn count_pinned_objects(
         version: &HummockVersion,
-        tables: &HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) -> HashMap<HummockSstableObjectId, u32> {
         let mut counts = HashMap::new();
-        for sst in Self::pinned_ssts(version, tables) {
+        for sst in Self::pinned_ssts(version, is_pinned) {
             *counts.entry(sst.object_id).or_insert(0) += 1;
         }
         counts
     }
 
-    fn is_pinned(sst: &SstableInfo, pinned_table_ids: &HashSet<TableId>) -> bool {
-        sst.table_ids
-            .iter()
-            .any(|table_id| pinned_table_ids.contains(table_id))
+    fn is_pinned(sst: &SstableInfo, is_pinned: impl Fn(&TableId) -> bool + Copy) -> bool {
+        sst.table_ids.iter().any(is_pinned)
     }
 }
 
@@ -282,11 +275,11 @@ impl PinCacheMembershipChanges {
     pub(crate) fn between_versions(
         before: &HummockVersion,
         after: &HummockVersion,
-        pinned_tables: &HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) -> Self {
         Self::between_objects(
-            PinCacheMembershipIndex::pinned_objects(before, pinned_tables),
-            PinCacheMembershipIndex::pinned_objects(after, pinned_tables),
+            PinCacheMembershipIndex::pinned_objects(before, is_pinned),
+            PinCacheMembershipIndex::pinned_objects(after, is_pinned),
         )
     }
 
@@ -295,21 +288,17 @@ impl PinCacheMembershipChanges {
     /// remain resident through a different logical reference in another snapshot.
     pub(crate) fn between_policies(
         versions: &[PinnedVersion],
-        old_pinned_tables: &HashSet<TableId>,
-        new_pinned_tables: &HashSet<TableId>,
+        old_is_pinned: impl Fn(&TableId) -> bool + Copy,
+        new_is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) -> Self {
         Self::between_objects(
             versions
                 .iter()
-                .flat_map(|version| {
-                    PinCacheMembershipIndex::pinned_objects(version, old_pinned_tables)
-                })
+                .flat_map(|version| PinCacheMembershipIndex::pinned_objects(version, old_is_pinned))
                 .collect(),
             versions
                 .iter()
-                .flat_map(|version| {
-                    PinCacheMembershipIndex::pinned_objects(version, new_pinned_tables)
-                })
+                .flat_map(|version| PinCacheMembershipIndex::pinned_objects(version, new_is_pinned))
                 .collect(),
         )
     }

@@ -41,9 +41,13 @@ pub(crate) struct PinCacheMembership {
 }
 
 impl PinCacheMembership {
-    pub(crate) fn new(cache: Arc<PinCache>, version: PinnedVersion) -> Self {
+    pub(crate) fn new(
+        cache: Arc<PinCache>,
+        version: PinnedVersion,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
+    ) -> Self {
         Self {
-            index: PinCacheMembershipIndex::new(version.clone(), &HashSet::new()),
+            index: PinCacheMembershipIndex::new(version.clone(), is_pinned),
             published: version,
             received: VecDeque::new(),
             cache,
@@ -56,11 +60,11 @@ impl PinCacheMembership {
         deltas: &[SstDeltaInfo],
         target: PinnedVersion,
         raw: Option<&[HummockVersionDelta]>,
-        pinned: &HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) {
         let changes = self
             .index
-            .advance_version(deltas, target.clone(), raw, pinned);
+            .advance_version(deltas, target.clone(), raw, is_pinned);
         // Membership is independent of batch selection and download admission.
         self.cache
             .register_objects(changes.inserted.iter().copied());
@@ -98,10 +102,11 @@ impl PinCacheMembership {
     }
 
     /// Rebuilds protected membership under a policy transition; this creates no refill intent.
-    pub(crate) fn replace_pinned_tables(&mut self, old: &HashSet<TableId>, new: &HashSet<TableId>) {
-        if old == new {
-            return;
-        }
+    pub(crate) fn replace_policy(
+        &mut self,
+        old: impl Fn(&TableId) -> bool + Copy,
+        new: impl Fn(&TableId) -> bool + Copy,
+    ) {
         let versions: Vec<_> = std::iter::once(self.published.clone())
             .chain(self.received.iter().map(|update| update.after.clone()))
             .collect();

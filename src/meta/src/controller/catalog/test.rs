@@ -1120,10 +1120,12 @@ mod tests {
         .await?;
         let policies = recv_table_refill_policies(&mut rx).await;
         assert!(policies.table_policies.is_empty());
-        assert!(policies.internal_table_policies.is_empty());
         assert_eq!(
-            policies.pinned_table_ids,
-            vec![internal_table_id.as_raw_id()]
+            policies.internal_table_policies,
+            vec![PbTableCacheRefillPolicy {
+                table_id: internal_table_id.as_raw_id(),
+                policy: CacheRefillPolicy::Pin.to_protobuf() as i32,
+            }]
         );
 
         mgr.alter_streaming_job_config(
@@ -1135,7 +1137,6 @@ mod tests {
         let policies = recv_table_refill_policies(&mut rx).await;
         assert!(policies.table_policies.is_empty());
         assert!(policies.internal_table_policies.is_empty());
-        assert!(policies.pinned_table_ids.is_empty());
 
         mgr.alter_streaming_job_config(
             result_table_id.as_job_id(),
@@ -1148,7 +1149,6 @@ mod tests {
         .await?;
 
         let policies = recv_table_refill_policies(&mut rx).await;
-        assert!(policies.pinned_table_ids.is_empty());
         assert_eq!(
             policies
                 .table_policies
@@ -1181,10 +1181,6 @@ mod tests {
 
         let policies = recv_table_refill_policies(&mut rx).await;
         assert_eq!(
-            policies.pinned_table_ids,
-            vec![internal_table_id.as_raw_id()]
-        );
-        assert_eq!(
             policies
                 .table_policies
                 .into_iter()
@@ -1203,7 +1199,7 @@ mod tests {
                 .collect::<HashMap<_, _>>(),
             HashMap::from([(
                 internal_table_id.as_raw_id(),
-                CacheRefillPolicy::Both.to_protobuf() as i32,
+                CacheRefillPolicy::Pin.to_protobuf() as i32,
             )])
         );
 
@@ -1214,7 +1210,6 @@ mod tests {
         )
         .await?;
         let policies = recv_table_refill_policies(&mut rx).await;
-        assert!(policies.pinned_table_ids.is_empty());
         assert_eq!(
             policies.internal_table_policies[0].policy,
             CacheRefillPolicy::Both.to_protobuf() as i32
@@ -1243,6 +1238,31 @@ mod tests {
             .await
             .expect_err("out-of-range table id must not be pinned");
         assert!(error.to_string().contains("is out of range"));
+
+        mgr.alter_streaming_job_config(
+            result_table_id.as_job_id(),
+            HashMap::from([(
+                STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
+                "\"pin\"".to_owned(),
+            )]),
+            vec![],
+        )
+        .await?;
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert_eq!(
+            policies.table_policies,
+            vec![PbTableCacheRefillPolicy {
+                table_id: result_table_id.as_raw_id(),
+                policy: CacheRefillPolicy::Pin.to_protobuf() as i32,
+            }]
+        );
+        assert_eq!(
+            policies.internal_table_policies,
+            vec![PbTableCacheRefillPolicy {
+                table_id: internal_table_id.as_raw_id(),
+                policy: CacheRefillPolicy::Pin.to_protobuf() as i32,
+            }]
+        );
 
         Ok(())
     }

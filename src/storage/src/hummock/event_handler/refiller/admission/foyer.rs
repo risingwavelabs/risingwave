@@ -57,7 +57,7 @@ pub(in super::super) fn table_cache_refill_contexts(
     for table_id in table_ids {
         if let Entry::Vacant(entry) = contexts.entry(table_id)
             && let Some(context) =
-                TableCacheRefillContext::new(table_policy(metadata, &table_id), metadata, &table_id)
+                TableCacheRefillContext::new(metadata.policy(&table_id), metadata, &table_id)
         {
             entry.insert(context);
         }
@@ -165,15 +165,6 @@ impl TableCacheRefillContext {
     }
 }
 
-/// Missing overrides use the configured default, not Disabled.
-fn table_policy(metadata: &TableCacheMetadata, table: &TableId) -> CacheRefillPolicy {
-    metadata
-        .table_cache_refill_policies
-        .get(table)
-        .copied()
-        .unwrap_or(metadata.default_policy)
-}
-
 /// Selects Foyer table projections and captures their immutable inputs before backend dispatch.
 /// The caller has already submitted Pin from the shared input; these Foyer-specific exclusions
 /// must not narrow Pin's candidates. Snapshot copies follow whole-SST rejection.
@@ -188,10 +179,7 @@ pub(in super::super) fn select_table_inputs(
         delta.insert_sst_infos.retain(|sst| {
             let mut admitted = false;
             for table in &sst.table_ids {
-                if metadata.is_pinned(table) {
-                    continue;
-                }
-                let policy = table_policy(metadata, table);
+                let policy = metadata.policy(table);
                 if !admits_metadata_refill(policy, metadata, table, insert_only) {
                     continue;
                 }

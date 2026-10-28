@@ -96,9 +96,9 @@ fn test_refill_candidates_are_independent_of_membership_changes() {
         observed.iter().flat_map(|delta| &delta.insert_sst_infos),
         &pinned,
     );
-    plan.retain_in_version(&only_b, &pinned);
+    plan.retain_in_version(&only_b, |table| pinned.contains(table));
     assert_eq!(plan.objects[&object].admitted_tables, [tables[1]].into());
-    plan.retain_in_version(&version_with(&[]), &pinned);
+    plan.retain_in_version(&version_with(&[]), |table| pinned.contains(table));
     assert!(plan.objects.is_empty());
     // Neither a restored snapshot nor an empty delta payload introduces refill intent.
     for raw in [None, Some([].as_slice())] {

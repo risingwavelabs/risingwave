@@ -355,7 +355,7 @@ pub struct StreamingDeveloperConfig {
     pub locality_sort_buffer_activate_threshold: u64,
 
     /// Cache refill policy for streaming cache refill feature.
-    /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.
+    /// Can be `enabled`, `disabled`, `streaming`, `serving`, `both` or `pin`.
     #[serde(default = "default::developer::cache_refill_policy")]
     pub cache_refill_policy: CacheRefillPolicy,
 

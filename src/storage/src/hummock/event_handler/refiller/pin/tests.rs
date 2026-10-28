@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -99,10 +99,11 @@ async fn test_pin_admission_uses_logical_tables_and_current_ownership() {
             default_spawn_refill_task(),
             base.clone(),
         );
-        refiller.replace_table_cache_refill_runtime_snapshot(
-            HashMap::new(),
-            if pin_b { [a, b].into() } else { [a].into() },
-        );
+        refiller.replace_table_cache_refill_runtime_snapshot(if pin_b {
+            [(a, CacheRefillPolicy::Pin), (b, CacheRefillPolicy::Pin)].into()
+        } else {
+            [(a, CacheRefillPolicy::Pin)].into()
+        });
         refiller.update_streaming_table_vnodes(b, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
         if let Some(vnodes) = a_vnodes {
             refiller.update_streaming_table_vnodes(
@@ -142,7 +143,8 @@ async fn test_pin_owner_drop() {
             default_spawn_refill_task(),
             base.clone(),
         );
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller
+            .replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
         refiller
             .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
         let permit = refiller
@@ -224,8 +226,13 @@ async fn test_pin_preparation_rechecks_policy_and_vnode_range() {
             default_spawn_refill_task(),
             pinned_version_with_ssts(&[sibling, table], &[]),
         );
-        refiller
-            .replace_table_cache_refill_runtime_snapshot(HashMap::new(), [sibling, table].into());
+        refiller.replace_table_cache_refill_runtime_snapshot(
+            [
+                (sibling, CacheRefillPolicy::Pin),
+                (table, CacheRefillPolicy::Pin),
+            ]
+            .into(),
+        );
         refiller.replace_serving_table_vnode_mapping(
             [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
         );
@@ -251,10 +258,15 @@ async fn test_pin_preparation_rechecks_policy_and_vnode_range() {
         if reset_then_set {
             // The sibling preserves object registration and its token. Only the captured
             // policy intent can reject this withdrawn-then-reenabled table after the await.
-            refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [sibling].into());
             refiller.replace_table_cache_refill_runtime_snapshot(
-                HashMap::new(),
-                [sibling, table].into(),
+                [(sibling, CacheRefillPolicy::Pin)].into(),
+            );
+            refiller.replace_table_cache_refill_runtime_snapshot(
+                [
+                    (sibling, CacheRefillPolicy::Pin),
+                    (table, CacheRefillPolicy::Pin),
+                ]
+                .into(),
             );
         } else {
             // Serving mappings are replaced by Meta without reconstructing a streaming actor.
@@ -304,7 +316,8 @@ async fn test_selected_batch_endpoint_on_timeout_or_revocation() {
             default_spawn_refill_task(),
             pinned_version_with_ssts(&[table], &[]),
         );
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller
+            .replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
         refiller
             .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
         let _permit = refiller
@@ -320,7 +333,6 @@ async fn test_selected_batch_endpoint_on_timeout_or_revocation() {
         cache.register_objects([first_sst.object_id]);
         let pin = refiller.cache().pin_cache_refill.as_ref().unwrap();
         let first = {
-            let metadata = refiller.metadata().read();
             pin.start_cache_refill(
                 &[SstDeltaInfo {
                     insert_sst_infos: vec![first_sst],
@@ -328,16 +340,11 @@ async fn test_selected_batch_endpoint_on_timeout_or_revocation() {
                 }],
                 first_target,
                 Some(&[]),
-                metadata.pinned_tables(),
+                &[table].into(),
             )
         };
         // Empty intent still belongs to the selected batch and supplies its endpoint.
-        let last = pin.start_cache_refill(
-            &[],
-            last_target,
-            Some(&[]),
-            refiller.metadata().read().pinned_tables(),
-        );
+        let last = pin.start_cache_refill(&[], last_target, Some(&[]), &[table].into());
         wait_for_pin_downloads(&refiller, &[object]).await;
         if revoke_ownership {
             refiller.update_streaming_table_vnodes(table, None);
@@ -390,7 +397,12 @@ async fn test_pin_changes_before_and_after_submission() {
             default_spawn_refill_task(),
             base.clone(),
         );
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), tables.into());
+        refiller.replace_table_cache_refill_runtime_snapshot(
+            tables
+                .into_iter()
+                .map(|table| (table, CacheRefillPolicy::Pin))
+                .collect(),
+        );
         refiller.update_streaming_table_vnodes(
             tables[0],
             Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
@@ -429,8 +441,9 @@ async fn test_pin_changes_before_and_after_submission() {
                 tables[1],
                 Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             ),
-            Change::Policy => refiller
-                .replace_table_cache_refill_runtime_snapshot(HashMap::new(), [tables[1]].into()),
+            Change::Policy => refiller.replace_table_cache_refill_runtime_snapshot(
+                [(tables[1], CacheRefillPolicy::Pin)].into(),
+            ),
             // These updates represent the union after read-version registration/destruction,
             // not an in-place rescale of a retained actor.
             Change::Ownership | Change::PendingOwnership => {
@@ -445,7 +458,12 @@ async fn test_pin_changes_before_and_after_submission() {
             let fresh_token = cache.prepare_refill(object);
             assert_ne!(fresh_token, original_token);
             assert!(cache.is_registered(object), "the sibling keeps membership");
-            refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), tables.into());
+            refiller.replace_table_cache_refill_runtime_snapshot(
+                tables
+                    .into_iter()
+                    .map(|table| (table, CacheRefillPolicy::Pin))
+                    .collect(),
+            );
             refiller.update_streaming_table_vnodes(
                 tables[0],
                 Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
@@ -528,7 +546,7 @@ async fn test_pin_recovery_keeps_local_files_without_remote_backfill() {
         default_spawn_refill_task(),
         version.clone(),
     );
-    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+    refiller.replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
     assert!(cache.get(recovered.object_id).is_some());
     // Block downloads to prove a full snapshot does not schedule missing-object backfill.
     let _permit = refiller
@@ -553,7 +571,7 @@ async fn test_pin_recovery_keeps_local_files_without_remote_backfill() {
 
     assert!(cache.get(recovered.object_id).is_some());
     assert!(cache.get(missing.object_id).is_none());
-    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), HashSet::new());
+    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new());
     assert!(
         cache.get(recovered.object_id).is_none(),
         "unpin still revokes recovered routes"

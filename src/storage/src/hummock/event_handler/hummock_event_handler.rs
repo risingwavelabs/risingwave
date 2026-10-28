@@ -32,7 +32,6 @@ use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
-use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 use risingwave_pb::meta::{PbServingTableVnodeMappings, PbTableRefillRuntimeConfig};
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
@@ -56,7 +55,9 @@ use crate::hummock::event_handler::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, VersionUpdate};
-use crate::hummock::table_cache_metadata::{SharedTableCacheMetadata, TableCacheMetadata};
+use crate::hummock::table_cache_metadata::{
+    SharedTableCacheMetadata, TableCacheMetadata, table_cache_refill_policy_from_protobuf,
+};
 use crate::hummock::{HummockResult, MemoryLimiter, ObjectIdManager};
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
@@ -193,24 +194,6 @@ struct HummockEventHandlerMetrics {
     event_handler_on_recv_version_update: Histogram,
     event_handler_on_spiller: Histogram,
     event_handler_on_apply_table_refill_runtime_config: Histogram,
-}
-
-fn table_cache_refill_policy_from_protobuf(
-    pb_policy: risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy,
-) -> Option<(TableId, CacheRefillPolicy)> {
-    let table_id = TableId::from(pb_policy.table_id);
-    let policy = match PbCacheRefillPolicy::try_from(pb_policy.policy) {
-        Ok(policy) => CacheRefillPolicy::from_protobuf(policy)?,
-        Err(_) => {
-            tracing::warn!(
-                table_id = pb_policy.table_id,
-                policy = pb_policy.policy,
-                "ignore unknown table cache refill policy"
-            );
-            return None;
-        }
-    };
-    Some((table_id, policy))
 }
 
 fn serving_table_vnode_mappings_to_map(
@@ -369,18 +352,13 @@ impl HummockEventHandler {
     // and update notifications.
     fn apply_table_refill_runtime_config(&mut self, config: PbTableRefillRuntimeConfig) {
         if let Some(policies) = config.table_cache_refill_policies {
-            let pinned_table_ids = policies
-                .pinned_table_ids
-                .into_iter()
-                .map(TableId::new)
-                .collect();
-            let foyer_policies = policies
+            let policies = policies
                 .table_policies
-                .into_iter()
-                .chain(policies.internal_table_policies)
+                .iter()
+                .chain(&policies.internal_table_policies)
                 .filter_map(table_cache_refill_policy_from_protobuf)
                 .collect();
-            self.replace_table_cache_refill_runtime_snapshot(foyer_policies, pinned_table_ids);
+            self.replace_table_cache_refill_runtime_snapshot(policies);
         }
         if let Some(mappings) = config.serving_table_vnode_mappings {
             self.replace_serving_table_vnode_mapping(serving_table_vnode_mappings_to_map(mappings));
@@ -390,16 +368,28 @@ impl HummockEventHandler {
     pub(super) fn replace_table_cache_refill_runtime_snapshot(
         &mut self,
         policies: HashMap<TableId, CacheRefillPolicy>,
-        mut pinned: HashSet<TableId>,
     ) {
         let mut metadata = self.cache_metadata.write();
-        if let Some(membership) = &mut self.pin_membership {
-            membership.replace_pinned_tables(metadata.pinned_tables(), &pinned);
-        } else {
-            pinned.clear();
+        let previous = metadata.replace_policy_snapshot(policies);
+        let default_policy = metadata.default_policy;
+        if let Some(membership) = &mut self.pin_membership
+            && previous
+                .keys()
+                .chain(metadata.table_cache_refill_policies.keys())
+                .any(|table| {
+                    (previous.get(table).copied().unwrap_or(default_policy)
+                        == CacheRefillPolicy::Pin)
+                        != metadata.is_pinned(table)
+                })
+        {
+            membership.replace_policy(
+                |table| {
+                    previous.get(table).copied().unwrap_or(default_policy) == CacheRefillPolicy::Pin
+                },
+                |table| metadata.is_pinned(table),
+            );
         }
-        let previous = metadata.replace_policy_snapshot(policies, pinned);
-        self.refiller.on_pinned_tables_changed(&previous, &metadata);
+        self.refiller.on_policies_changed(&previous, &metadata);
     }
 
     fn replace_serving_table_vnode_mapping(&mut self, mapping: HashMap<TableId, Bitmap>) {
@@ -441,9 +431,14 @@ impl HummockEventHandler {
         let refill_config = CacheRefillConfig::from_storage_opts(&compactor_context.storage_opts);
         let refill_store = compactor_context.sstable_store;
         let refill_version = recent_versions.latest_version().clone();
-        let pin_membership = refill_store
-            .pin_cache()
-            .map(|cache| PinCacheMembership::new(cache.clone(), refill_version));
+        let pin_membership = refill_store.pin_cache().map(|cache| {
+            PinCacheMembership::new(cache.clone(), refill_version, |_| {
+                compactor_context
+                    .storage_opts
+                    .cache_refill_table_cache_refill_default_policy
+                    == CacheRefillPolicy::Pin
+            })
+        });
         let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             role,
             compactor_context
@@ -781,7 +776,7 @@ impl HummockEventHandler {
                     &sst_delta_infos,
                     event.new_pinned_version.clone(),
                     version_deltas.as_deref(),
-                    metadata.pinned_tables(),
+                    |table| metadata.is_pinned(table),
                 );
             }
             // Membership advances independently; shared metadata is read-only during submission.
@@ -1202,9 +1197,11 @@ pub(super) mod tests {
             version: PinnedVersion,
         ) -> Self {
             let metrics = Arc::new(HummockStateStoreMetrics::unused());
-            let membership = store
-                .pin_cache()
-                .map(|cache| PinCacheMembership::new(cache.clone(), version.clone()));
+            let membership = store.pin_cache().map(|cache| {
+                PinCacheMembership::new(cache.clone(), version.clone(), |_| {
+                    default_policy == CacheRefillPolicy::Pin
+                })
+            });
             let metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
                 role,
                 default_policy,
@@ -1246,10 +1243,9 @@ pub(super) mod tests {
         pub(in crate::hummock::event_handler) fn replace_table_cache_refill_runtime_snapshot(
             &mut self,
             policies: HashMap<TableId, CacheRefillPolicy>,
-            pinned: HashSet<TableId>,
         ) {
             self.handler
-                .replace_table_cache_refill_runtime_snapshot(policies, pinned);
+                .replace_table_cache_refill_runtime_snapshot(policies);
         }
 
         pub(in crate::hummock::event_handler) fn replace_serving_table_vnode_mapping(
@@ -1583,8 +1579,10 @@ pub(super) mod tests {
                         table_id: ordinary_table.as_raw_id(),
                         policy: PbCacheRefillPolicy::Streaming as i32,
                     }],
-                    internal_table_policies: vec![],
-                    pinned_table_ids: vec![table.as_raw_id()],
+                    internal_table_policies: vec![PbTableCacheRefillPolicy {
+                        table_id: table.as_raw_id(),
+                        policy: PbCacheRefillPolicy::Pin as i32,
+                    }],
                 }),
                 serving_table_vnode_mappings: None,
                 ..Default::default()
@@ -1745,9 +1743,8 @@ pub(super) mod tests {
                 }],
                 internal_table_policies: vec![PbTableCacheRefillPolicy {
                     table_id: internal_table_id.as_raw_id(),
-                    policy: PbCacheRefillPolicy::Both as i32,
+                    policy: PbCacheRefillPolicy::Pin as i32,
                 }],
-                pinned_table_ids: vec![internal_table_id.as_raw_id()],
             }),
             serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
                 mappings: vec![PbServingTableVnodeMapping {
@@ -1762,18 +1759,15 @@ pub(super) mod tests {
             snapshot.policies,
             HashMap::from([
                 (old_table_id, CacheRefillPolicy::Serving),
-                (internal_table_id, CacheRefillPolicy::Both),
+                (internal_table_id, CacheRefillPolicy::Pin),
             ])
         );
         assert_eq!(
             snapshot.serving_table_vnode_mapping,
             HashMap::from([(old_table_id, old_vnodes)])
         );
-        // Without a local Pin backend, pin intent must not replace the Foyer policy.
-        assert_eq!(
-            snapshot.contexts[&internal_table_id].policy,
-            CacheRefillPolicy::Both
-        );
+        // Pin remains the table policy without a backend; it must not admit Foyer refill.
+        assert!(!snapshot.contexts.contains_key(&internal_table_id));
 
         handler.apply_table_refill_runtime_config(PbTableRefillRuntimeConfig {
             serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
@@ -1789,7 +1783,7 @@ pub(super) mod tests {
             snapshot.policies,
             HashMap::from([
                 (old_table_id, CacheRefillPolicy::Serving),
-                (internal_table_id, CacheRefillPolicy::Both),
+                (internal_table_id, CacheRefillPolicy::Pin),
             ])
         );
         assert_eq!(
@@ -1821,7 +1815,7 @@ pub(super) mod tests {
     fn test_runtime_config_ignores_invalid_entries() {
         let table_id = TableId::new(233);
         assert!(
-            super::table_cache_refill_policy_from_protobuf(PbTableCacheRefillPolicy {
+            super::table_cache_refill_policy_from_protobuf(&PbTableCacheRefillPolicy {
                 table_id: table_id.as_raw_id(),
                 policy: i32::MAX,
             })
