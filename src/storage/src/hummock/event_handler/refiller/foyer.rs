@@ -28,8 +28,8 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use super::CacheRefillConfig;
-use super::admission::SstLocality;
-use super::admission::foyer::{TableCacheRefillContextMap, load_metadata_and_select_blocks};
+use super::admission::foyer::{TableCacheRefillContextMap, select_blocks};
+use super::admission::{SstLocality, load_sst_metadata};
 use crate::hummock::{
     Block, HummockError, RecentFilterTrait, SstableBlockIndex, SstableStoreRef, TableHolder,
 };
@@ -139,8 +139,8 @@ impl DataCacheRefillTaskGenerator<'_> {
             let mut blk_start = 0;
             while blk_start < sst.block_count() {
                 // SstableBuilder ends a block before the table ID changes, so block metadata
-                // defines the exact physical boundary. `table_ids` below only admits logical
-                // projections and must not make a unit span another table.
+                // defines the exact physical boundary. The prepared locality bitmap admits
+                // logical projections but must not make a unit span another table.
                 let table_id = sst.meta.block_metas[blk_start].table_id();
                 let mut blk_end = std::cmp::min(sst.block_count(), blk_start + unit);
                 if let Some(table_boundary) = (blk_start + 1..blk_end)
@@ -346,24 +346,35 @@ impl CacheRefillTask {
                             .config
                             .data_refill_levels
                             .contains(&delta.insert_sst_level);
-                    let localities = match load_metadata_and_select_blocks(
+                    let prepared = match load_sst_metadata(
                         &context.sstable_store,
+                        delta.insert_sst_infos.iter(),
+                        |info| info,
                         context.meta_refill_concurrency.as_deref(),
-                        delta,
-                        &context.table_cache_refill_context_map,
-                        refill_data,
                     )
                     .await
                     {
-                        Ok(localities) => localities,
+                        Ok(prepared) => prepared,
                         Err(e) => {
                             tracing::warn!(error = %e.as_report(), "meta cache refill error");
                             return;
                         }
                     };
-                    if localities.is_empty() {
+                    // Metadata warming does not require Foyer data refill to be enabled.
+                    if !refill_data || prepared.is_empty() {
                         return;
                     }
+                    let localities = prepared
+                        .into_iter()
+                        .map(|(info, sst)| {
+                            select_blocks(
+                                sst,
+                                info,
+                                &context.table_cache_refill_context_map,
+                                delta.delete_sst_infos.is_empty(),
+                            )
+                        })
+                        .collect_vec();
                     let generator = DataCacheRefillTaskGenerator {
                         context,
                         delta,

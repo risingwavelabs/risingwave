@@ -83,7 +83,7 @@ impl DataRefillGeneratorTestFixture {
         serving_vnode_bitmap: Option<Bitmap>,
         configure: impl FnOnce(&mut CacheRefillConfig),
     ) -> CacheRefillContext {
-        let mut config = test_refill_config(CacheRefillPolicy::Enabled);
+        let mut config = test_refill_config();
         config.data_refill_levels.insert(0);
         configure(&mut config);
         CacheRefillContext {
@@ -260,21 +260,30 @@ fn test_table_cache_refill_contexts_by_role_and_policy() {
             )
         });
         assert_eq!(actual, expected, "{}", case.name);
-        // Ownership comes from the current policy/ownership maps, independently of Foyer policy.
-        let ownership = cache_metadata.ownership();
-        assert_eq!(ownership.streaming.is_some(), case.role.for_streaming());
-        assert_eq!(ownership.serving.is_some(), case.role.for_serving());
+        // Role-projected ownership remains independent of ordinary refill policy.
+        let expected_streaming = case.role.for_streaming() && case.has_streaming_vnodes;
+        let expected_serving = case.role.for_serving() && case.has_serving_vnodes;
+        let expected_owned = [
+            expected_streaming.then_some(&streaming_vnodes),
+            expected_serving.then_some(&serving_vnodes),
+        ];
         assert_eq!(
-            ownership.streaming.and_then(|map| map.get(&table_id)),
-            (case.role.for_streaming() && case.has_streaming_vnodes).then_some(&streaming_vnodes),
-            "{}: streaming ownership",
+            cache_metadata.owned_vnodes(&table_id).collect::<Vec<_>>(),
+            expected_owned.into_iter().flatten().collect::<Vec<_>>(),
+            "{}: ownership",
             case.name
         );
         assert_eq!(
-            ownership.serving.and_then(|map| map.get(&table_id)),
-            (case.role.for_serving() && case.has_serving_vnodes).then_some(&serving_vnodes),
-            "{}: serving ownership",
-            case.name
+            cache_metadata.has_vnodes(&table_id),
+            expected_streaming || expected_serving
+        );
+        assert_eq!(
+            cache_metadata.contains_vnode(&table_id, 1),
+            expected_streaming
+        );
+        assert_eq!(
+            cache_metadata.contains_vnode(&table_id, 2),
+            expected_serving
         );
     }
 }
@@ -290,11 +299,11 @@ async fn test_refill_task_captures_runtime_context_snapshot() {
         *captured_context_clone.lock() = Some(context);
         tokio::spawn(async {})
     });
-    let refill_config = test_refill_config(CacheRefillPolicy::Enabled);
+    let refill_config = test_refill_config();
     let refill_store = mock_sstable_store().await;
     let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
         Role::Serving,
-        refill_config.table_cache_refill_default_policy,
+        CacheRefillPolicy::Enabled,
     )));
     let refiller = CacheRefiller::new(
         refill_config,
@@ -333,9 +342,8 @@ async fn test_refill_task_captures_runtime_context_snapshot() {
     assert_eq!(
         cache_metadata
             .read()
-            .ownership()
-            .serving
-            .and_then(|map| map.get(&table_id)),
+            .serving_table_vnode_mapping
+            .get(&table_id),
         Some(&new_vnodes)
     );
 
@@ -377,11 +385,11 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
             *captured_deltas_clone.lock() = Some(deltas);
             tokio::spawn(async {})
         });
-        let refill_config = test_refill_config(default_policy);
+        let refill_config = test_refill_config();
         let refill_store = sstable_store.clone();
         let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
             role,
-            refill_config.table_cache_refill_default_policy,
+            default_policy,
         )));
         let refiller = CacheRefiller::new(
             refill_config,
@@ -862,13 +870,13 @@ async fn test_l0_refill_after_truncation_uses_serving_ownership() {
     let mut target = (*base).clone();
     target.apply_version_delta(&raw);
     let target = base.new_with_local_version(target).unwrap();
-    let mut config = test_refill_config(CacheRefillPolicy::Serving);
+    let mut config = test_refill_config();
     config.data_refill_levels.insert(0);
     let refill_config = config;
     let refill_store = fixture.sstable_store.clone();
     let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
         Role::Serving,
-        refill_config.table_cache_refill_default_policy,
+        CacheRefillPolicy::Serving,
     )));
     let refiller = CacheRefiller::new(
         refill_config,
@@ -1027,7 +1035,7 @@ async fn test_refill_units_do_not_cross_table_projection_boundaries() {
         })
         .collect::<TableCacheRefillContextMap>();
     let make_context = |unit| {
-        let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+        let mut config = test_refill_config();
         config.data_refill_levels.insert(0);
         config.unit = unit;
         CacheRefillContext {
@@ -1127,7 +1135,7 @@ async fn test_scoped_refill_handles_multi_table_vnode_boundary() {
         insert_sst_level: 0,
     };
     let generate = |streaming_vnodes| {
-        let mut config = test_refill_config(CacheRefillPolicy::Streaming);
+        let mut config = test_refill_config();
         config.data_refill_levels.insert(0);
         let context = CacheRefillContext {
             config: Arc::new(config),
@@ -1188,11 +1196,11 @@ async fn test_without_pin_backend_preserves_foyer_task_lifecycle() {
         })
     });
     let version = pinned_version_for_test();
-    let refill_config = test_refill_config(CacheRefillPolicy::Enabled);
+    let refill_config = test_refill_config();
     let refill_store = mock_sstable_store().await;
     let cache_metadata = Arc::new(parking_lot::RwLock::new(TableCacheMetadata::new(
         Role::Streaming,
-        refill_config.table_cache_refill_default_policy,
+        CacheRefillPolicy::Enabled,
     )));
     let mut refiller = CacheRefiller::new(
         refill_config,

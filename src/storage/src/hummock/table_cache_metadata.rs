@@ -13,7 +13,8 @@
 // limitations under the License.
 
 //! Current table cache policies and vnode mappings for one Hummock instance.
-//! The event handler owns and updates this state; refill tasks consume immutable snapshots.
+//! The event handler is the sole writer. Foyer captures immutable task snapshots;
+//! Pin reads current ownership under a guard when admitting asynchronous work.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -23,8 +24,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_pb::id::TableId;
-
-use super::refill_locality::RefillOwnership;
 
 /// Lock order: metadata, Pin pending queue, executor/cache locks. Never hold across I/O or await.
 pub(crate) type SharedTableCacheMetadata = Arc<RwLock<TableCacheMetadata>>;
@@ -53,17 +52,27 @@ impl TableCacheMetadata {
         }
     }
 
-    pub(crate) fn ownership(&self) -> RefillOwnership<'_> {
-        RefillOwnership {
-            streaming: self
-                .role
-                .for_streaming()
-                .then_some(&self.streaming_table_vnode_mapping),
-            serving: self
-                .role
-                .for_serving()
-                .then_some(&self.serving_table_vnode_mapping),
-        }
+    /// Borrows this table's owned vnode bitmaps for the worker's active roles.
+    pub(crate) fn owned_vnodes(&self, table: &TableId) -> impl Iterator<Item = &Bitmap> {
+        [
+            self.streaming_table_vnode_mapping
+                .get(table)
+                .filter(|_| self.role.for_streaming()),
+            self.serving_table_vnode_mapping
+                .get(table)
+                .filter(|_| self.role.for_serving()),
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    pub(crate) fn has_vnodes(&self, table: &TableId) -> bool {
+        self.owned_vnodes(table).any(Bitmap::any)
+    }
+
+    pub(crate) fn contains_vnode(&self, table: &TableId, vnode: usize) -> bool {
+        self.owned_vnodes(table)
+            .any(|bitmap| vnode < bitmap.len() && bitmap.is_set(vnode))
     }
 
     pub(crate) fn is_pinned(&self, table: &TableId) -> bool {

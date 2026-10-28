@@ -114,7 +114,7 @@ impl PinCacheRefillExecutor {
         Self { work, jobs, store }
     }
 
-    /// Submits a gate-deduplicated object after policy and ownership admission.
+    /// Submits an object after policy and ownership admission, deduplicating active copies.
     /// The token identifies that admission; a later revocation must make it obsolete.
     /// Submission is synchronous; the owned future only waits for its result.
     /// True includes published/cached and obsolete work, not a cache-hit guarantee.
@@ -139,7 +139,7 @@ impl PinCacheRefillExecutor {
         if cache.prepare_refill(object) != Some(cache_token) {
             return Either::Left(ready(true));
         }
-        // The gate filters cached objects too; defensively avoid duplicate publication.
+        // The Pin refiller filters cached objects too; defensively avoid duplicate publication.
         if cache.get(object).is_some() {
             return Either::Left(ready(true));
         }

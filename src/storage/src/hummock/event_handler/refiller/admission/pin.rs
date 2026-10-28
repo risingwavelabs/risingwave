@@ -15,17 +15,15 @@
 //! Pin input adaptation: selected plans, surviving receipt-time intent and object dependencies.
 //! Request selection, metadata guards and executor submission stay in `refiller::pin`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use futures::future::try_join_all;
-use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_pb::id::TableId;
-use tokio::sync::Semaphore;
 
-use super::{TableLocality, load_sst_metadata, select_local_blocks};
+use super::select_local_blocks;
+use crate::hummock::TableHolder;
 use crate::hummock::pin_cache_refill::PinCacheRefillObject;
+use crate::hummock::refill_locality::vnode_range_overlaps_bitmap;
 use crate::hummock::table_cache_metadata::TableCacheMetadata;
-use crate::hummock::{HummockResult, SstableStoreRef, TableHolder};
 
 /// Copies only owned, uncached candidates into metadata preparation. The caller rejects
 /// cached objects first; the original queued intent remains available for policy withdrawal.
@@ -39,7 +37,7 @@ pub(in super::super) fn select_owned_candidates<'a>(
                 .admitted_tables
                 .iter()
                 .copied()
-                .filter(|table| metadata.ownership().has_vnodes(table))
+                .filter(|table| metadata.has_vnodes(table))
                 .collect();
             if admitted_tables.is_empty() {
                 return None;
@@ -52,19 +50,6 @@ pub(in super::super) fn select_owned_candidates<'a>(
         .collect()
 }
 
-/// Loads metadata for selected candidates. Final admission follows under current metadata.
-pub(in super::super) async fn load_metadata(
-    store: &SstableStoreRef,
-    concurrency: Option<&Semaphore>,
-    candidates: Vec<PinCacheRefillObject>,
-) -> HummockResult<Vec<(PinCacheRefillObject, TableHolder)>> {
-    try_join_all(candidates.into_iter().map(|candidate| async move {
-        let sst = load_sst_metadata(store, &candidate.source_sst, concurrency).await?;
-        Ok((candidate, sst))
-    }))
-    .await
-}
-
 /// Consumes prepared inputs and yields only admitted objects, with cancellation dependencies
 /// narrowed to local projections. The caller holds the metadata guard through submission;
 /// surviving tables come from the selected requests so RESET then SET cannot revive intent.
@@ -73,14 +58,23 @@ pub(in super::super) fn iter_admitted_objects<'a>(
     metadata: &'a TableCacheMetadata,
     surviving_tables: impl IntoIterator<Item = TableId>,
 ) -> impl Iterator<Item = PinCacheRefillObject> + 'a {
-    let contexts = pin_refill_contexts(metadata, surviving_tables);
+    let surviving_tables: HashSet<_> = surviving_tables
+        .into_iter()
+        .filter(|table| metadata.is_pinned(table))
+        .collect();
     prepared
         .into_iter()
         .filter_map(move |(mut candidate, sst)| {
             let locality = select_local_blocks(
                 sst,
-                |table| candidate.admitted_tables.contains(table),
-                |table| contexts.get(table).copied(),
+                |table| {
+                    candidate.admitted_tables.contains(table) && surviving_tables.contains(table)
+                },
+                |table, range| {
+                    metadata
+                        .owned_vnodes(table)
+                        .any(|bitmap| vnode_range_overlaps_bitmap(range, bitmap))
+                },
             );
             if !locality.blocks.any() {
                 return None;
@@ -94,26 +88,4 @@ pub(in super::super) fn iter_admitted_objects<'a>(
             );
             Some(candidate)
         })
-}
-
-/// Pin enablement is independent of the ordinary refill policy. Capture one context per
-/// surviving table after metadata I/O; borrow under the same guard as download submission.
-fn pin_refill_contexts(
-    metadata: &TableCacheMetadata,
-    tables: impl IntoIterator<Item = TableId>,
-) -> HashMap<TableId, TableLocality<'_>> {
-    let mut contexts = HashMap::new();
-    for table in tables {
-        if metadata.is_pinned(&table) && metadata.ownership().has_vnodes(&table) {
-            contexts.entry(table).or_insert_with(|| TableLocality {
-                policy: CacheRefillPolicy::Both,
-                streaming_vnode_bitmap: metadata
-                    .ownership()
-                    .streaming
-                    .and_then(|map| map.get(&table)),
-                serving_vnode_bitmap: metadata.ownership().serving.and_then(|map| map.get(&table)),
-            });
-        }
-    }
-    contexts
 }

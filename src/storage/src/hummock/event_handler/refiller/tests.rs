@@ -81,7 +81,8 @@ async fn test_pin_metadata_changes_preserve_delta_admission() {
         let base = pinned_version_with_ssts(&[table], &[]);
         let mut refiller = RefillTest::new(
             Role::Streaming,
-            test_refill_config(CacheRefillPolicy::Disabled),
+            CacheRefillPolicy::Disabled,
+            test_refill_config(),
             store,
             spawn,
             base.clone(),
@@ -231,7 +232,7 @@ async fn test_mixed_sst_refills_both_backends_before_publication() {
                 .unwrap()
                 .with_pin_cache(cache.clone()),
         );
-        let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+        let mut config = test_refill_config();
         config.data_refill_levels.extend([0, 1]);
         config.skip_recent_filter = false;
         config.skip_inheritance_filter = false;
@@ -251,6 +252,7 @@ async fn test_mixed_sst_refills_both_backends_before_publication() {
             } else {
                 Role::Serving
             },
+            CacheRefillPolicy::Disabled,
             config,
             store.clone(),
             spawn,
@@ -364,11 +366,12 @@ async fn test_common_admission_rejects_before_backend_work() {
             .unwrap()
             .with_pin_cache(cache.clone()),
     );
-    let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+    let mut config = test_refill_config();
     config.data_refill_levels.insert(0);
     config.timeout = Duration::from_secs(60);
     let mut refiller = RefillTest::new(
         Role::Serving,
+        CacheRefillPolicy::Disabled,
         config,
         store.clone(),
         default_spawn_refill_task(),
@@ -483,7 +486,8 @@ async fn test_pin_policy_change_preserves_old_version_references() {
     );
     let mut refiller = RefillTest::new(
         Role::Streaming,
-        test_refill_config(CacheRefillPolicy::Disabled),
+        CacheRefillPolicy::Disabled,
+        test_refill_config(),
         store,
         default_spawn_refill_task(),
         version.clone(),
@@ -543,7 +547,7 @@ async fn test_foyer_failure_or_timeout_waits_for_pin() {
                 } else {
                     Duration::from_millis(1)
                 },
-                ..test_refill_config(CacheRefillPolicy::Enabled)
+                ..test_refill_config()
             });
             if !metadata_error {
                 context.meta_refill_concurrency = Some(Arc::new(Semaphore::new(0)));
@@ -555,10 +559,17 @@ async fn test_foyer_failure_or_timeout_waits_for_pin() {
                 finished.notify_one();
             })
         });
-        let mut config = test_refill_config(CacheRefillPolicy::Enabled);
+        let mut config = test_refill_config();
         config.timeout = Duration::from_secs(60);
         let base = pinned_version_with_ssts(&[table, ordinary_table], &[]);
-        let mut refiller = RefillTest::new(Role::Both, config, store, spawn, base);
+        let mut refiller = RefillTest::new(
+            Role::Both,
+            CacheRefillPolicy::Enabled,
+            config,
+            store,
+            spawn,
+            base,
+        );
         refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
         refiller.replace_serving_table_vnode_mapping(
             [(ordinary_table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
@@ -599,11 +610,12 @@ async fn test_pin_timeout_during_preparation_or_submitted_copy() {
         let table = TableId::from(233);
         let (store, cache) = mock_sstable_store_with_pin_cache().await;
         let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 810).await;
-        let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+        let mut config = test_refill_config();
         config.timeout = Duration::from_millis(50);
         let timeout = config.timeout;
         let mut refiller = RefillTest::new(
             Role::Streaming,
+            CacheRefillPolicy::Disabled,
             config,
             store,
             default_spawn_refill_task(),
@@ -690,7 +702,8 @@ async fn test_pin_refill_after_table_pruning() {
         let base = pinned_version_with_ssts(&tables, std::slice::from_ref(&old));
         let mut refiller = RefillTest::new(
             Role::Streaming,
-            test_refill_config(CacheRefillPolicy::Disabled),
+            CacheRefillPolicy::Disabled,
+            test_refill_config(),
             store,
             default_spawn_refill_task(),
             base.clone(),
