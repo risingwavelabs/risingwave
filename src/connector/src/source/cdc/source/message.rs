@@ -109,8 +109,14 @@ impl DebeziumCdcMeta {
     ///
     /// RisingWave's Java `DbzChangeEventConsumer` extracts `full_table_name` from the Debezium
     /// change event's topic name by removing everything through the first `.`. RisingWave
-    /// configures the removed first component as Debezium's `topic.prefix`. The remaining suffix
-    /// follows a connector-specific format:
+    /// configures the removed first component as Debezium's `topic.prefix`.
+    ///
+    /// RisingWave sets Debezium's `topic.naming.strategy` to `RisingWaveTopicNamingStrategy` (MySQL)
+    /// or `RisingWaveSchemaTopicNamingStrategy` (others), which keep table names as they are instead
+    /// of replacing characters such as `$`, `#` and non-ASCII characters with `_`.
+    ///
+    /// `full_table_name` is the table's key for message filtering and follows a connector-specific
+    /// format:
     ///
     /// - **MySQL** ([Debezium topic names](https://debezium.io/documentation/reference/3.2/connectors/mysql.html#mysql-topic-names)):
     ///   `"database.table"` (1 dot, 2 parts)
