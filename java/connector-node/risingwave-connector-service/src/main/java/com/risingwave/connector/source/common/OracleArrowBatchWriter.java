@@ -24,9 +24,7 @@ import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,8 +37,7 @@ import org.apache.arrow.vector.Float4Vector;
 import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.SmallIntVector;
-import org.apache.arrow.vector.TimeStampMicroTZVector;
-import org.apache.arrow.vector.TimeStampMicroVector;
+import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -203,25 +200,14 @@ final class OracleArrowBatchWriter implements AutoCloseable {
                     }
                 };
             }
-            case TIMESTAMP -> {
-                var target = (TimeStampMicroVector) vector;
+            case TIMESTAMP, TIMESTAMPTZ -> {
+                var target = (TimeStampVector) vector;
                 yield (result, row) -> {
                     var value = result.getObject(column, LocalDateTime.class);
                     if (value == null) {
                         target.setNull(row);
                     } else {
                         target.setSafe(row, epochMicros(value));
-                    }
-                };
-            }
-            case TIMESTAMPTZ -> {
-                var target = (TimeStampMicroTZVector) vector;
-                yield (result, row) -> {
-                    var value = readTimestampWithTimeZone(result, column);
-                    if (value == null) {
-                        target.setNull(row);
-                    } else {
-                        target.setSafe(row, epochMicros(value.toInstant()));
                     }
                 };
             }
@@ -264,23 +250,11 @@ final class OracleArrowBatchWriter implements AutoCloseable {
         };
     }
 
-    private static OffsetDateTime readTimestampWithTimeZone(ResultSet result, int column)
-            throws SQLException {
-        try {
-            return result.getObject(column, OffsetDateTime.class);
-        } catch (SQLException unsupportedConversion) {
-            var value = result.getObject(column, LocalDateTime.class);
-            return value == null ? null : value.atOffset(ZoneOffset.UTC);
-        }
-    }
-
     private static long epochMicros(LocalDateTime value) {
-        return epochMicros(value.toInstant(ZoneOffset.UTC));
-    }
-
-    private static long epochMicros(Instant value) {
+        var instant = value.toInstant(ZoneOffset.UTC);
         return Math.addExact(
-                Math.multiplyExact(value.getEpochSecond(), 1_000_000L), value.getNano() / 1_000);
+                Math.multiplyExact(instant.getEpochSecond(), 1_000_000L),
+                instant.getNano() / 1_000);
     }
 
     @FunctionalInterface

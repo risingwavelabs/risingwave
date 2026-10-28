@@ -231,12 +231,10 @@ final class OracleExternalTable {
         var schemaName = request.getSchemaName();
         var tableName = request.getTableName();
         var tableSchema = request.getTableSchema();
-        var columnNames =
-                tableSchema.getColumnsList().stream().map(PlanCommon.ColumnDesc::getName).toList();
         validatePrimaryKeys(request, tableSchema, startPk);
         var sql =
                 buildSnapshotSql(
-                        columnNames,
+                        tableSchema.getColumnsList(),
                         schemaName,
                         tableName,
                         request.getPrimaryKeysList(),
@@ -492,7 +490,7 @@ final class OracleExternalTable {
     }
 
     private static String buildSnapshotSql(
-            List<String> columns,
+            List<PlanCommon.ColumnDesc> columns,
             String schemaName,
             String tableName,
             List<String> primaryKeys,
@@ -505,7 +503,17 @@ final class OracleExternalTable {
         if (limit <= 0) {
             throw new SQLException("Oracle snapshot query has an invalid limit");
         }
-        var fields = columns.stream().map(OracleValidator::quoteIdentifier).toList();
+        var fields =
+                columns.stream()
+                        .map(
+                                column -> {
+                                    var field = OracleValidator.quoteIdentifier(column.getName());
+                                    return column.getColumnType().getTypeName()
+                                                    == TypeName.TIMESTAMPTZ
+                                            ? "SYS_EXTRACT_UTC(" + field + ")"
+                                            : field;
+                                })
+                        .toList();
         var keys = primaryKeys.stream().map(OracleValidator::quoteIdentifier).toList();
         var sql =
                 new StringBuilder("SELECT ")
