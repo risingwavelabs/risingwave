@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory;
 public class SqlServerValidator extends DatabaseValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(SqlServerValidator.class);
     private static final int CDC_TABLE_TYPE =
-            Catalog.Table.CdcTableType.CDC_TABLE_TYPE_SQLSERVER.getNumber();
+            Catalog.Table.CdcTableType.CDC_TABLE_TYPE_SQL_SERVER.getNumber();
     // `status` of a running service in `sys.dm_server_services`.
     private static final int SERVICE_STATUS_RUNNING = 4;
 
