@@ -111,7 +111,7 @@ pub struct OracleExternalTableReader {
     rw_schema: Schema,
     pk_indices: Vec<usize>,
     table_schema: TableSchema,
-    session_id: OnceCell<i64>,
+    session: OnceCell<OracleSession>,
 }
 
 impl ExternalTableReader for OracleExternalTableReader {
@@ -203,21 +203,23 @@ impl OracleExternalTableReader {
             rw_schema,
             pk_indices,
             table_schema,
-            session_id: OnceCell::new(),
+            session: OnceCell::new(),
         })
     }
 
     async fn session_id(&self) -> ConnectorResult<i64> {
-        let session_id = self
-            .session_id
+        let session = self
+            .session
             .get_or_try_init(|| async {
                 let properties = self.connection_properties.clone();
-                tokio::task::spawn_blocking(move || invoke_jni_open_session(&properties))
-                    .await
-                    .context("failed to join Oracle session open task")?
+                tokio::task::spawn_blocking(move || {
+                    invoke_jni_open_session(&properties).map(OracleSession)
+                })
+                .await
+                .context("failed to join Oracle session open task")?
             })
             .await?;
-        Ok(*session_id)
+        Ok(session.0)
     }
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
@@ -283,11 +285,13 @@ impl OracleExternalTableReader {
     }
 }
 
-impl Drop for OracleExternalTableReader {
+/// The ID of a session registered in the Java `JniOracleExternalTable` session map.
+#[derive(Debug)]
+struct OracleSession(i64);
+
+impl Drop for OracleSession {
     fn drop(&mut self) {
-        let Some(&session_id) = self.session_id.get() else {
-            return;
-        };
+        let session_id = self.0;
         let close = move || {
             if let Err(error) = invoke_jni_close_session(session_id) {
                 tracing::warn!(
