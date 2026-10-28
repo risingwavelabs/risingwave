@@ -13,9 +13,9 @@
 // limitations under the License.
 
 //! Pin input adaptation: selected plans, surviving receipt-time intent and object dependencies.
-//! Batch selection, metadata guards and executor submission stay in `refiller::pin`.
+//! Request selection, metadata guards and executor submission stay in `refiller::pin`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use futures::future::try_join_all;
 use risingwave_common::config::streaming::CacheRefillPolicy;
@@ -23,31 +23,42 @@ use risingwave_pb::id::TableId;
 use tokio::sync::Semaphore;
 
 use super::{TableLocality, load_sst_metadata, select_local_blocks};
-use crate::hummock::pin_cache_refill::{PinCacheRefillObject, PinCacheRefillPlan};
+use crate::hummock::pin_cache_refill::PinCacheRefillObject;
 use crate::hummock::table_cache_metadata::TableCacheMetadata;
 use crate::hummock::{HummockResult, SstableStoreRef, TableHolder};
 
-/// Coarse admission at selection, before metadata preparation allocates work.
-pub(in super::super) fn retain_owned_candidates(
-    plan: &mut PinCacheRefillPlan,
+/// Copies only owned, uncached candidates into metadata preparation. The caller rejects
+/// cached objects first; the original queued intent remains available for policy withdrawal.
+pub(in super::super) fn select_owned_candidates<'a>(
+    candidates: impl Iterator<Item = &'a PinCacheRefillObject>,
     metadata: &TableCacheMetadata,
-) {
-    plan.objects.retain(|_, candidate| {
-        candidate
-            .admitted_tables
-            .retain(|table| metadata.ownership().has_vnodes(table));
-        !candidate.admitted_tables.is_empty()
-    });
+) -> Vec<PinCacheRefillObject> {
+    candidates
+        .filter_map(|candidate| {
+            let admitted_tables: HashSet<_> = candidate
+                .admitted_tables
+                .iter()
+                .copied()
+                .filter(|table| metadata.ownership().has_vnodes(table))
+                .collect();
+            if admitted_tables.is_empty() {
+                return None;
+            }
+            Some(PinCacheRefillObject {
+                source_sst: candidate.source_sst.clone(),
+                admitted_tables,
+            })
+        })
+        .collect()
 }
 
-/// Loads metadata only after Pin selects its endpoint and discards superseded,
-/// unowned and cached candidates. Final admission follows under current metadata.
+/// Loads metadata for selected candidates. Final admission follows under current metadata.
 pub(in super::super) async fn load_metadata(
     store: &SstableStoreRef,
     concurrency: Option<&Semaphore>,
-    plan: PinCacheRefillPlan,
+    candidates: Vec<PinCacheRefillObject>,
 ) -> HummockResult<Vec<(PinCacheRefillObject, TableHolder)>> {
-    try_join_all(plan.objects.into_values().map(|candidate| async move {
+    try_join_all(candidates.into_iter().map(|candidate| async move {
         let sst = load_sst_metadata(store, &candidate.source_sst, concurrency).await?;
         Ok((candidate, sst))
     }))

@@ -780,7 +780,7 @@ impl HummockEventHandler {
             // Membership advances independently; shared metadata is read-only during submission.
             let condition = self.refiller.start_cache_refill(
                 sst_delta_infos,
-                event.new_pinned_version.clone(),
+                &event.new_pinned_version,
                 version_deltas.as_deref(),
                 &metadata,
             );

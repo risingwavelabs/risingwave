@@ -31,7 +31,7 @@ the same loader and selector; neither runtime implements vnode overlap.
 | Entry | Output and consumer |
 | --- | --- |
 | `foyer::load_metadata_and_select_blocks` | Loads metadata, preserves metadata-only warming, and returns `SstLocality` for Foyer unit generation. Foyer supplies only its data-refill eligibility and immutable contexts. |
-| `pin::retain_owned_candidates` / `pin::load_metadata` | Coarse ownership is checked under the selection guard; metadata is loaded afterward for surviving candidates. No download jobs are constructed. |
+| `pin::select_owned_candidates` / `pin::load_metadata` | Cached objects are rejected first; only owned candidates are copied under the selection guard. Metadata is loaded afterward. No download jobs are constructed. |
 | `pin::iter_admitted_objects` | Rechecks current authority and surviving request intent, then yields only eligible objects with narrowed cancellation dependencies. Pin submits them synchronously under the same metadata guard. |
 
 The `iter_` name denotes lazy admission: the iterator is consumed inside the same
@@ -76,7 +76,9 @@ existing Tokio runtime. This consumer prepares one event at a time, independentl
 of Foyer and publication. There is no cross-event merging or batching configuration.
 The executor owns physical downloads, deduplication and cancellation.
 
-The selected request stays queued during metadata preparation so Pin withdrawal can
+A queued request retains only its version ID and refill plan; the publication queue
+and membership ledger retain the target version. The selected request stays queued
+during metadata preparation so Pin withdrawal can
 permanently narrow its intent. A later SET cannot recreate it. The worker releases
 all guards for I/O, then borrows current ownership and intersects surviving intent
 under the same read guard as synchronous executor submission. Metadata replacement
