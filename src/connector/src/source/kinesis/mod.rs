@@ -134,29 +134,6 @@ mod test {
     }
 
     #[test]
-    fn test_parse_kinesis_reader_config() {
-        let props: HashMap<String, String> = hashmap! {
-            "stream".to_owned() => "sample_stream".to_owned(),
-            "aws.region".to_owned() => "us-east-1".to_owned(),
-        };
-        let kinesis_props: KinesisProperties =
-            serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
-        assert_eq!(kinesis_props.reader_config.eof_retry_interval_ms, 1000);
-        assert_eq!(kinesis_props.reader_config.error_retry_interval_ms, 200);
-
-        let props: HashMap<String, String> = hashmap! {
-            "stream".to_owned() => "sample_stream".to_owned(),
-            "aws.region".to_owned() => "us-east-1".to_owned(),
-            "kinesis.reader.eof_retry_interval_ms".to_owned() => "5000".to_owned(),
-            "kinesis.reader.error_retry_interval_ms".to_owned() => "1000".to_owned(),
-        };
-        let kinesis_props: KinesisProperties =
-            serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
-        assert_eq!(kinesis_props.reader_config.eof_retry_interval_ms, 5000);
-        assert_eq!(kinesis_props.reader_config.error_retry_interval_ms, 1000);
-    }
-
-    #[test]
     fn test_kinesis_props() {
         let with_options = btreemap! {
             "connector".to_owned() => "kinesis".to_owned(),
@@ -177,6 +154,8 @@ mod test {
         };
 
         assert_eq!(kinesis_props.common.sdk_connect_timeout_ms, 10000);
+        assert_eq!(kinesis_props.reader_config.eof_retry_interval_ms, 1000);
+        assert_eq!(kinesis_props.reader_config.error_retry_interval_ms, 200);
 
         let with_options = btreemap! {
             "connector".to_owned() => "kinesis".to_owned(),
@@ -187,6 +166,8 @@ mod test {
             "aws.credentials.access_key_id".to_owned() => "access_key".to_owned(),
             "aws.credentials.secret_access_key".to_owned() => "secret_key".to_owned(),
             "kinesis.sdk.connect_timeout_ms".to_owned() => "20000".to_owned(),
+            "kinesis.reader.eof_retry_interval_ms".to_owned() => "5000".to_owned(),
+            "kinesis.reader.error_retry_interval_ms".to_owned() => "1000".to_owned(),
         };
         let connector_props = ConnectorProperties::extract(
             WithOptionsSecResolved::without_secrets(with_options),
@@ -198,5 +179,7 @@ mod test {
         };
 
         assert_eq!(kinesis_props.common.sdk_connect_timeout_ms, 20000);
+        assert_eq!(kinesis_props.reader_config.eof_retry_interval_ms, 5000);
+        assert_eq!(kinesis_props.reader_config.error_retry_interval_ms, 1000);
     }
 }
