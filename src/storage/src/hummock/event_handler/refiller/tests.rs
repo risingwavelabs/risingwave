@@ -43,7 +43,9 @@ use super::test_utils::{
 };
 use super::{CacheRefillConfig, SpawnRefillTask, default_spawn_refill_task};
 use crate::hummock::SstableBlockIndex;
-use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+use crate::hummock::iterator::test_utils::{
+    mock_sstable_store, mock_sstable_store_with_object_store,
+};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::recent_filter::simple::SimpleRecentFilter;
 use crate::hummock::sstable_store::CachePolicy;
@@ -348,27 +350,20 @@ async fn test_mixed_sst_refills_both_backends_before_publication() {
 
 #[tokio::test]
 async fn test_pin_policy_without_backend_rejects_refill_but_preserves_reads() {
-    for default_pin in [false, true] {
+    for default_policy in [CacheRefillPolicy::Enabled, CacheRefillPolicy::Pin] {
         let table = TableId::from(233);
-        let (store, _cache_dir) = mock_sstable_store_with_disk_cache(None).await;
+        let store = mock_sstable_store().await;
         let writer = mock_sstable_store_with_object_store(store.store()).await;
-        let (_, info) = gen_test_sst_with_object_id(table, writer, 880).await;
-        let mut config = test_refill_config();
-        config.data_refill_levels.insert(0);
-        config.timeout = Duration::from_secs(60);
+        let (sst, info) = gen_test_sst_with_object_id(table, writer, 880).await;
         let mut refiller = RefillTest::new(
             Role::Serving,
-            if default_pin {
-                CacheRefillPolicy::Pin
-            } else {
-                CacheRefillPolicy::Enabled
-            },
-            config,
+            default_policy,
+            test_refill_config(),
             store.clone(),
             default_spawn_refill_task(),
             pinned_version_with_ssts(&[table], &[]),
         );
-        if !default_pin {
+        if default_policy != CacheRefillPolicy::Pin {
             refiller.replace_table_cache_refill_runtime_snapshot(
                 [(table, CacheRefillPolicy::Pin)].into(),
             );
@@ -376,47 +371,19 @@ async fn test_pin_policy_without_backend_rejects_refill_but_preserves_reads() {
         refiller.replace_serving_table_vnode_mapping(
             [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
         );
-        // A mistaken Foyer fallback would wait on these permits. Rejected Pin work must
-        // publish without entering metadata or data preparation.
-        let _meta = refiller
-            .cache()
-            .foyer
-            .meta_refill_concurrency
-            .as_ref()
-            .unwrap()
-            .clone()
-            .acquire_owned()
-            .await
-            .unwrap();
-        let _data = refiller
-            .cache()
-            .foyer
-            .concurrency
-            .clone()
-            .acquire_owned()
-            .await
-            .unwrap();
         refiller.submit(vec![l0_insert_delta(
             1.into(),
             test_epoch(1),
             vec![info.clone()],
         )]);
-        let events = tokio::time::timeout(Duration::from_secs(5), apply_next_events(&mut refiller))
-            .await
-            .expect("unsupported Pin policy must not schedule Foyer refill");
-        assert_eq!(events.len(), 1);
-        assert_eq!(
-            refiller.metadata().read().policy(&table),
-            CacheRefillPolicy::Pin
-        );
-        assert!(refiller.cache().pin_cache_refill.is_none());
-        store.block_cache().storage().wait().await;
-        assert!(!store.block_cache().contains(&SstableBlockIndex {
-            sst_id: info.object_id,
-            block_idx: 0
-        }));
+        assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
+        // Foyer warms metadata even without a disk cache. A wrong fallback would populate it
+        // before publication; the separate writer keeps this reader's metadata cache cold.
+        let cached = store.sstable_cached(info.object_id).await.unwrap();
+        assert!(cached.is_none());
+        let policy = refiller.metadata().read().policy(&table);
+        assert_eq!(policy, CacheRefillPolicy::Pin);
         let mut stats = StoreLocalStatistic::default();
-        let sst = store.sstable(&info, &mut stats).await.unwrap();
         let block = store
             .get(&sst, 0, CachePolicy::default(), &mut stats)
             .await
