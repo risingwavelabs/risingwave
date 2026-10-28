@@ -299,7 +299,6 @@ impl CatalogControllerInner {
 
         let mut table_policies = Vec::new();
         let mut internal_table_policies = Vec::new();
-        let mut pinned_table_ids = Vec::new();
         for (table_id, table_type, belongs_to_job_id) in tables {
             let job_id = if table_type == TableType::Internal {
                 let Some(job_id) = belongs_to_job_id else {
@@ -309,10 +308,12 @@ impl CatalogControllerInner {
             } else {
                 table_id.as_job_id()
             };
-            if pinned_table_by_job.get(&job_id) == Some(&table_id) {
-                pinned_table_ids.push(table_id.as_raw_id());
-            }
-            let Some(policy) = policies_by_job.get(&job_id) else {
+            let policy = if pinned_table_by_job.get(&job_id) == Some(&table_id) {
+                Some(CacheRefillPolicy::Pin)
+            } else {
+                policies_by_job.get(&job_id).copied()
+            };
+            let Some(policy) = policy else {
                 continue;
             };
             let policy = PbTableCacheRefillPolicy {
@@ -327,12 +328,10 @@ impl CatalogControllerInner {
         }
         table_policies.sort_unstable_by_key(|policy| policy.table_id);
         internal_table_policies.sort_unstable_by_key(|policy| policy.table_id);
-        pinned_table_ids.sort_unstable();
 
         Ok(PbTableCacheRefillPolicies {
             table_policies,
             internal_table_policies,
-            pinned_table_ids,
         })
     }
 }

@@ -82,7 +82,7 @@ impl PinCacheRefillPlan {
             // A snapshot restores membership without creating download intent.
             None => Self::default(),
         };
-        plan.retain_in_version(version, pinned_tables);
+        plan.retain_in_version(version, |table| pinned_tables.contains(table));
         plan
     }
 
@@ -119,7 +119,7 @@ impl PinCacheRefillPlan {
     pub(crate) fn retain_in_version(
         &mut self,
         version: &HummockVersion,
-        pinned_tables: &HashSet<TableId>,
+        is_pinned: impl Fn(&TableId) -> bool + Copy,
     ) {
         if self.objects.is_empty() {
             return;
@@ -129,13 +129,13 @@ impl PinCacheRefillPlan {
             .keys()
             .map(|object| (*object, HashSet::new()))
             .collect();
-        for sst in PinCacheMembershipIndex::pinned_ssts(version, pinned_tables) {
+        for sst in PinCacheMembershipIndex::pinned_ssts(version, is_pinned) {
             if let Some(tables) = required.get_mut(&sst.object_id) {
                 tables.extend(
                     sst.table_ids
                         .iter()
                         .copied()
-                        .filter(|table| pinned_tables.contains(table)),
+                        .filter(|table| is_pinned(table)),
                 );
             }
         }
@@ -147,11 +147,9 @@ impl PinCacheRefillPlan {
         });
     }
 
-    pub(crate) fn retain_tables(&mut self, pinned_tables: &HashSet<TableId>) {
+    pub(crate) fn retain_tables(&mut self, is_pinned: impl Fn(&TableId) -> bool + Copy) {
         self.objects.retain(|_, object| {
-            object
-                .admitted_tables
-                .retain(|table| pinned_tables.contains(table));
+            object.admitted_tables.retain(|table| is_pinned(table));
             !object.admitted_tables.is_empty()
         });
     }

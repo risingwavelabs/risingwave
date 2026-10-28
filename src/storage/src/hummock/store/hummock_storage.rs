@@ -23,6 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::Role;
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
@@ -64,6 +65,7 @@ use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::pin_cache::PinCache;
 use crate::hummock::pin_cache::membership::PinCacheMembershipIndex;
 use crate::hummock::store::vector_writer::HummockVectorWriter;
+use crate::hummock::table_cache_metadata::table_cache_refill_policy_from_protobuf;
 use crate::hummock::table_change_log_manager::TableChangeLogManager;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
 use crate::hummock::utils::{wait_for_epoch, wait_for_update};
@@ -228,19 +230,30 @@ impl HummockStorage {
             let HummockObserverEvent::TableRefillRuntimeConfig(_, config) = &event else {
                 unreachable!("initial version must be followed by refill config");
             };
-            let pinned_tables = config
+            let policies: std::collections::HashMap<_, _> = config
                 .table_cache_refill_policies
                 .as_ref()
                 .into_iter()
-                .flat_map(|policies| &policies.pinned_table_ids)
-                .map(|&id| TableId::new(id))
+                .flat_map(|policies| {
+                    policies
+                        .table_policies
+                        .iter()
+                        .chain(&policies.internal_table_policies)
+                })
+                .filter_map(table_cache_refill_policy_from_protobuf)
                 .collect();
             let cache = PinCache::new(
                 store,
                 (options.pin_cache_capacity_mb as u64).saturating_mul(1 << 20),
                 options.pin_cache_shard_num,
-                PinCacheMembershipIndex::pinned_ssts(&pinned_version, &pinned_tables)
-                    .map(|sst| sst.object_id),
+                PinCacheMembershipIndex::pinned_ssts(&pinned_version, |table| {
+                    policies
+                        .get(table)
+                        .copied()
+                        .unwrap_or(options.cache_refill_table_cache_refill_default_policy)
+                        == CacheRefillPolicy::Pin
+                })
+                .map(|sst| sst.object_id),
             )
             .await
             .map_err(HummockError::from)?;

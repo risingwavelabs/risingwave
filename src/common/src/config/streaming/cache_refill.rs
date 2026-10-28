@@ -31,6 +31,9 @@ pub enum CacheRefillPolicy {
     Serving,
     /// Enable cache refill optimized for both streaming and serving workloads for this table.
     Both,
+    /// Refill complete SST objects into Pin Cache for locally owned data.
+    /// Workers without a Pin backend skip refill for this table.
+    Pin,
 }
 
 impl FromStr for CacheRefillPolicy {
@@ -44,7 +47,8 @@ impl FromStr for CacheRefillPolicy {
             "streaming" => Ok(Self::Streaming),
             "serving" => Ok(Self::Serving),
             "both" => Ok(Self::Both),
-            _ => Err("expect one of [enabled, disabled, streaming, serving, both]"),
+            "pin" => Ok(Self::Pin),
+            _ => Err("expect one of [enabled, disabled, streaming, serving, both, pin]"),
         }
     }
 }
@@ -57,6 +61,7 @@ impl CacheRefillPolicy {
             Self::Streaming => PbCacheRefillPolicy::Streaming,
             Self::Serving => PbCacheRefillPolicy::Serving,
             Self::Both => PbCacheRefillPolicy::Both,
+            Self::Pin => PbCacheRefillPolicy::Pin,
         }
     }
 
@@ -68,6 +73,7 @@ impl CacheRefillPolicy {
             PbCacheRefillPolicy::Streaming => Some(Self::Streaming),
             PbCacheRefillPolicy::Serving => Some(Self::Serving),
             PbCacheRefillPolicy::Both => Some(Self::Both),
+            PbCacheRefillPolicy::Pin => Some(Self::Pin),
         }
     }
 
@@ -104,6 +110,7 @@ mod tests {
             ),
             (CacheRefillPolicy::Serving, "serving", false, false, true),
             (CacheRefillPolicy::Both, "both", false, true, true),
+            (CacheRefillPolicy::Pin, "pin", false, false, false),
         ] {
             assert_eq!(policy.to_string(), name);
             assert_eq!(name.parse(), Ok(policy));

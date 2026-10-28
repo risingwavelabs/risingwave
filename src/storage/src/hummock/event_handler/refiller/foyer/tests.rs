@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -233,8 +233,7 @@ fn test_table_cache_refill_contexts_by_role_and_policy() {
         let mut cache_metadata = TableCacheMetadata::new(case.role, case.default_policy);
 
         if let Some(policy) = case.policy {
-            cache_metadata
-                .replace_policy_snapshot(HashMap::from([(table_id, policy)]), HashSet::new());
+            cache_metadata.replace_policy_snapshot(HashMap::from([(table_id, policy)]));
         }
         if case.has_streaming_vnodes {
             cache_metadata.update_streaming_table_vnodes(table_id, Some(streaming_vnodes.clone()));
@@ -312,10 +311,9 @@ async fn test_refill_task_captures_runtime_context_snapshot() {
     )
     .with_foyer_spawn_task(spawn_refill_task);
 
-    cache_metadata.write().replace_policy_snapshot(
-        HashMap::from([(table_id, CacheRefillPolicy::Serving)]),
-        HashSet::new(),
-    );
+    cache_metadata
+        .write()
+        .replace_policy_snapshot(HashMap::from([(table_id, CacheRefillPolicy::Serving)]));
     cache_metadata
         .write()
         .replace_serving_mapping(HashMap::from([(table_id, old_vnodes.clone())]));
@@ -332,10 +330,9 @@ async fn test_refill_task_captures_runtime_context_snapshot() {
         Some(&[]),
         &cache_metadata.read(),
     );
-    cache_metadata.write().replace_policy_snapshot(
-        HashMap::from([(table_id, CacheRefillPolicy::Disabled)]),
-        HashSet::new(),
-    );
+    cache_metadata
+        .write()
+        .replace_policy_snapshot(HashMap::from([(table_id, CacheRefillPolicy::Disabled)]));
     cache_metadata
         .write()
         .replace_serving_mapping(HashMap::from([(table_id, new_vnodes.clone())]));
@@ -397,9 +394,7 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
             ReadOnlyRwLockRef::new(cache_metadata.clone()),
         )
         .with_foyer_spawn_task(spawn_refill_task);
-        cache_metadata
-            .write()
-            .replace_policy_snapshot(policies, HashSet::new());
+        cache_metadata.write().replace_policy_snapshot(policies);
         for table_id in streaming_tables {
             cache_metadata
                 .write()

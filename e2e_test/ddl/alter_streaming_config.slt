@@ -192,6 +192,25 @@ where name = 'cf_pin_mv'
 0
 
 statement ok
+alter materialized view cf_pin_mv set config (
+    streaming.developer.cache_refill_policy = 'pin'
+);
+
+query I
+select count(*)
+from rw_streaming_job_config
+where name = 'cf_pin_mv'
+  and key = 'streaming.developer.cache_refill_policy'
+  and value = '"pin"';
+----
+1
+
+statement ok
+alter materialized view cf_pin_mv reset config (
+    streaming.developer.cache_refill_policy
+);
+
+statement ok
 drop materialized view cf_pin_mv;
 
 statement ok
