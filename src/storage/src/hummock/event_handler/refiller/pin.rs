@@ -18,6 +18,7 @@ use std::sync::{Arc, Weak};
 use futures::future::try_join_all;
 use parking_lot::Mutex;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_pb::id::TableId;
@@ -25,17 +26,17 @@ use tokio::sync::{Notify, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 
 use super::CacheRefillConfig;
-use super::admission::pin::{iter_admitted_objects, load_metadata, retain_owned_candidates};
+use super::admission::pin::{iter_admitted_objects, load_metadata, select_owned_candidates};
 use crate::hummock::SstableStoreRef;
 use crate::hummock::event_handler::ReadOnlyRwLockRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::pin_cache_refill::PinCacheRefillPlan;
 use crate::hummock::pin_cache_refill::executor::PinCacheRefillExecutor;
-use crate::hummock::pin_cache_refill::{PinCacheRefillObject, PinCacheRefillPlan};
 use crate::hummock::table_cache_metadata::TableCacheMetadata;
 
-/// One unresolved event: fixed target, withdrawable intent and its publication completion.
+/// One unresolved event: version ID, withdrawable intent and its publication completion.
 struct Request {
-    target: PinnedVersion,
+    version_id: HummockVersionId,
     plan: PinCacheRefillPlan,
     completion: oneshot::Sender<()>,
 }
@@ -93,19 +94,19 @@ impl PinCacheRefiller {
     pub fn start_cache_refill(
         &self,
         deltas: &[SstDeltaInfo],
-        target: PinnedVersion,
+        target: &PinnedVersion,
         version_deltas: Option<&[HummockVersionDelta]>,
         admitted_tables: &HashSet<TableId>,
     ) -> oneshot::Receiver<()> {
         let plan = PinCacheRefillPlan::from_version_update(
             deltas,
-            &target,
+            target,
             version_deltas,
             admitted_tables,
         );
         let (completion, receiver) = oneshot::channel();
         self.requests.lock().push_back(Request {
-            target,
+            version_id: target.id(),
             plan,
             completion,
         });
@@ -130,43 +131,29 @@ impl PinCacheRefiller {
                 let metadata = metadata.read();
                 let requests = requests.lock();
                 requests.front().map(|request| {
-                    let mut plan = PinCacheRefillPlan {
-                        objects: request
-                            .plan
-                            .objects
-                            .iter()
-                            .map(|(object, candidate)| {
-                                (
-                                    *object,
-                                    PinCacheRefillObject {
-                                        source_sst: candidate.source_sst.clone(),
-                                        admitted_tables: candidate.admitted_tables.clone(),
-                                    },
-                                )
-                            })
-                            .collect(),
-                    };
-                    retain_owned_candidates(&mut plan, &metadata);
-                    // Only surviving, uncached candidates enter common metadata preparation.
-                    plan.objects
-                        .retain(|object, _| cache.get(*object).is_none());
-                    (request.target.id(), plan)
+                    let candidates = select_owned_candidates(
+                        request.plan.objects.values().filter(|candidate| {
+                            cache.get(candidate.source_sst.object_id).is_none()
+                        }),
+                        &metadata,
+                    );
+                    (request.version_id, candidates)
                 })
             };
-            let Some((target_id, plan)) = selected else {
+            let Some((target_id, candidates)) = selected else {
                 wake.notified().await;
                 continue;
             };
             let attempt = async {
-                let prepared = match load_metadata(&store, meta_concurrency.as_deref(), plan).await
-                {
-                    Ok(prepared) => prepared,
-                    Err(error) => {
-                        tracing::warn!(version_id = %target_id, error = %error,
+                let prepared =
+                    match load_metadata(&store, meta_concurrency.as_deref(), candidates).await {
+                        Ok(prepared) => prepared,
+                        Err(error) => {
+                            tracing::warn!(version_id = %target_id, error = %error,
                             "Pin metadata preparation failed; using remote fallback");
-                        return Err(());
-                    }
-                };
+                            return Err(());
+                        }
+                    };
                 if prepared.is_empty() {
                     return Ok(());
                 }

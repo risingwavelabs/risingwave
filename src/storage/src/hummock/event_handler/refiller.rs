@@ -154,7 +154,7 @@ impl CacheRefiller {
     pub(super) fn start_cache_refill(
         &self,
         mut deltas: Vec<SstDeltaInfo>,
-        new_pinned_version: PinnedVersion,
+        new_pinned_version: &PinnedVersion,
         version_deltas: Option<&[HummockVersionDelta]>,
         metadata: &TableCacheMetadata,
     ) -> VersionUpdateCondition {

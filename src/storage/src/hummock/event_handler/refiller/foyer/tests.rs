@@ -319,7 +319,7 @@ async fn test_refill_task_captures_runtime_context_snapshot() {
             })],
             ..Default::default()
         }],
-        pinned_version_for_test(),
+        &pinned_version_for_test(),
         Some(&[]),
         &cache_metadata.read(),
     );
@@ -405,7 +405,7 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
         );
         let _condition = refiller.start_cache_refill(
             vec![delta],
-            pinned_version_for_test(),
+            &pinned_version_for_test(),
             Some(&[]),
             &cache_metadata.read(),
         );
@@ -883,7 +883,7 @@ async fn test_l0_refill_after_truncation_uses_serving_ownership() {
         )]));
     fixture.sstable_store.clear_block_cache().await.unwrap();
     let condition =
-        refiller.start_cache_refill(infos.clone(), target, Some(&[raw]), &cache_metadata.read());
+        refiller.start_cache_refill(infos.clone(), &target, Some(&[raw]), &cache_metadata.read());
     tokio::time::timeout(Duration::from_secs(5), condition)
         .await
         .unwrap();
@@ -1202,7 +1202,7 @@ async fn test_without_pin_backend_preserves_foyer_task_lifecycle() {
     .with_foyer_spawn_task(spawn);
     assert!(refiller.pin_cache_refill.is_none());
     // Work starts without polling; dropping the condition keeps legacy Foyer work alive.
-    drop(refiller.start_cache_refill(vec![], version.clone(), Some(&[]), &cache_metadata.read()));
+    drop(refiller.start_cache_refill(vec![], &version, Some(&[]), &cache_metadata.read()));
     gate.add_permits(1);
     tokio::time::timeout(Duration::from_secs(1), completed.notified())
         .await
@@ -1211,6 +1211,7 @@ async fn test_without_pin_backend_preserves_foyer_task_lifecycle() {
     refiller.foyer.spawn_refill_task = Some(Arc::new(|_, _| {
         tokio::spawn(async { panic!("simulated Foyer task failure") })
     }));
-    let condition = refiller.start_cache_refill(vec![], version, Some(&[]), &cache_metadata.read());
+    let condition =
+        refiller.start_cache_refill(vec![], &version, Some(&[]), &cache_metadata.read());
     assert!(AssertUnwindSafe(condition).rw_catch_unwind().await.is_err());
 }

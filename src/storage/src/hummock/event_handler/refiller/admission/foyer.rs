@@ -16,6 +16,7 @@
 //! Runtime scheduling, recent/inheritance filtering and downloads stay in `refiller::foyer`.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use futures::future::try_join_all;
 use risingwave_common::bitmap::Bitmap;
@@ -57,16 +58,15 @@ pub(in super::super) fn table_cache_refill_contexts(
     let ownership = metadata.ownership();
     let mut contexts = HashMap::new();
     for table_id in table_ids {
-        if ownership.serving.is_some()
-            && ownership.streaming.is_none()
-            && !metadata.serving_table_vnode_mapping.contains_key(&table_id)
+        if let Entry::Vacant(entry) = contexts.entry(table_id)
+            && let Some(context) = TableCacheRefillContext::new(
+                table_policy(metadata, &table_id),
+                ownership,
+                &table_id,
+            )
         {
-            continue;
+            entry.insert(context);
         }
-        contexts.entry(table_id).or_insert_with(|| {
-            let policy = table_policy(metadata, &table_id);
-            TableCacheRefillContext::new(policy, ownership, &table_id)
-        });
     }
     contexts
 }
@@ -92,26 +92,43 @@ pub(crate) fn table_cache_refill_monitor_snapshot(
     }
 }
 
-/// Reject ordinary table inputs before copying their task-local bitmaps.
-fn admits_table(metadata: &TableCacheMetadata, table: &TableId) -> bool {
-    let ownership = metadata.ownership();
-    let policy = table_policy(metadata, table);
+/// Reject metadata work before copying snapshots. Insert-only refill uses the serving
+/// lane because streaming writers already warm Foyer. Enabled preserves metadata warming
+/// even without a serving bitmap; block admission still requires serving overlap for L0.
+fn admits_metadata_refill(
+    policy: CacheRefillPolicy,
+    ownership: RefillOwnership<'_>,
+    table: &TableId,
+    insert_only: bool,
+) -> bool {
+    let serving = ownership.serving.and_then(|map| map.get(table));
+    if insert_only {
+        return ownership.serving.is_some()
+            && (policy.is_unscoped_enabled()
+                || (policy.is_serving_scoped() && serving.is_some_and(Bitmap::any)));
+    }
     policy.is_unscoped_enabled()
         || (policy.is_streaming_scoped()
             && ownership
                 .streaming
                 .and_then(|map| map.get(table))
                 .is_some_and(Bitmap::any))
-        || (policy.is_serving_scoped()
-            && ownership
-                .serving
-                .and_then(|map| map.get(table))
-                .is_some_and(Bitmap::any))
+        || (policy.is_serving_scoped() && serving.is_some_and(Bitmap::any))
 }
 
 impl TableCacheRefillContext {
-    fn new(policy: CacheRefillPolicy, ownership: RefillOwnership<'_>, table: &TableId) -> Self {
-        Self {
+    fn new(
+        policy: CacheRefillPolicy,
+        ownership: RefillOwnership<'_>,
+        table: &TableId,
+    ) -> Option<Self> {
+        let serving = ownership.serving.and_then(|map| map.get(table));
+        // Pure serving workers keep metadata warming for Enabled, but do not admit data
+        // for tables absent from their serving mapping.
+        if ownership.serving.is_some() && ownership.streaming.is_none() && serving.is_none() {
+            return None;
+        }
+        Some(Self {
             policy,
             streaming_vnode_bitmap: ownership
                 .streaming
@@ -119,12 +136,10 @@ impl TableCacheRefillContext {
                 .and_then(|map| map.get(table))
                 .cloned(),
             // Enabled is unscoped for normal refill but needs serving locality for L0.
-            serving_vnode_bitmap: ownership
-                .serving
+            serving_vnode_bitmap: serving
                 .filter(|_| policy.is_serving_scoped() || policy.is_unscoped_enabled())
-                .and_then(|map| map.get(table))
                 .cloned(),
-        }
+        })
     }
 
     pub(in super::super) fn locality(&self) -> TableLocality<'_> {
@@ -152,45 +167,32 @@ pub(in super::super) fn select_table_inputs(
     deltas: &mut [SstDeltaInfo],
     metadata: &TableCacheMetadata,
 ) -> TableCacheRefillContextMap {
+    let ownership = metadata.ownership();
+    let mut contexts = HashMap::new();
     // Pin and Foyer can share one physical SST. Exclude only Pin table projections.
     for delta in deltas.iter_mut() {
         let insert_only = delta.delete_sst_infos.is_empty();
         delta.insert_sst_infos.retain(|sst| {
-            sst.table_ids.iter().any(|table| {
-                !metadata.is_pinned(table)
-                    && admits_table(metadata, table)
-                    // Streaming writers already warm Foyer on L0 commit. This rule must
-                    // not affect Pin, which downloads complete objects independently.
-                    && (!insert_only || allows_insert_only_refill(metadata, table))
-            })
+            let mut admitted = false;
+            for table in &sst.table_ids {
+                if metadata.is_pinned(table) {
+                    continue;
+                }
+                let policy = table_policy(metadata, table);
+                if !admits_metadata_refill(policy, ownership, table, insert_only) {
+                    continue;
+                }
+                admitted = true;
+                if let Entry::Vacant(entry) = contexts.entry(*table)
+                    && let Some(context) = TableCacheRefillContext::new(policy, ownership, table)
+                {
+                    entry.insert(context);
+                }
+            }
+            admitted
         });
     }
-    table_cache_refill_contexts(
-        metadata,
-        deltas
-            .iter()
-            .flat_map(|delta| {
-                delta
-                    .insert_sst_infos
-                    .iter()
-                    .flat_map(|sst| sst.table_ids.iter().copied())
-            })
-            .filter(|table| !metadata.is_pinned(table) && admits_table(metadata, table)),
-    )
-}
-
-fn allows_insert_only_refill(metadata: &TableCacheMetadata, table: &TableId) -> bool {
-    let policy = table_policy(metadata, table);
-    // Preserve Enabled's legacy metadata refill, even without a serving bitmap.
-    // Data blocks still require serving ownership after metadata is available.
-    metadata.role.for_serving()
-        && (policy.is_unscoped_enabled()
-            || (policy.is_serving_scoped()
-                && metadata
-                    .ownership()
-                    .serving
-                    .and_then(|map| map.get(table))
-                    .is_some_and(Bitmap::any)))
+    contexts
 }
 
 /// Prepares Foyer's physical metadata and locality before data task generation.
