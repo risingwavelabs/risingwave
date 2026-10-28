@@ -66,6 +66,15 @@ execute_oracle_sqls([
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('a', 'c1')",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('ab', 'c2')",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('b', 'c3')",
+    "BEGIN IF DBTIMEZONE = '+00:00' THEN "
+    "RAISE_APPLICATION_ERROR(-20000, 'the PDB time zone must not be UTC'); END IF; END;",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY "
+    "(TS TIMESTAMP(6) WITH LOCAL TIME ZONE PRIMARY KEY, NOTE VARCHAR2(16))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY VALUES (TIMESTAMP '2025-12-31 20:00:00 +00:00', 'r1')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY VALUES (TIMESTAMP '2026-01-01 00:00:00 +00:00', 'r2')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY VALUES (TIMESTAMP '2026-01-01 04:00:00 +00:00', 'r3')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY VALUES (TIMESTAMP '2026-01-01 09:00:00 +00:00', 'r4')",
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_INTERVAL "
     "(ID NUMBER(9) PRIMARY KEY, INTERVAL_VALUE INTERVAL DAY TO SECOND)",
     "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_INTERVAL ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
@@ -103,6 +112,10 @@ FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_KEYS';
 statement ok
 CREATE TABLE oracle_snapshot_char_key (*) WITH (snapshot.batch_size = 1)
 FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_CHAR_KEY';
+
+statement ok
+CREATE TABLE oracle_snapshot_ltz_key (*) WITH (snapshot.batch_size = 1)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_LTZ_KEY';
 
 # Discovery must reject Oracle types it cannot map, without leaving a catalog object.
 statement error (?s).*Unsupported Oracle data type: INTERVAL DAY.*
@@ -296,6 +309,16 @@ SELECT replace("CODE", ' ', '_'), "NOTE" FROM oracle_snapshot_char_key ORDER BY 
 a___ c1
 ab__ c2
 b___ c3
+
+# Every page after the first starts from a LOCAL TIME ZONE key read back by the snapshot. A key
+# shifted by the PDB time zone would skip the rows between the real and the shifted value.
+query T retry 30 backoff 1s
+SELECT "TS", "NOTE" FROM oracle_snapshot_ltz_key ORDER BY "TS";
+----
+2025-12-31 20:00:00+00:00 r1
+2026-01-01 00:00:00+00:00 r2
+2026-01-01 04:00:00+00:00 r3
+2026-01-01 09:00:00+00:00 r4
 
 statement ok
 DROP SOURCE oracle_types_source CASCADE;

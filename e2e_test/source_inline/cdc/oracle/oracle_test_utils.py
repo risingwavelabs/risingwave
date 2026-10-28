@@ -35,6 +35,7 @@ TEST_ORACLE_PDB = os.environ["ORACLE_PDB"].upper()
 TEST_ORACLE_SOURCE_SCHEMA = "APP"
 ORACLE_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
 TABLE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
+ORACLE_DATABASE_TIME_ZONE = "+08:00"
 DDL_STATEMENT_TIMEOUT_SECONDS = 120
 PSQL_PROCESS_TIMEOUT_SECONDS = 150
 CHECKPOINT_QUERY_TIMEOUT_SECONDS = 30
@@ -125,10 +126,27 @@ def prepare(
             with connection.cursor() as cursor:
                 cursor.execute(f"ALTER USER {user} QUOTA UNLIMITED ON USERS")
 
+    def __set_database_time_zone() -> None:
+        """Move the PDB off UTC, so LOCAL TIME ZONE values are stored shifted from UTC."""
+        if _query_one("SELECT DBTIMEZONE FROM DUAL") == ORACLE_DATABASE_TIME_ZONE:
+            return
+        with _connect_as_sys(TEST_ORACLE_PDB) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"ALTER DATABASE SET TIME_ZONE = '{ORACLE_DATABASE_TIME_ZONE}'"
+                )
+        with _connect_as_sys(TEST_ORACLE_DATABASE) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"ALTER PLUGGABLE DATABASE {TEST_ORACLE_PDB} CLOSE IMMEDIATE"
+                )
+                cursor.execute(f"ALTER PLUGGABLE DATABASE {TEST_ORACLE_PDB} OPEN")
+
     outcome = SqlOutcome()
     try:
         __prepare_base()
         __drop_tables()
+        __set_database_time_zone()
     except Exception as error:
         outcome.exception = error
     context = HookContext([outcome])

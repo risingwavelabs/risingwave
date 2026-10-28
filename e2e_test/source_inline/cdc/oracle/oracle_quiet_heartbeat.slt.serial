@@ -21,10 +21,9 @@ PY
 # fixture's existing datafiles rather than assuming a container filesystem path.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
-from oracle_test_utils import execute_oracle_sqls
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
 assert "$TEST_ORACLE_HOT_PDB" != "$TEST_ORACLE_PDB"
 execute_oracle_sqls([
-    "ALTER SESSION SET CONTAINER = CDB$ROOT",
     """BEGIN
         FOR pdb IN (SELECT OPEN_MODE FROM V$PDBS WHERE NAME = '$TEST_ORACLE_HOT_PDB') LOOP
             IF pdb.OPEN_MODE <> 'MOUNTED' THEN
@@ -52,7 +51,7 @@ execute_oracle_sqls([
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.CUSTOMERS VALUES (1, 'hot-0')",
     "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS (WRITES NUMBER, CHECKED_WRITES NUMBER)",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS VALUES (0, 0)",
-])
+], service=TEST_ORACLE_DATABASE)
 # Commit the seed rows before starting the independent scheduler session.
 execute_oracle_sqls([
     "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
@@ -82,7 +81,7 @@ execute_oracle_sqls([
         END LOOP;
         RAISE_APPLICATION_ERROR(-20000, 'Hot PDB writer did not start');
     END;""",
-])
+], service=TEST_ORACLE_DATABASE)
 PY
 
 system ok
@@ -125,12 +124,13 @@ SELECT "ID", "NAME" FROM oracle_quiet_customers;
 # insufficient: require three advances.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
-from oracle_test_utils import execute_oracle_sqls
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
 from oracle_test_hooks import check_heartbeat_progress
 execute_oracle_sqls([
     "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
     "UPDATE $TEST_ORACLE_SOURCE_SCHEMA.WRITE_PROGRESS SET CHECKED_WRITES = WRITES",
 ],
+    service=TEST_ORACLE_DATABASE,
     after_oracle_sqls_hook=check_heartbeat_progress,
     after_oracle_sqls_hook_kwargs={"source": "oracle_quiet_source", "checkpoint": "oracle_quiet_source"},
 )
@@ -140,7 +140,7 @@ PY
 # rather than merely having seeded rows before it. Keep writing across RECOVER.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
-from oracle_test_utils import execute_oracle_sqls
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
 execute_oracle_sqls([
     "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
     """DECLARE
@@ -157,7 +157,7 @@ execute_oracle_sqls([
             RAISE_APPLICATION_ERROR(-20000, 'Hot PDB writes did not advance');
         END IF;
     END;""",
-])
+], service=TEST_ORACLE_DATABASE)
 PY
 
 # Hot-PDB writes and quiet heartbeat activity must not change the quiet table.
@@ -182,7 +182,7 @@ PY
 
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
-from oracle_test_utils import execute_oracle_sqls
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
 execute_oracle_sqls([
     "ALTER SESSION SET CONTAINER = $TEST_ORACLE_HOT_PDB",
     """DECLARE
@@ -199,7 +199,7 @@ execute_oracle_sqls([
             RAISE_APPLICATION_ERROR(-20000, 'Hot PDB writes did not advance');
         END IF;
     END;""",
-])
+], service=TEST_ORACLE_DATABASE)
 PY
 
 # Heartbeat progress and recovery must not leak same-named hot-PDB table changes.
@@ -221,10 +221,9 @@ python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
 # The job is bounded (~10 minutes) so an aborted SLT cannot write indefinitely.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
-from oracle_test_utils import execute_oracle_sqls
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
 execute_oracle_sqls([
-    "ALTER SESSION SET CONTAINER = CDB$ROOT",
     "ALTER PLUGGABLE DATABASE $TEST_ORACLE_HOT_PDB CLOSE IMMEDIATE",
     "DROP PLUGGABLE DATABASE $TEST_ORACLE_HOT_PDB INCLUDING DATAFILES",
-])
+], service=TEST_ORACLE_DATABASE)
 PY
