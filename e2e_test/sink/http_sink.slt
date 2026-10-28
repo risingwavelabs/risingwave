@@ -393,4 +393,4 @@ statement ok
 DROP TABLE t_batched_payload;
 
 statement ok
-RESET streaming_parallelism;
+SET streaming_parallelism TO DEFAULT;
