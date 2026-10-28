@@ -1,0 +1,225 @@
+# Temporal join with `streaming.developer.temporal_join_entry_state_max_rows` set below the number
+# of matching rows of a key, so the key is not cached and its rows are read from the lookup table.
+# Results must be the same as without the limit, for normal and broadcast temporal joins, append-only
+# and non-append-only.
+#
+# `.slt.serial` because applying the config needs `recover`, which restarts every streaming job.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE events(id INT, k INT, payload INT, PRIMARY KEY (id));
+
+statement ok
+CREATE TABLE append_events(k INT, payload INT) APPEND ONLY;
+
+statement ok
+CREATE TABLE dimensions(k INT, seq INT, dim_value INT, PRIMARY KEY (k, seq));
+
+# Distributed by `k`, so a temporal join on `k` reads all rows of a key through this index.
+statement ok
+CREATE INDEX dimensions_by_k ON dimensions(k) INCLUDE (seq, dim_value) DISTRIBUTED BY (k);
+
+# Key 1 has 3 rows, key 2 has 1 row.
+statement ok
+INSERT INTO dimensions VALUES (1, 1, 10), (1, 2, 20), (1, 3, 30), (2, 1, 40);
+
+statement ok
+CREATE MATERIALIZED VIEW joined AS
+SELECT id, payload, seq, dim_value
+FROM events
+JOIN dimensions FOR SYSTEM_TIME AS OF PROCTIME()
+ON events.k = dimensions.k;
+
+statement ok
+CREATE MATERIALIZED VIEW joined_broadcast AS
+SELECT id, payload, seq, dim_value
+FROM events
+BROADCAST JOIN dimensions FOR SYSTEM_TIME AS OF PROCTIME()
+ON events.k = dimensions.k;
+
+statement ok
+CREATE MATERIALIZED VIEW joined_append_only AS
+SELECT payload, seq, dim_value
+FROM append_events
+LEFT JOIN dimensions FOR SYSTEM_TIME AS OF PROCTIME()
+ON append_events.k = dimensions.k;
+
+statement ok
+CREATE MATERIALIZED VIEW joined_append_only_broadcast AS
+SELECT payload, seq, dim_value
+FROM append_events
+BROADCAST LEFT JOIN dimensions FOR SYSTEM_TIME AS OF PROCTIME()
+ON append_events.k = dimensions.k;
+
+statement ok
+ALTER MATERIALIZED VIEW joined SET CONFIG (streaming.developer.temporal_join_entry_state_max_rows = 2);
+
+statement ok
+ALTER MATERIALIZED VIEW joined_broadcast SET CONFIG (streaming.developer.temporal_join_entry_state_max_rows = 2);
+
+statement ok
+ALTER MATERIALIZED VIEW joined_append_only SET CONFIG (streaming.developer.temporal_join_entry_state_max_rows = 2);
+
+statement ok
+ALTER MATERIALIZED VIEW joined_append_only_broadcast SET CONFIG (streaming.developer.temporal_join_entry_state_max_rows = 2);
+
+statement ok
+recover;
+
+statement ok
+INSERT INTO events VALUES (1, 1, 100), (2, 2, 200);
+
+statement ok
+INSERT INTO append_events VALUES (1, 100), (2, 200), (3, 300);
+
+query IIII rowsort
+SELECT * FROM joined;
+----
+1 100 1 10
+1 100 2 20
+1 100 3 30
+2 200 1 40
+
+query IIII rowsort
+SELECT * FROM joined_broadcast;
+----
+1 100 1 10
+1 100 2 20
+1 100 3 30
+2 200 1 40
+
+query III rowsort
+SELECT * FROM joined_append_only;
+----
+100 1 10
+100 2 20
+100 3 30
+200 1 40
+300 NULL NULL
+
+query III rowsort
+SELECT * FROM joined_append_only_broadcast;
+----
+100 1 10
+100 2 20
+100 3 30
+200 1 40
+300 NULL NULL
+
+# Change the lookup table after the keys were looked up: key 1 loses a row and gains one, and key 2
+# grows past the limit.
+statement ok
+DELETE FROM dimensions WHERE k = 1 AND seq = 2;
+
+statement ok
+INSERT INTO dimensions VALUES (1, 4, 50), (2, 2, 60), (2, 3, 70);
+
+statement ok
+INSERT INTO events VALUES (3, 1, 101), (4, 2, 201);
+
+statement ok
+INSERT INTO append_events VALUES (1, 101), (2, 201);
+
+query IIII rowsort
+SELECT * FROM joined;
+----
+1 100 1 10
+1 100 2 20
+1 100 3 30
+2 200 1 40
+3 101 1 10
+3 101 3 30
+3 101 4 50
+4 201 1 40
+4 201 2 60
+4 201 3 70
+
+query IIII rowsort
+SELECT * FROM joined_broadcast;
+----
+1 100 1 10
+1 100 2 20
+1 100 3 30
+2 200 1 40
+3 101 1 10
+3 101 3 30
+3 101 4 50
+4 201 1 40
+4 201 2 60
+4 201 3 70
+
+query III rowsort
+SELECT * FROM joined_append_only;
+----
+100 1 10
+100 2 20
+100 3 30
+101 1 10
+101 3 30
+101 4 50
+200 1 40
+201 1 40
+201 2 60
+201 3 70
+300 NULL NULL
+
+query III rowsort
+SELECT * FROM joined_append_only_broadcast;
+----
+100 1 10
+100 2 20
+100 3 30
+101 1 10
+101 3 30
+101 4 50
+200 1 40
+201 1 40
+201 2 60
+201 3 70
+300 NULL NULL
+
+# Deleting a left row retracts exactly the rows it was joined with.
+statement ok
+DELETE FROM events WHERE id IN (1, 4);
+
+query IIII rowsort
+SELECT * FROM joined;
+----
+2 200 1 40
+3 101 1 10
+3 101 3 30
+3 101 4 50
+
+query IIII rowsort
+SELECT * FROM joined_broadcast;
+----
+2 200 1 40
+3 101 1 10
+3 101 3 30
+3 101 4 50
+
+statement ok
+DROP MATERIALIZED VIEW joined;
+
+statement ok
+DROP MATERIALIZED VIEW joined_broadcast;
+
+statement ok
+DROP MATERIALIZED VIEW joined_append_only;
+
+statement ok
+DROP MATERIALIZED VIEW joined_append_only_broadcast;
+
+statement ok
+DROP TABLE events;
+
+statement ok
+DROP TABLE append_events;
+
+statement ok
+DROP INDEX dimensions_by_k;
+
+statement ok
+DROP TABLE dimensions;

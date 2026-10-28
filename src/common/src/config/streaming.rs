@@ -236,6 +236,12 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
     pub hash_join_entry_state_max_rows: usize,
 
+    /// Maximum number of right-side rows cached per join key in a temporal join. If a key has
+    /// more matching rows than this, they are not cached; lookups for that key read the rows from
+    /// the right table instead. 0 (the default) disables the limit.
+    #[serde(default = "default::developer::streaming_temporal_join_entry_state_max_rows")]
+    pub temporal_join_entry_state_max_rows: usize,
+
     /// Number of processed rows between periodic join cache evictions.
     /// Values smaller than 1 will be clamped to 1 by the executor.
     #[serde(default = "default::developer::streaming_join_hash_map_evict_interval_rows")]
