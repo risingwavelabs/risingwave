@@ -440,6 +440,25 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
         insert_sst_level: 0,
     };
 
+    // Risectl uses Role::None with the default Enabled policy. Neither L0 commits
+    // nor compaction outputs should reach metadata loading on that instance.
+    for delta in [
+        insert_only_delta(vec![sst_info(vec![fallback_table])]),
+        normal_delta(vec![sst_info(vec![fallback_table])]),
+    ] {
+        assert!(
+            capture_pruned_table_ids(
+                Role::None,
+                CacheRefillPolicy::Enabled,
+                HashMap::new(),
+                &[],
+                &[],
+                delta,
+            )
+            .is_empty()
+        );
+    }
+
     assert_eq!(
         capture_pruned_table_ids(
             Role::Both,
