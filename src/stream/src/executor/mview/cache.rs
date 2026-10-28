@@ -550,10 +550,9 @@ mod placeholder {
             // Check if the new value is Debezium's placeholder
             let is_placeholder = is_debezium_placeholder(&new_row.datum_at(placeholder_column_idx));
             if is_placeholder {
-                // Replace with old row value if available
-                if let Some(old_datum_ref) = old_row.datum_at(placeholder_column_idx) {
-                    fixed_row_data[placeholder_column_idx] = Some(old_datum_ref.into_scalar_impl());
-                }
+                fixed_row_data[placeholder_column_idx] = old_row
+                    .datum_at(placeholder_column_idx)
+                    .map(|old_datum_ref| old_datum_ref.into_scalar_impl());
             }
         }
 

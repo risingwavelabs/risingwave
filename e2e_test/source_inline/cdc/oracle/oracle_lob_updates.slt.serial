@@ -89,12 +89,26 @@ SELECT "ID", "TITLE", "BODY", "NBODY", "DATA" FROM oracle_lob_updates ORDER BY "
 1 title-only body changed nbody 改 \xff00
 2 title-only NULL nbody 二 \x0c0d
 
-# A later update of another column keeps the changed LOB values, not the backfilled ones.
+# A later update of another column keeps the changed LOB values, not the backfilled ones, and
+# keeps a NULL LOB NULL.
 system ok
 PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
 from oracle_test_utils import execute_oracle_sqls
 execute_oracle_sqls([
     "UPDATE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES SET TITLE = 'again' WHERE ID IN (1, 2)",
+])
+PY
+
+query T retry 30 backoff 1s
+SELECT "ID", "TITLE", "BODY", "NBODY", "DATA" FROM oracle_lob_updates ORDER BY "ID";
+----
+1 again body changed nbody 改 \xff00
+2 again NULL nbody 二 \x0c0d
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
     "DELETE FROM $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES WHERE ID = 2",
     "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_LOB_UPDATES (ID, TITLE) VALUES (3, 'marker')",
 ])
