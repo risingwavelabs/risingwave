@@ -575,43 +575,6 @@ fn parse_is_not_distinct_from() {
 }
 
 #[test]
-fn parse_is_distinct_from_precedence() {
-    use self::Expr::*;
-    let ident = |s| Box::new(Identifier(Ident::new_unchecked(s)));
-
-    // IS binds tighter than AND / OR, so this parses as (a IS DISTINCT FROM b) AND c
-    assert_eq!(
-        verified_expr("a IS DISTINCT FROM b AND c"),
-        BinaryOp {
-            left: Box::new(IsDistinctFrom(ident("a"), ident("b"))),
-            op: BinaryOperator::And,
-            right: ident("c"),
-        }
-    );
-    assert_eq!(
-        verified_expr("a IS NOT DISTINCT FROM b OR c"),
-        BinaryOp {
-            left: Box::new(IsNotDistinctFrom(ident("a"), ident("b"))),
-            op: BinaryOperator::Or,
-            right: ident("c"),
-        }
-    );
-
-    // But IS binds looser than comparison and arithmetic operators
-    assert_eq!(
-        verified_expr("a IS DISTINCT FROM b = c"),
-        IsDistinctFrom(
-            ident("a"),
-            Box::new(BinaryOp {
-                left: ident("b"),
-                op: BinaryOperator::Eq,
-                right: ident("c"),
-            })
-        )
-    );
-}
-
-#[test]
 fn parse_not_precedence() {
     // NOT has higher precedence than OR/AND, so the following must parse as (NOT true) OR true
     let sql = "NOT true OR true";

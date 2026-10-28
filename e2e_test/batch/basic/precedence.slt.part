@@ -23,6 +23,24 @@ select pg_typeof(-2147483648 * 1);
 ----
 integer
 
+query T
+select null is distinct from true and false; -- is distinct from then and
+----
+f
+
+query T
+select null is not distinct from false or true; -- is not distinct from then or
+----
+t
+
+query T
+select true is distinct from false = false; -- equals then is distinct from
+----
+f
+
+statement error syntax error at or near
+select false is distinct from null is null; -- is is non-associative
+
 
 # query I
 # select @ 1 - 2; -- minus then abs

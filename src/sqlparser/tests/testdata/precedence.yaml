@@ -14,3 +14,38 @@
 - input: select |/ 4 + 12
   formatted_sql: SELECT |/ 4 + 12
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(UnaryOp { op: Custom("|/"), expr: BinaryOp { left: Value(Number("4")), op: Plus, right: Value(Number("12")) } })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select a is distinct from b and c
+  formatted_sql: SELECT a IS DISTINCT FROM b AND c
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: IsDistinctFrom(Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None })), op: And, right: Identifier(Ident { value: "c", quote_style: None }) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select a is not distinct from b or c
+  formatted_sql: SELECT a IS NOT DISTINCT FROM b OR c
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: IsNotDistinctFrom(Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None })), op: Or, right: Identifier(Ident { value: "c", quote_style: None }) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select a is distinct from b = c
+  formatted_sql: SELECT a IS DISTINCT FROM b = c
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsDistinctFrom(Identifier(Ident { value: "a", quote_style: None }), BinaryOp { left: Identifier(Ident { value: "b", quote_style: None }), op: Eq, right: Identifier(Ident { value: "c", quote_style: None }) }))], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select a is null is distinct from b
+  formatted_sql: SELECT a IS NULL IS DISTINCT FROM b
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsDistinctFrom(IsNull(Identifier(Ident { value: "a", quote_style: None })), Identifier(Ident { value: "b", quote_style: None })))], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select (a is distinct from b) is null
+  formatted_sql: SELECT (a IS DISTINCT FROM b) IS NULL
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsNull(Nested(IsDistinctFrom(Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None })))))], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select a is distinct from b is null
+  error_msg: |-
+    sql parser error: syntax error at or near is
+    LINE 1: select a is distinct from b is null
+                                        ^
+- input: select a is not distinct from b is true
+  error_msg: |-
+    sql parser error: syntax error at or near is
+    LINE 1: select a is not distinct from b is true
+                                            ^
+- input: select a is distinct from b isnull
+  error_msg: |-
+    sql parser error: syntax error at or near isnull
+    LINE 1: select a is distinct from b isnull
+                                        ^
+- input: select a is distinct from b notnull
+  error_msg: |-
+    sql parser error: syntax error at or near notnull
+    LINE 1: select a is distinct from b notnull
+                                        ^

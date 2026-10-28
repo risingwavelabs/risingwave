@@ -1389,11 +1389,11 @@ impl Parser<'_> {
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::NULL]) {
                         Ok(Expr::IsNotNull(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::DISTINCT, Keyword::FROM]) {
-                        let expr2 = self.parse_subexpr(Precedence::Is)?;
+                        let expr2 = self.parse_is_distinct_from_rhs()?;
                         Ok(Expr::IsDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::DISTINCT, Keyword::FROM])
                     {
-                        let expr2 = self.parse_subexpr(Precedence::Is)?;
+                        let expr2 = self.parse_is_distinct_from_rhs()?;
                         Ok(Expr::IsNotDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else {
                         let negated = self.parse_keyword(Keyword::NOT);
@@ -1573,6 +1573,20 @@ impl Parser<'_> {
         } else {
             Ok(new_expr)
         }
+    }
+
+    /// Parses the right operand of `IS [NOT] DISTINCT FROM`.
+    ///
+    /// Like PostgreSQL, where `IS` is non-associative, rejects another `IS`, `ISNULL`, or
+    /// `NOTNULL` right after the operand.
+    fn parse_is_distinct_from_rhs(&mut self) -> ModalResult<Expr> {
+        let expr = self.parse_subexpr(Precedence::Is)?;
+
+        if self.get_next_precedence()? == Precedence::Is {
+            parser_err!("syntax error at or near {}", self.peek_token().token);
+        }
+
+        Ok(expr)
     }
 
     /// Parses the optional constraints following the `IS [NOT] JSON` predicate
