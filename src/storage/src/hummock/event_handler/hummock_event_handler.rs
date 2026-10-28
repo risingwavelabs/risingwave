@@ -1226,6 +1226,12 @@ pub(super) mod tests {
             &self.handler.refiller
         }
 
+        pub(in crate::hummock::event_handler) fn metadata(
+            &self,
+        ) -> &crate::hummock::table_cache_metadata::SharedTableCacheMetadata {
+            &self.handler.cache_metadata
+        }
+
         pub(in crate::hummock::event_handler) fn versions(
             &mut self,
         ) -> &mut super::VersionUpdateQueue {
