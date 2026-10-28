@@ -14,11 +14,13 @@
 
 //! Integration tests for backend composition and version publication.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures::FutureExt;
+use parking_lot::Mutex;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
@@ -684,8 +686,7 @@ async fn test_pin_timeout_during_preparation_or_submitted_copy() {
 #[tokio::test]
 async fn test_pin_refill_after_table_pruning() {
     // A mixed commit truncates A while appending a shared SST. Separate raw deltas
-    // append first and then unregister A. Within one event only B's surviving projection
-    // may refill; separate events must still refill the first event's owned A projection.
+    // append first and then unregister A. Only B's surviving projection may refill.
     for (mixed_commit, separate_events, owns_survivor) in [
         (true, false, true),
         (true, false, false),
@@ -754,13 +755,12 @@ async fn test_pin_refill_after_table_pruning() {
                 Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             );
         }
-        let target_id = if mixed_commit { 2 } else { 3 };
-        let mut events = apply_next_events(&mut refiller).await;
-        while events.last().unwrap().new_pinned_version.id().as_raw_id() < target_id {
-            events.extend(apply_next_events(&mut refiller).await);
-        }
+        let events = apply_next_events(&mut refiller).await;
         assert_eq!(events.len(), if separate_events { 2 } else { 1 });
-        assert_eq!(events.last().unwrap().new_pinned_version.id(), target_id);
+        assert_eq!(
+            events.last().unwrap().new_pinned_version.id(),
+            if mixed_commit { 2 } else { 3 }
+        );
         assert!(!cache.is_registered(old.object_id));
         assert!(
             cache.is_registered(inserted.object_id),
@@ -768,8 +768,252 @@ async fn test_pin_refill_after_table_pruning() {
         );
         assert_eq!(
             cache.get(inserted.object_id).is_some(),
-            owns_survivor || separate_events,
-            "mixed_commit={mixed_commit}, separate_events={separate_events}"
+            owns_survivor,
+            "mixed_commit={mixed_commit}"
         );
+    }
+}
+
+#[tokio::test]
+async fn test_pin_commit_compaction_batch_publication() {
+    for (batch_size, fail_target, slow_commit_foyer) in [
+        (1, false, false),
+        (16, false, false),
+        (16, true, false),
+        (16, false, true),
+    ] {
+        let table = TableId::from(233);
+        let ordinary_table = TableId::from(234);
+        let (store, cache) = mock_sstable_store_with_pin_cache().await;
+        let mut infos = Vec::new();
+        for object in 839..=842 {
+            infos.push(
+                gen_test_sst_with_object_id(table, store.clone(), object)
+                    .await
+                    .1,
+            );
+        }
+        let [initial, middle, last, later] = infos.try_into().unwrap();
+        let ordinary = gen_test_sst_with_object_id(ordinary_table, store.clone(), 843)
+            .await
+            .1;
+        let ordinary_output = gen_test_sst_with_object_id(ordinary_table, store.clone(), 844)
+            .await
+            .1;
+        if fail_target {
+            store
+                .store()
+                .delete(&store.get_sst_data_path(last.object_id))
+                .await
+                .unwrap();
+            store.clear_meta_cache().await.unwrap();
+        }
+        // Writer-populated metadata must not conceal whether the selected Pin batch loaded it.
+        store.clear_meta_cache().await.unwrap();
+        let serving_store = store.clone();
+        let base = pinned_version_with_ssts(&[table, ordinary_table], &[]);
+        let gates = std::array::from_fn::<_, 4, _>(|_| Arc::new(Semaphore::new(0)));
+        let waiting = Arc::new(Mutex::new(VecDeque::from(gates.clone())));
+        let output = ordinary_output.object_id;
+        let completed = Arc::new(AtomicUsize::new(0));
+        let worker_completed = completed.clone();
+        let spawn: SpawnRefillTask = Arc::new(move |deltas, _| {
+            let mut waiting = waiting.lock();
+            if waiting.len() == 2 {
+                assert!(
+                    deltas
+                        .iter()
+                        .flat_map(|delta| &delta.insert_sst_infos)
+                        .any(|sst| sst.object_id == output),
+                    "the final Foyer condition must contain ordinary compaction work"
+                );
+            }
+            let gate = waiting.pop_front().unwrap();
+            let completed = worker_completed.clone();
+            tokio::spawn(async move {
+                gate.acquire().await.unwrap().forget();
+                completed.fetch_add(1, Ordering::SeqCst);
+            })
+        });
+        let mut config = test_refill_config();
+        config.timeout = Duration::from_secs(5);
+        config.pin_cache_max_batch_size = batch_size;
+        let mut refiller = RefillTest::new(
+            Role::Both,
+            CacheRefillPolicy::Enabled,
+            config,
+            store,
+            spawn,
+            base.clone(),
+        );
+        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller
+            .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+
+        // An earlier submitted Pin copy waits for data capacity while later events queue.
+        let first_permit = refiller
+            .cache()
+            .foyer
+            .concurrency
+            .clone()
+            .acquire_owned()
+            .await
+            .unwrap();
+        let committed = l0_insert_delta(base.id(), test_epoch(233), vec![initial.clone()]);
+        refiller.submit(vec![committed]);
+        wait_for_pin_downloads(&refiller, &[initial.object_id]).await;
+        assert!(cache.is_registered(initial.object_id));
+
+        let inserted = l0_insert_delta(
+            2.into(),
+            test_epoch(234),
+            vec![middle.clone(), ordinary.clone()],
+        );
+        let mut compacted = HummockVersionDelta::default();
+        compacted.prev_id = inserted.id;
+        compacted.id = 4.into();
+        compacted.group_deltas.insert(
+            1.into(),
+            GroupDeltas {
+                // Match Meta's separate deletion and insertion operations. Only the
+                // second sublevel is compacted; the earlier SST remains in L0.
+                group_deltas: vec![
+                    GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        0,
+                        0,
+                        [middle.sst_id, ordinary.sst_id].into(),
+                        vec![],
+                        0,
+                        0,
+                    )),
+                    GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        0,
+                        2,
+                        HashSet::new(),
+                        vec![last.clone(), ordinary_output],
+                        0,
+                        0,
+                    )),
+                ],
+            },
+        );
+        for delta in [inserted, compacted] {
+            refiller.submit(vec![delta]);
+        }
+        assert!(cache.is_registered(middle.object_id));
+        assert!(cache.is_registered(last.object_id));
+        assert!(cache.get(middle.object_id).is_none());
+        drop(first_permit);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while refiller
+                .cache()
+                .pin_cache_refill
+                .as_ref()
+                .unwrap()
+                .has_unfinished_requests()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Pin must select the next batch while all Foyer conditions remain blocked");
+        let data_permit = if fail_target {
+            None
+        } else {
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while cache.get(last.object_id).is_none() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            Some(
+                refiller
+                    .cache()
+                    .foyer
+                    .concurrency
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .unwrap(),
+            )
+        };
+
+        let appended = l0_insert_delta(4.into(), test_epoch(235), vec![later.clone()]);
+        refiller.submit(vec![appended]);
+        gates[3].add_permits(1);
+        assert!(cache.is_registered(later.object_id));
+
+        gates[0].add_permits(1);
+        let first = apply_next_events(&mut refiller).await;
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].new_pinned_version.id(), 2);
+        assert_eq!(cache.get(middle.object_id).is_some(), batch_size == 1);
+        assert_eq!(
+            serving_store
+                .sstable_cached(middle.object_id)
+                .await
+                .unwrap()
+                .is_some(),
+            batch_size == 1,
+            "merged Pin batches must prune the intermediate object before metadata preparation",
+        );
+        assert!(cache.is_registered(middle.object_id));
+        // A later ready target must not bypass the commit's independent Foyer attempt.
+        let (ready_foyer, blocked_foyer) = if slow_commit_foyer { (2, 1) } else { (1, 2) };
+        gates[ready_foyer].add_permits(1);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while completed.load(Ordering::SeqCst) != 3 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("only the selected Foyer task must remain unfinished");
+        if batch_size == 1 {
+            let events = apply_next_events(&mut refiller).await;
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].new_pinned_version.id(), 3);
+        }
+        for _ in 0..2 {
+            assert!(
+                refiller.versions().next_events().now_or_never().is_none(),
+                "a merged target must wait for both events' independent Foyer attempts"
+            );
+        }
+        if data_permit.is_some() {
+            assert!(
+                cache.get(later.object_id).is_none(),
+                "publishing older work must not cancel the newer download"
+            );
+        }
+        drop(data_permit);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while cache.get(later.object_id).is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the next Pin batch must finish before the previous batch's Foyer condition");
+        assert_eq!(cache.get(last.object_id).is_some(), !fail_target);
+        assert!(refiller.versions().next_events().now_or_never().is_none());
+
+        gates[blocked_foyer].add_permits(1);
+        let events = apply_next_events(&mut refiller).await;
+        let ids = events
+            .iter()
+            .map(|event| event.new_pinned_version.id().as_raw_id())
+            .collect::<Vec<_>>();
+        let first_id = if batch_size == 1 { 4 } else { 3 };
+        let published = *ids.last().unwrap();
+        assert!(published >= 4);
+        assert_eq!(ids, (first_id..=published).collect::<Vec<_>>());
+        if published < 5 {
+            let events = apply_next_events(&mut refiller).await;
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].new_pinned_version.id(), 5);
+        }
+        assert!(!cache.is_registered(middle.object_id));
+        assert!(cache.is_registered(last.object_id));
+        assert!(cache.get(later.object_id).is_some());
     }
 }

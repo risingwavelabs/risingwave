@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Weak};
 
 use futures::future::try_join_all;
 use parking_lot::Mutex;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_pb::id::TableId;
@@ -31,23 +31,23 @@ use super::admission::pin::{iter_admitted_objects, select_owned_candidates};
 use crate::hummock::SstableStoreRef;
 use crate::hummock::event_handler::ReadOnlyRwLockRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::pin_cache_refill::PinCacheRefillPlan;
 use crate::hummock::pin_cache_refill::executor::PinCacheRefillExecutor;
+use crate::hummock::pin_cache_refill::{PinCacheRefillObject, PinCacheRefillPlan};
 use crate::hummock::table_cache_metadata::TableCacheMetadata;
 
-/// One unresolved event: version ID, withdrawable intent and its publication completion.
+/// One unresolved event: target snapshot, withdrawable intent and publication completion.
 struct Request {
-    version_id: HummockVersionId,
+    target: PinnedVersion,
     plan: PinCacheRefillPlan,
-    completion: oneshot::Sender<()>,
+    completion: oneshot::Sender<bool>,
 }
 
-/// Prepares one event at a time independently of Foyer and version publication.
-/// The executor owns admitted downloads; this worker owns metadata preparation and completion.
+/// Batches queued intent independently of version publication. The executor owns all
+/// admitted downloads. This worker selects batches, prepares locality and reports endpoints.
 pub(super) struct PinCacheRefiller {
     pub(super) executor: Arc<PinCacheRefillExecutor>,
-    // The selected request stays queued until its attempt settles, so policy withdrawal
-    // can narrow its original intent during metadata I/O without another active-request record.
+    // Selected requests stay in this queue until the attempt settles. Policy withdrawal
+    // can narrow their original intent during metadata I/O without a second active-batch state.
     requests: Arc<Mutex<VecDeque<Request>>>,
     wake: Arc<Notify>,
     worker: JoinHandle<()>,
@@ -56,7 +56,7 @@ pub(super) struct PinCacheRefiller {
 impl Drop for PinCacheRefiller {
     fn drop(&mut self) {
         // The worker owns the last queue reference while running. Abort drops its selected
-        // inputs and queued senders together; clearing here could race its completion dequeue.
+        // inputs and queued senders together; clearing here could race its fixed-prefix drain.
         self.worker.abort();
     }
 }
@@ -95,19 +95,19 @@ impl PinCacheRefiller {
     pub fn start_cache_refill(
         &self,
         deltas: &[SstDeltaInfo],
-        target: &PinnedVersion,
+        target: PinnedVersion,
         version_deltas: Option<&[HummockVersionDelta]>,
         admitted_tables: &HashSet<TableId>,
-    ) -> oneshot::Receiver<()> {
+    ) -> oneshot::Receiver<bool> {
         let plan = PinCacheRefillPlan::from_version_update(
             deltas,
-            target,
+            &target,
             version_deltas,
             admitted_tables,
         );
         let (completion, receiver) = oneshot::channel();
         self.requests.lock().push_back(Request {
-            version_id: target.id(),
+            target,
             plan,
             completion,
         });
@@ -131,24 +131,37 @@ impl PinCacheRefiller {
             let selected = {
                 let metadata = metadata.read();
                 let requests = requests.lock();
-                requests.front().map(|request| {
+                if requests.is_empty() {
+                    None
+                } else {
+                    let count = config.pin_cache_max_batch_size.max(1).min(requests.len());
+                    let target = &requests[count - 1].target;
                     let candidates = select_owned_candidates(
-                        request.plan.objects.values().filter(|candidate| {
-                            cache.get(candidate.source_sst.object_id).is_none()
-                        }),
+                        requests
+                            .iter()
+                            .take(count)
+                            .flat_map(|request| request.plan.objects.values())
+                            .filter(|candidate| {
+                                cache.get(candidate.source_sst.object_id).is_none()
+                            }),
                         &metadata,
                     );
-                    (request.version_id, candidates)
-                })
+                    let mut plan = merge_pin_refill_candidates(candidates);
+                    // A single event was already pruned against its target at receipt.
+                    if count > 1 {
+                        plan.retain_in_version(target, metadata.pinned_tables());
+                    }
+                    Some((count, target.id(), plan))
+                }
             };
-            let Some((target_id, candidates)) = selected else {
+            let Some((count, target_id, plan)) = selected else {
                 wake.notified().await;
                 continue;
             };
             let attempt = async {
                 let prepared = match load_sst_metadata(
                     &store,
-                    candidates.into_iter(),
+                    plan.objects.into_values(),
                     |candidate| &candidate.source_sst,
                     meta_concurrency.as_deref(),
                 )
@@ -167,17 +180,15 @@ impl PinCacheRefiller {
                 let downloads = {
                     let metadata = metadata.read();
                     let requests = requests.lock();
-                    // The selected request remains authoritative during preparation. RESET then
-                    // SET cannot recreate tables removed from its captured plan.
+                    // The selected prefix remains authoritative during preparation. RESET then
+                    // SET cannot recreate tables removed from these captured plans.
                     let admitted = iter_admitted_objects(
                         prepared,
                         &metadata,
                         requests
-                            .front()
-                            .expect("only the worker removes requests")
-                            .plan
-                            .objects
-                            .values()
+                            .iter()
+                            .take(count)
+                            .flat_map(|request| request.plan.objects.values())
                             .flat_map(|candidate| candidate.admitted_tables.iter().copied()),
                     );
                     let Some(executor) = executor.upgrade() else {
@@ -205,12 +216,11 @@ impl PinCacheRefiller {
             if tokio::time::timeout(config.timeout, attempt).await.is_err() {
                 tracing::warn!(version_id = %target_id, "Pin cache refill timed out");
             }
-            // Failure and timeout permit remote fallback. Only this worker removes requests.
-            let request = requests
-                .lock()
-                .pop_front()
-                .expect("selected request remains queued");
-            let _ = request.completion.send(());
+            // Keep endpoint decisions even when preparation fails or times out before submission.
+            // Only this worker removes requests; metadata notifications only narrow their plans.
+            for (index, request) in requests.lock().drain(..count).enumerate() {
+                let _ = request.completion.send(index + 1 == count);
+            }
             tokio::task::yield_now().await;
         }
     }
@@ -292,7 +302,7 @@ impl PinCacheRefiller {
                 request.plan.retain_tables(pinned_tables);
             }
         }
-        // Executor work can outlive an event timeout, so it is always invalidated directly.
+        // Executor work can outlive a batch timeout, so it is always invalidated directly.
         self.executor.cancel_tables(changed_tables);
     }
 
@@ -302,6 +312,25 @@ impl PinCacheRefiller {
     ) {
         self.executor.cancel_objects(objects);
     }
+}
+
+// Coalesce owned candidates before pruning the selected endpoint and loading metadata.
+fn merge_pin_refill_candidates(candidates: Vec<PinCacheRefillObject>) -> PinCacheRefillPlan {
+    let mut plan = PinCacheRefillPlan::default();
+    for candidate in candidates {
+        match plan.objects.entry(candidate.source_sst.object_id) {
+            Entry::Occupied(mut entry) => {
+                entry
+                    .get_mut()
+                    .admitted_tables
+                    .extend(candidate.admitted_tables);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(candidate);
+            }
+        }
+    }
+    plan
 }
 
 #[cfg(test)]
