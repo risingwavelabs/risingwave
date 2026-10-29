@@ -277,13 +277,14 @@ enable_state_table_vnode_stats_pruning = false
 enable_locality_sort_buffer = true
 locality_sort_buffer_activate_threshold = 65536
 cache_refill_policy = "enabled"
-pin_cache_table_id = ""
 enable_vnode_key_stats_for_materialize = false
 max_concurrent_kv_log_store_historical_read = 0
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
 pool_setup_concurrency = 0
+
+[streaming.developer.cache_refill_policy_overrides]
 
 [storage]
 share_buffers_sync_parallelism = 1

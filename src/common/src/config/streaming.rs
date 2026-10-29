@@ -359,10 +359,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::cache_refill_policy")]
     pub cache_refill_policy: CacheRefillPolicy,
 
-    /// Physical table ID whose complete SSTs should be stored in the local pin cache.
-    /// This per-job override is intended for testing the pin-cache path.
+    /// Per-job cache refill policy overrides keyed by physical table ID.
+    /// Set through `ALTER ... SET CACHE_REFILL_POLICY ... FOR TABLES (...)`.
     #[serde(default)]
-    pub pin_cache_table_id: Option<u32>,
+    pub cache_refill_policy_overrides: BTreeMap<String, CacheRefillPolicy>,
 
     /// Whether `MaterializeExecutor` enables vnode key stats for its state table.
     #[serde(default = "default::developer::enable_vnode_key_stats_for_materialize")]

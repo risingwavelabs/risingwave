@@ -947,13 +947,20 @@ impl CatalogController {
         entries_to_add: HashMap<String, String>,
         keys_to_remove: Vec<String>,
     ) -> MetaResult<NotificationVersion> {
-        let updates_table_cache_refill_config = entries_to_add.keys().any(|key| {
-            key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH
-                || key == STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH
-        }) || keys_to_remove.iter().any(|key| {
-            key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH
-                || key == STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH
-        });
+        let updates_table_cache_refill_config = entries_to_add
+            .keys()
+            .chain(keys_to_remove.iter())
+            .any(|key| is_cache_refill_config(key));
+
+        let mut table_ids = entries_to_add
+            .keys()
+            .chain(keys_to_remove.iter())
+            .filter_map(|key| {
+                key.strip_prefix(STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH)
+                    .and_then(|suffix| suffix.strip_prefix('.'))
+            })
+            .map(cache_refill_policy_table_id)
+            .collect::<MetaResult<Vec<_>>>()?;
 
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -969,6 +976,24 @@ impl CatalogController {
 
         let mut table: toml::Table =
             toml::from_str(&config_override).context("invalid streaming job config")?;
+
+        // A state removed by ALTER may leave an override behind. Its owner must still be
+        // able to RESET that persisted entry, without accepting arbitrary foreign targets.
+        let existing_overrides = table
+            .get("streaming")
+            .and_then(|value| value.get("developer"))
+            .and_then(|value| value.get("cache_refill_policy_overrides"))
+            .and_then(toml::Value::as_table);
+        let reset_existing = keys_to_remove
+            .iter()
+            .filter_map(|key| {
+                key.strip_prefix(STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH)
+                    .and_then(|suffix| suffix.strip_prefix('.'))
+            })
+            .filter(|id| existing_overrides.is_some_and(|overrides| overrides.contains_key(*id)))
+            .map(cache_refill_policy_table_id)
+            .collect::<MetaResult<HashSet<_>>>()?;
+        table_ids.retain(|id| !reset_existing.contains(id));
 
         // The frontend guarantees that there's no duplicated keys in `to_add` and `to_remove`.
         for (key, value) in entries_to_add {
@@ -1001,26 +1026,42 @@ impl CatalogController {
                 bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
             }
 
-            if let Some(raw_table_id) = merged.developer.pin_cache_table_id {
-                let table_id = pin_cache_table_id(raw_table_id)?;
-                let table = Table::find_by_id(table_id)
-                    .select_only()
-                    .column(table::Column::TableType)
-                    .column(table::Column::BelongsToJobId)
-                    .into_tuple::<(TableType, Option<JobId>)>()
-                    .one(&txn)
-                    .await?;
-                let belongs_to_job = table.is_some_and(|(table_type, belongs_to_job_id)| {
-                    table_id == job_id.as_mv_table_id()
-                        || (table_type == TableType::Internal && belongs_to_job_id == Some(job_id))
-                });
-                if !belongs_to_job {
-                    bail_invalid_parameter!(
-                        "pin cache table {} does not belong to streaming job {}",
-                        raw_table_id,
-                        job_id.as_raw_id()
-                    );
-                }
+            table_ids.extend(
+                merged
+                    .developer
+                    .cache_refill_policy_overrides
+                    .keys()
+                    .map(|id| cache_refill_policy_table_id(id))
+                    .collect::<MetaResult<Vec<_>>>()?,
+            );
+        }
+        table_ids.sort_unstable();
+        table_ids.dedup();
+        if !table_ids.is_empty() {
+            let tables: Vec<(TableId, TableType, Option<JobId>)> = Table::find()
+                .select_only()
+                .column(table::Column::TableId)
+                .column(table::Column::TableType)
+                .column(table::Column::BelongsToJobId)
+                .filter(table::Column::TableId.is_in(table_ids.iter().copied()))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            let owned_tables: HashSet<_> = tables
+                .into_iter()
+                .filter(|(id, table_type, belongs_to_job_id)| {
+                    *id == job_id.as_mv_table_id()
+                        || (*table_type == TableType::Internal
+                            && *belongs_to_job_id == Some(job_id))
+                })
+                .map(|(id, _, _)| id)
+                .collect();
+            if let Some(table_id) = table_ids.iter().find(|id| !owned_tables.contains(*id)) {
+                bail_invalid_parameter!(
+                    "cache refill table {} does not belong to streaming job {}",
+                    table_id.as_raw_id(),
+                    job_id.as_raw_id()
+                );
             }
         }
 
@@ -1033,10 +1074,10 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
-        drop(inner);
 
+        // Preserve catalog commit order through snapshot construction and notification enqueue.
         if updates_table_cache_refill_config {
-            let policies = self.table_cache_refill_policies_snapshot().await?;
+            let policies = inner.table_cache_refill_policies_snapshot().await?;
             self.env.notification_manager().notify_hummock(
                 NotificationOperation::Update,
                 NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {

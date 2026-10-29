@@ -30,7 +30,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableOption,
 };
-use risingwave_common::config::streaming::CacheRefillPolicy;
+use risingwave_common::config::streaming::{
+    CacheRefillPolicy, STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH, is_cache_refill_config,
+};
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::current_cluster_version;
 use risingwave_common::id::JobId;
@@ -113,9 +115,6 @@ pub type Catalog = (
 
 pub type CatalogControllerRef = Arc<CatalogController>;
 
-const STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH: &str = "streaming.developer.cache_refill_policy";
-const STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH: &str = "streaming.developer.pin_cache_table_id";
-
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {
     pub(crate) env: MetaSrvEnv,
@@ -170,16 +169,19 @@ pub(crate) struct CleanedDirtyStreamingJobs {
 #[derive(Default)]
 struct ExplicitTableCacheRefillConfig {
     policy: Option<CacheRefillPolicy>,
-    pinned_table_id: Option<TableId>,
+    table_policies: HashMap<TableId, CacheRefillPolicy>,
 }
 
-fn pin_cache_table_id(raw_table_id: u32) -> MetaResult<TableId> {
-    if raw_table_id > i32::MAX as u32 {
+fn cache_refill_policy_table_id(raw_table_id: &str) -> MetaResult<TableId> {
+    let table_id = raw_table_id.parse::<u32>().map_err(|_| {
+        MetaError::invalid_parameter(format!("invalid cache refill table id {raw_table_id}"))
+    })?;
+    if table_id > i32::MAX as u32 || table_id.to_string() != raw_table_id {
         return Err(MetaError::invalid_parameter(format!(
-            "pin cache table id {raw_table_id} is out of range"
+            "cache refill table id {raw_table_id} is out of range or not canonical"
         )));
     }
-    Ok(TableId::new(raw_table_id))
+    Ok(TableId::new(table_id))
 }
 
 fn explicit_table_cache_refill_config(
@@ -200,8 +202,8 @@ fn explicit_table_cache_refill_config(
         return Ok(ExplicitTableCacheRefillConfig::default());
     };
     let has_explicit_policy = developer.contains_key("cache_refill_policy");
-    let has_pinned_table = developer.contains_key("pin_cache_table_id");
-    if !has_explicit_policy && !has_pinned_table {
+    let has_table_policies = developer.contains_key("cache_refill_policy_overrides");
+    if !has_explicit_policy && !has_table_policies {
         return Ok(ExplicitTableCacheRefillConfig::default());
     }
 
@@ -210,11 +212,12 @@ fn explicit_table_cache_refill_config(
         .context("empty streaming job config override")?;
     Ok(ExplicitTableCacheRefillConfig {
         policy: has_explicit_policy.then_some(merged.developer.cache_refill_policy),
-        pinned_table_id: merged
+        table_policies: merged
             .developer
-            .pin_cache_table_id
-            .map(pin_cache_table_id)
-            .transpose()?,
+            .cache_refill_policy_overrides
+            .into_iter()
+            .map(|(id, policy)| Ok((cache_refill_policy_table_id(&id)?, policy)))
+            .collect::<MetaResult<_>>()?,
     })
 }
 
@@ -232,7 +235,7 @@ impl CatalogControllerInner {
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
 
         let config = explicit_table_cache_refill_config(&config_override.unwrap_or_default())?;
-        if config.policy.is_none() && config.pinned_table_id.is_none() {
+        if config.policy.is_none() && config.table_policies.is_empty() {
             return Ok(None);
         }
 
@@ -261,7 +264,7 @@ impl CatalogControllerInner {
         let mut configs_by_job = HashMap::new();
         for (job_id, config_override) in job_configs {
             let config = explicit_table_cache_refill_config(&config_override.unwrap_or_default())?;
-            if config.policy.is_some() || config.pinned_table_id.is_some() {
+            if config.policy.is_some() || !config.table_policies.is_empty() {
                 configs_by_job.insert(job_id, config);
             }
         }
@@ -302,11 +305,11 @@ impl CatalogControllerInner {
             let Some(config) = configs_by_job.get(&job_id) else {
                 continue;
             };
-            let policy = if config.pinned_table_id == Some(table_id) {
-                Some(CacheRefillPolicy::Pin)
-            } else {
-                config.policy
-            };
+            let policy = config
+                .table_policies
+                .get(&table_id)
+                .copied()
+                .or(config.policy);
             let Some(policy) = policy else {
                 continue;
             };

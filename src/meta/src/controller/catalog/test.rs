@@ -17,6 +17,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+    use risingwave_common::config::streaming::STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH;
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
@@ -1093,158 +1094,54 @@ mod tests {
             tx,
         );
         let mgr = CatalogController::new(env).await?;
-
         let inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
-        let (_job, Some(result_table_id), internal_table_id) =
-            insert_test_streaming_job(&txn, "mv_cache_refill", true, None).await?
+        let (job, Some(result), first) =
+            insert_test_streaming_job(&txn, "mv_cache_refill", true, Some(CacheRefillPolicy::Both))
+                .await?
+        else {
+            unreachable!()
+        };
+        let mut internal = vec![first];
+        for name in ["second", "third"] {
+            let id = CatalogController::create_object(
+                &txn,
+                ObjectType::Table,
+                TEST_OWNER_ID,
+                Some(job.as_object_id()),
+            )
+            .await?
+            .oid
+            .as_table_id();
+            insert_test_table(&txn, id, name, TableType::Internal, Some(job), "").await?;
+            internal.push(id);
+        }
+        let (_, Some(foreign), _) = insert_test_streaming_job(&txn, "foreign", true, None).await?
         else {
             unreachable!()
         };
         insert_test_fragment(
             &txn,
             FragmentId::new(200),
-            result_table_id.as_job_id(),
-            TableIdArray(vec![result_table_id, internal_table_id]),
+            job,
+            TableIdArray(vec![result, internal[0], internal[1], internal[2]]),
         )
         .await?;
         txn.commit().await?;
         drop(inner);
 
-        let pin_key = STREAMING_PIN_CACHE_TABLE_ID_CONFIG_PATH.to_owned();
-        mgr.alter_streaming_job_config(
-            result_table_id.as_job_id(),
-            HashMap::from([(pin_key.clone(), internal_table_id.as_raw_id().to_string())]),
-            vec![],
-        )
-        .await?;
-        let policies = recv_table_refill_policies(&mut rx).await;
-        assert!(policies.table_policies.is_empty());
-        assert_eq!(
-            policies.internal_table_policies,
-            vec![PbTableCacheRefillPolicy {
-                table_id: internal_table_id.as_raw_id(),
-                policy: CacheRefillPolicy::Pin.to_protobuf() as i32,
-            }]
-        );
-
-        mgr.alter_streaming_job_config(
-            result_table_id.as_job_id(),
-            HashMap::new(),
-            vec![pin_key.clone()],
-        )
-        .await?;
-        let policies = recv_table_refill_policies(&mut rx).await;
-        assert!(policies.table_policies.is_empty());
-        assert!(policies.internal_table_policies.is_empty());
-
-        mgr.alter_streaming_job_config(
-            result_table_id.as_job_id(),
-            HashMap::from([(
-                STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
-                "\"both\"".to_owned(),
-            )]),
-            vec![],
-        )
-        .await?;
-
-        let policies = recv_table_refill_policies(&mut rx).await;
-        assert_eq!(
-            policies
-                .table_policies
-                .into_iter()
-                .map(|policy| (policy.table_id, policy.policy))
-                .collect::<HashMap<_, _>>(),
-            HashMap::from([(
-                result_table_id.as_raw_id(),
-                CacheRefillPolicy::Both.to_protobuf() as i32,
-            )])
-        );
-        assert_eq!(
-            policies
-                .internal_table_policies
-                .into_iter()
-                .map(|policy| (policy.table_id, policy.policy))
-                .collect::<HashMap<_, _>>(),
-            HashMap::from([(
-                internal_table_id.as_raw_id(),
-                CacheRefillPolicy::Both.to_protobuf() as i32,
-            )])
-        );
-
-        mgr.alter_streaming_job_config(
-            result_table_id.as_job_id(),
-            HashMap::from([(pin_key.clone(), internal_table_id.as_raw_id().to_string())]),
-            vec![],
-        )
-        .await?;
-
-        let policies = recv_table_refill_policies(&mut rx).await;
-        assert_eq!(
-            policies
-                .table_policies
-                .into_iter()
-                .map(|policy| (policy.table_id, policy.policy))
-                .collect::<HashMap<_, _>>(),
-            HashMap::from([(
-                result_table_id.as_raw_id(),
-                CacheRefillPolicy::Both.to_protobuf() as i32,
-            )])
-        );
-        assert_eq!(
-            policies
-                .internal_table_policies
-                .into_iter()
-                .map(|policy| (policy.table_id, policy.policy))
-                .collect::<HashMap<_, _>>(),
-            HashMap::from([(
-                internal_table_id.as_raw_id(),
-                CacheRefillPolicy::Pin.to_protobuf() as i32,
-            )])
-        );
-
-        mgr.alter_streaming_job_config(
-            result_table_id.as_job_id(),
-            HashMap::new(),
-            vec![pin_key.clone()],
-        )
-        .await?;
-        let policies = recv_table_refill_policies(&mut rx).await;
-        assert_eq!(
-            policies.internal_table_policies[0].policy,
-            CacheRefillPolicy::Both.to_protobuf() as i32
-        );
-
-        let error = mgr
-            .alter_streaming_job_config(
-                result_table_id.as_job_id(),
-                HashMap::from([(pin_key.clone(), 1_000_000_u32.to_string())]),
-                vec![],
+        let key = |id: TableId| {
+            format!(
+                "{STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH}.{}",
+                id.as_raw_id()
             )
-            .await
-            .expect_err("unknown table must not be pinned");
-        assert!(
-            error
-                .to_string()
-                .contains("does not belong to streaming job")
-        );
-
-        let error = mgr
-            .alter_streaming_job_config(
-                result_table_id.as_job_id(),
-                HashMap::from([(pin_key, u32::MAX.to_string())]),
-                vec![],
-            )
-            .await
-            .expect_err("out-of-range table id must not be pinned");
-        assert!(error.to_string().contains("is out of range"));
-
+        };
         mgr.alter_streaming_job_config(
-            result_table_id.as_job_id(),
-            HashMap::from([(
-                STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
-                "\"pin\"".to_owned(),
-            )]),
+            job,
+            HashMap::from([
+                (key(internal[0]), "\"pin\"".to_owned()),
+                (key(internal[1]), "\"pin\"".to_owned()),
+            ]),
             vec![],
         )
         .await?;
@@ -1252,18 +1149,169 @@ mod tests {
         assert_eq!(
             policies.table_policies,
             vec![PbTableCacheRefillPolicy {
-                table_id: result_table_id.as_raw_id(),
-                policy: CacheRefillPolicy::Pin.to_protobuf() as i32,
+                table_id: result.as_raw_id(),
+                policy: CacheRefillPolicy::Both.to_protobuf() as i32,
             }]
         );
         assert_eq!(
-            policies.internal_table_policies,
-            vec![PbTableCacheRefillPolicy {
-                table_id: internal_table_id.as_raw_id(),
-                policy: CacheRefillPolicy::Pin.to_protobuf() as i32,
-            }]
+            policies
+                .internal_table_policies
+                .iter()
+                .map(|p| (p.table_id, p.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                (
+                    internal[0].as_raw_id(),
+                    CacheRefillPolicy::Pin.to_protobuf() as i32
+                ),
+                (
+                    internal[1].as_raw_id(),
+                    CacheRefillPolicy::Pin.to_protobuf() as i32
+                ),
+                (
+                    internal[2].as_raw_id(),
+                    CacheRefillPolicy::Both.to_protobuf() as i32
+                ),
+            ])
         );
 
+        mgr.alter_streaming_job_config(job, HashMap::new(), vec![key(internal[0])])
+            .await?;
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .iter()
+                .map(|p| (p.table_id, p.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                (
+                    internal[0].as_raw_id(),
+                    CacheRefillPolicy::Both.to_protobuf() as i32
+                ),
+                (
+                    internal[1].as_raw_id(),
+                    CacheRefillPolicy::Pin.to_protobuf() as i32
+                ),
+                (
+                    internal[2].as_raw_id(),
+                    CacheRefillPolicy::Both.to_protobuf() as i32
+                ),
+            ])
+        );
+
+        mgr.alter_streaming_job_config(
+            job,
+            HashMap::from([
+                (
+                    STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
+                    "\"pin\"".to_owned(),
+                ),
+                (key(internal[2]), "\"both\"".to_owned()),
+            ]),
+            vec![],
+        )
+        .await?;
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert_eq!(
+            policies.table_policies[0].policy,
+            CacheRefillPolicy::Pin.to_protobuf() as i32
+        );
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .iter()
+                .map(|p| (p.table_id, p.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                (
+                    internal[0].as_raw_id(),
+                    CacheRefillPolicy::Pin.to_protobuf() as i32
+                ),
+                (
+                    internal[1].as_raw_id(),
+                    CacheRefillPolicy::Pin.to_protobuf() as i32
+                ),
+                (
+                    internal[2].as_raw_id(),
+                    CacheRefillPolicy::Both.to_protobuf() as i32
+                ),
+            ])
+        );
+
+        mgr.alter_streaming_job_config(
+            job,
+            HashMap::new(),
+            vec![STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned()],
+        )
+        .await?;
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert!(policies.table_policies.is_empty());
+        assert_eq!(
+            policies.internal_table_policies,
+            vec![
+                PbTableCacheRefillPolicy {
+                    table_id: internal[1].as_raw_id(),
+                    policy: CacheRefillPolicy::Pin.to_protobuf() as i32
+                },
+                PbTableCacheRefillPolicy {
+                    table_id: internal[2].as_raw_id(),
+                    policy: CacheRefillPolicy::Both.to_protobuf() as i32
+                },
+            ]
+        );
+
+        // One invalid member must roll back the valid member of the same batch.
+        let error = mgr
+            .alter_streaming_job_config(
+                job,
+                HashMap::from([
+                    (key(internal[0]), "\"disabled\"".to_owned()),
+                    (key(foreign), "\"pin\"".to_owned()),
+                ]),
+                vec![],
+            )
+            .await
+            .expect_err("foreign job must reject the entire batch");
+        assert!(
+            error
+                .to_string()
+                .contains("does not belong to streaming job")
+        );
+        assert_eq!(mgr.table_cache_refill_policies_snapshot().await?, policies);
+        assert!(
+            mgr.alter_streaming_job_config(job, HashMap::new(), vec![key(foreign)])
+                .await
+                .is_err()
+        );
+        for id in ["1000000", "4294967295", "-1", "01"] {
+            assert!(
+                mgr.alter_streaming_job_config(
+                    job,
+                    HashMap::from([(
+                        format!("{STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH}.{id}"),
+                        "\"pin\"".to_owned()
+                    ),]),
+                    vec![]
+                )
+                .await
+                .is_err()
+            );
+        }
+        // State removal must not prevent resetting its saved override.
+        {
+            let inner = mgr.inner.write().await;
+            Table::delete_by_id(internal[2]).exec(&inner.db).await?;
+        }
+        mgr.alter_streaming_job_config(
+            job,
+            HashMap::new(),
+            vec![key(internal[1]), key(internal[2])],
+        )
+        .await?;
+        let policies = recv_table_refill_policies(&mut rx).await;
+        assert!(policies.table_policies.is_empty());
+        assert!(policies.internal_table_policies.is_empty());
         Ok(())
     }
 

@@ -3143,6 +3143,30 @@ impl Parser<'_> {
         self.parse_config_param_inner(Self::parse_set_variable_no_list)
     }
 
+    fn parse_alter_cache_refill_policy(
+        &mut self,
+        reset: bool,
+    ) -> ModalResult<AlterCacheRefillPolicy> {
+        let policy = if reset {
+            None
+        } else {
+            if !self.consume_token(&Token::Eq) && !self.parse_keyword(Keyword::TO) {
+                return self.expected("= or TO after CACHE_REFILL_POLICY");
+            }
+            Some(self.parse_set_variable_no_list()?)
+        };
+        let table_ids = if self.parse_keyword(Keyword::FOR) {
+            self.expect_keyword(Keyword::TABLES)?;
+            self.expect_token(&Token::LParen)?;
+            let table_ids = self.parse_comma_separated(Self::parse_literal_u32)?;
+            self.expect_token(&Token::RParen)?;
+            table_ids
+        } else {
+            vec![]
+        };
+        Ok(AlterCacheRefillPolicy { policy, table_ids })
+    }
+
     fn parse_set_variable_no_list(&mut self) -> ModalResult<SetVariableValue> {
         alt((
             Keyword::DEFAULT.value(SetVariableValue::Default),
@@ -3422,20 +3446,24 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
                 AlterTableOperation::AlterRateLimit(rate_limit)
+            } else if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) {
+                AlterTableOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(false)?)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterTableOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT/CACHE_REFILL_POLICY/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
-            if self.parse_keyword(Keyword::CONFIG) {
+            if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) {
+                AlterTableOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(true)?)
+            } else if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterTableOperation::ResetConfig { keys }
             } else {
-                return self.expected("CONFIG after RESET");
+                return self.expected("CACHE_REFILL_POLICY or CONFIG after RESET");
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3599,12 +3627,14 @@ impl Parser<'_> {
                     resource_group: Some(value),
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) {
+                AlterIndexOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(false)?)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterIndexOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "PARALLELISM/BACKFILL_PARALLELISM/RESOURCE_GROUP or CONFIG after SET",
+                    "PARALLELISM/BACKFILL_PARALLELISM/RESOURCE_GROUP, CACHE_REFILL_POLICY or CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
@@ -3615,11 +3645,13 @@ impl Parser<'_> {
                     resource_group: None,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) {
+                AlterIndexOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(true)?)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterIndexOperation::ResetConfig { keys }
             } else {
-                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
+                return self.expected("RESOURCE_GROUP, CACHE_REFILL_POLICY or CONFIG after RESET");
             }
         } else {
             return self.expected("RENAME, SET, or RESET after ALTER INDEX");
@@ -3714,12 +3746,14 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
                 AlterViewOperation::AlterRateLimit(rate_limit)
+            } else if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) && materialized {
+                AlterViewOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(false)?)
             } else if self.parse_keyword(Keyword::CONFIG) && materialized {
                 let entries = self.parse_options()?;
                 AlterViewOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/BACKFILL_RATE_LIMIT/CACHE_REFILL_POLICY/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
@@ -3730,11 +3764,13 @@ impl Parser<'_> {
                     resource_group: None,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) && materialized {
+                AlterViewOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(true)?)
             } else if self.parse_keyword(Keyword::CONFIG) && materialized {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterViewOperation::ResetConfig { keys }
             } else {
-                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
+                return self.expected("RESOURCE_GROUP, CACHE_REFILL_POLICY or CONFIG after RESET");
             }
         } else {
             return self.expected(&format!(
@@ -3817,12 +3853,14 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
                 AlterSinkOperation::AlterRateLimit(rate_limit)
+            } else if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) {
+                AlterSinkOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(false)?)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/RESOURCE_GROUP/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/RESOURCE_GROUP/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CACHE_REFILL_POLICY/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
@@ -3833,11 +3871,13 @@ impl Parser<'_> {
                     resource_group: None,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) {
+                AlterSinkOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(true)?)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterSinkOperation::ResetConfig { keys }
             } else {
-                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
+                return self.expected("RESOURCE_GROUP, CACHE_REFILL_POLICY or CONFIG after RESET");
             }
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_sink = self.parse_object_name()?;
@@ -3959,6 +3999,10 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) {
+                AlterSourceOperation::CacheRefillPolicy(
+                    self.parse_alter_cache_refill_policy(false)?,
+                )
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSourceOperation::SetConfig { entries }
@@ -3968,7 +4012,9 @@ impl Parser<'_> {
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
-            if self.parse_keyword(Keyword::CONFIG) {
+            if self.parse_keyword(Keyword::CACHE_REFILL_POLICY) {
+                AlterSourceOperation::CacheRefillPolicy(self.parse_alter_cache_refill_policy(true)?)
+            } else if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterSourceOperation::ResetConfig { keys }
             } else {

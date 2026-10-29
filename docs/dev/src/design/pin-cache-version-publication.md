@@ -163,10 +163,32 @@ constructing the cache and starting event processing. Recovery restores files by
 version membership without remote data or metadata reads, and does not backfill
 missing objects. Subsequent delta insertions use the shared admission path above.
 
-`cache_refill_policy = "pin"` selects whole-SST Pin refill. The experimental
-`pin_cache_table_id` selector sets this same policy for one physical table while
-other tables retain the job policy. Pin has no fallback policy: a worker without
-a Pin backend rejects its refill work, rather than scheduling Foyer refill.
+Cache policy can be changed online on a table, materialized view, index, shared
+source, or sink. Without `FOR TABLES`, SET/RESET changes the job default; with it,
+only the selected physical result/internal tables are changed:
+
+```sql
+ALTER MATERIALIZED VIEW mv SET CACHE_REFILL_POLICY = 'both';
+ALTER MATERIALIZED VIEW mv SET CACHE_REFILL_POLICY = 'pin' FOR TABLES (101, 103);
+ALTER MATERIALIZED VIEW mv SET CACHE_REFILL_POLICY = 'both' FOR TABLES (101);
+ALTER MATERIALIZED VIEW mv RESET CACHE_REFILL_POLICY FOR TABLES (101, 103);
+```
+
+Discover internal IDs through `rw_catalog.rw_internal_table_info`, using the job
+and schema name. SET supports all ordinary policies as well as Pin, and updates
+only the listed IDs; RESET (or SET to DEFAULT) removes their explicit overrides.
+A physical override takes precedence over the job default, which takes precedence
+over the worker default. RESET does not restore a historical policy. Every ID must
+belong to the addressed job; an invalid member rejects the complete batch.
+Persisted defaults and overrides are visible in `rw_streaming_job_config`.
+SQL completion acknowledges persistence and notification enqueue, not worker
+application or completed downloads. SET Pin does not backfill existing SSTs.
+
+The job configuration stores overrides under
+`streaming.developer.cache_refill_policy_overrides`; Meta expands them into the
+same per-table runtime policy map. Pin selects complete physical SST objects, so
+shared files may also contain data from non-Pin tables. Pin has no fallback policy:
+a worker without a Pin backend rejects its refill work, rather than scheduling Foyer refill.
 Query reads remain independent: a missing or failed Pin read uses the ordinary
 Foyer/remote path without changing the table policy or refilling Pin on reads.
 
