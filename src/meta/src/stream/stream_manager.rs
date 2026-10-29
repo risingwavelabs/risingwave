@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_common::id::{JobId, SinkId};
+use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
 use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, streaming_job};
@@ -143,6 +143,8 @@ pub struct CreateStreamingJobContext {
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
 
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
+
+    pub bounded_load_source: Option<SourceId>,
 
     pub option: CreateStreamingJobOption,
 
@@ -609,6 +611,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
+            bounded_load_source,
             is_serverless_backfill,
             resource_type,
             mut streaming_job_model,
@@ -660,6 +663,7 @@ impl GlobalStreamManager {
             database_resource_group,
             fragment_backfill_ordering,
             cdc_table_snapshot_splits,
+            bounded_load_source,
             locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
             streaming_job_model,

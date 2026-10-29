@@ -36,6 +36,7 @@ use risingwave_pb::stream_plan::{
 };
 use tracing::warn;
 
+use crate::barrier::bounded_progress::BoundedLoadTracker;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::IcebergV3JobCheckpointControl;
 use crate::barrier::checkpoint::{
@@ -1075,19 +1076,37 @@ impl DatabaseCheckpointControl {
                 } else {
                     None
                 };
-                self.database_info
-                    .pre_apply_new_job(info.streaming_job.id(), cdc_tracker);
-                self.database_info.pre_apply_new_fragments(
-                    info.stream_job_fragments
-                        .new_fragment_info(
-                            &actors.stream_actors,
-                            &actors.actor_location,
-                            &resolved_split_assignment,
-                        )
-                        .map(|(fragment_id, fragment_infos)| {
-                            (fragment_id, info.streaming_job.id(), fragment_infos)
-                        }),
+                let new_fragment_infos: Vec<_> = info
+                    .stream_job_fragments
+                    .new_fragment_info(
+                        &actors.stream_actors,
+                        &actors.actor_location,
+                        &resolved_split_assignment,
+                    )
+                    .collect();
+
+                let bounded_load_tracker = info.bounded_load_source.map(|source_id| {
+                    BoundedLoadTracker::new(
+                        self.database_id,
+                        info.streaming_job.id(),
+                        source_id,
+                        new_fragment_infos.iter().map(|(_, fragment)| fragment),
+                    )
+                });
+
+                self.database_info.pre_apply_new_job(
+                    info.streaming_job.id(),
+                    cdc_tracker,
+                    bounded_load_tracker,
                 );
+
+                self.database_info
+                    .pre_apply_new_fragments(new_fragment_infos.into_iter().map(
+                        |(fragment_id, fragment_infos)| {
+                            (fragment_id, info.streaming_job.id(), fragment_infos)
+                        },
+                    ));
+
                 if let CreateStreamingJobType::SinkIntoTable(ref ctx) = job_type {
                     let downstream_fragment_id = ctx.new_sink_downstream.downstream_fragment_id;
                     self.database_info.pre_apply_add_node_upstream(
@@ -1642,14 +1661,6 @@ impl DatabaseCheckpointControl {
                 self.apply_simple_command(mutation, "ListFinish")
             }
 
-            Some(Command::StartBoundedLoad { job_id, source_id }) => {
-                let mutation = self
-                    .database_info
-                    .install_bounded_load_tracker(job_id, source_id)
-                    .then(|| Command::start_load_mutation(source_id));
-                self.apply_simple_command(mutation, "StartBoundedLoad")
-            }
-
             Some(Command::LoadFinish {
                 table_id: _,
                 associated_source_id,
@@ -1982,8 +1993,11 @@ impl DatabaseCheckpointControl {
                     Some(PbMutation::Update(mutation))
                 } else {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
+
                     if fragment_ids.is_empty() {
-                        None
+                        self.database_info
+                            .take_pending_bounded_load_start()
+                            .map(Command::start_load_mutation)
                     } else {
                         Some(PbMutation::StartFragmentBackfill(
                             PbStartFragmentBackfillMutation { fragment_ids },

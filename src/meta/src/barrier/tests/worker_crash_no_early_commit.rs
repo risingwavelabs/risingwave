@@ -367,6 +367,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             checkpoint_frequency: None,
         }],
         cdc_table_snapshot_splits: HashMap::new(),
+        active_bounded_loads: HashMap::new(),
     })
     .unwrap();
     let make_control_stream_handle = || {

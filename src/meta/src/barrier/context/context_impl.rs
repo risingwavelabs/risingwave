@@ -31,7 +31,9 @@ use risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedA
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
 
-use crate::barrier::bounded_progress::BoundedLoadAction;
+use crate::barrier::bounded_progress::{
+    BoundedLoadAction, mark_bounded_job_complete, mark_bounded_job_failed,
+};
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{
@@ -42,7 +44,7 @@ use crate::barrier::load_progress::{LoadProgress, LoadReport};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, CreateStreamingJobCommandInfo,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
     Scheduled,
 };
@@ -208,9 +210,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
-        // The schedulers re-run the cycles and loads abandoned by the recovery.
+        // The scheduler re-runs the cycles abandoned by the recovery.
         self.refresh_manager.notify_scheduler();
-        self.bounded_load_manager.notify_scheduler();
         Ok(())
     }
 
@@ -313,8 +314,6 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.env
             .notification_manager()
             .notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
-
-        self.bounded_load_manager.notify_scheduler();
         Ok(())
     }
 
@@ -324,16 +323,25 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 database_id,
                 source_id,
             } => {
-                self.bounded_load_manager
-                    .list_finish(database_id, source_id);
+                if let Err(error) = self
+                    .barrier_scheduler
+                    .run_command_no_wait(database_id, Command::ListFinish { source_id })
+                {
+                    tracing::warn!(
+                        %database_id,
+                        %source_id,
+                        error = %error.as_report(),
+                        "skip bounded list finish during recovery"
+                    );
+                }
             }
             BoundedLoadAction::Complete { job_id, source_id } => {
-                self.bounded_load_manager
-                    .complete(job_id, source_id)
+                mark_bounded_job_complete(&self.env.meta_store_ref().conn, job_id, source_id)
                     .await?;
             }
             BoundedLoadAction::Fail { job_id, source_id } => {
-                self.bounded_load_manager.fail(job_id, source_id).await?;
+                tracing::warn!(%job_id, %source_id, "bounded load failed, see compute logs for the error");
+                mark_bounded_job_failed(&self.env.meta_store_ref().conn, job_id, source_id).await?;
             }
         }
         Ok(())
