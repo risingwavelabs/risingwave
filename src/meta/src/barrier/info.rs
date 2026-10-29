@@ -964,6 +964,13 @@ impl InflightDatabaseInfo {
             .find(|tracker| tracker.source_id == source_id)
     }
 
+    pub(super) fn has_pending_bounded_load_start(&self) -> bool {
+        self.jobs
+            .values()
+            .filter_map(|job| job.bounded_load_tracker.as_ref())
+            .any(|tracker| !tracker.start_sent)
+    }
+
     /// Returns a bounded source whose `Load { Start }` is still to be sent, marking it as sent.
     pub(super) fn take_pending_bounded_load_start(&mut self) -> Option<SourceId> {
         self.jobs
