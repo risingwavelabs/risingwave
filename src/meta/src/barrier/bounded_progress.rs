@@ -12,18 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::mem::take;
 
 use risingwave_common::bail;
 use risingwave_common::id::{ActorId, DatabaseId, JobId, SourceId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
+use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_meta_model::bounded_job::BoundedJobStatus;
-use risingwave_meta_model::{JobStatus, bounded_job, object, streaming_job};
+use risingwave_meta_model::{bounded_job, object};
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use sea_orm::prelude::Expr;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
+    ActiveValue, ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect,
+    RelationTrait,
 };
 
 use crate::MetaResult;
@@ -79,6 +82,8 @@ pub(super) struct BoundedLoadTracker {
     list_finished: HashSet<ActorId>,
     read_finished: HashSet<ActorId>,
     phase: Phase,
+    /// Whether `Load { Start }` has been sent to the job's actors.
+    start_sent: bool,
     /// Actions of the collected barriers, applied once their checkpoint commits.
     actions: Vec<BoundedLoadAction>,
 }
@@ -122,8 +127,20 @@ impl BoundedLoadTracker {
             list_finished: HashSet::new(),
             read_finished: HashSet::new(),
             phase,
+            start_sent: false,
             actions: vec![],
         }
+    }
+
+    /// Returns the source to send `Load { Start }` for, if it has not been sent yet.
+    pub fn take_pending_start(&mut self) -> Option<SourceId> {
+        if self.start_sent {
+            return None;
+        }
+
+        self.start_sent = true;
+
+        Some(self.source_id)
     }
 
     pub fn apply_progress(&mut self, report: &LoadReport) {
@@ -259,26 +276,62 @@ pub(crate) async fn load_unfinished_bounded_jobs(
         .collect())
 }
 
-/// Returns the unfinished bounded loads whose streaming job is created, with their database. Only
-/// these have actors to receive `Load { Start }`
-pub(crate) async fn load_startable_bounded_jobs(
+/// Returns the bounded source that the fragments of a new job read, if any.
+pub(crate) fn bounded_load_source<'a>(
+    fragments: impl IntoIterator<Item = &'a StreamNode>,
+) -> MetaResult<Option<SourceId>> {
+    let mut readers = vec![];
+
+    for nodes in fragments {
+        visit_stream_node_body(nodes, |body| {
+            let reader = match body {
+                NodeBody::Source(node) => node
+                    .source_inner
+                    .as_ref()
+                    .map(|source| (source.source_id, source.ingest_mode.as_ref())),
+                NodeBody::StreamFsFetch(node) => node
+                    .node_inner
+                    .as_ref()
+                    .map(|fetch| (fetch.source_id, fetch.ingest_mode.as_ref())),
+                _ => None,
+            };
+
+            if let Some((source_id, ingest_mode)) = reader {
+                readers.push((source_id, IngestMode::from_proto(ingest_mode)));
+            }
+        });
+    }
+
+    let mut sources = BTreeSet::new();
+
+    for (source_id, ingest_mode) in readers {
+        if ingest_mode?.is_bounded() {
+            sources.insert(source_id);
+        }
+    }
+
+    if sources.len() > 1 {
+        bail!("a job can load at most one bounded source, found {sources:?}");
+    }
+
+    Ok(sources.pop_first())
+}
+
+pub(crate) async fn insert_bounded_job(
     conn: &impl ConnectionTrait,
-) -> MetaResult<Vec<(JobId, SourceId, DatabaseId)>> {
-    Ok(bounded_job::Entity::find()
-        .select_only()
-        .column(bounded_job::Column::JobId)
-        .column(bounded_job::Column::SourceId)
-        .column(object::Column::DatabaseId)
-        .join(JoinType::InnerJoin, bounded_job::Relation::Job.def())
-        .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-        .filter(bounded_job::Column::Status.eq(BoundedJobStatus::Loading))
-        .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-        .into_tuple::<(JobId, SourceId, Option<DatabaseId>)>()
-        .all(conn)
-        .await?
-        .into_iter()
-        .filter_map(|(job_id, source_id, database_id)| Some((job_id, source_id, database_id?)))
-        .collect())
+    job_id: JobId,
+    source_id: SourceId,
+) -> MetaResult<()> {
+    bounded_job::Entity::insert(bounded_job::ActiveModel {
+        job_id: ActiveValue::Set(job_id),
+        source_id: ActiveValue::Set(source_id),
+        status: ActiveValue::Set(BoundedJobStatus::Loading),
+        completed_at: ActiveValue::Set(None),
+    })
+    .exec(conn)
+    .await?;
+
+    Ok(())
 }
 
 /// Marks the bounded load of `job_id` as complete.
@@ -440,6 +493,25 @@ mod tests {
         tracker.apply_progress(&failed(2));
         tracker.apply_progress(&reader_done(2));
         assert_eq!(tracker.take_actions(), vec![fail()]);
+    }
+
+    /// The bounded source comes from the fragments that read it, and streaming sources are skipped.
+    #[test]
+    fn test_bounded_load_source() {
+        let fragments = two_phase();
+        let nodes = fragments.iter().map(|fragment| &fragment.nodes);
+        assert_eq!(bounded_load_source(nodes).unwrap(), Some(SOURCE_ID));
+
+        let streaming = PbStreamNode {
+            node_body: Some(NodeBody::Source(Box::new(SourceNode {
+                source_inner: Some(StreamSource {
+                    source_id: SOURCE_ID,
+                    ..Default::default()
+                }),
+            }))),
+            ..Default::default()
+        };
+        assert_eq!(bounded_load_source([&streaming]).unwrap(), None);
     }
 
     fn list_finish() -> BoundedLoadAction {

@@ -35,17 +35,15 @@ use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
-    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, FragmentBackfillProgress,
-    RecoveryStatus, UpdateDatabaseBarrierRequest, schedule,
+    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, BarrierScheduler,
+    FragmentBackfillProgress, RecoveryStatus, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::serving::ServingVnodeMappingRef;
-use crate::stream::{
-    BoundedLoadManagerRef, GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef,
-};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub struct GlobalBarrierManager {
     status: Arc<ArcSwap<BarrierManagerStatus>>,
@@ -199,7 +197,7 @@ impl GlobalBarrierManager {
         scale_controller: ScaleControllerRef,
         refresh_manager: GlobalRefreshManagerRef,
         initial_workers_tx: oneshot::Sender<HashMap<WorkerId, WorkerNode>>,
-        bounded_load_manager: BoundedLoadManagerRef,
+        barrier_scheduler: BarrierScheduler,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
         let hummock_manager_clone = hummock_manager.clone();
@@ -216,7 +214,7 @@ impl GlobalBarrierManager {
             scale_controller,
             request_rx,
             refresh_manager,
-            bounded_load_manager,
+            barrier_scheduler,
         )
         .await;
         let manager = Self {

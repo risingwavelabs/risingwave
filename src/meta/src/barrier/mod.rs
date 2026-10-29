@@ -52,7 +52,7 @@ mod utils;
 mod worker;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::checkpoint::snapshot_backfill_max_pending_barrier_num;
@@ -170,6 +170,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
+    active_bounded_loads: HashMap<JobId, SourceId>,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
@@ -254,4 +255,5 @@ struct DatabaseRuntimeInfoSnapshot {
     mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
     creating_jobs: HashSet<JobId>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
+    active_bounded_loads: HashMap<JobId, SourceId>,
 }

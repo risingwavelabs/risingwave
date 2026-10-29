@@ -369,6 +369,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: ExtendedFragmentBackfillOrder,
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
+    pub bounded_load_source: Option<SourceId>,
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.
@@ -574,12 +575,6 @@ pub enum Command {
     ListFinish {
         source_id: SourceId,
     },
-    /// Starts the bounded load of `source_id` in the created job `job_id` and tracks its progress.
-    /// Does nothing if the job is gone or its load is already tracked.
-    StartBoundedLoad {
-        job_id: JobId,
-        source_id: SourceId,
-    },
     LoadFinish {
         table_id: TableId,
         associated_source_id: SourceId,
@@ -696,9 +691,6 @@ impl std::fmt::Display for Command {
                 table_id, associated_source_id, trigger_time
             ),
             Command::ListFinish { source_id } => write!(f, "ListFinish: {source_id}"),
-            Command::StartBoundedLoad { job_id, source_id } => {
-                write!(f, "StartBoundedLoad: {job_id} (source: {source_id})")
-            }
             Command::LoadFinish {
                 table_id,
                 associated_source_id,
