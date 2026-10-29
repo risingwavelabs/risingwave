@@ -56,7 +56,6 @@ public class DbzConnectorConfig {
     public static final String DB_NAME = "database.name";
     public static final String TABLE_NAME = "table.name";
 
-
     /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
     public static final String MYSQL_SSL_MODE = "ssl.mode";
