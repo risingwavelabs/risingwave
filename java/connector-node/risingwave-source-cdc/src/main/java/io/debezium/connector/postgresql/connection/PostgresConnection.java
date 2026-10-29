@@ -50,6 +50,7 @@ import io.debezium.spi.schema.DataCollectionId;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
 import java.nio.charset.Charset;
+import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -97,6 +98,19 @@ public class PostgresConnection extends JdbcConnection {
             Pattern.compile("\\(+(?:.+(?:[+ - * / < > = ~ ! @ # % ^ & | ` ?] ?.+)+)+\\)");
     private static final Logger LOGGER = LoggerFactory.getLogger(PostgresConnection.class);
 
+    // JdbcConnection has no passive accessor for its cached connection. Publish new connections
+    // from the factory so forced shutdown can abort them without calling connection() and possibly
+    // reconnecting. The tracker is thread-scoped because connection establishment is synchronous.
+    // Track every PostgreSQL connection created by the source thread, including short-lived slot
+    // inspection and cleanup connections.
+    private static final ThreadLocal<ConnectionTrackingContext> CONNECTION_TRACKER =
+            new ThreadLocal<>();
+
+    // The main metadata connection is shared with signal and incremental-snapshot executors. Keep
+    // its tracker on the connection itself so reconnects from those threads cannot bypass the
+    // source's abort registry.
+    private volatile ConnectionTracker connectionTracker;
+
     private static final String URL_PATTERN =
             "jdbc:postgresql://${"
                     + JdbcConfiguration.HOSTNAME
@@ -105,13 +119,97 @@ public class PostgresConnection extends JdbcConnection {
                     + "}/${"
                     + JdbcConfiguration.DATABASE
                     + "}";
-    protected static final ConnectionFactory FACTORY =
+    private static final ConnectionFactory DEFAULT_FACTORY =
             JdbcConnection.patternBasedFactory(
                     URL_PATTERN,
                     org.postgresql.Driver.class.getName(),
                     PostgresConnection.class.getClassLoader(),
                     JdbcConfiguration.PORT.withDefault(
                             PostgresConnectorConfig.PORT.defaultValueAsString()));
+    protected static final ConnectionFactory FACTORY = trackCreatedConnections(DEFAULT_FACTORY);
+
+    protected static ConnectionFactory trackCreatedConnections(ConnectionFactory delegate) {
+        return config -> {
+            ConnectionTrackingContext context = CONNECTION_TRACKER.get();
+            if (context != null) {
+                context.tracker.beforeConnect();
+            }
+            Connection connection = delegate.connect(config);
+            if (context != null) {
+                context.tracker.capture(connection);
+            }
+            return connection;
+        };
+    }
+
+    public void setConnectionTracker(ConnectionTracker connectionTracker) {
+        this.connectionTracker = Objects.requireNonNull(connectionTracker);
+    }
+
+    @Override
+    public synchronized Connection connection(boolean executeOnConnect) throws SQLException {
+        ConnectionTracker tracker = connectionTracker;
+        if (tracker == null) {
+            return super.connection(executeOnConnect);
+        }
+
+        tracker.beforeConnect();
+        try (ConnectionTrackingScope ignored = trackConnections(tracker)) {
+            return tracker.capture(super.connection(executeOnConnect));
+        }
+    }
+
+    @Override
+    public synchronized void reconnect() throws SQLException {
+        ConnectionTracker tracker = connectionTracker;
+        if (tracker == null) {
+            super.reconnect();
+            return;
+        }
+
+        tracker.beforeConnect();
+        try (ConnectionTrackingScope ignored = trackConnections(tracker)) {
+            super.reconnect();
+            tracker.capture(super.connection(false));
+        }
+    }
+
+    public static ConnectionTrackingScope trackConnections(ConnectionTracker tracker) {
+        ConnectionTrackingContext previous = CONNECTION_TRACKER.get();
+        CONNECTION_TRACKER.set(
+                new ConnectionTrackingContext(Objects.requireNonNull(tracker), previous));
+        return () -> {
+            if (previous == null) {
+                CONNECTION_TRACKER.remove();
+            } else {
+                CONNECTION_TRACKER.set(previous);
+            }
+        };
+    }
+
+    @FunctionalInterface
+    public interface ConnectionTracker {
+        default void beforeConnect() throws SQLException {}
+
+        Connection capture(Connection connection) throws SQLException;
+    }
+
+    @FunctionalInterface
+    public interface ConnectionTrackingScope extends AutoCloseable {
+        @Override
+        void close();
+    }
+
+    private static final class ConnectionTrackingContext {
+        private final ConnectionTracker tracker;
+        private final ConnectionTrackingContext previous;
+
+        private ConnectionTrackingContext(
+                ConnectionTracker tracker, ConnectionTrackingContext previous) {
+            this.tracker = tracker;
+            this.previous = previous;
+        }
+    }
 
     /**
      * Obtaining a replication slot may fail if there's a pending transaction. We're retrying to get
@@ -199,6 +297,14 @@ public class PostgresConnection extends JdbcConnection {
      */
     public PostgresConnection(JdbcConfiguration config, String connectionUsage) {
         this(config, null, connectionUsage);
+    }
+
+    @VisibleForTesting
+    protected PostgresConnection(
+            JdbcConfiguration config, String connectionUsage, ConnectionFactory connectionFactory) {
+        super(addDefaultSettings(config, connectionUsage), connectionFactory, "\"", "\"");
+        this.typeRegistry = null;
+        this.defaultValueConverter = null;
     }
 
     static JdbcConfiguration addDefaultSettings(
