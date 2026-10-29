@@ -1082,6 +1082,155 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_replace_publishes_catalog_before_cache_policy_refresh() -> MetaResult<()> {
+        use crate::controller::streaming_job::SinkIntoTableContext;
+
+        for fail_cache_refresh in [false, true] {
+            let env = MetaSrvEnv::for_test().await;
+            let mgr = CatalogController::new(env.clone()).await?;
+            let inner = mgr.inner.write().await;
+            let txn = inner.db.begin().await?;
+            let (job, Some(result), internal) = insert_test_streaming_job(
+                &txn,
+                "mv_replace_policy",
+                true,
+                Some(CacheRefillPolicy::Both),
+            )
+            .await?
+            else {
+                unreachable!()
+            };
+            insert_test_fragment(
+                &txn,
+                FragmentId::new(400),
+                job,
+                TableIdArray(vec![result, internal]),
+            )
+            .await?;
+            txn.commit().await?;
+            drop(inner);
+
+            let mut table = mgr.get_table_by_id(result).await?;
+            table.fragment_id = FragmentId::new(401);
+            table.definition = "replacement definition".to_owned();
+            let replacement = crate::manager::StreamingJob::MaterializedView(table);
+            let tmp = mgr
+                .create_job_catalog_for_replace(&replacement, None, None, None)
+                .await?;
+            let inner = mgr.inner.write().await;
+            let txn = inner.db.begin().await?;
+            insert_test_fragment(
+                &txn,
+                FragmentId::new(401),
+                tmp.job_id,
+                TableIdArray(vec![result, internal]),
+            )
+            .await?;
+            // Fault injection for the auxiliary snapshot, without adding a production test hook.
+            // Ordinary SQL does not create this malformed persisted configuration.
+            if fail_cache_refresh {
+                streaming_job::ActiveModel {
+                    job_id: Set(job),
+                    config_override: Set(Some("[".to_owned())),
+                    ..Default::default()
+                }
+                .update(&txn)
+                .await?;
+            }
+            txn.commit().await?;
+            drop(inner);
+            assert_eq!(
+                mgr.table_cache_refill_policies_snapshot().await.is_err(),
+                fail_cache_refresh
+            );
+
+            let (cache_tx, mut cache_rx) = mpsc::unbounded_channel();
+            env.notification_manager().insert_sender(
+                SubscribeType::Hummock,
+                WorkerKey(HostAddress {
+                    host: "localhost".to_owned(),
+                    port: 5687,
+                }),
+                cache_tx,
+            );
+            let (frontend_tx, mut frontend_rx) = mpsc::unbounded_channel();
+            env.notification_manager().insert_sender(
+                SubscribeType::Frontend,
+                WorkerKey(HostAddress {
+                    host: "localhost".to_owned(),
+                    port: 4566,
+                }),
+                frontend_tx,
+            );
+            let (serving_tx, mut serving_rx) = mpsc::unbounded_channel();
+            env.notification_manager().insert_local_sender(serving_tx);
+
+            let version = mgr
+                .finish_replace_streaming_job(
+                    tmp.job_id,
+                    replacement,
+                    Default::default(),
+                    SinkIntoTableContext {
+                        updated_sink_catalogs: vec![],
+                    },
+                    None,
+                    None,
+                )
+                .await
+                .expect("an auxiliary cache error must not fail an already committed replacement");
+            let table = mgr.get_table_by_id(result).await?;
+            assert_eq!(table.definition, "replacement definition");
+            assert_eq!(table.fragment_id, FragmentId::new(401));
+            let response =
+                tokio::time::timeout(std::time::Duration::from_secs(1), frontend_rx.recv())
+                    .await
+                    .expect("committed replacement must notify the frontend")
+                    .expect("frontend subscription stays open")
+                    .expect("notification succeeds");
+            assert_eq!(response.version, version);
+            let Some(NotificationInfo::ObjectGroup(group)) = response.info else {
+                panic!("expected a catalog object group");
+            };
+            assert!(group.objects.iter().any(|object| matches!(&object.object_info,
+                Some(PbObjectInfo::Table(table)) if table.id == result && table.definition == "replacement definition")));
+            assert!(matches!(serving_rx.try_recv().unwrap(),
+                LocalNotification::ServingFragmentMappingsDelete(ids) if ids == vec![400]));
+            assert!(matches!(serving_rx.try_recv().unwrap(),
+                LocalNotification::ServingFragmentMappingsUpsert(ids) if ids == vec![401]));
+            if !fail_cache_refresh {
+                let cache_response =
+                    tokio::time::timeout(std::time::Duration::from_secs(1), cache_rx.recv())
+                        .await
+                        .expect("successful replacement must still refresh cache policies")
+                        .expect("cache subscription stays open")
+                        .expect("notification succeeds");
+                // The unversioned cache message inherits the catalog version already queued.
+                assert_eq!(cache_response.version, version);
+                let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = cache_response.info
+                else {
+                    panic!("expected a cache policy snapshot");
+                };
+                let policies = config.table_cache_refill_policies.unwrap();
+                assert_eq!(
+                    policies.table_policies,
+                    vec![PbTableCacheRefillPolicy {
+                        table_id: result.as_raw_id(),
+                        policy: CacheRefillPolicy::Both.to_protobuf() as i32,
+                    }]
+                );
+                assert_eq!(
+                    policies.internal_table_policies,
+                    vec![PbTableCacheRefillPolicy {
+                        table_id: internal.as_raw_id(),
+                        policy: CacheRefillPolicy::Both.to_protobuf() as i32,
+                    }]
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_alter_streaming_job_cache_refill_config_notifies_hummock() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let (tx, mut rx) = mpsc::unbounded_channel();
