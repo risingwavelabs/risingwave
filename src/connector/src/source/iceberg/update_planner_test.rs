@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Iceberg tables require a native Tokio runtime, which madsim does not provide.
+#![cfg(not(madsim))]
+
 use std::collections::{BTreeSet, HashMap};
 use std::slice::from_ref;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -384,7 +384,8 @@ impl CatalogV2 for MockCatalog {
     }
 }
 
-#[cfg(test)]
+// Iceberg tables require a native Tokio runtime, which madsim does not provide.
+#[cfg(all(test, not(madsim)))]
 mod tests {
     use super::*;
 
