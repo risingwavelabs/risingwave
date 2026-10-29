@@ -498,8 +498,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         let change_buffers =
                                             cache.handle_new(chunk, &self.state_table).await?;
 
-                                        let mut output_chunks =
-                                            Vec::with_capacity(change_buffers.len());
                                         for change_buffer in change_buffers {
                                             let output_chunk = if self.stream_key_indices
                                                 == self.state_table.pk_indices()
@@ -524,24 +522,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             if let Some(output_chunk) = output_chunk {
                                                 self.state_table.write_chunk(output_chunk.clone());
                                                 self.state_table.try_flush().await?;
-                                                output_chunks.push(output_chunk);
+                                                yield Message::Chunk(output_chunk);
                                             }
-                                        }
-                                        // Each buffer must be written in order, but downstream gets a single chunk.
-                                        if output_chunks.len() == 1 {
-                                            yield Message::Chunk(output_chunks.pop().unwrap());
-                                        } else if !output_chunks.is_empty() {
-                                            let mut builder = StreamChunkBuilder::unlimited(
-                                                data_types.clone(),
-                                                None,
-                                            );
-                                            for output_chunk in &output_chunks {
-                                                for (op, row) in output_chunk.rows() {
-                                                    let none = builder.append_row(op, row);
-                                                    debug_assert!(none.is_none());
-                                                }
-                                            }
-                                            yield Message::Chunk(builder.take().unwrap());
                                         }
                                     }
                                     ConflictBehavior::NoCheck => {
@@ -1904,21 +1886,23 @@ mod tests {
             materialize_executor.next().await.transpose().unwrap();
         }
 
-        match materialize_executor.next().await.transpose().unwrap() {
-            Some(Message::Chunk(chunk)) => {
-                assert_eq!(
-                    chunk.compact_vis(),
-                    StreamChunk::from_pretty(
-                        " i i
-                        U- 1 1
-                        U+ 1 2
-                        U- 1 2
-                        U+ 1 3
-                        - 1 3"
-                    )
-                );
+        let expected = [
+            " i i
+            U- 1 1
+            U+ 1 2",
+            " i i
+            U- 1 2
+            U+ 1 3",
+            " i i
+            - 1 3",
+        ];
+        for expected in expected {
+            match materialize_executor.next().await.transpose().unwrap() {
+                Some(Message::Chunk(chunk)) => {
+                    assert_eq!(chunk.compact_vis(), StreamChunk::from_pretty(expected));
+                }
+                other => panic!("expect chunk, got {other:?}"),
             }
-            other => panic!("expect chunk, got {other:?}"),
         }
         assert!(matches!(
             materialize_executor.next().await.transpose().unwrap(),
