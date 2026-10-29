@@ -243,7 +243,7 @@ impl MonitoredStorageMetrics {
         )
         .unwrap();
         let iter_log_op_type_counts = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
-            MetricLevel::Debug,
+            MetricLevel::Info,
             iter_log_op_type_counts,
             metric_level,
             1,
