@@ -509,6 +509,42 @@ impl BigQuerySink {
         Ok(tfs)
     }
 
+    fn check_primary_key(&self, table: &Table) -> Result<()> {
+        if self.is_append_only {
+            return Ok(());
+        }
+
+        let expected: Vec<_> = self
+            .pk_indices
+            .iter()
+            .map(|&index| self.schema.fields()[index].name.as_str())
+            .collect();
+        let actual: Vec<_> = table
+            .table_constraints
+            .as_ref()
+            .and_then(|constraints| constraints.primary_key.as_ref())
+            .map(|pk| pk.columns.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+        // Composite keys identify the same rows regardless of column order.
+        let mut expected_sorted = expected.clone();
+        let mut actual_sorted = actual.clone();
+        expected_sorted.sort_unstable();
+        actual_sorted.sort_unstable();
+        if actual.is_empty() || actual_sorted != expected_sorted {
+            return Err(SinkError::Config(anyhow!(
+                "BigQuery table `{}.{}.{}` primary key does not match the upsert sink: expected {:?}, actual {:?}. \
+                 Declare a PRIMARY KEY (...) NOT ENFORCED on the destination table matching the sink's `primary_key`, \
+                 or set the sink's `primary_key` to match the existing table.",
+                self.config.common.project,
+                self.config.common.dataset,
+                self.config.common.table,
+                expected,
+                actual,
+            )));
+        }
+        Ok(())
+    }
+
     fn build_table(&self, dataset: &Dataset, table_id: &str) -> Result<Table> {
         let fields = self
             .schema
@@ -594,21 +630,22 @@ impl Sink for BigQuerySink {
             ..
         } = &self.config.common;
 
-        if self.config.common.auto_create {
+        if self.config.common.auto_create || !self.is_append_only {
             match client
                 .table()
                 .get(project_id, dataset_id, table_id, None)
                 .await
             {
-                Err(BQError::ResponseError { error }) if error.error.code == 404 => {
-                    // early return: no need to query schema to check column and type
-                    return self
+                Err(BQError::ResponseError { error })
+                    if error.error.code == 404 && self.config.common.auto_create =>
+                {
+                    let table = self
                         .create_table(&client, project_id, dataset_id, table_id)
-                        .await
-                        .map(|_| ());
+                        .await?;
+                    return self.check_primary_key(&table);
                 }
                 Err(e) => return Err(SinkError::BigQuery(e.into())),
-                _ => {}
+                Ok(table) => self.check_primary_key(&table)?,
             }
         }
 
@@ -1125,6 +1162,8 @@ mod test {
     use std::collections::{BTreeMap, HashMap};
 
     use gcp_bigquery_client::model::dataset::Dataset;
+    use gcp_bigquery_client::model::table::Table;
+    use gcp_bigquery_client::model::table_schema::TableSchema;
     use google_cloud_gax::conn::Environment;
     use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
         ProtoData, Rows as AppendRowsRequestRows,
@@ -1338,6 +1377,95 @@ mod test {
                 assert_eq!(field["type"], "STRING");
             }
         }
+    }
+
+    #[test]
+    fn test_check_primary_key() {
+        let sink = BigQuerySink::new(
+            sink_config("upsert"),
+            Schema {
+                fields: vec![
+                    Field::with_name(DataType::Varchar, "value"),
+                    Field::with_name(DataType::Int64, "renamed_id"),
+                    Field::with_name(DataType::Varchar, "tenant"),
+                ],
+            },
+            vec![2, 1],
+            false,
+        )
+        .unwrap();
+
+        for (constraints, valid) in [
+            (serde_json::Value::Null, false),
+            (serde_json::json!({}), false),
+            (serde_json::json!({"primaryKey": {"columns": []}}), false),
+            (
+                serde_json::json!({"primaryKey": {"columns": ["tenant", "renamed_id"]}}),
+                true,
+            ),
+            (
+                serde_json::json!({"primaryKey": {"columns": ["renamed_id", "tenant"]}}),
+                true,
+            ),
+            (
+                serde_json::json!({"primaryKey": {"columns": ["tenant"]}}),
+                false,
+            ),
+            (
+                serde_json::json!({"primaryKey": {"columns": ["tenant", "value"]}}),
+                false,
+            ),
+            (
+                serde_json::json!({"primaryKey": {"columns": ["tenant", "renamed_id", "value"]}}),
+                false,
+            ),
+        ] {
+            let mut table = Table::new("project", "dataset", "table", TableSchema::default());
+            table.table_constraints = serde_json::from_value(constraints.clone()).unwrap();
+            assert_eq!(
+                sink.check_primary_key(&table).is_ok(),
+                valid,
+                "{constraints}"
+            );
+
+            let mut append_only_sink = BigQuerySink::new(
+                sink_config("append-only"),
+                sink.schema.clone(),
+                vec![],
+                true,
+            )
+            .unwrap();
+            append_only_sink.config.common.auto_create = true;
+            append_only_sink.check_primary_key(&table).unwrap();
+        }
+
+        let table = Table::new("project", "dataset", "table", TableSchema::default());
+        let error = sink.check_primary_key(&table).unwrap_err().to_string();
+        assert!(error.contains("project.dataset.table"), "{error}");
+        assert!(
+            error.contains("expected [\"tenant\", \"renamed_id\"], actual []"),
+            "{error}"
+        );
+        assert!(error.contains("PRIMARY KEY (...) NOT ENFORCED"), "{error}");
+    }
+
+    #[test]
+    fn test_check_created_table_primary_key() {
+        let sink = BigQuerySink::new(
+            sink_config("upsert"),
+            Schema {
+                fields: vec![Field::with_name(DataType::Int64, "id")],
+            },
+            vec![0],
+            false,
+        )
+        .unwrap();
+        let mut table = sink
+            .build_table(&Dataset::new("project", "dataset"), "table")
+            .unwrap();
+        sink.check_primary_key(&table).unwrap();
+        table.table_constraints = None;
+        assert!(sink.check_primary_key(&table).is_err());
     }
 
     /// Writes `chunks` in order and decodes the rows of the sent requests.
