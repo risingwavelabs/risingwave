@@ -66,8 +66,19 @@ FROM
     starrocks.ignore_json_size = 'false',
     starrocks.load_mem_limit = '268435456',
     starrocks.transaction_timeout_seconds = '900',
+    commit_checkpoint_interval = '2',
     primary_key = 'v1'
 );
+
+# Make the CREATE settings observable before changing the writer configuration.
+statement ok
+INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'before_alter', '2013-01-01', '2013-01-01 01:01:01', false, '{"v101":100}', 1.12345678910);
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(mysql --host=starrocks-fe-server --port=9030 --connect-timeout=2 --user=users --password=123456 --batch --skip-column-names --execute="SELECT COUNT(*) FROM demo.demo_bhv_table WHERE v1 = 1 AND v6 = 'before_alter'")" = "1"
 
 # Invalid connector updates must be rejected before they reach the running writer.
 statement error starrocks.transaction_timeout_seconds.*between 1 and 2147483647
@@ -76,7 +87,7 @@ ALTER SINK s6 CONNECTOR WITH (starrocks.transaction_timeout_seconds = '0');
 statement error starrocks.load_mem_limit.*must not exceed
 ALTER SINK s6 CONNECTOR WITH (starrocks.load_mem_limit = '9223372036854775808');
 
-# Verify the options are alterable and persisted, then exercise the updated writer below.
+# Verify the options are alterable and persisted, then exercise the updated writer.
 statement ok
 ALTER SINK s6 CONNECTOR WITH (
     commit_checkpoint_interval = '1',
@@ -104,20 +115,40 @@ WHERE name = 's6';
 true 536870912 1200
 
 statement ok
-INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01' , false, '{"v101":100}',1.12345678910);
+UPDATE t6 SET v6 = 'after_alter' WHERE v1 = 1;
 
 statement ok
 FLUSH;
 
 # FLUSH does not wait for a decoupled sink to commit to the external system.
-system ok
-for attempt in $(seq 1 30); do
-    if [ "$(mysql --host=starrocks-fe-server --port=9030 --connect-timeout=2 --user=users --password=123456 --batch --skip-column-names --execute="SELECT COUNT(*) FROM demo.demo_bhv_table WHERE v1 = 1 AND v6 = 'test'")" = "1" ]; then
-        exit 0
-    fi
-    sleep 1
-done
-exit 1
+system ok retry 30 backoff 1s
+test "$(mysql --host=starrocks-fe-server --port=9030 --connect-timeout=2 --user=users --password=123456 --batch --skip-column-names --execute="SELECT COUNT(*) FROM demo.demo_bhv_table WHERE v1 = 1 AND v6 = 'after_alter'")" = "1"
+
+# Restore the three options and verify the rebuilt writer can still update the row.
+statement ok
+ALTER SINK s6 CONNECTOR WITH (
+    starrocks.ignore_json_size = 'false',
+    starrocks.load_mem_limit = '268435456',
+    starrocks.transaction_timeout_seconds = '900'
+);
+
+query TTT
+SELECT connector_props -> 'starrocks.ignore_json_size' ->> 'value',
+       connector_props -> 'starrocks.load_mem_limit' ->> 'value',
+       connector_props -> 'starrocks.transaction_timeout_seconds' ->> 'value'
+FROM rw_catalog.rw_sinks
+WHERE name = 's6';
+----
+false 268435456 900
+
+statement ok
+UPDATE t6 SET v6 = 'test' WHERE v1 = 1;
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(mysql --host=starrocks-fe-server --port=9030 --connect-timeout=2 --user=users --password=123456 --batch --skip-column-names --execute="SELECT COUNT(*) FROM demo.demo_bhv_table WHERE v1 = 1 AND v6 = 'test'")" = "1"
 
 statement ok
 DROP SINK s6;
