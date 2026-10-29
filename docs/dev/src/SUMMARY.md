@@ -28,7 +28,6 @@
 
 - [Develop Connectors](./connector/intro.md)
     - [Source](./connector/source.md)
-    - [StarRocks Sink Stream Load Options](./connector/starrocks.md)
 - [Continuous Integration](./ci.md)
 
 ---
