@@ -527,8 +527,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                                 output_chunks.push(output_chunk);
                                             }
                                         }
-                                        // Each buffer must be written in order, but yield a single chunk downstream
-                                        // to avoid many small chunks when a key changes many times within one chunk.
+                                        // Each buffer must be written in order, but downstream gets a single chunk.
                                         if output_chunks.len() == 1 {
                                             yield Message::Chunk(output_chunks.pop().unwrap());
                                         } else if !output_chunks.is_empty() {
