@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod citus;
 pub mod enumerator;
 pub mod external;
 pub mod jni_source;
@@ -66,7 +65,6 @@ pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
-pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
 pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
 pub const SQL_SERVER_CDC_CONNECTOR: &str = SqlServer::CDC_CONNECTOR_NAME;
 pub const ORACLE_CDC_CONNECTOR: &str = Oracle::CDC_CONNECTOR_NAME;
@@ -121,7 +119,6 @@ impl<'a> From<&'a str> for CdcSourceType {
         match name {
             MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
-            CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
             MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
             SQL_SERVER_CDC_CONNECTOR => CdcSourceType::SqlServer,
             ORACLE_CDC_CONNECTOR => CdcSourceType::Oracle,
@@ -135,7 +132,6 @@ impl CdcSourceType {
         match self {
             CdcSourceType::Mysql => "MySQL",
             CdcSourceType::Postgres => "Postgres",
-            CdcSourceType::Citus => "Citus",
             CdcSourceType::Mongodb => "MongoDB",
             CdcSourceType::SqlServer => "SQL Server",
             CdcSourceType::Oracle => "Oracle",

@@ -20,7 +20,6 @@ macro_rules! for_all_classified_sources {
             {
                 { Mysql },
                 { Postgres },
-                { Citus },
                 { Mongodb },
                 { SqlServer },
                 { Oracle }

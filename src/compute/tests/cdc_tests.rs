@@ -311,7 +311,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let mut splits = HashMap::new();
     splits.insert(
         actor_id.into(),
-        vec![SplitImpl::MysqlCdc(DebeziumCdcSplit::new(0, None, None))],
+        vec![SplitImpl::MysqlCdc(DebeziumCdcSplit::new(0, None))],
     );
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
@@ -633,7 +633,7 @@ async fn test_parallelized_cdc_backfill() {
     let mut source_splits = HashMap::new();
     source_splits.insert(
         actor_id,
-        vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
+        vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None))],
     );
     let splits = [(
         actor_id,
@@ -788,7 +788,7 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     let mut source_splits = HashMap::new();
     source_splits.insert(
         actor_id,
-        vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
+        vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None))],
     );
     let splits = [(
         actor_id,
