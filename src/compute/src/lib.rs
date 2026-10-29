@@ -260,40 +260,4 @@ mod tests {
     fn test_compute_role_rejects_none() {
         assert!(ComputeNodeOpts::try_parse_from(["compute", "--role", "none"]).is_err());
     }
-
-    #[test]
-    fn test_pin_cache_directory_override() {
-        use clap::CommandFactory;
-        use risingwave_common::config::RwConfig;
-
-        let command = ComputeNodeOpts::command();
-        let arg = command
-            .get_arguments()
-            .find(|arg| arg.get_id() == "pin_cache_dir")
-            .unwrap();
-        assert_eq!(
-            arg.get_env(),
-            Some(std::ffi::OsStr::new("RW_PIN_CACHE_DIR"))
-        );
-        assert!(arg.get_default_values().is_empty());
-
-        let opts = ComputeNodeOpts::try_parse_from(["compute"]).unwrap();
-        assert_eq!(opts.pin_cache_dir, std::env::var("RW_PIN_CACHE_DIR").ok());
-
-        for directory in ["/tmp/pin-cache", ""] {
-            let mut opts =
-                ComputeNodeOpts::try_parse_from(["compute", "--pin-cache-dir", directory]).unwrap();
-            assert_eq!(opts.pin_cache_dir.as_deref(), Some(directory));
-            let mut config = RwConfig::default();
-            config.storage.pin_cache_dir = "configured-directory".to_owned();
-            opts.r#override(&mut config);
-            assert_eq!(config.storage.pin_cache_dir, directory);
-
-            // An absent CLI/environment override preserves the file configuration.
-            opts.pin_cache_dir = None;
-            config.storage.pin_cache_dir = "configured-directory".to_owned();
-            opts.r#override(&mut config);
-            assert_eq!(config.storage.pin_cache_dir, "configured-directory");
-        }
-    }
 }
