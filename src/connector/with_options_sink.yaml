@@ -398,7 +398,9 @@ FirestoreConfig:
     default: DEFAULT_MAX_BATCH_SIZE
   - name: firestore.max_future_send_nums
     field_type: usize
-    comments: 'Maximum number of in-flight futures (default: 256)'
+    comments: |-
+      Maximum concurrent batch write requests within one chunk (default: 256).
+      Chunks are written sequentially to preserve per-document mutation order.
     required: false
     default: DEFAULT_MAX_FUTURE_SEND_NUMS
 FsConfig:

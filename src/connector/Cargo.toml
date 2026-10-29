@@ -77,6 +77,7 @@ either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.7"
 firestore = "0.47"
+jsonbb = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcloud-sdk = "0.28"
@@ -228,6 +229,7 @@ syn = { version = "2", features = ["full"] }
 tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
+tonic-prost = "0.14"
 walkdir = "2"
 
 [[bench]]

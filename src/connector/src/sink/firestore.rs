@@ -14,17 +14,19 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use firestore::{FirestoreDb, FirestoreDbOptions};
+use firestore::{FirestoreBatchWriter, FirestoreDb, FirestoreDbOptions};
+use futures::StreamExt;
+use gcloud_sdk::google::firestore::v1::value::ValueType;
+use gcloud_sdk::google::firestore::v1::{ArrayValue, Document, MapValue, Value, Write, write};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use serde::ser::{SerializeMap, SerializeSeq};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
@@ -75,7 +77,8 @@ pub struct FirestoreConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_size: usize,
 
-    /// Maximum number of in-flight futures (default: 256)
+    /// Maximum concurrent batch write requests within one chunk (default: 256).
+    /// Chunks are written sequentially to preserve per-document mutation order.
     #[serde(
         rename = "firestore.max_future_send_nums",
         default = "default_max_future_send_nums"
@@ -100,13 +103,39 @@ impl EnforceSecret for FirestoreConfig {
 
 impl FirestoreConfig {
     pub async fn build_client(&self) -> Result<FirestoreDb> {
-        let options = if let Some(ref database_id) = self.database_id {
+        self.build_client_with_emulator(std::env::var("FIRESTORE_EMULATOR_HOST").ok())
+            .await
+    }
+
+    async fn build_client_with_emulator(
+        &self,
+        emulator_host: Option<String>,
+    ) -> Result<FirestoreDb> {
+        let mut options = if let Some(ref database_id) = self.database_id {
             FirestoreDbOptions::new(self.project_id.clone()).with_database_id(database_id.clone())
         } else {
             FirestoreDbOptions::new(self.project_id.clone())
         };
 
-        let db = if let Some(ref cred) = self.credentials {
+        let db = if let Some(host) = emulator_host {
+            // The SDK already supports the emulator endpoint, but still attempts ADC by default.
+            // Use the emulator's owner token without fetching or forwarding cloud credentials.
+            use gcloud_sdk::{ExternalJwtFunctionSource, Token, TokenSourceType};
+            options.firebase_api_url = Some(format!("http://{host}"));
+            let source = ExternalJwtFunctionSource::new(|| async {
+                Ok(Token::new(
+                    "Bearer".to_owned(),
+                    "owner".to_owned().into(),
+                    chrono::Utc::now() + chrono::Duration::hours(1),
+                ))
+            });
+            FirestoreDb::with_options_token_source(
+                options,
+                vec![],
+                TokenSourceType::ExternalSource(Box::new(source)),
+            )
+            .await
+        } else if let Some(ref cred) = self.credentials {
             // Use JSON credentials string with gcloud-sdk's TokenSourceType
             // firestore internally uses gcloud-sdk, so we use TokenSourceType::Json
             use gcloud_sdk::{GCP_DEFAULT_SCOPES, TokenSourceType};
@@ -125,6 +154,36 @@ impl FirestoreConfig {
         db.map_err(|e| {
             SinkError::Firestore(anyhow!(e).context("failed to create Firestore client"))
         })
+    }
+
+    fn validate_schema(&self, schema: &Schema, pk_indices: &[usize]) -> Result<Option<usize>> {
+        if !(1..=DEFAULT_MAX_BATCH_SIZE).contains(&self.max_batch_size) {
+            return Err(SinkError::Config(anyhow!(
+                "firestore.max_batch_size must be between 1 and {}",
+                DEFAULT_MAX_BATCH_SIZE
+            )));
+        }
+        if self.max_future_send_nums == 0 {
+            return Err(SinkError::Config(anyhow!(
+                "firestore.max_future_send_nums must be greater than 0"
+            )));
+        }
+        if let Some(name) = &self.document_id_column {
+            return schema
+                .fields()
+                .iter()
+                .position(|f| &f.name == name)
+                .map(Some)
+                .ok_or_else(|| {
+                    SinkError::Config(anyhow!("document_id_column '{}' not found in schema", name))
+                });
+        }
+        if pk_indices.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "Either document_id_column or primary key must be specified"
+            )));
+        }
+        Ok(None)
     }
 
     fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
@@ -157,47 +216,9 @@ impl Sink for FirestoreSink {
     const SINK_NAME: &'static str = FIRESTORE_SINK;
 
     async fn validate(&self) -> Result<()> {
-        if self.config.max_batch_size == 0 {
-            return Err(SinkError::Config(anyhow!(
-                "firestore.max_batch_size must be greater than 0"
-            )));
-        }
-        if self.config.max_batch_size > DEFAULT_MAX_BATCH_SIZE {
-            return Err(SinkError::Config(anyhow!(
-                "firestore.max_batch_size must not exceed {}",
-                DEFAULT_MAX_BATCH_SIZE
-            )));
-        }
-        if self.config.max_future_send_nums == 0 {
-            return Err(SinkError::Config(anyhow!(
-                "firestore.max_future_send_nums must be greater than 0"
-            )));
-        }
-
-        // Validate connection by creating a client
-        let _client: FirestoreDb = self
-            .config
-            .build_client()
-            .await
-            .context("Failed to validate Firestore connection")?;
-
-        // Validate document_id_column if specified
-        if let Some(ref doc_id_col) = self.config.document_id_column {
-            let col_exists = self.schema.fields().iter().any(|f| &f.name == doc_id_col);
-            if !col_exists {
-                return Err(SinkError::Firestore(anyhow!(
-                    "document_id_column '{}' not found in schema",
-                    doc_id_col
-                )));
-            }
-        }
-
-        // Validate that we have at least one PK if no document_id_column is specified
-        if self.config.document_id_column.is_none() && self.pk_indices.is_empty() {
-            return Err(SinkError::Firestore(anyhow!(
-                "Either document_id_column or primary key must be specified"
-            )));
-        }
+        self.config
+            .validate_schema(&self.schema, &self.pk_indices)?;
+        self.config.build_client().await?;
 
         Ok(())
     }
@@ -209,7 +230,8 @@ impl Sink for FirestoreSink {
             self.pk_indices.clone(),
         )
         .await?
-        .into_log_sinker(self.config.max_future_send_nums))
+        // Writes finish inline; request concurrency is bounded inside each chunk.
+        .into_log_sinker(1))
     }
 }
 
@@ -243,14 +265,8 @@ impl FirestoreSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
     ) -> Result<Self> {
+        let doc_id_col_idx = config.validate_schema(&schema, &pk_indices)?;
         let client = config.build_client().await?;
-
-        // Find document ID column index
-        let doc_id_col_idx = if let Some(ref col_name) = config.document_id_column {
-            schema.fields().iter().position(|f| &f.name == col_name)
-        } else {
-            None
-        };
 
         Ok(Self {
             client,
@@ -292,7 +308,7 @@ impl FirestoreSinkWriter {
         }
     }
 
-    fn format_row(&self, row: RowRef<'_>) -> Result<HashMap<String, JsonValue>> {
+    fn format_row(&self, row: RowRef<'_>) -> Result<HashMap<String, Value>> {
         let mut map = HashMap::new();
         for (datum, field) in row.iter().zip_eq_debug(self.schema.fields()) {
             let value = format_datum(datum, &field.data_type)?;
@@ -301,7 +317,7 @@ impl FirestoreSinkWriter {
         Ok(map)
     }
 
-    fn write_chunk_inner(&mut self, chunk: StreamChunk) -> Result<WriteChunkFuture> {
+    fn write_chunk_inner(&self, chunk: StreamChunk) -> Result<Vec<FirestoreOperation>> {
         let mut operations = BTreeMap::new();
 
         for (op, row) in chunk.rows() {
@@ -321,170 +337,154 @@ impl FirestoreSinkWriter {
             }
         }
 
-        Ok(self.write_operations(operations.into_values().collect()))
+        Ok(operations.into_values().collect())
     }
 
-    fn write_operations(&self, operations: Vec<FirestoreOperation>) -> WriteChunkFuture {
-        let client = self.client.clone();
-        let collection = self.config.collection.clone();
-        let futures = operations
-            .chunks(self.config.max_batch_size)
-            .map(|chunk| chunk.to_vec())
-            .map(move |chunk| {
-                let client = client.clone();
-                let collection = collection.clone();
-
-                async move {
-                    let batch_writer = client.create_simple_batch_writer().await.map_err(|e| {
-                        SinkError::Firestore(
-                            anyhow!(e).context("failed to create Firestore batch writer"),
-                        )
-                    })?;
-                    let mut batch = batch_writer.new_batch();
-                    let mut write_contexts = Vec::with_capacity(chunk.len());
-
-                    for op in &chunk {
-                        match op {
-                            FirestoreOperation::Upsert { doc_id, data } => {
-                                let data = FirestoreJsonObject(data);
-                                batch
-                                    .update_object(&collection, doc_id, &data, None, None, vec![])
-                                    .map_err(|e| {
-                                        SinkError::Firestore(
-                                            anyhow!(e)
-                                                .context("failed to add upsert document to batch"),
-                                        )
-                                    })?;
-                                write_contexts.push(format!("upsert document '{}'", doc_id));
+    async fn write_operations(&self, operations: Vec<FirestoreOperation>) -> Result<()> {
+        let requests = operations.chunks(self.config.max_batch_size).map(|chunk| {
+            let client = self.client.clone();
+            let collection = self.config.collection.clone();
+            let chunk = chunk.to_vec();
+            async move {
+                let document_ids = chunk
+                    .iter()
+                    .map(|op| op.document_id().to_owned())
+                    .collect::<Vec<_>>();
+                let writes = chunk
+                    .into_iter()
+                    .map(|op| {
+                        let name = format!(
+                            "{}/{}/{}",
+                            client.get_documents_path(),
+                            collection,
+                            op.document_id()
+                        );
+                        let operation = match op {
+                            FirestoreOperation::Upsert { data, .. } => {
+                                write::Operation::Update(Document {
+                                    name,
+                                    fields: data,
+                                    ..Default::default()
+                                })
                             }
-                            FirestoreOperation::Delete { doc_id } => {
-                                batch.delete_by_id(&collection, doc_id, None).map_err(|e| {
-                                    SinkError::Firestore(
-                                        anyhow!(e)
-                                            .context("failed to add delete document to batch"),
-                                    )
-                                })?;
-                                write_contexts.push(format!("delete document '{}'", doc_id));
-                            }
+                            FirestoreOperation::Delete { .. } => write::Operation::Delete(name),
+                        };
+                        Write {
+                            operation: Some(operation),
+                            ..Default::default()
                         }
-                    }
+                    })
+                    .collect::<Vec<_>>();
+                let writer = client.create_simple_batch_writer().await.map_err(|e| {
+                    SinkError::Firestore(
+                        anyhow!(e).context("failed to create Firestore batch writer"),
+                    )
+                })?;
+                let response = writer.write(writes).await.map_err(|e| {
+                    SinkError::Firestore(
+                        anyhow!(e).context("failed to execute Firestore batch write"),
+                    )
+                })?;
+                check_batch_statuses(&response.statuses, &document_ids)
+            }
+        });
 
-                    let response = batch.write().await.map_err(|e| {
-                        SinkError::Firestore(
-                            anyhow!(e).context("failed to execute Firestore batch write"),
-                        )
-                    })?;
-
-                    if response.statuses.len() != write_contexts.len() {
-                        return Err(SinkError::Firestore(anyhow!(
-                            "Firestore batch write returned {} statuses for {} writes",
-                            response.statuses.len(),
-                            write_contexts.len()
-                        )));
-                    }
-
-                    for (status, context) in response.statuses.iter().zip_eq_debug(&write_contexts)
-                    {
-                        if status.code != 0 {
-                            return Err(SinkError::Firestore(anyhow!(
-                                "Firestore batch write failed to {}: code={}, message={}",
-                                context,
-                                status.code,
-                                status.message
-                            )));
-                        }
-                    }
-
-                    Ok::<(), SinkError>(())
-                }
-            });
-
-        Box::pin(futures::future::try_join_all(futures))
+        // Each document occurs at most once per chunk. Only these independent requests may
+        // run concurrently. Drain requests even on failure before allowing rewind/replay.
+        futures::stream::iter(requests)
+            .buffer_unordered(self.config.max_future_send_nums)
+            .fold(Ok(()), |result, next| async move { result.and(next) })
+            .await
     }
+}
+
+fn check_batch_statuses(
+    statuses: &[gcloud_sdk::google::rpc::Status],
+    document_ids: &[String],
+) -> Result<()> {
+    if statuses.len() != document_ids.len() {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore batch write returned {} statuses for {} writes",
+            statuses.len(),
+            document_ids.len()
+        )));
+    }
+    for (status, document_id) in statuses.iter().zip_eq_debug(document_ids) {
+        if status.code != 0 {
+            return Err(SinkError::Firestore(anyhow!(
+                "Firestore batch write failed for document '{}': code={}, message={}",
+                document_id,
+                status.code,
+                status.message
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
 enum FirestoreOperation {
     Upsert {
         doc_id: String,
-        data: HashMap<String, JsonValue>,
+        data: HashMap<String, Value>,
     },
     Delete {
         doc_id: String,
     },
 }
 
-struct FirestoreJsonObject<'a>(&'a HashMap<String, JsonValue>);
-
-impl Serialize for FirestoreJsonObject<'_> {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(self.0.len()))?;
-        for (key, value) in self.0 {
-            map.serialize_entry(key, &FirestoreJsonValue(value))?;
-        }
-        map.end()
-    }
-}
-
-struct FirestoreJsonValue<'a>(&'a JsonValue);
-
-impl Serialize for FirestoreJsonValue<'_> {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self.0 {
-            JsonValue::Null => {
-                firestore::serialize_as_null::serialize(&Option::<()>::None, serializer)
-            }
-            JsonValue::Array(values) => {
-                let mut seq = serializer.serialize_seq(Some(values.len()))?;
-                for value in values {
-                    seq.serialize_element(&FirestoreJsonValue(value))?;
-                }
-                seq.end()
-            }
-            JsonValue::Object(values) => {
-                let mut map = serializer.serialize_map(Some(values.len()))?;
-                for (key, value) in values {
-                    map.serialize_entry(key, &FirestoreJsonValue(value))?;
-                }
-                map.end()
-            }
-            value => value.serialize(serializer),
+impl FirestoreOperation {
+    fn document_id(&self) -> &str {
+        match self {
+            Self::Upsert { doc_id, .. } | Self::Delete { doc_id } => doc_id,
         }
     }
 }
 
-pub type WriteChunkFuture = std::pin::Pin<
-    Box<dyn std::future::Future<Output = std::result::Result<Vec<()>, SinkError>> + Send>,
->;
+// Encode Firestore values directly: JSON cannot represent non-finite floats, and the
+// SDK's serde serializer casts u64 to i64 without checking its range.
+fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Result<Value> {
+    format_datum_at_depth(datum, data_type, 0)
+}
 
-fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Result<JsonValue> {
+fn check_container_depth(depth: usize) -> Result<()> {
+    if depth >= 20 {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore maps and arrays must not exceed 20 levels"
+        )));
+    }
+    Ok(())
+}
+
+fn array_value(values: Vec<Value>) -> Result<ValueType> {
+    if values
+        .iter()
+        .any(|v| matches!(v.value_type, Some(ValueType::ArrayValue(_))))
+    {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore arrays cannot directly contain arrays"
+        )));
+    }
+    Ok(ValueType::ArrayValue(ArrayValue { values }))
+}
+
+fn format_datum_at_depth(
+    datum: Option<ScalarRefImpl<'_>>,
+    data_type: &DataType,
+    depth: usize,
+) -> Result<Value> {
     let Some(scalar) = datum else {
-        return Ok(JsonValue::Null);
+        return Ok(Value {
+            value_type: Some(ValueType::NullValue(0)),
+        });
     };
-
-    let value = match data_type {
-        DataType::Boolean => JsonValue::Bool(scalar.into_bool()),
-        DataType::Int16 => JsonValue::Number(scalar.into_int16().into()),
-        DataType::Int32 => JsonValue::Number(scalar.into_int32().into()),
-        DataType::Int64 => JsonValue::Number(scalar.into_int64().into()),
-        DataType::Float32 => {
-            let f = scalar.into_float32().0;
-            serde_json::Number::from_f64(f as f64)
-                .map(JsonValue::Number)
-                .unwrap_or(JsonValue::String(f.to_string()))
-        }
-        DataType::Float64 => {
-            let f = scalar.into_float64().0;
-            serde_json::Number::from_f64(f)
-                .map(JsonValue::Number)
-                .unwrap_or(JsonValue::String(f.to_string()))
-        }
+    let value_type = match data_type {
+        DataType::Boolean => ValueType::BooleanValue(scalar.into_bool()),
+        DataType::Int16 => ValueType::IntegerValue(scalar.into_int16().into()),
+        DataType::Int32 => ValueType::IntegerValue(scalar.into_int32().into()),
+        DataType::Int64 => ValueType::IntegerValue(scalar.into_int64()),
+        DataType::Float32 => ValueType::DoubleValue(scalar.into_float32().0.into()),
+        DataType::Float64 => ValueType::DoubleValue(scalar.into_float64().0),
         DataType::Decimal
         | DataType::Int256
         | DataType::Serial
@@ -492,56 +492,102 @@ fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resul
         | DataType::Date
         | DataType::Time
         | DataType::Timestamp
-        | DataType::Timestamptz => JsonValue::String(scalar.to_text_with_type(data_type)),
-        DataType::Varchar => JsonValue::String(scalar.into_utf8().to_owned()),
-        DataType::Bytea => {
-            let bytes = scalar.into_bytea();
-            JsonValue::String(STANDARD.encode(bytes))
-        }
-        DataType::Jsonb => {
-            let jsonb = scalar.into_jsonb();
-            serde_json::from_str(&jsonb.to_string())
-                .unwrap_or_else(|_| JsonValue::String(jsonb.to_string()))
-        }
+        | DataType::Timestamptz => ValueType::StringValue(scalar.to_text_with_type(data_type)),
+        DataType::Varchar => ValueType::StringValue(scalar.into_utf8().to_owned()),
+        DataType::Bytea => ValueType::StringValue(STANDARD.encode(scalar.into_bytea())),
+        DataType::Jsonb => return format_jsonb(scalar.into_jsonb().into(), depth),
         DataType::List(inner) => {
-            let list = scalar.into_list();
-            let values: Result<Vec<JsonValue>> = list
+            check_container_depth(depth)?;
+            let values = scalar
+                .into_list()
                 .iter()
-                .map(|item| format_datum(item, inner.elem()))
-                .collect();
-            JsonValue::Array(values?)
+                .map(|item| format_datum_at_depth(item, inner.elem(), depth + 1))
+                .collect::<Result<Vec<_>>>()?;
+            array_value(values)?
         }
         DataType::Struct(st) => {
-            let struct_ref = scalar.into_struct();
-            let mut map = serde_json::Map::new();
-            for (datum, (name, dt)) in struct_ref.iter_fields_ref().zip_eq_debug(st.iter()) {
-                map.insert(name.to_owned(), format_datum(datum, dt)?);
+            check_container_depth(depth)?;
+            let mut fields = HashMap::new();
+            for (datum, (name, dt)) in scalar
+                .into_struct()
+                .iter_fields_ref()
+                .zip_eq_debug(st.iter())
+            {
+                fields.insert(
+                    name.to_owned(),
+                    format_datum_at_depth(datum, dt, depth + 1)?,
+                );
             }
-            JsonValue::Object(map)
+            ValueType::MapValue(MapValue { fields })
         }
-        DataType::Map(_) => {
+        DataType::Map(_) | DataType::Vector(_) => {
             return Err(SinkError::Firestore(anyhow!(
-                "Map type is not supported yet"
-            )));
-        }
-        DataType::Vector(_) => {
-            return Err(SinkError::Firestore(anyhow!(
-                "Vector type is not supported yet"
+                "{} is not supported by Firestore sink",
+                data_type
             )));
         }
     };
-    Ok(value)
+    Ok(Value {
+        value_type: Some(value_type),
+    })
+}
+
+fn format_jsonb(value: jsonbb::ValueRef<'_>, depth: usize) -> Result<Value> {
+    let value_type =
+        match value {
+            jsonbb::ValueRef::Null => ValueType::NullValue(0),
+            jsonbb::ValueRef::Bool(v) => ValueType::BooleanValue(v),
+            jsonbb::ValueRef::String(v) => ValueType::StringValue(v.as_str().to_owned()),
+            jsonbb::ValueRef::Number(v) => {
+                if let Some(v) = v.as_i64() {
+                    ValueType::IntegerValue(v)
+                } else if v.as_u64().is_some() {
+                    return Err(SinkError::Firestore(anyhow!(
+                        "JSONB integer exceeds Firestore signed 64-bit range"
+                    )));
+                } else {
+                    ValueType::DoubleValue(v.as_f64().ok_or_else(|| {
+                        SinkError::Firestore(anyhow!("JSONB number out of range"))
+                    })?)
+                }
+            }
+            jsonbb::ValueRef::Array(v) => {
+                check_container_depth(depth)?;
+                array_value(
+                    v.iter()
+                        .map(|v| format_jsonb(v, depth + 1))
+                        .collect::<Result<_>>()?,
+                )?
+            }
+            jsonbb::ValueRef::Object(v) => {
+                check_container_depth(depth)?;
+                let fields = v
+                    .iter()
+                    .map(|(k, v)| Ok((k.to_owned(), format_jsonb(v, depth + 1)?)))
+                    .collect::<Result<_>>()?;
+                ValueType::MapValue(MapValue { fields })
+            }
+        };
+    Ok(Value {
+        value_type: Some(value_type),
+    })
 }
 
 fn encode_pk_document_id(pk_values: Vec<JsonValue>) -> Result<String> {
-    Ok(URL_SAFE_NO_PAD.encode(
-        serde_json::to_vec(&pk_values).map_err(|e| {
+    let doc_id =
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&pk_values).map_err(|e| {
             SinkError::Firestore(anyhow!(e).context("failed to encode primary key"))
-        })?,
-    ))
+        })?);
+    validate_firestore_document_id(&doc_id)?;
+    Ok(doc_id)
 }
 
 fn validate_firestore_document_id(doc_id: &str) -> Result<()> {
+    if doc_id.len() > 1500 || (doc_id.starts_with("__") && doc_id.ends_with("__")) {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore document ID exceeds 1500 bytes or uses a reserved name"
+        )));
+    }
     if doc_id.is_empty() {
         return Err(SinkError::Firestore(anyhow!(
             "Firestore document ID must not be empty"
@@ -560,126 +606,17 @@ fn validate_firestore_document_id(doc_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub type FirestoreSinkDeliveryFuture =
-    std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<(), SinkError>> + Send>>;
-
 impl AsyncTruncateSinkWriter for FirestoreSinkWriter {
-    type DeliveryFuture = FirestoreSinkDeliveryFuture;
-
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        self.write_chunk_inner(chunk)?.await?;
+        let operations = self.write_chunk_inner(chunk)?;
+        self.write_operations(operations).await?;
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use gcloud_sdk::google::firestore::v1::value::ValueType;
-
-    use super::*;
-
-    #[test]
-    fn test_encode_pk_document_id_is_unambiguous_and_path_safe() -> Result<()> {
-        let first = encode_pk_document_id(vec![
-            JsonValue::String("a_b".to_owned()),
-            JsonValue::String("c".to_owned()),
-        ])?;
-        let second = encode_pk_document_id(vec![
-            JsonValue::String("a".to_owned()),
-            JsonValue::String("b_c".to_owned()),
-        ])?;
-        let third = encode_pk_document_id(vec![JsonValue::Null])?;
-        let fourth = encode_pk_document_id(vec![JsonValue::String("null".to_owned())])?;
-
-        assert_ne!(first, second);
-        assert_ne!(third, fourth);
-        assert!(!first.contains('/'));
-        assert!(!second.contains('/'));
-        Ok(())
-    }
-
-    #[test]
-    fn test_validate_explicit_document_id() {
-        assert!(validate_firestore_document_id("doc_1").is_ok());
-        assert!(validate_firestore_document_id("a/b").is_err());
-        assert!(validate_firestore_document_id("").is_err());
-        assert!(validate_firestore_document_id(".").is_err());
-        assert!(validate_firestore_document_id("..").is_err());
-    }
-
-    #[test]
-    fn test_format_int64_as_integer_value() -> Result<()> {
-        assert_eq!(
-            format_datum(Some(ScalarRefImpl::Int64(i64::MIN)), &DataType::Int64)?,
-            JsonValue::Number(i64::MIN.into())
-        );
-        assert_eq!(
-            format_datum(Some(ScalarRefImpl::Int64(i64::MAX)), &DataType::Int64)?,
-            JsonValue::Number(i64::MAX.into())
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_firestore_json_object_serializes_null_as_null_value() {
-        let data = HashMap::from([("field".to_owned(), JsonValue::Null)]);
-        let doc = FirestoreDb::serialize_to_doc(
-            "projects/p/databases/d/documents/c/doc",
-            &FirestoreJsonObject(&data),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            doc.fields.get("field").unwrap().value_type,
-            Some(ValueType::NullValue(0))
-        ));
-    }
-
-    #[test]
-    fn test_firestore_json_object_preserves_nested_null_values() {
-        let data = HashMap::from([(
-            "field".to_owned(),
-            serde_json::json!({
-                "array": [1, null, "x"],
-                "object": {
-                    "null_field": null,
-                    "string_field": "value"
-                }
-            }),
-        )]);
-        let doc = FirestoreDb::serialize_to_doc(
-            "projects/p/databases/d/documents/c/doc",
-            &FirestoreJsonObject(&data),
-        )
-        .unwrap();
-
-        let Some(ValueType::MapValue(root)) = &doc.fields.get("field").unwrap().value_type else {
-            panic!("expected field to be a map");
-        };
-        let Some(ValueType::ArrayValue(array)) = &root.fields.get("array").unwrap().value_type
-        else {
-            panic!("expected array field to be an array");
-        };
-        assert!(matches!(
-            array.values[1].value_type,
-            Some(ValueType::NullValue(0))
-        ));
-
-        let Some(ValueType::MapValue(object)) = &root.fields.get("object").unwrap().value_type
-        else {
-            panic!("expected object field to be a map");
-        };
-        assert!(matches!(
-            object.fields.get("null_field").unwrap().value_type,
-            Some(ValueType::NullValue(0))
-        ));
-        assert!(matches!(
-            object.fields.get("string_field").unwrap().value_type,
-            Some(ValueType::StringValue(_))
-        ));
-    }
-}
+mod tests;
