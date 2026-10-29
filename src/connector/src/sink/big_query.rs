@@ -27,9 +27,11 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use gcp_bigquery_client::Client;
 use gcp_bigquery_client::error::BQError;
+use gcp_bigquery_client::model::dataset::Dataset;
 use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::model::query_response::ResultSet;
 use gcp_bigquery_client::model::table::Table;
+use gcp_bigquery_client::model::table_constraint::{PrimaryKey, TableConstraints};
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use google_cloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
@@ -507,21 +509,39 @@ impl BigQuerySink {
         Ok(tfs)
     }
 
+    fn build_table(&self, dataset: &Dataset, table_id: &str) -> Result<Table> {
+        let fields = self
+            .schema
+            .fields()
+            .iter()
+            .map(Self::map_field)
+            .collect::<Result<Vec<_>>>()?;
+        let mut table = Table::from_dataset(dataset, table_id, TableSchema::new(fields));
+        if !self.is_append_only {
+            let pk_columns = self
+                .pk_indices
+                .iter()
+                .map(|&index| self.schema.fields()[index].name.clone())
+                .collect();
+            table.table_constraints =
+                Some(TableConstraints::default().primary_key(PrimaryKey::new(pk_columns)));
+        }
+        Ok(table)
+    }
+
     async fn create_table(
         &self,
         client: &Client,
         project_id: &str,
         dataset_id: &str,
         table_id: &str,
-        fields: &Vec<Field>,
     ) -> Result<Table> {
         let dataset = client
             .dataset()
             .get(project_id, dataset_id)
             .await
             .map_err(|e| SinkError::BigQuery(e.into()))?;
-        let fields: Vec<_> = fields.iter().map(Self::map_field).collect::<Result<_>>()?;
-        let table = Table::from_dataset(&dataset, table_id, TableSchema::new(fields));
+        let table = self.build_table(&dataset, table_id)?;
 
         client
             .table()
@@ -583,13 +603,7 @@ impl Sink for BigQuerySink {
                 Err(BQError::ResponseError { error }) if error.error.code == 404 => {
                     // early return: no need to query schema to check column and type
                     return self
-                        .create_table(
-                            &client,
-                            project_id,
-                            dataset_id,
-                            table_id,
-                            &self.schema.fields,
-                        )
+                        .create_table(&client, project_id, dataset_id, table_id)
                         .await
                         .map(|_| ());
                 }
@@ -1086,7 +1100,9 @@ fn build_protobuf_field(
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Variant => {
-            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Variant")));
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Don't support Variant"
+            )));
         }
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
         DataType::Float32 | DataType::Int256 => {
@@ -1108,6 +1124,7 @@ mod test {
     use std::assert_matches;
     use std::collections::{BTreeMap, HashMap};
 
+    use gcp_bigquery_client::model::dataset::Dataset;
     use google_cloud_gax::conn::Environment;
     use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
         ProtoData, Rows as AppendRowsRequestRows,
@@ -1273,6 +1290,54 @@ mod test {
             .map(|(k, v)| (k.to_owned(), v.to_owned())),
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn test_build_table_primary_key() {
+        for (column_names, pk_indices, expected_pk) in [
+            (["id", "value", "tenant"], vec![0], vec!["id"]),
+            (["id", "value", "tenant"], vec![2, 0], vec!["tenant", "id"]),
+            (
+                ["value", "renamed_id", "tenant"],
+                vec![1],
+                vec!["renamed_id"],
+            ),
+        ] {
+            let sink = BigQuerySink::new(
+                sink_config("upsert"),
+                Schema {
+                    fields: column_names
+                        .iter()
+                        .map(|name| Field::with_name(DataType::Varchar, *name))
+                        .collect(),
+                },
+                pk_indices,
+                false,
+            )
+            .unwrap();
+            let table = sink
+                .build_table(&Dataset::new("project", "dataset"), "target")
+                .unwrap();
+            let request = serde_json::to_value(table).unwrap();
+            assert_eq!(
+                request["tableConstraints"],
+                serde_json::json!({"primaryKey": {"columns": expected_pk}})
+            );
+            assert_eq!(
+                request["tableReference"],
+                serde_json::json!({
+                    "projectId": "project",
+                    "datasetId": "dataset",
+                    "tableId": "target",
+                })
+            );
+            let fields = request["schema"]["fields"].as_array().unwrap();
+            assert_eq!(fields.len(), column_names.len());
+            for (field, name) in fields.iter().zip(column_names) {
+                assert_eq!(field["name"], name);
+                assert_eq!(field["type"], "STRING");
+            }
+        }
     }
 
     /// Writes `chunks` in order and decodes the rows of the sent requests.

@@ -81,7 +81,7 @@ elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.7"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcp-bigquery-client = { version = "0.28.0", optional = true }
+gcp-bigquery-client = { git = "https://github.com/risingwavelabs/gcp-bigquery-client", rev = "fe62f94ef5474991e4c528b9a06cdbb026ffdb1e", optional = true }
 glob = "0.3"
 google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.6", features = [
     "auth",
