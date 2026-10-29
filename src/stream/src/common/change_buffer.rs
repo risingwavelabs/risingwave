@@ -237,6 +237,13 @@ impl<K, R> ChangeBuffer<K, R> {
     }
 }
 
+impl<K: private::Key, R> ChangeBuffer<K, R> {
+    /// Check if the buffer has pending changes for the given key.
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.buffer.contains_key(key)
+    }
+}
+
 /// The kind of output for [`ChangeBuffer::into_chunk`] and [`ChangeBuffer::into_chunks`].
 /// Can be [`UPSERT`] or [`RETRACT`].
 pub type OutputKind = bool;

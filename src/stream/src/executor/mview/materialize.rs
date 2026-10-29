@@ -339,6 +339,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
+        let preserve_changes = actor_context.config.developer.materialize_preserve_changes;
 
         Self {
             input,
@@ -354,6 +355,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 version_column_indices.clone(),
                 conflict_behavior,
                 toastable_column_indices.clone(),
+                preserve_changes,
                 cache_metrics,
             ),
             toastable_column_indices,
@@ -493,37 +495,35 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         }
 
                                         let cache = self.materialize_cache.as_mut().unwrap();
-                                        let change_buffer =
+                                        let change_buffers =
                                             cache.handle_new(chunk, &self.state_table).await?;
 
-                                        let output_chunk = if self.stream_key_indices
-                                            == self.state_table.pk_indices()
-                                        {
-                                            change_buffer.into_chunk::<{ cb_kind::RETRACT }>(
-                                                data_types.clone(),
-                                            )
-                                        } else {
-                                            // We only hit this branch for TTL-ed tables for now.
-                                            // Assert stream key is a superset of pk.
-                                            debug_assert!(
-                                                self.state_table
-                                                    .pk_indices()
-                                                    .iter()
-                                                    .all(|&i| self.stream_key_indices.contains(&i))
-                                            );
-                                            change_buffer.into_chunk_with_key(
-                                                data_types.clone(),
-                                                &self.stream_key_indices,
-                                            )
-                                        };
+                                        for change_buffer in change_buffers {
+                                            let output_chunk = if self.stream_key_indices
+                                                == self.state_table.pk_indices()
+                                            {
+                                                change_buffer.into_chunk::<{ cb_kind::RETRACT }>(
+                                                    data_types.clone(),
+                                                )
+                                            } else {
+                                                // We only hit this branch for TTL-ed tables for now.
+                                                // Assert stream key is a superset of pk.
+                                                debug_assert!(
+                                                    self.state_table.pk_indices().iter().all(
+                                                        |&i| self.stream_key_indices.contains(&i)
+                                                    )
+                                                );
+                                                change_buffer.into_chunk_with_key(
+                                                    data_types.clone(),
+                                                    &self.stream_key_indices,
+                                                )
+                                            };
 
-                                        match output_chunk {
-                                            Some(output_chunk) => {
+                                            if let Some(output_chunk) = output_chunk {
                                                 self.state_table.write_chunk(output_chunk.clone());
                                                 self.state_table.try_flush().await?;
                                                 yield Message::Chunk(output_chunk);
                                             }
-                                            None => continue,
                                         }
                                     }
                                     ConflictBehavior::NoCheck => {
@@ -1221,6 +1221,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 vec![],
                 conflict_behavior,
                 None,
+                false,
                 cache_metrics,
             ),
             toastable_column_indices: None,
@@ -1828,6 +1829,85 @@ mod tests {
             }
             other => panic!("expect chunk, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_preserve_changes() {
+        // With `preserve_changes`, multiple changes on the same key within one chunk are all
+        // emitted in order instead of being compacted into one.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 1",
+        );
+        // Upsert-style CDC updates followed by a delete, all in one chunk.
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 1 2
+            + 1 3
+            - 1 3",
+        );
+
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(chunk1),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ])
+        .into_executor(schema.clone(), StreamKey::new());
+
+        let mut executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::Overwrite,
+        )
+        .await;
+        executor
+            .materialize_cache
+            .as_mut()
+            .unwrap()
+            .preserve_changes = true;
+        let mut materialize_executor = executor.boxed().execute();
+
+        // init barrier, first insert, commit barrier
+        for _ in 0..3 {
+            materialize_executor.next().await.transpose().unwrap();
+        }
+
+        let expected = [
+            " i i
+            U- 1 1
+            U+ 1 2",
+            " i i
+            U- 1 2
+            U+ 1 3",
+            " i i
+            - 1 3",
+        ];
+        for expected in expected {
+            match materialize_executor.next().await.transpose().unwrap() {
+                Some(Message::Chunk(chunk)) => {
+                    assert_eq!(chunk.compact_vis(), StreamChunk::from_pretty(expected));
+                }
+                other => panic!("expect chunk, got {other:?}"),
+            }
+        }
+        assert!(matches!(
+            materialize_executor.next().await.transpose().unwrap(),
+            Some(Message::Barrier(_))
+        ));
     }
 
     #[tokio::test]

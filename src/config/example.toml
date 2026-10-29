@@ -263,6 +263,7 @@ iceberg_sink_write_parquet_max_row_group_rows = 100000
 iceberg_pk_index_sink_lookup_concurrency = 64
 iceberg_pk_index_sink_max_batch_rows = 4096
 materialize_force_overwrite_on_no_check = false
+materialize_preserve_changes = false
 default_enable_mem_preload_state_table = false
 mem_preload_state_table_ids_whitelist = []
 mem_preload_state_table_ids_blacklist = []
