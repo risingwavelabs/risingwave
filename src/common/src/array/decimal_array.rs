@@ -49,9 +49,9 @@ mod tests {
             None,
             Some(Decimal::from_str("4.04").unwrap()),
             None,
-            Some(Decimal::NegativeInf),
-            Some(Decimal::PositiveInf),
-            Some(Decimal::NaN),
+            Some(Decimal::NEGATIVE_INF),
+            Some(Decimal::POSITIVE_INF),
+            Some(Decimal::NAN),
         ];
 
         let array = DecimalArray::from_iter(&input);

@@ -34,7 +34,8 @@ use super::jsonb::{JsonbRef, JsonbVal};
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{
-    DataType, Decimal, Scalar, ScalarRef, ScalarRefImpl, StructType, scalar_ref_type_match,
+    DataType, Decimal, DecimalParts, Scalar, ScalarRef, ScalarRefImpl, StructType,
+    scalar_ref_type_match,
 };
 use crate::util::iter_util::ZipEqFast;
 
@@ -906,14 +907,13 @@ fn non_finite_to_json(value: f64) -> serde_json::Value {
 }
 
 fn append_decimal(value: Decimal, builder: &mut impl VariantBuilderExt) -> anyhow::Result<()> {
-    match value {
-        Decimal::Normalized(value) => {
-            let value = value.normalize();
-            let decimal = VariantDecimal16::try_new(value.mantissa(), value.scale() as u8)
+    match value.normalize().to_parts() {
+        DecimalParts::Finite { mantissa, scale } => {
+            let decimal = VariantDecimal16::try_new(mantissa, scale as u8)
                 .context("failed to encode decimal as variant")?;
             builder.append_value(decimal);
         }
-        Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf => {
+        DecimalParts::NaN | DecimalParts::PositiveInf | DecimalParts::NegativeInf => {
             builder.append_value(value.to_text().as_str());
         }
     }
