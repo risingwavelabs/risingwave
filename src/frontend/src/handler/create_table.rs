@@ -1118,7 +1118,16 @@ pub(super) async fn handle_create_table_plan(
             let excluded_columns = handler_args
                 .with_options
                 .get(CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY)
-                .map(|list| parse_cdc_table_excluded_columns(list))
+                .map(|list| {
+                    let columns = parse_cdc_table_excluded_columns(list);
+                    if columns.is_empty() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "`{CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY}` must list at least one column"
+                        )));
+                    }
+                    Ok(columns)
+                })
+                .transpose()?
                 .unwrap_or_default();
 
             let (columns, pk_names, pk_comparisons) = match wildcard_idx {
