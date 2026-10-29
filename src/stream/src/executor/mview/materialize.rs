@@ -240,6 +240,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         metrics: Arc<StreamingMetrics>,
         refresh_args: Option<RefreshableMaterializeArgs<S, SD>>,
         cleaned_by_ttl_watermark: bool,
+        preserve_changes: bool,
         local_barrier_manager: LocalBarrierManager,
     ) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -339,7 +340,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
-        let preserve_changes = actor_context.config.developer.materialize_preserve_changes;
 
         Self {
             input,

@@ -287,11 +287,6 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::materialize_force_overwrite_on_no_check")]
     pub materialize_force_overwrite_on_no_check: bool,
 
-    /// When enabled, materialize executors with conflict checking emit every change in order,
-    /// instead of compacting multiple changes on the same key within a chunk into one.
-    #[serde(default = "default::developer::materialize_preserve_changes")]
-    pub materialize_preserve_changes: bool,
-
     /// Whether by default enable preloading all rows in memory for state table.
     /// If true, all capable state tables will preload its state to memory
     #[serde(default = "default::streaming::default_enable_mem_preload_state_table")]

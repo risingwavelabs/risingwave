@@ -415,14 +415,6 @@ pub struct SessionConfig {
     #[parameter(default = None)]
     streaming_cache_refill_policy: OptionConfig<CacheRefillPolicy>,
 
-    /// Emit every change from materialize executors in order, instead of compacting changes on the
-    /// same key within a chunk. Useful for CDC tables whose changelog must keep every version.
-    ///
-    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
-    /// taking effect for new streaming jobs created in the current session.
-    #[parameter(default = None)]
-    streaming_materialize_preserve_changes: OptionConfig<bool>,
-
     /// Run DDL statements in background
     #[parameter(default = false)]
     background_ddl: bool,
@@ -713,11 +705,6 @@ impl SessionConfig {
         if let Some(v) = self.streaming_cache_refill_policy.as_ref() {
             table
                 .upsert("streaming.developer.cache_refill_policy", v)
-                .unwrap();
-        }
-        if let Some(v) = self.streaming_materialize_preserve_changes.as_ref() {
-            table
-                .upsert("streaming.developer.materialize_preserve_changes", v)
                 .unwrap();
         }
 

@@ -457,10 +457,6 @@ pub mod default {
             false
         }
 
-        pub fn materialize_preserve_changes() -> bool {
-            false
-        }
-
         pub fn refresh_scheduler_interval_sec() -> u64 {
             60
         }
