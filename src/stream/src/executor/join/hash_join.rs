@@ -741,8 +741,7 @@ pub struct JoinEntryState<E: JoinEncoding> {
 
 impl<E: JoinEncoding> EstimateSize for JoinEntryState<E> {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: Add btreemap internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
+        // Only counts the cached rows, not the overhead of the row set itself.
         self.kv_heap_size.size()
     }
 }
