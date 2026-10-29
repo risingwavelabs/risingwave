@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use iceberg::io::FileIO;
 use iceberg::spec::{
-    FormatVersion, NestedField, PrimitiveType, Schema, SortOrder, TableMetadataBuilder, Type,
-    UnboundPartitionSpec,
+    DataFileBuilder, DataFileFormat, FormatVersion, Literal, NestedField, PrimitiveType, Schema,
+    SortOrder, TableMetadataBuilder, Transform, Type, UnboundPartitionField, UnboundPartitionSpec,
 };
 use iceberg::{
     Catalog, Namespace, NamespaceIdent, Runtime, TableCommit, TableCreation, TableIdent,
@@ -87,6 +87,32 @@ fn test_table(temp_dir: &TempDir, format_version: FormatVersion) -> Result<Table
 }
 
 fn test_table_at_location(location: &str, format_version: FormatVersion) -> Result<Table> {
+    test_table_with_partition_spec(
+        location,
+        format_version,
+        UnboundPartitionSpec::builder().build(),
+    )
+}
+
+fn partitioned_test_table(temp_dir: &TempDir, format_version: FormatVersion) -> Result<Table> {
+    let location = format!("file://{}", temp_dir.path().display());
+    let partition_spec = UnboundPartitionSpec::builder()
+        .with_spec_id(1)
+        .add_partition_fields(vec![UnboundPartitionField {
+            source_id: 1,
+            field_id: Some(1000),
+            name: "id".to_owned(),
+            transform: Transform::Identity,
+        }])?
+        .build();
+    test_table_with_partition_spec(&location, format_version, partition_spec)
+}
+
+fn test_table_with_partition_spec(
+    location: &str,
+    format_version: FormatVersion,
+    partition_spec: UnboundPartitionSpec,
+) -> Result<Table> {
     let schema = Schema::builder()
         .with_schema_id(0)
         .with_fields(vec![
@@ -95,7 +121,7 @@ fn test_table_at_location(location: &str, format_version: FormatVersion) -> Resu
         .build()?;
     let metadata = TableMetadataBuilder::new(
         schema,
-        UnboundPartitionSpec::builder().build(),
+        partition_spec,
         SortOrder::unsorted_order(),
         location.to_owned(),
         format_version,
@@ -579,6 +605,25 @@ fn id_partition(id: i64) -> Struct {
     Struct::from_iter([Some(Literal::long(id))])
 }
 
+fn output_data_file_with_partition(
+    table: &Table,
+    name: &str,
+    partition: Struct,
+) -> Result<DataFile> {
+    Ok(DataFileBuilder::default()
+        .content(DataContentType::Data)
+        .file_path(format!(
+            "{}/data/{name}.parquet",
+            table.metadata().location()
+        ))
+        .file_format(DataFileFormat::Parquet)
+        .partition(partition)
+        .partition_spec_id(table.metadata().default_partition_spec_id())
+        .record_count(10)
+        .file_size_in_bytes(1)
+        .build()?)
+}
+
 /// A position delete as writers report it: the partition is left for meta to backfill.
 fn serialized_delete_without_partition(path: &str, referenced: &str) -> SerializedDataFile {
     serde_json::from_value(serde_json::json!({
@@ -653,18 +698,13 @@ fn staged_add_files(coordinator: &IcebergPkIndexSinkCoordinator) -> Vec<DataFile
 #[tokio::test]
 async fn committed_data_file_partitions_follow_own_commits() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let table = committable_table(coalesce_test_table_with_partitioning(
-        &temp_dir,
-        FormatVersion::V2,
-        true,
-    )?)?;
+    let table = committable_table(partitioned_test_table(&temp_dir, FormatVersion::V2)?)?;
     let catalog = Arc::new(ReloadingTestCatalog::new(table.clone()));
     let first = output_data_file_with_partition(&table, "first", id_partition(1))?;
     let table = append_data_file(&catalog, &table, first.clone(), 1).await?;
     let mut coordinator = test_coordinator(
         table.clone(),
         catalog.clone(),
-        coalesce_test_config(),
         pending_sink_state_db().await?,
     );
     let loads = catalog.load_count();
@@ -750,11 +790,7 @@ async fn committed_data_file_partitions_follow_own_commits() -> Result<()> {
 #[tokio::test]
 async fn committed_data_file_partitions_reset_on_foreign_or_data_file_removals() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let table = committable_table(coalesce_test_table_with_partitioning(
-        &temp_dir,
-        FormatVersion::V2,
-        true,
-    )?)?;
+    let table = committable_table(partitioned_test_table(&temp_dir, FormatVersion::V2)?)?;
     let catalog = ReloadingTestCatalog::new(table.clone());
     let first = output_data_file_with_partition(&table, "first", id_partition(1))?;
     let table = append_data_file(&catalog, &table, first, 1).await?;
