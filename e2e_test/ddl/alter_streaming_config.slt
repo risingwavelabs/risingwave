@@ -154,49 +154,125 @@ in `developer`
 
 
 statement ok
+create table cf_pin_input(k int, a int, b int);
+
+statement ok
 create materialized view cf_pin_mv as
-select v, count(*) from cf group by v;
+select k, count(distinct a), sum(distinct b) from cf_pin_input group by k;
 
-let pin_cache_table_id
-select id
-from rw_catalog.rw_internal_table_info
-where job_name = 'cf_pin_mv'
-order by id
-limit 1
-
-statement ok
-alter materialized view cf_pin_mv set config (
-    streaming.developer.cache_refill_policy = 'pin',
-    streaming.developer.pin_cache_table_id = ${pin_cache_table_id}
-);
-
-query I
-select count(*)
-from rw_streaming_job_config
-where name = 'cf_pin_mv'
-  and (
-    (key = 'streaming.developer.cache_refill_policy' and value = '"pin"')
-    or (key = 'streaming.developer.pin_cache_table_id' and value = '${pin_cache_table_id}')
-  );
+query B
+select count(*) >= 3 from rw_internal_table_info where job_name = 'cf_pin_mv';
 ----
-2
+t
+
+let first_state
+select id from rw_internal_table_info where job_name = 'cf_pin_mv' order by id limit 1
+
+let second_state
+select id from rw_internal_table_info where job_name = 'cf_pin_mv' order by id limit 1 offset 1
+
+let foreign_table
+select id from rw_tables where name = 'cf'
 
 statement ok
-alter materialized view cf_pin_mv reset config (
-    streaming.developer.cache_refill_policy,
-    streaming.developer.pin_cache_table_id
-);
+alter materialized view cf_pin_mv set cache_refill_policy = 'both';
+
+# Batch targets are idempotent and leave all unlisted states on the job default.
+statement ok
+alter materialized view cf_pin_mv set cache_refill_policy = pin
+for tables (${first_state}, ${second_state}, ${first_state});
+
+query II
+select count(*), count(*) filter (where value = '"pin"')
+from rw_streaming_job_config where name = 'cf_pin_mv';
+----
+3 2
+
+statement error does not belong to streaming job
+alter materialized view cf_pin_mv set cache_refill_policy = disabled
+for tables (${first_state}, ${foreign_table});
+
+statement error does not belong to streaming job
+alter materialized view cf_pin_mv reset cache_refill_policy for tables (${foreign_table});
+
+statement error out of range
+alter materialized view cf_pin_mv set cache_refill_policy = pin for tables (2147483648);
+
+statement error expect one of
+alter materialized view cf_pin_mv set cache_refill_policy = invalid;
+
+# The valid target in the rejected batch must retain Pin.
+query II
+select count(*), count(*) filter (where value = '"pin"')
+from rw_streaming_job_config where name = 'cf_pin_mv';
+----
+3 2
+
+statement ok
+alter materialized view cf_pin_mv reset cache_refill_policy for tables (${first_state});
+
+query TT rowsort
+select case key
+  when 'streaming.developer.cache_refill_policy' then 'job'
+  when 'streaming.developer.cache_refill_policy_overrides.${second_state}' then 'second_state'
+  else 'unexpected' end, value
+from rw_streaming_job_config where name = 'cf_pin_mv';
+----
+job "both"
+second_state "pin"
+
+# An ordinary physical-table override must win over job-default Pin.
+statement ok
+alter materialized view cf_pin_mv set cache_refill_policy = pin;
+
+statement ok
+alter materialized view cf_pin_mv set cache_refill_policy = both for tables (${first_state});
+
+query III
+select count(*), count(*) filter (where value = '"pin"'), count(*) filter (where value = '"both"')
+from rw_streaming_job_config where name = 'cf_pin_mv';
+----
+3 2 1
+
+# Resetting the job default preserves both physical-table overrides.
+statement ok
+alter materialized view cf_pin_mv reset cache_refill_policy;
+
+query II
+select count(*), count(*) filter (where key = 'streaming.developer.cache_refill_policy')
+from rw_streaming_job_config where name = 'cf_pin_mv';
+----
+2 0
+
+statement ok
+alter materialized view cf_pin_mv set cache_refill_policy = default
+for tables (${first_state}, ${second_state});
 
 query I
-select count(*)
-from rw_streaming_job_config
-where name = 'cf_pin_mv'
-  and key in ('streaming.developer.cache_refill_policy', 'streaming.developer.pin_cache_table_id');
+select count(*) from rw_streaming_job_config where name = 'cf_pin_mv';
 ----
 0
 
+let input_table
+select id from rw_tables where name = 'cf_pin_input'
+
+statement ok
+alter table cf_pin_input set cache_refill_policy to both for tables (${input_table});
+
+query BT
+select key = 'streaming.developer.cache_refill_policy_overrides.${input_table}', value
+from rw_streaming_job_config where name = 'cf_pin_input';
+----
+t "both"
+
+statement ok
+alter table cf_pin_input reset cache_refill_policy for tables (${input_table});
+
 statement ok
 drop materialized view cf_pin_mv;
+
+statement ok
+drop table cf_pin_input;
 
 statement ok
 drop table cf;

@@ -42,3 +42,47 @@
   formatted_sql: ALTER SOURCE src SET CONFIG (foo.bar = 1)
 - input: ALTER SOURCE src RESET CONFIG (foo.bar)
   formatted_sql: ALTER SOURCE src RESET CONFIG (foo.bar)
+- input: ALTER TABLE t SET CACHE_REFILL_POLICY = 'pin'
+  formatted_sql: ALTER TABLE t SET CACHE_REFILL_POLICY = 'pin'
+- input: ALTER MATERIALIZED VIEW mv SET CACHE_REFILL_POLICY TO pin FOR TABLES (101, 103)
+  formatted_sql: ALTER MATERIALIZED VIEW mv SET CACHE_REFILL_POLICY = pin FOR TABLES (101, 103)
+- input: ALTER MATERIALIZED VIEW mv RESET CACHE_REFILL_POLICY FOR TABLES (101)
+  formatted_sql: ALTER MATERIALIZED VIEW mv RESET CACHE_REFILL_POLICY FOR TABLES (101)
+- input: ALTER TABLE t SET CACHE_REFILL_POLICY = DEFAULT FOR TABLES (1, 2)
+  formatted_sql: ALTER TABLE t SET CACHE_REFILL_POLICY = DEFAULT FOR TABLES (1, 2)
+- input: ALTER INDEX idx RESET CACHE_REFILL_POLICY
+  formatted_sql: ALTER INDEX idx RESET CACHE_REFILL_POLICY
+- input: ALTER SINK sk SET CACHE_REFILL_POLICY = both FOR TABLES (1)
+  formatted_sql: ALTER SINK sk SET CACHE_REFILL_POLICY = both FOR TABLES (1)
+- input: ALTER SOURCE src RESET CACHE_REFILL_POLICY FOR TABLES (1, 2)
+  formatted_sql: ALTER SOURCE src RESET CACHE_REFILL_POLICY FOR TABLES (1, 2)
+- input: ALTER TABLE t SET CACHE_REFILL_POLICY = pin FOR TABLES ()
+  error_msg: |-
+    sql parser error: invalid number
+    LINE 1: ALTER TABLE t SET CACHE_REFILL_POLICY = pin FOR TABLES ()
+                                                                    ^
+- input: ALTER TABLE t SET CACHE_REFILL_POLICY = pin FOR TABLES (-1)
+  error_msg: |-
+    sql parser error: invalid number
+    LINE 1: ALTER TABLE t SET CACHE_REFILL_POLICY = pin FOR TABLES (-1)
+                                                                    ^
+- input: ALTER TABLE t SET CACHE_REFILL_POLICY = pin FOR TABLES (4294967296)
+  error_msg: |-
+    sql parser error: invalid u32: number too large to fit in target type
+    LINE 1: ALTER TABLE t SET CACHE_REFILL_POLICY = pin FOR TABLES (4294967296)
+                                                                    ^
+- input: ALTER TABLE t SET CACHE_REFILL_POLICY = pin FOR TABLES (1,)
+  error_msg: |-
+    sql parser error: invalid number
+    LINE 1: ALTER TABLE t SET CACHE_REFILL_POLICY = pin FOR TABLES (1,)
+                                                                      ^
+- input: ALTER TABLE t SET CACHE_REFILL_POLICY pin
+  error_msg: |-
+    sql parser error: expected = or TO after CACHE_REFILL_POLICY, found: pin
+    LINE 1: ALTER TABLE t SET CACHE_REFILL_POLICY pin
+                                                  ^
+- input: ALTER VIEW v SET CACHE_REFILL_POLICY = pin
+  error_msg: |-
+    sql parser error: expected SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/BACKFILL_RATE_LIMIT/CACHE_REFILL_POLICY/CONFIG after SET, found: =
+    LINE 1: ALTER VIEW v SET CACHE_REFILL_POLICY = pin
+                                                 ^

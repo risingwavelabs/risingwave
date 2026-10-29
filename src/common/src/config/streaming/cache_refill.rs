@@ -18,6 +18,18 @@ use parse_display::Display;
 use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
+pub const STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH: &str =
+    "streaming.developer.cache_refill_policy";
+pub const STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH: &str =
+    "streaming.developer.cache_refill_policy_overrides";
+
+pub fn is_cache_refill_config(path: &str) -> bool {
+    path == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH
+        || path
+            .strip_prefix(STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH)
+            .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('.'))
+}
+
 #[derive(Copy, Debug, Clone, PartialEq, Eq, Display, SerializeDisplay, DeserializeFromStr)]
 #[display(style = "snake_case")]
 pub enum CacheRefillPolicy {

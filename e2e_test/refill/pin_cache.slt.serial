@@ -16,19 +16,19 @@ statement ok
 create table mt_pin_a(id int primary key, v int, payload varchar);
 
 statement ok
-alter table mt_pin_a set config(streaming.developer.cache_refill_policy='pin');
+alter table mt_pin_a set cache_refill_policy = 'pin';
 
 statement ok
 create table mt_pin_b(id int primary key, v int, payload varchar);
 
 statement ok
-alter table mt_pin_b set config(streaming.developer.cache_refill_policy='pin');
+alter table mt_pin_b set cache_refill_policy = 'pin';
 
 statement ok
 create table mt_ordinary(id int primary key, v int, payload varchar);
 
 statement ok
-alter table mt_ordinary set config(streaming.developer.cache_refill_policy='both');
+alter table mt_ordinary set cache_refill_policy = 'both';
 
 let previous_objects
 select coalesce(string_agg(distinct object_id::varchar, ','), '') from rw_hummock_sstables;
@@ -173,7 +173,7 @@ python3 e2e_test/refill/check_pin_cache.py --previous-objects "${previous_object
 # Withdraw only A; B must retain its independent cache files.
 
 statement ok
-alter table mt_pin_a reset config(streaming.developer.cache_refill_policy);
+alter table mt_pin_a reset cache_refill_policy;
 
 system ok
 python3 e2e_test/refill/check_pin_cache.py mt_pin_b
