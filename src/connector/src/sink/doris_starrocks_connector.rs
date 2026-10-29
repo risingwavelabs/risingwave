@@ -561,8 +561,8 @@ impl StarrocksTxnRequestBuilder {
             Url::parse(&uri).map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         let mut request = Request::new(method, parsed_url);
 
-        if request.method() != Method::PUT {
-            // Transaction loads use PUT and are timed by `tokio::timeout`, including after redirects.
+        // Preserve the existing URL-based timeout policy, including rebuilt BE load requests.
+        if uri != self.url_load {
             *request.timeout_mut() = Some(self.stream_load_http_timeout);
         }
 
@@ -776,21 +776,30 @@ mod tests {
     }
 
     #[test]
-    fn starrocks_rebuilt_backend_load_preserves_options() {
+    fn starrocks_backend_load_paths_preserve_options_and_timeouts() {
         let builder = starrocks_request_builder()
             .with_load_options(true, Some(i64::MAX as u64))
             .with_transaction_timeout_seconds(Some(900));
-        let request = builder
-            .build_load_request(
-                "http://127.0.0.1:8040/api/transaction/load".to_owned(),
-                "txn".to_owned(),
-            )
+        let backend_url = Url::parse("http://127.0.0.1:8040/api/transaction/load").unwrap();
+        // Normal redirects clone the FE request and preserve its lack of a total deadline.
+        let mut redirected = builder
+            .build_load_request(builder.url_load.clone(), "txn".to_owned())
+            .unwrap()
+            .try_clone()
             .unwrap();
+        *redirected.url_mut() = backend_url.clone();
+        assert_eq!(redirected.timeout(), None);
+
+        // The response fallback rebuilds the BE request and retains its original deadline.
+        let request = builder
+            .build_load_request(backend_url.into(), "txn".to_owned())
+            .unwrap();
+        assert_eq!(request.headers(), redirected.headers());
         assert_eq!(request.headers()["ignore_json_size"], "true");
         assert_eq!(request.headers()["load_mem_limit"], "9223372036854775807");
         assert!(!request.headers().contains_key("timeout"));
         assert_eq!(request.headers()["label"], "txn");
-        assert_eq!(request.timeout(), None);
+        assert_eq!(request.timeout(), Some(&Duration::from_millis(1234)));
     }
 
     #[test]
