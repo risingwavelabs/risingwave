@@ -50,10 +50,14 @@ CREATE TABLE pk_compaction_round(id INT, part INT, v INT, PRIMARY KEY (part, id)
 statement error use ALTER TABLE
 ALTER SINK __iceberg_sink_pk_compaction_round CONNECTOR WITH (enable_compaction = 'true');
 
-# Options that require rebuilding the running writer must fail before catalog changes.
-statement error not supported for Iceberg sinks with PK index
+# Commit intervals are updated in Meta without rebuilding the writer.
+statement ok
 ALTER TABLE pk_compaction_round CONNECTOR WITH (commit_checkpoint_interval = '2');
 
+statement ok
+ALTER TABLE pk_compaction_round CONNECTOR WITH (commit_checkpoint_interval = '1');
+
+# Options that require rebuilding the running writer must fail before catalog changes.
 statement error not supported for Iceberg sinks with PK index
 ALTER TABLE pk_compaction_round CONNECTOR WITH (compaction.write_parquet_compression = 'snappy');
 
