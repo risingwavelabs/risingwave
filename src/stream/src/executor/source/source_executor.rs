@@ -1030,14 +1030,8 @@ impl<S: StateStore> SourceExecutor<S> {
                         must_wait_cdc_offset_before_report,
                     );
 
-                    // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
-                    if barrier.kind.is_checkpoint()
-                        && let Some(task_builder) = &mut wait_checkpoint_task_builder
-                    {
-                        task_builder.update_task_on_checkpoint(updated_splits);
-
-                        tracing::debug!("epoch to wait {:?}", epoch);
-                        task_builder.send(Epoch(epoch.prev));
+                    if let Some(task_builder) = &mut wait_checkpoint_task_builder {
+                        task_builder.on_barrier(&barrier, updated_splits);
                     }
 
                     let barrier_epoch = barrier.epoch;
@@ -1202,7 +1196,16 @@ impl WaitCheckpointTaskBuilder {
         }
     }
 
-    fn update_task_on_checkpoint(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
+    /// Offsets persisted at non-checkpoint barriers are committed with the next checkpoint.
+    fn on_barrier(&mut self, barrier: &Barrier, updated_splits: HashMap<SplitId, SplitImpl>) {
+        self.update_task_on_barrier(updated_splits);
+        if barrier.kind.is_checkpoint() {
+            tracing::debug!("epoch to wait {:?}", barrier.epoch);
+            self.send(Epoch(barrier.epoch.prev));
+        }
+    }
+
+    fn update_task_on_barrier(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
         #[expect(clippy::single_match)]
         match &mut self.building_task {
             WaitCheckpointTask::CommitCdcOffset(offsets) => {
@@ -1354,6 +1357,7 @@ mod tests {
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
+    use risingwave_pb::stream_plan::barrier::BarrierKind;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
     use tracing_test::traced_test;
@@ -1416,6 +1420,38 @@ mod tests {
                 build_pulsar_ack_channel_id(source_id, &split_a, actor_id),
             ]
         );
+    }
+
+    #[test]
+    fn test_build_cdc_commit_task_across_non_checkpoint_barriers() {
+        let (wait_checkpoint_tx, mut wait_checkpoint_rx) = unbounded_channel();
+        let mut builder = WaitCheckpointTaskBuilder {
+            wait_checkpoint_tx,
+            building_task: WaitCheckpointTask::CommitCdcOffset(None),
+        };
+        let split =
+            SplitImpl::PostgresCdc(DebeziumCdcSplit::new(1, Some("offset".to_owned()), None));
+
+        let non_checkpoint = Barrier {
+            kind: BarrierKind::Barrier,
+            ..Barrier::new_test_barrier(test_epoch(1))
+        };
+        builder.on_barrier(&non_checkpoint, hashmap! { split.id() => split.clone() });
+        assert!(wait_checkpoint_rx.try_recv().is_err());
+
+        let checkpoint = Barrier::new_test_barrier(test_epoch(2));
+        builder.on_barrier(&checkpoint, HashMap::new());
+        let (epoch, task) = wait_checkpoint_rx.try_recv().unwrap();
+        assert_eq!(epoch.0, checkpoint.epoch.prev);
+        let WaitCheckpointTask::CommitCdcOffset(Some((split_id, offset))) = task else {
+            panic!("the offset persisted at the non-checkpoint barrier should be committed");
+        };
+        assert_eq!(split_id, split.id());
+        assert_eq!(offset, "offset");
+
+        builder.on_barrier(&Barrier::new_test_barrier(test_epoch(3)), HashMap::new());
+        let (_, task) = wait_checkpoint_rx.try_recv().unwrap();
+        assert!(matches!(task, WaitCheckpointTask::CommitCdcOffset(None)));
     }
 
     #[tokio::test]
