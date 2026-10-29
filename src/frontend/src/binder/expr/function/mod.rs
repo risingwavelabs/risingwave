@@ -119,6 +119,14 @@ impl Binder {
                     source_catalog.database_id,
                 )?;
 
+                if source_catalog.is_cdc_table_source() {
+                    return Err(ErrorCode::BindError(
+                        "mysql_query and postgres_query only accept shared CDC sources, not CDC table sources"
+                            .to_owned(),
+                    )
+                    .into());
+                }
+
                 if !source_catalog
                     .connector_name()
                     .eq_ignore_ascii_case(expected_connector_name)

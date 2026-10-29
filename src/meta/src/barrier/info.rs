@@ -433,11 +433,15 @@ impl InflightStreamingJobInfo {
     pub fn tracking_progress_actor_ids(
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Vec<(ActorId, BackfillUpstreamType)> {
-        StreamJobFragments::tracking_progress_actor_ids_impl(
-            fragment_infos
-                .values()
-                .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
-        )
+        StreamJobFragments::tracking_progress_actor_ids_impl(fragment_infos.values().map(
+            |fragment| {
+                (
+                    fragment.fragment_type_mask,
+                    &fragment.nodes,
+                    fragment.actors.keys().copied(),
+                )
+            },
+        ))
     }
 }
 

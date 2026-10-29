@@ -78,6 +78,13 @@ pub async fn handle_alter_streaming_rate_limit(
             let (source, schema_name) =
                 reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
+            if source.is_cdc_table_source() {
+                return Err(ErrorCode::NotSupported(
+                    "SOURCE_RATE_LIMIT is not supported for CDC table sources".to_owned(),
+                    "Alter the upstream shared CDC source instead".to_owned(),
+                )
+                .into());
+            }
             (StatementType::ALTER_SOURCE, source.id.as_raw_id())
         }
         (PbThrottleTarget::Table, PbThrottleType::Dml) => {
