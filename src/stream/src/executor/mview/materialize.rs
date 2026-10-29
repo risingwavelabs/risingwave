@@ -498,6 +498,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         let change_buffers =
                                             cache.handle_new(chunk, &self.state_table).await?;
 
+                                        // Yield each buffer as its own chunk: downstream may compact changes on the same
+                                        // key within a chunk (e.g. `eliminate_adjacent_noop_update`), which would drop
+                                        // the intermediate versions.
                                         for change_buffer in change_buffers {
                                             let output_chunk = if self.stream_key_indices
                                                 == self.state_table.pk_indices()
