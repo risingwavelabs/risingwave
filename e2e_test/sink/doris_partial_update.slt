@@ -1,0 +1,126 @@
+control substitution on
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+DROP TABLE IF EXISTS doris_partial_src CASCADE;
+
+statement ok
+DROP TABLE IF EXISTS doris_partial_append_src CASCADE;
+
+system ok
+RISEDEV_MYSQL_USER="${DORIS_USER}" MYSQL_PWD="${DORIS_PASSWORD}" mysql -h "${DORIS_HOST}" -P "${DORIS_QUERY_PORT}" -u "${DORIS_USER}" -D "${DORIS_DATABASE}" -e "
+DROP TABLE IF EXISTS rw_partial_update;
+CREATE TABLE rw_partial_update (
+    k1 INT, k2 INT, a INT NULL, b VARCHAR(32) NULL
+) UNIQUE KEY(k1, k2)
+DISTRIBUTED BY HASH(k1) BUCKETS 1
+PROPERTIES ('replication_num' = '1', 'enable_unique_key_merge_on_write' = 'true');
+INSERT INTO rw_partial_update VALUES (1, 10, 100, 'keep-upsert'), (2, 20, 200, 'keep-append');"
+
+statement ok
+CREATE TABLE doris_partial_src (k1 INT PRIMARY KEY, k2 INT, a INT);
+
+# A nonempty primary_key option is insufficient when a target key is omitted.
+statement error Missing key columns: k2
+CREATE SINK doris_partial_missing_key AS SELECT k1, a FROM doris_partial_src WITH (
+    ${RISEDEV_DORIS_WITH_OPTIONS_COMMON},
+    doris.table = 'rw_partial_update',
+    doris.partial_update = 'true',
+    type = 'upsert',
+    primary_key = 'k1'
+);
+
+# Append-only partial updates must also include every target key.
+statement error Missing key columns: k2
+CREATE SINK doris_partial_append_missing_key AS SELECT k1, a FROM doris_partial_src WITH (
+    ${RISEDEV_DORIS_WITH_OPTIONS_COMMON},
+    doris.table = 'rw_partial_update',
+    doris.partial_update = 'true',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+# Deliberately reorder the output columns and omit the non-key column b.
+statement ok
+CREATE SINK doris_partial_upsert AS SELECT k2, a, k1 FROM doris_partial_src WITH (
+    ${RISEDEV_DORIS_WITH_OPTIONS_COMMON},
+    doris.table = 'rw_partial_update',
+    doris.partial_update = 'true',
+    type = 'upsert',
+    primary_key = 'k1,k2'
+);
+
+statement ok
+INSERT INTO doris_partial_src VALUES (1, 10, 101);
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(RISEDEV_MYSQL_USER="${DORIS_USER}" MYSQL_PWD="${DORIS_PASSWORD}" mysql -h "${DORIS_HOST}" -P "${DORIS_QUERY_PORT}" -u "${DORIS_USER}" -D "${DORIS_DATABASE}" -N -B -e "SELECT COUNT(*) FROM rw_partial_update WHERE k1 = 1 AND k2 = 10 AND a = 101 AND b = 'keep-upsert'")" = 1
+
+statement ok
+UPDATE doris_partial_src SET a = 102 WHERE k1 = 1;
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(RISEDEV_MYSQL_USER="${DORIS_USER}" MYSQL_PWD="${DORIS_PASSWORD}" mysql -h "${DORIS_HOST}" -P "${DORIS_QUERY_PORT}" -u "${DORIS_USER}" -D "${DORIS_DATABASE}" -N -B -e "SELECT COUNT(*) FROM rw_partial_update WHERE k1 = 1 AND k2 = 10 AND a = 102 AND b = 'keep-upsert'")" = 1
+
+# An explicit NULL updates a, while the omitted b must retain its value.
+statement ok
+UPDATE doris_partial_src SET a = NULL WHERE k1 = 1;
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(RISEDEV_MYSQL_USER="${DORIS_USER}" MYSQL_PWD="${DORIS_PASSWORD}" mysql -h "${DORIS_HOST}" -P "${DORIS_QUERY_PORT}" -u "${DORIS_USER}" -D "${DORIS_DATABASE}" -N -B -e "SELECT COUNT(*) FROM rw_partial_update WHERE k1 = 1 AND k2 = 10 AND a IS NULL AND b = 'keep-upsert'")" = 1
+
+# catches a columns header that omits __DORIS_DELETE_SIGN__.
+statement ok
+DELETE FROM doris_partial_src WHERE k1 = 1;
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(RISEDEV_MYSQL_USER="${DORIS_USER}" MYSQL_PWD="${DORIS_PASSWORD}" mysql -h "${DORIS_HOST}" -P "${DORIS_QUERY_PORT}" -u "${DORIS_USER}" -D "${DORIS_DATABASE}" -N -B -e "SELECT COUNT(*) FROM rw_partial_update WHERE k1 = 1 AND k2 = 10")" = 0
+
+statement ok
+CREATE TABLE doris_partial_append_src (k1 INT, k2 INT, a INT) APPEND ONLY;
+
+statement ok
+CREATE SINK doris_partial_append FROM doris_partial_append_src WITH (
+    ${RISEDEV_DORIS_WITH_OPTIONS_COMMON},
+    doris.table = 'rw_partial_update',
+    doris.partial_update = 'true',
+    type = 'append-only'
+);
+
+statement ok
+INSERT INTO doris_partial_append_src VALUES (2, 20, 201);
+
+statement ok
+FLUSH;
+
+system ok retry 30 backoff 1s
+test "$(RISEDEV_MYSQL_USER="${DORIS_USER}" MYSQL_PWD="${DORIS_PASSWORD}" mysql -h "${DORIS_HOST}" -P "${DORIS_QUERY_PORT}" -u "${DORIS_USER}" -D "${DORIS_DATABASE}" -N -B -e "SELECT COUNT(*) FROM rw_partial_update WHERE k1 = 2 AND k2 = 20 AND a = 201 AND b = 'keep-append'")" = 1
+
+statement ok
+DROP SINK doris_partial_upsert;
+
+statement ok
+DROP SINK doris_partial_append;
+
+statement ok
+DROP TABLE doris_partial_src;
+
+statement ok
+DROP TABLE doris_partial_append_src;
+
+system ok
+RISEDEV_MYSQL_USER="${DORIS_USER}" MYSQL_PWD="${DORIS_PASSWORD}" mysql -h "${DORIS_HOST}" -P "${DORIS_QUERY_PORT}" -u "${DORIS_USER}" -D "${DORIS_DATABASE}" -e "DROP TABLE rw_partial_update"
