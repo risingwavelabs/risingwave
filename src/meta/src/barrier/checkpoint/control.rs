@@ -1151,6 +1151,11 @@ impl DatabaseCheckpointControl {
         {
             periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
         }
+
+        if self.database_info.has_pending_bounded_load_start() {
+            periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
+        }
+
         if !independent_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
             for (job_id, epoch, resps, info, compaction) in independent_jobs_task {
