@@ -127,6 +127,11 @@ pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
 ) -> Result<()> {
+    let mut connector = props
+        .get_connector()
+        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_owned())))?;
+    let uses_pulsar_schema = validate_pulsar_schema_options(format_encode, &connector)?;
+
     let protocol_error = |e: ConnectorError| RwError::from(ProtocolError(e.to_report_string()));
     dispatch_cdc_source_type!(
         props.cdc_source_type(),
@@ -144,9 +149,6 @@ pub fn validate_compatibility(
         {}
     );
 
-    let mut connector = props
-        .get_connector()
-        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_owned())))?;
     if connector == OPENDAL_S3_CONNECTOR {
         // reject s3_v2 creation
         return Err(RwError::from(Deprecated(
@@ -171,7 +173,6 @@ pub fn validate_compatibility(
                 CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
-    let uses_pulsar_schema = validate_pulsar_schema_options(format_encode, &connector)?;
     if connector != KAFKA_CONNECTOR && !uses_pulsar_schema {
         let res = match (&format_encode.format, &format_encode.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
