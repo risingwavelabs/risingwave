@@ -184,6 +184,7 @@ impl CheckpointControl {
                 partial_graph_manager,
                 &mut task,
                 &self.hummock_version_stats,
+                self.in_flight_barrier_nums,
             );
         }
         task
@@ -1001,6 +1002,7 @@ impl DatabaseCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         task: &mut Option<CompleteBarrierTask>,
         hummock_version_stats: &HummockVersionStats,
+        in_flight_barrier_nums: usize,
     ) {
         // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
         let mut independent_jobs_task = vec![];
@@ -1152,7 +1154,12 @@ impl DatabaseCheckpointControl {
             periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
         }
 
-        if self.database_info.has_pending_bounded_load_start() {
+        // A forced barrier is dropped when the database is at the in-flight limit, so forcing
+        // then would only make the barrier worker spin until a barrier is collected.
+        if self.database_info.has_pending_bounded_load_start()
+            && partial_graph_manager.pending_barrier_num(self.partial_graph_id)
+                < in_flight_barrier_nums
+        {
             periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
         }
 
