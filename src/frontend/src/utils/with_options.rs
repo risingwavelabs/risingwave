@@ -158,10 +158,16 @@ impl WithOptions {
             .and_then(|s| s.parse().ok())
     }
 
-    pub fn preserve_changes(&self) -> bool {
-        self.inner
-            .get(options::PRESERVE_CHANGES)
-            .is_some_and(|s| s.eq_ignore_ascii_case("true"))
+    pub fn preserve_changes(&self) -> RwResult<bool> {
+        let Some(s) = self.inner.get(options::PRESERVE_CHANGES) else {
+            return Ok(false);
+        };
+        s.to_lowercase().parse().map_err(|_| {
+            RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "`{}` must be `true` or `false`, got `{s}`",
+                options::PRESERVE_CHANGES
+            )))
+        })
     }
 
     pub fn refresh_interval_sec(&self) -> RwResult<Option<u64>> {

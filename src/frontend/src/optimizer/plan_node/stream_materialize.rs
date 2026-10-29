@@ -749,7 +749,8 @@ impl StreamNode for StreamMaterialize {
             // See `StreamMaterialize::derive_table_catalog`.
             cleaned_by_ttl_watermark: !self.table.clean_watermark_indices.is_empty(),
             preserve_changes: self.table.table_type == TableType::Table
-                && self.base.ctx().with_options().preserve_changes(),
+                // Validated in `handle_create_table`.
+                && self.base.ctx().with_options().preserve_changes().unwrap_or_default(),
         }))
     }
 }
