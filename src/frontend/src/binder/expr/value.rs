@@ -78,7 +78,7 @@ impl Binder {
         } else if let Ok(int_64) = i64::from_str_radix(&s, base) {
             (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
         } else if let Ok(decimal) = Decimal::from_str_radix(&s, base) {
-            // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
+            // Digits beyond 38 significant digits or 38 digits after the decimal point are rounded.
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         } else if let Some(scientific) = Decimal::from_scientific(&s) {
             (Some(ScalarImpl::Decimal(scientific)), DataType::Decimal)
