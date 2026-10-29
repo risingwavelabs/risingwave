@@ -2092,6 +2092,29 @@ StarrocksConfig:
       Defaults to unlimited.
     required: false
     allow_alter_on_fly: true
+  - name: starrocks.ignore_json_size
+    field_type: bool
+    comments: |-
+      Skip the `StarRocks` JSON size check. Defaults to false. This may increase
+      backend memory usage and does not disable `starrocks.max_batch_size_bytes`.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: starrocks.load_mem_limit
+    field_type: u64
+    comments: |-
+      The `StarRocks` load job memory limit in bytes. When omitted, use the server default.
+      This is not a limit on all HTTP receive buffers or total backend memory usage.
+    required: false
+    allow_alter_on_fly: true
+  - name: starrocks.transaction_timeout_seconds
+    field_type: u32
+    comments: |-
+      The server-side transaction timeout in seconds, from begin to prepared.
+      A positive 32-bit signed integer, subject to the server's configured timeout range.
+      When omitted, use the server default. Independent of the client HTTP timeout.
+    required: false
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: true

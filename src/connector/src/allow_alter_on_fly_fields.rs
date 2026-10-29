@@ -390,6 +390,9 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "starrocks.stream_load.http.timeout.ms".to_owned(),
             "commit_checkpoint_interval".to_owned(),
             "starrocks.max_batch_size_bytes".to_owned(),
+            "starrocks.ignore_json_size".to_owned(),
+            "starrocks.load_mem_limit".to_owned(),
+            "starrocks.transaction_timeout_seconds".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // TurbopufferConfig

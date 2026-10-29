@@ -491,6 +491,9 @@ pub struct StarrocksTxnRequestBuilder {
     header: HashMap<String, String>,
     fe_host: String,
     stream_load_http_timeout: Duration,
+    ignore_json_size: bool,
+    load_mem_limit: Option<u64>,
+    transaction_timeout_seconds: Option<u32>,
     // The `reqwest` crate suggests us reuse the Client, and we don't need make it Arc, because it
     // already uses an Arc internally.
     client: Client,
@@ -531,8 +534,26 @@ impl StarrocksTxnRequestBuilder {
             header,
             fe_host,
             stream_load_http_timeout,
+            ignore_json_size: false,
+            load_mem_limit: None,
+            transaction_timeout_seconds: None,
             client,
         })
+    }
+
+    pub fn with_load_options(
+        mut self,
+        ignore_json_size: bool,
+        load_mem_limit: Option<u64>,
+    ) -> Self {
+        self.ignore_json_size = ignore_json_size;
+        self.load_mem_limit = load_mem_limit;
+        self
+    }
+
+    pub fn with_transaction_timeout_seconds(mut self, timeout: Option<u32>) -> Self {
+        self.transaction_timeout_seconds = timeout;
+        self
     }
 
     fn build_request(&self, uri: String, method: Method, label: String) -> Result<Request> {
@@ -540,8 +561,8 @@ impl StarrocksTxnRequestBuilder {
             Url::parse(&uri).map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
         let mut request = Request::new(method, parsed_url);
 
-        if uri != self.url_load {
-            // Set timeout for non-load requests; load requests' timeout is controlled by `tokio::timeout`
+        if request.method() != Method::PUT {
+            // Transaction loads use PUT and are timed by `tokio::timeout`, including after redirects.
             *request.timeout_mut() = Some(self.stream_load_http_timeout);
         }
 
@@ -564,7 +585,12 @@ impl StarrocksTxnRequestBuilder {
     }
 
     pub fn build_begin_request_sender(&self, label: String) -> Result<MetaRequestSender> {
-        let request = self.build_request(self.url_begin.clone(), Method::POST, label)?;
+        let mut request = self.build_request(self.url_begin.clone(), Method::POST, label)?;
+        if let Some(timeout) = self.transaction_timeout_seconds {
+            request
+                .headers_mut()
+                .insert("timeout", HeaderValue::from(timeout));
+        }
         Ok(MetaRequestSender::new(
             self.client.clone(),
             request,
@@ -600,7 +626,7 @@ impl StarrocksTxnRequestBuilder {
     }
 
     pub async fn build_txn_inserter(&self, label: String) -> Result<InserterInner> {
-        let request = self.build_request(self.url_load.clone(), Method::PUT, label.clone())?;
+        let request = self.build_load_request(self.url_load.clone(), label.clone())?;
         let mut be_request =
             match send_stream_load_request(self.client.clone(), request, &self.fe_host).await? {
                 StreamLoadResponse::BeRequest(be_request) => be_request,
@@ -608,7 +634,7 @@ impl StarrocksTxnRequestBuilder {
                     // If we get a response here, it should be from BE, so we extract the URL
                     // and create a new request based on it.
                     let url = resp.url().clone();
-                    self.build_request(url.into(), Method::PUT, label)?
+                    self.build_load_request(url.into(), label)?
                 }
             };
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -651,5 +677,129 @@ impl StarrocksTxnRequestBuilder {
             handle,
             self.stream_load_http_timeout,
         ))
+    }
+
+    fn build_load_request(&self, uri: String, label: String) -> Result<Request> {
+        let mut request = self.build_request(uri, Method::PUT, label)?;
+        let headers = request.headers_mut();
+        if self.ignore_json_size {
+            headers.insert("ignore_json_size", HeaderValue::from_static("true"));
+        }
+        if let Some(limit) = self.load_mem_limit {
+            headers.insert("load_mem_limit", HeaderValue::from(limit));
+        }
+        Ok(request)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn starrocks_request_builder() -> StarrocksTxnRequestBuilder {
+        let headers = HeaderBuilder::new()
+            .add_common_header()
+            .set_user_password("user".to_owned(), "password".to_owned())
+            .add_json_format()
+            .set_db("db".to_owned())
+            .set_table("table".to_owned())
+            .build();
+        StarrocksTxnRequestBuilder::new("http://127.0.0.1:8030".to_owned(), headers, 1234).unwrap()
+    }
+
+    fn starrocks_requests(builder: &StarrocksTxnRequestBuilder) -> [Request; 5] {
+        let label = "test-transaction".to_owned();
+        [
+            builder
+                .build_begin_request_sender(label.clone())
+                .unwrap()
+                .request,
+            builder
+                .build_load_request(builder.url_load.clone(), label.clone())
+                .unwrap(),
+            builder
+                .build_prepare_request_sender(label.clone())
+                .unwrap()
+                .request,
+            builder
+                .build_commit_request_sender(label.clone())
+                .unwrap()
+                .request,
+            builder
+                .build_rollback_request_sender(label)
+                .unwrap()
+                .request,
+        ]
+    }
+
+    #[test]
+    fn starrocks_default_requests_preserve_server_defaults() {
+        for request in starrocks_requests(&starrocks_request_builder()) {
+            for name in ["ignore_json_size", "load_mem_limit", "timeout"] {
+                assert!(!request.headers().contains_key(name));
+            }
+            assert_eq!(request.headers()["label"], "test-transaction");
+            assert_eq!(request.headers()["db"], "db");
+            assert_eq!(request.headers()["table"], "table");
+            assert_eq!(
+                request.headers()["authorization"],
+                "Basic dXNlcjpwYXNzd29yZA=="
+            );
+            if request.method() == Method::PUT {
+                assert_eq!(request.timeout(), None);
+            } else {
+                assert_eq!(request.timeout(), Some(&Duration::from_millis(1234)));
+            }
+        }
+    }
+
+    #[test]
+    fn starrocks_options_are_scoped_to_begin_and_load() {
+        let builder = starrocks_request_builder()
+            .with_load_options(true, Some(268435456))
+            .with_transaction_timeout_seconds(Some(900));
+        for request in starrocks_requests(&builder) {
+            let headers = request.headers();
+            if request.url().path().ends_with("/begin") {
+                assert_eq!(headers["timeout"], "900");
+            } else {
+                assert!(!headers.contains_key("timeout"));
+            }
+            if request.url().path().ends_with("/load") {
+                assert_eq!(headers["ignore_json_size"], "true");
+                assert_eq!(headers["load_mem_limit"], "268435456");
+            } else {
+                assert!(!headers.contains_key("ignore_json_size"));
+                assert!(!headers.contains_key("load_mem_limit"));
+            }
+        }
+    }
+
+    #[test]
+    fn starrocks_rebuilt_backend_load_preserves_options() {
+        let builder = starrocks_request_builder()
+            .with_load_options(true, Some(i64::MAX as u64))
+            .with_transaction_timeout_seconds(Some(900));
+        let request = builder
+            .build_load_request(
+                "http://127.0.0.1:8040/api/transaction/load".to_owned(),
+                "txn".to_owned(),
+            )
+            .unwrap();
+        assert_eq!(request.headers()["ignore_json_size"], "true");
+        assert_eq!(request.headers()["load_mem_limit"], "9223372036854775807");
+        assert!(!request.headers().contains_key("timeout"));
+        assert_eq!(request.headers()["label"], "txn");
+        assert_eq!(request.timeout(), None);
+    }
+
+    #[test]
+    fn starrocks_false_omits_size_override_and_zero_memory_is_forwarded() {
+        let builder = starrocks_request_builder().with_load_options(false, Some(0));
+        let request = builder
+            .build_load_request(builder.url_load.clone(), "txn".to_owned())
+            .unwrap();
+        assert!(!request.headers().contains_key("ignore_json_size"));
+        assert_eq!(request.headers()["load_mem_limit"], "0");
     }
 }

@@ -46,6 +46,10 @@ CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, 
 statement ok
 CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
+# Altering connector options rebuilds the writer through the decoupled log reader.
+statement ok
+SET sink_decouple = true;
+
 statement ok
 CREATE SINK s6
 FROM
@@ -59,13 +63,27 @@ FROM
     starrocks.password = '123456',
     starrocks.database = 'demo',
     starrocks.table = 'demo_bhv_table',
+    starrocks.ignore_json_size = 'false',
+    starrocks.load_mem_limit = '268435456',
+    starrocks.transaction_timeout_seconds = '900',
     primary_key = 'v1'
 );
 
-# verify commit_checkpoint_interval can be altered.
+# Invalid connector updates must be rejected before they reach the running writer.
+statement error starrocks.transaction_timeout_seconds.*between 1 and 2147483647
+ALTER SINK s6 CONNECTOR WITH (starrocks.transaction_timeout_seconds = '0');
+
+statement error starrocks.load_mem_limit.*must not exceed
+ALTER SINK s6 CONNECTOR WITH (starrocks.load_mem_limit = '9223372036854775808');
+
+# Verify the options are alterable and persisted, then exercise the updated writer below.
 statement ok
 ALTER SINK s6 CONNECTOR WITH (
-    commit_checkpoint_interval = '1'
+    commit_checkpoint_interval = '1',
+    starrocks.ignore_json_size = 'true',
+    starrocks.load_mem_limit = '536870912',
+    starrocks.transaction_timeout_seconds = '1200',
+    starrocks.max_batch_size_bytes = '5242880'
 );
 
 query I
@@ -76,11 +94,30 @@ where name = 's6'
 ----
 1
 
+query TTT
+SELECT connector_props -> 'starrocks.ignore_json_size' ->> 'value',
+       connector_props -> 'starrocks.load_mem_limit' ->> 'value',
+       connector_props -> 'starrocks.transaction_timeout_seconds' ->> 'value'
+FROM rw_catalog.rw_sinks
+WHERE name = 's6';
+----
+true 536870912 1200
+
 statement ok
 INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01' , false, '{"v101":100}',1.12345678910);
 
 statement ok
 FLUSH;
+
+# FLUSH does not wait for a decoupled sink to commit to the external system.
+system ok
+for attempt in $(seq 1 30); do
+    if [ "$(mysql --host=starrocks-fe-server --port=9030 --connect-timeout=2 --user=users --password=123456 --batch --skip-column-names --execute="SELECT COUNT(*) FROM demo.demo_bhv_table WHERE v1 = 1 AND v6 = 'test'")" = "1" ]; then
+        exit 0
+    fi
+    sleep 1
+done
+exit 1
 
 statement ok
 DROP SINK s6;
@@ -90,6 +127,9 @@ DROP MATERIALIZED VIEW mv6;
 
 statement ok
 DROP TABLE t6;
+
+statement ok
+SET sink_decouple = false;
 
 statement ok
 CREATE TABLE agg_table(id int primary key, value string);
