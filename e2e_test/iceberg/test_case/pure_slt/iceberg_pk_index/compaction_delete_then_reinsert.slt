@@ -106,6 +106,45 @@ select * from t_pk_index_delete_reinsert;
 2 bob 200
 4 diana 400
 
+# Delete id = 1 in a later epoch. It lives in the same compacted data file as
+# id = 3, so the position-delete merger replaces that file's delete artifact.
+# Ordinary commits skip the delete filter manager, so the overwrite itself must
+# retire the replaced artifact: exactly one live position-delete file remains.
+statement ok
+delete from t_pk_index_delete_reinsert where id = 1;
+
+statement ok
+flush;
+
+# Wait for this delete to be visible before counting the replaced artifact.
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_delete_reinsert;
+----
+2 bob 200
+4 diana 400
+
+query T retry 6 backoff 1s
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_delete_reinsert'
+  and content = 'PositionDeletes';
+----
+1
+
+# Restore id = 1 so the rest of the test keeps its expected rows.
+statement ok
+insert into t_pk_index_delete_reinsert values(1, 'alice', 100);
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_delete_reinsert;
+----
+1 alice 100
+2 bob 200
+4 diana 400
+
 # Reinsert the same primary key with a different value. The final read
 # must show the reinserted row, not a resurrected pre-delete value: if
 # stale pk-index bookkeeping from the earlier compaction leaked into how id = 3
