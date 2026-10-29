@@ -81,6 +81,7 @@ impl StreamNode for StreamSyncLogStore {
         NodeBody::SyncLogStore(Box::new(SyncLogStoreNode {
             log_store_table,
             aligned: false,
+            read_rate_limit: None,
 
             // The following fields should now be read from per-job config override.
             #[expect(deprecated)]
