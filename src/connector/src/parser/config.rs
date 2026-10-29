@@ -227,9 +227,6 @@ impl SpecificParserConfig {
             }
             (SourceFormat::Plain, SourceEncode::Protobuf)
             | (SourceFormat::Upsert, SourceEncode::Protobuf) => {
-                if info.row_schema_location.is_empty() {
-                    bail!("protobuf file location not provided");
-                }
                 let mut messages_as_jsonb = if let Some(messages_as_jsonb) =
                     format_encode_options_with_secret.get(PROTOBUF_MESSAGES_AS_JSONB)
                 {
@@ -245,7 +242,16 @@ impl SpecificParserConfig {
                     messages_as_jsonb,
                     ..Default::default()
                 };
-                config.schema_location = if info.use_schema_registry {
+                config.schema_location = if let Some(client_config) =
+                    PulsarSchemaConfig::from_options(&format_encode_options_with_secret)?
+                {
+                    SchemaLocation::Pulsar {
+                        client_config,
+                        topic: get_pulsar_topic(&options_with_secret)?.clone(),
+                    }
+                } else if info.row_schema_location.is_empty() {
+                    bail!("protobuf file location not provided");
+                } else if info.use_schema_registry {
                     SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
                         client_config: SchemaRegistryConfig::from(
@@ -438,42 +444,41 @@ mod tests {
 
     #[test]
     fn pulsar_schema_config_uses_pulsar_source_topic() {
-        let info = StreamSourceInfo {
-            format: FormatType::Plain as i32,
-            row_encode: EncodeType::Avro as i32,
-            format_encode_options: BTreeMap::from([
+        for row_encode in [EncodeType::Avro, EncodeType::Protobuf] {
+            let info = StreamSourceInfo {
+                format: FormatType::Plain as i32,
+                row_encode: row_encode as i32,
+                format_encode_options: BTreeMap::from([
+                    (
+                        PULSAR_SCHEMA_URL_KEY.to_owned(),
+                        "https://pulsar-admin:8443".to_owned(),
+                    ),
+                    (
+                        PULSAR_SCHEMA_AUTH_TOKEN_KEY.to_owned(),
+                        "schema-token".to_owned(),
+                    ),
+                ]),
+                ..Default::default()
+            };
+            let source_options = WithOptionsSecResolved::without_secrets(BTreeMap::from([
+                (UPSTREAM_SOURCE_KEY.to_owned(), PULSAR_CONNECTOR.to_owned()),
                 (
-                    PULSAR_SCHEMA_URL_KEY.to_owned(),
-                    "https://pulsar-admin:8443".to_owned(),
+                    "topic".to_owned(),
+                    "persistent://tenant/namespace/events".to_owned(),
                 ),
-                (
-                    PULSAR_SCHEMA_AUTH_TOKEN_KEY.to_owned(),
-                    "schema-token".to_owned(),
-                ),
-            ]),
-            ..Default::default()
-        };
-        let source_options = WithOptionsSecResolved::without_secrets(BTreeMap::from([
-            (UPSTREAM_SOURCE_KEY.to_owned(), PULSAR_CONNECTOR.to_owned()),
-            (
-                "topic".to_owned(),
-                "persistent://tenant/namespace/events".to_owned(),
-            ),
-            ("auth.token".to_owned(), "broker-token".to_owned()),
-        ]));
+                ("auth.token".to_owned(), "broker-token".to_owned()),
+            ]));
 
-        let config = SpecificParserConfig::new(&info, &source_options).unwrap();
-        let EncodingProperties::Avro(AvroProperties {
-            schema_location:
-                SchemaLocation::Pulsar {
-                    client_config: _,
-                    topic,
-                },
-            ..
-        }) = config.encoding_config
-        else {
-            panic!("expected Pulsar Avro parser config");
-        };
-        assert_eq!(topic, "persistent://tenant/namespace/events");
+            let config = SpecificParserConfig::new(&info, &source_options).unwrap();
+            let schema_location = match config.encoding_config {
+                EncodingProperties::Avro(config) => config.schema_location,
+                EncodingProperties::Protobuf(config) => config.schema_location,
+                _ => panic!("unexpected encoding config for {row_encode:?}"),
+            };
+            let SchemaLocation::Pulsar { topic, .. } = schema_location else {
+                panic!("expected Pulsar schema location for {row_encode:?}");
+            };
+            assert_eq!(topic, "persistent://tenant/namespace/events");
+        }
     }
 }

@@ -174,28 +174,36 @@ async fn bind_columns_from_source_for_non_cdc(
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
         (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
-            let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options_to_consume)?;
-            let message_name = consume_string_from_options(
-                &mut format_encode_options_to_consume,
-                MESSAGE_NAME_KEY,
-            )?;
-            let name_strategy = get_sr_name_strategy_check(
-                &mut format_encode_options_to_consume,
-                use_schema_registry,
-            )?;
+            if format_encode_options_to_consume.contains_key(PULSAR_SCHEMA_URL_KEY) {
+                let message_name = consume_string_from_options(
+                    &mut format_encode_options_to_consume,
+                    MESSAGE_NAME_KEY,
+                )?;
+                stream_source_info.proto_message_name = message_name.0;
+            } else {
+                let (row_schema_location, use_schema_registry) =
+                    get_schema_location(&mut format_encode_options_to_consume)?;
+                let message_name = consume_string_from_options(
+                    &mut format_encode_options_to_consume,
+                    MESSAGE_NAME_KEY,
+                )?;
+                let name_strategy = get_sr_name_strategy_check(
+                    &mut format_encode_options_to_consume,
+                    use_schema_registry,
+                )?;
 
-            stream_source_info.use_schema_registry = use_schema_registry;
-            stream_source_info
-                .row_schema_location
-                .clone_from(&row_schema_location.0);
-            stream_source_info
-                .proto_message_name
-                .clone_from(&message_name.0);
-            stream_source_info.key_message_name =
-                get_key_message_name(&mut format_encode_options_to_consume);
-            stream_source_info.name_strategy =
-                name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
+                stream_source_info.use_schema_registry = use_schema_registry;
+                stream_source_info
+                    .row_schema_location
+                    .clone_from(&row_schema_location.0);
+                stream_source_info
+                    .proto_message_name
+                    .clone_from(&message_name.0);
+                stream_source_info.key_message_name =
+                    get_key_message_name(&mut format_encode_options_to_consume);
+                stream_source_info.name_strategy =
+                    name_strategy.unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
+            }
 
             Some(
                 extract_protobuf_table_schema(
