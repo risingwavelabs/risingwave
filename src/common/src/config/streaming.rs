@@ -355,9 +355,14 @@ pub struct StreamingDeveloperConfig {
     pub locality_sort_buffer_activate_threshold: u64,
 
     /// Cache refill policy for streaming cache refill feature.
-    /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.
+    /// Can be `enabled`, `disabled`, `streaming`, `serving`, `both` or `pin`.
     #[serde(default = "default::developer::cache_refill_policy")]
     pub cache_refill_policy: CacheRefillPolicy,
+
+    /// Per-job cache refill policy overrides keyed by physical table ID.
+    /// Set through `ALTER ... SET CACHE_REFILL_POLICY ... FOR TABLES (...)`.
+    #[serde(default)]
+    pub cache_refill_policy_overrides: BTreeMap<String, CacheRefillPolicy>,
 
     /// Whether `MaterializeExecutor` enables vnode key stats for its state table.
     #[serde(default = "default::developer::enable_vnode_key_stats_for_materialize")]

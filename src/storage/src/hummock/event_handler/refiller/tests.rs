@@ -43,7 +43,9 @@ use super::test_utils::{
 };
 use super::{CacheRefillConfig, SpawnRefillTask, default_spawn_refill_task};
 use crate::hummock::SstableBlockIndex;
-use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+use crate::hummock::iterator::test_utils::{
+    mock_sstable_store, mock_sstable_store_with_object_store,
+};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::recent_filter::simple::SimpleRecentFilter;
 use crate::hummock::sstable_store::CachePolicy;
@@ -96,7 +98,9 @@ async fn test_pin_metadata_changes_preserve_delta_admission() {
             );
         }
         if change != Change::LateSet {
-            refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+            refiller.replace_table_cache_refill_runtime_snapshot(
+                [(table, CacheRefillPolicy::Pin)].into(),
+            );
         }
         refiller.submit(vec![l0_insert_delta(
             1.into(),
@@ -106,9 +110,10 @@ async fn test_pin_metadata_changes_preserve_delta_admission() {
         // Receipt-time rejection is permanent for this event. Late metadata cannot create
         // download intent; a later delta may use the new policy/ownership normally.
         if change == Change::ResetThenSet {
-            refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), HashSet::new());
+            refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new());
         }
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller
+            .replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
         if change == Change::LateRegistration {
             refiller.update_streaming_table_vnodes(
                 table,
@@ -270,19 +275,9 @@ async fn test_mixed_sst_refills_both_backends_before_publication() {
                         CacheRefillPolicy::Serving
                     },
                 ),
-                // Keep exclusion coverage when both switches are enabled; the legacy row
-                // also proves that ordinary Disabled cannot veto Pin's independent switch.
-                (
-                    pinned,
-                    if legacy_unscoped {
-                        CacheRefillPolicy::Disabled
-                    } else {
-                        CacheRefillPolicy::Serving
-                    },
-                ),
+                (pinned, CacheRefillPolicy::Pin),
             ]
             .into(),
-            HashSet::from([pinned]),
         );
         let mut ownership = HashMap::from([(pinned, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))]);
         if !legacy_unscoped {
@@ -330,7 +325,7 @@ async fn test_mixed_sst_refills_both_backends_before_publication() {
             continue;
         }
         // Remove both alternative sources: the ordinary table must still read from Foyer.
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), HashSet::new());
+        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new());
         assert!(!cache.is_registered(info.object_id));
         assert!(cache.get(info.object_id).is_none());
         store
@@ -351,6 +346,78 @@ async fn test_mixed_sst_refills_both_backends_before_publication() {
         assert_eq!(stats.cache_data_block_miss, 0);
         stats.discard();
     }
+}
+
+#[tokio::test]
+async fn test_pin_policy_without_backend_rejects_refill_but_preserves_reads() {
+    for default_policy in [CacheRefillPolicy::Enabled, CacheRefillPolicy::Pin] {
+        let table = TableId::from(233);
+        let store = mock_sstable_store().await;
+        let writer = mock_sstable_store_with_object_store(store.store()).await;
+        let (sst, info) = gen_test_sst_with_object_id(table, writer, 880).await;
+        let mut refiller = RefillTest::new(
+            Role::Serving,
+            default_policy,
+            test_refill_config(),
+            store.clone(),
+            default_spawn_refill_task(),
+            pinned_version_with_ssts(&[table], &[]),
+        );
+        if default_policy != CacheRefillPolicy::Pin {
+            refiller.replace_table_cache_refill_runtime_snapshot(
+                [(table, CacheRefillPolicy::Pin)].into(),
+            );
+        }
+        refiller.replace_serving_table_vnode_mapping(
+            [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
+        );
+        refiller.submit(vec![l0_insert_delta(
+            1.into(),
+            test_epoch(1),
+            vec![info.clone()],
+        )]);
+        assert_eq!(apply_next_events(&mut refiller).await.len(), 1);
+        // Foyer warms metadata even without a disk cache. A wrong fallback would populate it
+        // before publication; the separate writer keeps this reader's metadata cache cold.
+        let cached = store.sstable_cached(info.object_id).await.unwrap();
+        assert!(cached.is_none());
+        let policy = refiller.metadata().read().policy(&table);
+        assert_eq!(policy, CacheRefillPolicy::Pin);
+        let mut stats = StoreLocalStatistic::default();
+        let block = store
+            .get(&sst, 0, CachePolicy::default(), &mut stats)
+            .await
+            .unwrap();
+        assert!(!block.loaded_from_pin_cache);
+        stats.discard();
+    }
+}
+
+#[tokio::test]
+async fn test_default_pin_policy_tracks_membership_and_explicit_withdrawal() {
+    let table = TableId::from(233);
+    let (store, cache) = mock_sstable_store_with_pin_cache().await;
+    let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 881).await;
+    let mut refiller = RefillTest::new(
+        Role::Streaming,
+        CacheRefillPolicy::Pin,
+        test_refill_config(),
+        store,
+        default_spawn_refill_task(),
+        pinned_version_with_ssts(&[table], &[]),
+    );
+    refiller.update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+    refiller.submit(vec![l0_insert_delta(
+        1.into(),
+        test_epoch(1),
+        vec![info.clone()],
+    )]);
+    apply_next_events(&mut refiller).await;
+    assert!(cache.get(info.object_id).is_some());
+    refiller
+        .replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Disabled)].into());
+    assert!(!cache.is_registered(info.object_id));
+    assert!(cache.get(info.object_id).is_none());
 }
 
 #[tokio::test]
@@ -380,8 +447,11 @@ async fn test_common_admission_rejects_before_backend_work() {
         pinned_version_with_ssts(&[ordinary, pinned], &[]),
     );
     refiller.replace_table_cache_refill_runtime_snapshot(
-        [(ordinary, CacheRefillPolicy::Both)].into(),
-        [pinned].into(),
+        [
+            (ordinary, CacheRefillPolicy::Both),
+            (pinned, CacheRefillPolicy::Pin),
+        ]
+        .into(),
     );
     refiller.replace_serving_table_vnode_mapping(HashMap::new());
     let _meta = refiller
@@ -494,12 +564,18 @@ async fn test_pin_policy_change_preserves_old_version_references() {
         default_spawn_refill_task(),
         version.clone(),
     );
-    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [sibling, table].into());
+    refiller.replace_table_cache_refill_runtime_snapshot(
+        [
+            (sibling, CacheRefillPolicy::Pin),
+            (table, CacheRefillPolicy::Pin),
+        ]
+        .into(),
+    );
     let old_token = cache.prepare_refill(shared.object_id);
     refiller.submit(vec![compacted]);
     // RESET A while B's compaction is pending. The applied B reference still pins the
     // old file; looking only at planning would incorrectly unregister it through A.
-    refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+    refiller.replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
     assert_eq!(cache.prepare_refill(shared.object_id), old_token);
     assert!(cache.is_registered(shared.object_id));
     let events = tokio::time::timeout(Duration::from_secs(1), refiller.versions().next_events())
@@ -572,7 +648,8 @@ async fn test_foyer_failure_or_timeout_waits_for_pin() {
             spawn,
             base,
         );
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller
+            .replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
         refiller.replace_serving_table_vnode_mapping(
             [(ordinary_table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
         );
@@ -623,7 +700,8 @@ async fn test_pin_timeout_during_preparation_or_submitted_copy() {
             default_spawn_refill_task(),
             pinned_version_with_ssts(&[table], &[]),
         );
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller
+            .replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
         refiller
             .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
         let semaphore = if preparing {
@@ -709,7 +787,12 @@ async fn test_pin_refill_after_table_pruning() {
             default_spawn_refill_task(),
             base.clone(),
         );
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), tables.into());
+        refiller.replace_table_cache_refill_runtime_snapshot(
+            tables
+                .into_iter()
+                .map(|table| (table, CacheRefillPolicy::Pin))
+                .collect(),
+        );
         for table in tables.into_iter().take(1 + usize::from(owns_survivor)) {
             refiller.update_streaming_table_vnodes(
                 table,
@@ -846,7 +929,8 @@ async fn test_pin_commit_compaction_batch_publication() {
             spawn,
             base.clone(),
         );
-        refiller.replace_table_cache_refill_runtime_snapshot(HashMap::new(), [table].into());
+        refiller
+            .replace_table_cache_refill_runtime_snapshot([(table, CacheRefillPolicy::Pin)].into());
         refiller
             .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 

@@ -1998,6 +1998,7 @@ impl CatalogController {
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+        let original_job_id = streaming_job.id();
 
         let (objects, delete_notification_objs, old_fragment_ids, new_fragment_ids) =
             Self::finish_replace_streaming_job_inner(
@@ -2042,6 +2043,16 @@ impl CatalogController {
             .publish()
             .await
             .expect("the replacement notification batch contains the updated object");
+
+        // The schema change is committed and published. An auxiliary cache refresh must not
+        // turn it into a failed DDL or prevent the caller from finishing connector cleanup.
+        if let Err(error) = self
+            .notify_hummock_table_cache_refill_policy_if_explicit(&inner, original_job_id)
+            .await
+        {
+            tracing::warn!(job_id = %original_job_id, error = %error.as_report(),
+                "failed to refresh cache refill policy after committed job replacement");
+        }
 
         Ok(version)
     }

@@ -19,6 +19,7 @@ use std::sync::{Arc, Weak};
 use futures::future::try_join_all;
 use parking_lot::Mutex;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_pb::id::TableId;
@@ -149,7 +150,7 @@ impl PinCacheRefiller {
                     let mut plan = merge_pin_refill_candidates(candidates);
                     // A single event was already pruned against its target at receipt.
                     if count > 1 {
-                        plan.retain_in_version(target, metadata.pinned_tables());
+                        plan.retain_in_version(target, |table| metadata.is_pinned(table));
                     }
                     Some((count, target.id(), plan))
                 }
@@ -231,16 +232,25 @@ impl PinCacheRefiller {
     }
 
     // All metadata notifications run under the handler's write guard, serializing with admission.
-    pub fn on_pinned_tables_changed(
+    pub fn on_policies_changed(
         &self,
-        previous: &HashSet<TableId>,
+        previous: &HashMap<TableId, CacheRefillPolicy>,
         metadata: &TableCacheMetadata,
     ) {
         let changed = previous
-            .difference(metadata.pinned_tables())
+            .keys()
+            .chain(metadata.table_cache_refill_policies.keys())
+            .filter(|table| {
+                previous
+                    .get(*table)
+                    .copied()
+                    .unwrap_or(metadata.default_policy)
+                    == CacheRefillPolicy::Pin
+                    && !metadata.is_pinned(table)
+            })
             .copied()
             .collect();
-        self.invalidate_refills(&changed, metadata.pinned_tables());
+        self.invalidate_refills(&changed, metadata);
     }
 
     pub fn on_serving_mapping_changed(
@@ -248,9 +258,9 @@ impl PinCacheRefiller {
         previous: &HashMap<TableId, Bitmap>,
         metadata: &TableCacheMetadata,
     ) {
-        let changed = metadata
-            .pinned_tables()
-            .iter()
+        let changed = previous
+            .keys()
+            .filter(|table| metadata.is_pinned(table))
             .copied()
             .filter(|table| {
                 metadata.role.for_serving()
@@ -261,7 +271,7 @@ impl PinCacheRefiller {
                     })
             })
             .collect();
-        self.invalidate_refills(&changed, metadata.pinned_tables());
+        self.invalidate_refills(&changed, metadata);
     }
 
     pub fn on_streaming_vnodes_changed(
@@ -281,25 +291,23 @@ impl PinCacheRefiller {
                     .any(|vnode| !metadata.contains_vnode(&table, vnode))
             })
         {
-            self.invalidate_refills(&[table].into(), metadata.pinned_tables());
+            self.invalidate_refills(&[table].into(), metadata);
         }
     }
 
     /// Preparation uses current ownership at submission; policy withdrawal permanently narrows intent.
-    fn invalidate_refills(
-        &self,
-        changed_tables: &HashSet<TableId>,
-        pinned_tables: &HashSet<TableId>,
-    ) {
+    fn invalidate_refills(&self, changed_tables: &HashSet<TableId>, metadata: &TableCacheMetadata) {
         if changed_tables.is_empty() {
             return;
         }
         if changed_tables
             .iter()
-            .any(|table| !pinned_tables.contains(table))
+            .any(|table| !metadata.is_pinned(table))
         {
             for request in &mut *self.requests.lock() {
-                request.plan.retain_tables(pinned_tables);
+                request
+                    .plan
+                    .retain_tables(|table| metadata.is_pinned(table));
             }
         }
         // Executor work can outlive a batch timeout, so it is always invalidated directly.

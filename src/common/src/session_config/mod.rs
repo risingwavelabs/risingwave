@@ -408,7 +408,7 @@ pub struct SessionConfig {
     streaming_over_window_cache_policy: OptionConfig<OverWindowCachePolicy>,
 
     /// Cache refill policy for streaming cache refill feature.
-    /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.
+    /// Can be `enabled`, `disabled`, `streaming`, `serving`, `both` or `pin`.
     ///
     /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
     /// taking effect for new streaming jobs created in the current session.

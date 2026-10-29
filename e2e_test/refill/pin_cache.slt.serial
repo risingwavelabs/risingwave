@@ -1,0 +1,227 @@
+control substitution on
+
+# Requires an exclusive real-process refill profile with Pin Cache enabled on every CN.
+# Alternate shared and per-table flushes to cover shared and independent SST objects.
+
+statement ok
+drop table if exists mt_pin_a;
+
+statement ok
+drop table if exists mt_pin_b;
+
+statement ok
+drop table if exists mt_ordinary;
+
+statement ok
+create table mt_pin_a(id int primary key, v int, payload varchar);
+
+statement ok
+alter table mt_pin_a set cache_refill_policy = 'pin';
+
+statement ok
+create table mt_pin_b(id int primary key, v int, payload varchar);
+
+statement ok
+alter table mt_pin_b set cache_refill_policy = 'pin';
+
+statement ok
+create table mt_ordinary(id int primary key, v int, payload varchar);
+
+statement ok
+alter table mt_ordinary set cache_refill_policy = 'both';
+
+let previous_objects
+select coalesce(string_agg(distinct object_id::varchar, ','), '') from rw_hummock_sstables;
+
+# Append round 1: new keys in all three tables.
+
+statement ok
+insert into mt_pin_a select i, i*1, repeat(md5(i::varchar),4) from generate_series(1,512) as i;
+
+statement ok
+insert into mt_pin_b select i, i*2, repeat(md5(i::varchar),4) from generate_series(1,512) as i;
+
+statement ok
+insert into mt_ordinary select i, i*3, repeat(md5(i::varchar),4) from generate_series(1,512) as i;
+
+statement ok
+flush;
+
+statement ok
+set query_mode = 'distributed';
+
+query TIII
+select 'mt_pin_a', count(*), sum(v), sum(octet_length(payload)) from mt_pin_a
+union all
+select 'mt_pin_b', count(*), sum(v), sum(octet_length(payload)) from mt_pin_b
+union all
+select 'mt_ordinary', count(*), sum(v), sum(octet_length(payload)) from mt_ordinary
+order by 1;
+----
+mt_ordinary 512 393984 65536
+mt_pin_a 512 131328 65536
+mt_pin_b 512 262656 65536
+
+system ok
+python3 e2e_test/refill/check_pin_cache.py --previous-objects "${previous_objects}" mt_pin_a mt_pin_b
+
+let previous_objects
+select coalesce(string_agg(distinct object_id::varchar, ','), '') from rw_hummock_sstables;
+
+# Append round 2: new keys in all three tables.
+
+statement ok
+insert into mt_pin_a select i, i*1, repeat(md5(i::varchar),4) from generate_series(513,1024) as i;
+
+statement ok
+flush;
+
+statement ok
+insert into mt_pin_b select i, i*2, repeat(md5(i::varchar),4) from generate_series(513,1024) as i;
+
+statement ok
+flush;
+
+statement ok
+insert into mt_ordinary select i, i*3, repeat(md5(i::varchar),4) from generate_series(513,1024) as i;
+
+statement ok
+flush;
+
+query TIII
+select 'mt_pin_a', count(*), sum(v), sum(octet_length(payload)) from mt_pin_a
+union all
+select 'mt_pin_b', count(*), sum(v), sum(octet_length(payload)) from mt_pin_b
+union all
+select 'mt_ordinary', count(*), sum(v), sum(octet_length(payload)) from mt_ordinary
+order by 1;
+----
+mt_ordinary 1024 1574400 131072
+mt_pin_a 1024 524800 131072
+mt_pin_b 1024 1049600 131072
+
+system ok
+python3 e2e_test/refill/check_pin_cache.py --previous-objects "${previous_objects}" mt_pin_a mt_pin_b
+
+let previous_objects
+select coalesce(string_agg(distinct object_id::varchar, ','), '') from rw_hummock_sstables;
+
+# Append round 3: new keys in all three tables.
+
+statement ok
+insert into mt_pin_a select i, i*1, repeat(md5(i::varchar),4) from generate_series(1025,1536) as i;
+
+statement ok
+insert into mt_pin_b select i, i*2, repeat(md5(i::varchar),4) from generate_series(1025,1536) as i;
+
+statement ok
+insert into mt_ordinary select i, i*3, repeat(md5(i::varchar),4) from generate_series(1025,1536) as i;
+
+statement ok
+flush;
+
+query TIII
+select 'mt_pin_a', count(*), sum(v), sum(octet_length(payload)) from mt_pin_a
+union all
+select 'mt_pin_b', count(*), sum(v), sum(octet_length(payload)) from mt_pin_b
+union all
+select 'mt_ordinary', count(*), sum(v), sum(octet_length(payload)) from mt_ordinary
+order by 1;
+----
+mt_ordinary 1536 3541248 196608
+mt_pin_a 1536 1180416 196608
+mt_pin_b 1536 2360832 196608
+
+system ok
+python3 e2e_test/refill/check_pin_cache.py --previous-objects "${previous_objects}" mt_pin_a mt_pin_b
+
+let previous_objects
+select coalesce(string_agg(distinct object_id::varchar, ','), '') from rw_hummock_sstables;
+
+# Round 4: overwrite A, delete + append B, overwrite ordinary C.
+
+statement ok
+update mt_pin_a set v=v+10000 where id%3=0;
+
+statement ok
+delete from mt_pin_b where id%4=0;
+
+statement ok
+insert into mt_pin_b select i, i*2, repeat(md5(i::varchar),4) from generate_series(1537,2048) as i;
+
+statement ok
+update mt_ordinary set v=v-7 where id%5=0;
+
+statement ok
+flush;
+
+query TIII
+select 'mt_pin_a', count(*), sum(v), sum(octet_length(payload)) from mt_pin_a
+union all
+select 'mt_pin_b', count(*), sum(v), sum(octet_length(payload)) from mt_pin_b
+union all
+select 'mt_ordinary', count(*), sum(v), sum(octet_length(payload)) from mt_ordinary
+order by 1;
+----
+mt_ordinary 1536 3539099 196608
+mt_pin_a 1536 6300416 196608
+mt_pin_b 1664 3604992 212992
+
+system ok
+python3 e2e_test/refill/check_pin_cache.py --previous-objects "${previous_objects}" mt_pin_a mt_pin_b
+
+# Withdraw only A; B must retain its independent cache files.
+
+statement ok
+alter table mt_pin_a reset cache_refill_policy;
+
+system ok
+python3 e2e_test/refill/check_pin_cache.py mt_pin_b
+
+let previous_objects
+select coalesce(string_agg(distinct object_id::varchar, ','), '') from rw_hummock_sstables;
+
+statement ok
+insert into mt_pin_a select i, i*1, repeat(md5(i::varchar),4) from generate_series(1537,2048) as i;
+
+statement ok
+flush;
+
+statement ok
+insert into mt_pin_b select i, i*2, repeat(md5(i::varchar),4) from generate_series(2049,2560) as i;
+
+statement ok
+flush;
+
+statement ok
+insert into mt_ordinary select i, i*3, repeat(md5(i::varchar),4) from generate_series(1537,2048) as i;
+
+statement ok
+flush;
+
+query TIII
+select 'mt_pin_a', count(*), sum(v), sum(octet_length(payload)) from mt_pin_a
+union all
+select 'mt_pin_b', count(*), sum(v), sum(octet_length(payload)) from mt_pin_b
+union all
+select 'mt_ordinary', count(*), sum(v), sum(octet_length(payload)) from mt_ordinary
+order by 1;
+----
+mt_ordinary 2048 6292379 262144
+mt_pin_a 2048 7218176 262144
+mt_pin_b 2176 5964800 278528
+
+system ok
+python3 e2e_test/refill/check_pin_cache.py --previous-objects "${previous_objects}" mt_pin_b
+
+statement ok
+drop table mt_pin_a;
+
+statement ok
+drop table mt_pin_b;
+
+statement ok
+drop table mt_ordinary;
+
+system ok
+python3 e2e_test/refill/check_pin_cache.py

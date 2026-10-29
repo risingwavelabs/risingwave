@@ -8,12 +8,12 @@ These acceptance conditions govern the implementation; tests must not redefine t
 | --- | --- |
 | Version input | Apply complete deltas once; membership sees the complete version independently of refill filtering. |
 | Common admission | Both backends consume the same logical-table and block vnode-range selection result. Sharing table metadata alone is insufficient. |
-| Backend policy | Preserve main's ordinary Enabled and scoped-policy semantics. Pin enablement is independent; Foyer's L0, level, recent and inheritance rules cannot veto Pin. |
+| Backend policy | One table policy selects ordinary Foyer refill or Pin. Preserve main's ordinary Enabled and scoped-policy semantics. Pin uses local ownership; Foyer's L0, level, recent and inheritance rules do not apply to Pin. Without a Pin backend, Pin tables skip refill. |
 | Pin preparation | Select a queued prefix and prune its merged candidates against the fixed final target before loading metadata. After I/O, intersect surviving receipt-time intent with current ownership before submitting downloads. RESET then SET cannot revive withdrawn intent. |
 | Ownership lifetime | Foyer owns inputs retained across asynchronous work. Pin borrows current bitmap inputs while holding the metadata read guard through synchronous admission/submission; no bitmap snapshot is needed inside that scope. |
 | Foyer metadata-only work | Continue warming admitted SST metadata when disk data refill is disabled or the level is excluded, but skip block locality computation and data jobs. |
 | Independence and publication | Each backend executes and times out independently. After both attempts settle, each event reports whether it may be a publication endpoint. The queue publishes settled FIFO prefixes without splitting a selected Pin batch. Shared I/O limits do not create shared completion scheduling. |
-| Scope | Cross-event merging belongs to Pin. No retries, GC scans, queue deadlines, backlog force-release or production activation. Locality bounds remain conservative; downloads retain unit/whole-object granularity. |
+| Scope | Cross-event merging belongs to Pin. No retries, GC scans, queue deadlines, backlog force-release. Production activation is wired by the separate layer below. Locality bounds remain conservative; downloads retain unit/whole-object granularity. |
 
 ## Preparation boundary
 
@@ -59,7 +59,8 @@ There is no new preparation worker, queue, mutable policy snapshot or retry loop
 ## Responsibilities and admission
 
 The event handler is the only writer of shared `TableCacheMetadata`: table cache
-policies, the effective Pin table set, role and streaming/serving vnode ownership.
+policies, role and streaming/serving vnode ownership. Pin membership and admission
+query the same policy map; no separate Pin table set is stored or notified.
 The default table policy initializes this metadata directly from storage options;
 `CacheRefillConfig` contains only execution settings. Shared read access is needed
 by Pin's asynchronous worker; the handler remains the sole writer.
@@ -70,7 +71,7 @@ without creating download intent; only observed delta insertions create intent.
 
 `CacheRefiller` applies shared table admission before dispatch. Ordinary Disabled
 and scoped tables without local vnodes are rejected before job/snapshot allocation.
-Pin has independent enablement and uses the union of role-projected ownership lanes.
+The Pin policy uses the union of role-projected ownership lanes.
 Ordinary Enabled retains main's unscoped normal-refill behavior.
 
 `admission::foyer::select_table_inputs` excludes Pin projections and applies Foyer's L0
@@ -151,6 +152,47 @@ updates remain intact; watch readers and the uploader receive the prefix's final
 
 Without Pin, each settled Foyer event is an endpoint and retains the original
 JoinError and detach behavior. Handler shutdown drops refillers and the publication
-queue together. Ownership-driven published-file reclamation, physical GC scheduling
-and production activation remain separate work. No read-through refill or automatic
-retry is introduced.
+queue together. Ownership-driven published-file reclamation remains separate work.
+No read-through refill or automatic retry is introduced.
+
+## Activation layer
+
+The activation layer enables the backend only with a configured local directory.
+Startup consumes the version and table policies from the same Meta snapshot before
+constructing the cache and starting event processing. Recovery restores files by
+version membership without remote data or metadata reads, and does not backfill
+missing objects. Subsequent delta insertions use the shared admission path above.
+
+Cache policy can be changed online on a table, materialized view, index, shared
+source, or sink. Without `FOR TABLES`, SET/RESET changes the job default; with it,
+only the selected physical result/internal tables are changed:
+
+```sql
+ALTER MATERIALIZED VIEW mv SET CACHE_REFILL_POLICY = 'both';
+ALTER MATERIALIZED VIEW mv SET CACHE_REFILL_POLICY = 'pin' FOR TABLES (101, 103);
+ALTER MATERIALIZED VIEW mv SET CACHE_REFILL_POLICY = 'both' FOR TABLES (101);
+ALTER MATERIALIZED VIEW mv RESET CACHE_REFILL_POLICY FOR TABLES (101, 103);
+```
+
+Discover internal IDs through `rw_catalog.rw_internal_table_info`, using the job
+and schema name. SET supports all ordinary policies as well as Pin, and updates
+only the listed IDs; RESET (or SET to DEFAULT) removes their explicit overrides.
+A physical override takes precedence over the job default, which takes precedence
+over the worker default. RESET does not restore a historical policy. Every ID must
+belong to the addressed job; an invalid member rejects the complete batch.
+Persisted defaults and overrides are visible in `rw_streaming_job_config`.
+SQL completion acknowledges persistence and notification enqueue, not worker
+application or completed downloads. SET Pin does not backfill existing SSTs.
+
+The job configuration stores overrides under
+`streaming.developer.cache_refill_policy_overrides`; Meta expands them into the
+same per-table runtime policy map. Pin selects complete physical SST objects, so
+shared files may also contain data from non-Pin tables. Pin has no fallback policy:
+a worker without a Pin backend rejects its refill work, rather than scheduling Foyer refill.
+Query reads remain independent: a missing or failed Pin read uses the ordinary
+Foyer/remote path without changing the table policy or refilling Pin on reads.
+
+After recovery, a storage-owned GC worker runs one full pass for startup garbage
+and periodic minor passes for withdrawn files whose readers have exited. Storage
+shutdown aborts this worker. This does not add ownership-driven scans of published
+files: unpin and version retirement still drive their withdrawal.

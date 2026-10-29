@@ -17,8 +17,68 @@ use std::time::{Duration, SystemTime};
 use bytes::Bytes;
 use futures::TryStreamExt;
 
-use super::super::test_utils::{in_memory_object_store, local_object_store};
+use super::super::test_utils::{
+    download_and_publish_for_test, in_memory_object_store, local_object_store,
+};
 use super::{DELETE_BATCH_SIZE, PinCache, PinCacheFile, PinCacheGcSelection};
+
+#[tokio::test]
+async fn test_gc_worker_reclaims_startup_garbage_and_reuses_withdrawn_capacity() {
+    let store = in_memory_object_store();
+    for path in ["1001-1.sst", "1002-2.sst", "orphan.tmp"] {
+        store
+            .upload(path, Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+    }
+    let cache = PinCache::new(store.clone(), 8, 1, [1001.into()])
+        .await
+        .unwrap();
+    let reader = cache.get(1001.into()).unwrap();
+    assert_eq!(cache.storage.lock().accounted_bytes, 16);
+    let _gc = scopeguard::guard(cache.start_gc(), |task| task.abort());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let accounted = cache.storage.lock().accounted_bytes;
+            if accounted == 8 && store.metadata("orphan.tmp").await.is_err() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("startup GC must reclaim inventory rejects and temporary files");
+    assert!(store.metadata("1002-2.sst").await.is_err());
+
+    cache.unregister_objects([1001.into()]);
+    // Let minor GC inspect the withdrawn file while its reader still holds a lease.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(cache.storage.lock().accounted_bytes, 8);
+    assert_eq!(
+        reader.read(..).await.unwrap(),
+        Bytes::from_static(b"complete")
+    );
+    drop(reader);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while cache.storage.lock().accounted_bytes != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("minor GC must reclaim a withdrawal after its final reader exits");
+    assert!(store.metadata("1001-1.sst").await.is_err());
+
+    let remote = in_memory_object_store();
+    remote
+        .upload("sst", Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    cache.register_objects([1003.into()]);
+    download_and_publish_for_test(&cache, remote, "sst".into(), 1003.into(), 8)
+        .await
+        .unwrap();
+    assert!(cache.get(1003.into()).is_some());
+}
 
 #[tokio::test]
 async fn test_selection_protects_files_and_can_be_abandoned() {

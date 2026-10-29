@@ -16,7 +16,14 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use pgwire::pg_response::StatementType;
-use risingwave_sqlparser::ast::{ObjectName, SqlOption, SqlOptionValue, Value as AstValue};
+use risingwave_common::config::streaming::{
+    CacheRefillPolicy, STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH,
+    STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH, is_cache_refill_config,
+};
+use risingwave_sqlparser::ast::{
+    AlterCacheRefillPolicy, Ident, ObjectName, SetVariableValue, SqlOption, SqlOptionValue,
+    Value as AstValue,
+};
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 
@@ -27,14 +34,11 @@ use crate::handler::{HandlerArgs, RwPgResponse};
 /// A diff of a TOML map. `None` means the key should be removed.
 type TomlMapDiff = TomlMap<String, Option<TomlValue>>;
 
-const STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH: &str = "streaming.developer.cache_refill_policy";
 const ALTER_CONFIG_RECOVER_NOTICE: &str =
     "ALTER CONFIG requires a RECOVER on the specified streaming job to take effect.";
 
 fn alter_config_requires_recover(map_diff: &TomlMapDiff) -> bool {
-    map_diff
-        .keys()
-        .any(|key| key != STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH)
+    map_diff.keys().any(|key| !is_cache_refill_config(key))
 }
 
 fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
@@ -71,6 +75,46 @@ fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
     }
 
     Ok(map)
+}
+
+pub async fn handle_alter_cache_refill_policy(
+    handler_args: HandlerArgs,
+    obj_name: ObjectName,
+    operation: AlterCacheRefillPolicy,
+    stmt_type: StatementType,
+) -> Result<RwPgResponse> {
+    let value = match operation.policy {
+        None | Some(SetVariableValue::Default) => AstValue::Null,
+        Some(SetVariableValue::Single(value)) => {
+            let policy = value
+                .to_string_unquoted()
+                .parse::<CacheRefillPolicy>()
+                .map_err(|error| crate::error::ErrorCode::InvalidInputSyntax(error.to_owned()))?;
+            AstValue::SingleQuotedString(policy.to_string())
+        }
+        Some(SetVariableValue::List(_)) => {
+            bail_invalid_input_syntax!("CACHE_REFILL_POLICY requires a single policy");
+        }
+    };
+    let mut table_ids = operation.table_ids;
+    table_ids.sort_unstable();
+    table_ids.dedup();
+    let keys = if table_ids.is_empty() {
+        vec![STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned()]
+    } else {
+        table_ids
+            .into_iter()
+            .map(|id| format!("{STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH}.{id}"))
+            .collect()
+    };
+    let entries = keys
+        .into_iter()
+        .map(|key| SqlOption {
+            name: ObjectName(vec![Ident::from_real_value(&key)]),
+            value: SqlOptionValue::Value(value.clone()),
+        })
+        .collect();
+    handle_alter_streaming_set_config(handler_args, obj_name, entries, stmt_type).await
 }
 
 pub async fn handle_alter_streaming_set_config(
@@ -131,11 +175,13 @@ mod tests {
     use toml::Value as TomlValue;
 
     use super::{
-        STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH, TomlMapDiff, alter_config_requires_recover,
+        STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH,
+        STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH, TomlMapDiff,
+        alter_config_requires_recover,
     };
 
     #[test]
-    fn test_cache_refill_policy_config_does_not_require_recover() {
+    fn test_cache_refill_runtime_config_does_not_require_recover() {
         let mut map_diff = TomlMapDiff::new();
         map_diff.insert(
             STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
@@ -144,6 +190,18 @@ mod tests {
         assert!(!alter_config_requires_recover(&map_diff));
 
         map_diff.insert(STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(), None);
+        assert!(!alter_config_requires_recover(&map_diff));
+
+        map_diff.insert(
+            format!("{STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH}.233"),
+            Some(TomlValue::String("pin".to_owned())),
+        );
+        assert!(!alter_config_requires_recover(&map_diff));
+
+        map_diff.insert(
+            STREAMING_CACHE_REFILL_POLICY_OVERRIDES_CONFIG_PATH.to_owned(),
+            None,
+        );
         assert!(!alter_config_requires_recover(&map_diff));
     }
 

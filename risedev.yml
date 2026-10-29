@@ -763,30 +763,35 @@ profile:
         port: 5687
         exporter-port: 1222
         enable-tiered-cache: true
+        enable-pin-cache: true
         role: streaming
         parallelism: 4
       - use: compute-node
         port: 5688
         exporter-port: 1223
         enable-tiered-cache: true
+        enable-pin-cache: true
         role: streaming
         parallelism: 4
       - use: compute-node
         port: 5689
         exporter-port: 1224
         enable-tiered-cache: true
+        enable-pin-cache: true
         role: streaming
         parallelism: 4
       - use: compute-node
         port: 5685
         exporter-port: 1225
         enable-tiered-cache: true
+        enable-pin-cache: true
         role: serving
         parallelism: 4
       - use: compute-node
         port: 5686
         exporter-port: 1226
         enable-tiered-cache: true
+        enable-pin-cache: true
         role: serving
         parallelism: 8
       - use: frontend
@@ -1533,6 +1538,9 @@ template:
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
+
+    # Set a per-CN pin-cache directory; false leaves the TOML/environment setting unchanged.
+    enable-pin-cache: false
 
     # Minio instances used by this compute node
     provide-minio: "minio*"

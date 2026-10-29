@@ -13,14 +13,16 @@
 // limitations under the License.
 
 //! Minor/full file selection and batched deletion. Storage owns file lifetimes and capacity.
-//! No timer, wakeup policy or background task lives here. Run passes only after recovery.
+//! The storage owner starts GC after recovery and aborts its worker on shutdown.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::TryStreamExt;
 use risingwave_object_store::object::{ObjectMetadata, ObjectResult};
+use thiserror_ext::AsReport;
+use tokio::task::JoinHandle;
 
 use super::{PinCache, PinCacheFile};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
@@ -30,6 +32,7 @@ mod tests;
 
 // Match Hummock GC's maximum number of paths per delete request.
 const DELETE_BATCH_SIZE: usize = 1000;
+const MINOR_GC_INTERVAL: Duration = Duration::from_secs(1);
 
 /// One lease per physical path. Unknown garbage is owned only by this selection; dropping it
 /// leaves cleanup to the next scan. Accounted objects stay in the keeper until deletion succeeds.
@@ -68,6 +71,34 @@ impl PinCacheGcSelection {
 }
 
 impl PinCache {
+    /// One full startup pass discovers inventory rejects and interrupted uploads. Minor
+    /// passes reclaim withdrawals once their final reader releases the file. The storage
+    /// shutdown guard owns cancellation and releases the worker's cache reference.
+    pub(crate) fn start_gc(self: &Arc<Self>) -> JoinHandle<()> {
+        let cache = self.clone();
+        tokio::spawn(async move {
+            match cache.select_full(SystemTime::now()).await {
+                Ok(selection) => {
+                    if let Err(error) = selection.delete().await {
+                        tracing::warn!(error = %error.as_report(), "Pin cache startup GC failed");
+                    }
+                }
+                Err(error) => {
+                    GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
+                    tracing::warn!(error = %error.as_report(), "Pin cache startup GC listing failed");
+                }
+            }
+            let mut interval = tokio::time::interval(MINOR_GC_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if let Err(error) = cache.select_minor().delete().await {
+                    tracing::warn!(error = %error.as_report(), "Pin cache minor GC failed");
+                }
+            }
+        })
+    }
+
     /// Only inspect explicitly discarded files, without scanning all files or listing storage.
     /// Files still held by readers remain pending for a later pass.
     pub(super) fn select_minor(self: &Arc<Self>) -> PinCacheGcSelection {
