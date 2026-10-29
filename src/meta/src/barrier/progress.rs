@@ -1221,6 +1221,7 @@ mod tests {
                 .to_owned(),
             fragment_backfill_ordering: Default::default(),
             cdc_table_snapshot_splits: None,
+            bounded_load_source: None,
             locality_fragment_state_table_mapping: Default::default(),
             is_serverless: false,
             replace_sink: None,

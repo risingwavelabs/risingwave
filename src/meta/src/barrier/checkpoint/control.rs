@@ -361,7 +361,6 @@ impl CheckpointControl {
                     | Command::ConnectorPropsChange(_)
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
-                    | Command::StartBoundedLoad { .. }
                     | Command::LoadFinish { .. }
                     | Command::FinishRefresh { .. }
                     | Command::ResetSource { .. }

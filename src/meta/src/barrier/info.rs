@@ -964,29 +964,12 @@ impl InflightDatabaseInfo {
             .find(|tracker| tracker.source_id == source_id)
     }
 
-    /// Installs the tracker of the bounded load of `source_id` on `job_id`, built from the job's
-    /// current actors.
-    ///
-    /// Returns `true` if the tracker was installed, and `false` otherwise
-    pub(super) fn install_bounded_load_tracker(
-        &mut self,
-        job_id: JobId,
-        source_id: SourceId,
-    ) -> bool {
-        match self.jobs.get_mut(&job_id) {
-            None => false,
-            Some(job) if job.bounded_load_tracker.is_some() => false,
-            Some(job) => {
-                job.bounded_load_tracker = Some(BoundedLoadTracker::new(
-                    self.database_id,
-                    job_id,
-                    source_id,
-                    job.fragment_infos.values(),
-                ));
-
-                true
-            }
-        }
+    /// Returns a bounded source whose `Load { Start }` is still to be sent, marking it as sent.
+    pub(super) fn take_pending_bounded_load_start(&mut self) -> Option<SourceId> {
+        self.jobs
+            .values_mut()
+            .filter_map(|job| job.bounded_load_tracker.as_mut())
+            .find_map(|tracker| tracker.take_pending_start())
     }
 
     /// Register a new streaming job entry (with empty `fragment_infos`).
@@ -994,6 +977,7 @@ impl InflightDatabaseInfo {
         &mut self,
         job_id: JobId,
         cdc_table_backfill_tracker: Option<CdcTableBackfillTracker>,
+        bounded_load_tracker: Option<BoundedLoadTracker>,
     ) {
         {
             self.jobs
@@ -1005,7 +989,7 @@ impl InflightDatabaseInfo {
                         subscribers: Default::default(), // no subscriber for newly create job
                         status: CreateStreamingJobStatus::Init,
                         cdc_table_backfill_tracker,
-                        bounded_load_tracker: None,
+                        bounded_load_tracker,
                     },
                 )
                 .expect("non-duplicate");

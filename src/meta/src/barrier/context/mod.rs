@@ -36,9 +36,9 @@ use crate::barrier::load_progress::LoadReport;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, IndependentStreamingJobType,
-    RecoveryReason, Scheduled, SnapshotBackfillInfo,
+    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
+    CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
+    IndependentStreamingJobType, RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::iceberg_pk_index_sink::{
@@ -48,9 +48,7 @@ use crate::manager::sink_coordination::{RecoveryStart, SinkCoordinatorManager};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::serving::ServingVnodeMappingRef;
 use crate::stream::source_manager::SplitAssignment;
-use crate::stream::{
-    BoundedLoadManagerRef, GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef,
-};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 #[derive(Debug)]
 pub(super) struct CreateIndependentStreamingJobCommandInfo {
@@ -208,7 +206,7 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     pub(super) refresh_manager: GlobalRefreshManagerRef,
 
-    bounded_load_manager: BoundedLoadManagerRef,
+    barrier_scheduler: BarrierScheduler,
 
     sink_manager: SinkCoordinatorManager,
 
@@ -227,7 +225,7 @@ impl GlobalBarrierWorkerContextImpl {
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
         refresh_manager: GlobalRefreshManagerRef,
-        bounded_load_manager: BoundedLoadManagerRef,
+        barrier_scheduler: BarrierScheduler,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
@@ -241,7 +239,7 @@ impl GlobalBarrierWorkerContextImpl {
             _scale_controller: scale_controller,
             env,
             refresh_manager,
-            bounded_load_manager,
+            barrier_scheduler,
             sink_manager,
             iceberg_pk_index_sink_manager,
         }
