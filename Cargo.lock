@@ -333,9 +333,9 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "arc-swap"
-version = "1.9.1"
+version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a3a1fd6f75306b68087b831f025c712524bcb19aad54e557b1129cfa0a2b207"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
 dependencies = [
  "rustversion",
 ]
@@ -2363,9 +2363,9 @@ dependencies = [
 
 [[package]]
 name = "btoi"
-version = "0.4.3"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dd6407f73a9b8b6162d8a2ef999fe6afd7cc15902ebf42c5cd296addf17e0ad"
+checksum = "3b5ab9db53bcda568284df0fd39f6eac24ad6f7ba7ff1168b9e76eba6576b976"
 dependencies = [
  "num-traits",
 ]
@@ -7811,7 +7811,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f501ff0c245b4b625fe52feaf6125c69f7132557#f501ff0c245b4b625fe52feaf6125c69f7132557"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=60438a156fa9846fb692bb47c4da42ff3653c8e2#60438a156fa9846fb692bb47c4da42ff3653c8e2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -7870,7 +7870,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f501ff0c245b4b625fe52feaf6125c69f7132557#f501ff0c245b4b625fe52feaf6125c69f7132557"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=60438a156fa9846fb692bb47c4da42ff3653c8e2#60438a156fa9846fb692bb47c4da42ff3653c8e2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7885,7 +7885,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f501ff0c245b4b625fe52feaf6125c69f7132557#f501ff0c245b4b625fe52feaf6125c69f7132557"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=60438a156fa9846fb692bb47c4da42ff3653c8e2#60438a156fa9846fb692bb47c4da42ff3653c8e2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7907,7 +7907,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=708a4d9c233cc8e615c189d4b1d2bb113736e387#708a4d9c233cc8e615c189d4b1d2bb113736e387"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=2358f8e314a701f4208105346133b0f774736782#2358f8e314a701f4208105346133b0f774736782"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -7928,6 +7928,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-util",
  "tracing",
  "url",
  "uuid",
@@ -7936,7 +7937,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f501ff0c245b4b625fe52feaf6125c69f7132557#f501ff0c245b4b625fe52feaf6125c69f7132557"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=60438a156fa9846fb692bb47c4da42ff3653c8e2#60438a156fa9846fb692bb47c4da42ff3653c8e2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7952,7 +7953,7 @@ dependencies = [
 [[package]]
 name = "iceberg-storage-opendal"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f501ff0c245b4b625fe52feaf6125c69f7132557#f501ff0c245b4b625fe52feaf6125c69f7132557"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=60438a156fa9846fb692bb47c4da42ff3653c8e2#60438a156fa9846fb692bb47c4da42ff3653c8e2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9667,15 +9668,6 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
-dependencies = [
- "hashbrown 0.15.5",
-]
-
-[[package]]
-name = "lru"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b6180140927ee907000b0aa540091f6ea512ead4447c92b8fc35bc72788a5a6"
@@ -10330,26 +10322,27 @@ dependencies = [
 
 [[package]]
 name = "mysql_async"
-version = "0.36.1"
+version = "0.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "277ce2f2459b2af4cc6d0a0b7892381f80800832f57c533f03e2845f4ea331ea"
+checksum = "40d11da0e2d9fad4640c9f9198ee431c6d68444568f83ef1f10f3367270071e4"
 dependencies = [
+ "arc-swap",
  "bytes",
  "crossbeam-queue",
+ "crossbeam-utils",
  "flate2",
  "futures-core",
  "futures-sink",
  "futures-util",
  "keyed_priority_queue",
- "lru 0.14.0",
+ "lru 0.18.1",
  "mysql_common",
  "native-tls",
  "pem 3.0.6",
  "percent-encoding",
- "rand 0.9.5",
+ "rand 0.10.1",
  "serde",
- "serde_json",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.17",
  "tokio",
  "tokio-native-tls",
@@ -10360,9 +10353,9 @@ dependencies = [
 
 [[package]]
 name = "mysql_common"
-version = "0.35.5"
+version = "0.37.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbb9f371618ce723f095c61fbcdc36e8936956d2b62832f9c7648689b338e052"
+checksum = "0f27695f286b461da077b8c2f72f47feaa04ce3c3f9c0976257410e90e21208a"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.1",
@@ -15655,6 +15648,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "parquet",
  "paste",
  "pin-project",
  "pretty_assertions",
@@ -19415,9 +19409,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.26.1"
+version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
+checksum = "7cc1186384beb7dd8eedea376413fd654937285ea6c9cfbb928dc3043ea4b606"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",

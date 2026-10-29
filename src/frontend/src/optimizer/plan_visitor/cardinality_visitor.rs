@@ -159,36 +159,14 @@ impl LogicalPlanVisitor for CardinalityVisitor {
     fn visit_logical_join(&mut self, plan: &plan_node::LogicalJoin) -> Cardinality {
         let left = self.visit(plan.left());
         let right = self.visit(plan.right());
+        join_cardinality(plan.join_type(), left, right)
+    }
 
-        match plan.join_type() {
-            JoinType::Unspecified => unreachable!(),
-
-            // For each row from one side, we match `0..=(right.hi)` rows from the other side.
-            JoinType::Inner => left.mul(right.min(0..)),
-
-            // For each row from one side, we match `1..=max(right.hi, 1)` rows from the other side,
-            // since we can at least match a `NULL` row.
-            JoinType::LeftOuter => left.mul(right.max(1).min(1..)),
-            JoinType::RightOuter => right.mul(left.max(1).min(1..)),
-
-            // For each row in the result set, it must belong to the given side.
-            JoinType::LeftSemi | JoinType::LeftAnti => left.min(0..),
-            JoinType::RightSemi | JoinType::RightAnti => right.min(0..),
-
-            // TODO: refine the cardinality of full outer join
-            JoinType::FullOuter => {
-                if left.is_at_most(1) && right.is_at_most(1) {
-                    Cardinality::new(0, 1)
-                } else {
-                    Cardinality::unknown()
-                }
-            }
-
-            // For each row from one side, we match `0..=1` rows from the other side.
-            JoinType::AsofInner => left.mul(right.min(0..=1)),
-            // For each row from left side, we match exactly 1 row from the right side or a `NULL` row`.
-            JoinType::AsofLeftOuter => left,
-        }
+    fn visit_logical_apply(&mut self, plan: &plan_node::LogicalApply) -> Cardinality {
+        // The right side is evaluated once per left row, so its bound composes like a join.
+        let left = self.visit(plan.left());
+        let right = self.visit(plan.right());
+        join_cardinality(plan.join_type(), left, right)
     }
 
     fn visit_logical_now(&mut self, plan: &plan_node::LogicalNow) -> Cardinality {
@@ -201,6 +179,38 @@ impl LogicalPlanVisitor for CardinalityVisitor {
 
     fn visit_logical_expand(&mut self, plan: &plan_node::LogicalExpand) -> Cardinality {
         self.visit(plan.input()) * plan.column_subsets().len()
+    }
+}
+
+fn join_cardinality(join_type: JoinType, left: Cardinality, right: Cardinality) -> Cardinality {
+    match join_type {
+        JoinType::Unspecified => unreachable!(),
+
+        // For each row from one side, we match `0..=(right.hi)` rows from the other side.
+        JoinType::Inner => left.mul(right.min(0..)),
+
+        // For each row from one side, we match `1..=max(right.hi, 1)` rows from the other side,
+        // since we can at least match a `NULL` row.
+        JoinType::LeftOuter => left.mul(right.max(1).min(1..)),
+        JoinType::RightOuter => right.mul(left.max(1).min(1..)),
+
+        // For each row in the result set, it must belong to the given side.
+        JoinType::LeftSemi | JoinType::LeftAnti => left.min(0..),
+        JoinType::RightSemi | JoinType::RightAnti => right.min(0..),
+
+        // TODO: refine the cardinality of full outer join
+        JoinType::FullOuter => {
+            if left.is_at_most(1) && right.is_at_most(1) {
+                Cardinality::new(0, 1)
+            } else {
+                Cardinality::unknown()
+            }
+        }
+
+        // For each row from one side, we match `0..=1` rows from the other side.
+        JoinType::AsofInner => left.mul(right.min(0..=1)),
+        // For each row from left side, we match exactly 1 row from the right side or a `NULL` row`.
+        JoinType::AsofLeftOuter => left,
     }
 }
 

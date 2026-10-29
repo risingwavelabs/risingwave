@@ -445,6 +445,14 @@ pub mod default {
             100_000
         }
 
+        pub fn iceberg_pk_index_sink_lookup_concurrency() -> usize {
+            64
+        }
+
+        pub fn iceberg_pk_index_sink_max_batch_rows() -> usize {
+            4096
+        }
+
         pub fn materialize_force_overwrite_on_no_check() -> bool {
             false
         }

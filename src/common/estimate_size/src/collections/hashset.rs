@@ -26,8 +26,7 @@ pub struct EstimatedHashSet<T: EstimateSize> {
 
 impl<T: EstimateSize> EstimateSize for EstimatedHashSet<T> {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: Add hashset internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
+        // Only counts the elements, not the overhead of the `HashSet` itself.
         self.heap_size.size()
     }
 }

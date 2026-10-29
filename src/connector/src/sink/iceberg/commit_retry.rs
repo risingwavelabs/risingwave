@@ -156,10 +156,53 @@ where
     F: Fn(Table) -> Fut + Send + Sync,
     Fut: Future<Output = Result<Out, CommitError>> + Send,
 {
+    run_with_retry_from_table(
+        None,
+        catalog,
+        table_ident,
+        schema_id,
+        partition_spec_id,
+        format_version,
+        retry_num,
+        log_context,
+        commit_action,
+    )
+    .await
+}
+
+/// Same as [`run_with_retry`], but when `initial_table` is set the first attempt runs against it
+/// (after the same metadata validation) instead of reloading it from the catalog. Use this when
+/// the caller loaded the table right before the commit: a stale table only costs a commit
+/// conflict, and every retry reloads. `initial_table` must be the table named by `table_ident`.
+pub async fn run_with_retry_from_table<F, Fut, Out>(
+    initial_table: Option<Table>,
+    catalog: Arc<dyn Catalog>,
+    table_ident: TableIdent,
+    schema_id: i32,
+    partition_spec_id: i32,
+    format_version: Option<FormatVersion>,
+    retry_num: usize,
+    log_context: CommitRetryLogContext,
+    commit_action: F,
+) -> Result<Out>
+where
+    F: Fn(Table) -> Fut + Send + Sync,
+    Fut: Future<Output = Result<Out, CommitError>> + Send,
+{
+    if let Some(table) = &initial_table
+        && table.identifier() != &table_ident
+    {
+        bail!(
+            "iceberg commit: initial table {} does not match commit target {}",
+            table.identifier(),
+            table_ident
+        );
+    }
     let retry_strategy =
         exponential_backoff(Duration::from_millis(10), 10, Duration::from_secs(60))
             .map(jitter)
             .take(retry_num);
+    let mut initial_table = initial_table;
 
     RetryIf::spawn(
         retry_strategy,
@@ -167,16 +210,29 @@ where
             let catalog = catalog.clone();
             let table_ident = table_ident.clone();
             let commit_action = &commit_action;
+            let initial_table = initial_table.take();
             async move {
-                let table = reload_table(
-                    catalog.as_ref(),
-                    &table_ident,
-                    schema_id,
-                    partition_spec_id,
-                    format_version,
-                )
-                .await
-                .map_err(CommitError::ReloadTable)?;
+                let table = match initial_table {
+                    Some(table) => {
+                        validate_table_metadata(
+                            &table,
+                            schema_id,
+                            partition_spec_id,
+                            format_version,
+                        )
+                        .map_err(CommitError::ReloadTable)?;
+                        table
+                    }
+                    None => reload_table(
+                        catalog.as_ref(),
+                        &table_ident,
+                        schema_id,
+                        partition_spec_id,
+                        format_version,
+                    )
+                    .await
+                    .map_err(CommitError::ReloadTable)?,
+                };
                 commit_action(table).await
             }
         },
@@ -219,4 +275,247 @@ where
     .map_err(|e| match e {
         CommitError::ReloadTable(e) | CommitError::Commit(e) => e,
     })
+}
+
+#[cfg(all(test, not(madsim)))]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use iceberg::io::FileIO;
+    use iceberg::spec::{
+        NestedField, PrimitiveType, Schema, SortOrder, TableMetadataBuilder, Type,
+        UnboundPartitionSpec,
+    };
+    use iceberg::{Namespace, NamespaceIdent, Runtime, TableCommit, TableCreation};
+
+    use super::*;
+
+    fn test_table() -> Table {
+        let schema = Schema::builder()
+            .with_schema_id(0)
+            .with_fields(vec![
+                NestedField::required(1, "id", Type::Primitive(PrimitiveType::Long)).into(),
+            ])
+            .build()
+            .unwrap();
+        let metadata = TableMetadataBuilder::new(
+            schema,
+            UnboundPartitionSpec::builder().build(),
+            SortOrder::unsorted_order(),
+            "memory://commit-retry".to_owned(),
+            FormatVersion::V2,
+            HashMap::new(),
+        )
+        .unwrap()
+        .build()
+        .unwrap()
+        .metadata;
+        Table::builder()
+            .identifier(TableIdent::new(
+                NamespaceIdent::new("db".to_owned()),
+                "table".to_owned(),
+            ))
+            .file_io(FileIO::new_with_fs())
+            .runtime(Runtime::try_current().unwrap())
+            .metadata(metadata)
+            .build()
+            .unwrap()
+    }
+
+    #[derive(Debug)]
+    struct CountingCatalog {
+        table: Table,
+        loads: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl Catalog for CountingCatalog {
+        async fn load_table(&self, _table: &TableIdent) -> iceberg::Result<Table> {
+            self.loads.fetch_add(1, Ordering::SeqCst);
+            Ok(self.table.clone())
+        }
+
+        async fn list_namespaces(
+            &self,
+            _parent: Option<&NamespaceIdent>,
+        ) -> iceberg::Result<Vec<NamespaceIdent>> {
+            unreachable!()
+        }
+
+        async fn create_namespace(
+            &self,
+            _namespace: &NamespaceIdent,
+            _properties: HashMap<String, String>,
+        ) -> iceberg::Result<Namespace> {
+            unreachable!()
+        }
+
+        async fn get_namespace(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Namespace> {
+            unreachable!()
+        }
+
+        async fn namespace_exists(&self, _namespace: &NamespaceIdent) -> iceberg::Result<bool> {
+            unreachable!()
+        }
+
+        async fn update_namespace(
+            &self,
+            _namespace: &NamespaceIdent,
+            _properties: HashMap<String, String>,
+        ) -> iceberg::Result<()> {
+            unreachable!()
+        }
+
+        async fn drop_namespace(&self, _namespace: &NamespaceIdent) -> iceberg::Result<()> {
+            unreachable!()
+        }
+
+        async fn list_tables(
+            &self,
+            _namespace: &NamespaceIdent,
+        ) -> iceberg::Result<Vec<TableIdent>> {
+            unreachable!()
+        }
+
+        async fn create_table(
+            &self,
+            _namespace: &NamespaceIdent,
+            _creation: TableCreation,
+        ) -> iceberg::Result<Table> {
+            unreachable!()
+        }
+
+        async fn drop_table(&self, _table: &TableIdent) -> iceberg::Result<()> {
+            unreachable!()
+        }
+
+        async fn purge_table(&self, _table: &TableIdent) -> iceberg::Result<()> {
+            unreachable!()
+        }
+
+        async fn table_exists(&self, _table: &TableIdent) -> iceberg::Result<bool> {
+            unreachable!()
+        }
+
+        async fn rename_table(&self, _src: &TableIdent, _dest: &TableIdent) -> iceberg::Result<()> {
+            unreachable!()
+        }
+
+        async fn register_table(
+            &self,
+            _table: &TableIdent,
+            _metadata_location: String,
+        ) -> iceberg::Result<Table> {
+            unreachable!()
+        }
+
+        async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<Table> {
+            unreachable!()
+        }
+    }
+
+    fn log_context() -> CommitRetryLogContext {
+        CommitRetryLogContext::new("test", "commit", "db.table", "main")
+    }
+
+    #[tokio::test]
+    async fn first_attempt_uses_initial_table_and_retries_reload() {
+        let table = test_table();
+        let table_ident = table.identifier().clone();
+        let catalog = Arc::new(CountingCatalog {
+            table: table.clone(),
+            loads: AtomicUsize::new(0),
+        });
+        let attempts = AtomicUsize::new(0);
+
+        run_with_retry_from_table(
+            Some(table),
+            catalog.clone(),
+            table_ident,
+            0,
+            0,
+            Some(FormatVersion::V2),
+            3,
+            log_context(),
+            |_table| {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if attempt == 0 {
+                        Err(CommitError::Commit(anyhow!("injected conflict")))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            catalog.loads.load(Ordering::SeqCst),
+            1,
+            "only the retry reloads the table"
+        );
+    }
+
+    #[tokio::test]
+    async fn initial_table_is_validated_without_retry() {
+        let table = test_table();
+        let table_ident = table.identifier().clone();
+        let catalog = Arc::new(CountingCatalog {
+            table: table.clone(),
+            loads: AtomicUsize::new(0),
+        });
+
+        let error = run_with_retry_from_table(
+            Some(table),
+            catalog.clone(),
+            table_ident,
+            7,
+            0,
+            None,
+            3,
+            log_context(),
+            |_table| async { Ok::<_, CommitError>(()) },
+        )
+        .await
+        .expect_err("schema mismatch must fail");
+
+        assert!(error.to_string().contains("schema evolution not supported"));
+        assert_eq!(catalog.loads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn initial_table_must_match_commit_target() {
+        let table = test_table();
+        let catalog = Arc::new(CountingCatalog {
+            table: table.clone(),
+            loads: AtomicUsize::new(0),
+        });
+        let attempts = AtomicUsize::new(0);
+
+        let error = run_with_retry_from_table(
+            Some(table),
+            catalog.clone(),
+            TableIdent::new(NamespaceIdent::new("db".to_owned()), "other".to_owned()),
+            0,
+            0,
+            None,
+            3,
+            log_context(),
+            |_table| {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<_, CommitError>(()) }
+            },
+        )
+        .await
+        .expect_err("a table with another identifier must be rejected");
+
+        assert!(error.to_string().contains("does not match commit target"));
+        assert_eq!(attempts.load(Ordering::SeqCst), 0);
+        assert_eq!(catalog.loads.load(Ordering::SeqCst), 0);
+    }
 }

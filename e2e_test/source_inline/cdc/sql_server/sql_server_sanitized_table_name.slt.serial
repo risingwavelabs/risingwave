@@ -1,0 +1,72 @@
+control substitution on
+
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('sanitized_name_db') IS NOT NULL BEGIN ALTER DATABASE sanitized_name_db SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE sanitized_name_db; END; CREATE DATABASE sanitized_name_db;" -b
+
+system ok
+sqlcmd -C -d sanitized_name_db -i e2e_test/source_inline/cdc/sql_server/sql_server_sanitized_table_name_prepare.sql -b
+
+statement ok
+create source mssql_sanitized_name_source with (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'sanitized_name_db',
+);
+
+control substitution off
+
+statement ok
+create table rw_underscore (id int primary key, v varchar)
+from mssql_sanitized_name_source table 'sanitized_name_db.dbo.t_1';
+
+statement ok
+create table rw_dollar (id int primary key, v varchar)
+from mssql_sanitized_name_source table 'sanitized_name_db.dbo.t$1';
+
+statement ok
+create table rw_hash (id int primary key, v varchar)
+from mssql_sanitized_name_source table 'sanitized_name_db.dbo.t#1';
+
+statement ok
+create table rw_non_ascii (id int primary key, v varchar)
+from mssql_sanitized_name_source table 'sanitized_name_db.dbo.t中1';
+
+query TIT retry 30 backoff 1s
+select 'underscore', * from rw_underscore
+union all select 'dollar', * from rw_dollar
+union all select 'hash', * from rw_hash
+union all select 'non_ascii', * from rw_non_ascii
+order by 2;
+----
+underscore 10 snapshot
+dollar 20 snapshot
+hash 30 snapshot
+non_ascii 40 snapshot
+
+system ok
+sqlcmd -C -d sanitized_name_db -i e2e_test/source_inline/cdc/sql_server/sql_server_sanitized_table_name_insert.sql -b
+
+query TIT retry 60 backoff 1s
+select 'underscore', * from rw_underscore
+union all select 'dollar', * from rw_dollar
+union all select 'hash', * from rw_hash
+union all select 'non_ascii', * from rw_non_ascii
+order by 2;
+----
+underscore 10 snapshot
+underscore 11 stream
+dollar 20 snapshot
+dollar 21 stream
+hash 30 snapshot
+hash 31 stream
+non_ascii 40 snapshot
+non_ascii 41 stream
+
+statement ok
+drop source mssql_sanitized_name_source cascade;
+
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('sanitized_name_db') IS NOT NULL BEGIN ALTER DATABASE sanitized_name_db SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE sanitized_name_db; END;" -b

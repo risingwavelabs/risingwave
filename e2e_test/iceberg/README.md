@@ -78,11 +78,17 @@ scheduling and maintenance options, including activation without new writes.
 It also reattaches a table with existing snapshots and verifies that reconciliation
 finishes without new ingestion after the independent job becomes ready.
 Alter the table, not its internal sink. Online changes to `commit_checkpoint_interval`
-and `compaction.write_parquet_*` are currently rejected for PK-index sinks because
+update the Meta-side checkpoint pacing while preserving pending epochs.
+`compaction.write_parquet_*` changes are still rejected for PK-index sinks because
 their running writers do not reload these options.
 The ordinary-sink knobs `compaction.max_snapshots_num` and
 `compaction.delete_files_count_threshold` are also rejected by this ALTER path;
 PK-index compaction uses `compaction.delete_ratio_percent` for delete selection.
+
+PK-index jobs now honor their configured commit interval, including after recovery.
+Existing sinks with the frontend default of 60 therefore change from committing every
+checkpoint to every 60 checkpoints after upgrade. Set `commit_checkpoint_interval = 1`
+to retain the previous commit frequency.
 
 These tests only need MinIO and the connector libs. Start with fresh RiseDev data,
 as the profile uses an in-memory meta store:
@@ -92,6 +98,24 @@ as the profile uses an in-memory meta store:
 ./risedev slt './e2e_test/iceberg/compaction_round.slt'
 ./risedev slt './e2e_test/iceberg/pk_index_compaction_round.slt'
 ./risedev k
+```
+
+### PK-index compaction regressions
+
+The pure SLT suite includes `iceberg_pk_index/compaction_*.slt`. These use V2
+Parquet position deletes and read directly from Iceberg to check compaction,
+deletion, and reinsertion. They need MinIO and connector libs, but not Spark.
+
+Simulation coverage uses V3 deletion vectors and injects failures before the
+independent job's End barrier and after the Iceberg commit but before its metastore
+row becomes Committed. Recovery must replay the Pending epoch without another
+overwrite. A fixed-snapshot test also commits deletes after the simulated rewrite
+and reads the actual Iceberg rows to check conflict masking and reinsertion.
+Only the compactor rewrite is simulated; resolver, checkpoint, commit, and recovery
+paths are real:
+
+```sh
+./risedev sit-test iceberg_pk_index
 ```
 
 ## Key Config Files

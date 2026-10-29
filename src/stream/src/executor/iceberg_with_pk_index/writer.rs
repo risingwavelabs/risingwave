@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use anyhow::Context;
+use futures::FutureExt;
+use futures::stream::{self, StreamExt};
 use iceberg::writer::PositionDeleteInput;
+use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
@@ -29,7 +32,7 @@ use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
 
 use crate::common::change_buffer::output_kind;
-use crate::common::compact_chunk::{InconsistencyBehavior, compact_chunk_inline};
+use crate::common::compact_chunk::{InconsistencyBehavior, StreamChunkCompactor};
 use crate::executor::prelude::*;
 use crate::task::LocalBarrierManager;
 
@@ -109,6 +112,10 @@ where
     delete_position_buffer: Option<DataChunkBuilder>,
     mode: WriterInputMode,
     chunk_size: usize,
+    /// Maximum number of PK index lookups in flight at the same time.
+    lookup_concurrency: usize,
+    /// Maximum number of input rows merged into one batch from already-buffered chunks.
+    max_batch_rows: usize,
     sink_id: SinkId,
     local_barrier_manager: LocalBarrierManager,
 }
@@ -127,6 +134,8 @@ where
         pk_index_state_table: StateTable<S>,
         writer: W,
         chunk_size: usize,
+        lookup_concurrency: usize,
+        max_batch_rows: usize,
         sink_id: SinkId,
         local_barrier_manager: LocalBarrierManager,
     ) -> Self {
@@ -140,20 +149,19 @@ where
             delete_position_buffer: None,
             mode: WriterInputMode::Normal,
             chunk_size,
+            lookup_concurrency: lookup_concurrency.max(1),
+            max_batch_rows: max_batch_rows.max(1),
             sink_id,
             local_barrier_manager,
         }
     }
 
-    async fn delete_existing_row(
+    /// Removes `index_row` from the PK index and records its Iceberg position as a position delete.
+    fn delete_index_row(
         &mut self,
-        pk_row: PkRow<'_>,
+        index_row: OwnedRow,
         delete_position_buffer: &mut DataChunkBuilder,
     ) -> StreamExecutorResult<Option<DataChunk>> {
-        let Some(index_row) = self.pk_index_state_table.get_row(pk_row).await? else {
-            return Ok(None);
-        };
-
         let num_cols = index_row.len();
         let file_path = index_row
             .datum_at(num_cols - 2)
@@ -168,76 +176,87 @@ where
         Ok(chunk)
     }
 
-    // Process one stream chunk:
+    // Process a batch of stream chunks:
     //
-    // 1. Compact the chunk by `pk_indices` so each PK appears at most once and any intra-chunk
-    //    `+/-` cancellations are absorbed up front. After this step every record is either a
-    //    standalone `Insert`, `Delete`, or `Update {old, new}` whose old and new rows share the
-    //    same PK.
-    // 2. For each record: `Insert` is buffered into a single batched write; `Delete` looks up
-    //    `pk_index_state_table` to emit a position delete and clears the entry; `Update` is
-    //    handled as a position delete for the old row plus a buffered insert for the new row.
-    // 3. After the scan, write all buffered inserts in one `write_chunk` call and persist the
-    //    returned Iceberg positions back to `pk_index_state_table`.
+    // 1. Compact all chunks together by `pk_indices` so each PK appears in at most one surviving
+    //    change, and any `+/-` cancellations across the batch are absorbed up front. After this
+    //    step every record is a standalone `Insert`, `Delete`, or `Update {old, new}`. A PK whose
+    //    old and new rows are not adjacent shows up as a `Delete` followed later by an `Insert`.
+    // 2. Look up `pk_index_state_table` for every `Delete` / `Update` concurrently. Lookups do not
+    //    depend on each other because PKs are unique after compaction, and none of them can observe
+    //    writes from this batch because the index is only modified in the next steps.
+    // 3. Walk the records in order: emit a position delete and clear the index entry for every
+    //    found row, and buffer `Insert` / `Update::new` rows into a single batched write.
+    // 4. Write all buffered inserts in one `write_chunk` call and persist the returned Iceberg
+    //    positions back to `pk_index_state_table`.
     //
     // `pk_index_state_table` and `delete_position_buffer` live until the next barrier, so a later
-    // chunk in the same checkpoint observes earlier writes/deletes via the state table.
+    // batch in the same checkpoint observes earlier writes/deletes via the state table.
     #[try_stream(ok = DataChunk, error = StreamExecutorError)]
-    async fn process_chunk(&mut self, chunk: StreamChunk) {
-        let chunk = compact_chunk_inline::<{ output_kind::RETRACT }>(
-            chunk,
-            &self.pk_indices,
-            InconsistencyBehavior::Panic,
-        );
+    async fn process_chunks(&mut self, chunks: Vec<StreamChunk>) {
+        let Some(first) = chunks.first() else {
+            return Ok(());
+        };
+        // Invariant: every input column is visible and written to Iceberg verbatim. The planner
+        // (`promote_iceberg_pk_index_stream_key` in `stream_sink.rs`) enforces this by promoting
+        // hidden stream-key columns to visible and by not adding the extra partition column for
+        // pk-index sinks, so the writer has no hidden-column projection and writes the whole row.
+        let data_types = first.data_types();
+        // An upper bound on appended rows: each surviving record contributes at most one row
+        // (Insert / Update::new), and `records()` yields at most `capacity` records per chunk.
+        let insert_capacity = chunks.iter().map(|c| c.capacity()).sum::<usize>() + 1;
+
+        let chunks = StreamChunkCompactor::new(self.pk_indices.clone(), chunks)
+            .into_compacted_chunks_inline::<{ output_kind::RETRACT }>(InconsistencyBehavior::Panic);
+        let pk_indices = self.pk_indices.clone();
+        let records = chunks.iter().flat_map(|c| c.records()).collect_vec();
+
+        // The compactor groups by `pk_indices`, so `Update`'s old and new rows share the same PK.
+        let lookup_pks = records
+            .iter()
+            .filter_map(|record| match record {
+                Record::Insert { .. } => None,
+                Record::Delete { old_row } => Some((*old_row).project(&pk_indices)),
+                Record::Update { new_row, .. } => Some((*new_row).project(&pk_indices)),
+            })
+            .collect_vec();
+        let mut index_rows = lookup_index_rows(
+            &self.pk_index_state_table,
+            &lookup_pks,
+            self.lookup_concurrency,
+        )
+        .await?
+        .into_iter();
 
         let mut delete_position_buffer = self
             .delete_position_buffer
             .take()
             .unwrap_or_else(|| new_chunk_builder(self.chunk_size));
-        let pk_indices = self.pk_indices.clone();
-
-        // Invariant: every input column is visible and written to Iceberg verbatim. The planner
-        // (`promote_iceberg_pk_index_stream_key` in `stream_sink.rs`) enforces this by promoting
-        // hidden stream-key columns to visible and by not adding the extra partition column for
-        // pk-index sinks, so the writer has no hidden-column projection and writes the whole row.
-        // `chunk.capacity() + 1` is an upper bound on appended rows: each surviving record
-        // contributes at most one row (Insert / Update::new), and `records()` yields at most
-        // `capacity` records.
-        let mut insert_chunk =
-            DataChunkBuilder::new(chunk.data_chunk().data_types(), chunk.capacity() + 1);
+        let mut insert_chunk = DataChunkBuilder::new(data_types, insert_capacity);
         let mut insert_pks: Vec<PkRow<'_>> = Vec::new();
 
-        for record in chunk.records() {
-            match record {
-                Record::Insert { new_row } => {
-                    let overflow = insert_chunk.append_one_row(new_row);
-                    debug_assert!(overflow.is_none(), "insert chunk exceeds capacity");
-                    insert_pks.push(new_row.project(&pk_indices));
-                }
-                Record::Delete { old_row } => {
-                    let pk_row = old_row.project(&pk_indices);
-                    if let Some(chunk) = self
-                        .delete_existing_row(pk_row, &mut delete_position_buffer)
-                        .await?
-                    {
-                        yield chunk;
-                    }
-                }
-                Record::Update { new_row, .. } => {
-                    // The compactor groups by `pk_indices`, so old and new share the same PK.
-                    let pk_row = new_row.project(&pk_indices);
-                    if let Some(chunk) = self
-                        .delete_existing_row(pk_row, &mut delete_position_buffer)
-                        .await?
-                    {
-                        yield chunk;
-                    }
-                    let overflow = insert_chunk.append_one_row(new_row);
-                    debug_assert!(overflow.is_none(), "insert chunk exceeds capacity");
-                    insert_pks.push(pk_row);
-                }
+        for record in records {
+            let new_row = match record {
+                Record::Insert { new_row } => Some(new_row),
+                Record::Delete { .. } => None,
+                Record::Update { new_row, .. } => Some(new_row),
+            };
+            if !matches!(record, Record::Insert { .. })
+                && let Some(index_row) = index_rows
+                    .next()
+                    .expect("one lookup result per delete or update")
+                && let Some(chunk) =
+                    self.delete_index_row(index_row, &mut delete_position_buffer)?
+            {
+                yield chunk;
+            }
+            if let Some(new_row) = new_row {
+                let overflow = insert_chunk.append_one_row(new_row);
+                debug_assert!(overflow.is_none(), "insert chunk exceeds capacity");
+                insert_pks.push(new_row.project(&pk_indices));
             }
         }
+        debug_assert!(index_rows.next().is_none());
 
         if !insert_pks.is_empty() {
             let write_chunk = insert_chunk.finish();
@@ -437,13 +456,39 @@ where
         resolver_input: &'a mut BoxedMessageStream,
         completed: &'a mut bool,
     ) {
-        #[for_await]
-        for msg in input {
-            match msg? {
-                Message::Chunk(chunk) =>
-                {
+        // The next input item that has been polled while batching but not yet handled.
+        // `Some(None)` means the input has ended.
+        let mut peeked: Option<Option<Message>> = None;
+        loop {
+            let next = match peeked.take() {
+                Some(next) => next,
+                None => input.next().await.transpose()?,
+            };
+            let Some(msg) = next else {
+                break;
+            };
+            match msg {
+                Message::Chunk(chunk) => {
+                    // Merge chunks that are already buffered so their PK lookups run in one
+                    // concurrent round. Never wait for more input here: a backlogged input fills
+                    // the batch, while an idle one adds no latency.
+                    let mut batch_rows = chunk.cardinality();
+                    let mut chunks = vec![chunk];
+                    while batch_rows < self.max_batch_rows {
+                        match input.next().now_or_never() {
+                            Some(Some(Ok(Message::Chunk(chunk)))) => {
+                                batch_rows += chunk.cardinality();
+                                chunks.push(chunk);
+                            }
+                            Some(next) => {
+                                peeked = Some(next.transpose()?);
+                                break;
+                            }
+                            None => break,
+                        }
+                    }
                     #[for_await]
-                    for chunk in self.process_chunk(chunk) {
+                    for chunk in self.process_chunks(chunks) {
                         yield Message::Chunk(chunk?.into());
                     }
                 }
@@ -567,6 +612,26 @@ where
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
+}
+
+/// Looks up the PK index rows of `pks` with at most `concurrency` lookups in flight.
+/// Results are returned in the same order as `pks`.
+async fn lookup_index_rows<S: StateStore>(
+    table: &StateTable<S>,
+    pks: &[PkRow<'_>],
+    concurrency: usize,
+) -> StreamExecutorResult<Vec<Option<OwnedRow>>> {
+    let mut index_rows = vec![None; pks.len()];
+    // `buffer_unordered` keeps a slow lookup from blocking the others; results are put back by
+    // index to keep the output deterministic.
+    let mut lookups = stream::iter(pks.iter().enumerate())
+        .map(|(i, pk)| async move { table.get_row(pk).await.map(|row| (i, row)) })
+        .buffer_unordered(concurrency);
+    while let Some(result) = lookups.next().await {
+        let (i, row) = result?;
+        index_rows[i] = row;
+    }
+    Ok(index_rows)
 }
 
 async fn next_msg(input: &mut BoxedMessageStream) -> StreamExecutorResult<Message> {

@@ -115,8 +115,7 @@ impl<V: EstimateSize + Clone> Default for AsOfJoinCacheEntry<V> {
 
 impl<V: EstimateSize + Clone> EstimateSize for AsOfJoinCacheEntry<V> {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: Add btreemap internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
+        // Only counts the cached rows, not the overhead of the B-tree itself.
         self.kv_heap_size.size()
     }
 }

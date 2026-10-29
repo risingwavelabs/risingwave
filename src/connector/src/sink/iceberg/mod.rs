@@ -282,12 +282,11 @@ impl Sink for IcebergSink {
         let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
         if iceberg_config.enable_pk_index {
             // PK-index executors do not rebuild their writers on ConnectorPropsChange.
-            // Maintenance options are consumed by Meta, but accepting writer options here
-            // would leave the running writer and the persisted configuration out of sync.
+            // Maintenance options and commit intervals are consumed by Meta, but accepting
+            // writer options here would leave the writer and persisted configuration out of sync.
             // The ordinary sink's backlog and delete-file-count knobs also have no consumer
-            // in the PK-index path, which commits each checkpoint and selects by delete ratio.
+            // in the PK-index path, which selects by delete ratio.
             for key in [
-                "commit_checkpoint_interval",
                 COMPACTION_MAX_SNAPSHOTS_NUM,
                 COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
                 COMPACTION_WRITE_PARQUET_COMPRESSION,
