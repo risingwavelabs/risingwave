@@ -26,7 +26,115 @@ use iceberg::{
     TableIdent,
 };
 
-/// A mock catalog for iceberg used for plan test.
+#[cfg(any(test, feature = "test"))]
+pub use self::test_tables::MockTableGuard;
+
+#[cfg(any(test, feature = "test"))]
+mod test_tables {
+    use std::collections::HashMap;
+    use std::collections::hash_map::Entry;
+    use std::sync::LazyLock;
+
+    use iceberg::io::FileIO;
+    use iceberg::spec::{
+        FormatVersion, NestedField, PrimitiveType, Schema, SortOrder, TableMetadataBuilder, Type,
+        UnboundPartitionSpec,
+    };
+    use iceberg::table::Table;
+    use iceberg::{NamespaceIdent, Runtime, TableIdent};
+    use parking_lot::Mutex;
+
+    use super::MockCatalog;
+
+    static TABLES: LazyLock<Mutex<HashMap<TableIdent, Table>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    /// A registered table that is removed from the mock catalog when dropped.
+    #[must_use]
+    pub struct MockTableGuard {
+        ident: TableIdent,
+    }
+
+    impl MockTableGuard {
+        pub fn update(&self, table: Table) {
+            assert_eq!(table.identifier(), &self.ident);
+            *TABLES.lock().get_mut(&self.ident).unwrap() = table;
+        }
+    }
+
+    impl Drop for MockTableGuard {
+        fn drop(&mut self) {
+            TABLES.lock().remove(&self.ident);
+        }
+    }
+
+    impl MockCatalog {
+        /// Register a table shared by mock catalog instances. Use distinct identifiers in parallel tests.
+        pub fn register(table: Table) -> MockTableGuard {
+            let ident = table.identifier().clone();
+            match TABLES.lock().entry(ident.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(table);
+                }
+                Entry::Occupied(_) => panic!("mock table {ident} is already registered"),
+            }
+            MockTableGuard { ident }
+        }
+
+        /// Registered tables and the built-in `updates_v2`/`updates_v3` tables.
+        pub(super) fn test_table(ident: &TableIdent) -> Option<Table> {
+            if let Some(table) = TABLES.lock().get(ident).cloned() {
+                return Some(table);
+            }
+            match ident.name() {
+                "updates_v2" => Some(Self::updates_table(ident.name(), FormatVersion::V2)),
+                "updates_v3" => Some(Self::updates_table(ident.name(), FormatVersion::V3)),
+                _ => None,
+            }
+        }
+
+        pub(super) fn test_table_exists(ident: &TableIdent) -> bool {
+            TABLES.lock().contains_key(ident) || matches!(ident.name(), "updates_v2" | "updates_v3")
+        }
+
+        pub(super) fn updates_table(name: &str, version: FormatVersion) -> Table {
+            let schema = Schema::builder()
+                .with_fields(vec![
+                    NestedField::optional(10, "id", Type::Primitive(PrimitiveType::Int)).into(),
+                    NestedField::optional(20, "value", Type::Primitive(PrimitiveType::Long)).into(),
+                    NestedField::optional(30, "_row_id", Type::Primitive(PrimitiveType::Long))
+                        .into(),
+                ])
+                .build()
+                .unwrap();
+            let metadata = TableMetadataBuilder::new(
+                schema,
+                UnboundPartitionSpec::builder().build(),
+                SortOrder::unsorted_order(),
+                "memory://updates".to_owned(),
+                version,
+                HashMap::new(),
+            )
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+            // No writer properties, like tables created by older PK-index sinks.
+            Table::builder()
+                .identifier(TableIdent::new(
+                    NamespaceIdent::new("mock_namespace".to_owned()),
+                    name.to_owned(),
+                ))
+                .file_io(FileIO::new_with_memory())
+                .runtime(Runtime::try_current().unwrap())
+                .metadata(metadata)
+                .build()
+                .unwrap()
+        }
+    }
+}
+
+/// A mock catalog for Iceberg planner and executor tests.
 #[derive(Debug)]
 pub struct MockCatalog;
 
@@ -217,6 +325,10 @@ impl CatalogV2 for MockCatalog {
 
     /// Load table from the catalog.
     async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
+        #[cfg(any(test, feature = "test"))]
+        if let Some(table) = Self::test_table(table) {
+            return Ok(table);
+        }
         match table.name.as_ref() {
             Self::SPARSE_TABLE => Ok(Self::sparse_table()),
             Self::RANGE_TABLE => Ok(Self::range_table()),
@@ -235,6 +347,10 @@ impl CatalogV2 for MockCatalog {
 
     /// Check if a table exists in the catalog.
     async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
+        #[cfg(any(test, feature = "test"))]
+        if Self::test_table_exists(table) {
+            return Ok(true);
+        }
         match table.name.as_ref() {
             Self::SPARSE_TABLE => Ok(true),
             Self::RANGE_TABLE => Ok(true),
@@ -265,5 +381,62 @@ impl CatalogV2 for MockCatalog {
             iceberg::ErrorKind::Unexpected,
             "register_table is not supported in mock catalog",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn registered_tables_are_isolated_and_scoped() -> iceberg::Result<()> {
+        use iceberg::spec::FormatVersion;
+
+        let first = MockCatalog::updates_table(
+            &format!("registered_{}", uuid::Uuid::new_v4().simple()),
+            FormatVersion::V2,
+        );
+        let second = MockCatalog::updates_table(
+            &format!("registered_{}", uuid::Uuid::new_v4().simple()),
+            FormatVersion::V2,
+        );
+        let first_guard = MockCatalog::register(first.clone());
+        let second_guard = MockCatalog::register(second.clone());
+        let catalog = MockCatalog;
+        assert!(catalog.table_exists(first.identifier()).await?);
+        assert!(catalog.table_exists(second.identifier()).await?);
+        assert_eq!(
+            catalog
+                .load_table(first.identifier())
+                .await?
+                .metadata()
+                .uuid(),
+            first.metadata().uuid()
+        );
+
+        let updated = MockCatalog::updates_table(first.identifier().name(), FormatVersion::V3);
+        first_guard.update(updated.clone());
+        assert_eq!(
+            catalog
+                .load_table(first.identifier())
+                .await?
+                .metadata()
+                .uuid(),
+            updated.metadata().uuid()
+        );
+        assert_eq!(
+            catalog
+                .load_table(second.identifier())
+                .await?
+                .metadata()
+                .uuid(),
+            second.metadata().uuid()
+        );
+        drop(first_guard);
+        assert!(!catalog.table_exists(first.identifier()).await?);
+        assert!(catalog.table_exists(second.identifier()).await?);
+        drop(second_guard);
+        assert!(!catalog.table_exists(second.identifier()).await?);
+        Ok(())
     }
 }

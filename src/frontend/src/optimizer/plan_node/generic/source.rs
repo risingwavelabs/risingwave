@@ -119,7 +119,9 @@ impl GenericPlanNode for Source {
 impl Source {
     pub fn stream_kind(&self) -> StreamKind {
         if let Some(catalog) = &self.catalog {
-            if catalog.append_only {
+            if catalog.is_iceberg_update_source() {
+                StreamKind::Retract
+            } else if catalog.append_only {
                 StreamKind::AppendOnly
             } else {
                 // Always treat source as upsert, as we either don't parse the old record for `Update`, or we don't
@@ -236,6 +238,12 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_iceberg_connector())
     }
 
+    pub fn is_iceberg_update_source(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.is_iceberg_update_source())
+    }
+
     pub fn is_kafka_connector(&self) -> bool {
         self.catalog
             .as_ref()
@@ -258,6 +266,9 @@ impl Source {
     }
 
     pub fn exclude_iceberg_hidden_columns(mut self) -> Self {
+        if self.is_iceberg_update_source() {
+            return self;
+        }
         let Some(catalog) = &mut self.catalog else {
             return self;
         };

@@ -119,6 +119,7 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 expect-test = "1"
 risingwave_batch_executors = { workspace = true }
+risingwave_connector = { workspace = true, features = ["test"] }
 risingwave_expr_impl = { workspace = true }
 tempfile = "3"
 

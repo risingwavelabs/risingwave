@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
 use external_schema::nexmark::check_nexmark_schema;
@@ -544,6 +544,16 @@ pub(crate) async fn bind_source_pk(
     sql_defined_pk_names: Vec<String>,
     with_properties: &WithOptionsSecResolved,
 ) -> Result<Vec<String>> {
+    if with_properties.is_iceberg_update_source() {
+        if sql_defined_pk_names.is_empty() {
+            return Err(InvalidInputSyntax(
+                "Iceberg streaming_updates requires a SQL PRIMARY KEY for retracting ingestion"
+                    .to_owned(),
+            )
+            .into());
+        }
+        return Ok(sql_defined_pk_names);
+    }
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let include_key_column_name: Option<String> = {
         // iter columns to check if contains additional columns from key part
@@ -769,6 +779,18 @@ pub fn bind_connector_props(
     is_create_source: bool,
 ) -> Result<(WithOptions, SourceRefreshMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
+    // The planner and executors decide the ingestion mode from plaintext options only, while
+    // connector property extraction would also read a secret value.
+    if with_properties.is_iceberg_connector()
+        && with_properties
+            .secret_ref()
+            .contains_key(risingwave_connector::source::iceberg::STREAMING_UPDATES_KEY)
+    {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "streaming_updates cannot be provided as a SECRET; use a plaintext 'true' or 'false'"
+                .to_owned(),
+        )));
+    }
     validate_compatibility(format_encode, &mut with_properties)?;
     let refresh_mode = {
         let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
@@ -956,7 +978,10 @@ pub async fn bind_create_source_or_table_with_connector(
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
     if with_properties.is_iceberg_connector() {
-        if is_create_source && !sql_pk_names.is_empty() {
+        if is_create_source
+            && !with_properties.is_iceberg_update_source()
+            && !sql_pk_names.is_empty()
+        {
             return Err(ErrorCode::NotSupported(
                 "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
                     .to_owned(),
@@ -1174,6 +1199,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         rate_limit: source_rate_limit,
         refresh_mode: Some(refresh_mode),
     };
+    source.validate_iceberg_update_source()?;
     Ok(source)
 }
 
@@ -1558,6 +1584,10 @@ pub(super) fn generate_stream_graph_for_source(
     let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
+
+#[cfg(all(test, not(madsim)))]
+#[path = "create_source/iceberg_update_test.rs"]
+mod iceberg_update_tests;
 
 #[cfg(test)]
 pub mod tests {

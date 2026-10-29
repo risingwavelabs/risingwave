@@ -311,6 +311,10 @@ message StreamSource {
   optional Columns downstream_columns = 11;
   plan_common.SourceRefreshMode refresh_mode = 12;
   optional uint32 associated_table_id = 13;
+  // List reads this dedicated Fetch queue at committed checkpoints to confirm phase completion.
+  // The frontend sets only `table_id` to reference the paired Fetch state table; meta fills the
+  // rest of the descriptor from that table's catalog when building the actor graph.
+  optional plan_common.StorageTableDesc iceberg_fetch_state_table = 14;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
