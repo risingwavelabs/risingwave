@@ -83,7 +83,7 @@ pub(super) struct BoundedLoadTracker {
     read_finished: HashSet<ActorId>,
     phase: Phase,
     /// Whether `Load { Start }` has been sent to the job's actors.
-    start_sent: bool,
+    pub start_sent: bool,
     /// Actions of the collected barriers, applied once their checkpoint commits.
     actions: Vec<BoundedLoadAction>,
 }
