@@ -70,12 +70,15 @@ SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'failure_upstream_
 system ok
 ./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_failure/failure_db/failure_t/data/
 
-system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
-    SELECT snapshot_id FROM rw_iceberg_snapshots
-    WHERE source_name = 'failure_upstream_src'
-    ORDER BY timestamp_ms DESC LIMIT 1
-") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+control substitution on
+
+let latest_snapshot_id
+SELECT snapshot_id FROM rw_iceberg_snapshots
+WHERE source_name = 'failure_upstream_src'
+ORDER BY timestamp_ms DESC
+LIMIT 1
+
+statement ok
 CREATE TABLE bounded_fetch_failed (PRIMARY KEY (id)) WITH (
     connector = 'iceberg',
     warehouse.path = 's3://hummock001/bounded_iceberg_failure',
@@ -87,8 +90,8 @@ CREATE TABLE bounded_fetch_failed (PRIMARY KEY (id)) WITH (
     database.name = 'failure_db',
     table.name = 'failure_t',
     scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '$snapshot_id'
-)"
+    scan.bounded.snapshot.id = '${latest_snapshot_id}'
+);
 
 query TT retry 60 backoff 2s
 SELECT status, completed_at IS NULL FROM rw_bounded_jobs
@@ -103,12 +106,7 @@ FAILED t
 system ok
 ./risedev mc find hummock-minio/hummock001/bounded_iceberg_failure/failure_db/failure_t/metadata/ --name 'snap-*.avro' | grep '^hummock-minio/.*\.avro$' | xargs -n1 ./risedev mc rm
 
-system ok
-snapshot_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "
-    SELECT snapshot_id FROM rw_iceberg_snapshots
-    WHERE source_name = 'failure_upstream_src'
-    ORDER BY timestamp_ms DESC LIMIT 1
-") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "
+statement ok
 CREATE TABLE bounded_list_failed (PRIMARY KEY (id)) WITH (
     connector = 'iceberg',
     warehouse.path = 's3://hummock001/bounded_iceberg_failure',
@@ -120,8 +118,8 @@ CREATE TABLE bounded_list_failed (PRIMARY KEY (id)) WITH (
     database.name = 'failure_db',
     table.name = 'failure_t',
     scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '$snapshot_id'
-)"
+    scan.bounded.snapshot.id = '${latest_snapshot_id}'
+);
 
 query TT retry 60 backoff 2s
 SELECT status, completed_at IS NULL FROM rw_bounded_jobs

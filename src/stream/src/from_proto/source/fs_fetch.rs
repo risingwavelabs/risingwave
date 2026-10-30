@@ -28,7 +28,7 @@ use crate::error::StreamResult;
 use crate::executor::source::{
     BatchAdbcSnowflakeFetchExecutor, BatchIcebergFetchExecutor, BatchOpendalFsFetchExecutor,
     BatchPosixFsFetchExecutor, FsFetchExecutor, IcebergFetchExecutor, LoadRetryPolicy,
-    SourceStateTableHandler, StreamSourceCore,
+    SourceStateTableHandler, StartKind, StreamSourceCore,
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
@@ -142,6 +142,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         params.config.clone(),
                         source.associated_table_id,
                         LoadRetryPolicy::from_ingest_mode(&ingest_mode),
+                        StartKind::from_ingest_mode(&ingest_mode),
                     )
                     .boxed()
                 } else {

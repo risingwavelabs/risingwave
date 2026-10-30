@@ -23,9 +23,11 @@ pub use batch_opendal_fs_fetch::*;
 mod batch_iceberg_list;
 pub use batch_iceberg_list::*;
 mod batch_iceberg_fetch;
+mod batch_iceberg_state;
 use std::time::Duration;
 
 pub use batch_iceberg_fetch::*;
+pub use batch_iceberg_state::StartKind;
 use risingwave_connector::source::ingest_mode::IngestMode;
 
 use crate::executor::source::get_infinite_backoff_strategy;
