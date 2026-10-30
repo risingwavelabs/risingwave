@@ -634,7 +634,7 @@ impl PartialGraphRecoverer<'_> {
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
-        active_bounded_loads: &mut HashMap<JobId, SourceId>,
+        active_bounded_loads: &mut HashMap<JobId, Vec<SourceId>>,
         batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
         iceberg_v3: HashMap<JobId, IcebergV3RenderResult>,
     ) -> MetaResult<DatabaseCheckpointControl> {
@@ -1352,8 +1352,10 @@ impl PartialGraphRecoverer<'_> {
                 .shared_actor_infos()
                 .clone(),
         );
-        for (job_id, source_id) in bounded_loads {
-            database_info.register_bounded_load(job_id, source_id);
+        for (job_id, source_ids) in bounded_loads {
+            for source_id in source_ids {
+                database_info.register_bounded_load(job_id, source_id);
+            }
         }
         let database_state = BarrierWorkerState::recovery(new_epoch, is_paused);
         Ok(DatabaseCheckpointControl::recovery(

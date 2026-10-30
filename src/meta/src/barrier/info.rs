@@ -477,6 +477,12 @@ impl InflightDatabaseInfo {
             .flat_map(|job| job.fragment_infos())
     }
 
+    pub fn job_fragment_ids(&self, job_id: JobId) -> Vec<FragmentId> {
+        self.job_fragment_infos(job_id)
+            .map(|fragment| fragment.fragment_id)
+            .collect()
+    }
+
     pub(super) fn job_id_by_fragment(&self, fragment_id: FragmentId) -> Option<JobId> {
         self.fragment_location.get(&fragment_id).copied()
     }
@@ -959,7 +965,7 @@ impl InflightDatabaseInfo {
         self.bounded_loads.has_pending_start(&self.jobs)
     }
 
-    pub(super) fn take_pending_bounded_load_start(&mut self) -> Option<SourceId> {
+    pub(super) fn take_pending_bounded_load_start(&mut self) -> Option<(JobId, SourceId)> {
         self.bounded_loads
             .take_pending_start(self.database_id, &self.jobs)
     }

@@ -1,0 +1,245 @@
+statement ok
+DROP SINK IF EXISTS bounded_src_sink;
+
+statement ok
+DROP TABLE IF EXISTS bounded_src_sink_target;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS bounded_src_join_mv;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS bounded_src_mv;
+
+statement ok
+DROP SOURCE IF EXISTS bounded_src_latest;
+
+statement ok
+DROP SOURCE IF EXISTS bounded_src;
+
+statement ok
+DROP SOURCE IF EXISTS bounded_src_upstream_src;
+
+statement ok
+DROP SINK IF EXISTS bounded_src_upstream_sink;
+
+statement ok
+DROP TABLE IF EXISTS bounded_src_upstream;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_source/
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+CREATE TABLE bounded_src_upstream (id INT, v VARCHAR) APPEND ONLY;
+
+statement ok
+CREATE SINK bounded_src_upstream_sink FROM bounded_src_upstream WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_src_t',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true'
+);
+
+statement ok
+INSERT INTO bounded_src_upstream VALUES (1, 'a'), (2, 'b'), (3, 'c');
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SOURCE bounded_src_upstream_src WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_src_t'
+);
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_src_upstream_src';
+----
+1
+
+statement ok
+INSERT INTO bounded_src_upstream VALUES (4, 'd'), (5, 'e');
+
+statement ok
+FLUSH;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rw_iceberg_snapshots WHERE source_name = 'bounded_src_upstream_src';
+----
+2
+
+# ==== batch queries
+
+control substitution on
+
+let first_snapshot_id
+SELECT snapshot_id FROM rw_iceberg_snapshots
+WHERE source_name = 'bounded_src_upstream_src'
+ORDER BY timestamp_ms
+LIMIT 1
+
+statement ok
+CREATE SOURCE bounded_src WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_src_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '${first_snapshot_id}'
+);
+
+query IT
+SELECT id, v FROM bounded_src ORDER BY id;
+----
+1 a
+2 b
+3 c
+
+statement error AS OF on a bounded source is not supported
+SELECT id, v FROM bounded_src FOR SYSTEM_VERSION AS OF 1;
+
+# ==== materialized views
+
+statement ok
+CREATE MATERIALIZED VIEW bounded_src_mv AS SELECT id, v FROM bounded_src;
+
+query T retry 30 backoff 1s
+SELECT status FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_materialized_views WHERE name = 'bounded_src_mv');
+----
+COMPLETED
+
+query IT
+SELECT id, v FROM bounded_src_mv ORDER BY id;
+----
+1 a
+2 b
+3 c
+
+let latest_snapshot_id
+SELECT snapshot_id FROM rw_iceberg_snapshots
+WHERE source_name = 'bounded_src_upstream_src'
+ORDER BY timestamp_ms DESC
+LIMIT 1
+
+statement ok
+CREATE SOURCE bounded_src_latest WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3://hummock001/bounded_iceberg_source',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    database.name = 'bounded_db',
+    table.name = 'bounded_src_t',
+    scan.bounded.mode = 'snapshot',
+    scan.bounded.snapshot.id = '${latest_snapshot_id}'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW bounded_src_join_mv AS
+SELECT l.id, f.v AS first_v, l.v AS latest_v
+FROM bounded_src_latest l LEFT JOIN bounded_src f ON l.id = f.id;
+
+query T retry 30 backoff 1s
+SELECT status FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_materialized_views WHERE name = 'bounded_src_join_mv')
+ORDER BY source_id;
+----
+COMPLETED
+COMPLETED
+
+query ITT
+SELECT id, first_v, latest_v FROM bounded_src_join_mv ORDER BY id;
+----
+1 a a
+2 b b
+3 c c
+4 NULL d
+5 NULL e
+
+# ==== sinks
+
+statement ok
+CREATE TABLE bounded_src_sink_target (id INT, v VARCHAR) APPEND ONLY;
+
+statement ok
+CREATE SINK bounded_src_sink INTO bounded_src_sink_target FROM bounded_src;
+
+query T retry 30 backoff 1s
+SELECT status FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_sinks WHERE name = 'bounded_src_sink');
+----
+COMPLETED
+
+query IT retry 10 backoff 1s
+SELECT id, v FROM bounded_src_sink_target ORDER BY id;
+----
+1 a
+2 b
+3 c
+
+# ==== unsupported operations
+
+statement error altering connector properties of a bounded source is not supported
+ALTER SOURCE bounded_src CONNECTOR WITH (s3.region = 'us-west-2');
+
+# ==== cleanup
+
+statement ok
+DROP SINK bounded_src_sink;
+
+statement ok
+DROP TABLE bounded_src_sink_target;
+
+statement ok
+DROP MATERIALIZED VIEW bounded_src_join_mv;
+
+statement ok
+DROP MATERIALIZED VIEW bounded_src_mv;
+
+query I
+SELECT count(*) FROM rw_bounded_jobs;
+----
+0
+
+statement ok
+DROP SOURCE bounded_src_latest;
+
+statement ok
+DROP SOURCE bounded_src;
+
+statement ok
+DROP SOURCE bounded_src_upstream_src;
+
+statement ok
+DROP SINK bounded_src_upstream_sink;
+
+statement ok
+DROP TABLE bounded_src_upstream;
+
+system ok
+./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg_source/
