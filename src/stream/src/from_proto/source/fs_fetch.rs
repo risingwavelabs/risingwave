@@ -140,7 +140,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         upstream,
                         params.local_barrier_manager.clone(),
                         params.config.clone(),
-                        source.associated_table_id,
                         LoadRetryPolicy::from_ingest_mode(&ingest_mode),
                         StartKind::from_ingest_mode(&ingest_mode),
                     )

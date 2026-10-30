@@ -59,6 +59,19 @@ pub enum PlanFor {
     BatchDql,
 }
 
+impl PlanFor {
+    pub fn is_stream(self) -> bool {
+        match self {
+            Self::Stream | Self::StreamIcebergEngineInternal => true,
+            Self::Batch | Self::BatchDql => false,
+        }
+    }
+
+    pub fn is_batch(self) -> bool {
+        !self.is_stream()
+    }
+}
+
 impl Planner {
     pub fn new_for_batch_dql(ctx: OptimizerContextRef) -> Planner {
         Planner {

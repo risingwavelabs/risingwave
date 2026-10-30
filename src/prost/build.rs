@@ -844,6 +844,9 @@ for_all_wrapped_id_fields! (
         LoadId {
             source_id: SourceId,
         }
+        LoadMutation {
+            fragment_ids: FragmentId,
+        }
         LookupNode {
             table_id: TableId,
             index_id: TableId,

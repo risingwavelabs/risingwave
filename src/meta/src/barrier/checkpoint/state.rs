@@ -1085,19 +1085,24 @@ impl DatabaseCheckpointControl {
                     )
                     .collect();
 
-                let bounded_load_tracker = info.bounded_load_source.map(|source_id| {
-                    BoundedLoadTracker::new(
-                        self.database_id,
-                        info.streaming_job.id(),
-                        source_id,
-                        new_fragment_infos.iter().map(|(_, fragment)| fragment),
-                    )
-                });
+                let bounded_load_trackers = info
+                    .bounded_load_sources
+                    .iter()
+                    .map(|&source_id| {
+                        let tracker = BoundedLoadTracker::new(
+                            self.database_id,
+                            info.streaming_job.id(),
+                            source_id,
+                            new_fragment_infos.iter().map(|(_, fragment)| fragment),
+                        );
+                        (source_id, tracker)
+                    })
+                    .collect();
 
                 self.database_info.pre_apply_new_job(
                     info.streaming_job.id(),
                     cdc_tracker,
-                    bounded_load_tracker,
+                    bounded_load_trackers,
                 );
 
                 self.database_info
@@ -1635,7 +1640,10 @@ impl DatabaseCheckpointControl {
                 staging_table_id,
                 trigger_time,
             }) => {
-                let mutation = Some(Command::start_load_mutation(associated_source_id));
+                let mutation = Some(Command::start_load_mutation(
+                    associated_source_id,
+                    self.database_info.job_fragment_ids(table_id.as_job_id()),
+                ));
                 let actors = RefreshCycleActors::from_fragments(
                     self.database_info.job_fragment_infos(table_id.as_job_id()),
                 );
@@ -1656,8 +1664,11 @@ impl DatabaseCheckpointControl {
                 )
             }
 
-            Some(Command::ListFinish { source_id }) => {
-                let mutation = Some(Command::list_finish_mutation(source_id));
+            Some(Command::ListFinish { job_id, source_id }) => {
+                let mutation = Some(Command::list_finish_mutation(
+                    source_id,
+                    self.database_info.job_fragment_ids(job_id),
+                ));
                 self.apply_simple_command(mutation, "ListFinish")
             }
 
@@ -1983,7 +1994,7 @@ impl DatabaseCheckpointControl {
                             fragment_infos: new_fragment_info,
                             subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
                             status: CreateStreamingJobStatus::Created,
-                            bounded_load_tracker: None, // no bounded ingestion for snapshot backfill
+                            bounded_load_trackers: Default::default(), // no bounded ingestion for snapshot backfill
                             cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
                         });
                     }
@@ -1995,9 +2006,14 @@ impl DatabaseCheckpointControl {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
 
                     if fragment_ids.is_empty() {
-                        self.database_info
-                            .take_pending_bounded_load_start()
-                            .map(Command::start_load_mutation)
+                        self.database_info.take_pending_bounded_load_start().map(
+                            |(job_id, source_id)| {
+                                Command::start_load_mutation(
+                                    source_id,
+                                    self.database_info.job_fragment_ids(job_id),
+                                )
+                            },
+                        )
                     } else {
                         Some(PbMutation::StartFragmentBackfill(
                             PbStartFragmentBackfillMutation { fragment_ids },

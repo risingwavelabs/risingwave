@@ -758,9 +758,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     if let Some(ref mut refresh_args) = self.refresh_args {
                         match barrier.mutation.as_deref() {
                             Some(Mutation::Load {
-                                source_id,
+                                target,
                                 action: LoadAction::Start,
-                            }) if *source_id == refresh_args.associated_source_id => {
+                            }) if target.addresses(
+                                refresh_args.associated_source_id,
+                                self.actor_context.fragment_id,
+                            ) =>
+                            {
                                 if refresh_args.is_refreshing() {
                                     consistency_panic!(
                                         table_id = %refresh_args.table_id,

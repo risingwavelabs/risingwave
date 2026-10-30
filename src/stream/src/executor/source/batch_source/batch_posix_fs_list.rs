@@ -254,9 +254,13 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
                                     Mutation::Load {
-                                        source_id,
+                                        target,
                                         action: LoadAction::Start,
-                                    } if *source_id == self.stream_source_core.source_id => {
+                                    } if target.addresses(
+                                        self.stream_source_core.source_id,
+                                        self.actor_ctx.fragment_id,
+                                    ) =>
+                                    {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,

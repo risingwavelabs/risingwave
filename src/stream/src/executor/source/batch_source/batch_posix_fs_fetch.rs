@@ -330,9 +330,11 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
                                     Mutation::Load {
-                                        source_id,
+                                        target,
                                         action: LoadAction::Start,
-                                    } if *source_id == core.source_id => {
+                                    } if target
+                                        .addresses(core.source_id, actor_ctx.fragment_id) =>
+                                    {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %actor_ctx.id,
@@ -353,9 +355,11 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         stream.replace_data_stream(stream::pending().boxed());
                                     }
                                     Mutation::Load {
-                                        source_id,
+                                        target,
                                         action: LoadAction::ListFinish,
-                                    } if *source_id == core.source_id => {
+                                    } if target
+                                        .addresses(core.source_id, actor_ctx.fragment_id) =>
+                                    {
                                         // Listing is finished for our source
                                         tracing::info!(
                                             ?barrier.epoch,

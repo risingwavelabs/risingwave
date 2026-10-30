@@ -81,7 +81,7 @@ impl CatalogController {
             .collect()
     }
 
-    pub async fn list_unfinished_bounded_jobs(&self) -> MetaResult<HashMap<JobId, SourceId>> {
+    pub async fn list_unfinished_bounded_jobs(&self) -> MetaResult<HashMap<JobId, Vec<SourceId>>> {
         let inner = self.inner.read().await;
         load_unfinished_bounded_jobs(&inner.db, None).await
     }

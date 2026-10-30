@@ -159,7 +159,7 @@ message LoadId {
   uint32 source_id = 1;
 }
 
-// Drives a finite load. Only the actors reading `load_id.source_id` act on it.
+// Drives a finite load. Only the actors of `fragment_ids` reading `load_id.source_id` act on it.
 message LoadMutation {
   // Starts the load. The lister, if any, enumerates the input and assigns it to the readers.
   message Start {}
@@ -171,6 +171,8 @@ message LoadMutation {
     Start start = 2;
     ListFinish list_finish = 3;
   }
+  // The fragments of the job whose load this is.
+  repeated uint32 fragment_ids = 4;
 }
 
 message ResetSourceMutation {

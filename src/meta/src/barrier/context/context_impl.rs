@@ -321,14 +321,16 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         match action {
             BoundedLoadAction::ListFinish {
                 database_id,
+                job_id,
                 source_id,
             } => {
                 if let Err(error) = self
                     .barrier_scheduler
-                    .run_command_no_wait(database_id, Command::ListFinish { source_id })
+                    .run_command_no_wait(database_id, Command::ListFinish { job_id, source_id })
                 {
                     tracing::warn!(
                         %database_id,
+                        %job_id,
                         %source_id,
                         error = %error.as_report(),
                         "skip bounded list finish during recovery"

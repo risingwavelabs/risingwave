@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -144,7 +144,7 @@ pub struct CreateStreamingJobContext {
 
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
 
-    pub bounded_load_source: Option<SourceId>,
+    pub bounded_load_sources: BTreeSet<SourceId>,
 
     pub option: CreateStreamingJobOption,
 
@@ -611,7 +611,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
-            bounded_load_source,
+            bounded_load_sources,
             is_serverless_backfill,
             resource_type,
             mut streaming_job_model,
@@ -663,7 +663,7 @@ impl GlobalStreamManager {
             database_resource_group,
             fragment_backfill_ordering,
             cdc_table_snapshot_splits,
-            bounded_load_source,
+            bounded_load_sources,
             locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
             streaming_job_model,
