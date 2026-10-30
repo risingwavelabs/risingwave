@@ -213,8 +213,25 @@ impl Binder {
                         }
                         Ok(idxs) => idxs,
                     };
+                    // A side resolves to a single column unless it is a column group without a
+                    // non-nullable column, which resolves to `COALESCE` over the group.
+                    let single_l = (indices_l.len() == 1).then(|| indices_l[0]);
+                    let single_r = match self.context.get_unqualified_indices(&column.real_value())
+                    {
+                        Ok(idxs) if idxs.len() == 1 => Some(idxs[0] + l_len),
+                        _ => None,
+                    };
+                    // The merged column holds the left value for INNER and LEFT joins and the right
+                    // value for RIGHT joins. For FULL joins it is `COALESCE` over both sides.
+                    let non_nullable = match join_type {
+                        JoinType::Inner => single_l.or(single_r),
+                        JoinType::LeftOuter => single_l,
+                        JoinType::RightOuter => single_r,
+                        JoinType::FullOuter => None,
+                        _ => unreachable!(),
+                    };
                     let indices_r = indices_r.iter().map(|i| i + l_len).collect::<Vec<_>>();
-                    join_columns.push((column, indices_l, indices_r));
+                    join_columns.push((column, indices_l, indices_r, non_nullable));
                 }
                 self.pop_and_merge_lateral_context()?;
 
@@ -222,9 +239,9 @@ impl Binder {
                 // indices and column group ids of the right side.
                 let mut col_indices = Vec::new();
                 let mut binary_expr = Expr::Value(Value::Boolean(true));
-                for (column, indices_l, indices_r) in join_columns {
+                for (column, indices_l, indices_r, non_nullable) in join_columns {
                     // Select at most one column from each natural column group from left and right
-                    col_indices.push((indices_l[0], indices_r[0]));
+                    col_indices.push((indices_l[0], indices_r[0], non_nullable));
                     let left_expr = Self::get_identifier_from_indices(
                         &self.context,
                         &indices_l,
@@ -248,13 +265,7 @@ impl Binder {
                 // Bind the expression first, before allowing disambiguation of the columns involved
                 // in the join
                 let expr = self.bind_expr(&binary_expr)?;
-                for (l, r) in col_indices {
-                    let non_nullable = match join_type {
-                        JoinType::LeftOuter | JoinType::Inner => Some(l),
-                        JoinType::RightOuter => Some(r),
-                        JoinType::FullOuter => None,
-                        _ => unreachable!(),
-                    };
+                for (l, r, non_nullable) in col_indices {
                     self.context.add_natural_columns(l, r, non_nullable);
                 }
                 (expr, Some(relation))

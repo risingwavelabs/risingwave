@@ -148,9 +148,9 @@ pub struct ColumnGroupContext {
 pub struct ColumnGroup {
     /// Indices of the columns in the group
     pub indices: HashSet<usize>,
-    /// A non-nullable column is never NULL.
-    /// If `None`, ambiguous references to the column name will be resolved to a `COALESCE(col1,
-    /// col2, ..., coln)` over each column in the group
+    /// A column that always holds the value of the merged column, e.g. the left column of a
+    /// LEFT join. If `None`, ambiguous references to the column name will be resolved to a
+    /// `COALESCE(col1, col2, ..., coln)` over each column in the group
     pub non_nullable_column: Option<usize>,
 
     pub column_name: Option<String>,
@@ -328,8 +328,8 @@ impl BindContext {
         Ok(())
     }
 
-    /// Identifies two columns as being in the same group. Additionally, possibly provides one of
-    /// the columns as being `non_nullable`
+    /// Identifies two columns as being in the same group, and sets the `non_nullable` column of
+    /// the group, which holds the value of the merged column if present.
     pub fn add_natural_columns(
         &mut self,
         left: usize,
@@ -356,17 +356,13 @@ impl BindContext {
             (Some(group_id), None) => {
                 let group = self.column_group_context.groups.get_mut(&group_id).unwrap();
                 group.indices.insert(right);
-                if group.non_nullable_column.is_none() {
-                    group.non_nullable_column = non_nullable_column;
-                }
+                group.non_nullable_column = non_nullable_column;
                 self.column_group_context.mapping.insert(right, group_id);
             }
             (None, Some(group_id)) => {
                 let group = self.column_group_context.groups.get_mut(&group_id).unwrap();
                 group.indices.insert(left);
-                if group.non_nullable_column.is_none() {
-                    group.non_nullable_column = non_nullable_column;
-                }
+                group.non_nullable_column = non_nullable_column;
                 self.column_group_context.mapping.insert(left, group_id);
             }
             (Some(l_group_id), Some(r_group_id)) => {
@@ -389,13 +385,7 @@ impl BindContext {
                     *self.column_group_context.mapping.get_mut(idx).unwrap() = l_group_id;
                     l_group.indices.insert(*idx);
                 }
-                if l_group.non_nullable_column.is_none() {
-                    l_group.non_nullable_column = if r_group.non_nullable_column.is_none() {
-                        non_nullable_column
-                    } else {
-                        r_group.non_nullable_column
-                    };
-                }
+                l_group.non_nullable_column = non_nullable_column;
             }
         }
     }
