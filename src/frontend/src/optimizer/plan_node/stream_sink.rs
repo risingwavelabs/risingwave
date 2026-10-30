@@ -325,6 +325,13 @@ impl StreamSink {
             .into());
         }
 
+        if is_iceberg_pk_index && auto_refresh_schema_from_table.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Iceberg sink with `enable_pk_index='true'` does not support `auto.schema.change='true'`.".to_owned(),
+            )
+            .into());
+        }
+
         // Get downstream pk from user input, override and perform some checks if applicable.
         let mut downstream_pk = properties
             .get(DOWNSTREAM_PK_KEY)
