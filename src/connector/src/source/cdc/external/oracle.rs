@@ -49,7 +49,27 @@ const ORACLE_SNAPSHOT_CHANNEL_SIZE: usize = 4;
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct OracleOffset {
-    pub scn: u64,
+    pub decoded_commit_scn: u64,
+}
+
+impl OracleOffset {
+    /// The per-event commit SCN is attached by RisingWave's Java CDC consumer; Debezium's
+    /// own `sourceOffset.commit_scn` is a per-redo-thread recovery map, not this event's SCN.
+    pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
+        // Native Oracle offset fields (such as the string txId) differ from other connectors.
+        let dbz_offset: serde_json::Value = serde_json::from_str(offset)
+            .with_context(|| format!("invalid upstream Oracle CDC offset: {offset}"))?;
+        let decoded_commit_scn = dbz_offset
+            .pointer("/sourceOffset/decoded_commit_scn")
+            .and_then(serde_json::Value::as_str)
+            .context("Oracle CDC data offset is missing decoded_commit_scn")?
+            .parse::<u64>()
+            .context("invalid Oracle CDC commit SCN")?;
+        if decoded_commit_scn == 0 {
+            bail!("Oracle CDC commit SCN must be positive");
+        }
+        Ok(Self { decoded_commit_scn })
+    }
 }
 
 pub struct OracleExternalTable {
@@ -123,7 +143,9 @@ impl ExternalTableReader for OracleExternalTableReader {
         if scn <= 0 {
             bail!("Oracle returned an invalid current SCN: {scn}");
         }
-        Ok(CdcOffset::Oracle(OracleOffset { scn: scn as u64 }))
+        Ok(CdcOffset::Oracle(OracleOffset {
+            decoded_commit_scn: scn as u64,
+        }))
     }
 
     fn snapshot_read(
@@ -161,8 +183,11 @@ impl ExternalTableReader for OracleExternalTableReader {
 
 impl OracleExternalTableReader {
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
-        // TODO(#26804): Parse Oracle Debezium offsets when Oracle CDC backfill is implemented.
-        Box::new(|_offset| Err(anyhow!("Oracle CDC offset parsing is not supported yet").into()))
+        Box::new(|offset| {
+            Ok(CdcOffset::Oracle(OracleOffset::parse_debezium_offset(
+                offset,
+            )?))
+        })
     }
 
     pub fn new(

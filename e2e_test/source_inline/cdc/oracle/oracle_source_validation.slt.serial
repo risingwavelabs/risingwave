@@ -1,0 +1,165 @@
+include oracle_test_env.slt.part
+
+statement ok
+DROP SOURCE IF EXISTS oracle_validation_no_logmining CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS oracle_validation_source CASCADE;
+
+# prepare() grants every required privilege again, restoring LOGMINING after a failed run.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+# Remove PDB- and CDB-level ALL logging left by a failed run; prepare() keeps minimal logging.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import (
+    TEST_ORACLE_DATABASE,
+    TEST_ORACLE_PDB,
+    _connect_as_sys,
+    execute_oracle_sqls,
+)
+for service, query in [
+    (TEST_ORACLE_PDB, "SELECT ALL_COLUMN FROM DBA_SUPPLEMENTAL_LOGGING"),
+    (TEST_ORACLE_DATABASE, "SELECT SUPPLEMENTAL_LOG_DATA_ALL FROM V$DATABASE"),
+]:
+    with _connect_as_sys(service) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            enabled = cursor.fetchone()[0] == "YES"
+    if enabled:
+        execute_oracle_sqls(
+            ["ALTER DATABASE DROP SUPPLEMENTAL LOG DATA (ALL) COLUMNS"], service=service
+        )
+PY
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOG_NONE (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOG_PK (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOG_PK ADD SUPPLEMENTAL LOG DATA (PRIMARY KEY) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOG_PARTIAL (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOG_PARTIAL ADD SUPPLEMENTAL LOG GROUP RW_LOG_PARTIAL_NAME (NAME) ALWAYS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOG_ALL (ID NUMBER(9) PRIMARY KEY, NAME VARCHAR2(100))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_LOG_ALL ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+])
+PY
+
+# A source fails validation when the connector user lacks a required privilege.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
+execute_oracle_sqls(
+    ["REVOKE LOGMINING FROM $TEST_ORACLE_USER CONTAINER=ALL"], service=TEST_ORACLE_DATABASE
+)
+PY
+
+statement error (?s).*Oracle user is missing required privileges: \[LOGMINING\].*
+CREATE SOURCE oracle_validation_no_logmining WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}'
+) FORMAT PLAIN ENCODE JSON;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
+execute_oracle_sqls(
+    ["GRANT LOGMINING TO $TEST_ORACLE_USER CONTAINER=ALL"], service=TEST_ORACLE_DATABASE
+)
+PY
+
+statement ok
+CREATE SOURCE oracle_validation_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}'
+) FORMAT PLAIN ENCODE JSON;
+
+# A table needs ALL-column logging. Table-level ALL logging on RW_LOG_ALL does not cover
+# RW_LOG_NONE, and primary-key or partial log groups are not enough.
+statement error (?s).*all-column supplemental logging must be enabled on table 'APP.RW_LOG_NONE'.*
+CREATE TABLE oracle_log_none (*) WITH (snapshot = 'false')
+FROM oracle_validation_source TABLE 'APP.RW_LOG_NONE';
+
+statement error (?s).*all-column supplemental logging must be enabled on table 'APP.RW_LOG_PK'.*
+CREATE TABLE oracle_log_pk (*) WITH (snapshot = 'false')
+FROM oracle_validation_source TABLE 'APP.RW_LOG_PK';
+
+statement error (?s).*all-column supplemental logging must be enabled on table 'APP.RW_LOG_PARTIAL'.*
+CREATE TABLE oracle_log_partial (*) WITH (snapshot = 'false')
+FROM oracle_validation_source TABLE 'APP.RW_LOG_PARTIAL';
+
+statement ok
+CREATE TABLE oracle_log_all (*) WITH (snapshot = 'false')
+FROM oracle_validation_source TABLE 'APP.RW_LOG_ALL';
+
+statement ok
+DROP TABLE oracle_log_all;
+
+# PDB-level ALL logging covers every table in the PDB.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls(["ALTER DATABASE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS"])
+PY
+
+statement ok
+CREATE TABLE oracle_log_pdb (*) WITH (snapshot = 'false')
+FROM oracle_validation_source TABLE 'APP.RW_LOG_NONE';
+
+statement ok
+DROP TABLE oracle_log_pdb;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls(["ALTER DATABASE DROP SUPPLEMENTAL LOG DATA (ALL) COLUMNS"])
+PY
+
+statement error (?s).*all-column supplemental logging must be enabled on table 'APP.RW_LOG_NONE'.*
+CREATE TABLE oracle_log_none (*) WITH (snapshot = 'false')
+FROM oracle_validation_source TABLE 'APP.RW_LOG_NONE';
+
+# CDB-level ALL logging covers every PDB in the container database.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
+execute_oracle_sqls(
+    ["ALTER DATABASE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS"], service=TEST_ORACLE_DATABASE
+)
+PY
+
+statement ok
+CREATE TABLE oracle_log_cdb (*) WITH (snapshot = 'false')
+FROM oracle_validation_source TABLE 'APP.RW_LOG_NONE';
+
+statement ok
+DROP TABLE oracle_log_cdb;
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import TEST_ORACLE_DATABASE, execute_oracle_sqls
+execute_oracle_sqls(
+    ["ALTER DATABASE DROP SUPPLEMENTAL LOG DATA (ALL) COLUMNS"], service=TEST_ORACLE_DATABASE
+)
+PY
+
+statement error (?s).*all-column supplemental logging must be enabled on table 'APP.RW_LOG_NONE'.*
+CREATE TABLE oracle_log_none (*) WITH (snapshot = 'false')
+FROM oracle_validation_source TABLE 'APP.RW_LOG_NONE';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations
+WHERE name IN ('oracle_validation_no_logmining', 'oracle_log_none', 'oracle_log_pk',
+               'oracle_log_partial', 'oracle_log_all', 'oracle_log_pdb', 'oracle_log_cdb');
+----
+0
+
+statement ok
+DROP SOURCE oracle_validation_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup
