@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -26,9 +27,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbTableRefillRuntimeConfig;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
-};
+use risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedActor;
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
 
@@ -38,6 +37,7 @@ use crate::barrier::command::{
     PostCollectCommand, ResumeBackfillTarget, SinceTimestampResolvedEpoch,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::load_progress::{LoadProgress, LoadReport};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
@@ -340,32 +340,34 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.reload_database_runtime_info_impl(database_id).await
     }
 
-    async fn handle_list_finished_source_ids(
+    async fn handle_refresh_load_progress(
         &self,
-        list_finished: Vec<PbListFinishedSource>,
+        refresh_load_progress: Vec<LoadReport>,
     ) -> MetaResult<()> {
-        for (table_id, actors) in group_reporters(
-            list_finished
-                .into_iter()
-                .map(|report| (report.table_id, report.reporter_actor_id)),
-        ) {
-            self.refresh_manager
-                .report_stage(table_id, RefreshStage::List, actors)?;
-        }
-        Ok(())
-    }
+        let mut list_finished = vec![];
+        let mut read_finished = vec![];
 
-    async fn handle_load_finished_source_ids(
-        &self,
-        load_finished: Vec<PbLoadFinishedSource>,
-    ) -> MetaResult<()> {
-        for (table_id, actors) in group_reporters(
-            load_finished
-                .into_iter()
-                .map(|report| (report.table_id, report.reporter_actor_id)),
-        ) {
-            self.refresh_manager
-                .report_stage(table_id, RefreshStage::Fetch, actors)?;
+        for report in refresh_load_progress {
+            let reporter = (report.source_id, report.actor_id);
+
+            match report.progress {
+                LoadProgress::ListFinished => list_finished.push(reporter),
+                LoadProgress::ReaderDone => read_finished.push(reporter),
+                // A refresh load retries forever, so its actors never report `Failed`.
+                LoadProgress::Failed => {
+                    tracing::warn!(?report, "ignore unexpected refresh load progress")
+                }
+            }
+        }
+
+        for (stage, reports) in [
+            (RefreshStage::List, list_finished),
+            (RefreshStage::Fetch, read_finished),
+        ] {
+            for (source_id, actors) in group_reporters(reports.into_iter()) {
+                self.refresh_manager
+                    .report_source_stage(source_id, stage, actors)?;
+            }
         }
         Ok(())
     }
@@ -973,12 +975,12 @@ impl PostCollectCommand {
     }
 }
 
-fn group_reporters(
-    reports: impl Iterator<Item = (TableId, ActorId)>,
-) -> HashMap<TableId, HashSet<ActorId>> {
-    let mut grouped: HashMap<TableId, HashSet<ActorId>> = HashMap::new();
-    for (table_id, actor_id) in reports {
-        grouped.entry(table_id).or_default().insert(actor_id);
+fn group_reporters<K: Hash + Eq>(
+    reports: impl Iterator<Item = (K, ActorId)>,
+) -> HashMap<K, HashSet<ActorId>> {
+    let mut grouped: HashMap<K, HashSet<ActorId>> = HashMap::new();
+    for (key, actor_id) in reports {
+        grouped.entry(key).or_default().insert(actor_id);
     }
     grouped
 }

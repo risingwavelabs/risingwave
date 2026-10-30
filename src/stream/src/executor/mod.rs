@@ -49,6 +49,7 @@ use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
+use risingwave_pb::stream_plan::load_mutation::Action as PbLoadAction;
 use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
@@ -375,12 +376,9 @@ pub enum Mutation {
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
     },
-    RefreshStart {
-        table_id: TableId,
-        associated_source_id: SourceId,
-    },
-    ListFinish {
-        associated_source_id: SourceId,
+    Load {
+        source_id: SourceId,
+        action: LoadAction,
     },
     LoadFinish {
         associated_source_id: SourceId,
@@ -393,6 +391,13 @@ pub enum Mutation {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+}
+
+/// See [`risingwave_pb::stream_plan::LoadMutation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadAction {
+    Start,
+    ListFinish,
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -585,8 +590,7 @@ impl Barrier {
             | Mutation::DropSubscriptions { .. }
             | Mutation::ConnectorPropsChange(_)
             | Mutation::StartFragmentBackfill { .. }
-            | Mutation::RefreshStart { .. }
-            | Mutation::ListFinish { .. }
+            | Mutation::Load { .. }
             | Mutation::LoadFinish { .. }
             | Mutation::ResetSource { .. }
             | Mutation::InjectSourceOffsets { .. } => false,
@@ -1020,18 +1024,17 @@ impl Mutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
-            Mutation::RefreshStart {
-                table_id,
-                associated_source_id,
-            } => PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
-                table_id: *table_id,
-                associated_source_id: *associated_source_id,
-            }),
-            Mutation::ListFinish {
-                associated_source_id,
-            } => PbMutation::ListFinish(risingwave_pb::stream_plan::ListFinishMutation {
-                associated_source_id: *associated_source_id,
-            }),
+            Mutation::Load { source_id, action } => {
+                PbMutation::Load(risingwave_pb::stream_plan::LoadMutation {
+                    load_id: Some(risingwave_pb::stream_plan::LoadId {
+                        source_id: *source_id,
+                    }),
+                    action: Some(match action {
+                        LoadAction::Start => PbLoadAction::Start(Default::default()),
+                        LoadAction::ListFinish => PbLoadAction::ListFinish(Default::default()),
+                    }),
+                })
+            }
             Mutation::LoadFinish {
                 associated_source_id,
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
@@ -1213,12 +1216,12 @@ impl Mutation {
                         .collect(),
                 }
             }
-            PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
-                table_id: refresh_start.table_id,
-                associated_source_id: refresh_start.associated_source_id,
-            },
-            PbMutation::ListFinish(list_finish) => Mutation::ListFinish {
-                associated_source_id: list_finish.associated_source_id,
+            PbMutation::Load(load) => Mutation::Load {
+                source_id: load.load_id.as_ref().unwrap().source_id,
+                action: match load.action.as_ref().unwrap() {
+                    PbLoadAction::Start(_) => LoadAction::Start,
+                    PbLoadAction::ListFinish(_) => LoadAction::ListFinish,
+                },
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
                 associated_source_id: load_finish.associated_source_id,
@@ -1230,7 +1233,6 @@ impl Mutation {
                 source_id: SourceId::from(inject.source_id),
                 split_offsets: inject.split_offsets.clone(),
             },
-            PbMutation::Load(_) => unimplemented!("load mutations are handled in the next layer"),
         };
         Ok(mutation)
     }
