@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -242,29 +242,24 @@ impl CompactorManagerInner {
         tasks: &[HummockCompactionTaskId],
         slow_task_duration: Duration,
     ) -> HashMap<HummockCompactionTaskId, (Duration, &'static str)> {
-        let tasks_ids: HashSet<u64> = HashSet::from_iter(tasks.to_vec());
-        let mut ret = HashMap::default();
-        for TaskHeartbeat {
-            task, create_time, ..
-        } in self.task_heartbeats.values()
-        {
-            if !tasks_ids.contains(&task.task_id) {
-                continue;
-            }
-            let pending_time = create_time.elapsed();
-            if pending_time > slow_task_duration {
-                ret.insert(task.task_id, (pending_time, TASK_RUN_TOO_LONG));
-            } else {
-                ret.insert(task.task_id, (pending_time, TASK_NORMAL));
-            }
-        }
-
-        for task_id in tasks {
-            if !ret.contains_key(task_id) {
-                ret.insert(*task_id, (Duration::from_secs(0), TASK_NOT_FOUND));
-            }
-        }
-        ret
+        tasks
+            .iter()
+            .map(|task_id| {
+                let status = match self.task_heartbeats.get(task_id) {
+                    Some(heartbeat) => {
+                        let pending_time = heartbeat.create_time.elapsed();
+                        let status = if pending_time > slow_task_duration {
+                            TASK_RUN_TOO_LONG
+                        } else {
+                            TASK_NORMAL
+                        };
+                        (pending_time, status)
+                    }
+                    None => (Duration::from_secs(0), TASK_NOT_FOUND),
+                };
+                (*task_id, status)
+            })
+            .collect()
     }
 
     pub fn get_heartbeat_expired_tasks(&self) -> Vec<CompactTask> {
@@ -590,6 +585,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
     use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
@@ -600,6 +596,33 @@ mod tests {
         add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
     };
     use crate::hummock::{CompactorManager, IcebergCompactorManager, MockHummockMetaClient};
+
+    #[test]
+    fn test_check_tasks_status() {
+        use super::{CompactorManagerInner, TASK_NORMAL, TASK_NOT_FOUND, TASK_RUN_TOO_LONG};
+
+        let mut manager = CompactorManagerInner::for_test();
+        for task_id in [1, 2, 3] {
+            manager.initiate_task_heartbeat(CompactTask {
+                task_id,
+                ..Default::default()
+            });
+        }
+        manager.task_heartbeats.get_mut(&1).unwrap().create_time -= Duration::from_secs(10);
+
+        let statuses = manager.check_tasks_status(&[1, 2, 4], Duration::from_secs(5));
+        assert_eq!(statuses.len(), 3);
+        assert_eq!(statuses[&1].1, TASK_RUN_TOO_LONG);
+        assert!(statuses[&1].0 > Duration::from_secs(5));
+        assert_eq!(statuses[&2].1, TASK_NORMAL);
+        assert_eq!(statuses[&4], (Duration::from_secs(0), TASK_NOT_FOUND));
+        assert!(!statuses.contains_key(&3));
+        assert!(
+            manager
+                .check_tasks_status(&[], Duration::from_secs(5))
+                .is_empty()
+        );
+    }
 
     #[tokio::test]
     async fn test_compactor_manager() {
