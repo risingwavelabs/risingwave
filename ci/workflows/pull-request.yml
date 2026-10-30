@@ -27,7 +27,7 @@ anchors:
         nienbo/cache#v2.4.21:
           id: maven
           key: >-
-            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java/pom.xml' }}-{{ checksum 'e2e_test/udf/remote_java/pom.xml' }}
+            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java/build-debezium.sh' }}-{{ checksum 'java/pom.xml' }}-{{ checksum 'e2e_test/udf/remote_java/pom.xml' }}-{{ env.DEBEZIUM_COMMIT }}
           restore-keys:
             - "v1-cache-maven-{{ runner.os }}-"
             - "v1-cache-maven-"
@@ -97,6 +97,7 @@ steps:
     key: "build-other"
     plugins:
       - *cargo-cache
+      - ./ci/plugins/debezium-submodule-commit
       - *maven-cache
       - seek-oss/aws-sm#v2.3.2:
           env:
