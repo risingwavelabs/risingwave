@@ -1447,6 +1447,133 @@ async fn test_manual_l0_compaction_rejects_pending_middle_sublevel() {
     }
 }
 
+type AssignmentHeartbeatGate = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+static ASSIGNMENT_HEARTBEAT_GATES: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<usize, AssignmentHeartbeatGate>>,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(super) async fn pause_after_compaction_assignment_publication(manager: &HummockManager) {
+    let gate = ASSIGNMENT_HEARTBEAT_GATES
+        .lock()
+        .unwrap()
+        .remove(&(std::ptr::from_ref(manager) as usize));
+    if let Some((entered, resume)) = gate {
+        entered.send(()).unwrap();
+        resume.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn test_cancel_compaction_between_assignment_and_heartbeat() {
+    let (_, manager, _, worker_id) = setup_compute_env(80).await;
+    let client: Arc<dyn HummockMetaClient> =
+        Arc::new(MockHummockMetaClient::new(manager.clone(), worker_id as _));
+    let group_id = StaticCompactionGroupId::StateDefault;
+    register_table_ids_to_compaction_group(&manager, &[1], group_id).await;
+    let sst_ids = get_sst_ids(&manager, 1).await;
+    let epoch = test_epoch(1);
+    let sst = SstableInfoInner {
+        object_id: sst_ids[0].into(),
+        sst_id: sst_ids[0].into(),
+        key_range: KeyRange::new(
+            FullKey::new(1.into(), gen_key_from_str(VirtualNode::ZERO, "a"), epoch)
+                .encode()
+                .into(),
+            FullKey::new(1.into(), gen_key_from_str(VirtualNode::ZERO, "z"), epoch)
+                .encode()
+                .into(),
+        ),
+        table_ids: vec![1.into()],
+        file_size: 128,
+        sst_size: 128,
+        uncompressed_file_size: 128,
+        total_key_count: 1,
+        min_epoch: epoch,
+        max_epoch: epoch,
+        ..Default::default()
+    }
+    .into();
+    client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: to_local_sstable_info(&[sst]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+    ASSIGNMENT_HEARTBEAT_GATES
+        .lock()
+        .unwrap()
+        .insert(Arc::as_ptr(&manager) as usize, (entered_tx, resume_rx));
+    let selecting_manager = manager.clone();
+    let selecting = tokio::spawn(async move {
+        selecting_manager
+            .manual_get_compact_task(
+                group_id,
+                ManualCompactionOption {
+                    level: 0,
+                    sst_ids: sst_ids.into_iter().map(Into::into).collect(),
+                    exclusive: false,
+                    ..Default::default()
+                },
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), entered_rx)
+        .await
+        .expect("selection did not reach the committed assignment boundary")
+        .unwrap();
+
+    // Use the same assignment-list and cancel entry points available to RPC callers.
+    let (_, assignments) = manager.list_compaction_status().await;
+    assert_eq!(assignments.len(), 1);
+    let task_id = assignments[0].compact_task.as_ref().unwrap().task_id;
+    let heartbeat_before_cancel = manager
+        .compactor_manager
+        .get_progress()
+        .iter()
+        .any(|progress| progress.task_id == task_id);
+    let cancel_manager = manager.clone();
+    let cancellation = tokio::spawn(async move {
+        cancel_manager
+            .cancel_compact_task(task_id, TaskStatus::ManualCanceled)
+            .await
+    })
+    .await;
+    resume_tx.send(()).unwrap();
+    let selected = selecting.await.unwrap().unwrap().unwrap();
+    assert_eq!(selected.task_id, task_id);
+    let assignment_removed = manager
+        .compaction_task_from_assignment_for_test(task_id)
+        .await
+        .is_none();
+    let orphan_heartbeat = manager
+        .compactor_manager
+        .get_progress()
+        .iter()
+        .any(|progress| progress.task_id == task_id);
+    eprintln!(
+        "HLC-001: task_id={task_id}, heartbeat_before_cancel={heartbeat_before_cancel}, \
+         cancellation={cancellation:?}, assignment_removed={assignment_removed}, \
+         orphan_heartbeat={orphan_heartbeat}"
+    );
+    assert!(
+        cancellation.is_ok(),
+        "cancellation panicked: {cancellation:?}"
+    );
+    assert!(cancellation.unwrap().unwrap());
+    assert!(assignment_removed);
+    assert!(!orphan_heartbeat, "cancelled task regained a heartbeat");
+}
+
 #[tokio::test]
 async fn test_trigger_manual_compaction() {
     let (_, hummock_manager, _, worker_id) = setup_compute_env(80).await;
