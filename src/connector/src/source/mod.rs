@@ -62,7 +62,6 @@ pub mod utils;
 
 mod util;
 use std::collections::HashMap;
-use std::future::IntoFuture;
 use std::time::Duration;
 
 pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
@@ -328,12 +327,13 @@ impl WaitCheckpointTask {
                     source_name: &str,
                 ) {
                     let fut = async {
-                        let ack_future = context
-                            .publish(reply_subject.clone(), "+ACK".into())
-                            .await
-                            .map_err(|e| e.to_report_string())?;
-                        ack_future
-                            .into_future()
+                        // Send the ack as a core NATS request, not `jetstream::Context::publish`.
+                        // The server confirms an ack with an empty reply, not a `PubAck`, so
+                        // waiting on a `PublishAckFuture` fails to parse it (see #20447). Any
+                        // reply means the ack was received.
+                        context
+                            .client()
+                            .request(reply_subject.clone(), "+ACK".into())
                             .await
                             .map_err(|e| e.to_report_string())?;
                         Ok::<(), String>(())
