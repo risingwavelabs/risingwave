@@ -554,6 +554,22 @@
       └─LogicalJoin { type: FullOuter, on: (t2.x = t3.x), output: all }
         ├─LogicalScan { table: t2, columns: [t2.x, t2._row_id, t2._rw_timestamp] }
         └─LogicalScan { table: t3, columns: [t3.x, t3._row_id, t3._rw_timestamp] }
+- name: Ensure that USING compares the right column group when both sides have column groups
+  sql: |
+    create table t1(x int);
+    create table t2(x int);
+    create table t3(x int);
+    create table t4(x int);
+    select x from (t1 full join t2 using (x)) full join (t3 full join t4 using (x)) using (x);
+  logical_plan: |-
+    LogicalProject { exprs: [Coalesce(t1.x, t2.x, t3.x, t4.x) as $expr1] }
+    └─LogicalJoin { type: FullOuter, on: (Coalesce(t1.x, t2.x) = Coalesce(t3.x, t4.x)), output: all }
+      ├─LogicalJoin { type: FullOuter, on: (t1.x = t2.x), output: all }
+      │ ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id, t1._rw_timestamp] }
+      │ └─LogicalScan { table: t2, columns: [t2.x, t2._row_id, t2._rw_timestamp] }
+      └─LogicalJoin { type: FullOuter, on: (t3.x = t4.x), output: all }
+        ├─LogicalScan { table: t3, columns: [t3.x, t3._row_id, t3._rw_timestamp] }
+        └─LogicalScan { table: t4, columns: [t4.x, t4._row_id, t4._rw_timestamp] }
 - name: Ensure that non-trivial ambiguous references can be resolved
   sql: |
     create table a(x int);

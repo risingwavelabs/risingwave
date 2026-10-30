@@ -1,0 +1,76 @@
+# A USING / NATURAL join whose left and right sides both contain a column group
+# (from an earlier USING / NATURAL join) must compare the right side's group,
+# not the left one. Expected results match PostgreSQL.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table ung_t1 (x int, y int);
+
+statement ok
+create table ung_t2 (x int, y int);
+
+statement ok
+create table ung_t3 (x int);
+
+statement ok
+create table ung_t4 (x int);
+
+statement ok
+create table ung_t5 (y int);
+
+statement ok
+insert into ung_t1 values (1, 10), (2, 20);
+
+statement ok
+insert into ung_t2 values (2, 20), (3, 30);
+
+statement ok
+insert into ung_t3 values (3), (4);
+
+statement ok
+insert into ung_t4 values (4), (5);
+
+statement ok
+insert into ung_t5 values (10), (20);
+
+query I
+select x from (ung_t1 full join ung_t2 using (x)) full join (ung_t3 full join ung_t4 using (x)) using (x) order by x;
+----
+1
+2
+3
+4
+5
+
+query I
+select x from (ung_t1 join ung_t2 using (x)) join (ung_t3 full join ung_t4 using (x)) using (x);
+----
+
+# The left column group is on another column.
+query II
+select x, y from (ung_t1 join ung_t5 using (y)) join (ung_t3 full join ung_t4 using (x)) using (x);
+----
+
+query I
+select x from (ung_t3 natural full join ung_t4) natural full join (ung_t3 as g3 natural full join ung_t4 as g4) order by x;
+----
+3
+4
+5
+
+statement ok
+drop table ung_t1;
+
+statement ok
+drop table ung_t2;
+
+statement ok
+drop table ung_t3;
+
+statement ok
+drop table ung_t4;
+
+statement ok
+drop table ung_t5;

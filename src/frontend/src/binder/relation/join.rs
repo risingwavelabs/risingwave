@@ -190,8 +190,7 @@ impl Binder {
                     .collect::<Vec<_>>();
                 columns.sort_by_key(|a| a.0.real_value());
 
-                let mut col_indices = Vec::new();
-                let mut binary_expr = Expr::Value(Value::Boolean(true));
+                let mut join_columns = Vec::new();
 
                 // Walk the RHS cols, checking to see if any share a name with any LHS cols
                 for (column, indices_r) in columns {
@@ -214,16 +213,26 @@ impl Binder {
                         }
                         Ok(idxs) => idxs,
                     };
+                    let indices_r = indices_r.iter().map(|i| i + l_len).collect::<Vec<_>>();
+                    join_columns.push((column, indices_l, indices_r));
+                }
+                self.pop_and_merge_lateral_context()?;
+
+                // Build the join condition in the merged context: merging offsets the column
+                // indices and column group ids of the right side.
+                let mut col_indices = Vec::new();
+                let mut binary_expr = Expr::Value(Value::Boolean(true));
+                for (column, indices_l, indices_r) in join_columns {
                     // Select at most one column from each natural column group from left and right
-                    col_indices.push((indices_l[0], indices_r[0] + l_len));
+                    col_indices.push((indices_l[0], indices_r[0]));
                     let left_expr = Self::get_identifier_from_indices(
-                        &old_context,
+                        &self.context,
                         &indices_l,
                         column.clone(),
                     )?;
                     let right_expr = Self::get_identifier_from_indices(
                         &self.context,
-                        indices_r,
+                        &indices_r,
                         column.clone(),
                     )?;
                     binary_expr = Expr::BinaryOp {
@@ -236,7 +245,6 @@ impl Binder {
                         }),
                     }
                 }
-                self.pop_and_merge_lateral_context()?;
                 // Bind the expression first, before allowing disambiguation of the columns involved
                 // in the join
                 let expr = self.bind_expr(&binary_expr)?;

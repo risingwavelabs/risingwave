@@ -285,6 +285,15 @@
     select *, x, t1.x, t2.x, t3.x from t1 full join (t2 full join t3 using (x)) using (x);
   expected_outputs:
   - logical_plan
+- name: Ensure that USING compares the right column group when both sides have column groups
+  sql: |
+    create table t1(x int);
+    create table t2(x int);
+    create table t3(x int);
+    create table t4(x int);
+    select x from (t1 full join t2 using (x)) full join (t3 full join t4 using (x)) using (x);
+  expected_outputs:
+  - logical_plan
 - name: Ensure that non-trivial ambiguous references can be resolved
   sql: |
     create table a(x int);
