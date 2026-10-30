@@ -1266,6 +1266,15 @@ impl LogicalPlanRoot {
             && properties
                 .get(ENABLE_PK_INDEX)
                 .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+
+        if is_iceberg_v3 && auto_refresh_schema_from_table.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Iceberg sink with `enable_pk_index='true'` does not support `auto.schema.change='true'`."
+                    .to_owned(),
+            )
+            .into());
+        }
+
         let backfill_type = if is_iceberg_v3 {
             if without_snapshot || since_timestamp {
                 return Err(ErrorCode::InvalidInputSyntax(
