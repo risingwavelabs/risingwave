@@ -19,7 +19,6 @@ use either::Either;
 use iceberg::scan::FileScanTask;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::ColumnCatalog;
-use risingwave_common::id::TableId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::{
@@ -118,7 +117,6 @@ pub struct BatchIcebergListExecutor<S: StateStore> {
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
     /// Local barrier manager for reporting list finished
     barrier_manager: LocalBarrierManager,
-    associated_table_id: TableId,
     load_target: IcebergLoadTarget,
     retry_policy: LoadRetryPolicy,
     /// Metrics for monitor.
@@ -134,18 +132,15 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         barrier_manager: LocalBarrierManager,
-        associated_table_id: Option<TableId>,
         load_target: IcebergLoadTarget,
         retry_policy: LoadRetryPolicy,
     ) -> Self {
-        assert!(associated_table_id.is_some());
         Self {
             actor_ctx,
             stream_source_core,
             downstream_columns,
             barrier_receiver: Some(barrier_receiver),
             barrier_manager,
-            associated_table_id: associated_table_id.unwrap(),
             load_target,
             retry_policy,
             _metrics: metrics,
@@ -220,8 +215,8 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         e.variant_name().to_owned(),
                         self.stream_source_core.source_id.to_string(),
+                        self.stream_source_core.source_name.clone(),
                         self.actor_ctx.fragment_id.to_string(),
-                        self.associated_table_id.to_string(),
                     ]);
 
                     scan_metrics.record_scan_error("list_error");
@@ -233,7 +228,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                     let Some(delay) = state.next_retry_delay() else {
                         tracing::error!(
                             source_id = %self.stream_source_core.source_id,
-                            table_id = %self.associated_table_id,
+                            fragment_id = %self.actor_ctx.fragment_id,
                             error = %e.as_report(),
                             "load failed after repeated list errors"
                         );
@@ -244,7 +239,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
 
                     tracing::info!(
                         source_id = %self.stream_source_core.source_id,
-                        table_id = %self.associated_table_id,
+                        fragment_id = %self.actor_ctx.fragment_id,
                         ?delay,
                         "re-listing iceberg scan tasks due to error"
                     );
@@ -266,18 +261,21 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
                                     Mutation::Load {
-                                        source_id,
-                                        attempt,
+                                        target,
                                         action: LoadAction::Start,
-                                    } if *source_id == self.stream_source_core.source_id => {
+                                    } if target.addresses(
+                                        self.stream_source_core.source_id,
+                                        self.actor_ctx.fragment_id,
+                                    ) =>
+                                    {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
                                             source_id = %self.stream_source_core.source_id,
-                                            table_id = %self.associated_table_id,
+                                            fragment_id = %self.actor_ctx.fragment_id,
                                             "load started, listing iceberg scan tasks"
                                         );
-                                        current_attempt = *attempt;
+                                        current_attempt = target.attempt;
                                         if let Some(last) =
                                             last_attempt.take_if(|last| *last != current_attempt)
                                         {
@@ -330,7 +328,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                 tracing::info!(
                                     ?barrier.epoch,
                                     source_id = %self.stream_source_core.source_id,
-                                    table_id = %self.associated_table_id,
+                                    fragment_id = %self.actor_ctx.fragment_id,
                                     "reporting batch iceberg list finished"
                                 );
                                 self.barrier_manager.report_load_progress(

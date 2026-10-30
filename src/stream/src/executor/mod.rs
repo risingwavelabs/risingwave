@@ -378,8 +378,7 @@ pub enum Mutation {
         fragment_ids: HashSet<FragmentId>,
     },
     Load {
-        source_id: SourceId,
-        attempt: u64,
+        target: LoadTarget,
         action: LoadAction,
     },
     LoadFinish {
@@ -400,6 +399,21 @@ pub enum Mutation {
 pub enum LoadAction {
     Start,
     ListFinish,
+}
+
+/// The load a [`Mutation::Load`] drives, and the actors it is addressed to: those of
+/// `fragment_ids` reading `source_id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadTarget {
+    pub source_id: SourceId,
+    pub attempt: u64,
+    pub fragment_ids: HashSet<FragmentId>,
+}
+
+impl LoadTarget {
+    pub fn addresses(&self, source_id: SourceId, fragment_id: FragmentId) -> bool {
+        self.source_id == source_id && self.fragment_ids.contains(&fragment_id)
+    }
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -1026,16 +1040,13 @@ impl Mutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
-            Mutation::Load {
-                source_id,
-                attempt,
-                action,
-            } => {
+            Mutation::Load { target, action } => {
                 PbMutation::Load(risingwave_pb::stream_plan::LoadMutation {
                     load_id: Some(risingwave_pb::stream_plan::LoadId {
-                        source_id: *source_id,
-                        attempt: *attempt,
+                        source_id: target.source_id,
+                        attempt: target.attempt,
                     }),
+                    fragment_ids: target.fragment_ids.iter().copied().collect(),
                     action: Some(match action {
                         LoadAction::Start => PbLoadAction::Start(Default::default()),
                         LoadAction::ListFinish => PbLoadAction::ListFinish(Default::default()),
@@ -1235,8 +1246,11 @@ impl Mutation {
                 }
 
                 Mutation::Load {
-                    source_id: load_id.source_id,
-                    attempt: load_id.attempt,
+                    target: LoadTarget {
+                        source_id: load_id.source_id,
+                        attempt: load_id.attempt,
+                        fragment_ids: load.fragment_ids.iter().copied().collect(),
+                    },
                     action: match load.action.as_ref().unwrap() {
                         PbLoadAction::Start(_) => LoadAction::Start,
                         PbLoadAction::ListFinish(_) => LoadAction::ListFinish,

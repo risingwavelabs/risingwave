@@ -635,7 +635,7 @@ impl PartialGraphRecoverer<'_> {
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
-        active_bounded_loads: &mut HashMap<JobId, SourceId>,
+        active_bounded_loads: &mut HashMap<JobId, Vec<SourceId>>,
         batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
         iceberg_v3: HashMap<JobId, IcebergV3RenderResult>,
     ) -> MetaResult<DatabaseCheckpointControl> {
@@ -965,14 +965,20 @@ impl PartialGraphRecoverer<'_> {
                         } else {
                             None
                         };
-                    let bounded_load_tracker = active_bounded_loads.remove(&job_id).map(|source_id| {
-                        BoundedLoadTracker::new(
-                            database_id,
-                            job_id,
-                            source_id,
-                            fragment_infos.values(),
-                        )
-                    });
+                    let bounded_load_trackers = active_bounded_loads
+                        .remove(&job_id)
+                        .into_iter()
+                        .flatten()
+                        .map(|source_id| {
+                            let tracker = BoundedLoadTracker::new(
+                                database_id,
+                                job_id,
+                                source_id,
+                                fragment_infos.values(),
+                            );
+                            (source_id, tracker)
+                        })
+                        .collect();
 
                     Ok((
                         job_id,
@@ -984,7 +990,7 @@ impl PartialGraphRecoverer<'_> {
                                 .unwrap_or_default(),
                             status,
                             cdc_table_backfill_tracker,
-                            bounded_load_tracker,
+                            bounded_load_trackers,
                         },
                     ))
                 })

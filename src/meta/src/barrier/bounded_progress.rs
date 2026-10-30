@@ -15,6 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::mem::take;
 
+use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::id::{ActorId, DatabaseId, JobId, SourceId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
@@ -38,6 +39,7 @@ use crate::controller::fragment::InflightFragmentInfo;
 pub(super) enum BoundedLoadAction {
     ListFinish {
         database_id: DatabaseId,
+        job_id: JobId,
         source_id: SourceId,
     },
     Complete {
@@ -165,6 +167,7 @@ impl BoundedLoadTracker {
 
                     BoundedLoadAction::ListFinish {
                         database_id: self.database_id,
+                        job_id: self.job_id,
                         source_id: self.source_id,
                     }
                 })
@@ -190,6 +193,10 @@ impl BoundedLoadTracker {
         };
 
         self.actions.extend(action);
+    }
+
+    pub fn has_actor(&self, actor_id: ActorId) -> bool {
+        self.listers.contains(&actor_id) || self.readers.contains(&actor_id)
     }
 
     /// Takes the queued actions, once their checkpoint commits.
@@ -255,7 +262,7 @@ fn bounded_roles<'a>(
 pub(crate) async fn load_unfinished_bounded_jobs(
     conn: &impl ConnectionTrait,
     database_id: Option<DatabaseId>,
-) -> MetaResult<HashMap<JobId, SourceId>> {
+) -> MetaResult<HashMap<JobId, Vec<SourceId>>> {
     let mut query = bounded_job::Entity::find()
         .select_only()
         .column(bounded_job::Column::JobId)
@@ -273,13 +280,13 @@ pub(crate) async fn load_unfinished_bounded_jobs(
         .all(conn)
         .await?
         .into_iter()
-        .collect())
+        .into_group_map())
 }
 
-/// Returns the bounded source that the fragments of a new job read, if any.
-pub(crate) fn bounded_load_source<'a>(
+/// Returns the bounded sources that the fragments of a new job read.
+pub(crate) fn bounded_load_sources<'a>(
     fragments: impl IntoIterator<Item = &'a StreamNode>,
-) -> MetaResult<Option<SourceId>> {
+) -> MetaResult<BTreeSet<SourceId>> {
     let mut readers = vec![];
 
     for nodes in fragments {
@@ -310,11 +317,7 @@ pub(crate) fn bounded_load_source<'a>(
         }
     }
 
-    if sources.len() > 1 {
-        bail!("a job can load at most one bounded source, found {sources:?}");
-    }
-
-    Ok(sources.pop_first())
+    Ok(sources)
 }
 
 pub(crate) async fn insert_bounded_job(
@@ -495,12 +498,16 @@ mod tests {
         assert_eq!(tracker.take_actions(), vec![fail()]);
     }
 
-    /// The bounded source comes from the fragments that read it, and streaming sources are skipped.
+    /// The bounded sources come from the fragments that read them, and streaming sources are
+    /// skipped.
     #[test]
-    fn test_bounded_load_source() {
+    fn test_bounded_load_sources() {
         let fragments = two_phase();
         let nodes = fragments.iter().map(|fragment| &fragment.nodes);
-        assert_eq!(bounded_load_source(nodes).unwrap(), Some(SOURCE_ID));
+        assert_eq!(
+            bounded_load_sources(nodes).unwrap(),
+            BTreeSet::from([SOURCE_ID])
+        );
 
         let streaming = PbStreamNode {
             node_body: Some(NodeBody::Source(Box::new(SourceNode {
@@ -511,12 +518,13 @@ mod tests {
             }))),
             ..Default::default()
         };
-        assert_eq!(bounded_load_source([&streaming]).unwrap(), None);
+        assert!(bounded_load_sources([&streaming]).unwrap().is_empty());
     }
 
     fn list_finish() -> BoundedLoadAction {
         BoundedLoadAction::ListFinish {
             database_id: DATABASE_ID,
+            job_id: JOB_ID,
             source_id: SOURCE_ID,
         }
     }
