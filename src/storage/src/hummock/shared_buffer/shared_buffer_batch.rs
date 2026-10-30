@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::size_of_val;
 use std::ops::Bound::Included;
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
@@ -248,24 +248,6 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn measure_delete_range_size(batch_items: &[(Bound<Bytes>, Bound<Bytes>)]) -> usize {
-        batch_items
-            .iter()
-            .map(|(left, right)| {
-                // is_exclude_left_key(bool) + table_id + epoch
-                let l1 = match left {
-                    Bound::Excluded(x) | Bound::Included(x) => x.len() + 13,
-                    Bound::Unbounded => 13,
-                };
-                let l2 = match right {
-                    Bound::Excluded(x) | Bound::Included(x) => x.len() + 13,
-                    Bound::Unbounded => 13,
-                };
-                l1 + l2
-            })
-            .sum()
-    }
-
     /// Return (total size, old value size or 0)
     pub fn measure_batch_size(
         batch_items: &[SharedBufferItem],
@@ -392,11 +374,6 @@ impl SharedBufferBatch {
     #[inline(always)]
     pub fn end_table_key(&self) -> TableKey<&[u8]> {
         TableKey(self.inner.entries.last().expect("non-empty").key.as_ref())
-    }
-
-    #[inline(always)]
-    pub fn raw_largest_key(&self) -> &TableKey<Bytes> {
-        &self.inner.entries.last().expect("non-empty").key
     }
 
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
