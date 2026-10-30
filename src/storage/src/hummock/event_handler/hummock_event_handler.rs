@@ -45,7 +45,6 @@ use super::version_update::{VersionUpdateEvent, VersionUpdateQueue};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
-use crate::hummock::event_handler::refiller::SpawnRefillTask;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
 };
@@ -56,7 +55,7 @@ use crate::hummock::event_handler::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, VersionUpdate};
-use crate::hummock::{HummockResult, MemoryLimiter, ObjectIdManager, SstableStoreRef};
+use crate::hummock::{HummockResult, MemoryLimiter, ObjectIdManager};
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
@@ -405,12 +404,14 @@ impl HummockEventHandler {
         );
         let buffer_tracker =
             BufferTracker::from_storage_opts(&compactor_context.storage_opts, &state_store_metrics);
-        Self::new_inner(
+        let refiller = CacheRefiller::new(
             role,
-            observer_event_rx,
-            compactor_context.sstable_store.clone(),
-            state_store_metrics,
             CacheRefillConfig::from_storage_opts(&compactor_context.storage_opts),
+            compactor_context.sstable_store.clone(),
+        );
+        Self::new_inner(
+            observer_event_rx,
+            state_store_metrics,
             recent_versions,
             buffer_tracker,
             Arc::new(move |payload, task_info| {
@@ -457,20 +458,17 @@ impl HummockEventHandler {
                     }
                 })
             }),
-            CacheRefiller::default_spawn_refill_task(),
+            refiller,
         )
     }
 
     fn new_inner(
-        role: Role,
         observer_event_rx: UnboundedReceiver<HummockObserverEvent>,
-        sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
-        refill_config: CacheRefillConfig,
         recent_versions: RecentVersions,
         buffer_tracker: BufferTracker,
         spawn_upload_task: SpawnUploadTask,
-        spawn_refill_task: SpawnRefillTask,
+        refiller: CacheRefiller,
     ) -> Self {
         let (hummock_event_tx, hummock_event_rx) =
             event_channel(state_store_metrics.event_handler_pending_event.clone());
@@ -504,7 +502,6 @@ impl HummockEventHandler {
             buffer_tracker,
         );
         let version_updates = VersionUpdateQueue::new(recent_versions.latest_version().clone());
-        let refiller = CacheRefiller::new(role, refill_config, sstable_store, spawn_refill_task);
 
         Self {
             hummock_event_tx,
@@ -1137,28 +1134,31 @@ mod tests {
         let permits = Arc::new([Semaphore::new(0), Semaphore::new(0), Semaphore::new(0)]);
         let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let (finished_tx, mut finished_rx) = unbounded_channel();
-        let mut handler = HummockEventHandler::new_inner(
+        let refiller = CacheRefiller::new(
             Role::Streaming,
-            unbounded_channel().1,
-            mock_sstable_store().await,
-            metrics.clone(),
             CacheRefillConfig::from_storage_opts(&opts),
+            mock_sstable_store().await,
+        )
+        .with_foyer_spawn_task(Arc::new({
+            let permits = permits.clone();
+            let started = started.clone();
+            move |_, _| {
+                let index = started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let permits = permits.clone();
+                let finished_tx = finished_tx.clone();
+                spawn(async move {
+                    let _permit = permits[index].acquire().await.unwrap();
+                    finished_tx.send(index).unwrap();
+                })
+            }
+        }));
+        let mut handler = HummockEventHandler::new_inner(
+            unbounded_channel().1,
+            metrics.clone(),
             RecentVersions::new(version, 10, metrics.clone()),
             BufferTracker::from_storage_opts(&opts, &metrics),
             spawn_upload_task,
-            Arc::new({
-                let permits = permits.clone();
-                let started = started.clone();
-                move |_, _| {
-                    let index = started.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let permits = permits.clone();
-                    let finished_tx = finished_tx.clone();
-                    spawn(async move {
-                        let _permit = permits[index].acquire().await.unwrap();
-                        finished_tx.send(index).unwrap();
-                    })
-                }
-            }),
+            refiller,
         );
         let (tx, rx) = oneshot::channel();
         handler.handle_hummock_event(HummockEvent::RegisterReadVersion {
@@ -1314,7 +1314,6 @@ mod tests {
             Role::Both,
             CacheRefillConfig::from_storage_opts(&storage_opt),
             mock_sstable_store().await,
-            CacheRefiller::default_spawn_refill_task(),
         );
 
         HummockEventHandler::apply_table_refill_runtime_config(
@@ -1445,16 +1444,18 @@ mod tests {
             }),
             unbounded_channel().0,
         );
-        let mut event_handler = HummockEventHandler::new_inner(
+        let refiller = CacheRefiller::new(
             Role::Streaming,
-            observer_event_rx,
-            mock_sstable_store().await,
-            metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
+            mock_sstable_store().await,
+        );
+        let mut event_handler = HummockEventHandler::new_inner(
+            observer_event_rx,
+            metrics.clone(),
             RecentVersions::new(pinned_version, 10, metrics.clone()),
             BufferTracker::from_storage_opts(&storage_opt, &metrics),
             spawn_upload_task,
-            CacheRefiller::default_spawn_refill_task(),
+            refiller,
         );
 
         let (tx, rx) = oneshot::channel();
@@ -1564,12 +1565,14 @@ mod tests {
         let storage_opt = default_opts_for_test();
         let metrics = Arc::new(HummockStateStoreMetrics::unused());
 
-        let event_handler = HummockEventHandler::new_inner(
+        let refiller = CacheRefiller::new(
             Role::None,
-            observer_event_rx,
-            mock_sstable_store().await,
-            metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
+            mock_sstable_store().await,
+        );
+        let event_handler = HummockEventHandler::new_inner(
+            observer_event_rx,
+            metrics.clone(),
             RecentVersions::new(initial_version.clone(), 10, metrics.clone()),
             BufferTracker::from_storage_opts(&storage_opt, &metrics),
             Arc::new(move |_, info| {
@@ -1593,7 +1596,7 @@ mod tests {
                     _ => unreachable!(),
                 }
             }),
-            CacheRefiller::default_spawn_refill_task(),
+            refiller,
         );
 
         let event_tx = event_handler.event_sender();
@@ -1742,16 +1745,18 @@ mod tests {
 
         let (spawn_task, new_task_notifier) = prepare_uploader_order_test_spawn_task_fn(false);
 
-        let event_handler = HummockEventHandler::new_inner(
+        let refiller = CacheRefiller::new(
             Role::None,
-            observer_event_rx,
-            mock_sstable_store().await,
-            metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
+            mock_sstable_store().await,
+        );
+        let event_handler = HummockEventHandler::new_inner(
+            observer_event_rx,
+            metrics.clone(),
             RecentVersions::new(initial_version.clone(), 10, metrics.clone()),
             buffer_tracker,
             spawn_task,
-            CacheRefiller::default_spawn_refill_task(),
+            refiller,
         );
 
         let event_tx = event_handler.event_sender();
