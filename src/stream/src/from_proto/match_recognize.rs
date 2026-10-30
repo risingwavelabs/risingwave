@@ -233,7 +233,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             eval_error_report: params.eval_error_report,
             within_deadline,
             state_table,
-        });
+        })?;
 
         Ok((params.info, exec).into())
     }
