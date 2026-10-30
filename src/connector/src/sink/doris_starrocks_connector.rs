@@ -697,17 +697,13 @@ mod tests {
     use super::*;
 
     fn starrocks_request_builder() -> StarrocksTxnRequestBuilder {
-        let mut headers = HeaderBuilder::new()
+        let headers = HeaderBuilder::new()
             .add_common_header()
+            .set_user_password("user".to_owned(), "password".to_owned())
             .add_json_format()
             .set_db("db".to_owned())
             .set_table("table".to_owned())
             .build();
-        // Use a dummy auth header to test header propagation without constructing credentials.
-        headers.insert(
-            "Authorization".to_owned(),
-            "Basic dXNlcjpwYXNzd29yZA==".to_owned(),
-        );
         StarrocksTxnRequestBuilder::new("http://127.0.0.1:8030".to_owned(), headers, 1234).unwrap()
     }
 
