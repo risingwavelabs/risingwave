@@ -133,6 +133,18 @@ with(
 statement ok
 insert into t_v2_storage values(1, 'alice'), (2, 'bob');
 
+statement error Iceberg sink with `enable_pk_index='true'` does not support `auto\.schema\.change='true'`
+create sink pk_index_auto_schema_change from t_v2_storage with (
+    connector = 'iceberg',
+    connection = storage_catalog_conn,
+    database.name = 'public',
+    table.name = 'pk_index_auto_schema_change',
+    type = 'upsert',
+    create_table_if_not_exists = 'true',
+    enable_pk_index = 'true',
+    auto.schema.change = 'true'
+);
+
 statement ok
 flush;
 
