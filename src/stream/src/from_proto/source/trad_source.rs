@@ -269,7 +269,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             params.executor_stats.clone(),
                             barrier_receiver,
                             params.local_barrier_manager.clone(),
-                            associated_table_id,
                             IcebergLoadTarget::from_ingest_mode(&ingest_mode),
                             LoadRetryPolicy::from_ingest_mode(&ingest_mode),
                             StartKind::from_ingest_mode(&ingest_mode),

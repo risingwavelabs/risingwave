@@ -121,9 +121,9 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
                                     Mutation::Load {
-                                        source_id,
+                                        target,
                                         action: LoadAction::Start,
-                                    } if *source_id == core.source_id => {
+                                    } if target.addresses(core.source_id, self.actor_ctx.fragment_id) => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
@@ -142,9 +142,9 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
                                         need_rebuild_reader = true;
                                     }
                                     Mutation::Load {
-                                        source_id,
+                                        target,
                                         action: LoadAction::ListFinish,
-                                    } if *source_id == core.source_id => {
+                                    } if target.addresses(core.source_id, self.actor_ctx.fragment_id) => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,

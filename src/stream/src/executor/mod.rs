@@ -377,7 +377,7 @@ pub enum Mutation {
         fragment_ids: HashSet<FragmentId>,
     },
     Load {
-        source_id: SourceId,
+        target: LoadTarget,
         action: LoadAction,
     },
     LoadFinish {
@@ -398,6 +398,19 @@ pub enum Mutation {
 pub enum LoadAction {
     Start,
     ListFinish,
+}
+
+/// The actors a [`Mutation::Load`] is addressed to: those of `fragment_ids` reading `source_id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadTarget {
+    pub source_id: SourceId,
+    pub fragment_ids: HashSet<FragmentId>,
+}
+
+impl LoadTarget {
+    pub fn addresses(&self, source_id: SourceId, fragment_id: FragmentId) -> bool {
+        self.source_id == source_id && self.fragment_ids.contains(&fragment_id)
+    }
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -1024,11 +1037,12 @@ impl Mutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
-            Mutation::Load { source_id, action } => {
+            Mutation::Load { target, action } => {
                 PbMutation::Load(risingwave_pb::stream_plan::LoadMutation {
                     load_id: Some(risingwave_pb::stream_plan::LoadId {
-                        source_id: *source_id,
+                        source_id: target.source_id,
                     }),
+                    fragment_ids: target.fragment_ids.iter().copied().collect(),
                     action: Some(match action {
                         LoadAction::Start => PbLoadAction::Start(Default::default()),
                         LoadAction::ListFinish => PbLoadAction::ListFinish(Default::default()),
@@ -1217,7 +1231,10 @@ impl Mutation {
                 }
             }
             PbMutation::Load(load) => Mutation::Load {
-                source_id: load.load_id.as_ref().unwrap().source_id,
+                target: LoadTarget {
+                    source_id: load.load_id.as_ref().unwrap().source_id,
+                    fragment_ids: load.fragment_ids.iter().copied().collect(),
+                },
                 action: match load.action.as_ref().unwrap() {
                     PbLoadAction::Start(_) => LoadAction::Start,
                     PbLoadAction::ListFinish(_) => LoadAction::ListFinish,

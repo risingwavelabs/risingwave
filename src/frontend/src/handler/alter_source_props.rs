@@ -170,6 +170,14 @@ pub async fn handle_alter_source_connector_props(
             .into());
         }
 
+        if source.is_bounded() {
+            return Err(ErrorCode::NotSupported(
+                "altering connector properties of a bounded source is not supported".to_owned(),
+                "Drop and recreate the source".to_owned(),
+            )
+            .into());
+        }
+
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
 
         ensure_alter_props_not_set_by_connection(

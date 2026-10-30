@@ -150,7 +150,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
-    active_bounded_loads: HashMap<JobId, SourceId>,
+    active_bounded_loads: HashMap<JobId, Vec<SourceId>>,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
@@ -235,5 +235,5 @@ struct DatabaseRuntimeInfoSnapshot {
     mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
     creating_jobs: HashSet<JobId>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
-    active_bounded_loads: HashMap<JobId, SourceId>,
+    active_bounded_loads: HashMap<JobId, Vec<SourceId>>,
 }

@@ -1078,11 +1078,6 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
             )
             .into());
         }
-        (None, Some(_)) if is_create_source => {
-            return Err(RwError::from(ProtocolError(
-                "Bounded reads are only supported for CREATE TABLE".to_owned(),
-            )));
-        }
         (None, Some(input)) => IngestMode::Bounded(input),
         (None, None) | (Some(RefreshMode::Streaming), None) => IngestMode::Streaming,
         (Some(RefreshMode::FullReload { interval_sec }), None) => {

@@ -412,7 +412,7 @@ pub(super) struct InflightStreamingJobInfo {
     pub subscribers: HashMap<SubscriberId, SubscriberType>,
     pub status: CreateStreamingJobStatus,
     pub cdc_table_backfill_tracker: Option<CdcTableBackfillTracker>,
-    pub bounded_load_tracker: Option<BoundedLoadTracker>,
+    pub bounded_load_trackers: HashMap<SourceId, BoundedLoadTracker>,
 }
 
 impl InflightStreamingJobInfo {
@@ -475,6 +475,12 @@ impl InflightDatabaseInfo {
             .get(&job_id)
             .into_iter()
             .flat_map(|job| job.fragment_infos())
+    }
+
+    pub fn job_fragment_ids(&self, job_id: JobId) -> Vec<FragmentId> {
+        self.job_fragment_infos(job_id)
+            .map(|fragment| fragment.fragment_id)
+            .collect()
     }
 
     pub(super) fn job_id_by_fragment(&self, fragment_id: FragmentId) -> Option<JobId> {
@@ -711,7 +717,7 @@ impl InflightDatabaseInfo {
         }
 
         for report in LoadReport::from_responses(resps) {
-            if let Some(tracker) = self.bounded_load_tracker_mut(report.source_id) {
+            if let Some(tracker) = self.bounded_load_tracker_mut(&report) {
                 tracker.apply_progress(&report);
             }
         }
@@ -786,9 +792,11 @@ impl InflightDatabaseInfo {
                 }
             }
 
-            if let Some(tracker) = &mut job.bounded_load_tracker {
-                bounded_load_actions.extend(tracker.take_actions());
-            }
+            bounded_load_actions.extend(
+                job.bounded_load_trackers
+                    .values_mut()
+                    .flat_map(|tracker| tracker.take_actions()),
+            );
 
             if let Some(tracker) = &mut job.cdc_table_backfill_tracker
                 && tracker.take_pre_completed()
@@ -926,7 +934,7 @@ impl InflightDatabaseInfo {
             subscribers,
             status,
             cdc_table_backfill_tracker,
-            bounded_load_tracker,
+            bounded_load_trackers,
         } = job;
         self.jobs
             .try_insert(
@@ -937,7 +945,7 @@ impl InflightDatabaseInfo {
                     fragment_infos: Default::default(), // fill in later in pre_apply_new_fragments
                     status,
                     cdc_table_backfill_tracker,
-                    bounded_load_tracker,
+                    bounded_load_trackers,
                 },
             )
             .expect("non-duplicate");
@@ -950,33 +958,35 @@ impl InflightDatabaseInfo {
 
     /// Returns whether a job of the database tracks the bounded load of `source_id`.
     pub(super) fn is_bounded_load(&self, source_id: SourceId) -> bool {
-        self.jobs.values().any(|job| {
-            job.bounded_load_tracker
-                .as_ref()
-                .is_some_and(|tracker| tracker.source_id == source_id)
-        })
+        self.jobs
+            .values()
+            .any(|job| job.bounded_load_trackers.contains_key(&source_id))
     }
 
-    fn bounded_load_tracker_mut(&mut self, source_id: SourceId) -> Option<&mut BoundedLoadTracker> {
+    /// Returns the tracker of the load `report` belongs to. Several jobs can read the same source,
+    /// so the reporting actor picks the job.
+    fn bounded_load_tracker_mut(&mut self, report: &LoadReport) -> Option<&mut BoundedLoadTracker> {
         self.jobs
             .values_mut()
-            .filter_map(|job| job.bounded_load_tracker.as_mut())
-            .find(|tracker| tracker.source_id == source_id)
+            .filter_map(|job| job.bounded_load_trackers.get_mut(&report.source_id))
+            .find(|tracker| tracker.has_actor(report.actor_id))
     }
 
     pub(super) fn has_pending_bounded_load_start(&self) -> bool {
         self.jobs
             .values()
-            .filter_map(|job| job.bounded_load_tracker.as_ref())
+            .flat_map(|job| job.bounded_load_trackers.values())
             .any(|tracker| !tracker.start_sent)
     }
 
-    /// Returns a bounded source whose `Load { Start }` is still to be sent, marking it as sent.
-    pub(super) fn take_pending_bounded_load_start(&mut self) -> Option<SourceId> {
-        self.jobs
-            .values_mut()
-            .filter_map(|job| job.bounded_load_tracker.as_mut())
-            .find_map(|tracker| tracker.take_pending_start())
+    /// Returns a bounded load whose `Load { Start }` is still to be sent, marking it as sent.
+    pub(super) fn take_pending_bounded_load_start(&mut self) -> Option<(JobId, SourceId)> {
+        self.jobs.iter_mut().find_map(|(job_id, job)| {
+            job.bounded_load_trackers
+                .values_mut()
+                .find_map(|tracker| tracker.take_pending_start())
+                .map(|source_id| (*job_id, source_id))
+        })
     }
 
     /// Register a new streaming job entry (with empty `fragment_infos`).
@@ -984,7 +994,7 @@ impl InflightDatabaseInfo {
         &mut self,
         job_id: JobId,
         cdc_table_backfill_tracker: Option<CdcTableBackfillTracker>,
-        bounded_load_tracker: Option<BoundedLoadTracker>,
+        bounded_load_trackers: HashMap<SourceId, BoundedLoadTracker>,
     ) {
         {
             self.jobs
@@ -996,7 +1006,7 @@ impl InflightDatabaseInfo {
                         subscribers: Default::default(), // no subscriber for newly create job
                         status: CreateStreamingJobStatus::Init,
                         cdc_table_backfill_tracker,
-                        bounded_load_tracker,
+                        bounded_load_trackers,
                     },
                 )
                 .expect("non-duplicate");

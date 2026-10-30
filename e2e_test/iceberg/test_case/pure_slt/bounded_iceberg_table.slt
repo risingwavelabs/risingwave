@@ -161,21 +161,6 @@ CREATE TABLE bounded_invalid (PRIMARY KEY (id)) WITH (
     scan.bounded.snapshot.id = '${first_snapshot_id}'
 );
 
-statement error Bounded reads are only supported for CREATE TABLE
-CREATE SOURCE bounded_invalid_src WITH (
-    connector = 'iceberg',
-    warehouse.path = 's3://hummock001/bounded_iceberg',
-    s3.endpoint = 'http://127.0.0.1:9301',
-    s3.region = 'us-east-1',
-    s3.access.key = 'hummockadmin',
-    s3.secret.key = 'hummockadmin',
-    catalog.type = 'storage',
-    database.name = 'bounded_db',
-    table.name = 'bounded_t',
-    scan.bounded.mode = 'snapshot',
-    scan.bounded.snapshot.id = '${first_snapshot_id}'
-);
-
 # ==== load pinned snapshots
 
 # Pin the first snapshot, which only contains the first batch.
