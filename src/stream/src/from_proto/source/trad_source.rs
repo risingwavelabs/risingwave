@@ -207,11 +207,14 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )?;
                     if params.info.schema.data_types()
                         != vec![
-                            risingwave_common::types::DataType::Varchar,
+                            risingwave_common::types::DataType::Int64,
+                            risingwave_common::types::DataType::Int64,
                             risingwave_common::types::DataType::Jsonb,
                         ]
                     {
-                        bail!("Iceberg update List requires an assignment-key/JSON output schema");
+                        bail!(
+                            "Iceberg update List requires a (route, seq, assignment) output schema"
+                        );
                     }
                 }
                 let state_table_handler = SourceStateTableHandler::from_table_catalog(

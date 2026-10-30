@@ -218,11 +218,13 @@ impl LogicalSource {
         let downstream_columns = core.column_catalog.clone();
         let logical_source = generic::Source::file_list_node(core);
         let schema = logical_source.schema();
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &[0]);
+        // Update assignments are identified by `(route, seq)` and shuffled by `route`.
+        let key = if updates { vec![0, 1] } else { vec![0] };
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &key);
         let base = PlanBase::new_stream(
             logical_source.ctx(),
             schema,
-            Some(vec![0]),
+            Some(key),
             functional_dependency,
             Distribution::Single,
             if updates {

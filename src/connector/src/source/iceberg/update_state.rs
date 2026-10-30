@@ -12,9 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Durable List/Fetch handoff for Insert/Delete updates. List dispatches a whole phase,
-//! then confirms that its Fetch queue is empty at a committed epoch covering the dispatch.
+//! Durable List/Fetch handoff for Insert/Delete updates.
+//!
+//! Every task has a Fetch route and a dispatch sequence number. The Fetch state table is
+//! distributed by route and ordered by sequence number within a route, so one Fetch actor applies
+//! the tasks of a route in dispatch order, also across rescaling. A phase that fits in one small
+//! page goes to the shared ordered route and needs no completion fence: later ordered phases queue
+//! behind it. Other phases fan out across routes. Before a fan-out page, and after the last page
+//! of a fan-out phase, List confirms that the Fetch queue is empty at a committed epoch covering
+//! the earlier dispatch.
 
+use anyhow::Context;
 use iceberg::table::Table;
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::ensure;
@@ -30,18 +38,16 @@ use crate::error::ConnectorResult;
 pub struct IcebergUpdateAssignment {
     /// The dedicated Fetch state table ID. Distinct ingestion jobs never share this table.
     pub job_id: u32,
-    pub generation: u64,
+    /// The Fetch state distribution key.
+    pub route: i64,
+    /// Unique within the job and increasing in dispatch order. Orders tasks within a route.
+    pub seq: i64,
     pub task: IcebergUpdateTask,
 }
 
 impl IcebergUpdateAssignment {
-    pub fn key(&self) -> ConnectorResult<String> {
-        Ok(serde_json::to_string(&(
-            self.job_id,
-            self.generation,
-            &self.task.id,
-        ))?)
-    }
+    /// Shared by all ordered phases of a job. Fan-out tasks use their nonnegative `seq`.
+    pub const ORDERED_ROUTE: i64 = -1;
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,17 +83,37 @@ impl IcebergUpdateFetchState {
     }
 }
 
+/// Which outstanding tasks a dispatch must wait for, recorded at the epoch that emits a page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IcebergUpdateFenceKind {
+    /// A complete phase on the ordered route. Only fan-out dispatch waits for it.
+    Ordered,
+    /// The last page of a fan-out phase. All later dispatch waits for it.
+    FanOut,
+}
+
+/// Outstanding tasks, confirmed by an empty committed Fetch queue at `epoch` or later. The
+/// queue never holds ordered and fan-out tasks at once, so emptiness covers both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IcebergUpdateFence {
+    /// The graph epoch of the last covered dispatch. An older empty Fetch snapshot says
+    /// nothing about completion, since assignments may not yet be visible.
+    epoch: u64,
+    /// Only ordered tasks are outstanding and no fan-out page waits for them, so ordered
+    /// dispatch may continue behind them.
+    ordered: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IcebergUpdateListState {
     pub job_id: u32,
     binding: IcebergUpdateBinding,
     bootstrap_complete: bool,
-    applied_snapshot: Option<i64>,
+    /// The target of the last range whose tasks are all dispatched, and the base of the next.
+    dispatched_snapshot: Option<i64>,
     cursor: Option<IcebergUpdateCursor>,
-    generation: u64,
-    /// The graph epoch containing the last page of this phase. An older empty Fetch
-    /// snapshot says nothing about completion, since assignments may not yet be visible.
-    phase_end_epoch: Option<u64>,
+    next_seq: i64,
+    fence: Option<IcebergUpdateFence>,
 }
 
 impl IcebergUpdateListState {
@@ -96,10 +122,10 @@ impl IcebergUpdateListState {
             job_id,
             binding,
             bootstrap_complete: false,
-            applied_snapshot: None,
+            dispatched_snapshot: None,
             cursor: None,
-            generation: 0,
-            phase_end_epoch: None,
+            next_seq: 0,
+            fence: None,
         }
     }
 
@@ -111,48 +137,65 @@ impl IcebergUpdateListState {
         self.binding.validate_columns(columns)
     }
 
-    pub fn phase_end_epoch(&self) -> Option<u64> {
-        self.phase_end_epoch
+    /// The epoch whose committed Fetch queue must be empty before List dispatches again.
+    pub fn wait_epoch(&self) -> Option<u64> {
+        self.fence
+            .filter(|fence| !fence.ordered)
+            .map(|fence| fence.epoch)
     }
 
     /// Build one bounded page and advance the enumeration cursor, without waiting for Fetch.
-    /// The boolean marks the last nonempty page. The caller must record its dispatch epoch
+    /// A phase that fits in its first page with at most `ordered_max_tasks` tasks goes to the
+    /// ordered route. The caller must record the returned fence at the epoch emitting the page
     /// before persisting this state. Assignments and the cursor share a graph epoch.
     pub async fn enumerate(
         &mut self,
         table: &Table,
         batch_size: usize,
+        ordered_max_tasks: usize,
         planner: &mut Option<IcebergUpdatePlanner>,
-    ) -> ConnectorResult<(Vec<IcebergUpdateAssignment>, bool)> {
+    ) -> ConnectorResult<(Vec<IcebergUpdateAssignment>, Option<IcebergUpdateFenceKind>)> {
         ensure!(batch_size > 0, "Iceberg fetch batch size must be positive");
         ensure!(
-            self.phase_end_epoch.is_none(),
-            "cannot enumerate until the Iceberg phase is committed"
+            self.wait_epoch().is_none(),
+            "cannot enumerate until dispatched Iceberg tasks are applied"
         );
         let planner =
             planner.get_or_insert_with(|| IcebergUpdatePlanner::new(self.binding.clone()));
         if self.cursor.is_none() {
             self.cursor =
-                planner.start_cursor(table, self.bootstrap_complete, self.applied_snapshot)?;
+                planner.start_cursor(table, self.bootstrap_complete, self.dispatched_snapshot)?;
             if self.cursor.is_none() {
                 // Binding an empty table is itself a completed empty bootstrap, not permission
                 // to choose a different bootstrap on the next poll.
                 self.bootstrap_complete = true;
-                return Ok((vec![], false));
+                return Ok((vec![], None));
             }
         }
-        let page = planner
-            .plan_page(table, self.cursor.as_ref().expect("cursor set"), batch_size)
-            .await?;
+        let cursor = self.cursor.clone().expect("cursor set");
+        let page = planner.plan_page(table, &cursor, batch_size).await?;
         if page.tasks.is_empty() {
             ensure!(page.phase_finished, "empty non-final Iceberg page");
             self.advance_phase();
-            return Ok((vec![], false));
+            return Ok((vec![], None));
         }
-        self.generation = self
-            .generation
-            .checked_add(1)
-            .ok_or_else(|| anyhow::anyhow!("Iceberg generation overflow"))?;
+        // The route of a phase is chosen before its first dispatch, so only a phase that fits
+        // in its first page can be ordered.
+        let ordered = cursor.after_path.is_none()
+            && page.phase_finished
+            && page.tasks.len() <= ordered_max_tasks;
+        if !ordered && let Some(fence) = &mut self.fence {
+            // Fan-out tasks on other routes could overtake the outstanding ordered tasks. Keep
+            // the page for the next poll and wait until the ordered route drains.
+            planner.unread(cursor, page.tasks);
+            fence.ordered = false;
+            return Ok((vec![], None));
+        }
+        let first_seq = self.next_seq;
+        self.next_seq = i64::try_from(page.tasks.len())
+            .ok()
+            .and_then(|len| first_seq.checked_add(len))
+            .context("Iceberg task sequence overflow")?;
         self.cursor.as_mut().expect("cursor set").after_path = Some(
             page.tasks
                 .last()
@@ -164,34 +207,57 @@ impl IcebergUpdateListState {
         let assignments = page
             .tasks
             .into_iter()
-            .map(|task| IcebergUpdateAssignment {
+            .enumerate()
+            .map(|(offset, task)| (task, first_seq + offset as i64))
+            .map(|(task, seq)| IcebergUpdateAssignment {
                 job_id: self.job_id,
-                generation: self.generation,
+                route: if ordered {
+                    IcebergUpdateAssignment::ORDERED_ROUTE
+                } else {
+                    seq
+                },
+                seq,
                 task,
             })
             .collect();
-        Ok((assignments, page.phase_finished))
+        let fence = if ordered {
+            Some(IcebergUpdateFenceKind::Ordered)
+        } else {
+            page.phase_finished
+                .then_some(IcebergUpdateFenceKind::FanOut)
+        };
+        if page.phase_finished {
+            self.advance_phase();
+        }
+        Ok((assignments, fence))
     }
 
-    /// Called when the final page is emitted, not when its asynchronous planning started.
-    pub fn record_phase_end(&mut self, epoch: u64) -> ConnectorResult<()> {
+    /// Called when the page is emitted, not when its asynchronous planning started.
+    pub fn record_fence(
+        &mut self,
+        kind: IcebergUpdateFenceKind,
+        epoch: u64,
+    ) -> ConnectorResult<()> {
+        let ordered = kind == IcebergUpdateFenceKind::Ordered;
         ensure!(
-            self.cursor.is_some() && self.phase_end_epoch.is_none(),
-            "invalid Iceberg phase dispatch"
+            match self.fence {
+                None => true,
+                Some(fence) => ordered && fence.ordered && fence.epoch <= epoch,
+            },
+            "invalid Iceberg dispatch fence"
         );
-        self.phase_end_epoch = Some(epoch);
+        self.fence = Some(IcebergUpdateFence { epoch, ordered });
         Ok(())
     }
 
     /// The caller has observed an empty Fetch table at this committed epoch.
-    pub fn complete_phase(&mut self, committed_epoch: u64) -> ConnectorResult<()> {
+    pub fn complete_fence(&mut self, committed_epoch: u64) -> ConnectorResult<()> {
         ensure!(
-            self.phase_end_epoch
+            self.wait_epoch()
                 .is_some_and(|epoch| epoch <= committed_epoch),
-            "Iceberg completion snapshot predates phase dispatch"
+            "Iceberg completion snapshot predates dispatch"
         );
-        self.phase_end_epoch = None;
-        self.advance_phase();
+        self.fence = None;
         Ok(())
     }
 
@@ -202,7 +268,7 @@ impl IcebergUpdateListState {
             cursor.after_path = None;
             self.cursor = Some(cursor);
         } else {
-            self.applied_snapshot = Some(cursor.snapshot_id);
+            self.dispatched_snapshot = Some(cursor.snapshot_id);
             self.bootstrap_complete = true;
             self.cursor = None;
         }

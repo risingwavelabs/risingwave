@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Metadata-only planning of Insert and Delete updates. Plans do not advance ingestion
-//! progress: the caller must durably finish Delete before Insert, then acknowledge the snapshot.
+//! Metadata-only planning of Insert and Delete updates. Each plan covers a range of pending
+//! snapshots as one net change from a base snapshot to a target snapshot. Plans do not advance
+//! ingestion progress: the caller must order Delete before Insert, then acknowledge the target.
 //! This is deliberately separate from the legacy append-only planner and List/Fetch protocol.
 
 use std::collections::{BTreeMap, HashSet};
@@ -21,7 +22,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::stream::{BoxStream, Peekable};
+use futures::stream::{self, BoxStream, Peekable};
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iceberg::scan::{FileScanTask, FileScanTaskDeleteFile};
@@ -153,23 +154,51 @@ impl IcebergUpdateBinding {
         Ok(snapshot)
     }
 
-    /// Validate the complete remaining main ancestry, using links rather than snapshot-ID order.
-    fn ensure_ancestor(&self, table: &Table, last: Option<i64>) -> ConnectorResult<Option<i64>> {
+    /// The main ancestry after `last` up to the current snapshot, oldest first. Validates every
+    /// snapshot on the way, using links rather than snapshot-ID order.
+    fn pending<'a>(
+        &self,
+        table: &'a Table,
+        last: Option<i64>,
+    ) -> ConnectorResult<Vec<&'a SnapshotRef>> {
         if let Some(id) = last {
             self.snapshot(table, id)?;
         }
         let mut cursor = table.metadata().current_snapshot_id();
-        let mut next = None;
+        let mut pending = vec![];
         let mut seen = HashSet::new();
         while cursor != last {
             let id =
                 cursor.context("Iceberg history rolled back or diverged from source progress")?;
             ensure!(seen.insert(id), "cycle in Iceberg snapshot ancestry");
             let snapshot = self.snapshot(table, id)?;
-            next = Some(id);
+            pending.push(snapshot);
             cursor = snapshot.parent_snapshot_id();
         }
-        Ok(next)
+        pending.reverse();
+        Ok(pending)
+    }
+
+    fn ensure_ancestor(&self, table: &Table, last: Option<i64>) -> ConnectorResult<()> {
+        self.pending(table, last).map(drop)
+    }
+}
+
+fn is_compaction(snapshot: &SnapshotRef) -> bool {
+    snapshot.summary().operation == Operation::Replace
+}
+
+/// The number of pending snapshots planned as one range. A range ends before the next
+/// compaction, and a compaction forms a range of its own: it rewrites rows without changing
+/// them, while a net diff across it would retract and re-insert every rewritten row.
+fn range_len(pending: &[&SnapshotRef]) -> usize {
+    match pending.first() {
+        None => 0,
+        Some(first) if is_compaction(first) => 1,
+        Some(_) => pending
+            .iter()
+            .take_while(|snapshot| !is_compaction(snapshot))
+            .count(),
     }
 }
 
@@ -192,7 +221,7 @@ pub enum IcebergUpdatePhase {
     Insert,
 }
 
-/// Stable within a source job. The checkpoint assignment also includes job and generation identity.
+/// Stable within a source job. `snapshot_id` is the target of the planned range.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IcebergUpdateTaskId {
     pub table_uuid: Uuid,
@@ -272,6 +301,7 @@ impl UpdateFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IcebergUpdateTask {
     pub id: IcebergUpdateTaskId,
+    /// The base of the planned range.
     pub parent_snapshot_id: Option<i64>,
     binding: Arc<IcebergUpdateBinding>,
     file: UpdateFile,
@@ -443,9 +473,9 @@ fn task(
     }
 }
 
-/// Plans one snapshot phase as a deterministic stream; recovery replays it up to `after_path`.
+/// Plans one range phase as a deterministic stream; recovery replays it up to `after_path`.
 /// Bootstrap enumerates the whole snapshot. Incremental phases diff the manifest lists of the
-/// parent and current snapshots instead of indexing every live file of either snapshot.
+/// range base and target instead of indexing every live file of either snapshot.
 fn stream_tasks(
     binding: Arc<IcebergUpdateBinding>,
     table: Table,
@@ -467,6 +497,10 @@ fn stream_tasks(
 /// Manifests are immutable, so a manifest path present in both manifest lists contributes the
 /// same entries to both snapshots and never needs to be read for the diff itself. The list-level
 /// `first_row_id` of an inherited data manifest may still be assigned after a V2 to V3 upgrade.
+///
+/// `parent` is the range base and `current` the range target. Snapshots strictly inside the
+/// range are not opened: only the live files of the two ends define the net change, so a file
+/// added and removed within the range produces no task.
 ///
 /// File-level semantics assume the writer invariants: a data-file path is live at most once per
 /// snapshot and has at most one live delete artifact. Only the manifests read here are checked.
@@ -533,8 +567,9 @@ impl ManifestDiff {
         })
     }
 
+    /// A range containing a compaction contains only that snapshot.
     fn is_compaction(&self) -> bool {
-        self.current.summary().operation == Operation::Replace
+        is_compaction(&self.current)
     }
 
     fn current_sequence(&self) -> i64 {
@@ -1018,12 +1053,14 @@ async fn stream_files(binding: Arc<IcebergUpdateBinding>, table: Table, snapshot
     // Remaining descriptors reference data files that are no longer live.
 }
 
-/// Last dispatched file within a deterministic snapshot/phase stream, not a sorted path bound.
+/// Last dispatched file within a deterministic range/phase stream, not a sorted path bound.
 /// Recovery replays metadata up to this marker; normal pages retain the live manifest scan.
-/// Advancing enumeration does not acknowledge application: List fences whole phases.
+/// Advancing enumeration does not acknowledge application: List orders or fences phases.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IcebergUpdateCursor {
+    /// The range target, fixed when the range starts even if later snapshots are committed.
     pub snapshot_id: i64,
+    /// The range base: the last acknowledged snapshot, or `None` before the first snapshot.
     pub parent_snapshot_id: Option<i64>,
     pub bootstrap: bool,
     pub phase: IcebergUpdatePhase,
@@ -1051,10 +1088,12 @@ impl IcebergUpdatePlanner {
             self.binding.ensure_ancestor(table, Some(id))?;
             (id, None, true)
         } else {
-            let Some(id) = self.binding.ensure_ancestor(table, applied_snapshot)? else {
+            let pending = self.binding.pending(table, applied_snapshot)?;
+            let len = range_len(&pending);
+            if len == 0 {
                 return Ok(None);
-            };
-            (id, applied_snapshot, false)
+            }
+            (pending[len - 1].snapshot_id(), applied_snapshot, false)
         };
         Ok(Some(IcebergUpdateCursor {
             snapshot_id: id,
@@ -1077,17 +1116,21 @@ impl IcebergUpdatePlanner {
     ) -> ConnectorResult<IcebergUpdatePage> {
         ensure!(batch_size > 0, "Iceberg fetch batch size must be positive");
         self.binding.validate(table)?;
-        let expected = if cursor.bootstrap {
+        let matches = if cursor.bootstrap {
             self.binding
                 .ensure_ancestor(table, self.binding.bootstrap_snapshot_id)?;
-            self.binding.bootstrap_snapshot_id
+            self.binding.bootstrap_snapshot_id == Some(cursor.snapshot_id)
+                && cursor.parent_snapshot_id.is_none()
         } else {
-            self.binding
-                .ensure_ancestor(table, cursor.parent_snapshot_id)?
+            // Later commits only extend the pending ancestry, so they never move the range end
+            // that bounds a fixed target.
+            let pending = self.binding.pending(table, cursor.parent_snapshot_id)?;
+            pending[..range_len(&pending)]
+                .iter()
+                .any(|snapshot| snapshot.snapshot_id() == cursor.snapshot_id)
         };
         ensure!(
-            expected == Some(cursor.snapshot_id)
-                && (!cursor.bootstrap || cursor.parent_snapshot_id.is_none()),
+            matches,
             "update cursor no longer matches its fixed snapshots"
         );
         ensure!(
@@ -1140,6 +1183,18 @@ impl IcebergUpdatePlanner {
             phase_finished,
             tasks,
         })
+    }
+
+    /// Returns an undispatched page from `cursor`, so that the next page from `cursor` yields
+    /// the same tasks again without rebuilding the scan.
+    pub fn unread(&mut self, cursor: IcebergUpdateCursor, tasks: Vec<IcebergUpdateTask>) {
+        if let Some((_, remaining)) = self.enumeration.take() {
+            let tasks = stream::iter(tasks.into_iter().map(Ok))
+                .chain(remaining)
+                .boxed()
+                .peekable();
+            self.enumeration = Some((cursor, tasks));
+        }
     }
 }
 

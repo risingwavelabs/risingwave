@@ -15,8 +15,12 @@
 //! Delete-aware Iceberg ingestion (`streaming_updates = 'true'`).
 //!
 //! List dispatches bounded pages continuously within a phase. Fetch retires tasks at EOF.
-//! Phase transitions wait asynchronously for an empty committed Fetch queue, while ordinary
+//! Small phases share one ordered Fetch route and follow each other without waiting. Other
+//! phase transitions wait asynchronously for an empty committed Fetch queue, while ordinary
 //! barriers remain responsive. Output and physical cursors recover at the same checkpoint.
+//!
+//! List output rows and Fetch state rows are both `(route, seq, json)`. The Fetch state table
+//! is keyed by `(route, seq)` and distributed by `route`, like the List-to-Fetch exchange.
 
 mod fetch;
 mod list;
@@ -27,6 +31,7 @@ pub use list::IcebergUpdateListExecutor;
 use risingwave_common::types::{JsonbVal, ScalarRef};
 use risingwave_common::{bail, ensure};
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::source::iceberg::update_state::IcebergUpdateAssignment;
 use risingwave_connector::source::iceberg::{IcebergProperties, IcebergScanMetricsLabels};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -60,12 +65,16 @@ pub(crate) fn validate_update_state_table(
         );
     } else {
         ensure!(
-            types == vec![Some(TypeName::Varchar), Some(TypeName::Jsonb)]
-                && table.pk.len() == 1
-                && table.pk[0].column_index == 0
-                && table.value_indices == vec![0, 1]
+            types
+                == vec![
+                    Some(TypeName::Int64),
+                    Some(TypeName::Int64),
+                    Some(TypeName::Jsonb)
+                ]
+                && table.pk.iter().map(|order| order.column_index).eq([0, 1])
+                && table.value_indices == vec![0, 1, 2]
                 && table.distribution_key == vec![0],
-            "Iceberg update Fetch state requires a varchar task key and JSON value with matching distribution"
+            "Iceberg update Fetch state requires (route, seq, JSON) rows keyed by (route, seq) and distributed by route"
         );
     }
     Ok(())
@@ -103,12 +112,45 @@ fn encode(value: &impl Serialize) -> StreamExecutorResult<JsonbVal> {
         .into())
 }
 
-fn decode<T: DeserializeOwned>(row: impl Row) -> StreamExecutorResult<T> {
+/// The data types of List output rows and Fetch state rows.
+fn task_row_types() -> [DataType; 3] {
+    [DataType::Int64, DataType::Int64, DataType::Jsonb]
+}
+
+/// The Fetch state primary key of an assignment.
+fn task_pk(assignment: &IcebergUpdateAssignment) -> OwnedRow {
+    OwnedRow::new(vec![
+        Some(ScalarImpl::Int64(assignment.route)),
+        Some(ScalarImpl::Int64(assignment.seq)),
+    ])
+}
+
+fn task_row(
+    assignment: &IcebergUpdateAssignment,
+    value: &impl Serialize,
+) -> StreamExecutorResult<OwnedRow> {
+    let mut row = task_pk(assignment).into_inner().into_vec();
+    row.push(Some(ScalarImpl::Jsonb(encode(value)?)));
+    Ok(OwnedRow::new(row))
+}
+
+/// Decodes the JSON value of a task row and checks it against the row key.
+fn decode<T: DeserializeOwned>(
+    row: impl Row,
+    assignment: impl FnOnce(&T) -> &IcebergUpdateAssignment,
+) -> StreamExecutorResult<T> {
     let value = row
-        .datum_at(1)
+        .datum_at(2)
         .context("missing Iceberg update state")?
         .into_jsonb();
-    decode_value(value.to_owned_scalar())
+    let value: T = decode_value(value.to_owned_scalar())?;
+    let key = assignment(&value);
+    ensure!(
+        row.datum_at(0).map(ScalarRefImpl::into_int64) == Some(key.route)
+            && row.datum_at(1).map(ScalarRefImpl::into_int64) == Some(key.seq),
+        "Iceberg task row key differs from its assignment"
+    );
+    Ok(value)
 }
 
 fn decode_value<T: DeserializeOwned>(value: JsonbVal) -> StreamExecutorResult<T> {

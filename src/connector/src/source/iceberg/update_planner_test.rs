@@ -903,7 +903,7 @@ async fn v2_v3_legacy_overwrite_compaction_with_writes_preserves_logical_changes
 
 #[tokio::test]
 async fn paged_list_dispatches_continuously_and_recovers_its_phase_fence() -> Result<()> {
-    use crate::source::iceberg::update_state::IcebergUpdateListState;
+    use crate::source::iceberg::update_state::{IcebergUpdateFenceKind, IcebergUpdateListState};
 
     for version in [FormatVersion::V2, FormatVersion::V3] {
         let temp = tempfile::tempdir()?;
@@ -917,11 +917,11 @@ async fn paged_list_dispatches_continuously_and_recovers_its_phase_fence() -> Re
         let batch_size = 2;
         let mut enumeration = None;
         let mut state = IcebergUpdateListState::new(42, binding);
-        let (page, finished) = state
-            .enumerate(&first, batch_size, &mut enumeration)
+        let (page, fence) = state
+            .enumerate(&first, batch_size, 0, &mut enumeration)
             .await?;
         assert_eq!(page.len(), 2);
-        assert!(!finished);
+        assert!(fence.is_none());
         assert_eq!(page[0].task.id.data_file_path, files[0].file_path());
         assert_eq!(page[1].task.id.data_file_path, files[1].file_path());
         let encoded = serde_json::to_value(&state)?;
@@ -934,36 +934,45 @@ async fn paged_list_dispatches_continuously_and_recovers_its_phase_fence() -> Re
         let mut next_files = files.clone();
         next_files.push(data(&base, "d")?);
         let next = snapshot(&first, 3, Operation::Overwrite, &next_files, &[]).await?;
-        let (last, finished) = state.enumerate(&next, batch_size, &mut enumeration).await?;
+        let (last, fence) = state
+            .enumerate(&next, batch_size, 0, &mut enumeration)
+            .await?;
         assert_eq!(last.len(), 1);
-        assert!(finished);
+        assert_eq!(fence, Some(IcebergUpdateFenceKind::FanOut));
         assert_eq!(last[0].task.id.snapshot_id, 9);
         assert_eq!(last[0].task.id.data_file_path, files[2].file_path());
-        assert!(last[0].generation > page[0].generation);
-        state.record_phase_end(100)?;
+        assert!(last[0].seq > page[1].seq && page[1].seq > page[0].seq);
+        assert!(
+            page.iter()
+                .chain(&last)
+                .all(|assignment| assignment.route == assignment.seq)
+        );
+        state.record_fence(IcebergUpdateFenceKind::FanOut, 100)?;
         state = serde_json::from_slice(&serde_json::to_vec(&state)?)?;
         enumeration = None;
-        assert_eq!(state.phase_end_epoch(), Some(100));
+        assert_eq!(state.wait_epoch(), Some(100));
         assert!(
             state
-                .enumerate(&next, batch_size, &mut enumeration)
+                .enumerate(&next, batch_size, 0, &mut enumeration)
                 .await
                 .is_err()
         );
-        assert!(state.complete_phase(99).is_err());
-        state.complete_phase(100)?;
-        assert!(state.complete_phase(100).is_err());
+        assert!(state.complete_fence(99).is_err());
+        state.complete_fence(100)?;
+        assert!(state.complete_fence(100).is_err());
 
         // An exhaustive empty Delete phase can advance without waiting for a commit.
         assert!(
             state
-                .enumerate(&next, batch_size, &mut enumeration)
+                .enumerate(&next, batch_size, 0, &mut enumeration)
                 .await?
                 .0
                 .is_empty()
         );
-        let (inserts, finished) = state.enumerate(&next, batch_size, &mut enumeration).await?;
-        assert!(finished);
+        let (inserts, fence) = state
+            .enumerate(&next, batch_size, 0, &mut enumeration)
+            .await?;
+        assert_eq!(fence, Some(IcebergUpdateFenceKind::FanOut));
         assert_eq!(inserts.len(), 1);
         assert_eq!(inserts[0].task.id.snapshot_id, 3);
         assert_eq!(inserts[0].task.id.phase, IcebergUpdatePhase::Insert);
@@ -987,7 +996,7 @@ async fn partial_fetch_eof_and_zero_batch_size_fail_closed() -> Result<()> {
     let binding = IcebergUpdateBinding::bind(&first, vec![2, 1])?;
     let mut enumeration = None;
     let mut state = IcebergUpdateListState::new(1, binding.clone());
-    let (page, _) = state.enumerate(&first, 2, &mut enumeration).await?;
+    let (page, _) = state.enumerate(&first, 2, 0, &mut enumeration).await?;
     let mut progress = IcebergUpdateFetchState::new(page[0].clone());
     progress.advance(4, false)?;
     progress = serde_json::from_slice(&serde_json::to_vec(&progress)?)?;
@@ -1004,14 +1013,19 @@ async fn partial_fetch_eof_and_zero_batch_size_fail_closed() -> Result<()> {
 
     let mut state = IcebergUpdateListState::new(1, binding);
     let before = state.clone();
-    assert!(state.enumerate(&first, 0, &mut enumeration).await.is_err());
+    assert!(
+        state
+            .enumerate(&first, 0, 0, &mut enumeration)
+            .await
+            .is_err()
+    );
     assert_eq!(state, before);
     Ok(())
 }
 
 #[tokio::test]
 async fn count_limited_pages_resume_from_the_last_dispatched_task() -> Result<()> {
-    use crate::source::iceberg::update_state::IcebergUpdateListState;
+    use crate::source::iceberg::update_state::{IcebergUpdateFenceKind, IcebergUpdateListState};
 
     let temp = tempfile::tempdir()?;
     let base = table(&temp, FormatVersion::V3, false)?;
@@ -1029,27 +1043,27 @@ async fn count_limited_pages_resume_from_the_last_dispatched_task() -> Result<()
     let mut state = IcebergUpdateListState::new(42, binding);
     let mut paths = vec![];
     for index in 0..2 {
-        let (page, finished) = state
-            .enumerate(&first, batch_size, &mut enumeration)
+        let (page, fence) = state
+            .enumerate(&first, batch_size, 0, &mut enumeration)
             .await?;
         assert_eq!(page.len(), batch_size);
-        assert_eq!(finished, index == 1);
+        assert_eq!(fence.is_some(), index == 1);
         let encoded = serde_json::to_value(&state)?;
         assert!(encoded.get("pending").is_none());
         state = serde_json::from_value(encoded)?;
         paths.push(page[0].task.id.data_file_path.clone());
-        if finished {
-            state.record_phase_end(2)?;
+        if fence.is_some() {
+            state.record_fence(IcebergUpdateFenceKind::FanOut, 2)?;
         }
         state = serde_json::from_slice(&serde_json::to_vec(&state)?)?;
         enumeration = None;
     }
     assert!(paths[0] < paths[1]);
-    assert!(state.complete_phase(1).is_err());
-    state.complete_phase(2)?;
+    assert!(state.complete_fence(1).is_err());
+    state.complete_fence(2)?;
     assert!(
         state
-            .enumerate(&first, batch_size, &mut enumeration)
+            .enumerate(&first, batch_size, 0, &mut enumeration)
             .await?
             .0
             .is_empty()
@@ -1090,7 +1104,7 @@ async fn compaction_still_validates_delete_descriptors_without_reading_them() ->
 
 #[tokio::test]
 async fn delete_fence_and_compaction_progress_survive_list_recovery() -> Result<()> {
-    use crate::source::iceberg::update_state::IcebergUpdateListState;
+    use crate::source::iceberg::update_state::{IcebergUpdateFenceKind, IcebergUpdateListState};
 
     for version in [FormatVersion::V2, FormatVersion::V3] {
         let temp = tempfile::tempdir()?;
@@ -1101,19 +1115,19 @@ async fn delete_fence_and_compaction_progress_survive_list_recovery() -> Result<
         let mut state =
             IcebergUpdateListState::new(1, IcebergUpdateBinding::bind(&first, vec![2, 1])?);
         let batch_size = 2;
-        let (bootstrap, finished) = state
-            .enumerate(&first, batch_size, &mut enumeration)
+        let (bootstrap, fence) = state
+            .enumerate(&first, batch_size, 0, &mut enumeration)
             .await?;
         assert_eq!(bootstrap.len(), 1);
-        assert!(finished);
-        state.record_phase_end(1)?;
-        state.complete_phase(1)?;
+        assert_eq!(fence, Some(IcebergUpdateFenceKind::FanOut));
+        state.record_fence(IcebergUpdateFenceKind::FanOut, 1)?;
+        state.complete_fence(1)?;
 
         let compacted = data(&base, "b")?;
         let second = snapshot(&first, 2, Operation::Replace, from_ref(&compacted), &[]).await?;
         assert!(
             state
-                .enumerate(&second, batch_size, &mut enumeration)
+                .enumerate(&second, batch_size, 0, &mut enumeration)
                 .await?
                 .0
                 .is_empty()
@@ -1122,7 +1136,7 @@ async fn delete_fence_and_compaction_progress_survive_list_recovery() -> Result<
         enumeration = None;
         assert!(
             state
-                .enumerate(&second, batch_size, &mut enumeration)
+                .enumerate(&second, batch_size, 0, &mut enumeration)
                 .await?
                 .0
                 .is_empty()
@@ -1137,30 +1151,30 @@ async fn delete_fence_and_compaction_progress_survive_list_recovery() -> Result<
             &[(d, 3)],
         )
         .await?;
-        let (deletes, finished) = state
-            .enumerate(&third, batch_size, &mut enumeration)
+        let (deletes, fence) = state
+            .enumerate(&third, batch_size, 0, &mut enumeration)
             .await?;
-        assert!(finished);
+        assert_eq!(fence, Some(IcebergUpdateFenceKind::FanOut));
         assert_eq!(deletes.len(), 1);
         assert_eq!(deletes[0].task.id.phase, IcebergUpdatePhase::Delete);
         assert_eq!(deletes[0].task.id.data_file_path, compacted.file_path());
-        state.record_phase_end(3)?;
+        state.record_fence(IcebergUpdateFenceKind::FanOut, 3)?;
         state = serde_json::from_slice(&serde_json::to_vec(&state)?)?;
         enumeration = None;
         assert!(
             state
-                .enumerate(&third, batch_size, &mut enumeration)
+                .enumerate(&third, batch_size, 0, &mut enumeration)
                 .await
                 .is_err()
         );
-        assert!(state.complete_phase(2).is_err());
-        state.complete_phase(3)?;
+        assert!(state.complete_fence(2).is_err());
+        state.complete_fence(3)?;
         state = serde_json::from_slice(&serde_json::to_vec(&state)?)?;
         enumeration = None;
-        let (inserts, finished) = state
-            .enumerate(&third, batch_size, &mut enumeration)
+        let (inserts, fence) = state
+            .enumerate(&third, batch_size, 0, &mut enumeration)
             .await?;
-        assert!(finished);
+        assert_eq!(fence, Some(IcebergUpdateFenceKind::FanOut));
         assert_eq!(inserts.len(), 1);
         assert_eq!(inserts[0].task.id.phase, IcebergUpdatePhase::Insert);
     }
@@ -1196,8 +1210,8 @@ async fn pages_read_data_manifests_lazily_once_per_scan() -> Result<()> {
             let mut enumeration = None;
             let mut paths = vec![];
             loop {
-                let (page, finished) = state
-                    .enumerate(&first, batch_size, &mut enumeration)
+                let (page, fence) = state
+                    .enumerate(&first, batch_size, 0, &mut enumeration)
                     .await?;
                 assert!(page.len() <= batch_size);
                 if paths.is_empty() && batch_size == 1 {
@@ -1207,7 +1221,7 @@ async fn pages_read_data_manifests_lazily_once_per_scan() -> Result<()> {
                     page.into_iter()
                         .map(|assignment| assignment.task.id.data_file_path),
                 );
-                if finished {
+                if fence.is_some() {
                     break;
                 }
             }
@@ -1631,5 +1645,237 @@ async fn v2_to_v3_upgrade_ignores_assigned_first_row_ids() -> Result<()> {
     assert!(plan.inserts.is_empty());
     assert_eq!(plan.deletes.len(), 1);
     assert!(plan.deletes[0].file.first_row_id.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn v2_v3_pending_snapshots_are_planned_as_one_net_change() -> Result<()> {
+    for version in [FormatVersion::V2, FormatVersion::V3] {
+        let temp = tempfile::tempdir()?;
+        let base = table(&temp, version, false)?;
+        let [a, b, c, z] = ["a", "b", "c", "z"].map(|name| data(&base, name).unwrap());
+        let first = snapshot(&base, 1, Operation::Overwrite, &[a.clone(), z.clone()], &[]).await?;
+        let planner = planner(&first)?;
+        let second = snapshot(
+            &first,
+            2,
+            Operation::Overwrite,
+            &[a.clone(), b, z],
+            &[(delete(&base, &a, "a-2", 4)?, 2)],
+        )
+        .await?;
+        // `b` is added and removed, and `z` is removed, within the range.
+        let da = delete(&base, &a, "a-3", 14)?;
+        let third = snapshot(
+            &second,
+            3,
+            Operation::Overwrite,
+            &[a.clone(), c.clone()],
+            &[(da.clone(), 3)],
+        )
+        .await?;
+        let dc = delete(&base, &c, "c-4", 24)?;
+        let fourth = snapshot(
+            &third,
+            4,
+            Operation::Delete,
+            &[a.clone(), c.clone()],
+            &[(da.clone(), 3), (dc.clone(), 4)],
+        )
+        .await?;
+        let (fourth, counter) = counting(&fourth)?;
+        take_manifest_reads(&counter);
+
+        let plan = planner.plan_next(&fourth, Some(1)).await?.unwrap();
+        assert_eq!((plan.parent_snapshot_id, plan.snapshot_id), (Some(1), 4));
+        let deletes = plan
+            .deletes
+            .iter()
+            .map(|task| (file_name(&task.id.data_file_path), task.removed))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            deletes,
+            vec![
+                ("a.parquet".to_owned(), false),
+                ("z.parquet".to_owned(), true)
+            ]
+        );
+        // The retained file retracts only the positions deleted between the range ends.
+        assert!(plan.deletes[0].parent_deletes.is_empty());
+        assert_eq!(plan.deletes[0].file.deletes[0].file_path, da.file_path());
+        assert_eq!(plan.inserts.len(), 1);
+        assert_eq!(plan.inserts[0].id.data_file_path, c.file_path());
+        assert_eq!(plan.inserts[0].file.deletes[0].file_path, dc.file_path());
+        assert!(
+            plan.deletes
+                .iter()
+                .chain(&plan.inserts)
+                .all(|task| task.id.snapshot_id == 4 && task.parent_snapshot_id == Some(1))
+        );
+        // Only the range ends define the change; intermediate snapshots are never opened.
+        assert!(
+            take_manifest_reads(&counter)
+                .iter()
+                .all(|name| name.starts_with("manifest-1-") || name.starts_with("manifest-4-"))
+        );
+        for task in plan.deletes.iter().chain(&plan.inserts) {
+            task.prepare_read(&fourth)?;
+        }
+        assert!(planner.plan_next(&fourth, Some(4)).await?.is_none());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn ranges_end_before_compactions_and_keep_their_target() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let base = table(&temp, FormatVersion::V3, false)?;
+    let [a, b, c, d] = ["a", "b", "c", "d"].map(|name| data(&base, name).unwrap());
+    let first = snapshot(&base, 1, Operation::Overwrite, from_ref(&a), &[]).await?;
+    let mut planner = planner(&first)?;
+    let second = snapshot(&first, 2, Operation::Append, &[a.clone(), b.clone()], &[]).await?;
+
+    // A range fixed at the latest snapshot stays valid after later commits.
+    let cursor = planner.start_cursor(&second, true, Some(1))?.unwrap();
+    assert_eq!(cursor.snapshot_id, 2);
+    let third = snapshot(&second, 3, Operation::Append, &[a, b, c.clone()], &[]).await?;
+    let fourth = snapshot(&third, 4, Operation::Replace, from_ref(&c), &[]).await?;
+    let fifth = snapshot(&fourth, 5, Operation::Append, &[c, d.clone()], &[]).await?;
+    let mut insert = cursor.clone();
+    insert.phase = IcebergUpdatePhase::Insert;
+    assert_eq!(planner.plan_page(&fifth, &insert, 8).await?.tasks.len(), 1);
+
+    // Ranges stop before a compaction, which is planned alone and emits nothing.
+    for (last, target, inserts) in [(1, 3, 2), (3, 4, 0), (4, 5, 1)] {
+        let plan = planner.plan_next(&fifth, Some(last)).await?.unwrap();
+        assert_eq!(plan.snapshot_id, target);
+        assert!(plan.deletes.is_empty());
+        assert_eq!(plan.inserts.len(), inserts);
+    }
+    let last = planner.plan_next(&fifth, Some(4)).await?.unwrap();
+    assert_eq!(last.inserts[0].id.data_file_path, d.file_path());
+
+    // A persisted cursor whose range spans a compaction is rejected.
+    let mut spanning = cursor;
+    spanning.snapshot_id = 5;
+    assert!(planner.plan_page(&fifth, &spanning, 8).await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn small_phases_share_the_ordered_route_until_a_fan_out_phase() -> Result<()> {
+    use crate::source::iceberg::update_state::{
+        IcebergUpdateAssignment, IcebergUpdateFenceKind, IcebergUpdateListState,
+    };
+
+    let temp = tempfile::tempdir()?;
+    let base = table(&temp, FormatVersion::V3, false)?;
+    let [a, b, c] = ["a", "b", "c"].map(|name| data(&base, name).unwrap());
+    let first = snapshot(&base, 1, Operation::Overwrite, &[a.clone(), b], &[]).await?;
+    let mut state =
+        IcebergUpdateListState::new(42, IcebergUpdateBinding::bind(&first, vec![2, 1])?);
+    let mut enumeration = None;
+    let (batch_size, ordered_max_tasks) = (8, 2);
+    let ordered = |page: &[IcebergUpdateAssignment]| {
+        page.iter()
+            .all(|assignment| assignment.route == IcebergUpdateAssignment::ORDERED_ROUTE)
+    };
+
+    let (bootstrap, fence) = state
+        .enumerate(&first, batch_size, ordered_max_tasks, &mut enumeration)
+        .await?;
+    assert_eq!(bootstrap.len(), 2);
+    assert!(ordered(&bootstrap));
+    assert_eq!(fence, Some(IcebergUpdateFenceKind::Ordered));
+    state.record_fence(IcebergUpdateFenceKind::Ordered, 10)?;
+    assert_eq!(state.wait_epoch(), None);
+
+    // Both phases of the next range follow on the ordered route without a completion fence.
+    let da = delete(&base, &a, "da", 4)?;
+    let second = snapshot(
+        &first,
+        2,
+        Operation::Overwrite,
+        &[a.clone(), c.clone()],
+        &[(da.clone(), 2)],
+    )
+    .await?;
+    let mut seqs = bootstrap
+        .iter()
+        .map(|assignment| assignment.seq)
+        .collect::<Vec<_>>();
+    for phase in [IcebergUpdatePhase::Delete, IcebergUpdatePhase::Insert] {
+        let (page, fence) = state
+            .enumerate(&second, batch_size, ordered_max_tasks, &mut enumeration)
+            .await?;
+        assert!(!page.is_empty() && ordered(&page));
+        assert!(
+            page.iter()
+                .all(|assignment| assignment.task.id.phase == phase)
+        );
+        assert_eq!(fence, Some(IcebergUpdateFenceKind::Ordered));
+        state.record_fence(IcebergUpdateFenceKind::Ordered, 11)?;
+        seqs.extend(page.iter().map(|assignment| assignment.seq));
+    }
+    assert!(seqs.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(
+        state
+            .enumerate(&second, batch_size, ordered_max_tasks, &mut enumeration)
+            .await?
+            .0
+            .is_empty()
+    );
+
+    // A larger phase fans out, but only after the ordered route drains.
+    let mut files = vec![a, c];
+    files.extend(["d", "e", "f"].map(|name| data(&base, name).unwrap()));
+    let third = snapshot(&second, 3, Operation::Append, &files, &[(da, 2)]).await?;
+    let (deletes, _) = state
+        .enumerate(&third, batch_size, ordered_max_tasks, &mut enumeration)
+        .await?;
+    assert!(deletes.is_empty());
+    let (blocked, fence) = state
+        .enumerate(&third, batch_size, ordered_max_tasks, &mut enumeration)
+        .await?;
+    assert!(blocked.is_empty() && fence.is_none());
+    assert_eq!(state.wait_epoch(), Some(11));
+    assert!(
+        state
+            .enumerate(&third, batch_size, ordered_max_tasks, &mut enumeration)
+            .await
+            .is_err()
+    );
+    assert!(state.complete_fence(10).is_err());
+    state.complete_fence(11)?;
+    let replayed = {
+        let mut state =
+            serde_json::from_slice::<IcebergUpdateListState>(&serde_json::to_vec(&state)?)?;
+        state
+            .enumerate(&third, batch_size, ordered_max_tasks, &mut None)
+            .await?
+    };
+    let (fan_out, fence) = state
+        .enumerate(&third, batch_size, ordered_max_tasks, &mut enumeration)
+        .await?;
+    assert_eq!((fan_out.clone(), fence), replayed);
+    assert_eq!(fan_out.len(), 3);
+    assert_eq!(fence, Some(IcebergUpdateFenceKind::FanOut));
+    assert!(
+        fan_out
+            .iter()
+            .all(|assignment| assignment.route == assignment.seq
+                && assignment.seq > *seqs.last().unwrap())
+    );
+    assert!(
+        state
+            .record_fence(IcebergUpdateFenceKind::FanOut, 12)
+            .is_ok()
+    );
+    assert!(
+        state
+            .record_fence(IcebergUpdateFenceKind::Ordered, 13)
+            .is_err()
+    );
+    assert_eq!(state.wait_epoch(), Some(12));
     Ok(())
 }

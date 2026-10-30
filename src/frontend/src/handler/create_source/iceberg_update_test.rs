@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use risingwave_common::catalog::{ColumnCatalog, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{AdditionalColumn, AdditionalColumnOffset};
@@ -100,7 +101,14 @@ async fn iceberg_update_catalog_and_retract_graph_round_trip() -> TestResult {
                 match node.node_body.as_ref().unwrap() {
                     NodeBody::Source(source) => {
                         assert_eq!(node.stream_kind, StreamKind::Retract as i32);
-                        assert_eq!(node.stream_key, vec![0]);
+                        assert_eq!(node.stream_key, vec![0, 1]);
+                        assert_eq!(
+                            node.fields
+                                .iter()
+                                .map(|field| DataType::from(field.data_type.as_ref().unwrap()))
+                                .collect::<Vec<_>>(),
+                            vec![DataType::Int64, DataType::Int64, DataType::Jsonb]
+                        );
                         lists.push(source.source_inner.as_ref().unwrap().clone());
                     }
                     NodeBody::StreamFsFetch(fetch) => {
@@ -150,6 +158,58 @@ async fn iceberg_update_catalog_and_retract_graph_round_trip() -> TestResult {
         );
         assert_eq!(fetch.columns.len(), 3);
         assert_eq!(fetch.row_id_index, None);
+        // Keyed by (route, seq) and distributed by the route that List shuffles on.
+        let fetch_state = fetch.state_table.as_ref().unwrap();
+        assert_eq!(
+            fetch_state
+                .columns
+                .iter()
+                .map(|column| DataType::from(
+                    column
+                        .column_desc
+                        .as_ref()
+                        .unwrap()
+                        .column_type
+                        .as_ref()
+                        .unwrap()
+                ))
+                .collect::<Vec<_>>(),
+            vec![DataType::Int64, DataType::Int64, DataType::Jsonb]
+        );
+        assert_eq!(
+            fetch_state
+                .pk
+                .iter()
+                .map(|order| order.column_index)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(fetch_state.distribution_key, vec![0]);
+        assert_eq!(fetch_state.value_indices, vec![0, 1, 2]);
+        let exchange = graph
+            .edges
+            .iter()
+            .find(|edge| {
+                graph.fragments[&edge.downstream_id]
+                    .node
+                    .as_ref()
+                    .is_some_and(|node| {
+                        let mut found = false;
+                        visit_stream_node(node, |node| {
+                            found |= matches!(node.node_body, Some(NodeBody::StreamFsFetch(_)));
+                        });
+                        found
+                    })
+            })
+            .unwrap();
+        assert_eq!(
+            exchange
+                .dispatch_strategy
+                .as_ref()
+                .unwrap()
+                .dist_key_indices,
+            vec![0]
+        );
     }
     Ok(())
 }

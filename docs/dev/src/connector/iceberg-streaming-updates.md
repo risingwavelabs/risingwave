@@ -50,18 +50,38 @@ rows from removed files.
   the active scan across pages and checkpoints the last dispatched task.
   Recovery reconstructs the deterministic scan and skips its dispatched prefix.
   Fetch removes each task at EOF, checkpointing its retirement together with its output.
-- Before switching from Delete to Insert, or applying a snapshot, List
-  asynchronously checks that the committed Fetch queue is empty. The checkpoint
-  must cover the phase's last task dispatch; an older empty queue is not proof of
-  completion. This preserves Delete-before-Insert across actors without dedicated
-  task reports through Meta. Phase transitions depend on checkpoint commit latency,
-  but waiting never blocks ordinary barriers. New files' same-commit deleted
-  positions only filter Inserts; they never generate Deletes.
+- List plans all pending snapshots up to the next compaction as one net change
+  from the last applied snapshot to the last snapshot of the range. Each range
+  has a Delete phase followed by an Insert phase. A file added and removed
+  within the range produces no task, and repeated updates of one key produce at
+  most one Delete and one Insert. Intermediate snapshots of a range are never
+  materialized. A `replace` snapshot always forms its own range, because a
+  compaction contains no logical change and is applied by moving the baseline.
+- Fetch keeps its tasks in a state table keyed by `(route, seq)` and
+  distributed by `route`. List assigns `seq` in dispatch order, and Fetch reads
+  the pending tasks of one route in `seq` order.
+- A phase whose tasks fit in one page of at most
+  `streaming.developer.iceberg_update_ordered_max_tasks` tasks uses the ordered
+  route: all its tasks go to the single Fetch actor that owns that route. That
+  actor already applies Delete before Insert and one snapshot range after
+  another, so List starts the next phase immediately, without waiting for a
+  checkpoint.
+- A larger phase fans out: each task gets its own route, spreading the phase
+  across Fetch actors. Before starting the next phase, List asynchronously
+  checks that the committed Fetch queue is empty. The checkpoint must cover the
+  phase's last task dispatch; an older empty queue is not proof of completion.
+  A fan-out phase also waits for outstanding ordered tasks to drain first. This
+  preserves Delete-before-Insert across actors without dedicated task reports
+  through Meta. Only fan-out phase transitions depend on checkpoint commit
+  latency, and waiting never blocks ordinary barriers.
+- New files' same-commit deleted positions only filter Inserts; they never
+  generate Deletes.
 - Incremental pure compaction emits no rows and does not reread row artifacts.
   Bootstrap still imports the visible rows of a compaction snapshot.
 
-Results converge to the Iceberg table contents. Intermediate logical states are
-visible; this is not a business transaction log or an atomic snapshot refresh.
+Results converge to the Iceberg table contents. Intermediate logical states
+between a range's Delete and Insert phases are visible; this is not a business
+transaction log or an atomic snapshot refresh.
 
 ## Restrictions
 
@@ -71,15 +91,17 @@ table identity/schema, and unsupported artifacts
 produce errors rather than a silent resnapshot.
 
 `streaming.developer.iceberg_fetch_batch_size` controls both the number of tasks
-per List page and the number of pending tasks loaded per Fetch batch. When List
-finds no new work, it waits `streaming.developer.iceberg_list_interval_sec` before polling the
+per List page and the number of pending tasks loaded per Fetch batch.
+`streaming.developer.iceberg_update_ordered_max_tasks` (default 16) is the
+largest phase sent to the ordered route; `0` fans out every phase. Raising it
+trades Fetch parallelism for fewer checkpoint waits. When List finds no new work, it waits `streaming.developer.iceberg_list_interval_sec` before polling the
 catalog again.
 
-Planning cost follows the size of each commit, not the size of the table.
+Planning cost follows the size of the change, not the size of the table.
 Bootstrap enumerates the whole snapshot: it indexes all delete descriptors, then
-decodes one data manifest at a time. Incremental phases diff the parent and
-current manifest lists by manifest path and never read a manifest present in
-both lists for the diff itself:
+decodes one data manifest at a time. Incremental phases diff the manifest lists
+of the range's base and target snapshots by manifest path and never read a
+manifest present in both lists for the diff itself:
 
 - Insert reads only the added data and delete manifests.
 - Delete reads the removed and added manifests. It also reads an unchanged data

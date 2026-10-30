@@ -29,7 +29,7 @@ use risingwave_connector::source::iceberg::update_planner::{
     IcebergUpdateBinding, IcebergUpdatePlanner,
 };
 use risingwave_connector::source::iceberg::update_state::{
-    IcebergUpdateAssignment, IcebergUpdateListState,
+    IcebergUpdateAssignment, IcebergUpdateFenceKind, IcebergUpdateListState,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -38,7 +38,7 @@ use risingwave_storage::table::batch_table::BatchTable;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::{decode_value, encode, properties, scan_metrics};
+use super::{decode_value, encode, properties, scan_metrics, task_row, task_row_types};
 use crate::executor::prelude::*;
 use crate::executor::source::{StreamSourceCore, barrier_to_message_stream};
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -73,6 +73,7 @@ impl<S: StateStore> IcebergUpdateListExecutor<S> {
         let developer = &self.streaming_config.developer;
         let list_interval = Duration::from_secs(developer.iceberg_list_interval_sec);
         let batch_size = developer.iceberg_fetch_batch_size as usize;
+        let ordered_max_tasks = developer.iceberg_update_ordered_max_tasks as usize;
         let properties = properties(&mut self.core)?;
         let scan_metrics = scan_metrics(&self.core, &properties);
         let fetch_reader = fetch_state_reader(
@@ -87,6 +88,7 @@ impl<S: StateStore> IcebergUpdateListExecutor<S> {
             properties,
             downstream_columns: self.downstream_columns,
             batch_size,
+            ordered_max_tasks,
             job_id: self.fetch_state_table.table_id.as_raw_id(),
             fetch_reader,
         });
@@ -184,21 +186,20 @@ impl<S: StateStore> IcebergUpdateListExecutor<S> {
                     state: mut new_state,
                     planner: next_planner,
                     assignments,
-                    phase_finished,
+                    fence,
                 })) => {
                     planner = next_planner;
-                    if phase_finished {
-                        new_state.record_phase_end(epoch)?;
+                    if let Some(kind) = fence {
+                        new_state.record_fence(kind, epoch)?;
                     }
                     let changed = state.as_ref() != Some(&new_state);
                     dirty |= changed;
-                    next_poll = if !assignments.is_empty() && !phase_finished {
-                        // More pages remain in this phase, so keep listing without a barrier.
+                    let waiting = new_state.wait_epoch().is_some();
+                    next_poll = if !assignments.is_empty() && !waiting {
+                        // More pages or ordered phases may follow, so keep listing without a
+                        // barrier.
                         NextPoll::Running
-                    } else if assignments.is_empty()
-                        && !changed
-                        && new_state.phase_end_epoch().is_none()
-                    {
+                    } else if assignments.is_empty() && !changed && !waiting {
                         NextPoll::Throttled
                     } else {
                         NextPoll::Now
@@ -269,6 +270,7 @@ pub(super) struct ListContext<S: StateStore> {
     pub(super) properties: IcebergProperties,
     pub(super) downstream_columns: Vec<ColumnCatalog>,
     pub(super) batch_size: usize,
+    pub(super) ordered_max_tasks: usize,
     pub(super) job_id: u32,
     pub(super) fetch_reader: BatchTable<S>,
 }
@@ -277,11 +279,11 @@ pub(super) struct ListResult {
     pub(super) state: IcebergUpdateListState,
     pub(super) planner: Option<IcebergUpdatePlanner>,
     pub(super) assignments: Vec<IcebergUpdateAssignment>,
-    pub(super) phase_finished: bool,
+    pub(super) fence: Option<IcebergUpdateFenceKind>,
 }
 
 /// Metadata I/O runs on the data arm so it cannot prevent List from forwarding barriers.
-/// `idle_delay` throttles only catalog polls; phase completion checks never wait for it.
+/// `idle_delay` throttles only catalog polls; completion checks never wait for it.
 #[try_stream(boxed, ok = ListResult, error = StreamExecutorError)]
 pub(super) async fn list_work<S: StateStore>(
     ctx: Arc<ListContext<S>>,
@@ -292,7 +294,7 @@ pub(super) async fn list_work<S: StateStore>(
 ) {
     let polls_catalog = state
         .as_ref()
-        .is_none_or(|state| state.phase_end_epoch().is_none());
+        .is_none_or(|state| state.wait_epoch().is_none());
     if polls_catalog && !idle_delay.is_zero() {
         tokio::time::sleep(idle_delay).await;
     }
@@ -305,13 +307,13 @@ pub(super) async fn list_work<S: StateStore>(
             state: IcebergUpdateListState::new(ctx.job_id, binding),
             planner: None,
             assignments: vec![],
-            phase_finished: false,
+            fence: None,
         };
         return Ok(());
     };
     let mut assignments = vec![];
-    let mut phase_finished = false;
-    if let Some(dispatched_epoch) = state.phase_end_epoch() {
+    let mut fence = None;
+    if let Some(dispatched_epoch) = state.wait_epoch() {
         if checkpoint_epoch >= dispatched_epoch {
             let rows = ctx
                 .fetch_reader
@@ -323,25 +325,25 @@ pub(super) async fn list_work<S: StateStore>(
                 .await?;
             pin_mut!(rows);
             if rows.try_next().await?.is_none() {
-                state.complete_phase(checkpoint_epoch)?;
+                state.complete_fence(checkpoint_epoch)?;
             }
         }
     } else {
         let table = ctx.properties.load_table().await?;
-        (assignments, phase_finished) = state
-            .enumerate(&table, ctx.batch_size, &mut planner)
+        (assignments, fence) = state
+            .enumerate(&table, ctx.batch_size, ctx.ordered_max_tasks, &mut planner)
             .await?;
     }
     yield ListResult {
         state,
         planner,
         assignments,
-        phase_finished,
+        fence,
     };
 }
 
-/// Reads the task keys of the Fetch state table across all vnodes, so that phase
-/// completion observes the tasks of every Fetch actor.
+/// Reads the task keys of the Fetch state table across all vnodes, so that completion
+/// observes the tasks of every Fetch actor.
 fn fetch_state_reader<S: StateStore>(store: S, desc: &StorageTableDesc) -> BatchTable<S> {
     BatchTable::new_partial(
         store,
@@ -369,18 +371,7 @@ fn write_list_state<S: StateStore>(
 fn assignments_chunk(assignments: &[IcebergUpdateAssignment]) -> StreamExecutorResult<StreamChunk> {
     let rows = assignments
         .iter()
-        .map(|assignment| {
-            Ok((
-                Op::Insert,
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Utf8(assignment.key()?.into())),
-                    Some(ScalarImpl::Jsonb(encode(assignment)?)),
-                ]),
-            ))
-        })
+        .map(|assignment| Ok((Op::Insert, task_row(assignment, assignment)?)))
         .collect::<StreamExecutorResult<Vec<_>>>()?;
-    Ok(StreamChunk::from_rows(
-        &rows,
-        &[DataType::Varchar, DataType::Jsonb],
-    ))
+    Ok(StreamChunk::from_rows(&rows, &task_row_types()))
 }

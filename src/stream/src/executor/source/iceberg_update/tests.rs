@@ -144,6 +144,89 @@ fn list_state_requires_a_single_json_value_without_a_key() -> anyhow::Result<()>
     assert!(validate_update_state_table(&catalog, true).is_err());
     Ok(())
 }
+/// The Fetch state layout planned by the frontend: `(route, seq, state)` keyed by
+/// `(route, seq)` and distributed by `route`.
+fn fetch_state_catalog(id: u32) -> risingwave_pb::catalog::Table {
+    let mut catalog = default_source_internal_table(id);
+    let template = catalog.columns[1].clone();
+    catalog.columns = [DataType::Int64, DataType::Int64, DataType::Jsonb]
+        .into_iter()
+        .enumerate()
+        .map(|(index, data_type)| {
+            let mut column = template.clone();
+            let desc = column.column_desc.as_mut().unwrap();
+            desc.column_type = Some(data_type.to_protobuf());
+            desc.column_id = index as i32;
+            column
+        })
+        .collect();
+    let route = catalog.pk[0];
+    catalog.pk = vec![
+        route,
+        risingwave_pb::common::PbColumnOrder {
+            column_index: 1,
+            ..route
+        },
+    ];
+    catalog.value_indices = vec![0, 1, 2];
+    catalog.distribution_key = vec![0];
+    catalog.maybe_vnode_count = Some(4);
+    catalog
+}
+
+async fn fetch_state<S: StateStore>(
+    catalog: &risingwave_pb::catalog::Table,
+    store: S,
+) -> SourceStateTableHandler<S> {
+    SourceStateTableHandler::from_table_catalog_with_vnodes(
+        catalog,
+        store,
+        Some(Arc::new(Bitmap::ones(4))),
+    )
+    .await
+}
+
+async fn put_task<S: StateStore>(
+    state: &mut SourceStateTableHandler<S>,
+    task: &IcebergUpdateFetchState,
+) -> anyhow::Result<()> {
+    let table = state.state_table_mut();
+    let row = task_row(&task.assignment, task)?;
+    match table.get_row(task_pk(&task.assignment)).await? {
+        Some(old) => table.update(old, row),
+        None => table.insert(row),
+    }
+    Ok(())
+}
+
+async fn delete_task<S: StateStore>(
+    state: &mut SourceStateTableHandler<S>,
+    assignment: &IcebergUpdateAssignment,
+) -> anyhow::Result<()> {
+    let table = state.state_table_mut();
+    if let Some(old) = table.get_row(task_pk(assignment)).await? {
+        table.delete(old);
+    }
+    Ok(())
+}
+
+#[test]
+fn fetch_state_requires_route_seq_rows_distributed_by_route() -> anyhow::Result<()> {
+    let catalog = fetch_state_catalog(42);
+    validate_update_state_table(&catalog, false)?;
+    assert!(validate_update_state_table(&catalog, true).is_err());
+    let mut legacy = default_source_internal_table(42);
+    legacy.distribution_key = vec![0];
+    assert!(validate_update_state_table(&legacy, false).is_err());
+    let mut by_seq = catalog.clone();
+    by_seq.distribution_key = vec![1];
+    assert!(validate_update_state_table(&by_seq, false).is_err());
+    let mut by_route = catalog;
+    by_route.pk.truncate(1);
+    assert!(validate_update_state_table(&by_route, false).is_err());
+    Ok(())
+}
+
 fn descriptor(table: &risingwave_pb::catalog::Table) -> StorageTableDesc {
     StorageTableDesc {
         table_id: table.id,
@@ -188,6 +271,7 @@ fn list_context<S: StateStore>(
         properties,
         downstream_columns: output_columns(),
         batch_size: 2,
+        ordered_max_tasks: 0,
         job_id: 42,
         fetch_reader,
     })
@@ -219,16 +303,17 @@ fn fixture() -> anyhow::Result<(
             "partition": {}, "partition_spec": {"spec-id": 0, "fields": []}, "deletes": []}
     });
     let cursor = json!({"snapshot_id": 2, "parent_snapshot_id": 1,
-        "bootstrap": false, "phase": "Delete", "after_path": null});
+        "bootstrap": false, "phase": "Insert", "after_path": null});
+    // The Delete phase of snapshot 2 fanned out and has not been confirmed yet.
     let state = serde_json::from_value(json!({
-        "job_id": 42, "binding": binding, "bootstrap_complete": true, "applied_snapshot": 1,
-        "cursor": cursor, "generation": 7,
-        "phase_end_epoch": test_epoch(1)
+        "job_id": 42, "binding": binding, "bootstrap_complete": true, "dispatched_snapshot": 1,
+        "cursor": cursor, "next_seq": 8,
+        "fence": {"epoch": test_epoch(1), "ordered": false}
     }))?;
     Ok((
         serde_json::from_value(binding)?,
         state,
-        serde_json::from_value(json!({"job_id": 42, "generation": 7, "task": task}))?,
+        serde_json::from_value(json!({"job_id": 42, "route": 7, "seq": 7, "task": task}))?,
     ))
 }
 
@@ -241,48 +326,40 @@ fn output_columns() -> Vec<ColumnCatalog> {
 }
 
 fn streaming_config() -> Arc<StreamingConfig> {
-    streaming_config_with_list_interval(0)
+    streaming_config_with(
+        0,
+        StreamingConfig::default()
+            .developer
+            .iceberg_update_ordered_max_tasks,
+    )
 }
 
-fn streaming_config_with_list_interval(seconds: u64) -> Arc<StreamingConfig> {
+fn streaming_config_with(list_interval_sec: u64, ordered_max_tasks: u64) -> Arc<StreamingConfig> {
     let mut config = StreamingConfig::default();
     config.developer.iceberg_fetch_batch_size = 2;
     config.developer.chunk_size = 1;
-    config.developer.iceberg_list_interval_sec = seconds;
+    config.developer.iceberg_list_interval_sec = list_interval_sec;
+    config.developer.iceberg_update_ordered_max_tasks = ordered_max_tasks;
     Arc::new(config)
 }
 
 #[tokio::test]
 async fn pending_task_batches_respect_the_configured_size() -> anyhow::Result<()> {
     let (_, _, assignment) = fixture()?;
-    let store = MemoryStateStore::new();
-    let mut catalog = default_source_internal_table(42);
-    catalog.distribution_key = vec![0];
-    catalog.maybe_vnode_count = Some(4);
-    let mut state = SourceStateTableHandler::from_table_catalog_with_vnodes(
-        &catalog,
-        store,
-        Some(Arc::new(Bitmap::ones(4))),
-    )
-    .await;
+    let mut state = fetch_state(&fetch_state_catalog(42), MemoryStateStore::new()).await;
     state
         .init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
         .await?;
-    for generation in 1..=3 {
+    for seq in 1..=3 {
         let mut assignment = assignment.clone();
-        assignment.generation = generation;
-        state
-            .set(
-                &assignment.key()?,
-                encode(&IcebergUpdateFetchState::new(assignment))?,
-            )
-            .await?;
+        (assignment.route, assignment.seq) = (seq, seq);
+        put_task(&mut state, &IcebergUpdateFetchState::new(assignment)).await?;
     }
     let batch_size = streaming_config().developer.iceberg_fetch_batch_size as usize;
     let batch = pending_tasks(&state, 42, batch_size, &output_columns(), &[0]).await?;
     assert_eq!(batch.len(), batch_size);
     for task in batch {
-        state.delete(&task.assignment.key()?).await?;
+        delete_task(&mut state, &task.assignment).await?;
     }
     assert_eq!(
         pending_tasks(&state, 42, batch_size, &output_columns(), &[0])
@@ -299,33 +376,56 @@ async fn pending_task_batches_respect_the_configured_size() -> anyhow::Result<()
 }
 
 #[tokio::test]
+async fn tasks_of_one_route_are_fetched_in_dispatch_order() -> anyhow::Result<()> {
+    let (_, _, assignment) = fixture()?;
+    let mut state = fetch_state(&fetch_state_catalog(42), MemoryStateStore::new()).await;
+    state
+        .init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
+        .await?;
+    // Sequence numbers above 9 also check numeric rather than textual order.
+    for seq in [12, 3, 9, 10] {
+        let mut assignment = assignment.clone();
+        (assignment.route, assignment.seq) = (IcebergUpdateAssignment::ORDERED_ROUTE, seq);
+        put_task(&mut state, &IcebergUpdateFetchState::new(assignment)).await?;
+    }
+    let tasks = pending_tasks(&state, 42, 32, &output_columns(), &[0]).await?;
+    assert_eq!(
+        tasks
+            .iter()
+            .map(|task| task.assignment.seq)
+            .collect::<Vec<_>>(),
+        vec![3, 9, 10, 12]
+    );
+
+    // A row whose key differs from its assignment is rejected.
+    let mut moved = IcebergUpdateFetchState::new(assignment.clone());
+    moved.assignment.seq = 99;
+    let row = task_row(&assignment, &moved)?;
+    state.state_table_mut().insert(row);
+    assert!(
+        pending_tasks(&state, 42, 32, &output_columns(), &[0])
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn rescaled_fetch_owners_restore_only_their_vnode_cursors() -> anyhow::Result<()> {
     let (_, _, assignment) = fixture()?;
     let store = MemoryStateStore::new();
-    let mut catalog = default_source_internal_table(42);
-    catalog.distribution_key = vec![0];
-    catalog.maybe_vnode_count = Some(4);
-    validate_update_state_table(&catalog, false)?;
-    assert!(validate_update_state_table(&catalog, true).is_err());
-    let mut owner = SourceStateTableHandler::from_table_catalog_with_vnodes(
-        &catalog,
-        store.clone(),
-        Some(Arc::new(Bitmap::ones(4))),
-    )
-    .await;
+    let catalog = fetch_state_catalog(42);
+    let mut owner = fetch_state(&catalog, store.clone()).await;
     owner
         .init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
         .await?;
-    let key = assignment.key()?;
     let vnode = owner
         .state_table()
-        .compute_vnode_by_pk(OwnedRow::new(vec![Some(ScalarImpl::Utf8(
-            key.clone().into(),
-        ))]))
+        .compute_vnode_by_pk(task_pk(&assignment))
         .to_index();
-    let mut progress = IcebergUpdateFetchState::new(assignment);
+    let mut progress = IcebergUpdateFetchState::new(assignment.clone());
     progress.advance(6, false)?;
-    owner.set(&key, encode(&progress)?).await?;
+    put_task(&mut owner, &progress).await?;
     owner
         .commit(EpochPair::new_test_epoch(test_epoch(2)))
         .await?;
@@ -350,12 +450,15 @@ async fn rescaled_fetch_owners_restore_only_their_vnode_cursors() -> anyhow::Res
     }
     let row = reader(store, &descriptor(&catalog))
         .get_row(
-            OwnedRow::new(vec![Some(ScalarImpl::Utf8(key.into()))]),
+            task_pk(&assignment),
             HummockReadEpoch::Committed(test_epoch(1)),
         )
         .await?
         .unwrap();
-    assert_eq!(decode::<IcebergUpdateFetchState>(&row)?, progress);
+    assert_eq!(
+        decode(&row, |task: &IcebergUpdateFetchState| &task.assignment)?,
+        progress
+    );
     Ok(())
 }
 
@@ -368,9 +471,7 @@ async fn phase_completion_requires_a_committed_snapshot_covering_all_dispatches(
         inner: MemoryStateStore::new(),
         committed,
     };
-    let mut catalog = default_source_internal_table(42);
-    catalog.distribution_key = vec![0];
-    catalog.maybe_vnode_count = Some(4);
+    let catalog = fetch_state_catalog(42);
     let properties: IcebergProperties =
         serde_json::from_value(json!({"catalog.type": "mock", "table.name": "unused"}))?;
     let ctx = list_context(properties, reader(store.clone(), &descriptor(&catalog)));
@@ -393,19 +494,15 @@ async fn phase_completion_requires_a_committed_snapshot_covering_all_dispatches(
     assert_eq!(result.state, state);
 
     // A task on any Fetch vnode prevents completion, even if it is not List's vnode.
-    let mut fetch = SourceStateTableHandler::from_table_catalog_with_vnodes(
-        &catalog,
-        store.clone(),
-        Some(Arc::new(Bitmap::ones(4))),
-    )
-    .await;
+    let mut fetch = fetch_state(&catalog, store.clone()).await;
     fetch
         .init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
         .await?;
-    let key = assignment.key()?;
-    fetch
-        .set(&key, encode(&IcebergUpdateFetchState::new(assignment))?)
-        .await?;
+    put_task(
+        &mut fetch,
+        &IcebergUpdateFetchState::new(assignment.clone()),
+    )
+    .await?;
     fetch
         .commit(EpochPair::new_test_epoch(test_epoch(2)))
         .await?;
@@ -427,7 +524,7 @@ async fn phase_completion_requires_a_committed_snapshot_covering_all_dispatches(
 
     // Local EOF retirement is not enough. Only a committed snapshot containing
     // that deletion can authorize the Delete -> Insert transition.
-    fetch.delete(&key).await?;
+    delete_task(&mut fetch, &assignment).await?;
     fetch
         .commit(EpochPair::new_test_epoch(test_epoch(3)))
         .await?;
@@ -451,40 +548,34 @@ async fn phase_completion_requires_a_committed_snapshot_covering_all_dispatches(
     commit_tx.send(test_epoch(2))?;
     let result = check.next().await.unwrap()?;
     assert!(result.assignments.is_empty());
-    assert_eq!(result.state.phase_end_epoch(), None);
-    assert_eq!(
-        serde_json::to_value(result.state)?["cursor"]["phase"],
-        "Insert"
-    );
+    assert_eq!(result.state.wait_epoch(), None);
+    assert!(serde_json::to_value(result.state)?["fence"].is_null());
     Ok(())
 }
 #[tokio::test]
 async fn task_retirement_and_output_cursor_share_the_recovery_checkpoint() -> anyhow::Result<()> {
     let (_, list, assignment) = fixture()?;
     let store = MemoryStateStore::new();
-    let fetch_catalog = default_source_internal_table(42);
+    let fetch_catalog = fetch_state_catalog(42);
     let list_catalog = list_state_catalog(43);
-    let mut fetch =
-        SourceStateTableHandler::from_table_catalog(&fetch_catalog, store.clone()).await;
+    let mut fetch = fetch_state(&fetch_catalog, store.clone()).await;
     let mut listing =
         SourceStateTableHandler::from_table_catalog(&list_catalog, store.clone()).await;
     let epoch = |n| EpochPair::new_test_epoch(test_epoch(n));
     fetch.init_epoch(epoch(1)).await?;
     listing.init_epoch(epoch(1)).await?;
-    let key = assignment.key()?;
-    let mut progress = IcebergUpdateFetchState::new(assignment);
+    let mut progress = IcebergUpdateFetchState::new(assignment.clone());
     progress.advance(4, false)?;
-    fetch.set(&key, encode(&progress)?).await?;
+    put_task(&mut fetch, &progress).await?;
     listing
         .state_table_mut()
         .insert([Some(ScalarImpl::Jsonb(encode(&list)?))]);
     fetch.commit(epoch(2)).await?;
     listing.commit(epoch(2)).await?;
     // Uncheckpointed EOF and retirement disappear together on restart.
-    fetch.delete(&key).await?;
+    delete_task(&mut fetch, &assignment).await?;
     drop(fetch);
-    let mut fetch =
-        SourceStateTableHandler::from_table_catalog(&fetch_catalog, store.clone()).await;
+    let mut fetch = fetch_state(&fetch_catalog, store.clone()).await;
     fetch.init_epoch(epoch(2)).await?;
     let restored = pending_tasks(&fetch, 42, 32, &output_columns(), &[0]).await?;
     assert_eq!(restored, vec![progress]);
@@ -505,7 +596,7 @@ async fn task_retirement_and_output_cursor_share_the_recovery_checkpoint() -> an
             .is_err()
     );
 
-    fetch.delete(&key).await?;
+    delete_task(&mut fetch, &assignment).await?;
     fetch.commit(epoch(3)).await?;
     listing.commit(epoch(3)).await?;
     assert!(
@@ -524,18 +615,19 @@ async fn task_retirement_and_output_cursor_share_the_recovery_checkpoint() -> an
     let mut recovered: IcebergUpdateListState =
         decode_value(row.datum_at(0).unwrap().into_jsonb().to_owned_scalar())?;
     assert_eq!(recovered, list);
-    assert_eq!(recovered.phase_end_epoch(), Some(test_epoch(1)));
+    assert_eq!(recovered.wait_epoch(), Some(test_epoch(1)));
     assert!(
         reader(store, &descriptor(&fetch_catalog))
             .get_row(
-                OwnedRow::new(vec![Some(ScalarImpl::Utf8(key.into()))]),
+                task_pk(&assignment),
                 HummockReadEpoch::Committed(test_epoch(2)),
             )
             .await?
             .is_none()
     );
-    // A recovered draining phase does not re-enumerate completed files.
-    recovered.complete_phase(test_epoch(2))?;
+    // A recovered drained phase continues with the next phase, not with completed files.
+    recovered.complete_fence(test_epoch(2))?;
+    assert_eq!(recovered.wait_epoch(), None);
     assert_eq!(
         serde_json::to_value(&recovered)?["cursor"]["phase"],
         "Insert"
@@ -742,29 +834,30 @@ async fn test_core<S: StateStore>(
 async fn pipeline(
     store: GatedStore,
     table: &TableIdent,
+    config: Arc<StreamingConfig>,
 ) -> anyhow::Result<(
     tokio::sync::mpsc::UnboundedSender<Barrier>,
     BoxedMessageStream,
 )> {
     let list_catalog = list_state_catalog(43);
-    let mut fetch_catalog = default_source_internal_table(42);
-    fetch_catalog.distribution_key = vec![0];
-    fetch_catalog.maybe_vnode_count = Some(4);
+    let fetch_catalog = fetch_state_catalog(42);
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let list = IcebergUpdateListExecutor::new(
         test_core(store.clone(), &list_catalog, None, table).await,
         output_columns(),
         descriptor(&fetch_catalog),
         rx,
-        streaming_config(),
+        config.clone(),
     );
     let upstream = Executor::new(
         ExecutorInfo::for_test(
-            risingwave_common::catalog::Schema::new(vec![
-                risingwave_common::catalog::Field::unnamed(DataType::Varchar),
-                risingwave_common::catalog::Field::unnamed(DataType::Jsonb),
-            ]),
-            vec![0],
+            risingwave_common::catalog::Schema::new(
+                task_row_types()
+                    .into_iter()
+                    .map(risingwave_common::catalog::Field::unnamed)
+                    .collect(),
+            ),
+            vec![0, 1],
             "List".to_owned(),
             1,
         ),
@@ -780,7 +873,7 @@ async fn pipeline(
         )
         .await,
         upstream,
-        streaming_config(),
+        config,
         output_columns(),
         vec![0],
     );
@@ -801,10 +894,7 @@ async fn list_binds_once_and_recovers_before_issuing_tasks() -> anyhow::Result<(
     let columns = output_columns();
     let ctx = list_context(
         properties,
-        reader(
-            store.clone(),
-            &descriptor(&default_source_internal_table(42)),
-        ),
+        reader(store.clone(), &descriptor(&fetch_state_catalog(42))),
     );
     let initial = list_work(ctx.clone(), None, None, test_epoch(0), Duration::ZERO)
         .next()
@@ -858,6 +948,19 @@ async fn list_binds_once_and_recovers_before_issuing_tasks() -> anyhow::Result<(
 #[tokio::test]
 async fn live_list_fetch_waits_only_at_phase_boundaries_and_keeps_barriers_flowing()
 -> anyhow::Result<()> {
+    live_list_fetch(0).await
+}
+
+#[tokio::test]
+async fn live_list_fetch_orders_small_phases_without_waiting_for_commits() -> anyhow::Result<()> {
+    live_list_fetch(16).await
+}
+
+/// Without ordered phases, Insert waits until the Delete phase is committed. With them, both
+/// phases share one Fetch route, so Insert follows Delete while global commit is held.
+async fn live_list_fetch(ordered_max_tasks: u64) -> anyhow::Result<()> {
+    let ordered = ordered_max_tasks > 0;
+    let config = streaming_config_with(0, ordered_max_tasks);
     let (first, second) = live_tables().await?;
     let table = MockCatalog::register(first.clone());
     let (commit_tx, committed) = watch::channel(0);
@@ -865,7 +968,7 @@ async fn live_list_fetch_waits_only_at_phase_boundaries_and_keeps_barriers_flowi
         inner: MemoryStateStore::new(),
         committed,
     };
-    let (mut tx, mut output) = pipeline(store.clone(), first.identifier()).await?;
+    let (mut tx, mut output) = pipeline(store.clone(), first.identifier(), config.clone()).await?;
     let mut events = vec![];
     let mut hold_until = None;
     let mut released = false;
@@ -893,7 +996,7 @@ async fn live_list_fetch_waits_only_at_phase_boundaries_and_keeps_barriers_flowi
             // advanced, but both executors must recover the original binding.
             table.update(second.clone());
             drop(output);
-            (tx, output) = pipeline(store.clone(), first.identifier()).await?;
+            (tx, output) = pipeline(store.clone(), first.identifier(), config.clone()).await?;
             tx.send(Barrier::new_test_barrier(test_epoch(epoch)))?;
             assert!(matches!(output.next().await.unwrap()?, Message::Barrier(_)));
             restart = false;
@@ -912,9 +1015,13 @@ async fn live_list_fetch_waits_only_at_phase_boundaries_and_keeps_barriers_flowi
                         events,
                         vec![(Op::Insert, 0), (Op::Insert, 1), (Op::Insert, 2)]
                     );
-                    hold_until = Some(epoch + 4);
+                    // An ordered Insert must not need any further commit.
+                    hold_until = Some(if ordered { u64::MAX } else { epoch + 4 });
                 } else if hold_until.is_some() {
-                    assert!(released, "Insert crossed an uncommitted Delete phase");
+                    assert!(
+                        released != ordered,
+                        "Insert crossed an uncommitted fan-out Delete phase or waited for an ordered one"
+                    );
                 }
                 events.push((op, key));
             }
@@ -936,14 +1043,19 @@ async fn live_list_fetch_waits_only_at_phase_boundaries_and_keeps_barriers_flowi
                 .unwrap();
             let state: IcebergUpdateListState =
                 decode_value(row.datum_at(0).unwrap().into_jsonb().to_owned_scalar())?;
-            if serde_json::to_value(&state)?["applied_snapshot"] == 2 {
-                assert_eq!(state.phase_end_epoch(), None);
-                applied = true;
-                break;
+            let encoded = serde_json::to_value(&state)?;
+            if encoded["dispatched_snapshot"] == 2 && encoded["cursor"].is_null() {
+                if ordered {
+                    assert_eq!(encoded["fence"]["ordered"], true);
+                }
+                if state.wait_epoch().is_none() {
+                    applied = true;
+                    break;
+                }
             }
         }
     }
-    assert!(released && restarted && applied);
+    assert!(released != ordered && restarted && applied);
     assert_eq!(
         events,
         vec![
@@ -967,9 +1079,7 @@ async fn list_dispatches_multiple_pages_before_waiting_for_a_checkpoint() -> any
         committed,
     };
     let list_catalog = list_state_catalog(43);
-    let mut fetch_catalog = default_source_internal_table(42);
-    fetch_catalog.distribution_key = vec![0];
-    fetch_catalog.maybe_vnode_count = Some(4);
+    let fetch_catalog = fetch_state_catalog(42);
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let list = IcebergUpdateListExecutor::new(
         test_core(store.clone(), &list_catalog, None, first.identifier()).await,
@@ -1000,7 +1110,10 @@ async fn list_dispatches_multiple_pages_before_waiting_for_a_checkpoint() -> any
         assert_eq!(chunk.cardinality(), expected);
         for (op, row) in chunk.rows() {
             assert_eq!(op, Op::Insert);
-            assert!(keys.insert(row.datum_at(0).unwrap().into_utf8().to_owned()));
+            // A phase spanning several pages fans out: each task has its own route.
+            let seq = row.datum_at(1).unwrap().into_int64();
+            assert_eq!(row.datum_at(0).unwrap().into_int64(), seq);
+            assert!(keys.insert(seq));
         }
     }
     // Start a phase completion read with global commit still blocked.
@@ -1029,7 +1142,7 @@ async fn list_dispatches_multiple_pages_before_waiting_for_a_checkpoint() -> any
         .unwrap();
     let state: IcebergUpdateListState =
         decode_value(row.datum_at(0).unwrap().into_jsonb().to_owned_scalar())?;
-    assert_eq!(state.phase_end_epoch(), Some(test_epoch(2)));
+    assert_eq!(state.wait_epoch(), Some(test_epoch(2)));
     assert!(serde_json::to_value(state)?.get("pending").is_none());
     Ok(())
 }
@@ -1077,7 +1190,7 @@ async fn idle_list_polls_are_throttled_while_barriers_keep_flowing() -> anyhow::
                 properties,
                 reader(
                     MemoryStateStore::new(),
-                    &descriptor(&default_source_internal_table(42)),
+                    &descriptor(&fetch_state_catalog(42)),
                 ),
             ),
             Some(state.clone()),
@@ -1094,9 +1207,7 @@ async fn idle_list_polls_are_throttled_while_barriers_keep_flowing() -> anyhow::
     let (first, second) = live_tables().await?;
     let table = MockCatalog::register(first.clone());
     let list_catalog = list_state_catalog(43);
-    let mut fetch_catalog = default_source_internal_table(42);
-    fetch_catalog.distribution_key = vec![0];
-    fetch_catalog.maybe_vnode_count = Some(4);
+    let fetch_catalog = fetch_state_catalog(42);
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let list = IcebergUpdateListExecutor::new(
         test_core(
@@ -1109,7 +1220,8 @@ async fn idle_list_polls_are_throttled_while_barriers_keep_flowing() -> anyhow::
         output_columns(),
         descriptor(&fetch_catalog),
         rx,
-        streaming_config_with_list_interval(1),
+        // Fan out so that the bootstrap phase waits for its completion like a large phase.
+        streaming_config_with(1, 0),
     );
     let mut output = list.boxed().execute();
     let mut epoch = 0;

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Fetch reads assigned Iceberg update tasks and keeps a resumable cursor per task.
+//! Fetch reads assigned Iceberg update tasks and keeps a resumable cursor per task. Tasks are
+//! read in state-table order, so the tasks of one route are applied in dispatch order.
 
 use std::ops::Bound;
 use std::time::Instant;
@@ -38,7 +39,7 @@ use risingwave_connector::source::iceberg::{
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
-use super::{decode, encode, properties, scan_metrics};
+use super::{decode, properties, scan_metrics, task_pk, task_row};
 use crate::executor::prelude::*;
 use crate::executor::source::{SourceStateTableHandler, StreamSourceCore};
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -164,8 +165,12 @@ impl<S: StateStore> IcebergUpdateFetchExecutor<S> {
                             == output_types,
                         "Iceberg update output schema differs from its plan"
                     );
-                    let key = state.assignment.key()?;
-                    state_table.set(&key, encode(&state)?).await?;
+                    let table = state_table.state_table_mut();
+                    let old = table
+                        .get_row(task_pk(&state.assignment))
+                        .await?
+                        .context("missing Iceberg task state")?;
+                    table.update(old, task_row(&state.assignment, &state)?);
                     if chunk.cardinality() != 0 {
                         yield Message::Chunk(chunk);
                     }
@@ -173,8 +178,10 @@ impl<S: StateStore> IcebergUpdateFetchExecutor<S> {
                 Either::Right(Ok(FetchResult::Finished(state))) => {
                     // Retirement and the last output share the same checkpoint. Recovery
                     // restores either the task cursor or its completed downstream effects.
-                    let key = state.assignment.key()?;
-                    state_table.delete(&key).await?;
+                    let table = state_table.state_table_mut();
+                    if let Some(old) = table.get_row(task_pk(&state.assignment)).await? {
+                        table.delete(old);
+                    }
                     inflight = inflight.saturating_sub(1);
                     ctx.scan_metrics.set_inflight_file_count(inflight);
                 }
@@ -221,28 +228,26 @@ impl FetchContext {
         state_table: &mut SourceStateTableHandler<S>,
         chunk: &StreamChunk,
     ) -> StreamExecutorResult<()> {
+        let table = state_table.state_table_mut();
         for (op, row) in chunk.rows() {
-            let key = row
-                .datum_at(0)
-                .context("missing assignment key")?
-                .into_utf8();
-            let assignment: IcebergUpdateAssignment = decode(row)?;
+            let assignment: IcebergUpdateAssignment = decode(row, |assignment| assignment)?;
             ensure!(
-                assignment.job_id == self.job_id && assignment.key()? == key,
-                "Iceberg assignment belongs to another job/generation"
+                assignment.job_id == self.job_id,
+                "Iceberg assignment belongs to another job"
             );
             assignment
                 .task
                 .validate_key(&self.output_columns, &self.key_indices)?;
-            match (op, state_table.get(key).await?) {
+            match (op, table.get_row(task_pk(&assignment)).await?) {
                 (Op::Insert, None) => {
-                    state_table
-                        .set(key, encode(&IcebergUpdateFetchState::new(assignment))?)
-                        .await?
+                    let state = IcebergUpdateFetchState::new(assignment);
+                    table.insert(task_row(&state.assignment, &state)?);
                 }
                 (Op::Insert, Some(old)) => {
                     ensure!(
-                        decode::<IcebergUpdateFetchState>(&old)?.assignment == assignment,
+                        decode(&old, |state: &IcebergUpdateFetchState| &state.assignment)?
+                            .assignment
+                            == assignment,
                         "conflicting duplicate Iceberg assignment"
                     );
                 }
@@ -359,7 +364,7 @@ pub(super) async fn pending_tasks<S: StateStore>(
             .await?;
         pin_mut!(iter);
         while let Some(row) = iter.next().await {
-            let task: IcebergUpdateFetchState = decode(&row?)?;
+            let task = decode(&row?, |task: &IcebergUpdateFetchState| &task.assignment)?;
             ensure!(
                 task.assignment.job_id == job_id,
                 "Iceberg task belongs to another ingestion job"
