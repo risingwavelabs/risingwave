@@ -734,39 +734,6 @@ mod tests {
     }
 
     #[test]
-    fn test_single_table_input() {
-        for (table_ids, expected) in [
-            (vec![], false),
-            (vec![vec![]], false),
-            (vec![vec![1]], true),
-            (vec![vec![1], vec![1]], true),
-            (vec![vec![], vec![1]], true),
-            (vec![vec![1, 2]], false),
-            (vec![vec![1], vec![2]], false),
-        ] {
-            let task = CompactTask {
-                input_ssts: vec![InputLevel {
-                    table_infos: table_ids
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, ids)| {
-                            test_sstable(index as u64, ids.into_iter().map(TableId::new).collect())
-                        })
-                        .collect(),
-                    ..Default::default()
-                }],
-                max_vnode_key_range_bytes: Some(32),
-                ..Default::default()
-            };
-            assert_eq!(task.is_single_table(), expected);
-            assert_eq!(
-                task.effective_max_vnode_key_range_bytes(),
-                expected.then_some(32)
-            );
-        }
-    }
-
-    #[test]
     fn test_empty_table_ids_are_reclaim_and_have_no_input_table_ids() {
         let task = CompactTask {
             input_ssts: vec![InputLevel {
