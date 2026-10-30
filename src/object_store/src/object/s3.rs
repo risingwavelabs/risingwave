@@ -695,7 +695,7 @@ impl S3ObjectStore {
                     Err(_) => false,
                 };
 
-                let sdk_config = sdk_config_loader.load().await;
+                let sdk_config = Box::pin(sdk_config_loader.load()).await;
                 #[cfg(madsim)]
                 let client = Client::new(&sdk_config);
                 #[cfg(not(madsim))]
@@ -719,7 +719,7 @@ impl S3ObjectStore {
             }
             Err(_) => {
                 // s3
-                let sdk_config = sdk_config_loader.load().await;
+                let sdk_config = Box::pin(sdk_config_loader.load()).await;
                 #[cfg(madsim)]
                 let client = Client::new(&sdk_config);
                 #[cfg(not(madsim))]
@@ -776,15 +776,17 @@ impl S3ObjectStore {
         );
         #[cfg(not(madsim))]
         let builder = aws_sdk_s3::config::Builder::from(
-            &aws_config::ConfigLoader::default()
-                // FIXME: https://github.com/awslabs/aws-sdk-rust/issues/973
-                .credentials_provider(Credentials::from_keys(
-                    access_key_id,
-                    secret_access_key,
-                    None,
-                ))
-                .load()
-                .await,
+            &Box::pin(
+                aws_config::ConfigLoader::default()
+                    // FIXME: https://github.com/awslabs/aws-sdk-rust/issues/973
+                    .credentials_provider(Credentials::from_keys(
+                        access_key_id,
+                        secret_access_key,
+                        None,
+                    ))
+                    .load(),
+            )
+            .await,
         )
         .force_path_style(true)
         .identity_cache(
