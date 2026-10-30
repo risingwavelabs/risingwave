@@ -231,8 +231,9 @@ fn generate_splits_fast(
     let mut last_split_key_count = 0;
     for key in indexes {
         if last_split_key_count >= parallel_key_count {
-            splits.last_mut().unwrap().right = Bytes::from(key.clone());
-            splits.push(KeyRange::new(Bytes::from(key.clone()), Bytes::default()));
+            let split_key = Bytes::from(key);
+            splits.last_mut().unwrap().right = split_key.clone();
+            splits.push(KeyRange::new(split_key, Bytes::default()));
             last_split_key_count = 0;
         }
         last_split_key_count += 1;
@@ -298,8 +299,9 @@ pub async fn generate_splits(
                     && !last_key.eq(&key)
                     && remaining_size > parallel_compact_size
                 {
-                    splits.last_mut().unwrap().right = Bytes::from(key.clone());
-                    splits.push(KeyRange::new(Bytes::from(key.clone()), Bytes::default()));
+                    let split_key = Bytes::copy_from_slice(&key);
+                    splits.last_mut().unwrap().right = split_key.clone();
+                    splits.push(KeyRange::new(split_key, Bytes::default()));
                     last_buffer_size = data_size;
                 } else {
                     last_buffer_size += data_size;
@@ -565,6 +567,18 @@ fn optimize_by_copy_block_with_input(
     input_ssts: &[&SstableInfo],
     compaction_size: u64,
 ) -> bool {
+    if !context.storage_opts.enable_fast_compaction
+        || !matches!(
+            compact_task.sstable_filter_type,
+            PbSstableFilterType::SstableFilterXor8 | PbSstableFilterType::SstableFilterXor16
+        )
+        || compact_task.target_level == 0
+        || compact_task.input_ssts.len() != 2
+        || compact_task.task_type != PbTaskType::Dynamic
+    {
+        return false;
+    }
+
     let all_ssts_are_blocked_filter = input_ssts
         .iter()
         .all(|table_info| table_info.filter_layout == PbSstableFilterLayout::Blocked);
@@ -591,25 +605,17 @@ fn optimize_by_copy_block_with_input(
         .map(|table_info| table_info.total_key_count)
         .sum::<u64>();
 
-    let single_table = compact_task.get_table_ids_from_input_ssts().count() == 1;
-    context.storage_opts.enable_fast_compaction
-        && matches!(
-            current_filter_type,
-            PbSstableFilterType::SstableFilterXor8 | PbSstableFilterType::SstableFilterXor16
-        )
-        && all_ssts_are_blocked_filter
+    let single_table = compact_task.is_single_table();
+    all_ssts_are_blocked_filter
         && all_ssts_match_filter_type
         && output_filter_layout == PbSstableFilterLayout::Blocked
         && !compact_task.contains_range_tombstone()
         && !compact_task.contains_ttl()
         && !compact_task.contains_split_sst()
         && single_table
-        && compact_task.target_level > 0
-        && compact_task.input_ssts.len() == 2
         && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
         && delete_key_count * 100
             < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
-        && compact_task.task_type == PbTaskType::Dynamic
 }
 
 pub async fn generate_splits_for_task(
@@ -617,23 +623,22 @@ pub async fn generate_splits_for_task(
     context: &CompactorContext,
     optimize_by_copy_block: bool,
 ) -> HummockResult<()> {
-    let input_ssts = compact_task.read_input_ssts().collect_vec();
-    let compaction_size = input_ssts_size(&input_ssts);
-
-    if !optimize_by_copy_block {
-        let splits = generate_splits(
-            &input_ssts,
-            compaction_size,
-            context,
-            compact_task.max_sub_compaction,
-        )
-        .await?;
-        if !splits.is_empty() {
-            compact_task.splits = splits;
-        }
+    if optimize_by_copy_block {
         return Ok(());
     }
 
+    let input_ssts = compact_task.read_input_ssts().collect_vec();
+    let compaction_size = input_ssts_size(&input_ssts);
+    let splits = generate_splits(
+        &input_ssts,
+        compaction_size,
+        context,
+        compact_task.max_sub_compaction,
+    )
+    .await?;
+    if !splits.is_empty() {
+        compact_task.splits = splits;
+    }
     Ok(())
 }
 
