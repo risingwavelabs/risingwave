@@ -264,6 +264,8 @@ pub enum HummockReadEpoch {
     /// We don't need to wait epoch.
     Backup(HummockEpoch),
     TimeTravel(HummockEpoch),
+    /// Resolve the local committed version and table epoch when creating a snapshot.
+    LatestCommitted,
 }
 
 impl From<BatchQueryEpoch> for HummockReadEpoch {
@@ -275,6 +277,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
             batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::NoWait(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
+            batch_query_epoch::Epoch::LatestCommitted(_) => HummockReadEpoch::LatestCommitted,
         }
     }
 }
@@ -286,13 +289,15 @@ pub fn test_batch_query_epoch() -> BatchQueryEpoch {
 }
 
 impl HummockReadEpoch {
-    pub fn get_epoch(&self) -> HummockEpoch {
-        *match self {
+    /// Returns no numeric epoch until a latest-committed request has been resolved.
+    pub fn get_epoch(&self) -> Option<HummockEpoch> {
+        match self {
             HummockReadEpoch::Committed(epoch)
             | HummockReadEpoch::BatchQueryCommitted(epoch, _)
             | HummockReadEpoch::NoWait(epoch)
             | HummockReadEpoch::Backup(epoch)
-            | HummockReadEpoch::TimeTravel(epoch) => epoch,
+            | HummockReadEpoch::TimeTravel(epoch) => Some(*epoch),
+            HummockReadEpoch::LatestCommitted => None,
         }
     }
 
@@ -300,7 +305,8 @@ impl HummockReadEpoch {
         match self {
             HummockReadEpoch::Committed(_)
             | HummockReadEpoch::TimeTravel(_)
-            | HummockReadEpoch::BatchQueryCommitted(_, _) => true,
+            | HummockReadEpoch::BatchQueryCommitted(_, _)
+            | HummockReadEpoch::LatestCommitted => true,
             HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => false,
         }
     }
@@ -492,6 +498,17 @@ mod tests {
     use sstable_info::SstableInfoInner;
 
     use super::*;
+
+    #[test]
+    fn test_latest_committed_epoch() {
+        let epoch = HummockReadEpoch::from(BatchQueryEpoch {
+            epoch: Some(batch_query_epoch::Epoch::LatestCommitted(Default::default())),
+        });
+        assert!(matches!(epoch, HummockReadEpoch::LatestCommitted));
+        assert_eq!(epoch.get_epoch(), None);
+        assert!(epoch.is_read_committed());
+        assert_eq!(HummockReadEpoch::Committed(42).get_epoch(), Some(42));
+    }
 
     #[test]
     fn test_object_id_decimal_max_length() {

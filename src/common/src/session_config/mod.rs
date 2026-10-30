@@ -175,6 +175,14 @@ pub struct SessionConfig {
     #[parameter(default = VisibilityMode::default())]
     visibility_mode: VisibilityMode,
 
+    /// Read each serving node's latest locally committed data without waiting for a frontend epoch.
+    /// Different scans, nodes, and statements in a transaction may observe different committed
+    /// epochs. Each storage snapshot remains stable. Explicit historical reads and subscription
+    /// snapshots retain their existing semantics. Overrides barrier reads. Enable only after all
+    /// participating frontend and serving nodes support this option.
+    #[parameter(default = false)]
+    batch_read_latest_committed: bool,
+
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
     #[parameter(default = IsolationLevel::default())]
     transaction_isolation: IsolationLevel,
@@ -737,6 +745,22 @@ mod test {
         test_param: i32,
         #[parameter(default = false, deprecated = "deprecated test notice")]
         deprecated_test_param: bool,
+    }
+
+    #[test]
+    fn test_batch_read_latest_committed() {
+        let mut config = SessionConfig::default();
+        assert!(!config.batch_read_latest_committed());
+        assert_eq!(config.get("batch_read_latest_committed").unwrap(), "false");
+        config
+            .set("batch_read_latest_committed", "true".to_owned(), &mut ())
+            .unwrap();
+        assert!(config.batch_read_latest_committed());
+        assert_eq!(config.get("batch_read_latest_committed").unwrap(), "true");
+        config
+            .reset("batch_read_latest_committed", &mut ())
+            .unwrap();
+        assert!(!config.batch_read_latest_committed());
     }
 
     #[test]

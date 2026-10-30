@@ -63,7 +63,7 @@ impl<S> TracedStateStore<S, TableSnapshot> {
     }
 
     fn raw_epoch(&self) -> Option<u64> {
-        self.epoch().map(|epoch| epoch.get_epoch())
+        self.epoch().and_then(|epoch| epoch.get_epoch())
     }
 
     fn table_id(&self) -> TableId {
@@ -336,6 +336,16 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
             .new_read_snapshot(epoch, options)
             .await
             .map(|snapshot| {
+                // Replay needs the epoch captured by this snapshot, not a later local version.
+                let epoch = if matches!(epoch, HummockReadEpoch::LatestCommitted) {
+                    HummockReadEpoch::Committed(
+                        snapshot
+                            .read_epoch()
+                            .expect("latest-committed snapshot must resolve its epoch"),
+                    )
+                } else {
+                    epoch
+                };
                 TracedStateStore::new_with_snapshot_epoch(
                     snapshot,
                     (table_id, Some(epoch), table_option),
@@ -365,6 +375,10 @@ impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, Table
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S, TableSnapshot> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
+
+    fn read_epoch(&self) -> Option<u64> {
+        self.inner.read_epoch()
+    }
 
     fn iter(
         &self,
@@ -510,4 +524,28 @@ impl<S: StateStoreIter> StateStoreIter for TracedStateStoreIter<S> {
 
 pub fn get_concurrent_id() -> ConcurrentId {
     LOCAL_ID.get()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::MemoryStateStore;
+
+    #[tokio::test]
+    async fn test_latest_committed_trace_resolves_epoch() {
+        let store = TracedStateStore::new_global(MemoryStateStore::new());
+        let snapshot = store
+            .new_read_snapshot(
+                HummockReadEpoch::LatestCommitted,
+                NewReadSnapshotOptions {
+                    table_id: TableId::new(1),
+                    table_option: TableOption::default(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(snapshot.raw_epoch(), Some(u64::MAX));
+        assert_eq!(snapshot.read_epoch(), Some(u64::MAX));
+        assert!(snapshot.epoch().unwrap().is_read_committed());
+    }
 }

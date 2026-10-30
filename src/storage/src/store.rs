@@ -277,6 +277,12 @@ pub trait StateStoreRead: StateStoreGet + StaticSendSync {
     type Iter: StateStoreReadIter;
     type RevIter: StateStoreReadIter;
 
+    /// The resolved epoch of a read snapshot, if this reader has one. Tracing uses this to
+    /// record a numeric epoch for requests resolved by storage, such as latest committed.
+    fn read_epoch(&self) -> Option<u64> {
+        None
+    }
+
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used for checking the SST filter and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
@@ -537,7 +543,8 @@ impl ReadOptions {
             Some(HummockReadEpoch::Backup(_)) => (true, false),
             Some(HummockReadEpoch::Committed(_))
             | Some(HummockReadEpoch::BatchQueryCommitted(_, _))
-            | Some(HummockReadEpoch::TimeTravel(_)) => (false, true),
+            | Some(HummockReadEpoch::TimeTravel(_))
+            | Some(HummockReadEpoch::LatestCommitted) => (false, true),
         };
         TracedReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
