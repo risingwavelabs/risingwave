@@ -15,6 +15,7 @@
 mod backup_meta;
 mod cluster_info;
 mod connection;
+mod create_meta_store_schema;
 mod pause_resume;
 mod reschedule;
 mod resume_backfill;
@@ -24,6 +25,7 @@ mod source_props;
 pub use backup_meta::*;
 pub use cluster_info::*;
 pub use connection::*;
+pub use create_meta_store_schema::*;
 pub use pause_resume::*;
 pub use reschedule::*;
 pub use resume_backfill::*;

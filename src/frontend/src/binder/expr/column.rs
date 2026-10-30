@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
-use crate::binder::{Binder, Clause};
+use crate::binder::{BindContext, Binder, Clause, LateralBindContext};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{
+    CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal, ScopeId,
+};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -94,81 +97,60 @@ impl Binder {
             }
         }
 
-        // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
+        // Try to find a correlated column in the enclosing scopes, starting from the innermost one.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name));
 
-        for (i, lateral_context) in self.lateral_contexts.iter().rev().enumerate() {
-            if lateral_context.is_visible {
-                let context = &lateral_context.context;
+        for level in self.outer_context_levels() {
+            let mut found = None;
+            for context in level {
                 if matches!(context.clause, Some(Clause::Insert)) {
                     continue;
                 }
-                // input ref from lateral context `depth` starts from 1.
-                let depth = i + 1;
-                match context.get_column_binding_index(&schema_name, &table_name, &column_name) {
-                    Ok(index) => {
-                        let column = &context.columns[index];
-                        return Ok(CorrelatedInputRef::new(
-                            column.index,
-                            column.field.data_type.clone(),
-                            depth,
-                        )
-                        .into());
-                    }
-                    Err(e) => {
-                        err = e;
-                    }
-                }
-            }
-        }
-
-        for (i, (context, lateral_contexts)) in
-            self.visible_upper_subquery_contexts_rev().enumerate()
-        {
-            if matches!(context.clause, Some(Clause::Insert)) {
-                continue;
-            }
-            // `depth` starts from 1.
-            let depth = i + 1;
-            match context.get_column_binding_index(&schema_name, &table_name, &column_name) {
-                Ok(index) => {
-                    let column = &context.columns[index];
-                    return Ok(CorrelatedInputRef::new(
-                        column.index,
-                        column.field.data_type.clone(),
-                        depth,
-                    )
-                    .into());
-                }
-                Err(e) => {
-                    err = e;
-                }
-            }
-
-            for (j, lateral_context) in lateral_contexts.iter().rev().enumerate() {
-                if lateral_context.is_visible {
-                    let context = &lateral_context.context;
-                    if matches!(context.clause, Some(Clause::Insert)) {
-                        continue;
-                    }
-                    // correlated input ref from lateral context `depth` starts from 1.
-                    let depth = i + j + 1;
-                    match context.get_column_binding_index(&schema_name, &table_name, &column_name)
-                    {
-                        Ok(index) => {
-                            let column = &context.columns[index];
-                            return Ok(CorrelatedInputRef::new(
-                                column.index,
-                                column.field.data_type.clone(),
-                                depth,
-                            )
+                match context.get_column_binding_indices(&schema_name, &table_name, &column_name) {
+                    Ok(indices) => {
+                        // All `FROM` items of a query level share one namespace, even when the
+                        // binder keeps the left inputs of a lateral factor in separate contexts.
+                        if found.is_some() {
+                            return Err(match &table_name {
+                                Some(table_name) => ErrorCode::InvalidReference(format!(
+                                    "table reference \"{}\" is ambiguous",
+                                    table_name
+                                )),
+                                None => ErrorCode::InvalidReference(format!(
+                                    "column reference \"{}\" is ambiguous",
+                                    column_name
+                                )),
+                            }
                             .into());
                         }
-                        Err(e) => {
-                            err = e;
-                        }
+                        found = Some((context, indices));
                     }
+                    Err(e @ ErrorCode::ItemNotFound(_)) => err = e,
+                    // An ambiguous name must not fall through to an outer scope.
+                    Err(e) => return Err(e.into()),
                 }
+            }
+
+            if let Some((context, mut indices)) = found {
+                indices.sort(); // make sure we have a consistent result
+                let mut inputs = indices
+                    .iter()
+                    .map(|index| {
+                        let column = &context.columns[*index];
+                        CorrelatedInputRef::new(
+                            column.index,
+                            column.field.data_type.clone(),
+                            context.scope,
+                        )
+                        .into()
+                    })
+                    .collect::<Vec<ExprImpl>>();
+                return if inputs.len() == 1 {
+                    Ok(inputs.pop().unwrap())
+                } else {
+                    // An unqualified reference to a column merged by `NATURAL`/`USING` join.
+                    Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
+                };
             }
         }
 
@@ -194,5 +176,42 @@ impl Binder {
         }
 
         Err(err.into())
+    }
+
+    /// Return visible outer column contexts grouped by query level, innermost first. A column found
+    /// in one of them is owned by that context's scope.
+    ///
+    /// An upper query context and its visible lateral contexts are the `FROM` items of one query
+    /// level, so they form one namespace: a name found in more than one of them is ambiguous rather
+    /// than resolved to whichever context comes first.
+    fn outer_context_levels(&self) -> Vec<Vec<&BindContext>> {
+        fn visible(lateral_contexts: &[LateralBindContext]) -> impl Iterator<Item = &BindContext> {
+            lateral_contexts
+                .iter()
+                .rev()
+                .filter(|lateral_context| lateral_context.is_visible)
+                .map(|lateral_context| &lateral_context.context)
+        }
+
+        let mut levels = vec![visible(&self.lateral_contexts).collect_vec()];
+        for (context, lateral_contexts) in self.visible_upper_subquery_contexts_rev() {
+            levels.push(
+                std::iter::once(context)
+                    .chain(visible(lateral_contexts))
+                    .collect(),
+            );
+        }
+        levels
+    }
+
+    /// The scope of the nearest outer `FROM` item: the first non-empty context, walking outwards
+    /// through the visible lateral contexts and the innermost upper query level.
+    pub(in crate::binder) fn nearest_outer_scope(&self) -> Option<ScopeId> {
+        self.outer_context_levels()
+            .into_iter()
+            .take(2)
+            .flatten()
+            .find(|context| !context.columns.is_empty())
+            .map(|context| context.scope)
     }
 }

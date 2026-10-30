@@ -15,6 +15,7 @@
 use core::pin::Pin;
 use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -42,6 +43,7 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 };
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use parking_lot::Mutex;
 use phf::{Set, phf_set};
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
@@ -51,6 +53,7 @@ use prost_types::{
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
@@ -72,6 +75,7 @@ use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 pub const CHANGE_TYPE: &str = "_CHANGE_TYPE";
+pub const CHANGE_SEQUENCE_NUMBER: &str = "_CHANGE_SEQUENCE_NUMBER";
 const DEFAULT_GRPC_CHANNEL_NUMS: usize = 4;
 const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(30));
 const CONNECTION_TIMEOUT: Option<Duration> = None;
@@ -92,7 +96,7 @@ pub struct BigQueryCommon {
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
-    #[serde(default)] // default false
+    #[serde(default, alias = "create_table_if_not_exists")] // default false
     #[serde_as(as = "DisplayFromStr")]
     pub auto_create: bool,
     #[serde(rename = "bigquery.credentials")]
@@ -260,7 +264,12 @@ pub struct BigQueryConfig {
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(BigQueryConfig);
 
 impl EnforceSecret for BigQueryConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -323,6 +332,28 @@ impl BigQuerySink {
 }
 
 impl BigQuerySink {
+    fn is_decimal_type_compatible(bigquery_type: &str) -> bool {
+        // BigQuery INFORMATION_SCHEMA reports parameterized decimal columns as
+        // `NUMERIC(p, s)` or `BIGNUMERIC(p, s)`. RisingWave `Decimal` does not
+        // carry typmod, so schema validation accepts the BigQuery decimal type
+        // family instead of requiring exact string equality.
+        let normalized = bigquery_type.trim().to_ascii_uppercase();
+        matches!(
+            normalized
+                .split_once('(')
+                .map_or(normalized.as_str(), |(prefix, _)| prefix),
+            "NUMERIC" | "BIGNUMERIC"
+        )
+    }
+
+    fn is_data_type_compatible(rw_data_type: &DataType, bigquery_type: &str) -> Result<bool> {
+        if matches!(rw_data_type, DataType::Decimal) {
+            return Ok(Self::is_decimal_type_compatible(bigquery_type));
+        }
+
+        Ok(Self::get_string_and_check_support_from_datatype(rw_data_type)? == bigquery_type)
+    }
+
     fn check_column_name_and_type(
         &self,
         big_query_columns_desc: HashMap<String, String>,
@@ -349,7 +380,7 @@ impl BigQuerySink {
                 ))
             })?;
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
-            if data_type_string.ne(value) {
+            if !Self::is_data_type_compatible(&i.data_type, value)? {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Data type mismatch for column `{:?}`. BigQuery side: `{:?}`, RisingWave side: `{:?}`. ",
                     i.name,
@@ -393,6 +424,9 @@ impl BigQuerySink {
             }
             DataType::Bytea => Ok("BYTES".to_owned()),
             DataType::Jsonb => Ok("JSON".to_owned()),
+            DataType::Variant => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "VARIANT is not supported for BigQuery sink."
+            ))),
             DataType::Serial => Ok("INT64".to_owned()),
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "INT256 is not supported for BigQuery sink."
@@ -449,6 +483,11 @@ impl BigQuerySink {
 
             DataType::Bytea => TableFieldSchema::bytes(&rw_field.name),
             DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
+            DataType::Variant => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "VARIANT is not supported for BigQuery sink."
+                )));
+            }
             DataType::Int256 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "INT256 is not supported for BigQuery sink."
@@ -496,6 +535,8 @@ impl Sink for BigQuerySink {
     type LogSinker = BigQueryLogSinker;
 
     const SINK_NAME: &'static str = BIGQUERY_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
@@ -603,6 +644,7 @@ pub struct BigQuerySinkWriter {
     message_descriptor: MessageDescriptor,
     write_stream: String,
     proto_field: Option<FieldDescriptor>,
+    change_sequence_number_field: Option<FieldDescriptor>,
 }
 
 impl TryFrom<SinkParam> for BigQuerySink {
@@ -627,6 +669,17 @@ impl BigQuerySinkWriter {
             .common
             .build_writer_client(&config.aws_auth_props)
             .await?;
+        let writer = Self::with_client(config, schema, pk_indices, is_append_only, client)?;
+        Ok((writer, resp_stream))
+    }
+
+    fn with_client(
+        config: BigQueryConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+        client: StorageWriterClient,
+    ) -> Result<Self> {
         let mut descriptor_proto = build_protobuf_schema(
             schema
                 .fields()
@@ -639,6 +692,13 @@ impl BigQuerySinkWriter {
             let field = FieldDescriptorProto {
                 name: Some(CHANGE_TYPE.to_owned()),
                 number: Some((schema.len() + 1) as i32),
+                r#type: Some(field_descriptor_proto::Type::String.into()),
+                ..Default::default()
+            };
+            descriptor_proto.field.push(field);
+            let field = FieldDescriptorProto {
+                name: Some(CHANGE_SEQUENCE_NUMBER.to_owned()),
+                number: Some((schema.len() + 2) as i32),
                 r#type: Some(field_descriptor_proto::Type::String.into()),
                 ..Default::default()
             };
@@ -664,32 +724,40 @@ impl BigQuerySinkWriter {
         } else {
             None
         };
+        let change_sequence_number_field = if !is_append_only {
+            let field = message_descriptor
+                .get_field_by_name(CHANGE_SEQUENCE_NUMBER)
+                .ok_or_else(|| {
+                    SinkError::BigQuery(anyhow::anyhow!("Can't find {}", CHANGE_SEQUENCE_NUMBER))
+                })?;
+            Some(field)
+        } else {
+            None
+        };
         let row_encoder = ProtoEncoder::new(
             schema.clone(),
             None,
             message_descriptor.clone(),
             ProtoHeader::None,
         )?;
-        Ok((
-            Self {
-                write_stream: format!(
-                    "projects/{}/datasets/{}/tables/{}/streams/_default",
-                    config.common.project, config.common.dataset, config.common.table
-                ),
-                config,
-                schema,
-                pk_indices,
-                client,
-                is_append_only,
-                row_encoder,
-                message_descriptor,
-                proto_field,
-                writer_pb_schema: ProtoSchema {
-                    proto_descriptor: Some(descriptor_proto.clone()),
-                },
+        Ok(Self {
+            write_stream: format!(
+                "projects/{}/datasets/{}/tables/{}/streams/_default",
+                config.common.project, config.common.dataset, config.common.table
+            ),
+            config,
+            schema,
+            pk_indices,
+            client,
+            is_append_only,
+            row_encoder,
+            message_descriptor,
+            proto_field,
+            change_sequence_number_field,
+            writer_pb_schema: ProtoSchema {
+                proto_descriptor: Some(descriptor_proto.clone()),
             },
-            resp_stream,
-        ))
+        })
     }
 
     fn append_only(&mut self, chunk: StreamChunk) -> Result<Vec<Vec<u8>>> {
@@ -704,8 +772,9 @@ impl BigQuerySinkWriter {
     }
 
     fn upsert(&mut self, chunk: StreamChunk) -> Result<Vec<Vec<u8>>> {
+        let sequence_numbers = CHANGE_SEQUENCE_CLOCK.reserve(chunk.cardinality());
         let mut serialized_rows: Vec<Vec<u8>> = Vec::with_capacity(chunk.capacity());
-        for (op, row) in chunk.rows() {
+        for ((op, row), sequence_number) in chunk.rows().zip_eq_debug(sequence_numbers) {
             if op == Op::UpdateDelete {
                 continue;
             }
@@ -734,6 +803,13 @@ impl BigQuerySinkWriter {
                     )
                     .map_err(|e| SinkError::BigQuery(e.into()))?,
             };
+            pb_row
+                .message
+                .try_set_field(
+                    self.change_sequence_number_field.as_ref().unwrap(),
+                    prost_reflect::Value::String(sequence_number),
+                )
+                .map_err(|e| SinkError::BigQuery(e.into()))?;
 
             serialized_rows.push(pb_row.ser_to()?)
         }
@@ -775,6 +851,51 @@ impl BigQuerySinkWriter {
         Ok(len)
     }
 }
+
+/// Hands out `_CHANGE_SEQUENCE_NUMBER`s as `{physical:X}/{logical:X}`, with the wall clock in
+/// microseconds as `physical`. Each number is greater than any reserved before from the same clock,
+/// even if the wall clock moves back.
+///
+/// The change with the largest number wins for each key, so numbering rows in send order is
+/// enough: the sinker sends the changes of a key in log order, and every replay (rewind, recovery,
+/// rescale) resends all changes after the truncated offset, so the last change sent for a key is
+/// its latest one.
+struct ChangeSequenceClock {
+    /// The physical time of the last reserved numbers and the next logical number after them.
+    next: Mutex<(u64, u64)>,
+}
+
+impl ChangeSequenceClock {
+    const fn new() -> Self {
+        Self {
+            next: parking_lot::const_mutex((0, 0)),
+        }
+    }
+
+    /// Reserves `count` numbers at the current wall clock.
+    fn reserve(&self, count: usize) -> impl Iterator<Item = String> + use<> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since_epoch| since_epoch.as_micros() as u64);
+        let count = count as u64;
+        let (physical, start) = self.reserve_at(now, count);
+        (start..start + count).map(move |logical| format!("{physical:X}/{logical:X}"))
+    }
+
+    /// Reserves `count` logical numbers at physical time `now`, or after the last reserved ones if
+    /// `now` has not moved past their physical time. Returns the physical time and the first
+    /// logical number.
+    fn reserve_at(&self, now: u64, count: u64) -> (u64, u64) {
+        let mut next = self.next.lock();
+        let (physical, logical) = if now > next.0 { (now, 0) } else { *next };
+        *next = (physical, logical + count);
+        (physical, logical)
+    }
+}
+
+/// Shared by all writers in the process, so that the numbers keep increasing when a writer is
+/// rebuilt or a key moves to another actor in the process.
+static CHANGE_SEQUENCE_CLOCK: ChangeSequenceClock = ChangeSequenceClock::new();
 
 #[try_stream(ok = (), error = SinkError)]
 pub async fn resp_to_stream(
@@ -964,6 +1085,9 @@ fn build_protobuf_field(
         }
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
+        DataType::Variant => {
+            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Variant")));
+        }
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
         DataType::Float32 | DataType::Int256 => {
             return Err(SinkError::BigQuery(anyhow::anyhow!(
@@ -982,12 +1106,24 @@ fn build_protobuf_field(
 mod test {
 
     use std::assert_matches;
+    use std::collections::{BTreeMap, HashMap};
 
+    use google_cloud_gax::conn::Environment;
+    use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
+        ProtoData, Rows as AppendRowsRequestRows,
+    };
+    use prost_reflect::{DynamicMessage, ReflectMessage};
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, StructType};
+    use tokio::sync::mpsc;
 
+    use crate::connector_common::AwsAuthProps;
     use crate::sink::big_query::{
-        BigQuerySink, build_protobuf_descriptor_pool, build_protobuf_schema,
+        BigQueryCommon, BigQueryConfig, BigQuerySink, BigQuerySinkWriter, CHANGE_SEQUENCE_NUMBER,
+        CHANGE_TYPE, ChangeSequenceClock, StorageWriterClient, build_protobuf_descriptor_pool,
+        build_protobuf_schema,
     };
 
     #[tokio::test]
@@ -1066,5 +1202,182 @@ mod test {
             v3_v3_message.get_field_by_name("v2").unwrap().kind(),
             prost_reflect::Kind::Int64
         );
+    }
+
+    #[test]
+    fn test_decimal_type_family_compatibility() {
+        assert!(BigQuerySink::is_decimal_type_compatible("NUMERIC"));
+        assert!(BigQuerySink::is_decimal_type_compatible("numeric(31, 2)"));
+        assert!(BigQuerySink::is_decimal_type_compatible("BIGNUMERIC"));
+        assert!(BigQuerySink::is_decimal_type_compatible(
+            "bignumeric(35, 12)"
+        ));
+        assert!(!BigQuerySink::is_decimal_type_compatible("STRING"));
+    }
+
+    #[test]
+    fn test_decimal_schema_check_accepts_parameterized_numeric_types() {
+        let sink = BigQuerySink {
+            config: BigQueryConfig {
+                common: BigQueryCommon {
+                    local_path: None,
+                    s3_path: None,
+                    project: "project".to_owned(),
+                    dataset: "dataset".to_owned(),
+                    table: "table".to_owned(),
+                    auto_create: false,
+                    credentials: None,
+                },
+                aws_auth_props: AwsAuthProps {
+                    region: None,
+                    endpoint: None,
+                    access_key: None,
+                    secret_key: None,
+                    session_token: None,
+                    arn: None,
+                    external_id: None,
+                    profile: None,
+                    msk_signer_timeout_sec: None,
+                },
+                r#type: "append-only".to_owned(),
+                unknown_fields: Default::default(),
+            },
+            schema: Schema {
+                fields: vec![Field::with_name(DataType::Decimal, "capitalizedcost")],
+            },
+            pk_indices: vec![],
+            is_append_only: true,
+        };
+
+        sink.check_column_name_and_type(HashMap::from([(
+            "capitalizedcost".to_owned(),
+            "NUMERIC(31, 2)".to_owned(),
+        )]))
+        .unwrap();
+
+        sink.check_column_name_and_type(HashMap::from([(
+            "capitalizedcost".to_owned(),
+            "BIGNUMERIC(35, 12)".to_owned(),
+        )]))
+        .unwrap();
+    }
+
+    fn sink_config(sink_type: &str) -> BigQueryConfig {
+        BigQueryConfig::from_btreemap(BTreeMap::from(
+            [
+                ("bigquery.project", "project"),
+                ("bigquery.dataset", "dataset"),
+                ("bigquery.table", "table"),
+                ("type", sink_type),
+            ]
+            .map(|(k, v)| (k.to_owned(), v.to_owned())),
+        ))
+        .unwrap()
+    }
+
+    /// Writes `chunks` in order and decodes the rows of the sent requests.
+    fn write_and_decode(sink_type: &str, chunks: Vec<StreamChunk>) -> Vec<DynamicMessage> {
+        let schema = Schema {
+            fields: vec![
+                Field::with_name(DataType::Int64, "id"),
+                Field::with_name(DataType::Varchar, "v"),
+            ],
+        };
+        let (request_sender, mut request_rx) = mpsc::unbounded_channel();
+        let client = StorageWriterClient {
+            environment: Environment::Emulator(String::new()),
+            request_sender,
+        };
+        let mut writer = BigQuerySinkWriter::with_client(
+            sink_config(sink_type),
+            schema,
+            vec![0],
+            sink_type == "append-only",
+            client,
+        )
+        .unwrap();
+        for chunk in chunks {
+            writer.write_chunk(chunk).unwrap();
+        }
+
+        let mut rows = vec![];
+        while let Ok(request) = request_rx.try_recv() {
+            let Some(AppendRowsRequestRows::ProtoRows(ProtoData {
+                writer_schema: Some(writer_schema),
+                rows: Some(proto_rows),
+            })) = request.rows
+            else {
+                panic!("expected proto rows");
+            };
+            let pool =
+                build_protobuf_descriptor_pool(&writer_schema.proto_descriptor.unwrap()).unwrap();
+            let message = pool.get_message_by_name("table").unwrap();
+            rows.extend(
+                proto_rows
+                    .serialized_rows
+                    .iter()
+                    .map(|row| DynamicMessage::decode(message.clone(), row.as_slice()).unwrap()),
+            );
+        }
+        rows
+    }
+
+    #[test]
+    fn test_change_sequence_clock() {
+        let clock = ChangeSequenceClock::new();
+        assert_eq!(clock.reserve_at(100, 3), (100, 0));
+        // The clock has not moved past the last physical time, or has moved back.
+        assert_eq!(clock.reserve_at(100, 2), (100, 3));
+        assert_eq!(clock.reserve_at(90, 1), (100, 5));
+        assert_eq!(clock.reserve_at(101, 1), (101, 0));
+    }
+
+    #[test]
+    fn test_write_change_sequence_number() {
+        let chunks = || {
+            vec![
+                StreamChunk::from_pretty(
+                    "  I T
+                    +  1 a
+                    U- 1 a
+                    U+ 1 b",
+                ),
+                StreamChunk::from_pretty(
+                    " I T
+                    - 1 b",
+                ),
+            ]
+        };
+        let field = |row: &DynamicMessage, name: &str| {
+            row.get_field_by_name(name)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+
+        let rows = write_and_decode("upsert", chunks());
+        let change_types: Vec<_> = rows.iter().map(|row| field(row, CHANGE_TYPE)).collect();
+        assert_eq!(change_types, ["UPSERT", "UPSERT", "DELETE"]);
+        let sequence_numbers: Vec<_> = rows
+            .iter()
+            .map(|row| {
+                let sequence_number = field(row, CHANGE_SEQUENCE_NUMBER);
+                let (physical, logical) = sequence_number.split_once('/').unwrap();
+                (
+                    u64::from_str_radix(physical, 16).unwrap(),
+                    u64::from_str_radix(logical, 16).unwrap(),
+                )
+            })
+            .collect();
+        assert!(
+            sequence_numbers.windows(2).all(|pair| pair[0] < pair[1]),
+            "{sequence_numbers:?}"
+        );
+
+        let rows = write_and_decode("append-only", chunks());
+        for name in [CHANGE_TYPE, CHANGE_SEQUENCE_NUMBER] {
+            assert!(rows[0].descriptor().get_field_by_name(name).is_none());
+        }
     }
 }

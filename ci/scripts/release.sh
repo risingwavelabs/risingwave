@@ -61,6 +61,7 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 export NVM_DIR="$HOME/.nvm"
 . "$NVM_DIR/nvm.sh"
 cd dashboard && nvm install && nvm use && cd ..
+npm install --global pnpm@10.14.0
 
 echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG}" ]]; then
@@ -112,7 +113,7 @@ else
 fi
 
 echo "--- Build connector node"
-cd "${REPO_ROOT}"/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
+cd "${REPO_ROOT}"/java && ./build-debezium.sh && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
 
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Collect all release assets"

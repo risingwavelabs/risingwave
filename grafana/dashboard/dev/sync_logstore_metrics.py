@@ -12,17 +12,9 @@ def _(outer_panels: Panels):
             "Sync Log Store Metrics",
             [
                 panels.timeseries_epoch(
-                    "Log Store Read/Write Epoch",
+                    "Sync Log Store Unconsumed Min Epoch",
                     "",
                     [
-                        panels.target(
-                            f"{metric('sync_log_store_latest_write_epoch')}",
-                            "latest write epoch @ {{fragment_id}} {{relation}} @ actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"{metric('sync_log_store_latest_read_epoch')}",
-                            "latest read epoch @ {{fragment_id}} {{relation}} ({{target}}) actor {{actor_id}}",
-                        ),
                         panels.target(
                             f"{metric('sync_kv_log_store_buffer_unconsumed_min_epoch')}",
                             "Sync Kv log store unconsumed min epoch @ {{fragment_id}} {{relation}} ({{target}}) actor {{actor_id}}",
@@ -78,7 +70,7 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('sync_kv_log_store_total_read_size')}[$__rate_interval])) by (type, target, fragment_id, relation) / (1000*1000)",
+                            f"sum(rate({metric('sync_kv_log_store_read_size')}[$__rate_interval])) by (type, target, fragment_id, relation) / (1000*1000)",
                             "{{type}} {{fragment_id}} {{relation}} ({{target}})",
                         ),
                     ],
@@ -166,8 +158,8 @@ def _(outer_panels: Panels):
                     "Total size of chunks buffered in a barrier",
                     [
                         panels.target(
-                            f"sum({metric('stream_sink_chunk_buffer_size')}) by (fragment_id, actor_id, relation) * on(actor_id) group_left(relation) {metric('sink_info')}",
-                            "sink {{fragment_id}} {{relation}} - actor {{actor_id}}",
+                            f"sum({metric('stream_sink_chunk_buffer_size')}) by (fragment_id, sink_id, actor_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
+                            "sink {{sink_id}} {{sink_name}} - fragment {{fragment_id}} - actor {{actor_id}}",
                         ),
                     ],
                 ),

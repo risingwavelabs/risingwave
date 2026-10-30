@@ -20,7 +20,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use educe::Educe;
 use either::Either;
 use foyer::Hint;
 use futures::future::{ready, try_join_all};
@@ -45,11 +47,11 @@ use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{
-    CopyFromSlice, TableKey, end_bound_of_prefix, next_key, prefix_slice_with_vnode,
-    prefixed_range_with_vnode, start_bound_of_excluded_prefix,
+    CopyFromSlice, TableKey, TableKeyRange, end_bound_of_prefix, is_empty_key_range, next_key,
+    prefix_slice_with_vnode, prefixed_range_with_vnode, start_bound_of_excluded_prefix,
 };
 use risingwave_hummock_sdk::table_watermark::{
-    VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    VnodeWatermark, WatermarkDirection, WatermarkSerdeType, rewrite_range_with_watermark,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -258,6 +260,25 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// Used for `ArrangementBackfill` executor.
 pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
 
+pub type FlushedStateTableReader<S, SD = BasicSerde> = StateTableFlushedSnapshotReader<
+    <<S as StateStore>::Local as LocalStateStore>::FlushedSnapshotReader,
+    SD,
+>;
+
+#[derive(Educe)]
+#[educe(Clone)]
+pub struct StateTableFlushedSnapshotReader<R, SD = BasicSerde>
+where
+    R: StateStoreRead,
+    SD: ValueRowSerde,
+{
+    reader: Arc<R>,
+    pk_serde: OrderedRowSerde,
+    vnodes: Arc<Bitmap>,
+    row_serde: Arc<SD>,
+    metrics: Option<StateTableMetrics>,
+}
+
 // initialize
 impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
@@ -302,14 +323,14 @@ fn consistent_old_value_op(
             let first = match row_serde.deserialize(first) {
                 Ok(rows) => rows,
                 Err(e) => {
-                    error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
+                    error!(error = %e.as_report(), value = ?first, "failed to deserialize the serialized value");
                     return false;
                 }
             };
             let second = match row_serde.deserialize(second) {
                 Ok(rows) => rows,
                 Err(e) => {
-                    error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
+                    error!(error = %e.as_report(), value = ?second, "failed to deserialize the serialized value");
                     return false;
                 }
             };
@@ -344,6 +365,10 @@ macro_rules! dispatch_value_indices {
 struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
     state_store: LS,
     all_rows: Option<HashMap<VirtualNode, BTreeMap<Bytes, OwnedRow>>>,
+    /// The pk-prefix watermark fed in the current epoch, with its direction. The state store only
+    /// applies it once committed, so the reads from the state store hide the keys it cleans until
+    /// then.
+    pending_watermark: Option<(WatermarkDirection, Bytes)>,
 
     table_id: TableId,
     row_serde: Arc<SD>,
@@ -490,48 +515,86 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         Ok(())
     }
 
+    /// Remove the preloaded rows cleaned by `watermarks`.
+    fn clean_preloaded_rows(
+        &mut self,
+        direction: WatermarkDirection,
+        watermarks: &[VnodeWatermark],
+        serde_type: WatermarkSerdeType,
+    ) {
+        let Some(rows) = &mut self.all_rows else {
+            return;
+        };
+        match serde_type {
+            WatermarkSerdeType::PkPrefix => {
+                for vnode_watermark in watermarks {
+                    match direction {
+                        WatermarkDirection::Ascending => {
+                            for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
+                                let rows = rows.get_mut(&vnode).expect("covered vnode");
+                                // split_off returns everything after the given key, including the key.
+                                *rows = rows.split_off(vnode_watermark.watermark());
+                            }
+                        }
+                        WatermarkDirection::Descending => {
+                            // Turn Exclude(vnode_watermark.watermark()) into Include(next_key(vnode_watermark.watermark())).
+                            let split_off_key = next_key(vnode_watermark.watermark());
+                            for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
+                                let rows = rows.get_mut(&vnode).expect("covered vnode");
+                                // split_off away (Exclude(vnode_watermark.watermark())..) and keep
+                                // (..Include(vnode_watermark.watermark()))
+                                rows.split_off(split_off_key.as_slice());
+                            }
+                        }
+                    }
+                }
+            }
+            WatermarkSerdeType::NonPkPrefix => {
+                warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written non pk prefix watermark");
+                self.all_rows = None;
+            }
+            WatermarkSerdeType::Value => {
+                warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written value watermark");
+                self.all_rows = None;
+            }
+        }
+    }
+
+    /// Feed the pk-prefix watermark of the current epoch: the preloaded rows below it are removed
+    /// at once, and the reads from the state store hide them until the commit.
+    fn update_pending_watermark(
+        &mut self,
+        direction: WatermarkDirection,
+        vnode_watermark: VnodeWatermark,
+    ) {
+        self.clean_preloaded_rows(
+            direction,
+            std::slice::from_ref(&vnode_watermark),
+            WatermarkSerdeType::PkPrefix,
+        );
+        self.pending_watermark = Some((direction, vnode_watermark.watermark().clone()));
+    }
+
+    fn narrow_by_pending_watermark(&self, key_range: &mut TableKeyRange) {
+        if let Some((direction, watermark)) = &self.pending_watermark {
+            rewrite_range_with_watermark(*direction, watermark, key_range);
+        }
+    }
+
+    fn below_pending_watermark(&self, key: &TableKey<Bytes>) -> bool {
+        let mut key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
+        self.narrow_by_pending_watermark(&mut key_range);
+        is_empty_key_range(&key_range)
+    }
+
     async fn seal_current_epoch(
         &mut self,
         next_epoch: u64,
         table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)>,
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
-        if let Some((direction, watermarks, serde_type)) = &table_watermarks
-            && let Some(rows) = &mut self.all_rows
-        {
-            match serde_type {
-                WatermarkSerdeType::PkPrefix => {
-                    for vnode_watermark in watermarks {
-                        match direction {
-                            WatermarkDirection::Ascending => {
-                                for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
-                                    let rows = rows.get_mut(&vnode).expect("covered vnode");
-                                    // split_off returns everything after the given key, including the key.
-                                    *rows = rows.split_off(vnode_watermark.watermark());
-                                }
-                            }
-                            WatermarkDirection::Descending => {
-                                // Turn Exclude(vnode_watermark.watermark()) into Include(next_key(vnode_watermark.watermark())).
-                                let split_off_key = next_key(vnode_watermark.watermark());
-                                for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
-                                    let rows = rows.get_mut(&vnode).expect("covered vnode");
-                                    // split_off away (Exclude(vnode_watermark.watermark())..) and keep
-                                    // (..Include(vnode_watermark.watermark()))
-                                    rows.split_off(split_off_key.as_slice());
-                                }
-                            }
-                        }
-                    }
-                }
-                WatermarkSerdeType::NonPkPrefix => {
-                    warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written non pk prefix watermark");
-                    self.all_rows = None;
-                }
-                WatermarkSerdeType::Value => {
-                    warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written value watermark");
-                    self.all_rows = None;
-                }
-            }
+        if let Some((direction, watermarks, serde_type)) = &table_watermarks {
+            self.clean_preloaded_rows(*direction, watermarks, *serde_type);
         }
         self.state_store
             .flush()
@@ -1033,6 +1096,7 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             table_id,
             row_store: StateTableRowStore {
                 all_rows: preload_all_rows.then(HashMap::new),
+                pending_watermark: None,
                 state_store: local_state_store,
                 row_serde,
                 pk_serde: pk_serde.clone(),
@@ -1176,6 +1240,16 @@ where
         self.distribution.vnodes()
     }
 
+    pub fn flushed_snapshot_reader(&self) -> FlushedStateTableReader<S, SD> {
+        StateTableFlushedSnapshotReader {
+            reader: Arc::new(self.row_store.state_store.new_flushed_snapshot_reader()),
+            pk_serde: self.pk_serde.clone(),
+            vnodes: self.distribution.vnodes().clone(),
+            row_serde: self.row_store.row_serde.clone(),
+            metrics: self.row_store.metrics.clone(),
+        }
+    }
+
     pub fn value_indices(&self) -> &Option<Vec<usize>> {
         &self.value_indices
     }
@@ -1282,6 +1356,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             let (vnode, key) = key_bytes.split_vnode_bytes();
             return Ok(rows.get(&vnode).expect("covered vnode").get(&key).cloned());
         }
+        if self.below_pending_watermark(&key_bytes) {
+            return Ok(None);
+        }
 
         // Try to prune using vnode statistics
         let should_prune = if let Some(stats) = &self.vnode_stats
@@ -1338,6 +1415,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         if let Some(rows) = &self.all_rows {
             let (vnode, key) = key_bytes.split_vnode_bytes();
             return Ok(rows.get(&vnode).expect("covered vnode").contains_key(&key));
+        }
+        if self.below_pending_watermark(&key_bytes) {
+            return Ok(false);
         }
 
         // Try to prune using vnode statistics
@@ -1469,6 +1549,7 @@ where
 
         if keyed_cache_may_stale {
             self.inner.pending_watermark = None;
+            self.inner.row_store.pending_watermark = None;
         }
 
         Ok((
@@ -1668,13 +1749,20 @@ where
         }
     }
 
-    /// Update watermark for state cleaning.
+    /// Update watermark for state cleaning. The state store cleans the rows below it at the commit,
+    /// but for a pk-prefix watermark, reads stop returning them at once.
     ///
     /// # Arguments
     ///
     /// * `watermark` - Latest watermark received.
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
+        if let Some((direction, vnode_watermark, WatermarkSerdeType::PkPrefix)) =
+            self.serialize_watermark(&watermark)
+        {
+            self.row_store
+                .update_pending_watermark(direction, vnode_watermark);
+        }
         self.pending_watermark = Some(watermark);
     }
 
@@ -1682,6 +1770,12 @@ where
     /// table through `update_watermark` method.
     pub fn get_committed_watermark(&self) -> Option<&ScalarImpl> {
         self.committed_watermark.as_ref()
+    }
+
+    /// Get the watermark fed through `update_watermark` in the current epoch, which the state store
+    /// applies at the commit.
+    pub fn get_pending_watermark(&self) -> Option<&ScalarImpl> {
+        self.pending_watermark.as_ref()
     }
 
     pub async fn commit(
@@ -1751,6 +1845,11 @@ where
         let table_watermarks = self.commit_pending_watermark();
         self.row_store
             .seal_current_epoch(new_epoch.curr, table_watermarks, switch_consistent_op)
+            .instrument_await(await_tree::span!(
+                "state_table_commit table_id={} epoch={}",
+                self.table_id,
+                new_epoch.curr
+            ))
             .await?;
         self.epoch = Some(new_epoch);
 
@@ -1769,27 +1868,37 @@ where
             !self.pk_indices().is_empty(),
             "see pending watermark on empty pk"
         );
-        let (watermark_serializer, watermark_type) = self
-            .watermark_serde
-            .as_ref()
+        let (direction, vnode_watermark, watermark_type) = self
+            .serialize_watermark(&watermark)
             .expect("watermark serde should be initialized to commit watermark");
+        trace!(table_id = %self.table_id, ?vnode_watermark, "table watermark");
+
+        // The state store applies the watermark from now on.
+        self.row_store.pending_watermark = None;
+        self.committed_watermark = Some(watermark);
+        Some((direction, vec![vnode_watermark], watermark_type))
+    }
+
+    /// Serialize `watermark` into the watermark of the vnodes of this table, with its direction and
+    /// serde type. Returns `None` if the table has no clean watermark column.
+    fn serialize_watermark(
+        &self,
+        watermark: &ScalarImpl,
+    ) -> Option<(WatermarkDirection, VnodeWatermark, WatermarkSerdeType)> {
+        let (watermark_serializer, watermark_type) = self.watermark_serde.as_ref()?;
         let watermark_suffix =
             serialize_row(row::once(Some(watermark.clone())), watermark_serializer);
         let vnode_watermark = VnodeWatermark::new(
             self.vnodes().clone(),
             Bytes::copy_from_slice(watermark_suffix.as_ref()),
         );
-        trace!(table_id = %self.table_id, ?vnode_watermark, "table watermark");
-
         let order_type = watermark_serializer.get_order_types().get(0).unwrap();
         let direction = if order_type.is_ascending() {
             WatermarkDirection::Ascending
         } else {
             WatermarkDirection::Descending
         };
-
-        self.committed_watermark = Some(watermark);
-        Some((direction, vec![vnode_watermark], *watermark_type))
+        Some((direction, vnode_watermark, *watermark_type))
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
@@ -1822,6 +1931,45 @@ impl FromVnodeBytes for Bytes {
 
 impl FromVnodeBytes for () {
     fn from_vnode_bytes(_vnode: VirtualNode, _bytes: &Bytes) -> Self {}
+}
+
+impl<R, SD> StateTableFlushedSnapshotReader<R, SD>
+where
+    R: StateStoreRead,
+    SD: ValueRowSerde,
+{
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.vnodes
+    }
+
+    /// Scans flushed local state without reading uncommitted mem-table data.
+    pub async fn iter_with_vnode(
+        &self,
+        vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl RowStream<'static>> {
+        if let Some(m) = &self.metrics {
+            m.iter_count.inc();
+        }
+
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let iter = self
+            .reader
+            .iter(
+                prefixed_range_with_vnode(memcomparable_range, vnode),
+                ReadOptions {
+                    prefix_hint: None,
+                    prefetch_options,
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
+                },
+            )
+            .await?;
+        let row_serde = self.row_serde.clone();
+        Ok(iter
+            .into_stream(move |(_key, value)| Ok(OwnedRow::new(row_serde.deserialize(value)?)))
+            .map_err(Into::into))
+    }
 }
 
 // Iterator functions
@@ -1943,16 +2091,13 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             prefetch_options,
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
+        let mut key_range = prefixed_range_with_vnode((pruned_start, pruned_end), vnode);
+        self.narrow_by_pending_watermark(&mut key_range);
 
         Ok(futures::future::Either::Right(
             futures::future::Either::Right(
                 deserialize_keyed_row_stream(
-                    self.state_store
-                        .iter(
-                            prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
-                            read_options,
-                        )
-                        .await?,
+                    self.state_store.iter(key_range, read_options).await?,
                     &*self.row_serde,
                 )
                 .inspect(inspect_fn),
@@ -2032,16 +2177,13 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             prefetch_options,
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
+        let mut key_range = prefixed_range_with_vnode((pruned_start, pruned_end), vnode);
+        self.narrow_by_pending_watermark(&mut key_range);
 
         Ok(futures::future::Either::Right(
             futures::future::Either::Right(
                 deserialize_keyed_row_stream(
-                    self.state_store
-                        .rev_iter(
-                            prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
-                            read_options,
-                        )
-                        .await?,
+                    self.state_store.rev_iter(key_range, read_options).await?,
                     &*self.row_serde,
                 )
                 .inspect(inspect_fn),
@@ -2438,15 +2580,15 @@ fn fill_non_output_indices(
     data_types: &[DataType],
     chunk: StreamChunk,
 ) -> StreamChunk {
-    let cardinality = chunk.cardinality();
     let (ops, columns, vis) = chunk.into_inner();
+    let capacity = vis.len();
     let mut full_columns = Vec::with_capacity(data_types.len());
     for (i, data_type) in data_types.iter().enumerate() {
         if let Some(j) = i2o_mapping.try_map(i) {
             full_columns.push(columns[j].clone());
         } else {
-            let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
-            column_builder.append_n_null(cardinality);
+            let mut column_builder = ArrayImplBuilder::with_type(capacity, data_type.clone());
+            column_builder.append_n_null(capacity);
             let column: ArrayRef = column_builder.finish().into();
             full_columns.push(column)
         }
@@ -2488,6 +2630,32 @@ mod tests {
             +---+---+---+-----+
             | + | 2 |   | 222 |
             +---+---+---+-----+
+             }"#]],
+        );
+    }
+
+    #[test]
+    fn test_fill_non_output_indices_with_invisible_rows() {
+        let data_types = vec![DataType::Int32, DataType::Int32, DataType::Int32];
+        let replicated_chunk = [
+            OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into())]),
+            OwnedRow::new(vec![Some(333_i32.into()), Some(3_i32.into())]),
+        ];
+        let (columns, _) =
+            DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32])
+                .into_parts();
+        let replicated_chunk = StreamChunk::with_visibility(
+            vec![Op::Insert, Op::Insert],
+            columns,
+            Bitmap::from_iter([false, false]),
+        );
+        let i2o_mapping = ColIndexMapping::new(vec![Some(1), None, Some(0)], 2);
+        let filled_chunk = fill_non_output_indices(&i2o_mapping, &data_types, replicated_chunk);
+        check(
+            filled_chunk,
+            expect![[r#"
+            StreamChunk { cardinality: 0, capacity: 2, data:
+            (empty)
              }"#]],
         );
     }

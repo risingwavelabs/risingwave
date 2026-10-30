@@ -34,7 +34,8 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
 
     pub fn with_capacity(capacity: usize, mem_ctx: MemoryContext) -> Self {
         let inner = BinaryHeap::with_capacity(capacity);
-        mem_ctx.add((capacity * size_of::<T>()) as i64);
+        // The allocation already succeeded; a budget overrun must not discard its charge.
+        mem_ctx.add_unchecked((capacity * size_of::<T>()) as i64);
         Self { inner, mem_ctx }
     }
 
@@ -44,7 +45,7 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
         self.inner.push(item);
         let new_cap = self.inner.capacity();
         self.mem_ctx
-            .add(((new_cap - prev_cap) * size_of::<T>() + item_heap) as i64);
+            .add_unchecked(((new_cap - prev_cap) * size_of::<T>() + item_heap) as i64);
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -53,7 +54,7 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
         let item_heap = item.as_ref().map(|i| i.estimated_heap_size()).unwrap_or(0);
         let new_cap = self.inner.capacity();
         self.mem_ctx
-            .add(-(((prev_cap - new_cap) * size_of::<T>() + item_heap) as i64));
+            .add_unchecked(-(((prev_cap - new_cap) * size_of::<T>() + item_heap) as i64));
 
         item
     }
@@ -70,6 +71,32 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
         self.inner.peek()
     }
 
+    /// Moves the elements into a sorted vector and releases the old heap's backing-storage charge.
+    ///
+    /// # Warning
+    ///
+    /// `deallocate` only subtracts the backing-storage size. The elements may already have been
+    /// dropped, so it cannot determine the size of their separately allocated memory. Those charges
+    /// need separate cleanup, either explicitly or through a private memory context. A future
+    /// redesign should make this handling automatic.
+    ///
+    /// In this example, the heap uses a new private `mem_ctx`. Values are dropped as they are
+    /// consumed, but their payload charges remain until the context is dropped on normal return,
+    /// errors, or cancellation.
+    ///
+    /// ```rust
+    /// # #![feature(allocator_api)]
+    /// # use prometheus::core::Atomic;
+    /// # use risingwave_common::memory::{MemMonitoredHeap, MemoryContext};
+    /// # use risingwave_common::metrics::TrAdderAtomic;
+    /// # let parent = MemoryContext::none();
+    /// let mem_ctx = MemoryContext::new(Some(parent), TrAdderAtomic::new(0));
+    /// let mut heap = MemMonitoredHeap::new_with(mem_ctx.clone());
+    /// heap.push(String::from("value"));
+    /// for value in heap.into_sorted_vec() {
+    ///     drop(value);
+    /// }
+    /// ```
     pub fn into_sorted_vec(self) -> Vec<T, MonitoredGlobalAlloc> {
         let old_cap = self.inner.capacity();
         let alloc = MonitoredGlobalAlloc::with_memory_context(self.mem_ctx.clone());
@@ -78,7 +105,8 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
         let mut ret = Vec::with_capacity_in(vec.len(), alloc);
         ret.extend(vec);
 
-        self.mem_ctx.add(-((old_cap * size_of::<T>()) as i64));
+        self.mem_ctx
+            .add_unchecked(-((old_cap * size_of::<T>()) as i64));
         ret
     }
 
@@ -104,7 +132,7 @@ where
         let new_cap = self.inner.capacity();
 
         let diff = (new_cap - old_cap) * size_of::<T>() + items_heap_size;
-        self.mem_ctx.add(diff as i64);
+        self.mem_ctx.add_unchecked(diff as i64);
     }
 }
 

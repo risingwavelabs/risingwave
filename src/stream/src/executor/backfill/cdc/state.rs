@@ -69,12 +69,6 @@ impl<S: StateStore> CdcBackfillState<S> {
                 let state = self.cached_state.as_slice();
                 let state_len = state.len();
                 // schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
-                let cdc_offset = match state[state_len - 1] {
-                    Some(ScalarImpl::Jsonb(ref jsonb)) => {
-                        serde_json::from_value(jsonb.clone().take()).unwrap()
-                    }
-                    _ => return Err(anyhow!("invalid backfill state: cdc_offset").into()),
-                };
                 let row_count = match state[state_len - 2] {
                     Some(ScalarImpl::Int64(val)) => val,
                     _ => return Err(anyhow!("invalid backfill state: row_count").into()),
@@ -83,10 +77,28 @@ impl<S: StateStore> CdcBackfillState<S> {
                     Some(ScalarImpl::Bool(val)) => val,
                     _ => return Err(anyhow!("invalid backfill state: backfill_finished").into()),
                 };
+                let cdc_offset = match state[state_len - 1] {
+                    Some(ScalarImpl::Jsonb(ref jsonb)) => {
+                        serde_json::from_value(jsonb.clone().take()).unwrap()
+                    }
+                    None if is_finished => None,
+                    None => {
+                        return Err(anyhow!(
+                            "invalid backfill state: unfinished row has null cdc_offset"
+                        )
+                        .into());
+                    }
+                    _ => return Err(anyhow!("invalid backfill state: cdc_offset").into()),
+                };
 
                 let current_pk_pos = state[1..state_len - 3].to_vec();
+                let current_pk_pos = if current_pk_pos.iter().all(Option::is_none) {
+                    None
+                } else {
+                    Some(OwnedRow::new(current_pk_pos))
+                };
                 Ok(CdcStateRecord {
-                    current_pk_pos: Some(OwnedRow::new(current_pk_pos)),
+                    current_pk_pos,
                     is_finished,
                     last_cdc_offset: cdc_offset,
                     row_count,
@@ -104,6 +116,12 @@ impl<S: StateStore> CdcBackfillState<S> {
         row_count: u64,
         is_finished: bool,
     ) -> StreamExecutorResult<()> {
+        // An unfinished backfill without a snapshot cursor has no progress to persist.
+        // Skip it so recovery starts a fresh backfill instead of resuming from NULL PK cells.
+        if !is_finished && current_pk_pos.is_none() {
+            return Ok(());
+        }
+
         // schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
         let state = self.cached_state.as_mut_slice();
         let split_id = Some(ScalarImpl::from(self.split_id.clone()));
@@ -129,6 +147,20 @@ impl<S: StateStore> CdcBackfillState<S> {
             }
         }
         Ok(())
+    }
+
+    /// Modify the backfill state and persist it at `new_epoch`.
+    pub async fn mutate_and_commit_state(
+        &mut self,
+        current_pk_pos: Option<OwnedRow>,
+        last_cdc_offset: Option<CdcOffset>,
+        row_count: u64,
+        is_finished: bool,
+        new_epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        self.mutate_state(current_pk_pos, last_cdc_offset, row_count, is_finished)
+            .await?;
+        self.commit_state(new_epoch).await
     }
 
     /// Persist the state to storage

@@ -123,13 +123,13 @@ impl JoinHashMapMetrics {
         let join_table_id = join_table_id.to_string();
         let join_lookup_total_count_metric = metrics
             .join_lookup_total_count
-            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
+            .with_guarded_label_values(&[&actor_id, (side), &join_table_id, &fragment_id]);
         let join_lookup_miss_count_metric = metrics
             .join_lookup_miss_count
-            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
+            .with_guarded_label_values(&[&actor_id, (side), &join_table_id, &fragment_id]);
         let join_insert_cache_miss_count_metrics = metrics
             .join_insert_cache_miss_count
-            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
+            .with_guarded_label_values(&[&actor_id, (side), &join_table_id, &fragment_id]);
 
         Self {
             lookup_miss_count: 0,
@@ -741,8 +741,7 @@ pub struct JoinEntryState<E: JoinEncoding> {
 
 impl<E: JoinEncoding> EstimateSize for JoinEntryState<E> {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: Add btreemap internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
+        // Only counts the cached rows, not the overhead of the row set itself.
         self.kv_heap_size.size()
     }
 }

@@ -111,6 +111,12 @@ pub struct RdKafkaPropertiesConsumer {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub enable_auto_commit: Option<bool>,
+
+    /// The frequency in milliseconds that the consumer offsets are committed.
+    #[serde(rename = "properties.auto.commit.interval.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub auto_commit_interval_ms: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -249,6 +255,9 @@ impl RdKafkaPropertiesConsumer {
         if let Some(v) = &self.enable_auto_commit {
             c.set("enable.auto.commit", v.to_string());
         }
+        if let Some(v) = &self.auto_commit_interval_ms {
+            c.set("auto.commit.interval.ms", v.to_string());
+        }
     }
 }
 
@@ -271,12 +280,18 @@ mod test {
             // RdKafkaPropertiesCommon
             "properties.message.max.bytes".to_owned() => "12345".to_owned(),
             "properties.receive.message.max.bytes".to_owned() => "54321".to_owned(),
+            "properties.reconnect.backoff.ms".to_owned() => "1000".to_owned(),
+            "properties.reconnect.backoff.max.ms".to_owned() => "30000".to_owned(),
+            "properties.socket.connection.setup.timeout.ms".to_owned() => "60000".to_owned(),
+            "properties.retry.backoff.ms".to_owned() => "200".to_owned(),
+            "properties.retry.backoff.max.ms".to_owned() => "2000".to_owned(),
             // RdKafkaPropertiesConsumer
             "properties.queued.min.messages".to_owned() => "114514".to_owned(),
             "properties.queued.max.messages.kbytes".to_owned() => "114514".to_owned(),
             "properties.fetch.wait.max.ms".to_owned() => "114514".to_owned(),
             "properties.fetch.max.bytes".to_owned() => "114514".to_owned(),
             "properties.enable.auto.commit".to_owned() => "true".to_owned(),
+            "properties.auto.commit.interval.ms".to_owned() => "10000".to_owned(),
             "properties.fetch.queue.backoff.ms".to_owned() => "114514".to_owned(),
             // PrivateLink
             "broker.rewrite.endpoints".to_owned() => "{\"broker1\": \"10.0.0.1:8001\"}".to_owned(),
@@ -293,6 +308,25 @@ mod test {
         assert_eq!(
             props.rdkafka_properties_common.message_max_bytes,
             Some(12345)
+        );
+        assert_eq!(
+            props.rdkafka_properties_common.reconnect_backoff_ms,
+            Some(1000)
+        );
+        assert_eq!(
+            props.rdkafka_properties_common.reconnect_backoff_max_ms,
+            Some(30000)
+        );
+        assert_eq!(
+            props
+                .rdkafka_properties_common
+                .socket_connection_setup_timeout_ms,
+            Some(60000)
+        );
+        assert_eq!(props.rdkafka_properties_common.retry_backoff_ms, Some(200));
+        assert_eq!(
+            props.rdkafka_properties_common.retry_backoff_max_ms,
+            Some(2000)
         );
         assert_eq!(
             props.rdkafka_properties_consumer.queued_min_messages,
@@ -315,9 +349,24 @@ mod test {
             Some(true)
         );
         assert_eq!(
+            props.rdkafka_properties_consumer.auto_commit_interval_ms,
+            Some(10000)
+        );
+        assert_eq!(
             props.rdkafka_properties_consumer.fetch_queue_backoff_ms,
             Some(114514)
         );
+        let mut client_config = rdkafka::ClientConfig::new();
+        props.set_client(&mut client_config);
+        assert_eq!(client_config.get("reconnect.backoff.ms"), Some("1000"));
+        assert_eq!(client_config.get("reconnect.backoff.max.ms"), Some("30000"));
+        assert_eq!(
+            client_config.get("socket.connection.setup.timeout.ms"),
+            Some("60000")
+        );
+        assert_eq!(client_config.get("retry.backoff.ms"), Some("200"));
+        assert_eq!(client_config.get("retry.backoff.max.ms"), Some("2000"));
+        assert_eq!(client_config.get("auto.commit.interval.ms"), Some("10000"));
         let hashmap: BTreeMap<String, String> = btreemap! {
             "broker1".to_owned() => "10.0.0.1:8001".to_owned()
         };

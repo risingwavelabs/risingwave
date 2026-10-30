@@ -520,7 +520,7 @@ fn format_datum_at_depth(
             }
             ValueType::MapValue(MapValue { fields })
         }
-        DataType::Map(_) | DataType::Vector(_) => {
+        DataType::Map(_) | DataType::Vector(_) | DataType::Variant => {
             return Err(SinkError::Firestore(anyhow!(
                 "{} is not supported by Firestore sink",
                 data_type

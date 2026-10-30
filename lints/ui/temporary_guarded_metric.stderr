@@ -1,0 +1,27 @@
+warning: should not update a temporary guarded metric
+  --> $DIR/temporary_guarded_metric.rs:32:5
+   |
+LL |     metrics.with_guarded_label_values(&labels).inc();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: store the value returned by `with_guarded_label_values` so the label guard lives long enough
+  --> $DIR/temporary_guarded_metric.rs:32:48
+   |
+LL |     metrics.with_guarded_label_values(&labels).inc();
+   |                                                ^^^^^
+   = note: `#[warn(rw::temporary_guarded_metric)]` on by default
+
+warning: should not update a temporary guarded metric
+  --> $DIR/temporary_guarded_metric.rs:34:5
+   |
+LL |     metrics.with_guarded_label_values(&labels).observe(1.0);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: store the value returned by `with_guarded_label_values` so the label guard lives long enough
+  --> $DIR/temporary_guarded_metric.rs:34:48
+   |
+LL |     metrics.with_guarded_label_values(&labels).observe(1.0);
+   |                                                ^^^^^^^^^^^^
+
+warning: 2 warnings emitted
+

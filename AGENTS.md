@@ -75,15 +75,30 @@ When opening or updating a pull request, changing PR labels, or marking a PR rea
 1. Read `.agents/PR_LABELING.md`.
 2. Inspect the current PR labels and draft state before adding anything:
    `gh pr view <PR> --json isDraft,labels,title,body,files`
-3. Add only validated missing labels. Do not remove existing labels unless explicitly instructed by a maintainer.
+3. Add only validated missing labels. Do not remove labels that existed before the current agent operation unless explicitly instructed by a maintainer. An agent may remove a label it just added if validation shows it was a mistake, but it must report the correction.
 4. In the final PR report, list labels added, labels intentionally not added, local tests run, and CI labels requested.
 
 ## Connector Development
 
 See `docs/dev/src/connector/intro.md`.
 
+### Debezium fork
+
+- Debezium is built from our fork, checked out as the git submodule `java/debezium`. `java/build-debezium.sh` builds it and installs it into the local Maven repository as the `debezium.version` set in `java/pom.xml`. RiseDev, CI and the Docker builds run it before the Java build, and it skips the build when the submodule has not changed since the last install.
+- Load the submodule shallowly: `git submodule update --init --depth 1 java/debezium`. For a fresh clone, use `git clone --recurse-submodules --shallow-submodules`. The build script also initializes the submodule if it is missing.
+- Never patch Debezium by copying its classes into RisingWave modules. Change the fork instead.
+- To change Debezium, open a PR in the fork first. Then point the submodule at that PR's head and commit the new submodule pointer in the RisingWave PR, so RisingWave CI builds and tests against it:
+  - `git -C java/debezium fetch --depth 1 origin pull/<fork-pr-number>/head`
+  - `git -C java/debezium checkout FETCH_HEAD`
+  - `git add java/debezium`
+- After the fork PR merges, point the submodule at the merge commit on the fork's branch before merging the RisingWave PR: `git submodule update --remote --depth 1 java/debezium` moves it to the tip of the branch set in `.gitmodules`. The `Debezium Submodule Check` workflow fails until the submodule commit is on that branch.
+- While iterating locally, you can also edit files under `java/debezium` directly. The next build picks up uncommitted changes. When the change is ready, commit it inside `java/debezium` and push it from there to the fork PR's branch, then record the new commit in the RisingWave PR:
+  - `git -C java/debezium push <fork-remote> HEAD:<fork-pr-branch>`
+  - `git add java/debezium`
+- The build script holds a `flock` on `io/debezium/.risingwave-fork.lock` in the local Maven repository while it checks and builds the fork. Builds that share a local repository, such as several worktrees using `~/.m2`, therefore build the fork one at a time instead of installing conflicting artifacts: a second build waits until the first finishes. The script fails if `flock` is not installed (`brew install flock` on macOS).
+- The fork builds with JDK 21. Set `JAVA_HOME` to JDK 21 if your default JDK is newer, since JDK 23+ skips annotation processors that the Oracle connector needs. The build script forces annotation processing on to guard against this.
+
 ## Repo Skills
 
-- Use `$risingwave-rust-analyzer` for RisingWave-specific `rust-analyzer` CLI and LSP workflows, especially when a task needs fast semantic inspection, structural search/replace, or crate-specific feature guidance. Skill path: `.agents/skills/risingwave-rust-analyzer/SKILL.md`.
 - Use `$fix-buildkite-ci` for Buildkite triage and focused CI fixes. Skill path: `.agents/skills/fix-buildkite-ci/SKILL.md`.
 - Use `$risingwave-slt-authoring` when creating, reviewing, or fixing RisingWave SQLLogicTest (`.slt`/`.slt.serial`) files, especially tests with `system ok`, connector fixtures, CI coverage, madsim, or flaky/idempotent behavior. Skill path: `.agents/skills/risingwave-slt-authoring/SKILL.md`.

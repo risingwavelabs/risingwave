@@ -308,12 +308,12 @@ impl Planner {
         };
         let correlated_id = self.ctx.next_correlated_id();
         let mut subquery = expr.into_subquery().unwrap();
-        // we should call `subquery.query.collect_correlated_indices_by_depth_and_assign_id`
-        // instead of `subquery.collect_correlated_indices_by_depth_and_assign_id`.
+        // we should call `subquery.query.collect_correlated_indices_by_scope_and_assign_id`
+        // instead of `subquery.collect_correlated_indices_by_scope_and_assign_id`.
         // because current subquery containing struct `kind` expr which should never be correlated with the current subquery.
         let mut correlated_indices = subquery
             .query
-            .collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+            .collect_correlated_indices_by_scope_and_assign_id(subquery.outer_scope, correlated_id);
         correlated_indices.sort();
         correlated_indices.dedup();
         let output_column_type = subquery.query.data_types()[0].clone();
@@ -382,7 +382,10 @@ impl Planner {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id),
+                    subquery.collect_correlated_indices_by_scope_and_assign_id(
+                        subquery.outer_scope,
+                        correlated_id,
+                    ),
                 );
                 self.subqueries.push(subquery);
                 input_ref
@@ -435,13 +438,23 @@ impl Planner {
                 _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
             };
 
+            // `Array` subqueries decorrelate to a scalar aggregate with
+            // `Coalesce(array_agg, ARRAY[])`, guaranteeing one row per outer key, so
+            // `Inner` is equivalent to `LeftOuter` in batch. `Inner` also avoids the
+            // streaming transient-NULL caused by `StreamHashJoin(LeftOuter)`
+            // null-padding the outer row before the right-side aggregate arrives.
+            let join_type = if matches!(subquery.kind, SubqueryKind::Array) {
+                JoinType::Inner
+            } else {
+                JoinType::LeftOuter
+            };
             root = Self::create_apply(
                 correlated_id,
                 correlated_indices,
                 root,
                 right,
                 ExprImpl::literal_bool(true),
-                JoinType::LeftOuter,
+                join_type,
                 true,
             );
         }
@@ -492,8 +505,8 @@ impl Planner {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery.collect_correlated_indices_by_depth_and_assign_id(
-                        0,
+                    subquery.collect_correlated_indices_by_scope_and_assign_id(
+                        subquery.outer_scope,
                         self.correlated_id.unwrap(),
                     ),
                 );
@@ -515,6 +528,7 @@ impl Planner {
             .collect();
 
         let mut right = None;
+        let mut all_array_subqueries = true;
 
         for subquery in rewriter.subqueries {
             let return_type = subquery.return_type();
@@ -544,6 +558,9 @@ impl Planner {
                 SubqueryKind::Array => subroot.into_array_agg()?,
                 _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
             };
+            if !matches!(subquery.kind, SubqueryKind::Array) {
+                all_array_subqueries = false;
+            }
             if right.is_none() {
                 right = Some(subplan);
             } else {
@@ -566,13 +583,21 @@ impl Planner {
             correlated_indices.sort();
             correlated_indices.dedup();
 
+            // Same reasoning as `substitute_subqueries_in_left_deep_tree_way`:
+            // only safe when every combined subquery is `Array` (Scalar/Existential
+            // legitimately need `LeftOuter` null-padding).
+            let join_type = if all_array_subqueries {
+                JoinType::Inner
+            } else {
+                JoinType::LeftOuter
+            };
             Self::create_apply(
                 rewriter.correlated_id.expect("must have a correlated id"),
                 correlated_indices,
                 root,
                 right,
                 ExprImpl::literal_bool(true),
-                JoinType::LeftOuter,
+                join_type,
                 true,
             )
         } else {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::DateTime;
 use itertools::Itertools;
@@ -50,6 +51,11 @@ use crate::manager::MetaSrvEnv;
 use crate::stream::GlobalStreamManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
+
+fn unix_epoch_millis(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
+        .map_or(0, |since_epoch| since_epoch.as_millis() as i64)
+}
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
@@ -156,6 +162,11 @@ impl StreamManagerService for StreamServiceImpl {
                     next_compaction_after_sec: status.next_compaction_after_sec,
                     pending_snapshot_count: status.pending_snapshot_count.map(|count| count as u64),
                     is_triggerable: status.is_triggerable,
+                    last_success_at_ms: status.last_success_at.map(unix_epoch_millis),
+                    last_failure_at_ms: status.last_failure_at.map(unix_epoch_millis),
+                    last_error: status.last_error,
+                    consecutive_failures: status.consecutive_failures,
+                    compaction_lag_sec: status.compaction_lag.map(|lag| lag.as_secs()),
                 },
             )
             .collect();
@@ -194,12 +205,11 @@ impl StreamManagerService for StreamServiceImpl {
         let throttle_type = request.throttle_type();
 
         let raw_object_id: u32;
-        let jobs: HashSet<JobId>;
-        let fragments: HashSet<FragmentId>;
+        let fragments: HashMap<FragmentId, _>;
 
         match (throttle_type, throttle_target) {
             (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
-                (jobs, fragments) = self
+                fragments = self
                     .metadata_manager
                     .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
                     .await?;
@@ -212,7 +222,6 @@ impl StreamManagerService for StreamServiceImpl {
                     .metadata_manager
                     .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?;
-                jobs = [request.id.into()].into_iter().collect();
                 raw_object_id = request.id;
             }
             (ThrottleType::Dml, ThrottleTarget::Table) => {
@@ -220,7 +229,6 @@ impl StreamManagerService for StreamServiceImpl {
                     .metadata_manager
                     .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?;
-                jobs = [request.id.into()].into_iter().collect();
                 raw_object_id = request.id;
             }
             (ThrottleType::Sink, ThrottleTarget::Sink) => {
@@ -228,22 +236,25 @@ impl StreamManagerService for StreamServiceImpl {
                     .metadata_manager
                     .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
                     .await?;
-                jobs = [request.id.into()].into_iter().collect();
                 raw_object_id = request.id;
             }
             // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
-                self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
-                    .await?;
                 let fragment_id = request.id.into();
-                fragments = [fragment_id].into_iter().collect();
+                let stream_node = self
+                    .metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(
+                        fragment_id,
+                        throttle_type,
+                        request.rate,
+                    )
+                    .await?;
+                fragments = [(fragment_id, stream_node)].into_iter().collect();
                 let job_id = self
                     .metadata_manager
                     .catalog_controller
                     .get_fragment_streaming_job_id(fragment_id)
                     .await?;
-                jobs = [job_id].into_iter().collect();
                 raw_object_id = job_id.as_raw_id();
             }
             _ => {
@@ -264,18 +275,13 @@ impl StreamManagerService for StreamServiceImpl {
             rate_limit: request.rate,
             throttle_type: throttle_type.into(),
         };
+        let config = fragments
+            .into_iter()
+            .map(|(fragment_id, stream_node)| (fragment_id, (throttle_config, stream_node)))
+            .collect();
         let _i = self
             .barrier_scheduler
-            .run_command(
-                database_id,
-                Command::Throttle {
-                    jobs,
-                    config: fragments
-                        .into_iter()
-                        .map(|fragment_id| (fragment_id, throttle_config))
-                        .collect(),
-                },
-            )
+            .run_command(database_id, Command::Throttle { config })
             .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))
@@ -717,10 +723,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         tracing::info!("Refreshing table with id: {}", req.table_id);
 
-        let response = self
-            .refresh_manager
-            .trigger_manual_refresh(req, self.env.shared_actor_infos())
-            .await?;
+        let response = self.refresh_manager.trigger_manual_refresh(req).await?;
 
         Ok(Response::new(response))
     }

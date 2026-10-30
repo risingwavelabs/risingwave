@@ -1,0 +1,27 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (k int, v int);
+
+statement ok
+create table t2 (k int, v int);
+
+# Every probe row has 1500 candidates, so its candidates span output chunk boundaries.
+statement ok
+insert into t1 select 1, g * 23 % 1500 from generate_series(0, 63) g;
+
+statement ok
+insert into t2 select 1, g from generate_series(1, 1500) g;
+
+# Each row of t1 matches exactly one row of t2, so no row of t1 is NULL-extended.
+query III
+select count(*), count(t1.k), count(t2.k) from t1 full join t2 on t1.k = t2.k and t1.v < t2.v and t2.v < t1.v + 2;
+----
+1500 64 1500
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

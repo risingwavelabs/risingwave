@@ -55,4 +55,4 @@ fi
 
 FIRESTORE_EMULATOR_HOST="127.0.0.1:$emulator_port" \
   cargo test -p risingwave_connector --lib --no-default-features \
-    sink::firestore::tests::emulator_crud_replay_and_native_values -- --ignored --nocapture
+    sink::firestore::tests::grpc::emulator_crud_replay_and_native_values -- --ignored --nocapture

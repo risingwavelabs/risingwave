@@ -1062,7 +1062,7 @@ mod tests {
             ],
             vec![0..=2, 5..=7, 9..=9],
         );
-        test(vec![true, true, true], vec![0..=2]);
+        test(vec![true, true, true], std::iter::once(0..=2).collect());
         test(vec![false, false, false], vec![]);
     }
 

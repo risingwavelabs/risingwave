@@ -172,6 +172,14 @@ labels:
 - label: "ci/run-e2e-elasticsearch-sink-tests"
   files:
   - "ci\\/scripts\\/e2e-elasticsearch-sink-ci-test\\.sh"
+  - "ci\\/scripts\\/e2e-elasticsearch-sink-test\\.sh"
+  - "e2e_test\\/sink\\/elasticsearch\\/.*"
+  - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
+
+- label: "ci/run-e2e-opensearch-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-opensearch-sink-ci-test\\.sh"
+  - "ci\\/scripts\\/e2e-opensearch-sink-test\\.sh"
   - "e2e_test\\/sink\\/elasticsearch\\/.*"
   - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
 
@@ -191,6 +199,9 @@ labels:
 
 - label: "ci/run-e2e-clickhouse-sink-tests"
   files:
+  - "ci\\/scripts\\/e2e-clickhouse-sink-test\\.sh"
+  - "e2e_test\\/commands\\/clickhouse"
+  - "e2e_test\\/sink\\/clickhouse_sink\\.slt"
   - "src\\/connector\\/src\\/sink\\/clickhouse\\.rs"
 
 - label: "ci/run-e2e-sqlserver-sink-tests"
@@ -199,10 +210,16 @@ labels:
 
 - label: "ci/run-e2e-redis-sink-tests"
   files:
+  - "ci\\/scripts\\/e2e-redis-sink-test\\.sh"
+  - "e2e_test\\/commands\\/redis"
+  - "e2e_test\\/sink\\/redis.*"
   - "src\\/connector\\/src\\/sink\\/redis\\.rs"
 
 - label: "ci/run-e2e-doris-sink-tests"
   files:
+  - "ci\\/scripts\\/e2e-doris-sink-test\\.sh"
+  - "e2e_test\\/commands\\/doris"
+  - "e2e_test\\/sink\\/doris_sink\\.slt"
   - "src\\/connector\\/src\\/sink\\/doris\\.rs"
   - "src\\/connector\\/src\\/sink\\/doris_starrocks_connector\\.rs"
 

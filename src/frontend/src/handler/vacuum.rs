@@ -19,7 +19,7 @@ use risingwave_batch::task::ShutdownToken;
 use risingwave_common::bail;
 use risingwave_common::catalog::Engine;
 use risingwave_connector::sink::CONNECTOR_TYPE_KEY;
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_sqlparser::ast::{ObjectName, VacuumMode};
 
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
@@ -44,7 +44,7 @@ where
 pub async fn handle_vacuum(
     handler_args: HandlerArgs,
     object_name: ObjectName,
-    full: bool,
+    mode: VacuumMode,
 ) -> Result<RwPgResponse> {
     let session = &handler_args.session;
     let db_name = &session.database();
@@ -121,31 +121,52 @@ pub async fn handle_vacuum(
 
     let mut shutdown_rx = session.reset_cancel_query_flag();
 
-    if full {
-        // VACUUM FULL: perform compaction followed by snapshot expiration
+    if mode == VacuumMode::OrphanFiles {
+        let orphan_file_count = await_cancelable(
+            &mut shutdown_rx,
+            session
+                .env()
+                .meta_client()
+                .remove_iceberg_table_orphan_files(sink_id),
+        )
+        .await?
+        .orphan_file_count;
+
+        return Ok(PgResponse::builder(StatementType::VACUUM)
+            .notice(format!(
+                "Iceberg orphan-file cleanup removed {} files",
+                orphan_file_count
+            ))
+            .into());
+    }
+
+    if mode == VacuumMode::Full {
+        // VACUUM FULL compacts data files before rewriting the resulting manifests.
         await_cancelable(
             &mut shutdown_rx,
             session.env().meta_client().compact_iceberg_table(sink_id),
         )
         .await?;
-        await_cancelable(
-            &mut shutdown_rx,
-            session
-                .env()
-                .meta_client()
-                .expire_iceberg_table_snapshots(sink_id),
-        )
-        .await?;
-    } else {
-        // Regular VACUUM: only expire snapshots
-        await_cancelable(
-            &mut shutdown_rx,
-            session
-                .env()
-                .meta_client()
-                .expire_iceberg_table_snapshots(sink_id),
-        )
-        .await?;
     }
+
+    // Run the same eligibility check as periodic manifest maintenance immediately,
+    // then expire snapshots so replaced manifests can be cleaned up.
+    await_cancelable(
+        &mut shutdown_rx,
+        session
+            .env()
+            .meta_client()
+            .rewrite_iceberg_table_manifests(sink_id),
+    )
+    .await?;
+    await_cancelable(
+        &mut shutdown_rx,
+        session
+            .env()
+            .meta_client()
+            .expire_iceberg_table_snapshots(sink_id),
+    )
+    .await?;
+
     Ok(PgResponse::builder(StatementType::VACUUM).into())
 }

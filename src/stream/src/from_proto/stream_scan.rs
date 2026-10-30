@@ -25,8 +25,8 @@ use risingwave_storage::table::batch_table::BatchTable;
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableBuilder};
 use crate::executor::{
-    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, RearrangedChainExecutor,
-    TroublemakerExecutor, UpstreamTableExecutor,
+    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, TroublemakerExecutor,
+    UpstreamTableExecutor,
 };
 
 pub struct StreamScanExecutorBuilder;
@@ -54,16 +54,18 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
 
         #[expect(deprecated)]
         let exec = match node.stream_scan_type() {
-            StreamScanType::Chain | StreamScanType::UpstreamOnly => {
-                let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
-                let upstream_only = matches!(node.stream_scan_type(), StreamScanType::UpstreamOnly);
-                ChainExecutor::new(snapshot, upstream, progress, upstream_only).boxed()
+            StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
+                let [upstream, _snapshot]: [_; 2] = params.input.try_into().unwrap();
+                if node.stream_scan_type() != StreamScanType::UpstreamOnly {
+                    tracing::warn!(
+                        actor_id = %params.actor_context.id,
+                        fragment_id = %params.fragment_id,
+                        stream_scan_type = ?node.stream_scan_type(),
+                        "ChainExecutor only supports UpstreamOnly; ignoring snapshot input"
+                    );
+                }
+                ChainExecutor::new(upstream, progress).boxed()
             }
-            StreamScanType::Rearrange => {
-                let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
-                RearrangedChainExecutor::new(snapshot, upstream, progress).boxed()
-            }
-
             StreamScanType::Backfill => {
                 let [upstream, _]: [_; 2] = params.input.try_into().unwrap();
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
@@ -74,7 +76,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .map(ColumnId::from)
                     .collect_vec();
 
-                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let vnodes = Some(Arc::new(params.vnode_bitmap));
 
                 let state_table = if let Ok(table) = node.get_state_table() {
                     Some(
@@ -108,7 +110,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .map(ColumnId::from)
                     .collect_vec();
 
-                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let vnodes = Some(Arc::new(params.vnode_bitmap));
 
                 let state_table = node.get_state_table().unwrap();
                 let state_table =
@@ -166,7 +168,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .map(ColumnId::from)
                     .collect_vec();
 
-                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let vnodes = Some(Arc::new(params.vnode_bitmap));
                 let barrier_rx = params
                     .local_barrier_manager
                     .subscribe_barrier(params.actor_context.id);

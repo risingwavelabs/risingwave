@@ -1,0 +1,302 @@
+# CHANGELOG over a CDC table source.
+#
+# The scan is an upsert stream with SomeShard distribution, so `StreamChangeLog` needs a
+# hash exchange on the stream key, and column pruning must keep that key below the
+# operator and project it away above. Consumers that prune the key differently must still
+# observe exactly the same number of change events - before and after rescaling and
+# recovery.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+DROP SOURCE IF EXISTS ts_cl CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS s_cl CASCADE;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS t_cl;
+    CREATE TABLE t_cl (id INT NOT NULL PRIMARY KEY, v INT NOT NULL, s VARCHAR(20) NOT NULL) ENGINE=InnoDB;
+    DROP USER IF EXISTS 'cl-cdc'@'%';
+    CREATE USER 'cl-cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'cl-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+CREATE SOURCE s_cl WITH (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'cl-cdc',
+    password = 'abcdef',
+    database.name = 'risedev',
+    server.id = '5406'
+);
+
+sleep 2s
+
+statement ok
+CREATE SOURCE ts_cl (*)
+WITH (snapshot = 'false')
+FROM s_cl TABLE 'risedev.t_cl';
+
+# Keeps the stream key.
+statement ok
+CREATE MATERIALIZED VIEW cl_full AS
+WITH sub AS CHANGELOG FROM ts_cl SELECT id, v, s, changelog_op FROM sub;
+
+# Prunes the stream key but keeps a payload column.
+statement ok
+CREATE MATERIALIZED VIEW cl_nopk AS
+WITH sub AS CHANGELOG FROM ts_cl SELECT v, changelog_op FROM sub;
+
+# Prunes everything except the op.
+statement ok
+CREATE MATERIALIZED VIEW cl_oponly AS
+WITH sub AS CHANGELOG FROM ts_cl SELECT changelog_op FROM sub;
+
+# A predicate stays above the changelog, so it selects events rather than rewriting them.
+statement ok
+CREATE MATERIALIZED VIEW cl_filtered AS
+WITH sub AS CHANGELOG FROM ts_cl SELECT id, v, changelog_op FROM sub WHERE v % 2 = 0;
+
+# The changelog is append-only, so it is also the way to aggregate an upsert CDC stream.
+statement ok
+CREATE MATERIALIZED VIEW cl_agg AS
+WITH sub AS CHANGELOG FROM ts_cl SELECT changelog_op, count(*) AS n FROM sub GROUP BY changelog_op;
+
+statement ok
+CREATE MATERIALIZED VIEW cl_on_cl AS
+SELECT changelog_op, count(*) AS n FROM cl_full GROUP BY changelog_op;
+
+# Every changelog job carries its own singleton CDC scan and CdcFilter.
+query I
+SELECT count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name IN ('cl_full', 'cl_nopk', 'cl_oponly', 'cl_filtered', 'cl_agg')
+  AND ('STREAM_CDC_SCAN' = ANY(f.flags) OR 'CDC_FILTER' = ANY(f.flags))
+  AND (f.parallelism <> 1 OR f.distribution_type <> 'SINGLE');
+----
+0
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO t_cl VALUES (1,2,'a'),(2,3,'b'),(3,4,'c');
+    UPDATE t_cl SET v = 5, s = 'b2' WHERE id = 2;
+    UPDATE t_cl SET v = 6 WHERE id = 3;
+    DELETE FROM t_cl WHERE id = 1;
+"
+
+# An upsert changelog reports an UPDATE as an insert of the new image; a DELETE carries the
+# upstream before image.
+query IITI rowsort retry 20 backoff 1s
+SELECT id, v, s, changelog_op FROM cl_full;
+----
+1 2 a 1
+1 2 a 2
+2 3 b 1
+2 5 b2 1
+3 4 c 1
+3 6 c 1
+
+# Pruning the stream key must not drop or duplicate events.
+query IIII retry 20 backoff 1s
+SELECT
+  (SELECT count(*) FROM cl_full),
+  (SELECT count(*) FROM cl_nopk),
+  (SELECT count(*) FROM cl_oponly),
+  (SELECT count(*) FROM cl_filtered);
+----
+6 6 6 4
+
+# The generated changelog row id stays unique.
+query II retry 20 backoff 1s
+SELECT count(*), count(DISTINCT _changelog_row_id) FROM cl_full;
+----
+6 6
+
+query II rowsort retry 20 backoff 1s
+SELECT changelog_op, n FROM cl_agg;
+----
+1 5
+2 1
+
+query II rowsort retry 20 backoff 1s
+SELECT changelog_op, n FROM cl_on_cl;
+----
+1 5
+2 1
+
+# Rescale every changelog consumer, including down to a single actor.
+statement ok
+ALTER MATERIALIZED VIEW cl_full SET PARALLELISM = 1;
+
+statement ok
+ALTER MATERIALIZED VIEW cl_nopk SET PARALLELISM = 4;
+
+statement ok
+ALTER MATERIALIZED VIEW cl_oponly SET PARALLELISM = 2;
+
+statement ok
+ALTER MATERIALIZED VIEW cl_filtered SET PARALLELISM = 3;
+
+statement ok
+ALTER MATERIALIZED VIEW cl_agg SET PARALLELISM = ADAPTIVE;
+
+query I
+SELECT count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name IN ('cl_full', 'cl_nopk', 'cl_oponly', 'cl_filtered', 'cl_agg')
+  AND ('STREAM_CDC_SCAN' = ANY(f.flags) OR 'CDC_FILTER' = ANY(f.flags))
+  AND (f.parallelism <> 1 OR f.distribution_type <> 'SINGLE');
+----
+0
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO t_cl VALUES (4,8,'d');
+    UPDATE t_cl SET v = 9 WHERE id = 4;
+    DELETE FROM t_cl WHERE id = 3;
+"
+
+query IIII retry 20 backoff 1s
+SELECT
+  (SELECT count(*) FROM cl_full),
+  (SELECT count(*) FROM cl_nopk),
+  (SELECT count(*) FROM cl_oponly),
+  (SELECT count(*) FROM cl_filtered);
+----
+9 9 9 6
+
+query II rowsort retry 20 backoff 1s
+SELECT changelog_op, n FROM cl_agg;
+----
+1 7
+2 2
+
+# Rescaling must not re-emit or lose the events recorded before it.
+query IITI rowsort retry 20 backoff 1s
+SELECT id, v, s, changelog_op FROM cl_full;
+----
+1 2 a 1
+1 2 a 2
+2 3 b 1
+2 5 b2 1
+3 4 c 1
+3 6 c 1
+3 6 c 2
+4 8 d 1
+4 9 d 1
+
+query II retry 20 backoff 1s
+SELECT count(*), count(DISTINCT _changelog_row_id) FROM cl_full;
+----
+9 9
+
+onlyif can-use-recover
+statement ok
+recover;
+
+onlyif can-use-recover
+sleep 10s
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO t_cl VALUES (5,10,'e');
+    UPDATE t_cl SET v = 7 WHERE id = 2;
+    DELETE FROM t_cl WHERE id = 4;
+"
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, v, s, changelog_op FROM cl_full;
+----
+1 2 a 1
+1 2 a 2
+2 3 b 1
+2 5 b2 1
+2 7 b2 1
+3 4 c 1
+3 6 c 1
+3 6 c 2
+4 8 d 1
+4 9 d 1
+4 9 d 2
+5 10 e 1
+
+query IIII retry 30 backoff 1s
+SELECT
+  (SELECT count(*) FROM cl_full),
+  (SELECT count(*) FROM cl_nopk),
+  (SELECT count(*) FROM cl_oponly),
+  (SELECT count(*) FROM cl_filtered);
+----
+12 12 12 7
+
+query II retry 30 backoff 1s
+SELECT count(*), count(DISTINCT _changelog_row_id) FROM cl_full;
+----
+12 12
+
+query II rowsort retry 30 backoff 1s
+SELECT changelog_op, n FROM cl_agg;
+----
+1 9
+2 3
+
+query II rowsort retry 30 backoff 1s
+SELECT changelog_op, n FROM cl_on_cl;
+----
+1 9
+2 3
+
+# The pruned consumers agree on the op distribution as well.
+query II rowsort retry 30 backoff 1s
+SELECT changelog_op, count(*) FROM cl_oponly GROUP BY changelog_op;
+----
+1 9
+2 3
+
+query II rowsort retry 30 backoff 1s
+SELECT changelog_op, count(*) FROM cl_nopk GROUP BY changelog_op;
+----
+1 9
+2 3
+
+statement ok
+DROP MATERIALIZED VIEW cl_on_cl;
+
+statement ok
+DROP MATERIALIZED VIEW cl_agg;
+
+statement ok
+DROP MATERIALIZED VIEW cl_filtered;
+
+statement ok
+DROP MATERIALIZED VIEW cl_oponly;
+
+statement ok
+DROP MATERIALIZED VIEW cl_nopk;
+
+statement ok
+DROP MATERIALIZED VIEW cl_full;
+
+statement ok
+DROP SOURCE ts_cl;
+
+statement ok
+DROP SOURCE s_cl;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE t_cl;
+    DROP USER IF EXISTS 'cl-cdc'@'%';
+"

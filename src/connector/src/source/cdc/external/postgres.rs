@@ -30,9 +30,12 @@ use thiserror_ext::AsReport;
 use tokio_postgres::types::{PgLsn, Type as PgType};
 
 use crate::connector_common::create_pg_client;
+use crate::connector_common::postgres::postgres_point_type;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::scalar_adapter::ScalarAdapter;
-use crate::parser::{postgres_cell_to_scalar_impl, postgres_row_to_owned_row};
+use crate::parser::{
+    postgres_cell_to_scalar_impl_strict, postgres_row_to_owned_row_with_strict_pk,
+};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CDC_TABLE_SPLIT_ID_START, CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption,
@@ -233,41 +236,46 @@ impl PostgresExternalTableReader {
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         schema_table_name: SchemaTableName,
+        table_id: u32,
     ) -> ConnectorResult<Self> {
         tracing::info!(
             ?rw_schema,
             ?pk_indices,
             "create postgres external table reader"
         );
+        // No TCP keepalive for CDC source
+        let application_name = format!(
+            "risingwave-postgres-source-reader-{}-{}.{}",
+            table_id, schema_table_name.schema_name, schema_table_name.table_name
+        );
         let client = create_pg_client(
-            &config.username,
-            &config.password,
-            &config.host,
-            &config.port,
-            &config.database,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
-            None, // No TCP keepalive for CDC source
+            &config.pg_connection_config()?,
+            None,
+            Some(&application_name),
         )
         .await?;
 
-        // Discover user-defined composite columns. tokio-postgres cannot decode
-        // composite values natively, so for these columns we cast to text in the
-        // snapshot SELECT to get the `(a,b,c)` textual representation. Other
-        // varchar columns stay as-is to preserve RW's own text rendering
-        // (e.g. numeric -> "NaN"/"POSITIVE_INFINITY").
+        // Discover user-defined composite columns and arrays of composites.
+        // tokio-postgres cannot decode composite values natively, so for these
+        // columns we cast to text in the snapshot SELECT. Scalar composites
+        // become `(a,b,c)`; arrays become `text[]` so tokio-postgres can
+        // decode them directly as `Vec<Option<String>>` matching the RW
+        // `List(Varchar)` column. Other varchar columns stay as-is to
+        // preserve RW's own text rendering (e.g. numeric -> "NaN").
         let composite_columns = client
             .query(
-                "SELECT a.attname \
+                "SELECT a.attname, (t.typcategory = 'A') AS is_array \
                  FROM pg_attribute a \
                  JOIN pg_class c ON a.attrelid = c.oid \
                  JOIN pg_namespace n ON c.relnamespace = n.oid \
                  JOIN pg_type t ON a.atttypid = t.oid \
+                 LEFT JOIN pg_type t_elem ON t.typelem = t_elem.oid \
                  WHERE n.nspname = $1 \
                    AND c.relname = $2 \
                    AND a.attnum > 0 \
                    AND NOT a.attisdropped \
-                   AND t.typtype = 'c'",
+                   AND (t.typtype = 'c' \
+                        OR (t.typcategory = 'A' AND t_elem.typtype = 'c'))",
                 &[
                     &schema_table_name.schema_name,
                     &schema_table_name.table_name,
@@ -276,8 +284,8 @@ impl PostgresExternalTableReader {
             .await
             .map(|rows| {
                 rows.into_iter()
-                    .map(|row| row.get::<_, String>(0))
-                    .collect::<std::collections::HashSet<_>>()
+                    .map(|row| (row.get::<_, String>(0), row.get::<_, bool>(1)))
+                    .collect::<std::collections::HashMap<_, _>>()
             })
             .unwrap_or_else(|err| {
                 tracing::warn!(
@@ -286,7 +294,7 @@ impl PostgresExternalTableReader {
                     table = %schema_table_name.table_name,
                     "failed to discover postgres composite columns; falling back to no text cast"
                 );
-                std::collections::HashSet::new()
+                std::collections::HashMap::new()
             });
 
         let field_names = rw_schema
@@ -294,10 +302,18 @@ impl PostgresExternalTableReader {
             .iter()
             .map(|f| {
                 let quoted = Self::quote_column(&f.name);
-                if matches!(f.data_type, DataType::Varchar) && composite_columns.contains(&f.name) {
-                    format!("{quoted}::text AS {quoted}")
-                } else {
-                    quoted
+                match composite_columns.get(&f.name) {
+                    Some(false) if matches!(f.data_type, DataType::Varchar) => {
+                        format!("{quoted}::text AS {quoted}")
+                    }
+                    Some(true) if matches!(f.data_type, DataType::List(_)) => {
+                        format!(
+                            "CASE WHEN {quoted} IS NULL THEN NULL \
+                             ELSE ARRAY(SELECT t::text FROM unnest({quoted}) t)::text[] \
+                             END AS {quoted}"
+                        )
+                    }
+                    _ => quoted,
                 }
             })
             .join(",");
@@ -314,7 +330,8 @@ impl PostgresExternalTableReader {
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         format!(
             "\"{}\".\"{}\"",
-            table_name.schema_name, table_name.table_name
+            table_name.schema_name.replace('"', "\"\""),
+            table_name.table_name.replace('"', "\"\"")
         )
     }
 
@@ -386,7 +403,8 @@ impl PostgresExternalTableReader {
 
         let row_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
+            postgres_row_to_owned_row_with_strict_pk(row, &self.rw_schema, &self.pk_indices)
+                .map_err(ConnectorError::from)
         });
 
         pin_mut!(row_stream);
@@ -467,7 +485,7 @@ impl PostgresExternalTableReader {
     }
 
     fn quote_column(column: &str) -> String {
-        format!("\"{}\"", column)
+        format!("\"{}\"", column.replace('"', "\"\""))
     }
 
     async fn min_and_max(
@@ -476,8 +494,8 @@ impl PostgresExternalTableReader {
     ) -> ConnectorResult<Option<(ScalarImpl, ScalarImpl)>> {
         let sql = format!(
             "SELECT MIN({}), MAX({}) FROM {}",
-            split_column.name,
-            split_column.name,
+            Self::quote_column(&split_column.name),
+            Self::quote_column(&split_column.name),
             Self::get_normalized_table_name(&self.schema_table_name),
         );
         let client = self.client.lock().await;
@@ -486,10 +504,18 @@ impl PostgresExternalTableReader {
             Ok(None)
         } else {
             let row = &rows[0];
-            let min =
-                postgres_cell_to_scalar_impl(row, &split_column.data_type, 0, &split_column.name);
-            let max =
-                postgres_cell_to_scalar_impl(row, &split_column.data_type, 1, &split_column.name);
+            let min = postgres_cell_to_scalar_impl_strict(
+                row,
+                &split_column.data_type,
+                0,
+                &split_column.name,
+            )?;
+            let max = postgres_cell_to_scalar_impl_strict(
+                row,
+                &split_column.data_type,
+                1,
+                &split_column.name,
+            )?;
             match (min, max) {
                 (Some(min), Some(max)) => Ok(Some((min, max))),
                 _ => Ok(None),
@@ -529,12 +555,12 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&prepared_stmt, &params).await?;
         let datum_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl(
+            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl_strict(
                 &row,
                 &split_column.data_type,
                 0,
                 &split_column.name,
-            ))
+            )?)
         });
         pin_mut!(datum_stream);
         #[for_await]
@@ -573,12 +599,12 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&prepared_stmt, &params).await?;
         let datum_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl(
+            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl_strict(
                 &row,
                 &split_column.data_type,
                 0,
                 &split_column.name,
-            ))
+            )?)
         });
         pin_mut!(datum_stream);
         #[for_await]
@@ -597,6 +623,20 @@ impl PostgresExternalTableReader {
         right: OwnedRow,
         split_columns: Vec<Field>,
     ) {
+        // Conceptually, the query is:
+        //
+        // SELECT <selected_columns>
+        // FROM <upstream_table>
+        // WHERE <split_filter>
+        //
+        // `<split_filter>` is exactly one of:
+        // - `1 = 1` when both bounds contain the unbounded `NULL` sentinel;
+        // - `(<split_columns>) < (<right_bound_params>)` for the first split;
+        // - `(<split_columns>) >= (<left_bound_params>)` for the last split;
+        // - `(<split_columns>) >= (<left_bound_params>) AND
+        //    (<split_columns>) < (<right_bound_params>)` for a middle split.
+        //
+        // Bound values are bound in placeholder order: left, then right.
         assert_eq!(
             split_columns.len(),
             1,
@@ -654,7 +694,8 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&prepared_scan_stmt, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
+            postgres_row_to_owned_row_with_strict_pk(row, &self.rw_schema, &self.pk_indices)
+                .map_err(ConnectorError::from)
         });
 
         pin_mut!(row_stream);
@@ -847,7 +888,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "varchar" => Some(PgType::VARCHAR_ARRAY),
             "text" => Some(PgType::TEXT_ARRAY),
             "bytea" => Some(PgType::BYTEA_ARRAY),
-            "geometry" => Some(PgType::BYTEA_ARRAY), // PostGIS geometry array
+            "geometry" | "geography" => Some(PgType::BYTEA_ARRAY), // PostGIS spatial arrays
             "date" => Some(PgType::DATE_ARRAY),
             "time" => Some(PgType::TIME_ARRAY),
             "timetz" => Some(PgType::TIMETZ_ARRAY),
@@ -880,7 +921,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
             "citext" | "text" => Some(PgType::TEXT),
             "bytea" => Some(PgType::BYTEA),
-            "geometry" => Some(PgType::BYTEA), // PostGIS geometry type
+            "geometry" | "geography" => Some(PgType::BYTEA), // PostGIS spatial types
             "date" => Some(PgType::DATE),
             "time" => Some(PgType::TIME),
             "timetz" => Some(PgType::TIMETZ),
@@ -897,6 +938,9 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
     }
 }
 
+// Keep this canonical mapping aligned with `postgres_source_column_type_compatible` in
+// `src/common/src/catalog/cdc_type_compatibility.rs`, which validates user-declared RW column
+// types.
 pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
     let data_type = match *pg_type {
         PgType::BOOL => DataType::Boolean,
@@ -910,10 +954,7 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::DATE => DataType::Date,
         PgType::TIME => DataType::Time,
         PgType::TIMETZ => DataType::Time,
-        PgType::POINT => DataType::Struct(risingwave_common::types::StructType::new(vec![
-            ("x", DataType::Float32),
-            ("y", DataType::Float32),
-        ])),
+        PgType::POINT => postgres_point_type(),
         PgType::TIMESTAMP => DataType::Timestamp,
         PgType::TIMESTAMPTZ => DataType::Timestamptz,
         PgType::INTERVAL => DataType::Interval,
@@ -943,10 +984,10 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::OID => DataType::Int64,
         PgType::OID_ARRAY => DataType::Int64.list(),
         PgType::MONEY_ARRAY => DataType::Decimal.list(),
+        // Debezium does not implement POINT_ARRAY schema conversion.
+        // https://github.com/debezium/debezium/blob/main/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresValueConverter.java#L339-L348
         PgType::POINT_ARRAY => {
-            DataType::list(DataType::Struct(risingwave_common::types::StructType::new(
-                vec![("x", DataType::Float32), ("y", DataType::Float32)],
-            )))
+            return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
         }
         _ => {
             return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
@@ -989,16 +1030,11 @@ mod tests {
         };
 
         let table = PostgresExternalTable::connect(
-            &config.username,
-            &config.password,
-            &config.host,
-            config.port.parse::<u16>().unwrap(),
-            &config.database,
+            &config.pg_connection_config().unwrap(),
             &config.schema,
             &config.table,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
             false,
+            Some("SELECT"),
         )
         .await
         .unwrap();
@@ -1230,6 +1266,7 @@ mod tests {
             rw_schema,
             vec![0, 1],
             schema_table_name.clone(),
+            233,
         )
         .await
         .unwrap();

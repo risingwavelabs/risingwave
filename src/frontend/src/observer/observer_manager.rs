@@ -43,6 +43,7 @@ pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     version: CatalogVersion,
     catalog_updated_tx: Sender<CatalogVersion>,
+    // When both locks are needed, always acquire `catalog` before `user_info_manager`.
     catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -117,6 +118,9 @@ impl ObserverState for FrontendObserverNode {
             Info::ClusterResource(resource) => {
                 LicenseManager::get().update_cluster_resource(resource);
             }
+            Info::TableRefillRuntimeConfig(_) => {
+                panic!("frontend node should not receive TableRefillRuntimeConfig");
+            }
         }
     }
 
@@ -152,6 +156,7 @@ impl ObserverState for FrontendObserverNode {
             secrets,
             cluster_resource,
             object_dependencies,
+            table_refill_runtime_config: _,
         } = snapshot;
 
         for db in databases {
@@ -293,19 +298,7 @@ impl FrontendObserverNode {
                                 table.schema_id,
                                 table.id,
                             ),
-                            Operation::Update => {
-                                let old_fragment_id = catalog_guard
-                                    .get_any_table_by_id(table.id)
-                                    .unwrap()
-                                    .fragment_id;
-                                catalog_guard.update_table(table);
-                                if old_fragment_id != table.fragment_id {
-                                    // FIXME: the frontend node delete its fragment for the update
-                                    // operation by itself.
-                                    self.worker_node_manager
-                                        .remove_streaming_fragment_mapping(&old_fragment_id);
-                                }
-                            }
+                            Operation::Update => catalog_guard.update_table(table),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
                         PbObjectInfo::Source(source) => match resp.operation() {

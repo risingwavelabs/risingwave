@@ -49,13 +49,15 @@ pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::bind_data_type;
+pub(crate) use expr::bind_struct_type;
 pub use gap_fill_binder::BoundFillStrategy;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput, BoundSource,
-    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
+    BoundBaseTable, BoundGapFill, BoundIcebergMetadataTable, BoundJoin, BoundMatchRecognize,
+    BoundMeasure, BoundShare, BoundShareInput, BoundSource, BoundSymbolDefinition,
+    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, MeasureSlotKind, Relation,
     ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 // Re-export common types
@@ -72,6 +74,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, SecretId, ViewId};
 use crate::error::ErrorCode;
+use crate::expr::ScopeId;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
@@ -108,10 +111,12 @@ pub struct Binder {
 
     /// A stack holding contexts of left-lateral `TableFactor`s.
     ///
-    /// We need a separate stack as `CorrelatedInputRef` depth is
-    /// determined by the upper subquery context depth, not the lateral context stack depth.
+    /// These are the left inputs of the joins enclosing the table factor being bound. They are
+    /// only visible to a `LATERAL` factor, and are saved with the query level that owns them.
     lateral_contexts: Vec<LateralBindContext>,
 
+    /// The scope id for the next [`BindContext`]. Scope 0 is the initial context.
+    next_scope_id: u32,
     next_subquery_id: usize,
     next_values_id: usize,
     /// The `ShareId` is used to identify the share relation which could be a CTE, a source, a view
@@ -254,6 +259,7 @@ impl Binder {
             auth_context: session.auth_context(),
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
+            next_scope_id: 1,
             next_subquery_id: 0,
             next_values_id: 0,
             next_share_id: 0,
@@ -346,6 +352,7 @@ impl Binder {
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
         self.context.disable_security_invoker = new_context.disable_security_invoker;
+        self.context.scope = self.next_scope();
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -367,6 +374,7 @@ impl Binder {
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
         self.context.disable_security_invoker = new_context.disable_security_invoker;
+        self.context.scope = self.next_scope();
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
@@ -384,17 +392,25 @@ impl Binder {
         Ok(())
     }
 
-    fn try_mark_lateral_as_visible(&mut self) {
-        if let Some(mut ctx) = self.lateral_contexts.pop() {
-            ctx.is_visible = true;
-            self.lateral_contexts.push(ctx);
-        }
+    /// Make every enclosing left-hand `FROM` context visible while binding a lateral table
+    /// factor. A lateral factor nested in a join tree may refer not only to its immediate left
+    /// sibling, but also to left inputs of enclosing joins.
+    fn mark_lateral_contexts_visible(&mut self) -> Vec<bool> {
+        self.lateral_contexts
+            .iter_mut()
+            .map(|ctx| std::mem::replace(&mut ctx.is_visible, true))
+            .collect()
     }
 
-    fn try_mark_lateral_as_invisible(&mut self) {
-        if let Some(mut ctx) = self.lateral_contexts.pop() {
-            ctx.is_visible = false;
-            self.lateral_contexts.push(ctx);
+    fn restore_lateral_contexts_visibility(&mut self, visibility: Vec<bool>) {
+        // Some table-factor binders return early on an error without unwinding their temporary
+        // query context. The whole binder is discarded in that case, so there is no visibility
+        // state to restore on the active stack.
+        if self.lateral_contexts.len() != visibility.len() {
+            return;
+        }
+        for (ctx, is_visible) in self.lateral_contexts.iter_mut().zip_eq_debug(visibility) {
+            ctx.is_visible = is_visible;
         }
     }
 
@@ -410,6 +426,13 @@ impl Binder {
             .iter()
             .rev()
             .take_while(|(context, _)| context.sql_udf_arguments.is_none())
+    }
+
+    /// A fresh scope id for a new [`BindContext`].
+    fn next_scope(&mut self) -> ScopeId {
+        let scope = ScopeId(self.next_scope_id);
+        self.next_scope_id += 1;
+        scope
     }
 
     fn next_subquery_id(&mut self) -> usize {

@@ -34,9 +34,11 @@
 #![feature(custom_inner_attributes)]
 #![feature(iter_array_chunks)]
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use duration_str::parse_std;
+use risingwave_common::config::MetricLevel;
 use serde::de;
 
 pub mod aws_utils;
@@ -67,6 +69,19 @@ pub const AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
 pub const SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY: &str = "create_table_if_not_exists";
 pub const SINK_TARGET_TABLE_NAME: &str = "table.name";
 pub const SINK_INTERMEDIATE_TABLE_NAME: &str = "intermediate.table.name";
+
+static CONNECTOR_METRICS_LEVEL: OnceLock<MetricLevel> = OnceLock::new();
+
+pub fn init_connector_metrics(metric_level: MetricLevel) {
+    CONNECTOR_METRICS_LEVEL.get_or_init(|| metric_level);
+}
+
+fn connector_metrics_level() -> MetricLevel {
+    CONNECTOR_METRICS_LEVEL
+        .get()
+        .copied()
+        .unwrap_or(MetricLevel::Debug)
+}
 
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
@@ -190,8 +205,9 @@ mod tests {
     use expect_test::expect_file;
 
     use crate::with_options_test::{
-        generate_allow_alter_on_fly_fields_combined, generate_with_options_yaml_connection,
-        generate_with_options_yaml_sink, generate_with_options_yaml_source,
+        generate_allow_alter_on_fly_fields_combined, generate_iceberg_engine_fields,
+        generate_with_options_yaml_connection, generate_with_options_yaml_sink,
+        generate_with_options_yaml_source,
     };
 
     /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
@@ -212,6 +228,23 @@ mod tests {
     fn test_allow_alter_on_fly_fields_rust_up_to_date() {
         expect_file!("../src/allow_alter_on_fly_fields.rs")
             .assert_eq(&generate_allow_alter_on_fly_fields_combined());
+    }
+
+    /// This test ensures that Iceberg Engine sink fields are up-to-date.
+    #[test]
+    fn test_iceberg_engine_fields_rust_up_to_date() {
+        expect_file!("../src/sink/iceberg/engine_options.rs")
+            .assert_eq(&generate_iceberg_engine_fields());
+    }
+
+    #[test]
+    fn test_orphan_file_cleanup_options_supported_by_iceberg_engine() {
+        use crate::sink::iceberg::is_iceberg_engine_option;
+
+        assert!(is_iceberg_engine_option("enable_orphan_file_cleanup"));
+        assert!(is_iceberg_engine_option(
+            "orphan_file_cleanup_min_age_millis"
+        ));
     }
 
     /// Test some serde behavior we rely on.

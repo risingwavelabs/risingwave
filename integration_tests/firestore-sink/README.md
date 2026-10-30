@@ -15,6 +15,17 @@ draining concurrent requests on error, per-document ordering, and acknowledgemen
 before log truncation. Explicit batch failure and missing status entries are
 errors; a failed first chunk cannot truncate the log or send the following chunk.
 
+Encoding and validation tests also run in deterministic simulation:
+
+```sh
+CARGO_TARGET_DIR=target/sim cargo test -p risingwave_connector --lib --no-default-features --locked \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" sink::firestore
+```
+
+The real gRPC mock and official emulator tests are compiled only without `madsim`.
+The Firestore SDK uses real HTTP/2 sockets, and the simulation's replacement for
+`tonic` does not provide the gRPC server API used by the mock.
+
 ## Official emulator
 
 Requires Java 17 or later, curl, ripgrep, and the normal Rust build prerequisites.
@@ -31,7 +42,7 @@ yourself and run:
 
 ```sh
 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 cargo test -p risingwave_connector --lib --no-default-features \
-  sink::firestore::tests::emulator_crud_replay_and_native_values -- --ignored --nocapture
+  sink::firestore::tests::grpc::emulator_crud_replay_and_native_values -- --ignored --nocapture
 ```
 
 The connector honors the standard `FIRESTORE_EMULATOR_HOST=host:port` variable.

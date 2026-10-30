@@ -12,46 +12,63 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 
 use crate::error::Result;
-use crate::expr::{Expression, ValueImpl};
+use crate::expr::{AsyncExpression, ExpressionInfo, SyncExpression, ValueImpl};
 
-/// A wrapper of [`Expression`] that does extra checks after evaluation.
+/// A wrapper of an expression that does extra checks after evaluation.
 #[derive(Debug)]
 pub(crate) struct Checked<E>(pub E);
 
-// TODO: avoid the overhead of extra boxing.
-#[async_trait]
-impl<E: Expression> Expression for Checked<E> {
+impl<E: ExpressionInfo> ExpressionInfo for Checked<E> {
     fn return_type(&self) -> DataType {
         self.0.return_type()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let res = self.0.eval(input).await?;
-        assert_eq!(res.len(), input.capacity());
+    fn input_ref_index(&self) -> Option<usize> {
+        self.0.input_ref_index()
+    }
+}
+
+macro_rules! checked_eval {
+    ($mode:ident, $this:expr, $input:expr, $method:ident) => {{
+        let res = forward!($mode, $this.0, $method($input))?;
+        assert_eq!(res.len(), $input.capacity());
         Ok(res)
+    }};
+}
+
+impl<E: SyncExpression> SyncExpression for Checked<E> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        checked_eval!(sync, self, input, eval)
     }
 
-    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        let res = self.0.eval_v2(input).await?;
-        assert_eq!(res.len(), input.capacity());
-        Ok(res)
+    fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        checked_eval!(sync, self, input, eval_v2)
     }
 
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        self.0.eval_row(input).await
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        self.0.eval_row(input)
     }
 
     fn eval_const(&self) -> Result<Datum> {
         self.0.eval_const()
     }
+}
 
-    fn input_ref_index(&self) -> Option<usize> {
-        self.0.input_ref_index()
+impl<E: AsyncExpression> AsyncExpression for Checked<E> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        checked_eval!(async, self, input, eval)
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        checked_eval!(async, self, input, eval_v2)
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        self.0.eval_row(input).await
     }
 }

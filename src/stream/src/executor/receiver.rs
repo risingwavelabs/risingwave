@@ -69,7 +69,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let actor_id = 233.into();
-        let (old, new) = (114.into(), 514.into()); // old and new upstream actor id
+        let (old, new, unrelated) = (114.into(), 514.into(), 1919.into()); // upstream actor ids
 
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
 
@@ -89,7 +89,7 @@ mod tests {
                 upstream_fragment_id,
                 new_upstream_fragment_id: None,
                 added_upstream_actors: vec![helper_make_local_actor(new)],
-                removed_upstream_actor_id: vec![old],
+                removed_upstream_actor_id: vec![old, unrelated],
             }
         };
 

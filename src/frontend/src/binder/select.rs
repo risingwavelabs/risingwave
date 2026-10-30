@@ -29,7 +29,7 @@ use super::{BoundShareInput, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_column_name_not_reserved;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, ScopeId};
 use crate::optimizer::plan_node::generic::CHANGELOG_OP;
 use crate::utils::group_by::GroupBy;
 
@@ -129,11 +129,11 @@ impl BoundSelect {
             .chain(self.having.iter_mut())
     }
 
-    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_scope(&self, scope: ScopeId) -> bool {
         self.exprs()
-            .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
+            .any(|expr| expr.has_correlated_input_ref_by_scope(scope))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated_by_depth(depth),
+                Some(relation) => relation.is_correlated_by_scope(scope),
                 None => false,
             }
     }
@@ -147,21 +147,21 @@ impl BoundSelect {
             }
     }
 
-    pub fn collect_correlated_indices_by_depth_and_assign_id(
+    pub fn collect_correlated_indices_by_scope_and_assign_id(
         &mut self,
-        depth: Depth,
+        scope: ScopeId,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         let mut correlated_indices = self
             .exprs_mut()
             .flat_map(|expr| {
-                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+                expr.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id)
             })
             .collect_vec();
 
         if let Some(relation) = self.from.as_mut() {
             correlated_indices.extend(
-                relation.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                relation.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
             );
         }
 
@@ -314,7 +314,7 @@ impl Binder {
             .collect::<Result<Vec<Field>>>()?;
 
         if let Some(Relation::Share(bound)) = &from
-            && matches!(bound.input, BoundShareInput::ChangeLog(_))
+            && matches!(bound.input, BoundShareInput::ChangeLog { .. })
             && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
         {
             return Err(ErrorCode::BindError(
@@ -364,13 +364,9 @@ impl Binder {
                     let except_indices = self.generate_except_indices(except.as_deref())?;
                     let (begin, end) = self
                         .context
-                        .range_of
-                        .get(&(schema_name, table_name.clone()))
-                        .ok_or_else(|| {
-                            ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
-                        })?;
+                        .resolve_relation_range(&table_name, &schema_name)?;
                     let (exprs, names) = Self::iter_bound_columns(
-                        self.context.columns[*begin..*end]
+                        self.context.columns[begin..end]
                             .iter()
                             .filter(|c| !c.is_hidden && !except_indices.contains(&c.index)),
                     );
@@ -751,6 +747,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Text => "text".to_owned(),
         AstDataType::Bytea => "bytea".to_owned(),
         AstDataType::Jsonb => "jsonb".to_owned(),
+        AstDataType::Variant => "variant".to_owned(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
         AstDataType::Vector(_) => "vector".to_owned(),

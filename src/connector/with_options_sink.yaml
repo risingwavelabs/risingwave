@@ -57,6 +57,8 @@ BigQueryConfig:
     field_type: bool
     required: false
     default: Default::default
+    alias:
+    - create_table_if_not_exists
   - name: bigquery.credentials
     field_type: String
     required: false
@@ -238,7 +240,7 @@ DorisConfig:
     required: true
   - name: doris.stream_load.http.timeout.ms
     field_type: u64
-    comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    comments: The timeout in milliseconds for stream load http request, defaults to 30 seconds.
     required: false
     default: 30 * 1000
     allow_alter_on_fly: true
@@ -354,12 +356,15 @@ ElasticSearchConfig:
   - name: batch_num_messages
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: batch_size_kb
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: concurrent_requests
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: false
@@ -461,8 +466,10 @@ GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
     field_type: String
-    comments: The Google Pub/Sub Project ID
-    required: true
+    comments: |-
+      The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+      the credentials or Application Default Credentials.
+    required: false
   - name: pubsub.topic
     field_type: String
     comments: Specifies the Pub/Sub topic to publish messages
@@ -480,7 +487,9 @@ GooglePubSubConfig:
   - name: pubsub.credentials
     field_type: String
     comments: |-
-      A JSON string containing the service account credentials for authorization,
+      A JSON string containing the service account credentials for authorization. If omitted,
+      the connector uses Google Application Default Credentials (ADC) when allowed by the
+      deployment environment.
       see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
       The provided account credential must have the
       `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
@@ -489,7 +498,11 @@ HttpConfig:
   fields:
   - name: url
     field_type: String
-    comments: The endpoint URL to POST data to.
+    comments: The endpoint URL to send data to.
+    required: false
+  - name: method
+    field_type: String
+    comments: HTTP request method. Supported values are `POST` and `PUT`. Defaults to `POST`.
     required: false
   - name: content_type
     field_type: String
@@ -540,6 +553,9 @@ IcebergConfig:
   - name: glue.region
     field_type: String
     required: false
+  - name: glue.endpoint
+    field_type: String
+    required: false
   - name: glue.id
     field_type: String
     comments: |-
@@ -565,6 +581,18 @@ IcebergConfig:
     field_type: String
     required: false
   - name: adlsgen2.endpoint
+    field_type: String
+    required: false
+  - name: adlsgen2.tenant_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_secret
+    field_type: String
+    required: false
+  - name: adlsgen2.authority_host
     field_type: String
     required: false
   - name: warehouse.path
@@ -655,8 +683,11 @@ IcebergConfig:
     comments: |-
       Security type for REST catalog authentication.
       Supported values: `none`, `oauth2`, `google`.
-      When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
-      for authentication using Google Application Default Credentials (ADC).
+      When set to `google`, native REST catalogs authenticate using
+      `gcs.credential` or Google Application Default Credentials (ADC).
+      JNI REST catalogs use Java's `GoogleAuthManager` with ADC;
+      `gcs.credential` only configures Rust `FileIO` storage credentials.
+      Vended credentials use the native Rust REST catalog.
     required: false
   - name: gcp.auth.scopes
     field_type: String
@@ -675,8 +706,8 @@ IcebergConfig:
       - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
       - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
       - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
-      Google Cloud Lakehouse Iceberg REST catalogs with credential vending require
-      `org.apache.iceberg.gcp.gcs.GCSFileIO`.
+      Applies only to JNI catalogs. Native REST catalogs route storage by URI
+      and support GCS vended credentials without a Java `FileIO` class.
     required: false
   - name: database.name
     field_type: String
@@ -698,18 +729,30 @@ IcebergConfig:
     field_type: String
     required: false
     default: Default::default
+    iceberg_engine: true
   - name: order_key
     field_type: String
     required: false
     default: Default::default
+    iceberg_engine: true
   - name: commit_checkpoint_interval
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 60.
     required: false
     default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: create_table_if_not_exists
     field_type: bool
+    required: false
+    default: Default::default
+  - name: default_table_location_from_namespace
+    field_type: bool
+    comments: |-
+      For REST catalogs such as AWS Glue, derive a missing table location from the
+      namespace's `location` property. Defaults to false. An existing location
+      derived from `warehouse.path` takes precedence; a missing or empty namespace
+      location leaves server-side location assignment unchanged.
     required: false
     default: Default::default
   - name: is_exactly_once
@@ -727,28 +770,33 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction_interval_sec
     field_type: u64
     comments: The interval of iceberg compaction
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: enable_snapshot_expiration
     field_type: bool
     comments: Whether to enable iceberg expired snapshots.
     required: false
     default: 'true'
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: write_mode
     field_type: IcebergWriteMode
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
     default: 'IcebergWriteMode :: MergeOnRead'
+    iceberg_engine: true
   - name: format_version
     field_type: FormatVersion
     comments: Iceberg format version for table creation.
     required: false
     default: 'FormatVersion :: V2'
+    iceberg_engine: true
   - name: snapshot_expiration_max_age_millis
     field_type: i64
     comments: |-
@@ -757,22 +805,65 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: snapshot_expiration_retain_last
     field_type: i32
     comments: The number of snapshots to retain
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: snapshot_expiration_clear_expired_files
     field_type: bool
     required: false
     default: 'true'
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: snapshot_expiration_clear_expired_meta_data
     field_type: bool
     required: false
     default: 'true'
     allow_alter_on_fly: true
+    iceberg_engine: true
+  - name: enable_manifest_rewrite
+    field_type: bool
+    comments: Whether to periodically rewrite fragmented Iceberg data manifests.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
+  - name: manifest_rewrite_target_size_bytes
+    field_type: u64
+    comments: Target size in bytes for rewritten Iceberg data manifests.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
+  - name: manifest_rewrite_min_count_to_merge
+    field_type: usize
+    comments: Minimum number of manifests required to rewrite an under-filled batch.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
+  - name: enable_orphan_file_cleanup
+    field_type: bool
+    comments: |-
+      Whether to periodically remove files that are unreachable from Iceberg metadata.
+      Cleanup runs on the global Iceberg orphan-file cleanup interval.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
+  - name: orphan_file_cleanup_min_age_millis
+    field_type: u64
+    comments: |-
+      Minimum file age in milliseconds before an unreachable file may be removed.
+      Defaults to 7 days and must be at least 24 hours.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.max_snapshots_num
     field_type: usize
     comments: |-
@@ -782,34 +873,47 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.small_files_threshold_mb
     field_type: u64
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.delete_files_count_threshold
     field_type: usize
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
+  - name: compaction.delete_ratio_percent
+    field_type: u32
+    comments: Minimum percentage of deleted physical rows for PK-index compaction.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.trigger_snapshot_count
     field_type: usize
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.target_file_size_mb
     field_type: u64
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.type
     field_type: CompactionType
     comments: |-
-      Compaction type: `full`, `small-files`, or `files-with-delete`
-      If not set, will default to `full`
+      Compaction type: `auto`, `full`, `small-files`, or `files-with-delete`
+      If not set, defaults to `auto` when Iceberg compaction is licensed, otherwise `full`
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.write_parquet_compression
     field_type: String
     comments: |-
@@ -819,6 +923,7 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.write_parquet_max_row_group_rows
     field_type: usize
     comments: |-
@@ -827,6 +932,7 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.write_parquet_max_row_group_bytes
     field_type: usize
     comments: |-
@@ -835,13 +941,16 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: enable_pk_index
     field_type: bool
     comments: |-
       Whether to enable PK index for upsert sink. Default is false.
-      It's used for V3 upsert iceberg sink to generate delete vectors.
+      For upsert iceberg sinks (V2/V3, merge-on-read): maintain a pk index and write
+      position deletes instead of equality deletes.
     required: false
     default: Default::default
+    iceberg_engine: true
 KafkaConfig:
   fields:
   - name: topic
@@ -907,7 +1016,7 @@ KafkaConfig:
     allow_alter_on_fly: true
   - name: properties.sasl.mechanism
     field_type: String
-    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
+    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, OAUTHBEARER, and `AWS_MSK_IAM`.
     required: false
     allow_alter_on_fly: true
   - name: properties.sasl.username
@@ -924,26 +1033,62 @@ KafkaConfig:
     field_type: String
     comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.keytab
     field_type: String
     comments: Path to client's Kerberos keytab file under SASL/GSSAPI.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.principal
     field_type: String
     comments: Client's Kerberos principal name under SASL/GSSAPI.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.kinit.cmd
     field_type: String
     comments: Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.min.time.before.relogin
     field_type: String
     comments: Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.oauthbearer.config
     field_type: String
     comments: Configurations for SASL/OAUTHBEARER.
     required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.method
+    field_type: String
+    comments: SASL/OAUTHBEARER token acquisition method. Set to "oidc" to use the OIDC client credentials flow.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.client.id
+    field_type: String
+    comments: Client ID for SASL/OAUTHBEARER OIDC provider.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.client.secret
+    field_type: String
+    comments: Client secret for SASL/OAUTHBEARER OIDC provider.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.token.endpoint.url
+    field_type: String
+    comments: OIDC token endpoint URL for SASL/OAUTHBEARER.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.scope
+    field_type: String
+    comments: OIDC scope for SASL/OAUTHBEARER.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.sasl.oauthbearer.extensions
+    field_type: String
+    comments: SASL/OAUTHBEARER extensions for broker-facing claims (e.g. Confluent Cloud logicalCluster, identityPoolId).
+    required: false
+    allow_alter_on_fly: true
   - name: properties.retry.max
     field_type: u32
     required: false
@@ -990,10 +1135,41 @@ KafkaConfig:
     field_type: bool
     required: false
     allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.ms
+    field_type: usize
+    comments: |-
+      Initial backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.max.ms
+    field_type: usize
+    comments: |-
+      Maximum backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.socket.connection.setup.timeout.ms
+    field_type: usize
+    comments: |-
+      Maximum time in milliseconds allowed for broker connection setup, including TCP setup and
+      SSL/SASL handshakes.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
     default: 'true'
+  - name: properties.retry.backoff.ms
+    field_type: usize
+    comments: Initial backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.retry.backoff.max.ms
+    field_type: usize
+    comments: Maximum backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
@@ -1036,11 +1212,6 @@ KafkaConfig:
   - name: properties.message.send.max.retries
     field_type: usize
     comments: How many times to retry sending a failing Message.
-    required: false
-    allow_alter_on_fly: true
-  - name: properties.retry.backoff.ms
-    field_type: usize
-    comments: The backoff time in milliseconds before retrying a protocol request.
     required: false
     allow_alter_on_fly: true
   - name: properties.batch.num.messages
@@ -1203,6 +1374,31 @@ KinesisSinkConfig:
     field_type: u64
     required: false
     default: '20000'
+LanceDbConfig:
+  fields:
+  - name: lancedb.uri
+    field_type: String
+    comments: URI of the `LanceDB` database (e.g., `/tmp/lancedb`, `<s3://bucket/path/db>`)
+    required: true
+  - name: lancedb.table
+    field_type: String
+    comments: Table name in the `LanceDB` database
+    required: true
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Commit every n(>0) checkpoints, default is 10.
+    required: false
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
+  - name: r#type
+    field_type: String
+    required: true
+  - name: is_exactly_once
+    field_type: bool
+    comments: |-
+      Whether to use RisingWave's two-phase commit framework for exactly-once commits.
+      Defaults to true. Set to false to use single-phase commits.
+    required: false
 MongodbConfig:
   fields:
   - name: mongodb.url
@@ -1399,16 +1595,73 @@ OpenSearchConfig:
   - name: batch_num_messages
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: batch_size_kb
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: concurrent_requests
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: false
     default: '"upsert" . to_owned ()'
+PostgresConfig:
+  fields:
+  - name: host
+    field_type: String
+    required: true
+  - name: port
+    field_type: u16
+    required: true
+  - name: user
+    field_type: String
+    required: true
+  - name: password
+    field_type: String
+    required: true
+  - name: database
+    field_type: String
+    required: true
+  - name: table
+    field_type: String
+    required: true
+  - name: schema
+    field_type: String
+    required: false
+    default: '"public" . to_owned ()'
+  - name: ssl_mode
+    field_type: SslMode
+    required: false
+    default: Default::default
+  - name: ssl.root.cert
+    field_type: String
+    required: false
+  - name: max_batch_rows
+    field_type: usize
+    required: false
+    default: '1024'
+  - name: r#type
+    field_type: String
+    required: true
+  - name: tcp.keepalive.enable
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: tcp.keepalive.idle
+    field_type: u32
+    required: false
+    default: 10 * 60
+  - name: tcp.keepalive.interval
+    field_type: u32
+    required: false
+    default: '10'
+  - name: tcp.keepalive.count
+    field_type: u32
+    required: false
+    default: '3'
 PulsarConfig:
   fields:
   - name: properties.retry.max
@@ -1502,6 +1755,17 @@ PulsarConfig:
     field_type: usize
     required: false
     default: 1 << 20
+  - name: properties.routing.mode
+    field_type: PulsarRoutingMode
+    required: false
+    alias:
+    - properties.routing_mode
+    - routing_mode
+    - pulsar.routing_mode
+    - pulsar.routing.mode
+    - pulsar.properties.routing.mode
+    - pulsar.properties.routing_mode
+    allow_alter_on_fly: true
 RedShiftConfig:
   fields:
   - name: jdbc.url
@@ -1675,6 +1939,13 @@ SnowflakeV2Config:
     required: false
     default: '1800'
   - name: warehouse
+    field_type: String
+    required: false
+  - name: task.serverless
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: task.target_completion_interval
     field_type: String
     required: false
   - name: jdbc.url
@@ -1853,6 +2124,13 @@ StarrocksConfig:
     field_type: String
     comments: Enable partial update
     required: false
+  - name: starrocks.max_batch_size_bytes
+    field_type: u64
+    comments: |-
+      The maximum size in bytes for each `StarRocks` stream load request payload.
+      Defaults to unlimited.
+    required: false
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: true
@@ -1875,6 +2153,9 @@ TurbopufferConfig:
     required: false
   - name: disable_backpressure
     field_type: bool
+    required: false
+  - name: num_shards
+    field_type: usize
     required: false
   - name: full_text_search_columns
     field_type: String

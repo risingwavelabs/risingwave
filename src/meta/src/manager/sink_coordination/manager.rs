@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::pin::pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::future::{BoxFuture, Either, join_all, select};
+use futures::future::{BoxFuture, Either, select};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::id::{DatabaseId, JobId};
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{SinkCommittedEpochSubscriber, SinkError, SinkParam};
@@ -29,31 +30,26 @@ use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse, co
 use rw_futures_util::pending_on_none;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot::{Receiver, Sender, channel};
-use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::sink_coordination::SinkWriterRequestStream;
 use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
+use crate::notification::{
+    CollectionNotifier, Notifier, NotifierStarter, StartReceiver, wait_collection,
+};
 
 macro_rules! send_with_err_check {
     ($tx:expr, $msg:expr) => {
         if $tx.send($msg).is_err() {
-            error!("unable to send msg");
-        }
-    };
-}
-
-macro_rules! send_await_with_err_check {
-    ($tx:expr, $msg:expr) => {
-        if $tx.send($msg).await.is_err() {
             error!("unable to send msg");
         }
     };
@@ -64,10 +60,41 @@ const BOUNDED_CHANNEL_SIZE: usize = 16;
 enum ManagerRequest {
     NewSinkWriter(SinkWriterCoordinationHandle),
     StopCoordinator {
-        finish_notifier: Sender<()>,
-        /// sink id to stop. When `None`, stop all sink coordinator
-        sink_ids: Option<Vec<SinkId>>,
+        notifier: Notifier,
+        /// Streaming jobs whose sink coordinators should be stopped.
+        job_ids: Vec<JobId>,
     },
+    RecoveryStart {
+        recovery: RecoveryStart,
+        notifier: Notifier,
+    },
+    RecoverySucceeded {
+        recovery: RecoverySucceeded,
+        notifier: Notifier,
+    },
+}
+
+#[derive(Debug)]
+pub enum RecoveryStart {
+    Global,
+    Database {
+        database_id: DatabaseId,
+        job_ids: HashSet<JobId>,
+    },
+}
+
+#[derive(Debug)]
+pub enum RecoverySucceeded {
+    Global {
+        failed_databases: HashMap<DatabaseId, HashSet<JobId>>,
+    },
+    Database(DatabaseId),
+}
+
+#[derive(Debug)]
+enum RecoveryFence {
+    Global,
+    Databases(HashMap<DatabaseId, HashSet<JobId>>),
 }
 
 #[derive(Clone)]
@@ -99,6 +126,22 @@ fn new_committed_epoch_subscriber(
 }
 
 impl SinkCoordinatorManager {
+    /// Let lifecycle tests control when coordinator stop requests complete.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> (Self, UnboundedReceiver<(Vec<JobId>, Notifier)>) {
+        let (request_tx, mut request_rx) = mpsc::channel(BOUNDED_CHANNEL_SIZE);
+        let (stop_tx, stop_rx) = unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(request) = request_rx.recv().await {
+                let ManagerRequest::StopCoordinator { notifier, job_ids } = request else {
+                    panic!("expected a coordinator stop request");
+                };
+                stop_tx.send((job_ids, notifier)).unwrap();
+            }
+        });
+        (Self { request_tx }, stop_rx)
+    }
+
     pub fn start_worker(
         db: DatabaseConnection,
         hummock_manager: HummockManagerRef,
@@ -173,27 +216,46 @@ impl SinkCoordinatorManager {
         Ok(UnboundedReceiverStream::new(response_rx))
     }
 
-    async fn stop_coordinator(&self, sink_ids: Option<Vec<SinkId>>) {
-        let (tx, rx) = channel();
-        send_await_with_err_check!(
-            self.request_tx,
-            ManagerRequest::StopCoordinator {
-                finish_notifier: tx,
-                sink_ids: sink_ids.clone(),
-            }
-        );
-        if rx.await.is_err() {
-            error!("fail to wait for resetting sink manager worker");
+    pub async fn stop_sink_coordinators_for_jobs(&self, job_ids: Vec<JobId>) {
+        let (notifier, started_rx) = Notifier::new();
+        if self
+            .request_tx
+            .send(ManagerRequest::StopCoordinator { notifier, job_ids })
+            .await
+            .is_err()
+        {
+            error!("unable to send sink coordinator stop request");
+            return;
         }
-        info!("successfully stop coordinator: {:?}", sink_ids);
+        if let Err(err) = Self::wait_for_completion(started_rx).await {
+            error!(error = %err.as_report(), "failed to wait for sink coordinators to stop");
+        }
     }
 
-    pub async fn reset(&self) {
-        self.stop_coordinator(None).await;
+    pub async fn start_recovery(&self, recovery: RecoveryStart) -> anyhow::Result<()> {
+        let (notifier, started_rx) = Notifier::new();
+        self.request_tx
+            .send(ManagerRequest::RecoveryStart { recovery, notifier })
+            .await
+            .map_err(|_| anyhow!("sink coordinator manager worker has stopped"))?;
+        Self::wait_for_completion(started_rx).await
     }
 
-    pub async fn stop_sink_coordinator(&self, sink_ids: Vec<SinkId>) {
-        self.stop_coordinator(Some(sink_ids)).await;
+    pub async fn recovery_succeeded(&self, recovery: RecoverySucceeded) -> anyhow::Result<()> {
+        let (notifier, started_rx) = Notifier::new();
+        self.request_tx
+            .send(ManagerRequest::RecoverySucceeded { recovery, notifier })
+            .await
+            .map_err(|_| anyhow!("sink coordinator manager worker has stopped"))?;
+        Self::wait_for_completion(started_rx).await
+    }
+
+    async fn wait_for_completion(started_rx: StartReceiver) -> anyhow::Result<()> {
+        let receivers = started_rx
+            .await
+            .map_err(|_| anyhow!("sink coordinator manager dropped start notifier"))??;
+        wait_collection(receivers).await?;
+        Ok(())
     }
 }
 
@@ -201,7 +263,7 @@ struct CoordinatorWorkerHandle {
     /// Sender to coordinator worker. Drop the sender as a stop signal
     request_sender: Option<UnboundedSender<SinkWriterCoordinationHandle>>,
     /// Notify when the coordinator worker stops
-    finish_notifiers: Vec<Sender<()>>,
+    finish_notifiers: Vec<CollectionNotifier>,
 }
 
 struct ManagerWorker {
@@ -212,6 +274,7 @@ struct ManagerWorker {
     running_coordinator_worker_join_handles:
         FuturesUnordered<BoxFuture<'static, (SinkId, Result<(), JoinError>)>>,
     running_coordinator_worker: HashMap<SinkId, CoordinatorWorkerHandle>,
+    recovery_fence: Option<RecoveryFence>,
 }
 
 enum ManagerEvent {
@@ -233,6 +296,7 @@ impl ManagerWorker {
             shutdown_rx,
             running_coordinator_worker_join_handles: Default::default(),
             running_coordinator_worker: Default::default(),
+            recovery_fence: None,
         }
     }
 
@@ -243,47 +307,25 @@ impl ManagerWorker {
                     ManagerRequest::NewSinkWriter(request) => {
                         self.handle_new_sink_writer(request, &mut spawn_coordinator_worker)
                     }
-                    ManagerRequest::StopCoordinator {
-                        finish_notifier,
-                        sink_ids,
-                    } => {
-                        if let Some(sink_ids) = sink_ids {
-                            let mut rxs = Vec::with_capacity(sink_ids.len());
-                            for sink_id in sink_ids {
-                                if let Some(worker_handle) =
-                                    self.running_coordinator_worker.get_mut(&sink_id)
-                                {
-                                    let (tx, rx) = oneshot::channel();
-                                    rxs.push(rx);
-                                    worker_handle.finish_notifiers.push(tx);
-                                    if let Some(sender) = worker_handle.request_sender.take() {
-                                        // drop the sender as a signal to notify the coordinator worker
-                                        // to stop
-                                        drop(sender);
-                                    }
-                                } else {
-                                    debug!(
-                                        "sink coordinator of {} is not running, skip it",
-                                        sink_id
-                                    );
-                                }
+                    ManagerRequest::StopCoordinator { notifier, job_ids } => {
+                        let mut notifier = notifier.start();
+                        for job_id in job_ids {
+                            if let Some(worker_handle) = self
+                                .running_coordinator_worker
+                                .get_mut(&job_id.as_sink_id())
+                            {
+                                Self::drain_coordinator(worker_handle, &mut notifier);
                             }
-                            tokio::spawn(async move {
-                                let notify_res = join_all(rxs).await;
-                                for res in notify_res {
-                                    if let Err(e) = res {
-                                        error!(
-                                            "fail to wait for resetting sink manager worker: {}",
-                                            e.as_report()
-                                        );
-                                    }
-                                }
-                                send_with_err_check!(finish_notifier, ());
-                            });
-                        } else {
-                            self.clean_up().await;
-                            send_with_err_check!(finish_notifier, ());
                         }
+                        notifier.started();
+                    }
+                    ManagerRequest::RecoveryStart { recovery, notifier } => {
+                        self.apply_recovery_start(recovery, notifier);
+                    }
+                    ManagerRequest::RecoverySucceeded { recovery, notifier } => {
+                        let notifier = notifier.start();
+                        self.apply_recovery_succeeded(recovery);
+                        notifier.started();
                     }
                 },
                 ManagerEvent::CoordinatorWorkerFinished {
@@ -294,6 +336,93 @@ impl ManagerWorker {
         }
         self.clean_up().await;
         info!("sink manager worker exited");
+    }
+
+    fn apply_recovery_start(&mut self, recovery: RecoveryStart, notifier: Notifier) {
+        let job_ids_to_stop = match recovery {
+            RecoveryStart::Global => {
+                self.recovery_fence = Some(RecoveryFence::Global);
+                None
+            }
+            RecoveryStart::Database {
+                database_id,
+                job_ids,
+            } => {
+                let job_ids_to_stop = job_ids.clone();
+                match &mut self.recovery_fence {
+                    Some(RecoveryFence::Global) => {}
+                    Some(RecoveryFence::Databases(databases)) => {
+                        databases.entry(database_id).or_default().extend(job_ids);
+                    }
+                    None => {
+                        self.recovery_fence = Some(RecoveryFence::Databases(HashMap::from([(
+                            database_id,
+                            job_ids,
+                        )])));
+                    }
+                }
+                Some(job_ids_to_stop)
+            }
+        };
+
+        let mut notifier = notifier.start();
+        if let Some(job_ids) = job_ids_to_stop {
+            for job_id in job_ids {
+                if let Some(worker_handle) = self
+                    .running_coordinator_worker
+                    .get_mut(&job_id.as_sink_id())
+                {
+                    Self::drain_coordinator(worker_handle, &mut notifier);
+                }
+            }
+        } else {
+            for worker_handle in self.running_coordinator_worker.values_mut() {
+                Self::drain_coordinator(worker_handle, &mut notifier);
+            }
+        }
+        notifier.started();
+    }
+
+    fn drain_coordinator(
+        worker_handle: &mut CoordinatorWorkerHandle,
+        notifier: &mut NotifierStarter,
+    ) {
+        worker_handle.finish_notifiers.push(notifier.add_notify());
+        if let Some(sender) = worker_handle.request_sender.take() {
+            // Drop the sender as a signal to notify the coordinator worker to stop.
+            drop(sender);
+        }
+    }
+
+    fn apply_recovery_succeeded(&mut self, recovery: RecoverySucceeded) {
+        match recovery {
+            RecoverySucceeded::Global { failed_databases } => {
+                self.recovery_fence = if failed_databases.is_empty() {
+                    None
+                } else {
+                    Some(RecoveryFence::Databases(failed_databases))
+                };
+            }
+            RecoverySucceeded::Database(database_id) => {
+                let Some(RecoveryFence::Databases(databases)) = &mut self.recovery_fence else {
+                    return;
+                };
+                databases.remove(&database_id);
+                if databases.is_empty() {
+                    self.recovery_fence = None;
+                }
+            }
+        }
+    }
+
+    fn is_sink_fenced(&self, sink_id: SinkId) -> bool {
+        match &self.recovery_fence {
+            Some(RecoveryFence::Global) => true,
+            Some(RecoveryFence::Databases(databases)) => databases
+                .values()
+                .any(|job_ids| job_ids.contains(&sink_id.as_job_id())),
+            None => false,
+        }
     }
 
     async fn next_event(&mut self) -> Option<ManagerEvent> {
@@ -344,7 +473,7 @@ impl ManagerWorker {
             .remove(&sink_id)
             .expect("finished coordinator should have an associated worker handle");
         for finish_notifier in worker_handle.finish_notifiers {
-            send_with_err_check!(finish_notifier, ());
+            finish_notifier.notify_collected();
         }
         match join_result {
             Ok(()) => {
@@ -370,6 +499,14 @@ impl ManagerWorker {
     ) {
         let param = new_writer.param();
         let sink_id = param.sink_id;
+
+        if self.is_sink_fenced(sink_id) {
+            new_writer.abort(Status::unavailable(format!(
+                "sink coordinator for sink {} is unavailable during recovery",
+                sink_id
+            )));
+            return;
+        }
 
         let handle = self
             .running_coordinator_worker
@@ -403,10 +540,11 @@ impl ManagerWorker {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
     use std::future::{Future, poll_fn};
     use std::pin::pin;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicI32;
+    use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
     use std::task::Poll;
 
     use anyhow::anyhow;
@@ -415,16 +553,17 @@ mod tests {
     use futures::{FutureExt, StreamExt, TryFutureExt};
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use risingwave_common::bitmap::BitmapBuilder;
+    use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::id::{DatabaseId, JobId};
     use risingwave_connector::sink::catalog::{SinkId, SinkType};
     use risingwave_connector::sink::{
         SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkError, SinkParam,
         TwoPhaseCommitCoordinator,
     };
     use risingwave_meta_model::SinkSchemachange;
-    use risingwave_pb::connector_service::SinkMetadata;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
+    use risingwave_pb::connector_service::{CoordinateResponse, SinkMetadata};
     use risingwave_pb::data::PbDataType;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::PbField;
@@ -432,12 +571,250 @@ mod tests {
     use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
     use risingwave_rpc_client::CoordinatorStreamHandle;
     use sea_orm::{ConnectionTrait, Database, DatabaseConnection};
+    use tokio::sync::Notify;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio_stream::wrappers::ReceiverStream;
+    use tonic::Status;
 
+    use super::{
+        ManagerRequest, ManagerWorker, RecoveryFence, RecoveryStart, RecoverySucceeded,
+        SinkWriterCoordinationHandle,
+    };
     use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
     use crate::manager::sink_coordination::manager::SinkCommittedEpochSubscriber;
+
+    fn test_writer_handle(
+        param: SinkParam,
+    ) -> (
+        SinkWriterCoordinationHandle,
+        tokio::sync::mpsc::UnboundedReceiver<Result<CoordinateResponse, Status>>,
+    ) {
+        let (response_tx, response_rx) = unbounded_channel();
+        (
+            SinkWriterCoordinationHandle::new(
+                futures::stream::pending().boxed(),
+                response_tx,
+                param,
+                Bitmap::ones(1),
+            ),
+            response_rx,
+        )
+    }
+
+    #[test]
+    fn test_recovery_fence_transitions() {
+        let (_request_tx, request_rx) = tokio::sync::mpsc::channel(1);
+        let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let mut worker = ManagerWorker::new(request_rx, shutdown_rx);
+        let database_1 = DatabaseId::new(1);
+        let database_2 = DatabaseId::new(2);
+        let sink_1 = SinkId::new(11);
+        let sink_2 = SinkId::new(12);
+        let sink_3 = SinkId::new(21);
+        let job_1 = sink_1.as_job_id();
+        let job_2 = sink_2.as_job_id();
+        let job_3 = sink_3.as_job_id();
+
+        assert!(!worker.is_sink_fenced(sink_1));
+
+        worker.apply_recovery_start(
+            RecoveryStart::Database {
+                database_id: database_1,
+                job_ids: HashSet::from([job_1]),
+            },
+            crate::notification::Notifier::new().0,
+        );
+        assert!(worker.is_sink_fenced(sink_1));
+        assert!(!worker.is_sink_fenced(sink_2));
+
+        worker.apply_recovery_start(
+            RecoveryStart::Database {
+                database_id: database_1,
+                job_ids: HashSet::from([job_2]),
+            },
+            crate::notification::Notifier::new().0,
+        );
+        worker.apply_recovery_start(
+            RecoveryStart::Database {
+                database_id: database_2,
+                job_ids: HashSet::from([job_3]),
+            },
+            crate::notification::Notifier::new().0,
+        );
+        assert!(worker.is_sink_fenced(sink_1));
+        assert!(worker.is_sink_fenced(sink_2));
+        assert!(worker.is_sink_fenced(sink_3));
+
+        worker.apply_recovery_start(
+            RecoveryStart::Global,
+            crate::notification::Notifier::new().0,
+        );
+        worker.apply_recovery_start(
+            RecoveryStart::Global,
+            crate::notification::Notifier::new().0,
+        );
+        assert!(matches!(worker.recovery_fence, Some(RecoveryFence::Global)));
+        assert!(worker.is_sink_fenced(SinkId::new(999)));
+
+        worker.apply_recovery_start(
+            RecoveryStart::Database {
+                database_id: database_1,
+                job_ids: HashSet::from([job_1]),
+            },
+            crate::notification::Notifier::new().0,
+        );
+        assert!(matches!(worker.recovery_fence, Some(RecoveryFence::Global)));
+        worker.apply_recovery_succeeded(RecoverySucceeded::Database(database_1));
+        assert!(matches!(worker.recovery_fence, Some(RecoveryFence::Global)));
+
+        worker.apply_recovery_succeeded(RecoverySucceeded::Global {
+            failed_databases: HashMap::from([
+                (database_1, HashSet::from([job_1, job_2])),
+                (database_2, HashSet::from([job_3])),
+            ]),
+        });
+        assert!(worker.is_sink_fenced(sink_1));
+        assert!(worker.is_sink_fenced(sink_3));
+        assert!(!worker.is_sink_fenced(SinkId::new(999)));
+
+        worker.apply_recovery_succeeded(RecoverySucceeded::Database(database_1));
+        assert!(!worker.is_sink_fenced(sink_1));
+        assert!(worker.is_sink_fenced(sink_3));
+
+        worker.apply_recovery_succeeded(RecoverySucceeded::Database(database_2));
+        assert!(worker.recovery_fence.is_none());
+
+        worker.apply_recovery_start(
+            RecoveryStart::Global,
+            crate::notification::Notifier::new().0,
+        );
+        worker.apply_recovery_succeeded(RecoverySucceeded::Global {
+            failed_databases: HashMap::new(),
+        });
+        assert!(worker.recovery_fence.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recovery_fence_blocks_spawn_and_waits_for_coordinator_exit() {
+        let database_id = DatabaseId::new(1);
+        let sink_id = SinkId::new(11);
+        let param = SinkParam {
+            sink_id,
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+        let spawn_count = Arc::new(AtomicUsize::new(0));
+        let spawned = Arc::new(Notify::new());
+        let stopping = Arc::new(Notify::new());
+        let allow_exit = Arc::new(Notify::new());
+        let (manager, (_join_handle, _shutdown_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let spawn_count = spawn_count.clone();
+                let spawned = spawned.clone();
+                let stopping = stopping.clone();
+                let allow_exit = allow_exit.clone();
+                move |_param, mut request_rx| {
+                    spawn_count.fetch_add(1, Ordering::SeqCst);
+                    spawned.notify_one();
+                    let stopping = stopping.clone();
+                    let allow_exit = allow_exit.clone();
+                    tokio::spawn(async move {
+                        while request_rx.recv().await.is_some() {}
+                        stopping.notify_one();
+                        allow_exit.notified().await;
+                    })
+                }
+            });
+
+        manager
+            .start_recovery(RecoveryStart::Database {
+                database_id,
+                job_ids: HashSet::from([sink_id.as_job_id()]),
+            })
+            .await
+            .unwrap();
+
+        let (writer, mut response_rx) = test_writer_handle(param.clone());
+        manager
+            .request_tx
+            .send(ManagerRequest::NewSinkWriter(writer))
+            .await
+            .unwrap();
+        let status = response_rx.recv().await.unwrap().unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unavailable);
+        assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
+
+        manager
+            .recovery_succeeded(RecoverySucceeded::Database(database_id))
+            .await
+            .unwrap();
+        let (writer, _response_rx) = test_writer_handle(param.clone());
+        manager
+            .request_tx
+            .send(ManagerRequest::NewSinkWriter(writer))
+            .await
+            .unwrap();
+        spawned.notified().await;
+        assert_eq!(spawn_count.load(Ordering::SeqCst), 1);
+
+        let stop_task = tokio::spawn({
+            let manager = manager.clone();
+            async move {
+                manager
+                    .stop_sink_coordinators_for_jobs(vec![sink_id.as_job_id()])
+                    .await;
+            }
+        });
+        stopping.notified().await;
+        assert!(!stop_task.is_finished());
+        allow_exit.notify_one();
+        stop_task.await.unwrap();
+
+        let (writer, _response_rx) = test_writer_handle(param.clone());
+        manager
+            .request_tx
+            .send(ManagerRequest::NewSinkWriter(writer))
+            .await
+            .unwrap();
+        spawned.notified().await;
+        assert_eq!(spawn_count.load(Ordering::SeqCst), 2);
+
+        let recovery_task = tokio::spawn({
+            let manager = manager.clone();
+            async move {
+                manager
+                    .start_recovery(RecoveryStart::Database {
+                        database_id,
+                        job_ids: HashSet::from([sink_id.as_job_id()]),
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+        stopping.notified().await;
+        assert!(!recovery_task.is_finished());
+
+        let (writer, mut response_rx) = test_writer_handle(param);
+        manager
+            .request_tx
+            .send(ManagerRequest::NewSinkWriter(writer))
+            .await
+            .unwrap();
+        let status = response_rx.recv().await.unwrap().unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unavailable);
+        assert_eq!(spawn_count.load(Ordering::SeqCst), 2);
+
+        allow_exit.notify_one();
+        recovery_task.await.unwrap();
+    }
 
     struct MockSinglePhaseCoordinator<
         C,
@@ -1530,7 +1907,7 @@ mod tests {
                 sink_id i32 NOT NULL,
                 epoch i64 NOT NULL,
                 sink_state STRING NOT NULL,
-                metadata BLOB NOT NULL,
+                metadata BLOB,
                 schema_change BLOB,
                 PRIMARY KEY (sink_id, epoch)
             )
@@ -1546,7 +1923,13 @@ mod tests {
 
     async fn list_rows(
         db: &DatabaseConnection,
-    ) -> Vec<(i32, i64, String, Vec<u8>, Option<PbSinkSchemaChange>)> {
+    ) -> Vec<(
+        i32,
+        i64,
+        String,
+        Option<Vec<u8>>,
+        Option<PbSinkSchemaChange>,
+    )> {
         let sql =
             "SELECT sink_id, epoch, sink_state, metadata, schema_change FROM pending_sink_state";
         let rows = db
@@ -1585,7 +1968,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_init_response_skips_recovered_pending_epoch() {
+    async fn test_init_response_skips_recovered_empty_pending_epoch() {
         let db = prepare_db_backend().await;
 
         let param = SinkParam {
@@ -1602,10 +1985,9 @@ mod tests {
         };
 
         let epoch1 = 233;
-        let metadata = vec![1u8, 2u8];
 
         let sql = format!(
-            "INSERT INTO pending_sink_state (sink_id, epoch, sink_state, metadata) VALUES ({}, {}, 'PENDING', x'0102')",
+            "INSERT INTO pending_sink_state (sink_id, epoch, sink_state) VALUES ({}, {}, 'PENDING')",
             param.sink_id, epoch1
         );
         db.execute(sea_orm::Statement::from_string(
@@ -1646,13 +2028,11 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let db = db.clone();
-                let metadata = metadata.clone();
                 let pre_commit_attempt = pre_commit_attempt.clone();
                 let commit_attempt = commit_attempt.clone();
                 move |param, new_writer_rx| {
                     let expected_param = expected_param.clone();
                     let db = db.clone();
-                    let metadata = metadata.clone();
                     let pre_commit_attempt = pre_commit_attempt.clone();
                     let commit_attempt = commit_attempt.clone();
                     tokio::spawn({
@@ -1673,9 +2053,7 @@ mod tests {
                                             "pre_commit should not be called for a known pending epoch"
                                         )))
                                     },
-                                    move |epoch, commit_metadata| {
-                                        assert_eq!(epoch, epoch1);
-                                        assert_eq!(commit_metadata, metadata);
+                                    move |_epoch, _commit_metadata| {
                                         commit_attempt
                                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                         Ok(())
@@ -1716,11 +2094,12 @@ mod tests {
             pre_commit_attempt.load(std::sync::atomic::Ordering::SeqCst),
             0
         );
-        assert_eq!(commit_attempt.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(commit_attempt.load(std::sync::atomic::Ordering::SeqCst), 0);
         let rows = list_rows(&db).await;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].1, epoch1 as i64);
         assert_eq!(rows[0].2, "COMMITTED");
+        assert_eq!(rows[0].3, None);
     }
 
     #[tokio::test]
@@ -1837,7 +2216,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_waiting_on_checkpoint() {
+    async fn test_empty_pre_commit_waiting_on_checkpoint() {
         let db = prepare_db_backend().await;
 
         let param = SinkParam {
@@ -1886,10 +2265,8 @@ mod tests {
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
-                let metadata = metadata.clone();
                 let db = db.clone();
                 move |param, new_writer_rx| {
-                    let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
                     let db = db.clone();
                     tokio::spawn({
@@ -1903,20 +2280,10 @@ mod tests {
                                 new_writer_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, _schema_change| {
-                                        let metadata =
-                                            Itertools::exactly_one(metadata_list.into_iter())
-                                                .unwrap();
-                                        Ok(match metadata.metadata {
-                                            Some(Metadata::Serialized(SerializedMetadata {
-                                                metadata,
-                                            })) => Some(metadata),
-                                            _ => unreachable!(),
-                                        })
+                                        assert_eq!(metadata_list.len(), 1);
+                                        Ok(None)
                                     },
-                                    move |_epoch, commit_metadata| {
-                                        assert_eq!(commit_metadata, metadata);
-                                        Ok(())
-                                    },
+                                    move |_epoch, _commit_metadata| unreachable!(),
                                     move |_epoch, _schema_change| unreachable!(),
                                 ),
                                 subscriber.clone(),
@@ -1965,10 +2332,11 @@ mod tests {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].1, epoch1 as i64);
             assert_eq!(rows[0].2, "PENDING");
+            assert_eq!(rows[0].3, None);
 
             let guard = sender.lock().await;
             let sender = guard.as_ref().unwrap().clone();
-            sender.send(233).unwrap();
+            sender.send(epoch1).unwrap();
         }
 
         // wait max 5 seconds for the commit to be processed
@@ -1985,6 +2353,7 @@ mod tests {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].1, epoch1 as i64);
             assert_eq!(rows[0].2, "COMMITTED");
+            assert_eq!(rows[0].3, None);
         }
     }
 
@@ -2264,7 +2633,9 @@ mod tests {
             .await
             .unwrap();
 
-        manager.stop_sink_coordinator(vec![SinkId::from(1)]).await;
+        manager
+            .stop_sink_coordinators_for_jobs(vec![JobId::from(1)])
+            .await;
 
         {
             let rows = list_rows(&db).await;

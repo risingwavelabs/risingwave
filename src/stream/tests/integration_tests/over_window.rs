@@ -12,11 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+use std::sync::atomic::Ordering;
+
+use futures::TryStreamExt;
 use risingwave_common::config::streaming::OverWindowCachePolicy;
+use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_expr::aggregate::{AggArgs, PbAggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
+use risingwave_pb::catalog::PbTable;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{OverWindowExecutor, OverWindowExecutorArgs};
@@ -26,6 +35,70 @@ use crate::prelude::*;
 async fn create_executor<S: StateStore>(
     calls: Vec<WindowFuncCall>,
     store: S,
+) -> (MessageSender, BoxedMessageStream) {
+    create_executor_with_watermark(
+        calls,
+        store,
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(StreamingMetrics::unused()),
+    )
+    .await
+}
+
+async fn create_executor_with_watermark<S: StateStore>(
+    calls: Vec<WindowFuncCall>,
+    store: S,
+    watermark_epoch: Arc<AtomicU64>,
+    metrics: Arc<StreamingMetrics>,
+) -> (MessageSender, BoxedMessageStream) {
+    create_executor_inner(
+        calls,
+        store,
+        watermark_epoch,
+        metrics,
+        OverWindowCachePolicy::Recent,
+        false,
+    )
+    .await
+}
+
+/// State table schema = input schema (order key, partition key, pk, x) + window function outputs,
+/// state table pk = `partition key | order key | pk`.
+fn state_table_catalog(calls: &[WindowFuncCall]) -> PbTable {
+    let mut table_columns = vec![
+        ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // order key
+        ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // partition key
+        ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // pk
+        ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32), // x
+    ];
+    for call in calls {
+        table_columns.push(ColumnDesc::unnamed(
+            ColumnId::new(table_columns.len() as i32),
+            call.return_type.clone(),
+        ));
+    }
+    let table_pk_indices = vec![1, 0, 2];
+    let table_order_types = vec![
+        OrderType::ascending(),
+        OrderType::ascending(),
+        OrderType::ascending(),
+    ];
+    gen_pbtable(
+        TableId::new(1),
+        table_columns,
+        table_order_types,
+        table_pk_indices,
+        0,
+    )
+}
+
+async fn create_executor_inner<S: StateStore>(
+    calls: Vec<WindowFuncCall>,
+    store: S,
+    watermark_epoch: Arc<AtomicU64>,
+    metrics: Arc<StreamingMetrics>,
+    cache_policy: OverWindowCachePolicy,
+    enable_state_cleaning: bool,
 ) -> (MessageSender, BoxedMessageStream) {
     let input_schema = Schema::new(vec![
         Field::unnamed(DataType::Int64),   // order key
@@ -38,25 +111,6 @@ async fn create_executor<S: StateStore>(
     let order_key_indices = vec![0];
     let order_key_order_types = vec![OrderType::ascending()];
 
-    let mut table_columns = vec![
-        ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // order key
-        ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // partition key
-        ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // pk
-        ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32), // x
-    ];
-    for call in &calls {
-        table_columns.push(ColumnDesc::unnamed(
-            ColumnId::new(table_columns.len() as i32),
-            call.return_type.clone(),
-        ));
-    }
-    let table_pk_indices = vec![1, 0, 2];
-    let table_order_types = vec![
-        OrderType::ascending(),
-        OrderType::ascending(),
-        OrderType::ascending(),
-    ];
-
     let output_schema = {
         let mut fields = input_schema.fields.clone();
         calls.iter().for_each(|call| {
@@ -65,18 +119,8 @@ async fn create_executor<S: StateStore>(
         Schema { fields }
     };
 
-    let state_table = StateTable::from_table_catalog(
-        &gen_pbtable(
-            TableId::new(1),
-            table_columns,
-            table_order_types,
-            table_pk_indices,
-            0,
-        ),
-        store,
-        None,
-    )
-    .await;
+    let state_table =
+        StateTable::from_table_catalog(&state_table_catalog(&calls), store, None).await;
 
     let (tx, source) = MockSource::channel();
     let source = source.into_executor(input_schema, input_stream_key.clone());
@@ -91,12 +135,34 @@ async fn create_executor<S: StateStore>(
         order_key_indices,
         order_key_order_types,
         state_table,
-        watermark_epoch: Arc::new(AtomicU64::new(0)),
-        metrics: Arc::new(StreamingMetrics::unused()),
+        watermark_epoch,
+        metrics,
         chunk_size: 1024,
-        cache_policy: OverWindowCachePolicy::Recent,
+        cache_policy,
+        enable_state_cleaning,
     });
     (tx, executor.boxed().execute())
+}
+
+/// Read the order keys of all rows of partition `p1` from the state table.
+async fn state_order_keys(store: MemoryStateStore, calls: &[WindowFuncCall]) -> Vec<i64> {
+    let mut table = StateTable::from_table_catalog(&state_table_catalog(calls), store, None).await;
+    table
+        .init_epoch(EpochPair::new_test_epoch(test_epoch(100)))
+        .await
+        .unwrap();
+    let partition_key = OwnedRow::new(vec![Some("p1".into())]);
+    let sub_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
+    let rows: Vec<OwnedRow> = table
+        .iter_with_prefix(&partition_key, &sub_range, PrefetchOptions::default())
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    rows.iter()
+        .map(|row| row.datum_at(0).unwrap().into_int64())
+        .collect()
 }
 
 fn snapshot_options() -> SnapshotOptions {
@@ -389,6 +455,176 @@ async fn test_over_window_lag_lead_with_updates() {
     .await;
 }
 
+/// Test that force-evicting the partition cache between chunks (in the middle of an epoch)
+/// doesn't affect the results. The unbounded frame start forces `CachePolicy::Full`, and the
+/// evicted partition must be reloaded from the state table on the next access.
+#[tokio::test]
+async fn test_over_window_evict_between_chunks() {
+    let store = MemoryStateStore::new();
+    let watermark = Arc::new(AtomicU64::new(0));
+    let metrics = Arc::new(StreamingMetrics::unused());
+    let ow_metrics = metrics.new_over_window_metrics(TableId::new(1), 123.into(), 0.into());
+    let initial_lookup_count = ow_metrics.over_window_cache_lookup_count.get();
+    let initial_miss_count = ow_metrics.over_window_cache_miss_count.get();
+    let calls = vec![
+        // sum(x) over (partition by .. order by .. rows unbounded preceding)
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::Sum.into()),
+            return_type: DataType::Int64,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow),
+        },
+    ];
+    let (mut tx, mut stream) =
+        create_executor_with_watermark(calls, store, watermark.clone(), metrics.clone()).await;
+
+    tx.push_barrier(test_epoch(1), false);
+    stream.expect_barrier().await;
+
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 1 p1 100 10
+        + 2 p1 101 16",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i  I
+            + 1 p1 100 10 10
+            + 2 p1 101 16 26",
+        )
+    );
+
+    tx.push_barrier(test_epoch(2), false);
+    stream.expect_barrier().await;
+
+    // Demand eviction of all cache entries. `p1` is not accessed in the current epoch, so
+    // it will be evicted at the next chunk boundary.
+    watermark.store(u64::MAX, Ordering::Relaxed);
+
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 1 p2 200 5",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i I
+            + 1 p2 200 5 5",
+        )
+    );
+
+    // Still in the same epoch, `p1` must be reloaded from the state table and produce
+    // correct running sums.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 3 p1 102 4",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i I
+            + 3 p1 102 4 30",
+        )
+    );
+
+    // Append to `p1` again in the same epoch. The partition, now containing a row not
+    // yet committed, is evicted again at the last chunk boundary, and the reload must
+    // see the uncommitted row through the state table.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 4 p1 103 2",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i I
+            + 4 p1 103 2 32",
+        )
+    );
+
+    tx.push_barrier(test_epoch(3), false);
+    stream.expect_barrier().await;
+    // Poll once more so that the executor runs the post-barrier code, which flushes
+    // cache stats to metrics.
+    stream.next_unwrap_pending();
+
+    // 4 partition lookups (p1, p2, p1, p1), all missing the cache: `p1` was evicted at
+    // each chunk boundary in the second epoch. Without chunk-boundary eviction, the
+    // last two lookups would hit the cache and the miss count would be 2.
+    assert_eq!(
+        ow_metrics.over_window_cache_lookup_count.get(),
+        initial_lookup_count + 4
+    );
+    assert_eq!(
+        ow_metrics.over_window_cache_miss_count.get(),
+        initial_miss_count + 4
+    );
+}
+
+/// Regression test: deleting all rows of a fully-cached partition (no sentinels in the
+/// cache) leaves the range cache with zero entries. `PartitionCache::shrink` with
+/// `CachePolicy::Recent` used to panic on such an empty cache at the next barrier.
+///
+/// Note that the insert and the delete must happen within the same barrier interval:
+/// `shrink` only runs for partitions registered in `recently_accessed_ranges`, and a
+/// chunk that deletes all rows of a partition doesn't register it (empty affected
+/// ranges), so the registration must come from the insert chunk.
+#[tokio::test]
+async fn test_over_window_delete_all_rows_of_partition() {
+    let store = MemoryStateStore::new();
+    let calls = vec![
+        // lag(x, 1), doesn't force `CachePolicy::Full`
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
+        },
+    ];
+    let (mut tx, mut stream) = create_executor(calls, store).await;
+
+    tx.push_barrier(test_epoch(1), false);
+    stream.expect_barrier().await;
+
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 1 p1 100 10
+        + 2 p1 101 16",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i  i
+            + 1 p1 100 10 .
+            + 2 p1 101 16 10",
+        )
+    );
+
+    // Delete all rows of `p1` in the same epoch, emptying the range cache.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        - 1 p1 100 10
+        - 2 p1 101 16",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i  i
+            - 1 p1 100 10 .
+            - 2 p1 101 16 10",
+        )
+    );
+
+    tx.push_barrier(test_epoch(2), false);
+    stream.expect_barrier().await;
+    // Poll once more to run the post-barrier cache shrinking, which used to panic on
+    // the emptied `p1` cache.
+    stream.next_unwrap_pending();
+}
+
 #[tokio::test]
 async fn test_over_window_sum() {
     let store = MemoryStateStore::new();
@@ -565,4 +801,293 @@ async fn test_over_window_sum() {
         snapshot_options(),
     )
     .await;
+}
+
+/// Watermark-driven state cleaning: rows below the watermark that can never be accessed again are
+/// deleted from the state table at barriers, without affecting the outputs.
+#[tokio::test]
+async fn test_over_window_state_cleaning() {
+    for cache_policy in [OverWindowCachePolicy::Full, OverWindowCachePolicy::Recent] {
+        test_over_window_state_cleaning_inner(cache_policy).await;
+    }
+}
+
+async fn test_over_window_state_cleaning_inner(cache_policy: OverWindowCachePolicy) {
+    let store = MemoryStateStore::new();
+    let lru_watermark = Arc::new(AtomicU64::new(0));
+    let metrics = Arc::new(StreamingMetrics::unused());
+    let calls = vec![
+        // lag(x, 1)
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
+        },
+        // lead(x, 1)
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
+        },
+    ];
+    // 1 preceding row + 1 following row of the union frame, so 2 rows below the watermark are
+    // retained in each partition.
+    let create_executor = || {
+        create_executor_inner(
+            calls.clone(),
+            store.clone(),
+            lru_watermark.clone(),
+            metrics.clone(),
+            cache_policy,
+            true,
+        )
+    };
+
+    let (mut tx, mut stream) = create_executor().await;
+    tx.push_barrier(test_epoch(1), false);
+    stream.expect_barrier().await;
+
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I  T  I   i
+        + 10 p1 100 10
+        + 20 p1 101 11
+        + 30 p1 102 12
+        + 40 p1 103 13",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I  T  I   i  i  i
+            + 10 p1 100 10 .  11
+            + 20 p1 101 11 10 12
+            + 30 p1 102 12 11 13
+            + 40 p1 103 13 12 .",
+        )
+    );
+
+    // Rows 10, 20, 30 are below the watermark, the 2 closest ones (20, 30) are retained.
+    tx.push_watermark(0, DataType::Int64, 35i64.into());
+    tx.push_barrier(test_epoch(2), false);
+    stream.expect_barrier().await;
+    assert_eq!(
+        state_order_keys(store.clone(), &calls).await,
+        vec![20, 30, 40]
+    );
+
+    // New rows at the end of the partition only need the retained rows.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I  T  I   i
+        + 50 p1 104 14",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I  T  I   i  i  i
+            U- 40 p1 103 13 12 .
+            U+ 40 p1 103 13 12 14
+            +  50 p1 104 14 13 .",
+        )
+    );
+
+    // Rows 20, 30, 40 are below the watermark, 30 and 40 are retained.
+    tx.push_watermark(0, DataType::Int64, 45i64.into());
+    tx.push_barrier(test_epoch(3), false);
+    stream.expect_barrier().await;
+    assert_eq!(
+        state_order_keys(store.clone(), &calls).await,
+        vec![30, 40, 50]
+    );
+
+    // Recovery. The range cache is rebuilt from the cleaned state table.
+    let (mut tx, mut stream) = create_executor().await;
+    tx.push_barrier(test_epoch(3), false);
+    stream.expect_barrier().await;
+
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I  T  I   i
+        + 60 p1 105 15",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I  T  I   i  i  i
+            U- 50 p1 104 14 13 .
+            U+ 50 p1 104 14 13 15
+            +  60 p1 105 15 14 .",
+        )
+    );
+
+    // Demand LRU eviction of all cached partitions at the next chunk boundary, so that the
+    // partition is not in the cache when being cleaned and the state table has to be scanned.
+    lru_watermark.store(u64::MAX, Ordering::Relaxed);
+
+    // An out-of-order row that is not below the watermark, inserted in the middle of the partition.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I  T  I   i
+        + 55 p1 106 20",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I  T  I   i  i  i
+            U- 50 p1 104 14 13 15
+            U+ 50 p1 104 14 13 20
+            +  55 p1 106 20 14 15
+            U- 60 p1 105 15 14 .
+            U+ 60 p1 105 15 20 .",
+        )
+    );
+
+    // Rows 30, 40, 50, 55 are below the watermark, 50 and 55 are retained.
+    tx.push_watermark(0, DataType::Int64, 58i64.into());
+    tx.push_barrier(test_epoch(4), false);
+    stream.expect_barrier().await;
+    assert_eq!(
+        state_order_keys(store.clone(), &calls).await,
+        vec![50, 55, 60]
+    );
+
+    // The partition is reloaded from the cleaned state table.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I  T  I   i
+        + 70 p1 107 16",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I  T  I   i  i  i
+            U- 60 p1 105 15 20 .
+            U+ 60 p1 105 15 20 16
+            +  70 p1 107 16 15 .",
+        )
+    );
+
+    // Nothing to clean: rows 50, 55 are below the watermark and both are retained.
+    tx.push_barrier(test_epoch(5), false);
+    stream.expect_barrier().await;
+    assert_eq!(
+        state_order_keys(store.clone(), &calls).await,
+        vec![50, 55, 60, 70]
+    );
+
+    // The watermark advances but the partition still has rows not below it, and it's not touched
+    // in this epoch, so nothing is cleaned.
+    tx.push_watermark(0, DataType::Int64, 65i64.into());
+    tx.push_barrier(test_epoch(6), false);
+    stream.expect_barrier().await;
+    assert_eq!(
+        state_order_keys(store.clone(), &calls).await,
+        vec![50, 55, 60, 70]
+    );
+
+    // Advancing the watermark alone does not schedule inactive partitions for cleaning.
+    tx.push_watermark(0, DataType::Int64, 75i64.into());
+    tx.push_barrier(test_epoch(7), false);
+    stream.expect_barrier().await;
+    assert_eq!(
+        state_order_keys(store.clone(), &calls).await,
+        vec![50, 55, 60, 70]
+    );
+
+    // Once the partition is touched again, outputs are computed correctly and stale rows are
+    // cleaned at the following barrier.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I  T  I   i
+        + 80 p1 108 17",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I  T  I   i  i  i
+            U- 70 p1 107 16 15 .
+            U+ 70 p1 107 16 15 17
+            +  80 p1 108 17 16 .",
+        )
+    );
+    tx.push_barrier(test_epoch(8), false);
+    stream.expect_barrier().await;
+    assert_eq!(
+        state_order_keys(store.clone(), &calls).await,
+        vec![60, 70, 80]
+    );
+}
+
+/// Watermarks on the partition key column are always forwarded. Watermarks on the order key
+/// column are forwarded only if no window frame extends to following rows. Other watermarks are
+/// dropped.
+#[tokio::test]
+async fn test_over_window_watermark_forwarding() {
+    let lag = WindowFuncCall {
+        kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+        return_type: DataType::Int32,
+        args: AggArgs::from_iter([(DataType::Int32, 3)]),
+        ignore_nulls: false,
+        frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
+    };
+    let lead = WindowFuncCall {
+        kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+        return_type: DataType::Int32,
+        args: AggArgs::from_iter([(DataType::Int32, 3)]),
+        ignore_nulls: false,
+        frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
+    };
+
+    // `lag` only: the frame has no following rows, so watermarks on both the order key column
+    // and the partition key column are forwarded.
+    {
+        let (mut tx, mut stream) =
+            create_executor(vec![lag.clone()], MemoryStateStore::new()).await;
+        tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+
+        // Changes caused by chunks before the watermark are emitted before the watermark.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I  T  I   i
+            + 10 p1 100 10
+            + 20 p1 101 11",
+        ));
+        tx.push_int64_watermark(0, 15);
+        assert_eq!(
+            stream.expect_chunk().await,
+            StreamChunk::from_pretty(
+                " I  T  I   i  i
+                + 10 p1 100 10 .
+                + 20 p1 101 11 10",
+            )
+        );
+        let watermark = stream.expect_watermark().await;
+        assert_eq!(watermark.col_idx, 0);
+        assert_eq!(watermark.val, ScalarImpl::Int64(15));
+
+        tx.push_watermark(1, DataType::Varchar, "p1".into());
+        let watermark = stream.expect_watermark().await;
+        assert_eq!(watermark.col_idx, 1);
+        assert_eq!(watermark.val, ScalarImpl::from("p1"));
+
+        // Watermarks on other columns are dropped.
+        tx.push_watermark(3, DataType::Int32, 42i32.into());
+        tx.push_barrier(test_epoch(2), false);
+        stream.expect_barrier().await;
+    }
+
+    // `lag` + `lead`: the `lead` frame has following rows, so only watermarks on the partition
+    // key column are forwarded.
+    {
+        let (mut tx, mut stream) = create_executor(vec![lag, lead], MemoryStateStore::new()).await;
+        tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+
+        tx.push_int64_watermark(0, 15);
+        tx.push_watermark(1, DataType::Varchar, "p1".into());
+        let watermark = stream.expect_watermark().await;
+        assert_eq!(watermark.col_idx, 1);
+        assert_eq!(watermark.val, ScalarImpl::from("p1"));
+
+        tx.push_barrier(test_epoch(2), false);
+        stream.expect_barrier().await;
+    }
 }

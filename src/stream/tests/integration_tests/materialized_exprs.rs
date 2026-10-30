@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering;
 use risingwave_common::array::DataChunk;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
-use risingwave_expr::expr::{Expression, NonStrictExpression, ValueImpl};
+use risingwave_expr::expr::{ExpressionInfo, NonStrictExpression, SyncExpression, ValueImpl};
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::executor::project::{MaterializedExprsArgs, MaterializedExprsExecutor};
 
@@ -179,13 +179,14 @@ async fn test_materialize_pure_expressions() {
 #[derive(Debug)]
 struct Count(AtomicU64);
 
-#[async_trait::async_trait]
-impl Expression for Count {
+impl ExpressionInfo for Count {
     fn return_type(&self) -> DataType {
         DataType::Int64
     }
+}
 
-    async fn eval_v2(&self, input: &DataChunk) -> risingwave_expr::Result<ValueImpl> {
+impl SyncExpression for Count {
+    fn eval_v2(&self, input: &DataChunk) -> risingwave_expr::Result<ValueImpl> {
         let value = self.0.fetch_add(1, Ordering::Relaxed) as i64;
         Ok(ValueImpl::Scalar {
             value: Some(value.into()),
@@ -193,7 +194,7 @@ impl Expression for Count {
         })
     }
 
-    async fn eval_row(&self, _input: &OwnedRow) -> risingwave_expr::Result<Datum> {
+    fn eval_row(&self, _input: &OwnedRow) -> risingwave_expr::Result<Datum> {
         unimplemented!()
     }
 }

@@ -16,7 +16,8 @@ ENV NVM_DIR /root/.nvm
 ENV NODE_VERSION 20.11.1
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
   && . $NVM_DIR/nvm.sh \
-  && nvm install $NODE_VERSION
+  && nvm install $NODE_VERSION \
+  && npm install --global pnpm@10.14.0
 ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 
 SHELL ["/bin/bash", "-c"]
@@ -117,7 +118,8 @@ RUN mvn dependency:go-offline --fail-never
 # Besides, rust-maven-plugin sets --target-dir, so the dependencies are built twice. How to dedup?
 COPY ./ /risingwave
 
-RUN mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
+RUN ./build-debezium.sh && \
+  mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
   mkdir -p /risingwave/bin/connector-node && \
   tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 

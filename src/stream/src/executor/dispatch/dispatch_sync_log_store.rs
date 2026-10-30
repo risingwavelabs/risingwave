@@ -61,7 +61,7 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
         dispatchers: Vec<stream_plan::Dispatcher>,
         actor_context: &ActorContextRef,
         sync: &stream_plan::SyncLogStoreNode,
-        vnode_bitmap: Option<Bitmap>,
+        vnode_bitmap: Bitmap,
         state_store: S,
     ) -> StreamResult<Self> {
         let chunk_size = actor_context.config.developer.chunk_size;
@@ -85,8 +85,7 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
             .sync_log_store_pause_duration_ms;
         let max_buffer_size = actor_context.config.developer.sync_log_store_buffer_size;
 
-        let serde =
-            LogStoreRowSerde::new(table, vnode_bitmap.map(Into::into), &KV_LOG_STORE_V2_INFO);
+        let serde = LogStoreRowSerde::new(table, vnode_bitmap.into(), &KV_LOG_STORE_V2_INFO);
         let log_store_context = SyncKvLogStoreContext {
             table_id: table.id,
             fragment_id,
@@ -227,10 +226,12 @@ impl ConsumerFuture {
                         pending().await
                     }
 
-                    let chunk = read_future
-                        .next_chunk(progress, read_state, buffer, metrics)
+                    let message = read_future
+                        .next_message(progress, read_state, buffer, metrics)
                         .await?;
-                    metrics.total_read_count.inc_by(chunk.cardinality() as _);
+                    if let Message::Chunk(chunk) = &message {
+                        metrics.total_read_count.inc_by(chunk.cardinality() as _);
+                    }
 
                     let clean_state_reached =
                         read_future.mark_clean_state(clean_state, buffer, metrics);
@@ -238,7 +239,7 @@ impl ConsumerFuture {
                         self.as_mut().project_replace(ConsumerFuture::PlaceHolder),
                         ConsumerFutureProjReplace::ReadingChunk { inner } => inner
                     );
-                    self.set(Self::dispatch(inner, Message::Chunk(chunk)));
+                    self.set(Self::dispatch(inner, message));
 
                     if clean_state_reached {
                         return Ok(ConsumerFutureEvent::CleanStateReached);
@@ -466,8 +467,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                         consumer_future_state.as_mut().push_barrier(barrier);
                                     }
                                 }
-                                // TODO: handle upstream watermark in sync log store dispatch.
-                                Message::Watermark(_watermark) => {
+                                Message::Watermark(watermark) => {
+                                    buffer.add_watermark(write_state.epoch().curr, watermark);
                                     write_future_state =
                                         WriteFuture::receive_from_upstream(stream, write_state);
                                 }
@@ -582,7 +583,7 @@ mod tests {
         };
         let pk_info = &KV_LOG_STORE_V2_INFO;
         let table = gen_test_log_store_table(pk_info);
-        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
         let serde = LogStoreRowSerde::new(&table, vnodes, pk_info);
         let log_store_config = SyncKvLogStoreContext {
             table_id: table.id,
@@ -642,12 +643,22 @@ mod tests {
         assert_eq!(barriers[0].epoch.curr, test_epoch(1));
 
         input_tx.push_chunk(chunk_1.clone());
+        input_tx.push_int64_watermark(0, 7);
         input_tx.push_chunk(chunk_2.clone());
         let msg = timeout(Duration::from_secs(1), down_rx.recv())
             .await
             .unwrap()
             .expect("downstream should receive chunk(1)");
         assert_stream_chunk_eq!(msg.as_chunk().unwrap(), chunk_1);
+
+        let msg = timeout(Duration::from_secs(1), down_rx.recv())
+            .await
+            .unwrap()
+            .expect("downstream should receive watermark");
+        assert_eq!(
+            msg.as_watermark().unwrap(),
+            &Watermark::new(0, DataType::Int64, 7_i64.into())
+        );
 
         let msg = timeout(Duration::from_secs(1), down_rx.recv())
             .await

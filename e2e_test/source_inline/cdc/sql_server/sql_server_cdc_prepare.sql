@@ -16,6 +16,22 @@ EXEC sys.sp_cdc_enable_table
   @source_name = 'orders',
   @role_name = NULL;
 
+CREATE TABLE composite_pk_order (
+  type_id INT NOT NULL,
+  related_id INT NOT NULL,
+  client_id INT NOT NULL,
+  payload VARCHAR(50),
+  PRIMARY KEY (related_id, type_id, client_id)
+);
+
+EXEC sys.sp_cdc_enable_table
+  @source_schema = 'dbo',
+  @source_name = 'composite_pk_order',
+  @role_name = NULL;
+
+INSERT INTO composite_pk_order VALUES
+  (2, 1, 3, 'first'),
+  (1, 2, 3, 'second');
 
 INSERT INTO
   orders (
@@ -30,6 +46,20 @@ VALUES
   (1, 1558430840000, 'Bob', 10.50, 1, 1),
   (2, 1558430840001, 'Alice', 20.50, 2, 1),
   (3, 1558430840002, 'Alice', 18.50, 2, 1);
+
+-- The database uses a case-insensitive collation. Keep mixed casing in the catalog to verify that
+-- RisingWave rejects differently-cased identifiers before building the shared-CDC routing filter.
+CREATE TABLE MixedCaseTable (
+  id INT PRIMARY KEY,
+  payload VARCHAR(50)
+);
+
+EXEC sys.sp_cdc_enable_table
+  @source_schema = 'dbo',
+  @source_name = 'MixedCaseTable',
+  @role_name = NULL;
+
+INSERT INTO MixedCaseTable VALUES (1, 'snapshot');
 
 CREATE TABLE single_type (
   id INT PRIMARY KEY,
@@ -76,7 +106,7 @@ EXEC sys.sp_cdc_enable_table
 
 INSERT INTO sqlserver_all_data_types VALUES (1, 'False', 0, 0, 0, 0, 0, 0, 0, '', '', N'中', N'中', 0xff, NULL, NULL, '2001-01-01', '00:00:00', '2001-01-01 00:00:00', '2001-01-01 00:00:00', '<Person><Name>John Doe</Name><Age>30</Age></Person>', 100.510);
 
-INSERT INTO sqlserver_all_data_types VALUES (2, 'True', 255, -32768, -2147483648, -9223372036854775808, -10.0, -9999.999999, -10000.0, 'aa', 'aa', N'🌹', N'🌹', NULL, 0xff, '6f9619ff-8b86-d011-b42d-00c04fc964ff', '1990-01-01', '13:59:59.123', '2000-01-01 11:00:00.123', '1990-01-01 00:00:01.123', '<Person> <Name>Jane Doe</Name> <Age>28</Age> </Person>', 100.5);
+INSERT INTO sqlserver_all_data_types VALUES (2, 'True', 255, -32768, -2147483648, -9223372036854775808, -10.0, -9999.999999, -10000.0, 'aa', 'aa', N'🌹', N'🌹', NULL, 0xff, '6f9619ff-8b86-d011-b42d-00c04fc964ff', '1990-01-01', '13:59:59.123', '2000-01-01 11:00:00.123', '2026-06-23 00:01:05.0900948 -07:00', '<Person> <Name>Jane Doe</Name> <Age>28</Age> </Person>', 100.5);
 
 INSERT INTO sqlserver_all_data_types VALUES (3, 'True', 127, 32767, 2147483647, 9223372036854775807, -10.0, 9999.999999, 10000.0, 'zzzz', 'zzzz', N'🌹👍', N'🌹👍', 0xffffffff, 0xffffffff, '6F9619FF-8B86-D011-B42D-00C04FC964FF', '2999-12-31', '23:59:59.999', '2099-12-31 23:59:59.999', '2999-12-31 23:59:59.999', '<Name>Jane Doe</Name>', 100.0)
 

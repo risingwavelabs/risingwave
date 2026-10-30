@@ -50,15 +50,16 @@ use risingwave_pb::common::{PbObjectType, WorkerNode};
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
-    DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
-    alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
+    DdlProgress, PbTableJobType, RemoveIcebergTableOrphanFilesResponse, TableJobType,
+    alter_name_request, alter_set_schema_request, alter_swap_rename_request,
+    create_connection_request, streaming_job_resource_type,
 };
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
-use risingwave_pb::id::ActorId;
+use risingwave_pb::id::{ActorId, IcebergCompactionTaskId};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -457,8 +458,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_function(&self, _function: PbFunction) -> Result<()> {
-        unreachable!()
+    async fn create_function(&self, mut function: PbFunction) -> Result<()> {
+        function.id = self.gen_id();
+        self.catalog.write().create_function(&function);
+        Ok(())
     }
 
     async fn create_connection(
@@ -665,6 +668,16 @@ impl CatalogWriter for MockCatalogWriter {
         object_name: &str,
     ) -> Result<()> {
         match object_id {
+            alter_name_request::Object::DatabaseId(database_id) => {
+                let mut database = self
+                    .catalog
+                    .read()
+                    .get_database_by_id(database_id)?
+                    .to_prost();
+                database.name = object_name.to_owned();
+                self.catalog.write().update_database(&database);
+                Ok(())
+            }
             alter_name_request::Object::TableId(table_id) => {
                 self.catalog
                     .write()
@@ -1257,6 +1270,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(Some(SystemParams::default().into()))
     }
 
+    async fn clear_file_cache(
+        &self,
+        _clear_meta_cache: bool,
+        _clear_data_cache: bool,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn get_session_params(&self) -> RpcResult<SessionConfig> {
         Ok(Default::default())
     }
@@ -1463,12 +1484,26 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 
-    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
-        Ok(1)
+    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<IcebergCompactionTaskId> {
+        Ok(1.into())
+    }
+
+    async fn rewrite_iceberg_table_manifests(&self, _sink_id: SinkId) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn remove_iceberg_table_orphan_files(
+        &self,
+        _sink_id: SinkId,
+    ) -> RpcResult<RemoveIcebergTableOrphanFilesResponse> {
+        Ok(RemoveIcebergTableOrphanFilesResponse {
+            status: None,
+            orphan_file_count: 0,
+        })
     }
 
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {

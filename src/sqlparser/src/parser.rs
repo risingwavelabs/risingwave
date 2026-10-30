@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use ddl::WebhookSourceInfo;
+use ddl::{AlterRateLimit, AlterRateLimitType, WebhookSourceInfo};
 use itertools::Itertools;
 use tracing::{debug, instrument};
 use winnow::combinator::{
@@ -380,10 +380,16 @@ impl Parser<'_> {
     }
 
     pub fn parse_vacuum(&mut self) -> ModalResult<Statement> {
-        let full = self.parse_keyword(Keyword::FULL);
+        let mode = if self.parse_keyword(Keyword::FULL) {
+            VacuumMode::Full
+        } else if self.parse_keyword(Keyword::ORPHAN) {
+            VacuumMode::OrphanFiles
+        } else {
+            VacuumMode::Default
+        };
         let object_name = self.parse_object_name()?;
 
-        Ok(Statement::Vacuum { object_name, full })
+        Ok(Statement::Vacuum { object_name, mode })
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -1383,11 +1389,11 @@ impl Parser<'_> {
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::NULL]) {
                         Ok(Expr::IsNotNull(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::DISTINCT, Keyword::FROM]) {
-                        let expr2 = self.parse_expr()?;
+                        let expr2 = self.parse_is_distinct_from_rhs()?;
                         Ok(Expr::IsDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::DISTINCT, Keyword::FROM])
                     {
-                        let expr2 = self.parse_expr()?;
+                        let expr2 = self.parse_is_distinct_from_rhs()?;
                         Ok(Expr::IsNotDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else {
                         let negated = self.parse_keyword(Keyword::NOT);
@@ -1567,6 +1573,20 @@ impl Parser<'_> {
         } else {
             Ok(new_expr)
         }
+    }
+
+    /// Parses the right operand of `IS [NOT] DISTINCT FROM`.
+    ///
+    /// Like PostgreSQL, where `IS` is non-associative, rejects another `IS`, `ISNULL`, or
+    /// `NOTNULL` right after the operand.
+    fn parse_is_distinct_from_rhs(&mut self) -> ModalResult<Expr> {
+        let expr = self.parse_subexpr(Precedence::Is)?;
+
+        if self.get_next_precedence()? == Precedence::Is {
+            parser_err!("syntax error at or near {}", self.peek_token().token);
+        }
+
+        Ok(expr)
     }
 
     /// Parses the optional constraints following the `IS [NOT] JSON` predicate
@@ -1776,10 +1796,12 @@ impl Parser<'_> {
     }
 
     /// Check if the expected match is the next token.
-    /// The equality check is case-insensitive.
+    /// The equality check is case-insensitive, and only an UNQUOTED word matches: a quoted word
+    /// is an identifier by definition, so it must never be taken as a contextual grammar word
+    /// (`PATTERN ("PERMUTE")` names a pattern variable, not the `PERMUTE(...)` form).
     pub fn parse_word(&mut self, expected: &str) -> bool {
         match self.peek_token().token {
-            Token::Word(w) if w.value.to_uppercase() == expected => {
+            Token::Word(w) if w.quote_style.is_none() && w.value.to_uppercase() == expected => {
                 self.next_token();
                 true
             }
@@ -1793,6 +1815,24 @@ impl Parser<'_> {
         } else {
             self.expected(expected)
         }
+    }
+
+    /// Like [`Parser::parse_keywords`], but over contextual words: each element is matched
+    /// case-insensitively against the next word token (keyword or not), and the parser is reset on
+    /// the first miss. This is what lets `MATCH_RECOGNIZE`'s clause markers (`MEASURES`, `PATTERN`,
+    /// `DEFINE`, ...) avoid the keyword table entirely — a global keyword changes identifier
+    /// parsing and quoting everywhere (`UPDATE t SET per = 1` stopped parsing when `PER` was
+    /// briefly a keyword), while inside the parenthesized clause the grammar owns the context.
+    #[must_use]
+    pub fn parse_words(&mut self, words: &[&str]) -> bool {
+        let checkpoint = *self;
+        for w in words {
+            if !self.parse_word(w) {
+                *self = checkpoint;
+                return false;
+            }
+        }
+        true
     }
 
     /// Look for an expected keyword and consume it if it exists
@@ -2147,9 +2187,28 @@ impl Parser<'_> {
             parser_err!("CDC source cannot define columns and constraints");
         }
 
-        // row format for nexmark source must be native
-        // default row format for datagen source is native
-        let format_encode = self.parse_format_encode_with_connector(&connector, cdc_source_job)?;
+        let cdc_table_info = if self.parse_keyword(Keyword::FROM) {
+            let source_name = self.parse_object_name()?;
+            self.expect_keyword(Keyword::TABLE)?;
+            let external_table_name = self.parse_literal_string()?;
+            Some(CdcTableInfo {
+                source_name,
+                external_table_name,
+            })
+        } else {
+            None
+        };
+
+        // A CDC table source reuses the schema of an upstream shared CDC source and therefore has
+        // no FORMAT/ENCODE clause. Keep a native placeholder to avoid making the existing AST field
+        // optional; the frontend ignores it for this source kind.
+        let format_encode = if cdc_table_info.is_some() {
+            FormatEncodeOptions::native().into()
+        } else {
+            // row format for nexmark source must be native
+            // default row format for datagen source is native
+            self.parse_format_encode_with_connector(&connector, cdc_source_job)?
+        };
 
         let stmt = CreateSourceStatement {
             temporary,
@@ -2162,6 +2221,7 @@ impl Parser<'_> {
             format_encode,
             source_watermarks,
             include_column_options: include_options,
+            cdc_table_info,
         };
 
         Ok(Statement::CreateSource { stmt })
@@ -3374,12 +3434,8 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
-                AlterTableOperation::SetSourceRateLimit { rate_limit }
-            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
-                AlterTableOperation::SetBackfillRateLimit { rate_limit }
-            } else if let Some(rate_limit) = self.parse_alter_dml_rate_limit()? {
-                AlterTableOperation::SetDmlRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+                AlterTableOperation::AlterRateLimit(rate_limit)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterTableOperation::SetConfig { entries }
@@ -3471,71 +3527,37 @@ impl Parser<'_> {
         })
     }
 
-    /// BACKFILL_RATE_LIMIT = default | NUMBER
-    /// BACKFILL_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_backfill_rate_limit(&mut self) -> ModalResult<Option<i32>> {
-        if !self.parse_word("BACKFILL_RATE_LIMIT") {
-            return Ok(None);
-        }
+    fn parse_rate_limit_value(&mut self) -> ModalResult<i32> {
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+            return self.expected("TO or = after rate limit");
         }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
+        if self.parse_keyword(Keyword::DEFAULT) {
+            return Ok(-1);
+        }
+        let s = self.parse_number_value()?;
+        if let Ok(n) = s.parse::<i32>() {
+            Ok(n)
         } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(Some(rate_limit))
+            self.expected("number or DEFAULT")
+        }
     }
 
-    /// DML_RATE_LIMIT = default | NUMBER
-    /// DML_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_dml_rate_limit(&mut self) -> ModalResult<Option<i32>> {
-        if !self.parse_word("DML_RATE_LIMIT") {
-            return Ok(None);
-        }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER TABLE SET DML_RATE_LIMIT");
-        }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
-        } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
+    pub fn parse_alter_rate_limit(&mut self) -> ModalResult<Option<AlterRateLimit>> {
+        for rate_limit_type in [
+            AlterRateLimitType::Source,
+            AlterRateLimitType::Backfill,
+            AlterRateLimitType::Dml,
+            AlterRateLimitType::Sink,
+        ] {
+            if self.parse_word(rate_limit_type.as_str()) {
+                let rate_limit = self.parse_rate_limit_value()?;
+                return Ok(Some(AlterRateLimit {
+                    rate_limit_type,
+                    rate_limit,
+                }));
             }
-        };
-        Ok(Some(rate_limit))
-    }
-
-    /// SOURCE_RATE_LIMIT = default | NUMBER
-    /// SOURCE_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_source_rate_limit(&mut self, is_table: bool) -> ModalResult<Option<i32>> {
-        if !self.parse_word("SOURCE_RATE_LIMIT") {
-            return Ok(None);
         }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            let ddl = if is_table { "TABLE" } else { "SOURCE" };
-            return self.expected(&format!("TO or = after ALTER {ddl} SET SOURCE_RATE_LIMIT"));
-        }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
-        } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(Some(rate_limit))
+        Ok(None)
     }
 
     pub fn parse_alter_index(&mut self) -> ModalResult<Statement> {
@@ -3704,10 +3726,8 @@ impl Parser<'_> {
                     resource_group: Some(value),
                     deferred,
                 }
-            } else if materialized
-                && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
-            {
-                AlterViewOperation::SetBackfillRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+                AlterViewOperation::AlterRateLimit(rate_limit)
             } else if self.parse_keyword(Keyword::CONFIG) && materialized {
                 let entries = self.parse_options()?;
                 AlterViewOperation::SetConfig { entries }
@@ -3742,28 +3762,6 @@ impl Parser<'_> {
             name: view_name,
             operation,
         })
-    }
-
-    /// SINK_RATE_LIMIT = default | NUMBER
-    /// SINK_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_sink_rate_limit(&mut self) -> ModalResult<Option<i32>> {
-        if !self.parse_word("SINK_RATE_LIMIT") {
-            return Ok(None);
-        }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER SINK SET SINK_RATE_LIMIT");
-        }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
-        } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(Some(rate_limit))
     }
 
     pub fn parse_alter_sink(&mut self) -> ModalResult<Statement> {
@@ -3831,10 +3829,8 @@ impl Parser<'_> {
                     resource_group: Some(value),
                     deferred,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
-                AlterSinkOperation::SetSinkRateLimit { rate_limit }
-            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
-                AlterSinkOperation::SetBackfillRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+                AlterSinkOperation::AlterRateLimit(rate_limit)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSinkOperation::SetConfig { entries }
@@ -3947,8 +3943,8 @@ impl Parser<'_> {
                 AlterSourceOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
-                AlterSourceOperation::SetSourceRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+                AlterSourceOperation::AlterRateLimit(rate_limit)
             } else if self.parse_keyword(Keyword::PARALLELISM) {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -4081,6 +4077,20 @@ impl Parser<'_> {
     }
 
     pub fn parse_alter_system(&mut self) -> ModalResult<Statement> {
+        if self.parse_word("CLEAR") {
+            self.expect_keywords(&[Keyword::FILE, Keyword::CACHE])?;
+            let cache_type = if self.parse_keyword(Keyword::META) {
+                FileCacheType::Meta
+            } else if self.parse_keyword(Keyword::DATA) {
+                FileCacheType::Data
+            } else if self.parse_keyword(Keyword::ALL) {
+                FileCacheType::All
+            } else {
+                return self.expected("META, DATA, or ALL after ALTER SYSTEM CLEAR FILE CACHE");
+            };
+            return Ok(Statement::AlterSystemClearFileCache { cache_type });
+        }
+
         self.expect_keyword(Keyword::SET)?;
         let param = self.parse_identifier()?;
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
@@ -4139,7 +4149,7 @@ impl Parser<'_> {
             AlterFragmentOperation::SetParallelism { parallelism }
         } else {
             let rate_limit = self.parse_alter_fragment_rate_limit()?;
-            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit }
+            AlterFragmentOperation::AlterRateLimit(rate_limit)
         };
         Ok(Statement::AlterFragment {
             fragment_ids,
@@ -4169,24 +4179,19 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_alter_fragment_rate_limit(&mut self) -> ModalResult<i32> {
-        if !self.parse_word("RATE_LIMIT") {
-            return self.expected("expected RATE_LIMIT after SET");
+    fn parse_alter_fragment_rate_limit(&mut self) -> ModalResult<AlterRateLimit> {
+        if self.parse_word("RATE_LIMIT") {
+            let rate_limit = self.parse_rate_limit_value()?;
+            return Ok(AlterRateLimit {
+                rate_limit_type: AlterRateLimitType::Backfill,
+                rate_limit,
+            });
         }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after RATE_LIMIT");
-        }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
+        if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+            Ok(rate_limit)
         } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(rate_limit)
+            self.expected("expected rate limit after SET")
+        }
     }
 
     /// Parse a copy statement
@@ -4444,6 +4449,20 @@ impl Parser<'_> {
             // (For example, in `FROM t1 JOIN` the `JOIN` will always be parsed as a keyword,
             // not an alias.)
             Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
+                // Contextual reservation: `MATCH_RECOGNIZE` is deliberately NOT a keyword (a
+                // stored definition may use it as a bare alias from before the clause existed,
+                // and keywords change quoting and identifier parsing globally), so the clause is
+                // recognised here instead — a bare `match_recognize` immediately followed by `(`
+                // opens the clause and must not be taken as an implicit alias. With an explicit
+                // `AS`, or quoted, or not followed by `(`, it stays a perfectly good alias.
+                if !after_as
+                    && w.quote_style.is_none()
+                    && w.value.eq_ignore_ascii_case("MATCH_RECOGNIZE")
+                    && self.peek_token() == Token::LParen
+                {
+                    *self = checkpoint;
+                    return Ok(None);
+                }
                 Ok(Some(w.to_ident()?))
             }
             _ => {
@@ -4464,6 +4483,9 @@ impl Parser<'_> {
         &mut self,
         reserved_kwds: &[Keyword],
     ) -> ModalResult<Option<TableAlias>> {
+        if self.peek_broadcast_join() {
+            return Ok(None);
+        }
         match self.parse_optional_alias(reserved_kwds)? {
             Some(name) => {
                 let columns = self.parse_parenthesized_column_list(Optional)?;
@@ -4995,7 +5017,13 @@ impl Parser<'_> {
                     parser_err!("Expected 'changelog' but found '{}'", changelog);
                 }
                 self.expect_keyword(Keyword::FROM)?;
-                Ok(CteInner::ChangeLog(self.parse_object_name()?))
+                let from = self.parse_object_name()?;
+                let key = self
+                    .parse_keyword(Keyword::KEY)
+                    .then(|| self.parse_parenthesized_column_list(Mandatory))
+                    .transpose()?;
+
+                Ok(CteInner::ChangeLog { from, key })
             }
         }
     }
@@ -5492,6 +5520,7 @@ impl Parser<'_> {
         // a table alias.
         let mut joins = vec![];
         loop {
+            let join_checkpoint = *self;
             let join = if self.parse_keyword(Keyword::CROSS) {
                 let join_operator = if self.parse_keyword(Keyword::JOIN) {
                     JoinOperator::CrossJoin
@@ -5503,6 +5532,10 @@ impl Parser<'_> {
                     join_operator,
                 }
             } else {
+                let broadcast = self.peek_broadcast_join();
+                if broadcast {
+                    let _ = self.next_token();
+                }
                 let (natural, asof) =
                     match self.parse_one_of_keywords(&[Keyword::NATURAL, Keyword::ASOF]) {
                         Some(Keyword::NATURAL) => (true, false),
@@ -5558,11 +5591,38 @@ impl Parser<'_> {
                     _ if asof => {
                         return self.expected("a join type after ASOF");
                     }
+                    _ if broadcast => {
+                        return self.expected_at(join_checkpoint, "a join type after BROADCAST");
+                    }
                     _ => break,
                 };
-                let relation = self.parse_table_factor()?;
+                let mut relation = self.parse_table_factor()?;
                 let join_constraint = self.parse_join_constraint(natural)?;
                 let join_operator = join_operator_type(join_constraint);
+                if broadcast {
+                    if !matches!(
+                        join_operator,
+                        JoinOperator::Inner(_) | JoinOperator::LeftOuter(_)
+                    ) {
+                        return self.expected_at(
+                            join_checkpoint,
+                            "INNER or LEFT temporal join after BROADCAST",
+                        );
+                    }
+                    match &mut relation {
+                        TableFactor::Table {
+                            as_of: Some(as_of), ..
+                        } if matches!(as_of, AsOf::ProcessTime) => {
+                            *as_of = AsOf::ProcessTimeBroadcast;
+                        }
+                        _ => {
+                            return self.expected_at(
+                                join_checkpoint,
+                                "a table with FOR SYSTEM_TIME AS OF PROCTIME() after BROADCAST JOIN",
+                            );
+                        }
+                    }
+                }
                 let need_constraint = match join_operator {
                     JoinOperator::Inner(JoinConstraint::None) => Some("INNER JOIN"),
                     JoinOperator::AsOfInner(JoinConstraint::None) => Some("ASOF INNER JOIN"),
@@ -5583,8 +5643,39 @@ impl Parser<'_> {
         Ok(TableWithJoins { relation, joins })
     }
 
+    /// Whether the next tokens start a supported broadcast join.
+    ///
+    /// `BROADCAST` remains a regular identifier outside this exact position so that existing
+    /// table aliases and identifier formatting remain compatible.
+    fn peek_broadcast_join(&self) -> bool {
+        matches!(
+            self.peek_nth_token(0).token,
+            Token::Word(word)
+                if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("BROADCAST")
+        ) && matches!(
+            self.peek_nth_token(1).token,
+            Token::Word(word)
+                if matches!(word.keyword, Keyword::INNER | Keyword::JOIN | Keyword::LEFT)
+        )
+    }
+
     /// A table name or a parenthesized subquery, followed by optional `[AS] alias`
     pub fn parse_table_factor(&mut self) -> ModalResult<TableFactor> {
+        let relation = self.parse_table_factor_inner()?;
+        // Contextual, not a keyword: only `MATCH_RECOGNIZE (` opens the clause (the alias parser
+        // above declines exactly that shape), so a bare `match_recognize` elsewhere remains an
+        // ordinary identifier.
+        let checkpoint = *self;
+        if self.parse_word("MATCH_RECOGNIZE") {
+            if self.peek_token() == Token::LParen {
+                return self.parse_match_recognize(relation);
+            }
+            *self = checkpoint;
+        }
+        Ok(relation)
+    }
+
+    fn parse_table_factor_inner(&mut self) -> ModalResult<TableFactor> {
         if self.parse_keyword(Keyword::LATERAL) {
             // LATERAL must always be followed by a subquery.
             if !self.consume_token(&Token::LParen) {
@@ -5698,6 +5789,345 @@ impl Parser<'_> {
             subquery,
             alias,
         })
+    }
+
+    /// Parse the body of a `MATCH_RECOGNIZE (...)` clause applied to the already-parsed
+    /// input `table`. Assumes the `MATCH_RECOGNIZE` keyword has just been consumed.
+    ///
+    /// Supported in this version: `PARTITION BY`, `ORDER BY`, `MEASURES`, rows-per-match,
+    /// `AFTER MATCH SKIP`, `PATTERN` (named symbols, grouping, concatenation, alternation,
+    /// `PERMUTE`, and the quantifiers `*` `+` `?` `{n}` `{n,}` `{,m}` `{n,m}`), and `DEFINE`.
+    /// Row-pattern anchors (`^`, `$`) and exclusions (`{- -}`) are not yet parsed.
+    fn parse_match_recognize(&mut self, table: TableFactor) -> ModalResult<TableFactor> {
+        self.expect_token(&Token::LParen)?;
+
+        let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_expr)?
+        } else {
+            vec![]
+        };
+
+        let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_match_recognize_order_by_expr)?
+        } else {
+            vec![]
+        };
+
+        let measures = if self.parse_word("MEASURES") {
+            self.parse_comma_separated(Parser::parse_measure)?
+        } else {
+            vec![]
+        };
+
+        let rows_per_match = if self.parse_words(&["ONE", "ROW", "PER", "MATCH"]) {
+            Some(RowsPerMatch::OneRow)
+        } else if self.parse_words(&["ALL", "ROWS", "PER", "MATCH"]) {
+            Some(RowsPerMatch::AllRows)
+        } else {
+            None
+        };
+
+        let after_match_skip = if self.parse_words(&["AFTER", "MATCH", "SKIP"]) {
+            Some(self.parse_after_match_skip()?)
+        } else {
+            None
+        };
+
+        self.expect_word("PATTERN")?;
+        self.expect_token(&Token::LParen)?;
+        let pattern = self.parse_pattern()?;
+        self.expect_token(&Token::RParen)?;
+
+        // `WITHIN <interval>` bounds the time span of a match (streaming extension).
+        let within = if self.parse_keyword(Keyword::WITHIN) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        let subsets = if self.parse_word("SUBSET") {
+            self.parse_comma_separated(Parser::parse_subset_definition)?
+        } else {
+            vec![]
+        };
+
+        self.expect_word("DEFINE")?;
+        let symbols = self.parse_comma_separated(Parser::parse_symbol_definition)?;
+
+        self.expect_token(&Token::RParen)?;
+
+        let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+
+        Ok(TableFactor::MatchRecognize {
+            table: Box::new(table),
+            partition_by,
+            order_by,
+            measures,
+            rows_per_match,
+            after_match_skip,
+            pattern,
+            within,
+            subsets,
+            symbols,
+            alias,
+        })
+    }
+
+    /// Parse a `SUBSET` item: `<name> = ( <var>, ... )`.
+    fn parse_subset_definition(&mut self) -> ModalResult<SubsetDefinition> {
+        let name = self.parse_identifier()?;
+        self.expect_token(&Token::Eq)?;
+        self.expect_token(&Token::LParen)?;
+        let members = self.parse_comma_separated(Parser::parse_identifier)?;
+        self.expect_token(&Token::RParen)?;
+        Ok(SubsetDefinition { name, members })
+    }
+
+    fn parse_after_match_skip(&mut self) -> ModalResult<AfterMatchSkip> {
+        if self.parse_words(&["PAST", "LAST", "ROW"]) {
+            Ok(AfterMatchSkip::PastLastRow)
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::NEXT, Keyword::ROW]) {
+            Ok(AfterMatchSkip::ToNextRow)
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::FIRST]) {
+            Ok(AfterMatchSkip::ToFirst(self.parse_identifier()?))
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::LAST]) {
+            Ok(AfterMatchSkip::ToLast(self.parse_identifier()?))
+        } else {
+            self.expected(
+                "PAST LAST ROW, TO NEXT ROW, TO FIRST <symbol>, or TO LAST <symbol> after AFTER MATCH SKIP",
+            )
+        }
+    }
+
+    /// Parse an `ORDER BY` item inside `MATCH_RECOGNIZE`. The sort key is parsed with a
+    /// `Precedence::Other` floor so a trailing `ALL` (as in `ALL ROWS PER MATCH`) is not
+    /// swallowed by the `<expr> ALL (...)` quantified-comparison grammar. Arithmetic still
+    /// binds; a comparison/logical sort key must be parenthesized.
+    fn parse_match_recognize_order_by_expr(&mut self) -> ModalResult<OrderByExpr> {
+        let expr = self.parse_subexpr(Precedence::Other)?;
+
+        let asc = if self.parse_keyword(Keyword::ASC) {
+            Some(true)
+        } else if self.parse_keyword(Keyword::DESC) {
+            Some(false)
+        } else {
+            None
+        };
+
+        let nulls_first = if self.parse_keywords(&[Keyword::NULLS, Keyword::FIRST]) {
+            Some(true)
+        } else if self.parse_keywords(&[Keyword::NULLS, Keyword::LAST]) {
+            Some(false)
+        } else {
+            None
+        };
+
+        Ok(OrderByExpr {
+            expr,
+            asc,
+            nulls_first,
+        })
+    }
+
+    fn parse_measure(&mut self) -> ModalResult<Measure> {
+        let expr = self.parse_expr()?;
+        self.expect_keyword(Keyword::AS)?;
+        let alias = self.parse_identifier()?;
+        Ok(Measure { expr, alias })
+    }
+
+    fn parse_symbol_definition(&mut self) -> ModalResult<SymbolDefinition> {
+        let symbol = self.parse_identifier()?;
+        self.expect_keyword(Keyword::AS)?;
+        let definition = self.parse_expr()?;
+        Ok(SymbolDefinition { symbol, definition })
+    }
+
+    /// A row pattern: alternation of concatenations (alternation has the lowest precedence).
+    fn parse_pattern(&mut self) -> ModalResult<MatchRecognizePattern> {
+        // The tokenizer greedily fuses adjacent operator characters, so `a+|b` arrives as
+        // `Op("+|")`: a quantifier carrying the alternation pipe in the same token. The quantifier
+        // parser strips and reports that trailing pipe (it cannot be pushed back), and this loop
+        // treats it exactly like a free-standing one.
+        let (first, mut fused_pipe) = self.parse_pattern_concat()?;
+        let mut alternatives = vec![first];
+        while fused_pipe || self.consume_pattern_pipe() {
+            let (next, fp) = self.parse_pattern_concat()?;
+            alternatives.push(next);
+            fused_pipe = fp;
+        }
+        if alternatives.len() == 1 {
+            Ok(alternatives.pop().unwrap())
+        } else {
+            Ok(MatchRecognizePattern::Alternation(alternatives))
+        }
+    }
+
+    /// A concatenation of quantified primaries, terminated by `)`, `|` (possibly fused into the
+    /// preceding quantifier's token), or end of input. The bool reports that fused pipe.
+    fn parse_pattern_concat(&mut self) -> ModalResult<(MatchRecognizePattern, bool)> {
+        let (first, mut fused_pipe) = self.parse_pattern_repetition()?;
+        let mut terms = vec![first];
+        while !fused_pipe
+            && !matches!(self.peek_token().token, Token::RParen | Token::EOF)
+            && !self.peek_is_pattern_pipe()
+        {
+            let (next, fp) = self.parse_pattern_repetition()?;
+            terms.push(next);
+            fused_pipe = fp;
+        }
+        let pattern = if terms.len() == 1 {
+            terms.pop().unwrap()
+        } else {
+            MatchRecognizePattern::Concat(terms)
+        };
+        Ok((pattern, fused_pipe))
+    }
+
+    /// A pattern primary with an optional trailing quantifier. The bool reports an alternation
+    /// pipe fused into the quantifier's own token (`a+|b`), which the caller must honour.
+    fn parse_pattern_repetition(&mut self) -> ModalResult<(MatchRecognizePattern, bool)> {
+        let primary = self.parse_pattern_primary()?;
+        if let Some((quantifier, reluctant, fused_pipe)) =
+            self.parse_optional_pattern_quantifier()?
+        {
+            Ok((
+                MatchRecognizePattern::Repetition(Box::new(primary), quantifier, reluctant),
+                fused_pipe,
+            ))
+        } else {
+            Ok((primary, false))
+        }
+    }
+
+    /// Consume a trailing reluctant marker `?`. The alternation pipe may be fused into the same
+    /// operator token (`{2}?|b` tokenizes the `?|` as one `Op`), so the second bool reports a
+    /// consumed pipe for the caller to honour.
+    fn consume_pattern_reluctant_mark(&mut self) -> (bool, bool) {
+        match &self.peek_token().token {
+            Token::Op(op) if op == "?" => {
+                self.next_token();
+                (true, false)
+            }
+            Token::Op(op) if op == "?|" => {
+                self.next_token();
+                (true, true)
+            }
+            _ => (false, false),
+        }
+    }
+
+    /// A pattern primary: a parenthesized sub-pattern, `PERMUTE(...)`, or a named symbol.
+    fn parse_pattern_primary(&mut self) -> ModalResult<MatchRecognizePattern> {
+        if self.consume_token(&Token::LParen) {
+            let inner = self.parse_pattern()?;
+            self.expect_token(&Token::RParen)?;
+            Ok(MatchRecognizePattern::Group(Box::new(inner)))
+        } else if self.parse_word("PERMUTE") {
+            self.expect_token(&Token::LParen)?;
+            let symbols = self.parse_comma_separated(Parser::parse_pattern_symbol)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(MatchRecognizePattern::Permute(symbols))
+        } else {
+            Ok(MatchRecognizePattern::Symbol(self.parse_pattern_symbol()?))
+        }
+    }
+
+    fn parse_pattern_symbol(&mut self) -> ModalResult<MatchRecognizeSymbol> {
+        Ok(MatchRecognizeSymbol::Named(self.parse_identifier()?))
+    }
+
+    /// Parse an optional pattern quantifier: `*`, `+`, `?`, or a `{...}` range.
+    /// Returns `(quantifier, reluctant, fused_pipe)` — the last reporting an alternation `|` the
+    /// tokenizer fused into the quantifier's own operator token, which the caller must honour.
+    fn parse_optional_pattern_quantifier(
+        &mut self,
+    ) -> ModalResult<Option<(RepetitionQuantifier, bool, bool)>> {
+        if self.consume_token(&Token::LBrace) {
+            // The quantifier bounds are `u32` in the AST, so parse them as `u32`: a `u64` parse plus
+            // an `as u32` cast would silently wrap (`{4294967296}` to `{0}`, a pattern that matches
+            // nothing) instead of reporting the out-of-range bound.
+            let lower = if matches!(self.peek_token().token, Token::Comma) {
+                None
+            } else {
+                Some(self.parse_literal_u32()?)
+            };
+            let quantifier = if self.consume_token(&Token::Comma) {
+                let upper = if matches!(self.peek_token().token, Token::RBrace) {
+                    None
+                } else {
+                    Some(self.parse_literal_u32()?)
+                };
+                match (lower, upper) {
+                    (Some(n), None) => RepetitionQuantifier::AtLeast(n),
+                    (None, Some(m)) => RepetitionQuantifier::AtMost(m),
+                    (Some(n), Some(m)) => RepetitionQuantifier::Range(n, m),
+                    (None, None) => {
+                        return self.expected("at least one bound in a {min,max} quantifier");
+                    }
+                }
+            } else {
+                match lower {
+                    Some(n) => RepetitionQuantifier::Exactly(n),
+                    None => return self.expected("a number in a {n} quantifier"),
+                }
+            };
+            self.expect_token(&Token::RBrace)?;
+            let (reluctant, fused_pipe) = self.consume_pattern_reluctant_mark();
+            return Ok(Some((quantifier, reluctant, fused_pipe)));
+        }
+        // `*`, `+`, `?` may arrive as dedicated tokens or as `Token::Op(_)` depending on surrounding
+        // operator characters, so accept both spellings. A trailing `?` makes the quantifier
+        // reluctant, and both the `?` and an alternation `|` may be fused into the operator token —
+        // `a+?|b` arrives with `Op("+?|")` carrying the quantifier, the reluctant marker AND the
+        // pipe. The pipe cannot be pushed back, so it is reported to the caller instead.
+        let (quantifier, fused_reluctant, fused_pipe) = match &self.peek_token().token {
+            Token::Mul => (RepetitionQuantifier::ZeroOrMore, false, false),
+            Token::Plus => (RepetitionQuantifier::OneOrMore, false, false),
+            Token::Op(op) if op == "*" => (RepetitionQuantifier::ZeroOrMore, false, false),
+            Token::Op(op) if op == "+" => (RepetitionQuantifier::OneOrMore, false, false),
+            Token::Op(op) if op == "?" => (RepetitionQuantifier::AtMostOne, false, false),
+            Token::Op(op) if op == "*?" => (RepetitionQuantifier::ZeroOrMore, true, false),
+            Token::Op(op) if op == "+?" => (RepetitionQuantifier::OneOrMore, true, false),
+            Token::Op(op) if op == "??" => (RepetitionQuantifier::AtMostOne, true, false),
+            Token::Op(op) if op == "*|" => (RepetitionQuantifier::ZeroOrMore, false, true),
+            Token::Op(op) if op == "+|" => (RepetitionQuantifier::OneOrMore, false, true),
+            Token::Op(op) if op == "?|" => (RepetitionQuantifier::AtMostOne, false, true),
+            Token::Op(op) if op == "*?|" => (RepetitionQuantifier::ZeroOrMore, true, true),
+            Token::Op(op) if op == "+?|" => (RepetitionQuantifier::OneOrMore, true, true),
+            Token::Op(op) if op == "??|" => (RepetitionQuantifier::AtMostOne, true, true),
+            _ => return Ok(None),
+        };
+        self.next_token();
+        let (reluctant, fused_pipe) = if fused_pipe {
+            // The pipe was the token's last character; nothing can follow it in the same token.
+            (fused_reluctant, true)
+        } else {
+            let (marker, pipe) = if fused_reluctant {
+                (false, false)
+            } else {
+                self.consume_pattern_reluctant_mark()
+            };
+            (fused_reluctant || marker, pipe)
+        };
+        Ok(Some((quantifier, reluctant, fused_pipe)))
+    }
+
+    fn peek_is_pattern_pipe(&mut self) -> bool {
+        match &self.peek_token().token {
+            Token::Pipe => true,
+            Token::Op(op) if op == "|" => true,
+            _ => false,
+        }
+    }
+
+    fn consume_pattern_pipe(&mut self) -> bool {
+        if self.peek_is_pattern_pipe() {
+            self.next_token();
+            true
+        } else {
+            false
+        }
     }
 
     fn parse_join_constraint(&mut self, natural: bool) -> ModalResult<JoinConstraint> {

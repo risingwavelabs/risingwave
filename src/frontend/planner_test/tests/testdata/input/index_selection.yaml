@@ -60,6 +60,22 @@
   expected_outputs:
   - batch_plan
 - sql: |
+    create table t1 (a int primary key, b numeric, c bigint);
+    select * from t1 where a = some('{1}')
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t1 (a int primary key, b numeric, c bigint);
+    select * from t1 where a = some(array[1::bigint])
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 where a = some('{1,2,3}')
+  expected_outputs:
+  - batch_plan
+- sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);
     select * from t1 where a between 1 and 8
@@ -351,6 +367,14 @@
   expected_outputs:
   - batch_plan
   - batch_local_plan
+- name: covering index with residual predicate outside the index
+  sql: |
+    create materialized view mc as select 1 as id, 'a' as val, 'x' as tag;
+    create index mc_idx on mc (id) include (val);
+    select 1 from mc where id = 1 and tag = 'x';
+  expected_outputs:
+  - batch_plan
+  - batch_local_plan
 - name: create index to include all columns by default
   sql: |
     create table t1 (a int, b numeric, c bigint);
@@ -422,6 +446,14 @@
 - sql: |
     create table test_table(name varchar);
     select * from test_table where name like 'test\_table_2';
+  expected_outputs:
+  - batch_plan
+- name: restrict rewrite LIKE with ESCAPE as a binary expression
+  sql: |
+    create table some_trades(id varchar);
+    select * from some_trades
+    where id like '%\_%' escape '\'
+      and id not like 'DROPFEED%';
   expected_outputs:
   - batch_plan
 - sql: |
@@ -630,3 +662,59 @@
     select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c limit 5;
   expected_outputs:
     - batch_plan
+- name: index on a TopN mv whose order key exceeds its stream key does not panic (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select j->>'k1' from mv where id = 1;
+  expected_outputs:
+  - batch_plan
+- name: index on a TopN mv whose order key exceeds its stream key can not be used for index lookup (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select tag from mv where j->>'k1' = 'v';
+  expected_outputs:
+  - batch_plan
+- name: index on a TopN mv whose order key exceeds its stream key can not be used for index merge (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select id from mv where j->>'k1' = 'v' or j->>'k1' = 'w';
+  expected_outputs:
+  - batch_plan
+- name: plain-column index on a TopN mv with an INCLUDE list that leaves out the order key can not be used for index lookup (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, k int);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index i_plain on mv(k) include (id);
+    select tag from mv where k = 10;
+  expected_outputs:
+  - batch_plan
+- name: plain-column index on a TopN mv with an INCLUDE list that leaves out the order key still serves covered queries (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, k int);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index i_plain on mv(k) include (id);
+    select id from mv where k = 10;
+  expected_outputs:
+  - batch_plan
+- name: index on a single-row mv is never selected for a predicate scan (issue 27125)
+  sql: |
+    create table t (a int, b int);
+    create materialized view m as select count(*) as cnt from t;
+    create index mi on m(cnt);
+    select cnt + 1 from m where cnt > 1;
+  expected_outputs:
+  - batch_plan
+- name: index on a single-row mv is never selected for a full scan (issue 27125)
+  sql: |
+    create table t (a int, b int);
+    create materialized view m as select count(*) as cnt from t;
+    create index mi on m(cnt);
+    select * from m;
+  expected_outputs:
+  - batch_plan

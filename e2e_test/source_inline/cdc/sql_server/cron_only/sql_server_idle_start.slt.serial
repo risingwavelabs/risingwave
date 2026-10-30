@@ -1,0 +1,79 @@
+control substitution on
+
+# A shared source must start on a database whose CDC tables are quiet. While no change is captured,
+# the capture job records an idle row (tran_id = 0x00) in `cdc.lsn_time_mapping` about every 5
+# minutes, so the start position of a new source is past the last transaction.
+
+# ------------ data prepare stage ------------
+system ok
+sqlcmd -C -d master -Q "IF DB_ID('sqlserver_idle_db') IS NOT NULL BEGIN ALTER DATABASE sqlserver_idle_db SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE sqlserver_idle_db; END; IF SUSER_ID('rw_idle_login') IS NOT NULL DROP LOGIN rw_idle_login; CREATE DATABASE sqlserver_idle_db;" -b
+
+system ok
+sqlcmd -C -d sqlserver_idle_db -Q "EXEC sys.sp_cdc_enable_db; CREATE TABLE dbo.idle_t (id INT PRIMARY KEY, v VARCHAR(20)); EXEC sys.sp_cdc_enable_table @source_schema = 'dbo', @source_name = 'idle_t', @role_name = NULL; INSERT INTO dbo.idle_t VALUES (1, 'a');" -b
+
+# A login without VIEW SERVER STATE, which cannot read the status of SQL Server Agent.
+system ok
+sqlcmd -C -d sqlserver_idle_db -Q "CREATE LOGIN rw_idle_login WITH PASSWORD = 'IdleLogin@123', CHECK_POLICY = OFF; CREATE USER rw_idle_user FOR LOGIN rw_idle_login; ALTER ROLE db_owner ADD MEMBER rw_idle_user;" -b
+
+# Wait until an idle row follows the last captured transaction.
+system ok
+sqlcmd -C -d sqlserver_idle_db -Q "DECLARE @waited INT = 0; WHILE NOT EXISTS (SELECT 1 FROM cdc.lsn_time_mapping WHERE tran_id = 0x00 AND start_lsn > (SELECT MAX(start_lsn) FROM cdc.lsn_time_mapping WHERE tran_id <> 0x00)) BEGIN IF @waited >= 600 THROW 50000, 'no idle row after 10 minutes', 1; WAITFOR DELAY '00:00:01'; SET @waited += 1; END;" -b
+
+# ------------ create source and table stage ------------
+statement ok
+CREATE SOURCE mssql_idle_source WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'sqlserver_idle_db',
+);
+
+# The validator checks `sys.fn_cdc_get_max_lsn()` instead of the Agent status.
+statement ok
+CREATE SOURCE mssql_idle_source_no_server_state WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = 'rw_idle_login',
+    password = 'IdleLogin@123',
+    database.name = 'sqlserver_idle_db',
+);
+
+statement ok
+CREATE TABLE idle_t (
+    id INT,
+    v VARCHAR,
+    PRIMARY KEY (id)
+) FROM mssql_idle_source TABLE 'sqlserver_idle_db.dbo.idle_t';
+
+statement ok
+CREATE TABLE idle_t_no_server_state (
+    id INT,
+    v VARCHAR,
+    PRIMARY KEY (id)
+) FROM mssql_idle_source_no_server_state TABLE 'sqlserver_idle_db.dbo.idle_t';
+
+# ------------ add rows stage ------------
+system ok
+sqlcmd -C -d sqlserver_idle_db -Q "INSERT INTO dbo.idle_t VALUES (2, 'b');" -b
+
+query IT retry 60 backoff 1s
+SELECT id, v FROM idle_t ORDER BY id;
+----
+1 a
+2 b
+
+query IT retry 60 backoff 1s
+SELECT id, v FROM idle_t_no_server_state ORDER BY id;
+----
+1 a
+2 b
+
+# ------------ drop stage ------------
+statement ok
+DROP SOURCE mssql_idle_source CASCADE;
+
+statement ok
+DROP SOURCE mssql_idle_source_no_server_state CASCADE;

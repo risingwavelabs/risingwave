@@ -1,4 +1,4 @@
-// Copyright 2022 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,14 +21,16 @@ use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::TableId;
-use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_connector::dispatch_cdc_source_type;
 use risingwave_connector::source::cdc::split::{
     extract_postgres_lsn_from_offset_str, extract_sql_server_commit_lsn_from_offset_str,
 };
+use risingwave_connector::source::cdc::{CdcSourceRuntimeFlags, CdcSourceType};
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -60,6 +62,41 @@ fn lsn_u128_to_i64(lsn: u128) -> i64 {
     lsn.min(i64::MAX as u128) as i64
 }
 
+fn update_mysql_cdc_state_file_seq_metric(
+    metric_guard: &mut Option<LabelGuardedIntGauge>,
+    metrics: &StreamingMetrics,
+    source_id: &str,
+    split_impl: &SplitImpl,
+) {
+    let SplitImpl::MysqlCdc(mysql_split) = split_impl else {
+        return;
+    };
+
+    if let Some((file_seq, _)) = mysql_split.mysql_binlog_offset() {
+        metric_guard
+            .get_or_insert_with(|| {
+                metrics
+                    .mysql_cdc_state_binlog_file_seq
+                    .with_guarded_label_values(&[source_id])
+            })
+            .set(file_seq as i64);
+    } else {
+        *metric_guard = None;
+    }
+}
+
+fn clear_mysql_cdc_state_file_seq_metric_if_unassigned(
+    metric_guard: &mut Option<LabelGuardedIntGauge>,
+    target_state: &HashMap<SplitId, SplitImpl>,
+) {
+    if !target_state
+        .values()
+        .any(|split| matches!(split, SplitImpl::MysqlCdc(_)))
+    {
+        *metric_guard = None;
+    }
+}
+
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -68,6 +105,9 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
+
+    /// Keep the MySQL CDC state file sequence metric alive while this executor owns the split.
+    mysql_cdc_state_binlog_file_seq_guard: Option<LabelGuardedIntGauge>,
 
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
@@ -100,6 +140,7 @@ impl<S: StateStore> SourceExecutor<S> {
             actor_ctx,
             stream_source_core,
             metrics,
+            mysql_cdc_state_binlog_file_seq_guard: None,
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
@@ -148,13 +189,13 @@ impl<S: StateStore> SourceExecutor<S> {
         self.actor_ctx.config.developer.enable_auto_schema_change
     }
 
-    /// `source_id | source_name | actor_id | fragment_id`
+    /// `actor_id | source_id | source_name | fragment_id`
     #[inline]
     fn get_metric_labels(&self) -> [String; 4] {
         [
+            self.actor_ctx.id.to_string(),
             self.stream_source_core.source_id.to_string(),
             self.stream_source_core.source_name.clone(),
-            self.actor_ctx.id.to_string(),
             self.actor_ctx.fragment_id.to_string(),
         ]
     }
@@ -210,6 +251,7 @@ impl<S: StateStore> SourceExecutor<S> {
         target_splits: Vec<SplitImpl>,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
+        let mysql_file_seq_metric_guard = &mut self.mysql_cdc_state_binlog_file_seq_guard;
         let core = &mut self.stream_source_core;
 
         let target_splits: HashMap<_, _> = target_splits
@@ -285,6 +327,11 @@ impl<S: StateStore> SourceExecutor<S> {
 
             core.latest_split_info = target_state;
         }
+
+        clear_mysql_cdc_state_file_seq_metric_if_unassigned(
+            mysql_file_seq_metric_guard,
+            &core.latest_split_info,
+        );
 
         Ok(split_changed)
     }
@@ -442,6 +489,7 @@ impl<S: StateStore> SourceExecutor<S> {
         epoch: EpochPair,
     ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = &mut self.stream_source_core;
+        let mysql_file_seq_metric_guard = &mut self.mysql_cdc_state_binlog_file_seq_guard;
 
         let cache = core
             .updated_splits_in_epoch
@@ -466,12 +514,13 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                     }
                     SplitImpl::MysqlCdc(mysql_split) => {
-                        if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
-                            self.metrics
-                                .mysql_cdc_state_binlog_file_seq
-                                .with_guarded_label_values(&[&source_id])
-                                .set(file_seq as i64);
-
+                        update_mysql_cdc_state_file_seq_metric(
+                            mysql_file_seq_metric_guard,
+                            &self.metrics,
+                            &source_id,
+                            split_impl,
+                        );
+                        if let Some((_, position)) = mysql_split.mysql_binlog_offset() {
                             self.metrics
                                 .mysql_cdc_state_binlog_position
                                 .with_guarded_label_values(&[&source_id])
@@ -581,17 +630,20 @@ impl<S: StateStore> SourceExecutor<S> {
             })?;
         let first_epoch = first_barrier.epoch;
         // must_report_cdc_offset is true if and only if the source is a CDC source.
-        // must_wait_cdc_offset_before_report is true if and only if the source is a MySQL or SQL Server CDC source.
         let (mut boot_state, mut must_report_cdc_offset_once, must_wait_cdc_offset_before_report) =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
                 // CDC source must reach this branch.
                 tracing::debug!(?splits, "boot with splits");
                 // Skip report for non-CDC.
                 let must_report_cdc_offset_once = splits.iter().any(|split| split.is_cdc_split());
-                // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
                 let must_wait_cdc_offset_before_report = must_report_cdc_offset_once
                     && splits.iter().any(|split| {
-                        matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                        dispatch_cdc_source_type!(
+                            CdcSourceType::from(split),
+                            T,
+                            T::NEEDS_NON_EMPTY_INITIAL_OFFSET,
+                            false
+                        )
                     });
                 (
                     splits.to_vec(),
@@ -630,6 +682,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         core.split_state_store.init_epoch(first_epoch).await?;
         {
+            let source_id = source_id.to_string();
             let committed_reader = core
                 .split_state_store
                 .new_committed_reader(first_epoch)
@@ -639,6 +692,12 @@ impl<S: StateStore> SourceExecutor<S> {
                     committed_reader.try_recover_from_state_store(ele).await?
                 {
                     *ele = recover_state;
+                    update_mysql_cdc_state_file_seq_metric(
+                        &mut self.mysql_cdc_state_binlog_file_seq_guard,
+                        &self.metrics,
+                        &source_id,
+                        ele,
+                    );
                     // if state store is non-empty, we consider it's initialized.
                     is_uninitialized = false;
                 } else {
@@ -976,14 +1035,8 @@ impl<S: StateStore> SourceExecutor<S> {
                         must_wait_cdc_offset_before_report,
                     );
 
-                    // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
-                    if barrier.kind.is_checkpoint()
-                        && let Some(task_builder) = &mut wait_checkpoint_task_builder
-                    {
-                        task_builder.update_task_on_checkpoint(updated_splits);
-
-                        tracing::debug!("epoch to wait {:?}", epoch);
-                        task_builder.send(Epoch(epoch.prev));
+                    if let Some(task_builder) = &mut wait_checkpoint_task_builder {
+                        task_builder.on_barrier(&barrier, updated_splits);
                     }
 
                     let barrier_epoch = barrier.epoch;
@@ -1018,17 +1071,27 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
                         if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                            let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
-                            task_builder.update_task_on_chunk(
-                                source_id,
-                                &latest_state,
-                                pulsar_message_id_col.clone(),
-                            );
+                            if chunk.capacity() > 0 {
+                                // Each Pulsar chunk comes from one split, so all rows have the same
+                                // split ID.
+                                let (_, row, _) = chunk.row_at(0);
+                                let split_id = SplitId::from(
+                                    row.datum_at(split_idx).unwrap().into_utf8().to_owned(),
+                                );
+                                let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
+                                task_builder.update_task_on_chunk(
+                                    self.actor_ctx.id,
+                                    source_id,
+                                    Some(&split_id),
+                                    pulsar_message_id_col.clone(),
+                                );
+                            }
                         } else {
                             let offset_col = chunk.column_at(offset_idx);
                             task_builder.update_task_on_chunk(
+                                self.actor_ctx.id,
                                 source_id,
-                                &latest_state,
+                                None,
                                 offset_col.clone(),
                             );
                         }
@@ -1116,8 +1179,9 @@ struct WaitCheckpointTaskBuilder {
 impl WaitCheckpointTaskBuilder {
     fn update_task_on_chunk(
         &mut self,
+        actor_id: ActorId,
         source_id: SourceId,
-        latest_state: &HashMap<SplitId, SplitImpl>,
+        pulsar_split_id: Option<&SplitId>,
         offset_col: ArrayRef,
     ) {
         match &mut self.building_task {
@@ -1128,16 +1192,25 @@ impl WaitCheckpointTaskBuilder {
                 arrays.push(offset_col);
             }
             WaitCheckpointTask::AckPulsarMessage(arrays) => {
-                // each pulsar chunk will only contain one split
-                let split_id = latest_state.keys().next().unwrap();
-                let pulsar_ack_channel_id = build_pulsar_ack_channel_id(source_id, split_id);
+                let split_id = pulsar_split_id.expect("Pulsar chunk must have a split ID");
+                let pulsar_ack_channel_id =
+                    build_pulsar_ack_channel_id(source_id, split_id, actor_id);
                 arrays.push((pulsar_ack_channel_id, offset_col));
             }
             WaitCheckpointTask::CommitCdcOffset(_) => {}
         }
     }
 
-    fn update_task_on_checkpoint(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
+    /// Offsets persisted at non-checkpoint barriers are committed with the next checkpoint.
+    fn on_barrier(&mut self, barrier: &Barrier, updated_splits: HashMap<SplitId, SplitImpl>) {
+        self.update_task_on_barrier(updated_splits);
+        if barrier.kind.is_checkpoint() {
+            tracing::debug!("epoch to wait {:?}", barrier.epoch);
+            self.send(Epoch(barrier.epoch.prev));
+        }
+    }
+
+    fn update_task_on_barrier(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
         if let WaitCheckpointTask::CommitCdcOffset(offsets) = &mut self.building_task
             && !updated_splits.is_empty()
         {
@@ -1271,15 +1344,21 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 #[cfg(test)]
 mod tests {
     use maplit::{btreemap, convert_args, hashmap};
+    use prometheus::Registry;
+    use prometheus::core::Collector;
+    use risingwave_common::array::{Array, BytesArray};
     use risingwave_common::catalog::{ColumnId, Field};
+    use risingwave_common::config::MetricLevel;
     use risingwave_common::id::SourceId;
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
+    use risingwave_connector::source::cdc::{DebeziumCdcSplit, Mysql};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
+    use risingwave_pb::stream_plan::barrier::BarrierKind;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
     use tracing_test::traced_test;
@@ -1290,6 +1369,219 @@ mod tests {
     use crate::task::LocalBarrierManager;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
+
+    fn message_ids<const N: usize>(values: [Option<&[u8]>; N]) -> ArrayRef {
+        BytesArray::from_iter(values).into_ref()
+    }
+
+    #[test]
+    fn test_build_pulsar_ack_task_for_interleaved_splits() {
+        let (wait_checkpoint_tx, _wait_checkpoint_rx) = unbounded_channel();
+        let mut builder = WaitCheckpointTaskBuilder {
+            wait_checkpoint_tx,
+            building_task: WaitCheckpointTask::AckPulsarMessage(vec![]),
+        };
+        let actor_id = ActorId::new(11);
+        let source_id = SourceId::new(7);
+        let split_a = SplitId::from("persistent://public/default/topic-a");
+        let split_b = SplitId::from("persistent://public/default/topic-b");
+
+        builder.update_task_on_chunk(
+            actor_id,
+            source_id,
+            Some(&split_a),
+            message_ids([Some(b"a-0")]),
+        );
+        builder.update_task_on_chunk(
+            actor_id,
+            source_id,
+            Some(&split_b),
+            message_ids([Some(b"b-0")]),
+        );
+        builder.update_task_on_chunk(
+            actor_id,
+            source_id,
+            Some(&split_a),
+            message_ids([Some(b"a-1")]),
+        );
+
+        let WaitCheckpointTask::AckPulsarMessage(ack_arrays) = builder.building_task else {
+            unreachable!();
+        };
+        let channel_ids = ack_arrays
+            .into_iter()
+            .map(|(channel_id, _)| channel_id)
+            .collect_vec();
+
+        assert_eq!(
+            channel_ids,
+            vec![
+                build_pulsar_ack_channel_id(source_id, &split_a, actor_id),
+                build_pulsar_ack_channel_id(source_id, &split_b, actor_id),
+                build_pulsar_ack_channel_id(source_id, &split_a, actor_id),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_cdc_commit_task_across_non_checkpoint_barriers() {
+        let (wait_checkpoint_tx, mut wait_checkpoint_rx) = unbounded_channel();
+        let mut builder = WaitCheckpointTaskBuilder {
+            wait_checkpoint_tx,
+            building_task: WaitCheckpointTask::CommitCdcOffset(None),
+        };
+        let split =
+            SplitImpl::PostgresCdc(DebeziumCdcSplit::new(1, Some("offset".to_owned()), None));
+
+        let non_checkpoint = Barrier {
+            kind: BarrierKind::Barrier,
+            ..Barrier::new_test_barrier(test_epoch(1))
+        };
+        builder.on_barrier(&non_checkpoint, hashmap! { split.id() => split.clone() });
+        assert!(wait_checkpoint_rx.try_recv().is_err());
+
+        let checkpoint = Barrier::new_test_barrier(test_epoch(2));
+        builder.on_barrier(&checkpoint, HashMap::new());
+        let (epoch, task) = wait_checkpoint_rx.try_recv().unwrap();
+        assert_eq!(epoch.0, checkpoint.epoch.prev);
+        let WaitCheckpointTask::CommitCdcOffset(Some((split_id, offset))) = task else {
+            panic!("the offset persisted at the non-checkpoint barrier should be committed");
+        };
+        assert_eq!(split_id, split.id());
+        assert_eq!(offset, "offset");
+
+        builder.on_barrier(&Barrier::new_test_barrier(test_epoch(3)), HashMap::new());
+        let (_, task) = wait_checkpoint_rx.try_recv().unwrap();
+        assert!(matches!(task, WaitCheckpointTask::CommitCdcOffset(None)));
+    }
+
+    #[tokio::test]
+    async fn test_recovered_mysql_cdc_state_file_seq_metric_is_initialized()
+    -> StreamExecutorResult<()> {
+        let mut state_table_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            MemoryStateStore::new(),
+        )
+        .await;
+        let offset = r#"{"sourceOffset":{"file":"binlog.000123","pos":45678}}"#;
+        let persisted_split = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
+            1001,
+            Some(offset.to_owned()),
+            None,
+        ));
+        let uninitialized_split =
+            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+        let epoch_1 = EpochPair::new_test_epoch(test_epoch(1));
+        let epoch_2 = EpochPair::new_test_epoch(test_epoch(2));
+        let epoch_3 = EpochPair::new_test_epoch(test_epoch(3));
+
+        state_table_handler.init_epoch(epoch_1).await?;
+        state_table_handler
+            .set_states(vec![persisted_split.clone()])
+            .await?;
+        state_table_handler
+            .state_table_mut()
+            .commit_for_test(epoch_2)
+            .await?;
+        state_table_handler
+            .state_table_mut()
+            .commit_for_test(epoch_3)
+            .await?;
+
+        let recovered_split = state_table_handler
+            .new_committed_reader(epoch_3)
+            .await?
+            .try_recover_from_state_store(&uninitialized_split)
+            .await?
+            .unwrap();
+        assert_eq!(recovered_split, persisted_split);
+
+        let registry = Registry::new();
+        let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug);
+        let mut metric_guard = None;
+        update_mysql_cdc_state_file_seq_metric(&mut metric_guard, &metrics, "1", &recovered_split);
+
+        for _ in 0..2 {
+            let file_seq = metrics
+                .mysql_cdc_state_binlog_file_seq
+                .collect()
+                .pop()
+                .unwrap();
+            assert_eq!(
+                123.0,
+                file_seq.get_metric()[0]
+                    .get_gauge()
+                    .as_ref()
+                    .unwrap()
+                    .value()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_mysql_cdc_state_file_seq_metric_is_cleared() {
+        let registry = Registry::new();
+        let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug);
+        let mut metric_guard = None;
+        let split_with_offset = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
+            1001,
+            Some(r#"{"sourceOffset":{"file":"binlog.000123","pos":45678}}"#.to_owned()),
+            None,
+        ));
+        let split_without_offset =
+            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+
+        update_mysql_cdc_state_file_seq_metric(
+            &mut metric_guard,
+            &metrics,
+            "1",
+            &split_with_offset,
+        );
+        assert!(metric_guard.is_some());
+
+        update_mysql_cdc_state_file_seq_metric(
+            &mut metric_guard,
+            &metrics,
+            "1",
+            &split_without_offset,
+        );
+        assert!(metric_guard.is_none());
+
+        drop(metrics.mysql_cdc_state_binlog_file_seq.collect());
+        assert!(
+            metrics
+                .mysql_cdc_state_binlog_file_seq
+                .collect()
+                .pop()
+                .unwrap()
+                .get_metric()
+                .is_empty()
+        );
+
+        update_mysql_cdc_state_file_seq_metric(
+            &mut metric_guard,
+            &metrics,
+            "1",
+            &split_with_offset,
+        );
+        assert!(metric_guard.is_some());
+
+        clear_mysql_cdc_state_file_seq_metric_if_unassigned(&mut metric_guard, &HashMap::new());
+        assert!(metric_guard.is_none());
+
+        drop(metrics.mysql_cdc_state_binlog_file_seq.collect());
+        assert!(
+            metrics
+                .mysql_cdc_state_binlog_file_seq
+                .collect()
+                .pop()
+                .unwrap()
+                .get_metric()
+                .is_empty()
+        );
+    }
 
     #[tokio::test]
     async fn test_source_executor() {

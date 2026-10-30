@@ -21,7 +21,7 @@ use crate::binder::bind_context::BindContext;
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, COLUMN_GROUP_PREFIX, Clause, Relation};
 use crate::error::{ErrorCode, Result};
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, ScopeId};
 
 #[derive(Debug, Clone)]
 pub struct BoundJoin {
@@ -29,6 +29,9 @@ pub struct BoundJoin {
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
+    /// The scope holding the columns of `left` while `right` was bound. References from `right`
+    /// owned by it make this join an `Apply`.
+    pub left_scope: ScopeId,
 }
 
 impl RewriteExprsRecursive for BoundJoin {
@@ -57,18 +60,14 @@ impl Binder {
             let right = self.bind_table_with_joins(t)?;
             self.pop_and_merge_lateral_context()?;
 
-            let is_lateral = match &right {
-                Relation::Subquery(subquery) if subquery.lateral => true,
-                Relation::TableFunction { .. } => true,
-                _ => false,
-            };
-
-            root = if is_lateral {
+            let left_scope = self.context.scope;
+            root = if Self::requires_apply(&right, left_scope) {
                 Relation::Apply(Box::new(BoundJoin {
                     join_type: JoinType::Inner,
                     left: root,
                     right,
                     cond: ExprImpl::literal_bool(true),
+                    left_scope,
                 }))
             } else {
                 Relation::Join(Box::new(BoundJoin {
@@ -76,10 +75,17 @@ impl Binder {
                     left: root,
                     right,
                     cond: ExprImpl::literal_bool(true),
+                    left_scope,
                 }))
             }
         }
         Ok(Some(root))
+    }
+
+    fn requires_apply(relation: &Relation, left_scope: ScopeId) -> bool {
+        matches!(relation, Relation::Subquery(subquery) if subquery.lateral)
+            || matches!(relation, Relation::TableFunction { .. })
+            || relation.is_correlated_by_scope(left_scope)
     }
 
     pub(crate) fn bind_table_with_joins(&mut self, table: &TableWithJoins) -> Result<Relation> {
@@ -110,13 +116,8 @@ impl Binder {
                 (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
             }
 
-            let is_lateral = match &right {
-                Relation::Subquery(subquery) if subquery.lateral => true,
-                Relation::TableFunction { .. } => true,
-                _ => false,
-            };
-
-            root = if is_lateral {
+            let left_scope = self.context.scope;
+            root = if Self::requires_apply(&right, left_scope) {
                 match join_type {
                     JoinType::Inner | JoinType::LeftOuter => {}
                     _ => {
@@ -130,6 +131,7 @@ impl Binder {
                     left: root,
                     right,
                     cond,
+                    left_scope,
                 }))
             } else {
                 Relation::Join(Box::new(BoundJoin {
@@ -137,6 +139,7 @@ impl Binder {
                     left: root,
                     right,
                     cond,
+                    left_scope,
                 }))
             };
         }

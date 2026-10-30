@@ -23,9 +23,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::expr::{
-    BoxedExpression, Expression, build_from_prost as expr_build_from_prost,
-};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost as expr_build_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -144,7 +142,7 @@ impl NestedLoopJoinExecutor {
     /// Create a chunk by concatenating a row with a chunk and set its visibility according to the
     /// evaluation result of the expression.
     async fn concatenate_and_eval(
-        expr: &dyn Expression,
+        expr: &BoxedExpression,
         left_row_types: &[DataType],
         left_row: RowRef<'_>,
         right_chunk: &DataChunk,
@@ -260,7 +258,7 @@ impl NestedLoopJoinExecutor {
                 // 3. Concatenate the left row and right chunk into a single chunk and evaluate the
                 // expression on it.
                 let chunk = Self::concatenate_and_eval(
-                    join_expr.as_ref(),
+                    &join_expr,
                     &left_data_types,
                     left_row,
                     &right_chunk,
@@ -295,7 +293,7 @@ impl NestedLoopJoinExecutor {
             for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
                 shutdown_rx.check()?;
                 let chunk = Self::concatenate_and_eval(
-                    join_expr.as_ref(),
+                    &join_expr,
                     &left_data_types,
                     left_row,
                     &right_chunk,
@@ -343,7 +341,7 @@ impl NestedLoopJoinExecutor {
                     continue;
                 }
                 let chunk = Self::concatenate_and_eval(
-                    join_expr.as_ref(),
+                    &join_expr,
                     &left_data_types,
                     left_row,
                     &right_chunk,
@@ -384,7 +382,7 @@ impl NestedLoopJoinExecutor {
             for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
                 shutdown_rx.check()?;
                 let chunk = Self::concatenate_and_eval(
-                    join_expr.as_ref(),
+                    &join_expr,
                     &left_data_types,
                     left_row,
                     &right_chunk,
@@ -428,7 +426,7 @@ impl NestedLoopJoinExecutor {
             for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
                 shutdown_rx.check()?;
                 let chunk = Self::concatenate_and_eval(
-                    join_expr.as_ref(),
+                    &join_expr,
                     &left_data_types,
                     left_row,
                     &right_chunk,
@@ -470,7 +468,7 @@ impl NestedLoopJoinExecutor {
             for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
                 shutdown_rx.check()?;
                 let chunk = Self::concatenate_and_eval(
-                    join_expr.as_ref(),
+                    &join_expr,
                     &left_data_types,
                     left_row,
                     &right_chunk,

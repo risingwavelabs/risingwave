@@ -22,9 +22,10 @@ use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldLike, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
@@ -54,6 +55,10 @@ const ALLOW_EXPERIMENTAL_JSON_TYPE: &str = "allow_experimental_json_type";
 const INPUT_FORMAT_BINARY_READ_JSON_AS_STRING: &str = "input_format_binary_read_json_as_string";
 const OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING: &str = "output_format_binary_write_json_as_string";
 
+/// `ClickHouse` backs `Decimal(P, S)` with `Decimal256` once `P > 38`, which takes 32 bytes on the
+/// wire, while [`ClickHouseDecimal`] never writes more than 16.
+const MAX_ENCODABLE_DECIMAL_PRECISION: u8 = 38;
+
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
@@ -81,7 +86,6 @@ impl EnforceSecret for ClickHouseCommon {
         "clickhouse.password", "clickhouse.user"
     };
 }
-
 
 #[derive(Debug)]
 enum ClickHouseEngine {
@@ -331,7 +335,12 @@ pub struct ClickHouseConfig {
     pub common: ClickHouseCommon,
 
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(ClickHouseConfig);
 
 impl EnforceSecret for ClickHouseConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -477,7 +486,23 @@ impl ClickHouseSink {
             }
             risingwave_common::types::DataType::Float32 => Ok(ck_column.r#type.contains("Float32")),
             risingwave_common::types::DataType::Float64 => Ok(ck_column.r#type.contains("Float64")),
-            risingwave_common::types::DataType::Decimal => Ok(ck_column.r#type.contains("Decimal")),
+            risingwave_common::types::DataType::Decimal => {
+                match parse_decimal_accuracy(&ck_column.r#type)? {
+                    Some((precision, _)) if precision > MAX_ENCODABLE_DECIMAL_PRECISION => {
+                        Err(SinkError::ClickHouse(format!(
+                            "column {:?} has ClickHouse type `{}`: precision {} is backed by Decimal256, \
+                             but this sink can only encode decimals up to precision {}. Lower the column \
+                             precision (recreating the table if it is a key column), or leave the column \
+                             out of the sink.",
+                            ck_column.name,
+                            ck_column.r#type,
+                            precision,
+                            MAX_ENCODABLE_DECIMAL_PRECISION,
+                        )))
+                    }
+                    accuracy => Ok(accuracy.is_some()),
+                }
+            }
             risingwave_common::types::DataType::Date => Ok(ck_column.r#type.contains("Date32")),
             risingwave_common::types::DataType::Varchar => Ok(ck_column.r#type.contains("String")),
             risingwave_common::types::DataType::Time => Err(SinkError::ClickHouse(
@@ -503,6 +528,9 @@ impl ClickHouseSink {
                 "BYTEA is not supported for ClickHouse sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Jsonb => Ok(ck_column.r#type.contains("JSON")),
+            risingwave_common::types::DataType::Variant => Err(SinkError::ClickHouse(
+                "VARIANT is not supported for ClickHouse sink.".to_owned(),
+            )),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
@@ -531,6 +559,8 @@ impl Sink for ClickHouseSink {
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.
@@ -603,7 +633,6 @@ impl Sink for ClickHouseSink {
 }
 pub struct ClickHouseSinkWriter {
     pub config: ClickHouseConfig,
-    #[expect(dead_code)]
     schema: Schema,
     #[expect(dead_code)]
     pk_indices: Vec<usize>,
@@ -611,7 +640,7 @@ pub struct ClickHouseSinkWriter {
     #[expect(dead_code)]
     is_append_only: bool,
     // Save some features of the clickhouse column type
-    column_correct_vec: Vec<ClickHouseSchemaFeature>,
+    column_correct_map: HashMap<String, ClickHouseSchemaFeature>,
     rw_fields_name_after_calibration: Vec<String>,
     clickhouse_engine: ClickHouseEngine,
     inserter: Option<Insert<ClickHouseColumn>>,
@@ -637,14 +666,28 @@ impl ClickHouseSinkWriter {
         let (clickhouse_column, clickhouse_engine) =
             query_column_engine_from_ck(client.clone(), &config).await?;
 
-        let column_correct_vec: Result<Vec<ClickHouseSchemaFeature>> = clickhouse_column
+        let column_correct_map: Result<HashMap<String, ClickHouseSchemaFeature>> =
+            clickhouse_column
+                .iter()
+                .map(Self::build_column_correct_map)
+                .collect();
+        let sink_fields = build_fields_name_type_from_schema(&schema)?;
+
+        // The table may have been altered since `CREATE SINK` validated it, and an under-sized
+        // decimal encoding would desync every following column of the same RowBinary row. Only
+        // columns the writer encodes as decimals are held to the decimal rule.
+        let ck_columns: HashMap<&str, &SystemColumn> = clickhouse_column
             .iter()
-            .map(Self::build_column_correct_vec)
+            .map(|c| (c.name.as_str(), c))
             .collect();
-        let mut rw_fields_name_after_calibration = build_fields_name_type_from_schema(&schema)?
-            .iter()
-            .map(|(a, _)| a.clone())
-            .collect_vec();
+        for (name, data_type) in sink_fields.iter().filter(|(_, t)| contains_decimal(t)) {
+            if let Some(ck_column) = ck_columns.get(name.as_str()) {
+                ClickHouseSink::check_and_correct_column_type(data_type, ck_column)?;
+            }
+        }
+
+        let mut rw_fields_name_after_calibration =
+            sink_fields.iter().map(|(a, _)| a.clone()).collect_vec();
 
         if let Some(sign) = clickhouse_engine.get_sign_name() {
             rw_fields_name_after_calibration.push(sign);
@@ -658,7 +701,7 @@ impl ClickHouseSinkWriter {
             pk_indices,
             client,
             is_append_only,
-            column_correct_vec: column_correct_vec?,
+            column_correct_map: column_correct_map?,
             rw_fields_name_after_calibration,
             clickhouse_engine,
             inserter: None,
@@ -666,8 +709,10 @@ impl ClickHouseSinkWriter {
     }
 
     /// Check if clickhouse's column is 'Nullable', valid bits of `DateTime64`. And save it in
-    /// `column_correct_vec`
-    fn build_column_correct_vec(ck_column: &SystemColumn) -> Result<ClickHouseSchemaFeature> {
+    /// `column_correct_map`
+    fn build_column_correct_map(
+        ck_column: &SystemColumn,
+    ) -> Result<(String, ClickHouseSchemaFeature)> {
         let can_null = ck_column.r#type.contains("Nullable");
         // `DateTime64` without precision is already displayed as `DateTime(3)` in `system.columns`.
         let accuracy_time = if ck_column.r#type.contains("DateTime64(") {
@@ -687,43 +732,15 @@ impl ClickHouseSinkWriter {
         } else {
             0_u8
         };
-        let accuracy_decimal = if ck_column.r#type.contains("Decimal(") {
-            let decimal_all = ck_column
-                .r#type
-                .split("Decimal(")
-                .last()
-                .ok_or_else(|| SinkError::ClickHouse("must have last".to_owned()))?
-                .split(')')
-                .next()
-                .ok_or_else(|| SinkError::ClickHouse("must have next".to_owned()))?
-                .split(", ")
-                .collect_vec();
-            let length = decimal_all
-                .first()
-                .ok_or_else(|| SinkError::ClickHouse("must have next".to_owned()))?
-                .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(e.to_report_string()))?;
-
-            if length > 38 {
-                return Err(SinkError::ClickHouse(
-                    "RW don't support Decimal256".to_owned(),
-                ));
-            }
-
-            let scale = decimal_all
-                .last()
-                .ok_or_else(|| SinkError::ClickHouse("must have next".to_owned()))?
-                .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(e.to_report_string()))?;
-            (length, scale)
-        } else {
-            (0_u8, 0_u8)
-        };
-        Ok(ClickHouseSchemaFeature {
-            can_null,
-            accuracy_time,
-            accuracy_decimal,
-        })
+        let accuracy_decimal = parse_decimal_accuracy(&ck_column.r#type)?.unwrap_or((0, 0));
+        Ok((
+            ck_column.name.clone(),
+            ClickHouseSchemaFeature {
+                can_null,
+                accuracy_time,
+                accuracy_decimal,
+            },
+        ))
     }
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -735,11 +752,12 @@ impl ClickHouseSinkWriter {
         }
         for (op, row) in chunk.rows() {
             let mut clickhouse_filed_vec = vec![];
-            for (index, data) in row.iter().enumerate() {
+            for (data, field) in row.iter().zip_eq_debug(self.schema.fields()) {
                 clickhouse_filed_vec.extend(ClickHouseFieldWithNull::from_scalar_ref(
                     data,
-                    &self.column_correct_vec,
-                    index,
+                    &self.column_correct_map,
+                    field.name(),
+                    &field.data_type(),
                 )?);
             }
             match op {
@@ -815,6 +833,38 @@ struct SystemColumn {
     name: String,
     r#type: String,
     is_in_primary_key: u8,
+}
+
+/// Parse `(precision, scale)` out of a decimal type, or `None` if it is not a decimal.
+/// `system.columns` renders decimals canonically, so `Decimal128(10)` arrives as `Decimal(38, 10)`.
+fn parse_decimal_accuracy(ck_type: &str) -> Result<Option<(u8, u8)>> {
+    let Some((_, rest)) = ck_type.split_once("Decimal(") else {
+        return Ok(None);
+    };
+    let (args, _) = rest
+        .split_once(')')
+        .ok_or_else(|| SinkError::ClickHouse(format!("unterminated decimal type {ck_type:?}")))?;
+    let (precision, scale) = args
+        .split_once(',')
+        .ok_or_else(|| SinkError::ClickHouse(format!("decimal type {ck_type:?} has no scale")))?;
+    let parse = |field: &str| {
+        field.trim().parse::<u8>().map_err(|e| {
+            SinkError::ClickHouse(format!(
+                "cannot parse decimal type {:?}: {}",
+                ck_type,
+                e.to_report_string()
+            ))
+        })
+    };
+    Ok(Some((parse(precision)?, parse(scale)?)))
+}
+
+fn contains_decimal(data_type: &DataType) -> bool {
+    match data_type {
+        DataType::Decimal => true,
+        DataType::List(list) => contains_decimal(list.elem()),
+        _ => false,
+    }
 }
 
 #[derive(ClickHouseRow, Deserialize)]
@@ -917,13 +967,26 @@ enum ClickHouseFieldWithNull {
 impl ClickHouseFieldWithNull {
     pub fn from_scalar_ref(
         data: Option<ScalarRefImpl<'_>>,
-        clickhouse_schema_feature_vec: &Vec<ClickHouseSchemaFeature>,
-        clickhouse_schema_feature_index: usize,
+        clickhouse_schema_feature_map: &HashMap<String, ClickHouseSchemaFeature>,
+        rw_name: &str,
+        rw_type: &DataType,
     ) -> Result<Vec<ClickHouseFieldWithNull>> {
-        let clickhouse_schema_feature = clickhouse_schema_feature_vec
-            .get(clickhouse_schema_feature_index)
-            .ok_or_else(|| SinkError::ClickHouse(format!("No column found from clickhouse table schema, index is {clickhouse_schema_feature_index}")))?;
-        if data.is_none() {
+        let clickhouse_schema_feature = if !matches!(rw_type, DataType::Struct(_)) {
+            Some(clickhouse_schema_feature_map.get(rw_name).ok_or_else(|| {
+                SinkError::ClickHouse(format!(
+                    "No column found from clickhouse table schema, name is {rw_name}"
+                ))
+            })?)
+        } else {
+            None
+        };
+
+        let Some(data) = data else {
+            let Some(clickhouse_schema_feature) = clickhouse_schema_feature else {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse's nested can not insert null".to_owned(),
+                ));
+            };
             if !clickhouse_schema_feature.can_null {
                 return Err(SinkError::ClickHouse(
                     "Cannot insert null value into non-nullable ClickHouse column".to_owned(),
@@ -931,8 +994,8 @@ impl ClickHouseFieldWithNull {
             } else {
                 return Ok(vec![ClickHouseFieldWithNull::None]);
             }
-        }
-        let data = match data.unwrap() {
+        };
+        let data = match data {
             ScalarRefImpl::Int16(v) => ClickHouseField::Int16(v),
             ScalarRefImpl::Int32(v) => ClickHouseField::Int32(v),
             ScalarRefImpl::Int64(v) => ClickHouseField::Int64(v),
@@ -948,23 +1011,23 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
             ScalarRefImpl::Decimal(d) => {
                 let d = if let Decimal::Normalized(d) = d {
-                    let scale =
-                        clickhouse_schema_feature.accuracy_decimal.1 as i32 - d.scale() as i32;
+                    let scale = clickhouse_schema_feature.unwrap().accuracy_decimal.1 as i32
+                        - d.scale() as i32;
                     if scale < 0 {
                         d.mantissa() / 10_i128.pow(scale.unsigned_abs())
                     } else {
                         d.mantissa() * 10_i128.pow(scale as u32)
                     }
-                } else if clickhouse_schema_feature.can_null {
+                } else if clickhouse_schema_feature.unwrap().can_null {
                     warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse null!");
                     return Ok(vec![ClickHouseFieldWithNull::None]);
                 } else {
                     warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse 0!");
                     0_i128
                 };
-                if clickhouse_schema_feature.accuracy_decimal.0 <= 9 {
+                if clickhouse_schema_feature.unwrap().accuracy_decimal.0 <= 9 {
                     ClickHouseField::Decimal(ClickHouseDecimal::Decimal32(d as i32))
-                } else if clickhouse_schema_feature.accuracy_decimal.0 <= 18 {
+                } else if clickhouse_schema_feature.unwrap().accuracy_decimal.0 <= 18 {
                     ClickHouseField::Decimal(ClickHouseDecimal::Decimal64(d as i64))
                 } else {
                     ClickHouseField::Decimal(ClickHouseDecimal::Decimal128(d))
@@ -991,13 +1054,16 @@ impl ClickHouseFieldWithNull {
             }
             ScalarRefImpl::Timestamptz(v) => {
                 let micros = v.timestamp_micros();
-                let ticks = match clickhouse_schema_feature.accuracy_time <= 6 {
+                let ticks = match clickhouse_schema_feature.unwrap().accuracy_time <= 6 {
                     true => {
-                        micros / 10_i64.pow((6 - clickhouse_schema_feature.accuracy_time).into())
+                        micros
+                            / 10_i64
+                                .pow((6 - clickhouse_schema_feature.unwrap().accuracy_time).into())
                     }
                     false => micros
                         .checked_mul(
-                            10_i64.pow((clickhouse_schema_feature.accuracy_time - 6).into()),
+                            10_i64
+                                .pow((clickhouse_schema_feature.unwrap().accuracy_time - 6).into()),
                         )
                         .ok_or_else(|| SinkError::ClickHouse("DateTime64 overflow".to_owned()))?,
                 };
@@ -1007,13 +1073,22 @@ impl ClickHouseFieldWithNull {
                 let json_str = v.to_string();
                 ClickHouseField::String(json_str)
             }
+            ScalarRefImpl::Variant(_) => {
+                return Err(SinkError::ClickHouse(
+                    "VARIANT is not supported for ClickHouse sink.".to_owned(),
+                ));
+            }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];
-                for (index, field) in v.iter_fields_ref().enumerate() {
+                for (field, (struct_field_name, struct_field_type)) in
+                    v.iter_fields_ref().zip_eq_debug(rw_type.as_struct().iter())
+                {
+                    let name = format!("{}.{}", rw_name, struct_field_name);
                     let a = Self::from_scalar_ref(
                         field,
-                        clickhouse_schema_feature_vec,
-                        clickhouse_schema_feature_index + index,
+                        clickhouse_schema_feature_map,
+                        &name,
+                        struct_field_type,
                     )?;
                     struct_vec.push(ClickHouseFieldWithNull::WithoutSome(ClickHouseField::List(
                         a,
@@ -1026,8 +1101,9 @@ impl ClickHouseFieldWithNull {
                 for i in v.iter() {
                     vec.extend(Self::from_scalar_ref(
                         i,
-                        clickhouse_schema_feature_vec,
-                        clickhouse_schema_feature_index,
+                        clickhouse_schema_feature_map,
+                        rw_name,
+                        rw_type,
                     )?)
                 }
                 return Ok(vec![ClickHouseFieldWithNull::WithoutSome(
@@ -1050,7 +1126,9 @@ impl ClickHouseFieldWithNull {
                 ));
             }
         };
-        let data = if clickhouse_schema_feature.can_null {
+        let data = if let Some(clickhouse_schema_feature) = clickhouse_schema_feature
+            && clickhouse_schema_feature.can_null
+        {
             vec![ClickHouseFieldWithNull::WithSome(data)]
         } else {
             vec![ClickHouseFieldWithNull::WithoutSome(data)]
@@ -1138,5 +1216,51 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
 impl From<::clickhouse::error::Error> for SinkError {
     fn from(value: ::clickhouse::error::Error) -> Self {
         SinkError::ClickHouse(value.to_report_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn system_column(ck_type: &str) -> SystemColumn {
+        SystemColumn {
+            name: "amount".to_owned(),
+            r#type: ck_type.to_owned(),
+            is_in_primary_key: 0,
+        }
+    }
+
+    #[test]
+    fn test_parse_decimal_accuracy() {
+        let parse = |ck_type: &str| parse_decimal_accuracy(ck_type).unwrap();
+
+        assert_eq!(parse("Decimal(38, 10)"), Some((38, 10)));
+        assert_eq!(parse("Decimal(38,10)"), Some((38, 10)));
+        assert_eq!(parse("Nullable(Decimal(76, 4))"), Some((76, 4)));
+        assert_eq!(parse("DateTime64(3)"), None);
+
+        assert!(parse_decimal_accuracy("Decimal(38)").is_err());
+    }
+
+    #[test]
+    fn test_decimal_column_check() {
+        let check = |rw_type: &DataType, ck_type: &str| {
+            ClickHouseSink::check_and_correct_column_type(rw_type, &system_column(ck_type))
+        };
+        let decimal_list = DataType::list(DataType::Decimal);
+
+        check(&DataType::Decimal, "Nullable(Decimal(38, 10))").unwrap();
+        check(&decimal_list, "Array(Decimal(9, 2))").unwrap();
+        // Only columns encoded as decimals are held to the precision rule.
+        check(&DataType::Jsonb, "JSON(a Decimal(76, 4), b Decimal(9, 2))").unwrap();
+
+        check(&DataType::Decimal, "String").unwrap_err();
+        let err = check(&DataType::Decimal, "Decimal(76, 4)")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("amount"), "{err}");
+        assert!(err.contains("Decimal(76, 4)"), "{err}");
+        assert!(err.contains("precision 76"), "{err}");
     }
 }

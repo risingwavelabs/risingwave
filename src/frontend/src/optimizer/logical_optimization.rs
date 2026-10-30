@@ -23,7 +23,8 @@ use crate::expr::NowProcTimeFinder;
 use crate::optimizer::PlanRef;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
+    ColPrunable, ColumnPruningContext, PredicatePushdown, PredicatePushdownContext,
+    VisitExprsRecursive,
 };
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
@@ -152,6 +153,8 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
             TableFunctionToMySqlQueryRule::create(),
+            // Apply mssql query rule next
+            TableFunctionToMssqlQueryRule::create(),
             // Apply project set rule last
             TableFunctionToProjectSetRule::create(),
         ],
@@ -179,6 +182,17 @@ static TABLE_FUNCTION_TO_MYSQL_QUERY: LazyLock<OptimizationStage> = LazyLock::ne
     OptimizationStage::new(
         "Table Function To MySQL",
         vec![TableFunctionToMySqlQueryRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+static TABLE_FUNCTION_TO_MSSQL_QUERY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Table Function To MSSQL Query",
+        vec![TableFunctionToMssqlQueryRule::create()],
+        // This conversion targets a leaf node, so traversal order does not
+        // affect the result. Keep TopDown for consistency with the equivalent
+        // PostgreSQL, MySQL, and file-scan conversion stages above.
         ApplyOrder::TopDown,
     )
 });
@@ -611,10 +625,10 @@ impl LogicalOptimizer {
         explain_trace: bool,
         ctx: &OptimizerContextRef,
     ) -> LogicalPlanRef {
-        let plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
+        // Go through the trait method instead of `PredicatePushdownContext::run` so that the
+        // top-level `check_equivalent_plan` debug check covers the whole pass.
+        let mut pushdown_ctx = PredicatePushdownContext::new(plan.clone());
+        let plan = plan.predicate_pushdown(Condition::true_cond(), &mut pushdown_ctx);
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string());
@@ -630,6 +644,9 @@ impl LogicalOptimizer {
     ) -> Result<LogicalPlanRef> {
         // Bail our if no apply operators.
         if !has_logical_apply(plan.clone()) {
+            // A correlated column reference can still be left without any `Apply`. Report it
+            // here instead of panicking during serialization.
+            plan.check_apply_elimination()?;
             return Ok(plan);
         }
         // Simple Unnesting.
@@ -662,22 +679,14 @@ impl LogicalOptimizer {
         ctx: &OptimizerContextRef,
     ) -> LogicalPlanRef {
         let required_cols = (0..plan.schema().len()).collect_vec();
+        // Go through the trait method instead of `ColumnPruningContext::run` so that the
+        // top-level `check_equivalent_plan` debug check covers the whole pass.
         let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
         plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string());
-        }
-
-        if column_pruning_ctx.need_second_round() {
-            // Second round of column pruning and reuse the column pruning context.
-            // Try to replace original share operator with the new one.
-            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-            if explain_trace {
-                ctx.trace("Prune Columns (For DAG):");
-                ctx.trace(plan.explain_to_string());
-            }
         }
         plan
     }
@@ -711,6 +720,9 @@ impl LogicalOptimizer {
             ctx.trace("Begin:");
             ctx.trace(plan.explain_to_string());
         }
+
+        // Check before common sub-plan sharing, which hashes the expressions.
+        plan.check_subquery_planned()?;
 
         // Convert grouping sets at first because other agg rule can't handle grouping sets.
         plan = plan.optimize_by_rules(&GROUPING_SETS)?;
@@ -845,6 +857,8 @@ impl LogicalOptimizer {
             ctx.trace(plan.explain_to_string());
         }
 
+        plan.check_subquery_planned()?;
+
         if ctx.session_ctx().config().enable_mv_selection() {
             let query_relations =
                 RelationCollectorVisitor::collect_with(HashSet::new(), plan.clone());
@@ -868,6 +882,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MSSQL_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS)?;

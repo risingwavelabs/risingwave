@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{TableAlias, WindowSpec};
 
 use crate::binder::Relation;
 use crate::error::{ErrorCode, Result};
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, ScopeId};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
@@ -85,12 +85,11 @@ pub struct LateralBindContext {
 #[derive(Debug, Clone)]
 pub enum BindingCteState {
     /// We get the whole bound result of the CTE.
-    Bound {
-        query: BoundQuery,
-    },
+    Bound { query: BoundQuery },
 
     ChangeLog {
         table: Relation,
+        key_indices: Option<Vec<usize>>,
     },
 }
 
@@ -127,6 +126,8 @@ pub struct BindContext {
     /// Bound arguments for the current SQL UDF, if any.
     // TODO: use enum for named or positional arguments
     pub sql_udf_arguments: Option<HashMap<String, ExprImpl>>,
+    /// Identifies this context as the owner of correlated references to its columns.
+    pub scope: ScopeId,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.
@@ -165,8 +166,8 @@ impl BindContext {
         match &self.get_column_binding_indices(schema_name, table_name, column_name)?[..] {
             [] => unreachable!(),
             [idx] => Ok(*idx),
-            _ => Err(ErrorCode::InternalError(format!(
-                "Ambiguous column name: {}",
+            _ => Err(ErrorCode::InvalidReference(format!(
+                "column reference \"{}\" is ambiguous",
                 column_name
             ))),
         }
@@ -226,10 +227,23 @@ impl BindContext {
         group_id: u32,
         column_name: &String,
     ) -> LiteResult<Vec<usize>> {
-        let group = self.column_group_context.groups.get(&group_id).unwrap();
-        if let Some(name) = &group.column_name {
-            debug_assert_eq!(name, column_name);
-        }
+        // The group-id qualifier is also reachable from a quoted user identifier, so a missing
+        // group or a group of another column is "not found" rather than an internal invariant.
+        let Some(group) = self
+            .column_group_context
+            .groups
+            .get(&group_id)
+            .filter(|group| {
+                group
+                    .column_name
+                    .as_ref()
+                    .is_none_or(|name| name == column_name)
+            })
+        else {
+            return Err(ErrorCode::ItemNotFound(format!(
+                "Invalid column: {column_name}"
+            )));
+        };
         if let Some(non_nullable) = &group.non_nullable_column {
             Ok(vec![*non_nullable])
         } else {
@@ -259,8 +273,8 @@ impl BindContext {
                     }
                 }
             }
-            Err(ErrorCode::InternalError(format!(
-                "Ambiguous column name: {}",
+            Err(ErrorCode::InvalidReference(format!(
+                "column reference \"{}\" is ambiguous",
                 column_name
             )))
         } else {
@@ -405,7 +419,7 @@ impl BindContext {
     /// Resolve the relation range for a `table_name` in the current bind scope.
     ///
     /// Alias matches are prioritized over base relation name matches.
-    fn resolve_relation_range(
+    pub(super) fn resolve_relation_range(
         &self,
         table_name: &String,
         schema_name: &Option<String>,
@@ -413,15 +427,26 @@ impl BindContext {
         let mut alias_ranges = Vec::new();
         let mut base_ranges = Vec::new();
 
-        for ((_, _), range) in self.range_of.iter().filter(|((rel_schema, rel_name), _)| {
-            rel_name == table_name
-                && schema_name
+        for ((rel_schema, rel_name), range) in &self.range_of {
+            if rel_name != table_name
+                || !schema_name
                     .as_deref()
                     .is_none_or(|s| rel_schema.as_deref() == Some(s))
-        }) {
-            match self.columns[range.0].table_alias {
-                Some(_) => alias_ranges.push(*range),
-                None => base_ranges.push(*range),
+            {
+                continue;
+            }
+
+            // Empty ranges have no column binding from which to read `table_alias`. Explicit
+            // aliases are stored without a schema in `range_of`.
+            let is_alias = if range.0 == range.1 {
+                rel_schema.is_none()
+            } else {
+                self.columns[range.0].table_alias.is_some()
+            };
+            if is_alias {
+                alias_ranges.push(*range);
+            } else {
+                base_ranges.push(*range);
             }
         }
 

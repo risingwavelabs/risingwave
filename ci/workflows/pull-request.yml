@@ -27,7 +27,7 @@ anchors:
         nienbo/cache#v2.4.21:
           id: maven
           key: >-
-            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java/pom.xml' }}-{{ checksum 'e2e_test/udf/remote_java/pom.xml' }}
+            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java/build-debezium.sh' }}-{{ checksum 'java/pom.xml' }}-{{ checksum 'e2e_test/udf/remote_java/pom.xml' }}-{{ env.DEBEZIUM_COMMIT }}
           restore-keys:
             - "v1-cache-maven-{{ runner.os }}-"
             - "v1-cache-maven-"
@@ -89,7 +89,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 15
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "build other components"
@@ -97,6 +97,7 @@ steps:
     key: "build-other"
     plugins:
       - *cargo-cache
+      - ./ci/plugins/debezium-submodule-commit
       - *maven-cache
       - seek-oss/aws-sm#v2.3.2:
           env:
@@ -263,7 +264,7 @@ steps:
           <<: *docker-compose
           run: source-cdc-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "end-to-end pulsar source test"
@@ -346,6 +347,19 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     parallelism: 2
+    retry: *auto-retry
+
+  - label: "end-to-end refill test"
+    command: "ci/scripts/e2e-refill-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+    if: |
+      build.pull_request.labels includes "ci/run-e2e-refill-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-refill-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "end-to-end kafka sink test"
@@ -452,6 +466,22 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: sink-elasticsearch-test-env
+          wait: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end opensearch sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-opensearch-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-opensearch-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-opensearch-sink-ci-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: sink-opensearch-test-env
+          wait: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -529,6 +559,20 @@ steps:
   - label: "end-to-end deltalake sink test"
     if: build.pull_request.labels includes "ci/run-e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-deltalake-sink-rust-tests?(,|$$)/
     command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: sink-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 20
+    retry: *auto-retry
+
+  - label: "end-to-end lancedb sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-lancedb-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-lancedb-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-lancedb-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
       - "build-other"
@@ -663,7 +707,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 25
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "check dylint"
@@ -687,7 +731,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 15
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
@@ -698,7 +742,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
     plugins:
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation)"
@@ -851,7 +895,8 @@ steps:
       - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
-        # Test the 4 latest versions against the latest main.
+        # Test the 4 latest versions against the latest main. Each matrix entry
+        # upgrades through the latest stable patch of every intermediate release line.
         # e.g.
         # 1: 2.0.0
         # 2: 1.1.1
@@ -864,7 +909,8 @@ steps:
           - "2"
           - "3"
           - "4"
-    timeout_in_minutes: 25
+    # Older releases are upgraded through every intermediate release line.
+    timeout_in_minutes: 60
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"

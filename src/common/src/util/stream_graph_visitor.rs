@@ -287,6 +287,10 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "GapFillStateTable");
             }
 
+            NodeBody::MatchRecognize(node) => {
+                always!(node.state_table, "MatchRecognizeStateTable");
+            }
+
             // Note: add internal tables for new nodes here.
             NodeBody::Materialize(node) => {
                 if !internal_tables_only {
@@ -331,6 +335,7 @@ pub fn visit_stream_node_tables_inner<F>(
             NodeBody::LocalityProvider(node) => {
                 always!(node.state_table, "LocalityProviderState");
                 always!(node.progress_table, "LocalityProviderProgress");
+                optional!(node.sort_buffer_table, "LocalityProviderSortBuffer");
             }
 
             NodeBody::IcebergWithPkIndexWriter(node) => {

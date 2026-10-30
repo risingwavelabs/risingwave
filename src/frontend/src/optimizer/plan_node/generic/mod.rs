@@ -33,6 +33,12 @@ mod agg;
 pub use agg::*;
 mod project_set;
 pub use project_set::*;
+mod get_channel_delta_stats;
+pub use get_channel_delta_stats::*;
+mod table_function;
+pub use table_function::*;
+mod values;
+pub use values::*;
 mod join;
 pub use join::*;
 mod project;
@@ -41,6 +47,8 @@ mod filter;
 pub use filter::*;
 mod gap_fill;
 pub use gap_fill::*;
+mod match_recognize;
+pub use match_recognize::*;
 mod expand;
 pub use expand::*;
 mod source;
@@ -87,12 +95,19 @@ pub use now::*;
 mod file_scan;
 pub use file_scan::*;
 
+mod iceberg_metadata_scan;
+pub use iceberg_metadata_scan::*;
+
 mod postgres_query;
 pub use postgres_query::*;
 
 mod mysql_query;
 
 pub use mysql_query::*;
+
+mod mssql_query;
+
+pub use mssql_query::*;
 
 mod locality_provider;
 pub use locality_provider::*;

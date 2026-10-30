@@ -22,29 +22,33 @@ use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr_macro::build_function;
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{BoxedExpression, Expression};
+use super::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, SyncExpression,
+    SyncExpressionBoxExt,
+};
 use crate::Result;
 
 /// This is just an implementation detail. The semantic is not guaranteed at SQL level because
 /// optimizer may have rearranged the boolean expressions. #6202
 #[derive(Debug)]
-pub struct BinaryShortCircuitExpression {
-    expr_ia1: BoxedExpression,
-    expr_ia2: BoxedExpression,
+pub struct BinaryShortCircuitExpression<E> {
+    expr_ia1: E,
+    expr_ia2: E,
     expr_type: Type,
 }
 
-#[async_trait::async_trait]
-impl Expression for BinaryShortCircuitExpression {
+impl<E: ExpressionInfo> ExpressionInfo for BinaryShortCircuitExpression<E> {
     fn return_type(&self) -> DataType {
         DataType::Boolean
     }
+}
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let left = self.expr_ia1.eval(input).await?;
+macro_rules! eval_short_circuit {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let left = forward!($mode, $this.expr_ia1, eval($input))?;
         let left = left.as_bool();
 
-        let res_vis = match self.expr_type {
+        let res_vis = match $this.expr_type {
             // For `Or` operator, if res of left part is not null and is true, we do not want to
             // calculate right part because the result must be true.
             Type::Or => !left.to_bitmap(),
@@ -53,17 +57,17 @@ impl Expression for BinaryShortCircuitExpression {
             Type::And => left.data() | !left.null_bitmap(),
             _ => unimplemented!(),
         };
-        let new_vis = input.visibility() & res_vis;
-        let mut input1 = input.clone();
+        let new_vis = $input.visibility() & res_vis;
+        let mut input1 = $input.clone();
         input1.set_visibility(new_vis);
 
-        let right = self.expr_ia2.eval(&input1).await?;
+        let right = forward!($mode, $this.expr_ia2, eval(&input1))?;
         let right = right.as_bool();
         assert_eq!(left.len(), right.len());
 
-        let mut bitmap = input.visibility() & left.null_bitmap() & right.null_bitmap();
+        let mut bitmap = $input.visibility() & left.null_bitmap() & right.null_bitmap();
 
-        let c = match self.expr_type {
+        let c = match $this.expr_type {
             Type::Or => {
                 let data = left.to_bitmap() | right.to_bitmap();
                 bitmap |= &data; // is_true || is_true
@@ -78,42 +82,77 @@ impl Expression for BinaryShortCircuitExpression {
             _ => unimplemented!(),
         };
         Ok(Arc::new(c.into()))
-    }
+    }};
+}
 
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let ret_ia1 = self.expr_ia1.eval_row(input).await?.map(|x| x.into_bool());
-        match self.expr_type {
+macro_rules! eval_row_short_circuit {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let ret_ia1 = forward!($mode, $this.expr_ia1, eval_row($input))?.map(|x| x.into_bool());
+        match $this.expr_type {
             Type::Or if ret_ia1 == Some(true) => return Ok(Some(true.to_scalar_value())),
             Type::And if ret_ia1 == Some(false) => return Ok(Some(false.to_scalar_value())),
             _ => {}
         }
-        let ret_ia2 = self.expr_ia2.eval_row(input).await?.map(|x| x.into_bool());
-        match self.expr_type {
+        let ret_ia2 = forward!($mode, $this.expr_ia2, eval_row($input))?.map(|x| x.into_bool());
+        match $this.expr_type {
             Type::Or => Ok(or(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
             Type::And => Ok(and(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
             _ => unimplemented!(),
         }
+    }};
+}
+
+impl<E: SyncExpression> SyncExpression for BinaryShortCircuitExpression<E> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_short_circuit!(sync, self, input)
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_short_circuit!(sync, self, input)
+    }
+}
+
+impl<E: AsyncExpression> AsyncExpression for BinaryShortCircuitExpression<E> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_short_circuit!(async, self, input)
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_short_circuit!(async, self, input)
     }
 }
 
 #[build_function("and(boolean, boolean) -> boolean")]
 fn build_and_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    let mut iter = children.into_iter();
-    Ok(Box::new(BinaryShortCircuitExpression {
-        expr_ia1: iter.next().unwrap(),
-        expr_ia2: iter.next().unwrap(),
-        expr_type: Type::And,
-    }))
+    build_binary_short_circuit(children, Type::And)
 }
 
 #[build_function("or(boolean, boolean) -> boolean")]
 fn build_or_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    let mut iter = children.into_iter();
-    Ok(Box::new(BinaryShortCircuitExpression {
-        expr_ia1: iter.next().unwrap(),
-        expr_ia2: iter.next().unwrap(),
-        expr_type: Type::Or,
-    }))
+    build_binary_short_circuit(children, Type::Or)
+}
+
+fn build_binary_short_circuit(
+    children: Vec<BoxedExpression>,
+    expr_type: Type,
+) -> Result<BoxedExpression> {
+    let [left, right]: [_; 2] = children.try_into().unwrap();
+    Ok(match (left, right) {
+        (BoxedExpression::Sync(left), BoxedExpression::Sync(right)) => {
+            BinaryShortCircuitExpression {
+                expr_ia1: left,
+                expr_ia2: right,
+                expr_type,
+            }
+            .boxed()
+        }
+        (left, right) => BinaryShortCircuitExpression {
+            expr_ia1: left,
+            expr_ia2: right,
+            expr_type,
+        }
+        .boxed(),
+    })
 }
 
 // #[function("and(boolean, boolean) -> boolean")]

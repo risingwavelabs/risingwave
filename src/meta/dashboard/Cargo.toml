@@ -13,7 +13,7 @@ axum = { workspace = true }
 axum-embed = "0.1"
 bytes = "1"
 mime_guess = "2"
-reqwest = "0.12.2"
+reqwest = "0.13.4"
 rust-embed = { version = "8", features = ["interpolate-folder-path", "mime-guess"] }
 thiserror-ext = { workspace = true }
 tracing = "0.1"
@@ -27,7 +27,6 @@ tracing-subscriber = "0.3"
 anyhow = "1"
 cargo-emit = "0.2"
 dircpy = "0.3"
-npm_rs = "1"
 
 [lints]
 workspace = true

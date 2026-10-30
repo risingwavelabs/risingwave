@@ -13,7 +13,9 @@ ignored = []
 [features]
 default = []
 test = []
-all-sinks = [
+all-sinks = ["all-sinks-lite", "all-sinks-heavy"]
+all-sinks-heavy = ["sink-lancedb"]
+all-sinks-lite = [
     "sink-bigquery",
     "sink-deltalake",
     "sink-google_pubsub",
@@ -29,6 +31,7 @@ sink-bigquery = [
     "dep:google-cloud-googleapis",
 ]
 sink-deltalake = ["dep:deltalake"]
+sink-lancedb = ["dep:lancedb", "dep:lance", "dep:lance-table"]
 # TODO: pubsub source is not feature-gated, thus `google-cloud-pubsub` cannot be optional.
 sink-google_pubsub = ["dep:google-cloud-googleapis"]
 sink-clickhouse = ["dep:clickhouse"]
@@ -36,14 +39,14 @@ sink-doris = []
 sink-starrocks = []
 
 [dependencies]
-# Rust ADBC crates (e.g., adbc_core 0.21) are built against the ADBC C/C++ core driver library version 0.19
+# Rust ADBC crates (e.g., adbc_core 0.23) are built against the ADBC C/C++ core driver library version 0.19
 adbc_core = { workspace = true, optional = true }
 adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = { version = "0.47", features = ["websockets"] }
+async-nats = { version = "0.49", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -58,7 +61,7 @@ aws-sdk-s3 = { workspace = true }
 aws-smithy-types = { workspace = true }
 aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
 aws-types = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 cfg-if = "1"
@@ -71,13 +74,12 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f
 ], optional = true }
 csv = "1.4"
 deltalake = { workspace = true, optional = true }
-duration-str = "0.18.0"
+duration-str = "0.21.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.7"
 firestore = "0.47"
-jsonbb = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcloud-sdk = "0.28"
@@ -95,14 +97,19 @@ google-cloud-pubsub = { package = "gcloud-pubsub", version = "1.5" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
+iceberg-storage-opendal = { workspace = true }
 indexmap = { workspace = true }
 itertools = { workspace = true }
 jni = { workspace = true }
+jsonbb = { workspace = true }
+lance = { workspace = true, optional = true }
+lance-table = { workspace = true, optional = true }
+lancedb = { workspace = true, optional = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
 mongodb = "3.5.1"
 mysql_async = { workspace = true }
-mysql_common = { version = "0.35", default-features = false, features = [
+mysql_common = { version = "0.37", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
@@ -122,7 +129,7 @@ parking_lot = { workspace = true }
 parquet = { version = "58", features = ["async"] }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
-phf = { version = "0.13", features = ["macros"] }
+phf = { version = "0.14", features = ["macros"] }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
@@ -141,6 +148,10 @@ rdkafka = { workspace = true, features = [
     "ssl",
     "gssapi",
     "zstd",
+    # Keep both: `curl` enables librdkafka's OIDC client, while `curl-static`
+    # avoids adding a system libcurl dependency to release binaries.
+    "curl",
+    "curl-static",
 ] }
 redis = { workspace = true, features = [
     "aio",
@@ -175,7 +186,7 @@ sea-schema = { version = "0.16", default-features = false, features = [
 serde = { workspace = true, features = ["rc"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = { version = "0.17.0", features = ["hints"] }
+simd-json = { version = "0.18.1", features = ["hints"] }
 smallvec = { workspace = true }
 sqlx = { workspace = true }
 strum = "0.28"
@@ -218,6 +229,9 @@ criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true }
 expect-test = "1"
 fs-err = "3"
+lance = { workspace = true }
+lance-table = { workspace = true }
+lancedb = { workspace = true }
 paste = "1"
 pretty_assertions = "1"
 proc-macro2 = "1.0"
@@ -227,9 +241,9 @@ serde = { workspace = true }
 serde_yaml = "0.9"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
+tonic-prost = "0.14"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
-tonic-prost = "0.14"
 walkdir = "2"
 
 [[bench]]

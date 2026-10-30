@@ -19,7 +19,9 @@ use std::rc::Rc;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_sqlparser::ast::{Cte, CteInner, Expr, Fetch, OrderByExpr, Query, Value, With};
+use risingwave_sqlparser::ast::{
+    Cte, CteInner, Expr, Fetch, Ident, OrderByExpr, Query, Value, With,
+};
 use thiserror_ext::AsReport;
 
 use super::BoundValues;
@@ -28,7 +30,7 @@ use super::statement::RewriteExprsRecursive;
 use crate::binder::bind_context::BindingCte;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
+use crate::expr::{CorrelatedId, ExprImpl, ExprRewriter, ScopeId};
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
@@ -53,42 +55,30 @@ impl BoundQuery {
         self.schema().data_types()
     }
 
-    /// Checks whether this query contains references to outer queries.
-    ///
-    /// Note there are 3 cases:
+    /// Checks whether this query references columns owned by `scope`, and so cannot be evaluated
+    /// independently of it. With `scope` being the query `from a`:
     /// ```sql
-    /// select 1 from a having exists ( -- this is self
-    ///   select 1 from b where exists (
+    /// select 1 from a where exists (
+    ///   select 1 from b where exists ( -- this is self
     ///     select b1 from c
     ///   )
     /// );
     ///
-    /// select 1 from a having exists ( -- this is self
-    ///   select 1 from b where exists (
-    ///     select a1 from c
-    ///   )
-    /// );
-    ///
     /// select 1 from a where exists (
-    ///   select 1 from b having exists ( -- this is self, not the one above
+    ///   select 1 from b where exists ( -- this is self
     ///     select a1 from c
     ///   )
     /// );
     /// ```
-    /// We assume `self` is the subquery after `having`. In other words, the query with `from b` in
-    /// first 2 examples and the query with `from c` in the last example.
-    ///
-    /// * The first example is uncorrelated, because it is self-contained and does not depend on
-    ///   table `a`, although there is correlated input ref (`b1`) in it.
-    /// * The second example is correlated, because it depend on a correlated input ref (`a1`) that
-    ///   goes out.
-    /// * The last example is also correlated. because it cannot be evaluated independently either.
-    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
-        self.body.is_correlated_by_depth(depth + 1)
+    /// The first `self` is not correlated by `scope`, although it contains a correlated input ref
+    /// (`b1`). The second one is, because of `a1`, even though the reference sits in a nested
+    /// subquery.
+    pub fn is_correlated_by_scope(&self, scope: ScopeId) -> bool {
+        self.body.is_correlated_by_scope(scope)
             || self
                 .extra_order_exprs
                 .iter()
-                .any(|e| e.has_correlated_input_ref_by_depth(depth + 1))
+                .any(|e| e.has_correlated_input_ref_by_scope(scope))
     }
 
     pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
@@ -99,20 +89,20 @@ impl BoundQuery {
                 .any(|e| e.has_correlated_input_ref_by_correlated_id(correlated_id))
     }
 
-    pub fn collect_correlated_indices_by_depth_and_assign_id(
+    pub fn collect_correlated_indices_by_scope_and_assign_id(
         &mut self,
-        depth: Depth,
+        scope: ScopeId,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         let mut correlated_indices = vec![];
 
         correlated_indices.extend(
             self.body
-                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
+                .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
         );
 
         correlated_indices.extend(self.extra_order_exprs.iter_mut().flat_map(|expr| {
-            expr.collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id)
+            expr.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id)
         }));
         correlated_indices
     }
@@ -401,10 +391,14 @@ impl Binder {
                         })),
                     );
                 }
-                CteInner::ChangeLog(from_table_name) => {
+                CteInner::ChangeLog { from, key } => {
                     self.push_context();
-                    let from_table_relation =
-                        self.bind_relation_by_name(from_table_name, None, None, true)?;
+                    let from_table_relation = self.bind_relation_by_name(from, None, None, true)?;
+                    let key_indices = key
+                        .as_ref()
+                        .map(|key| self.bind_changelog_key(key))
+                        .transpose()?;
+
                     self.pop_context()?;
                     self.context.cte_to_relation.insert(
                         table_name,
@@ -412,6 +406,7 @@ impl Binder {
                             share_id,
                             state: BindingCteState::ChangeLog {
                                 table: from_table_relation,
+                                key_indices,
                             },
                             alias: alias.clone(),
                         })),
@@ -420,6 +415,34 @@ impl Binder {
             }
         }
         Ok(())
+    }
+
+    fn bind_changelog_key(&self, key: &[Ident]) -> Result<Vec<usize>> {
+        let mut seen = HashSet::new();
+
+        key.iter()
+            .map(|ident| {
+                let name = ident.real_value();
+                let index = self.context.get_column_binding_index(&None, &None, &name)?;
+                let column = &self.context.columns[index];
+
+                if column.is_hidden {
+                    return Err(ErrorCode::BindError(format!(
+                        "Changelog key column \"{name}\" must not be hidden"
+                    ))
+                    .into());
+                }
+
+                if !seen.insert(column.index) {
+                    return Err(ErrorCode::BindError(format!(
+                        "Changelog key column \"{name}\" specified more than once"
+                    ))
+                    .into());
+                }
+
+                Ok(index)
+            })
+            .collect()
     }
 }
 

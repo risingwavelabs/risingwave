@@ -26,12 +26,14 @@ use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::{
+    BoxedExpression, ExpressionInfo, SyncExpression, SyncExpressionBoxExt,
+};
 use risingwave_expr::{ExprError, Result, build_function};
 use thiserror_ext::AsReport;
 
 pub struct IcebergTransform {
-    child: BoxedExpression,
+    child: Arc<dyn SyncExpression>,
     transform: BoxedTransformFunction,
     input_arrow_type: arrow_schema_iceberg::DataType,
     output_arrow_field: arrow_schema_iceberg::Field,
@@ -47,15 +49,15 @@ impl std::fmt::Debug for IcebergTransform {
     }
 }
 
-#[async_trait::async_trait]
-impl risingwave_expr::expr::Expression for IcebergTransform {
+impl ExpressionInfo for IcebergTransform {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
+}
 
-    async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
-        // Get the child array
-        let array = self.child.eval(data_chunk).await?;
+impl SyncExpression for IcebergTransform {
+    fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
+        let array = self.child.eval(data_chunk)?;
         // Convert to arrow array
         let arrow_array = IcebergArrowConvert.to_arrow_array(&self.input_arrow_type, &array)?;
         // Transform
@@ -67,7 +69,7 @@ impl risingwave_expr::expr::Expression for IcebergTransform {
         )?))
     }
 
-    async fn eval_row(&self, _row: &OwnedRow) -> Result<Datum> {
+    fn eval_row(&self, _row: &OwnedRow) -> Result<Datum> {
         Err(ExprError::Internal(anyhow!(
             "eval_row in iceberg_transform is not supported yet"
         )))
@@ -153,14 +155,24 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         }
     );
 
-    Ok(Box::new(IcebergTransform {
-        child: children.remove(1),
-        transform: create_transform_function(&transform_type)
-            .map_err(|err| ExprError::Internal(err.into()))?,
+    let child = match children.remove(1) {
+        BoxedExpression::Sync(child) => child,
+        BoxedExpression::Async(_) => {
+            return Err(ExprError::Internal(anyhow!(
+                "async child in iceberg_transform is not supported"
+            )));
+        }
+    };
+    let transform = create_transform_function(&transform_type)
+        .map_err(|err| ExprError::Internal(err.into()))?;
+    Ok(IcebergTransform {
+        child,
+        transform,
         input_arrow_type,
         output_arrow_field,
         return_type,
-    }))
+    }
+    .boxed())
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
@@ -27,12 +27,12 @@ use simd_json::prelude::ArrayTrait;
 use tiberius::numeric::Numeric;
 use tiberius::{AuthMethod, Client, ColumnData, Config, Query};
 use tokio::net::TcpStream;
-use tokio_util::compat::TokioAsyncWriteCompatExt;
 use with_options::WithOptions;
 
 use super::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
+use crate::connector_common::sql_server::create_mssql_client_with_config;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
@@ -68,7 +68,12 @@ pub struct SqlServerConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(SqlServerConfig);
 
 pub fn sql_server_default_schema() -> String {
     "dbo".to_owned()
@@ -170,6 +175,8 @@ impl Sink for SqlServerSink {
     type LogSinker = LogSinkerOf<SqlServerSinkWriter>;
 
     const SINK_NAME: &'static str = SQLSERVER_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::SqlServerSink
@@ -539,40 +546,11 @@ impl SqlServerClient {
         Self::new_with_config(config).await
     }
 
-    pub async fn new_with_config(mut config: Config) -> Result<Self> {
-        let tcp = TcpStream::connect(config.get_addr())
+    pub async fn new_with_config(config: Config) -> Result<Self> {
+        let inner_client = create_mssql_client_with_config(config)
             .await
-            .context("failed to connect to sql server")
             .map_err(SinkError::SqlServer)?;
-        tcp.set_nodelay(true)
-            .context("failed to setting nodelay when connecting to sql server")
-            .map_err(SinkError::SqlServer)?;
-
-        let client = match Client::connect(config.clone(), tcp.compat_write()).await {
-            // Connection successful.
-            Ok(client) => client,
-            // The server wants us to redirect to a different address
-            Err(tiberius::error::Error::Routing { host, port }) => {
-                config.host(&host);
-                config.port(port);
-                let tcp = TcpStream::connect(config.get_addr())
-                    .await
-                    .context("failed to connect to sql server after routing")
-                    .map_err(SinkError::SqlServer)?;
-                tcp.set_nodelay(true)
-                    .context(
-                        "failed to setting nodelay when connecting to sql server after routing",
-                    )
-                    .map_err(SinkError::SqlServer)?;
-                // we should not have more than one redirect, so we'll short-circuit here.
-                Client::connect(config, tcp.compat_write()).await?
-            }
-            Err(e) => return Err(e.into()),
-        };
-
-        Ok(Self {
-            inner_client: client,
-        })
+        Ok(Self { inner_client })
     }
 }
 
@@ -814,6 +792,7 @@ fn bind_params(
                 ScalarRefImpl::Bytea(v) => query.bind(v.to_vec()),
                 ScalarRefImpl::Interval(_) => return Err(data_type_not_supported("Interval")),
                 ScalarRefImpl::Jsonb(_) => return Err(data_type_not_supported("Jsonb")),
+                ScalarRefImpl::Variant(_) => return Err(data_type_not_supported("Variant")),
                 ScalarRefImpl::Struct(_) => return Err(data_type_not_supported("Struct")),
                 ScalarRefImpl::List(_) => return Err(data_type_not_supported("List")),
                 ScalarRefImpl::Int256(_) => return Err(data_type_not_supported("Int256")),
@@ -881,6 +860,7 @@ fn bind_params(
                 DataType::Struct(_) => return Err(data_type_not_supported("Struct")),
                 DataType::List(_) => return Err(data_type_not_supported("List")),
                 DataType::Jsonb => return Err(data_type_not_supported("Jsonb")),
+                DataType::Variant => return Err(data_type_not_supported("Variant")),
                 DataType::Serial => return Err(data_type_not_supported("Serial")),
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
                 DataType::Map(_) => return Err(data_type_not_supported("Map")),
@@ -922,6 +902,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Struct(_) => Err(data_type_not_supported("Struct")),
         DataType::List(_) => Err(data_type_not_supported("List")),
         DataType::Jsonb => Err(data_type_not_supported("Jsonb")),
+        DataType::Variant => Err(data_type_not_supported("Variant")),
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),
         DataType::Map(_) => Err(data_type_not_supported("Map")),
@@ -987,6 +968,7 @@ fn sql_server_data_type_is_compatible(rw_data_type: &DataType, sql_server_data_t
         | DataType::Struct(_)
         | DataType::List(_)
         | DataType::Jsonb
+        | DataType::Variant
         | DataType::Serial
         | DataType::Int256
         | DataType::Map(_)

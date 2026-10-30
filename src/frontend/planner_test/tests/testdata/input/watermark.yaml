@@ -97,6 +97,12 @@
     select window_start from hop(t, ts, interval '1' minute, interval '3' minute);
   expected_outputs:
   - stream_plan
+- name: timestamp plus or minus months derives no watermark
+  sql: |
+    create table t (ts timestamp, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select ts + interval '1' month as plus_month, interval '1' month + ts as month_plus, ts - interval '1' month as minus_month, ts + interval '1' day as plus_day, ts - interval '1' day as minus_day from t;
+  expected_outputs:
+  - stream_plan
 - name: unnest
   sql: |
     create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
@@ -135,3 +141,39 @@
     select mv1.ts1 as mv1ts1, mv1.ts2 as mv1ts2, mv2.ts1 as mv2ts1, mv2.ts2 as mv2ts2 from mv1, mv2 where mv1.ts1 = mv2.ts1 and mv1.ts2 >= mv2.ts2 and mv1.ts2 <= mv2.ts2 + INTERVAL '1' HOUR;
   expected_outputs:
   - stream_dist_plan
+- name: two-phase top n ordered by watermark column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select ts, count(*) as cnt from t group by ts) order by ts limit 10;
+  expected_outputs:
+  - stream_plan
+- name: top n ordered by watermark column desc
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select ts, count(*) as cnt from t group by ts) order by ts desc limit 10;
+  expected_outputs:
+  - stream_plan
+- name: top n with watermark column not being the first order by column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from t order by v1, ts limit 10;
+  expected_outputs:
+  - stream_plan
+- name: group top n with watermark on the second group key column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select *, row_number() over (partition by v1, ts order by v2) as rn from t) where rn <= 1;
+  expected_outputs:
+  - stream_plan
+- name: group top n ordered by watermark column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select *, row_number() over (partition by v1 order by ts) as rn from t) where rn <= 1;
+  expected_outputs:
+  - stream_plan
+- name: group top n ordered by watermark column desc
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select *, row_number() over (partition by v1 order by ts desc) as rn from t) where rn <= 1;
+  expected_outputs:
+  - stream_plan

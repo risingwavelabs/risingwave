@@ -59,10 +59,10 @@ pub struct HummockVersionCheckpoint {
 
 impl HummockVersionCheckpoint {
     pub fn from_protobuf(checkpoint: &PbHummockVersionCheckpoint) -> Self {
+        let version = checkpoint.version.as_ref().unwrap();
+        warn_if_legacy_table_change_logs_are_present(version);
         Self {
-            version: Arc::new(HummockVersion::from_persisted_protobuf(
-                checkpoint.version.as_ref().unwrap(),
-            )),
+            version: Arc::new(HummockVersion::from_persisted_protobuf(version)),
             stale_objects: checkpoint
                 .stale_objects
                 .iter()
@@ -74,9 +74,10 @@ impl HummockVersionCheckpoint {
     /// Convert an owned `PbHummockVersionCheckpoint` to `HummockVersionCheckpoint`,
     /// moving data instead of cloning for better performance on large checkpoints.
     pub fn from_protobuf_owned(checkpoint: PbHummockVersionCheckpoint) -> Self {
+        let version = checkpoint.version.unwrap();
+        warn_if_legacy_table_change_logs_are_present(&version);
         Self {
-            version: HummockVersion::from_persisted_protobuf_owned(checkpoint.version.unwrap())
-                .into(),
+            version: HummockVersion::from_persisted_protobuf_owned(version).into(),
             stale_objects: checkpoint.stale_objects,
         }
     }
@@ -90,6 +91,16 @@ impl HummockVersionCheckpoint {
                 .map(|(version_id, objects)| (*version_id, objects.clone()))
                 .collect(),
         }
+    }
+}
+
+fn warn_if_legacy_table_change_logs_are_present(version: &PbHummockVersion) {
+    if !version.table_change_logs.is_empty() {
+        warn!(
+            version_id = ?version.id,
+            table_count = version.table_change_logs.len(),
+            "deprecated table change logs found in hummock version checkpoint; ignoring them"
+        );
     }
 }
 
@@ -416,8 +427,14 @@ impl HummockManager {
             }
             if cfg!(test) && new_checkpoint_id == old_checkpoint_id {
                 drop(versioning_guard);
-                let versioning = self.versioning.read().await;
-                let context_info = self.context_info.read().await;
+                let versioning = self
+                    .versioning
+                    .read_with_process_name("version_checkpoint_build")
+                    .await;
+                let context_info = self
+                    .context_info
+                    .read_with_process_name("version_checkpoint_build")
+                    .await;
                 let min_pinned_version_id = context_info.min_pinned_version_id();
                 let stale_object_stats = gc_stale_object_stats(
                     &versioning.checkpoint.stale_objects,
@@ -449,10 +466,10 @@ impl HummockManager {
         };
         assert!(new_checkpoint_id > old_checkpoint_id);
         let mut archive: Option<PbHummockVersionArchive> = None;
-        // `object_sizes` is used to calculate size of stale objects.
+        // Track objects from the old checkpoint and all subsequent deltas, together with their sizes.
+        // `version_object_size_map` and `get_object_ids` enumerate the same SST and vector objects;
+        // adding each delta's objects below preserves that key set without a separate object-id set.
         let mut object_sizes = version_object_size_map(old_checkpoint_version.as_ref());
-        // The set of object ids that once exist in any hummock version
-        let mut versions_object_ids: HashSet<_> = old_checkpoint_version.get_object_ids().collect();
         for version_delta in &version_deltas {
             // DO NOT REMOVE THIS LINE
             // This is to ensure that when adding new variant to `HummockObjectId`,
@@ -463,7 +480,7 @@ impl HummockManager {
                 HummockObjectId::HnswGraphFile(_) => {}
             };
             for (object_id, file_size) in version_delta
-                .newly_added_sst_infos(false)
+                .newly_added_sst_infos()
                 .map(|sst| (HummockObjectId::Sstable(sst.object_id), sst.file_size))
                 .chain(
                     version_delta
@@ -473,11 +490,10 @@ impl HummockManager {
                 )
             {
                 object_sizes.insert(object_id, file_size);
-                versions_object_ids.insert(object_id);
             }
         }
 
-        // Object ids that once exist in any hummock version but not exist in the latest hummock version
+        // Objects referenced by the current version or its change logs must remain live.
         let current_version_object_ids = current_version
             .get_object_ids()
             .chain(
@@ -485,21 +501,18 @@ impl HummockManager {
                     .values()
                     .flat_map(|l| l.get_object_ids()),
             )
-            .collect();
-        let removed_object_ids = &versions_object_ids - &current_version_object_ids;
-        let total_file_size = removed_object_ids
-            .iter()
-            .map(|t| {
-                object_sizes.get(t).copied().unwrap_or_else(|| {
-                    warn!(object_id = ?t, "unable to get size of removed object id");
-                    0
-                })
-            })
-            .sum::<u64>();
+            .collect::<HashSet<_>>();
+        // Stale objects = objects seen since the old checkpoint - objects still referenced.
+        // Consume the difference directly, retaining each object's size for accounting.
+        let removed_objects = object_sizes
+            .into_iter()
+            .filter(|(object_id, _)| !current_version_object_ids.contains(object_id));
         stale_objects.insert(current_version.id, {
+            let mut total_file_size = 0;
             let mut sst_ids = vec![];
             let mut vector_files = vec![];
-            for object_id in removed_object_ids {
+            for (object_id, file_size) in removed_objects {
+                total_file_size += file_size;
                 match object_id {
                     HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id),
                     HummockObjectId::VectorFile(vector_file_id) => {
@@ -531,7 +544,11 @@ impl HummockManager {
                     .collect(),
             });
         }
-        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let min_pinned_version_id = self
+            .context_info
+            .read_with_process_name("version_checkpoint_build")
+            .await
+            .min_pinned_version_id();
         let may_delete_object = stale_objects
             .iter()
             .filter_map(|(version_id, object_ids)| {
@@ -558,7 +575,11 @@ impl HummockManager {
                 archive.version.as_ref().unwrap().id
             );
         }
-        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let min_pinned_version_id = self
+            .context_info
+            .read_with_process_name("version_checkpoint_build")
+            .await
+            .min_pinned_version_id();
         let stale_object_stats =
             gc_stale_object_stats(&new_checkpoint.stale_objects, min_pinned_version_id);
         // 3. hold write lock briefly and update in memory state
@@ -603,7 +624,10 @@ impl HummockManager {
     }
 
     pub async fn get_checkpoint_version(&self) -> Arc<HummockVersion> {
-        let versioning_guard = self.versioning.read().await;
+        let versioning_guard = self
+            .versioning
+            .read_with_process_name("get_checkpoint_version")
+            .await;
         versioning_guard.checkpoint.version.clone()
     }
 }
@@ -616,10 +640,12 @@ mod tests {
     use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
     use risingwave_pb::hummock::{
         PbHummockVersion, PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope,
+        PbTableChangeLog,
     };
 
     use super::{
-        compress_payload, decode_checkpoint_data, read_bytes_in_chunks, xxhash64_checksum,
+        HummockVersionCheckpoint, compress_payload, decode_checkpoint_data, read_bytes_in_chunks,
+        xxhash64_checksum,
     };
 
     #[expect(deprecated)]
@@ -646,6 +672,27 @@ mod tests {
             version: Some(make_version(version_id)),
             stale_objects: [(1u64.into(), stale)].into_iter().collect(),
         }
+    }
+
+    #[test]
+    fn deprecated_table_change_logs_are_ignored() {
+        let mut checkpoint = make_checkpoint(42);
+        checkpoint
+            .version
+            .as_mut()
+            .unwrap()
+            .table_change_logs
+            .insert(1.into(), PbTableChangeLog::default());
+
+        let checkpoint = HummockVersionCheckpoint::from_protobuf(&checkpoint);
+        assert!(
+            checkpoint
+                .to_protobuf()
+                .version
+                .unwrap()
+                .table_change_logs
+                .is_empty()
+        );
     }
 
     fn make_envelope_bytes(

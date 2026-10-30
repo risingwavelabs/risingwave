@@ -60,8 +60,6 @@ pub enum Components {
     Lakekeeper,
     Hdfs,
     PrometheusAndGrafana,
-    Pubsub,
-    Redis,
     Tracing,
     RustComponents,
     UseSystem,
@@ -75,6 +73,7 @@ pub enum Components {
     NoBacktrace,
     Udf,
     NoDefaultFeatures,
+    NoHeavyConnectors,
     Moat,
     DataFusion,
     Adbc,
@@ -87,8 +86,6 @@ impl Components {
             Self::Lakekeeper => "[Component] Apache Iceberg: Lakekeeper REST Catalog",
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
-            Self::Pubsub => "[Component] Google Pubsub",
-            Self::Redis => "[Component] Redis",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
             Self::UseSystem => "[Build] Use system RisingWave",
@@ -102,6 +99,7 @@ impl Components {
             Self::NoBacktrace => "[Runtime] Disable backtrace",
             Self::Udf => "[Build] Enable UDF",
             Self::NoDefaultFeatures => "[Build] Disable default features",
+            Self::NoHeavyConnectors => "[Build] Disable heavyweight connectors",
             Self::Moat => "[Component] Enable Moat",
             Self::DataFusion => "[Build] Enable DataFusion",
             Self::Adbc => "[Component] ADBC Snowflake Driver",
@@ -128,11 +126,6 @@ Required by Hummock state store."
                 "
 Required if you want to view metrics."
             }
-            Self::Pubsub => {
-                "
-Required if you want to create source from Emulated Google Pub/sub.
-                "
-            }
             Self::RustComponents => {
                 "
 Required if you want to build compute-node and meta-node.
@@ -149,7 +142,7 @@ from source. This implies `ENABLE_BUILD_RUST` to be false.
                 "
 Required if you want to build dashboard from source.
 This is generally not the option you want to use to develop the
-dashboard. Instead, directly run `npm run dev` in the dashboard
+dashboard. Instead, directly run `pnpm run dev` in the dashboard
 directory to start the development server, set the API endpoint
 to a running RisingWave cluster in the settings page.
 "
@@ -171,11 +164,6 @@ with thread sanitizer. The built binaries will be at
 `target/debug`. RiseDev will help link binaries when starting
 a dev cluster.
 "
-            }
-            Self::Redis => {
-                "
-Required if you want to sink data to redis.
-                "
             }
             Self::BuildConnectorNode => {
                 "
@@ -219,6 +207,11 @@ Add --no-default-features to build command.
 Currently, default features are: rw-static-link, all-connectors
 "
             }
+            Self::NoHeavyConnectors => {
+                "
+Exclude heavyweight connectors, such as LanceDB, to reduce build size.
+Other default connectors remain enabled unless default features are disabled."
+            }
             Self::Moat => {
                 "
 Enable Moat as distributed hybrid cache service."
@@ -243,7 +236,6 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             "ENABLE_LAKEKEEPER" => Some(Self::Lakekeeper),
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
-            "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "USE_SYSTEM_RISINGWAVE" => Some(Self::UseSystem),
             "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
@@ -251,13 +243,13 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_DYNAMIC_LINKING" => Some(Self::DynamicLinking),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
-            "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
             "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
             "ENABLE_COREDUMP" => Some(Self::Coredump),
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
             "ENABLE_UDF" => Some(Self::Udf),
             "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
+            "DISABLE_HEAVY_CONNECTORS" => Some(Self::NoHeavyConnectors),
             "ENABLE_MOAT" => Some(Self::Moat),
             "ENABLE_DATAFUSION" => Some(Self::DataFusion),
             "ENABLE_ADBC" => Some(Self::Adbc),
@@ -271,8 +263,6 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             Self::Lakekeeper => "ENABLE_LAKEKEEPER",
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
-            Self::Pubsub => "ENABLE_PUBSUB",
-            Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::UseSystem => "USE_SYSTEM_RISINGWAVE",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD",
@@ -286,6 +276,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             Self::NoBacktrace => "DISABLE_BACKTRACE",
             Self::Udf => "ENABLE_UDF",
             Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
+            Self::NoHeavyConnectors => "DISABLE_HEAVY_CONNECTORS",
             Self::Moat => "ENABLE_MOAT",
             Self::DataFusion => "ENABLE_DATAFUSION",
             Self::Adbc => "ENABLE_ADBC",
@@ -294,7 +285,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
     }
 
     pub fn default_enabled() -> &'static [Self] {
-        &[Self::RustComponents]
+        &[Self::RustComponents, Self::NoHeavyConnectors]
     }
 }
 

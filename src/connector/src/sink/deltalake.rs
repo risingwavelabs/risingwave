@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -201,7 +201,12 @@ pub struct DeltaLakeConfig {
     /// Whether to use the Delta transaction log to deduplicate replayed epoch commits.
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(DeltaLakeConfig);
 
 impl EnforceSecret for DeltaLakeConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -211,10 +216,41 @@ impl EnforceSecret for DeltaLakeConfig {
 
 impl DeltaLakeConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<DeltaLakeConfig>(
+        let mut config = serde_json::from_value::<DeltaLakeConfig>(
             serde_json::to_value(properties).map_err(|e| SinkError::DeltaLake(e.into()))?,
         )
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        for key in [
+            "aws.credentials.access_key_id",
+            "aws.credentials.role.arn",
+            "aws.credentials.role.external_id",
+            "aws.credentials.secret_access_key",
+            "aws.credentials.session_token",
+            "aws.endpoint_url",
+            "aws.msk.signer_timeout_sec",
+            "aws.profile",
+            "aws.region",
+            "access_key",
+            "arn",
+            "commit_checkpoint_interval",
+            "endpoint",
+            "endpoint_url",
+            "external_id",
+            "gcs.service.account",
+            "is_exactly_once",
+            "location",
+            "profile",
+            "region",
+            "s3.access.key",
+            "s3.endpoint",
+            "s3.region",
+            "s3.secret.key",
+            "secret_key",
+            "session_token",
+            "type",
+        ] {
+            config.unknown_fields.remove(key);
+        }
         Ok(config)
     }
 }
@@ -341,6 +377,19 @@ impl Sink for DeltaLakeSink {
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
+    fn is_exactly_once(properties: &BTreeMap<String, String>) -> Result<bool> {
+        let Some(value) = properties.get("is_exactly_once") else {
+            return Ok(false);
+        };
+        value.parse::<bool>().map_err(|_| {
+            SinkError::Config(anyhow!(
+                "invalid value for `is_exactly_once`: expected `true` or `false`, got `{value}`"
+            ))
+        })
+    }
+
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let inner = DeltaLakeSinkWriter::new(
             self.config.clone(),
@@ -430,7 +479,7 @@ impl Sink for DeltaLakeSink {
         let coordinator = DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
             app_id: format!("risingwave-deltalake-{}", self.param.sink_id),
-            exactly_once: self.config.is_exactly_once.unwrap_or_default(),
+            exactly_once: Self::is_exactly_once(&self.param.properties)?,
         };
         if coordinator.exactly_once {
             Ok(SinkCommitCoordinator::TwoPhase(Box::new(coordinator)))

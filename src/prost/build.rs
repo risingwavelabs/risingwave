@@ -260,6 +260,9 @@ for_all_wrapped_id_fields! (
         CompactIcebergTableRequest {
             sink_id: SinkId,
         }
+        CompactIcebergTableResponse {
+            task_id: IcebergCompactionTaskId,
+        }
         CreateConnectionRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
@@ -330,6 +333,9 @@ for_all_wrapped_id_fields! (
         GetTablesResponse {
             tables: TableId,
         }
+        RemoveIcebergTableOrphanFilesRequest {
+            sink_id: SinkId,
+        }
         ReplaceJobPlan.ReplaceSink {
             old_sink_id: SinkId,
             dependencies: ObjectId,
@@ -337,9 +343,15 @@ for_all_wrapped_id_fields! (
         ResetSourceRequest {
             source_id: SourceId,
         }
+        RewriteIcebergTableManifestsRequest {
+            sink_id: SinkId,
+        }
         RisectlResumeBackfillRequest {
             job_id: JobId,
             fragment_id: FragmentId,
+        }
+        WaitIcebergPkIndexSinkEpochRequest {
+            sink_id: SinkId,
         }
         WaitRequest {
             job_id: JobId,
@@ -551,8 +563,18 @@ for_all_wrapped_id_fields! (
         }
     }
     iceberg_compaction {
+        CancelCompactTask {
+            task_id: IcebergCompactionTaskId,
+        }
+        IcebergCompactionTask {
+            task_id: IcebergCompactionTaskId,
+        }
         SubscribeIcebergCompactionEventRequest.Register {
             context_id: WorkerId,
+        }
+        SubscribeIcebergCompactionEventRequest.ReportTask {
+            task_id: IcebergCompactionTaskId,
+            sink_id: SinkId,
         }
     }
     meta {
@@ -722,6 +744,9 @@ for_all_wrapped_id_fields! (
             state_table_ids: TableId,
             table_id: JobId,
         }
+        WarmUpTableCacheRequest {
+            table_id: TableId,
+        }
         WorkerReschedule {
             worker_actor_diff: WorkerId,
         }
@@ -792,6 +817,9 @@ for_all_wrapped_id_fields! (
         CdcFilterNode {
             upstream_source_id: SourceId,
         }
+        CompactionResolverNode {
+            sink_id: SinkId,
+        }
         DeltaIndexJoinNode {
             left_table_id: TableId,
             right_table_id: TableId,
@@ -802,6 +830,10 @@ for_all_wrapped_id_fields! (
         }
         DmlNode {
             table_id: TableId,
+        }
+        IcebergPkIndexCompactionContext {
+            sink_id: SinkId,
+            task_id: IcebergCompactionTaskId,
         }
         ListFinishMutation {
             associated_source_id: SourceId,
@@ -910,8 +942,6 @@ for_all_wrapped_id_fields! (
     }
     stream_service {
         BarrierCompleteResponse {
-            truncate_tables: TableId,
-            refresh_finished_tables: TableId,
             table_watermarks: TableId,
             vector_index_adds: TableId,
             worker_id: WorkerId,
@@ -931,7 +961,7 @@ for_all_wrapped_id_fields! (
             backfill_actor_id: ActorId,
             fragment_id: FragmentId,
         }
-        BarrierCompleteResponse.IcebergV3SinkMetadata {
+        BarrierCompleteResponse.IcebergPkIndexSinkMetadata {
             reporter_actor_id: ActorId,
             sink_id: SinkId,
         }
@@ -947,6 +977,15 @@ for_all_wrapped_id_fields! (
         }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
+        }
+        BarrierCompleteResponse.RefreshFinishedActor {
+            reporter_actor_id: ActorId,
+            table_id: TableId,
+        }
+        BarrierCompleteResponse.TableChangeLogProgress {
+            fragment_id: FragmentId,
+            upstream_table_id: TableId,
+            progress_table_id: TableId,
         }
         GetMinUncommittedObjectIdResponse {
             min_uncommitted_object_id: HummockRawObjectId,
@@ -978,6 +1017,9 @@ for_all_wrapped_id_fields! (
         }
         StreamingControlStreamResponse.ResetPartialGraphResponse {
             partial_graph_id: PartialGraphId,
+        }
+        WarmUpTableCacheRequest {
+            table_id: TableId,
         }
     }
     task_service {
@@ -1104,12 +1146,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".connector_service.ValidateSourceRequest",
         ".connector_service.GetEventStreamRequest",
         ".connector_service.SinkParam",
+        ".stream_plan.CompactionResolverNode",
         ".stream_plan.SinkDesc",
         ".stream_plan.StreamFsFetch",
         ".stream_plan.SourceBackfillNode",
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
         ".batch_plan.IcebergScanNode",
+        ".batch_plan.IcebergMetadataScanNode",
         ".iceberg_compaction.IcebergCompactionTask",
     ];
 
@@ -1206,7 +1250,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
         .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_writer")
-        .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_dv_merger")
+        .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_position_delete_merger")
+        .boxed(".stream_plan.StreamNode.node_body.compaction_resolver")
+        .boxed(".stream_plan.StreamNode.node_body.match_recognize")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // prost-build 0.14+ only derives `Eq`/`Hash` for a subset of messages/oneofs.
@@ -1222,6 +1268,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.CdcKeyOrdering", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.ColumnDesc.generated_or_default_column",

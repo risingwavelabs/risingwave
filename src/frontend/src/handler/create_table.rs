@@ -16,36 +16,33 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
+use iceberg::spec::FormatVersion;
 use itertools::Itertools;
 use percent_encoding::percent_decode_str;
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
-    ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
-    TableId,
+    CdcKeyComparison, CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior,
+    DEFAULT_SCHEMA_NAME, Engine, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
-use risingwave_connector::source::cdc::external::{
-    DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
-    SCHEMA_NAME_KEY, TABLE_NAME_KEY,
-};
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_connector::source::cdc::{
     build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
 };
-use risingwave_connector::{
-    AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, source,
-};
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
@@ -76,10 +73,16 @@ use crate::catalog::{ColumnId, DatabaseId, SchemaId, SourceId, check_column_name
 use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
-use crate::handler::create_source::{
-    UPSTREAM_SOURCE_KEY, bind_connector_props, bind_create_source_or_table_with_connector,
-    bind_source_watermark, handle_addition_columns,
+use crate::handler::cdc::{
+    bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
+    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
+use crate::handler::create_source::{
+    bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
+    handle_addition_columns,
+};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::{
     LongRunningNotificationAction, SourceSchemaCompatExt, execute_with_long_running_notification,
 };
@@ -100,16 +103,8 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
-    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, COMPACTION_WRITE_PARQUET_COMPRESSION,
-    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
-    CompactionType, ENABLE_COMPACTION, ENABLE_PK_INDEX, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
-    IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
-    validate_order_key_columns,
+    ENABLE_COMPACTION, ENABLE_MANIFEST_REWRITE, IcebergConfig, IcebergSink,
+    is_iceberg_engine_option, parse_partition_by_exprs, validate_order_key_columns,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -224,8 +219,8 @@ fn check_generated_column_constraints(
             .any(|c| c == referred_generated_column)
         {
             return Err(ErrorCode::BindError(format!(
-                "Generated can not reference another generated column. \
-                But here generated column \"{}\" referenced another generated column \"{}\"",
+                "A generated column cannot reference another generated column. \
+                Generated column \"{}\" references generated column \"{}\"",
                 column_name, referred_generated_column
             ))
             .into());
@@ -286,7 +281,7 @@ pub fn bind_sql_column_constraints(
 
                     let expr_impl = binder.bind_expr(expr).with_context(|| {
                         format!(
-                            "fail to bind expression in generated column \"{}\"",
+                            "failed to bind the expression in generated column \"{}\"",
                             column.name.real_value()
                         )
                     })?;
@@ -508,6 +503,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let db_name: &str = &session.database();
     let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
+    // Check the CREATE privilege before `bind_columns_from_source`, which may fetch from
+    // user-supplied URLs (schema registry, schema file).
+    session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     // TODO: omit this step if `sql_column_strategy` is `Follow`.
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -841,6 +839,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     source_watermarks: Vec<SourceWatermark>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
+    pk_comparisons: Vec<CdcKeyComparison>,
     cdc_with_options: WithOptionsSecResolved,
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
@@ -919,6 +918,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         source_id: source.id, // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
+        pk_comparisons,
         columns: non_generated_column_descs,
         stream_key: pk_column_indices,
         connect_properties: options,
@@ -926,7 +926,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
-    let options = build_cdc_scan_options_with_options(context.with_options(), &cdc_table_type)?;
+    let options = build_cdc_scan_options_with_options(
+        context.with_options(),
+        cdc_table_desc.connect_properties.cdc_source_type(),
+    )?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),
@@ -985,212 +988,6 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         ensure_sync_log_store_fragment_root(materialize.into()),
         table,
     ))
-}
-
-/// Derive connector properties and normalize `external_table_name` for CDC tables.
-///
-/// Returns (`connector_properties`, `normalized_external_table_name`) where:
-/// - For SQL Server: Normalizes 'db.schema.table' (3 parts) to 'schema.table' (2 parts),
-///   because users can optionally include database name for verification, but it needs to be
-///   stripped to match the format returned by Debezium's `extract_table_name()`.
-/// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
-fn derive_with_options_for_cdc_table(
-    source_with_properties: &WithOptionsSecResolved,
-    external_table_name: String,
-) -> Result<(WithOptionsSecResolved, String)> {
-    use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
-    // we should remove the prefix from `full_table_name`
-    let source_database_name: &str = source_with_properties
-        .get("database.name")
-        .ok_or_else(|| anyhow!("The source with properties does not contain 'database.name'"))?
-        .as_str();
-    let mut with_options = source_with_properties.clone();
-    if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
-        match connector.as_str() {
-            MYSQL_CDC_CONNECTOR => {
-                // MySQL doesn't allow '.' in database name and table name, so we can split the
-                // external table name by '.' to get the table name
-                let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {
-                    anyhow!("The upstream table name must contain database name prefix, e.g. 'database.table'")
-                })?;
-                // We allow multiple database names in the source definition
-                if !source_database_name
-                    .split(',')
-                    .map(|s| s.trim())
-                    .any(|name| name == db_name)
-                {
-                    return Err(anyhow!(
-                        "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
-                        db_name,
-                        source_database_name
-                    ).into());
-                }
-                with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
-                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
-                // Return original external_table_name unchanged for MySQL
-                return Ok((with_options, external_table_name));
-            }
-            POSTGRES_CDC_CONNECTOR => {
-                let (schema_name, table_name) =
-                    parse_postgres_cdc_external_table_name(&external_table_name)?;
-
-                // insert 'schema.name' into connect properties
-                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name);
-                with_options.insert(TABLE_NAME_KEY.into(), table_name);
-                // Return original external_table_name unchanged for Postgres
-                return Ok((with_options, external_table_name));
-            }
-            SQL_SERVER_CDC_CONNECTOR => {
-                // SQL Server external table name must be in one of two formats:
-                // 1. 'schemaName.tableName' (2 parts) - database is already specified in source
-                // 2. 'databaseName.schemaName.tableName' (3 parts) - for explicit verification
-                //
-                // We do NOT allow single table name (e.g., 't') because:
-                // - Unlike database name (already in source), schema name is NOT pre-specified
-                // - User must explicitly provide schema (even if it's 'dbo')
-                let parts: Vec<&str> = external_table_name.split('.').collect();
-                let (schema_name, table_name) = match parts.len() {
-                    3 => {
-                        // Format: database.schema.table
-                        // Verify that the database name matches the one in source definition
-                        let db_name = parts[0];
-                        let schema_name = parts[1];
-                        let table_name = parts[2];
-
-                        if db_name != source_database_name {
-                            return Err(anyhow!(
-                                "The database name '{}' in FROM clause does not match the database name '{}' specified in source definition. \
-                                 You can either use 'schema.table' format (recommended) or ensure the database name matches.",
-                                db_name,
-                                source_database_name
-                            ).into());
-                        }
-                        (schema_name, table_name)
-                    }
-                    2 => {
-                        // Format: schema.table (recommended)
-                        // Database name is taken from source definition
-                        let schema_name = parts[0];
-                        let table_name = parts[1];
-                        (schema_name, table_name)
-                    }
-                    1 => {
-                        // Format: table only
-                        // Reject with clear error message
-                        return Err(anyhow!(
-                            "Invalid table name format '{}'. For SQL Server CDC, you must specify the schema name. \
-                             Use 'schema.table' format (e.g., 'dbo.{}') or 'database.schema.table' format (e.g., '{}.dbo.{}').",
-                            external_table_name,
-                            external_table_name,
-                            source_database_name,
-                            external_table_name
-                        ).into());
-                    }
-                    _ => {
-                        // Invalid format (4+ parts or empty)
-                        return Err(anyhow!(
-                            "Invalid table name format '{}'. Expected 'schema.table' or 'database.schema.table'.",
-                            external_table_name
-                        ).into());
-                    }
-                };
-
-                // Insert schema and table names into connector properties
-                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
-                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
-
-                // Normalize external_table_name to 'schema.table' format
-                // This ensures consistency with extract_table_name() in message.rs
-                let normalized_external_table_name = format!("{}.{}", schema_name, table_name);
-                return Ok((with_options, normalized_external_table_name));
-            }
-            _ => {
-                return Err(RwError::from(anyhow!(
-                    "connector {} is not supported for cdc table",
-                    connector
-                )));
-            }
-        };
-    }
-    unreachable!("All valid CDC connectors should have returned by now")
-}
-
-/// Parse the schema/table name from the CDC `TABLE` clause.
-///
-/// Column names do not need the same parsing here: wildcard schema derivation reads
-/// them from PostgreSQL catalogs after the exact table has been identified.
-fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
-    let mut parts = vec![];
-    let mut current = String::new();
-    let mut chars = external_table_name.chars().peekable();
-    let mut in_quote = false;
-    let mut just_closed_quote = false;
-
-    while let Some(ch) = chars.next() {
-        if in_quote {
-            if ch == '"' {
-                if chars.peek() == Some(&'"') {
-                    current.push('"');
-                    chars.next();
-                } else {
-                    in_quote = false;
-                    just_closed_quote = true;
-                }
-            } else {
-                current.push(ch);
-            }
-        } else {
-            match ch {
-                '.' => {
-                    if current.is_empty() {
-                        return Err(anyhow!(
-                            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                            external_table_name
-                        )
-                        .into());
-                    }
-                    parts.push(std::mem::take(&mut current));
-                    just_closed_quote = false;
-                }
-                '"' if current.is_empty() => {
-                    in_quote = true;
-                }
-                '"' => {
-                    return Err(anyhow!(
-                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                        external_table_name
-                    )
-                    .into());
-                }
-                _ if just_closed_quote => {
-                    return Err(anyhow!(
-                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                        external_table_name
-                    )
-                    .into());
-                }
-                _ => current.push(ch),
-            }
-        }
-    }
-
-    if in_quote || current.is_empty() {
-        return Err(anyhow!(
-            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-            external_table_name
-        )
-        .into());
-    }
-    parts.push(current);
-
-    if let [schema_name, table_name] = parts.as_slice() {
-        Ok((schema_name.clone(), table_name.clone()))
-    } else {
-        Err(
-            anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'")
-                .into(),
-        )
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1313,13 +1110,14 @@ pub(super) async fn handle_create_table_plan(
                 )?;
                 source.clone()
             };
+            check_cdc_source_select_privilege(session, &source)?;
             let (cdc_with_options, normalized_external_table_name) =
                 derive_with_options_for_cdc_table(
                     &source.with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
 
-            let (columns, pk_names) = match wildcard_idx {
+            let (columns, pk_names, pk_comparisons) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
                 None => {
                     for column_def in &column_defs {
@@ -1338,14 +1136,21 @@ pub(super) async fn handle_create_table_plan(
 
                     let (columns, pk_names) =
                         bind_cdc_table_schema(&column_defs, &constraints, false)?;
-                    // read default value definition from external db
-                    let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
-                        .context("failed to extract external table config")?;
+                    let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
+                        cdc_with_options.clone(),
+                        &pk_names,
+                    ))
+                    .await?;
 
-                    (columns, pk_names)
+                    (columns, pk_names, pk_comparisons)
                 }
             };
+
+            // CDC-table branch only: if Debezium column filters remove a PK column from the
+            // change-event value, RisingWave reads NULL for that PK from the payload and silently
+            // corrupts downstream (UPDATE turns into a fresh INSERT, DELETE no-ops). Plain
+            // (non-CDC) tables don't hit this check.
+            reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, explain_options).into();
@@ -1358,6 +1163,7 @@ pub(super) async fn handle_create_table_plan(
                 source_watermarks,
                 columns,
                 pk_names,
+                pk_comparisons,
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
@@ -1416,130 +1222,6 @@ fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()>
     Ok(())
 }
 
-// For both table from cdc source and table with cdc connector
-fn not_null_check_for_cdc_table(
-    wildcard_idx: &Option<usize>,
-    column_defs: &Vec<ColumnDef>,
-) -> Result<()> {
-    if !wildcard_idx.is_some()
-        && column_defs.iter().any(|col| {
-            col.options
-                .iter()
-                .any(|opt| matches!(opt.option, ColumnOption::NotNull))
-        })
-    {
-        return Err(ErrorCode::NotSupported(
-            "CDC table with NOT NULL constraint is not supported".to_owned(),
-            "Please remove the NOT NULL constraint for columns".to_owned(),
-        )
-        .into());
-    }
-    Ok(())
-}
-
-// Only for table from cdc source
-fn sanity_check_for_table_on_cdc_source(
-    append_only: bool,
-    column_defs: &Vec<ColumnDef>,
-    wildcard_idx: &Option<usize>,
-    constraints: &Vec<TableConstraint>,
-    source_watermarks: &Vec<SourceWatermark>,
-) -> Result<()> {
-    // wildcard cannot be used with column definitions
-    if wildcard_idx.is_some() && !column_defs.is_empty() {
-        return Err(ErrorCode::NotSupported(
-            "wildcard(*) and column definitions cannot be used together".to_owned(),
-            "Remove the wildcard or column definitions".to_owned(),
-        )
-        .into());
-    }
-
-    // cdc table must have primary key constraint or primary key column
-    if !wildcard_idx.is_some()
-        && !constraints.iter().any(|c| {
-            matches!(
-                c,
-                TableConstraint::Unique {
-                    is_primary: true,
-                    ..
-                }
-            )
-        })
-        && !column_defs.iter().any(|col| {
-            col.options
-                .iter()
-                .any(|opt| matches!(opt.option, ColumnOption::Unique { is_primary: true }))
-        })
-    {
-        return Err(ErrorCode::NotSupported(
-            "CDC table without primary key constraint is not supported".to_owned(),
-            "Please define a primary key".to_owned(),
-        )
-        .into());
-    }
-
-    if append_only {
-        return Err(ErrorCode::NotSupported(
-            "append only modifier on the table created from a CDC source".into(),
-            "Remove the APPEND ONLY clause".into(),
-        )
-        .into());
-    }
-
-    if !source_watermarks.is_empty()
-        && source_watermarks
-            .iter()
-            .any(|watermark| !watermark.with_ttl)
-    {
-        return Err(ErrorCode::NotSupported(
-            "non-TTL watermark defined on the table created from a CDC source".into(),
-            "Use `WATERMARK ... WITH TTL` instead.".into(),
-        )
-        .into());
-    }
-
-    Ok(())
-}
-
-/// Derive schema for cdc table when create a new Table or alter an existing Table
-async fn bind_cdc_table_schema_externally(
-    cdc_with_options: WithOptionsSecResolved,
-) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    // read cdc table schema from external db or parsing the schema from SQL definitions
-    let (options, secret_refs) = cdc_with_options.into_parts();
-    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
-        .context("failed to extract external table config")?;
-
-    let table = ExternalTableImpl::connect(config)
-        .await
-        .context("failed to auto derive table schema")?;
-
-    Ok((
-        table
-            .column_descs()
-            .iter()
-            .cloned()
-            .map(|column_desc| ColumnCatalog {
-                column_desc,
-                is_hidden: false,
-            })
-            .collect(),
-        table.pk_names().clone(),
-    ))
-}
-
-/// Derive schema for cdc table when create a new Table or alter an existing Table
-fn bind_cdc_table_schema(
-    column_defs: &Vec<ColumnDef>,
-    constraints: &Vec<TableConstraint>,
-    is_for_replace_plan: bool,
-) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let columns = bind_sql_columns(column_defs, is_for_replace_plan)?;
-
-    let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
-    Ok((columns, pk_names))
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
     handler_args: HandlerArgs,
@@ -1580,7 +1262,7 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, hummock_table, job_type, shared_source_id) = {
-        let (plan, source, table, job_type, shared_source_id) = handle_create_table_plan(
+        let (plan, source, table, job_type, shared_source_id) = Box::pin(handle_create_table_plan(
             handler_args.clone(),
             ExplainOptions::default(),
             format_encode,
@@ -1596,7 +1278,7 @@ pub async fn handle_create_table(
             include_column_options,
             webhook_info,
             engine,
-        )
+        ))
         .await?;
         tracing::trace!("table_plan: {:?}", plan.explain_to_string());
 
@@ -1658,6 +1340,111 @@ pub async fn handle_create_table(
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
+}
+
+fn build_iceberg_engine_sink_options(
+    mut sink_options: BTreeMap<String, String>,
+    user_options: &WithOptions,
+    table: &TableCatalog,
+    primary_key: &[String],
+) -> Result<BTreeMap<String, String>> {
+    sink_options.extend(
+        user_options
+            .iter()
+            .filter(|(key, _)| is_iceberg_engine_option(key))
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+
+    sink_options
+        .entry(ENABLE_COMPACTION.to_owned())
+        .or_insert_with(|| "true".to_owned());
+    sink_options.insert(
+        "type".to_owned(),
+        if table.append_only {
+            "append-only"
+        } else {
+            "upsert"
+        }
+        .to_owned(),
+    );
+
+    // Supply the table primary key while parsing the typed config. In PK-index mode the
+    // planner derives it from the upstream stream key, so it is removed again below.
+    if !table.append_only {
+        sink_options.insert("primary_key".to_owned(), primary_key.join(","));
+    }
+
+    sink_options.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
+    sink_options.insert("is_exactly_once".to_owned(), "true".to_owned());
+
+    let config = IcebergConfig::from_btreemap(sink_options.clone())?;
+
+    // Both merge-on-read and copy-on-write initialize an equality-delete writer for upserts.
+    // Reject unsupported key types before creating the remote Iceberg table.
+    if !table.append_only && !config.enable_pk_index {
+        for pk in table.pk() {
+            let column = &table.columns()[pk.column_index];
+            let data_type = column.data_type();
+            if data_type.is_composite()
+                || matches!(data_type, DataType::Float32 | DataType::Float64)
+            {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "Iceberg engine table primary key column \"{}\" has unsupported type {} for equality deletes",
+                        column.name(), data_type
+                    ),
+                    "Use non-floating-point scalar primary key columns.".to_owned(),
+                )
+                .into());
+            }
+        }
+    }
+
+    // Engine tables own their Iceberg maintenance policy, so enable manifest rewrites by default
+    // whenever the table format supports them. Keep V3 disabled until rewrites preserve row lineage.
+    if config.table_format_version() < FormatVersion::V3 {
+        sink_options
+            .entry(ENABLE_MANIFEST_REWRITE.to_owned())
+            .or_insert_with(|| "true".to_owned());
+    }
+
+    if let Some(partition_by) = &config.partition_by {
+        let mut partition_columns = vec![];
+        for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
+            table
+                .columns()
+                .iter()
+                .find(|col| col.name().eq_ignore_ascii_case(&column))
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "Partition source column does not exist in schema: {}",
+                        column
+                    ))
+                })?;
+
+            partition_columns.push(column);
+        }
+
+        ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, primary_key)
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(
+                    "The partition columns should be the prefix of the primary key".to_owned(),
+                )
+            })?;
+    }
+
+    if let Some(order_key) = &config.order_key {
+        validate_order_key_columns(order_key, table.columns().iter().map(|col| col.name()))
+            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_report_string()))?;
+    }
+
+    if config.enable_pk_index {
+        sink_options.remove("primary_key");
+    } else {
+        sink_options.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
+    }
+
+    Ok(sink_options)
 }
 
 /// Iceberg table engine is composed of hummock table, iceberg sink and iceberg source.
@@ -1856,26 +1643,19 @@ pub async fn create_iceberg_engine_table(
 
     let mut sink_handler_args = handler_args.clone();
 
-    let mut sink_with = with_common.clone();
+    let sink_with = build_iceberg_engine_sink_options(
+        with_common.clone(),
+        &handler_args.with_options,
+        &table,
+        &pks,
+    )?;
 
-    let enable_pk_index = handler_args
-        .with_options
-        .get(ENABLE_PK_INDEX)
-        .is_some_and(|val| val.eq_ignore_ascii_case("true"));
-
-    // Iceberg with pk index does not support auto schema change yet.
-    if !enable_pk_index {
-        sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
+    if let Some(source) = source.as_mut() {
+        source
+            .with_properties
+            .retain(|key, _| !is_iceberg_engine_option(key));
     }
 
-    if table.append_only {
-        sink_with.insert("type".to_owned(), "append-only".to_owned());
-    } else {
-        sink_with.insert("type".to_owned(), "upsert".to_owned());
-        if !enable_pk_index {
-            sink_with.insert("primary_key".to_owned(), pks.join(","));
-        }
-    }
     // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
     //
     // Note: in theory, we don't need to backfill from the table to the sink,
@@ -1894,541 +1674,6 @@ pub async fn create_iceberg_engine_table(
     // - For table with an upstream job: Specifically, CDC table from shared CDC source.
     //   + Data may come from both upstream connector, and CDC table backfill, so we need to pause both of them.
     //   + For now we don't support APPEND ONLY CDC table, so it's safe.
-    let commit_checkpoint_interval = handler_args
-        .with_options
-        .get(COMMIT_CHECKPOINT_INTERVAL)
-        .map(|v| v.to_owned())
-        .unwrap_or_else(|| "60".to_owned());
-    let commit_checkpoint_interval = commit_checkpoint_interval.parse::<u32>().map_err(|_| {
-        ErrorCode::InvalidInputSyntax(format!(
-            "commit_checkpoint_interval must be greater than 0: {}",
-            commit_checkpoint_interval
-        ))
-    })?;
-
-    if commit_checkpoint_interval == 0 {
-        bail!("commit_checkpoint_interval must be greater than 0");
-    }
-
-    // remove commit_checkpoint_interval from source options, otherwise it will be considered as an unknown field.
-    source
-        .as_mut()
-        .map(|x| x.with_properties.remove(COMMIT_CHECKPOINT_INTERVAL));
-
-    let sink_decouple = session.config().sink_decouple();
-    if matches!(sink_decouple, SinkDecouple::Disable) && commit_checkpoint_interval > 1 {
-        bail!(
-            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-        )
-    }
-
-    sink_with.insert(
-        COMMIT_CHECKPOINT_INTERVAL.to_owned(),
-        commit_checkpoint_interval.to_string(),
-    );
-    sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
-
-    sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
-
-    if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
-        match enable_compaction.to_lowercase().as_str() {
-            "true" => {
-                sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
-            }
-            "false" => {
-                sink_with.insert(ENABLE_COMPACTION.to_owned(), "false".to_owned());
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "enable_compaction must be true or false: {}",
-                    enable_compaction
-                ))
-                .into());
-            }
-        }
-
-        // remove enable_compaction from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove("enable_compaction"));
-    } else {
-        sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
-    }
-
-    if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
-        let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "compaction_interval_sec must be greater than 0: {}",
-                commit_checkpoint_interval
-            ))
-        })?;
-        if compaction_interval_sec == 0 {
-            bail!("compaction_interval_sec must be greater than 0");
-        }
-        sink_with.insert(
-            "compaction_interval_sec".to_owned(),
-            compaction_interval_sec.to_string(),
-        );
-        // remove compaction_interval_sec from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove("compaction_interval_sec"));
-    }
-
-    let has_enabled_snapshot_expiration = if let Some(enable_snapshot_expiration) =
-        handler_args.with_options.get(ENABLE_SNAPSHOT_EXPIRATION)
-    {
-        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
-        match enable_snapshot_expiration.to_lowercase().as_str() {
-            "true" => {
-                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
-                true
-            }
-            "false" => {
-                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
-                false
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "enable_snapshot_expiration must be true or false: {}",
-                    enable_snapshot_expiration
-                ))
-                .into());
-            }
-        }
-    } else {
-        sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
-        true
-    };
-
-    if has_enabled_snapshot_expiration {
-        // configuration for snapshot expiration
-        if let Some(snapshot_expiration_retain_last) = handler_args
-            .with_options
-            .get(SNAPSHOT_EXPIRATION_RETAIN_LAST)
-        {
-            sink_with.insert(
-                SNAPSHOT_EXPIRATION_RETAIN_LAST.to_owned(),
-                snapshot_expiration_retain_last.to_owned(),
-            );
-            // remove snapshot_expiration_retain_last from source options, otherwise it will be considered as an unknown field.
-            source
-                .as_mut()
-                .map(|x| x.with_properties.remove(SNAPSHOT_EXPIRATION_RETAIN_LAST));
-        }
-
-        if let Some(snapshot_expiration_max_age) = handler_args
-            .with_options
-            .get(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
-        {
-            sink_with.insert(
-                SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS.to_owned(),
-                snapshot_expiration_max_age.to_owned(),
-            );
-            // remove snapshot_expiration_max_age from source options, otherwise it will be considered as an unknown field.
-            source
-                .as_mut()
-                .map(|x| x.with_properties.remove(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS));
-        }
-
-        if let Some(snapshot_expiration_clear_expired_files) = handler_args
-            .with_options
-            .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
-        {
-            sink_with.insert(
-                SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES.to_owned(),
-                snapshot_expiration_clear_expired_files.to_owned(),
-            );
-            // remove snapshot_expiration_clear_expired_files from source options, otherwise it will be considered as an unknown field.
-            source.as_mut().map(|x| {
-                x.with_properties
-                    .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
-            });
-        }
-
-        if let Some(snapshot_expiration_clear_expired_meta_data) = handler_args
-            .with_options
-            .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
-        {
-            sink_with.insert(
-                SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA.to_owned(),
-                snapshot_expiration_clear_expired_meta_data.to_owned(),
-            );
-            // remove snapshot_expiration_clear_expired_meta_data from source options, otherwise it will be considered as an unknown field.
-            source.as_mut().map(|x| {
-                x.with_properties
-                    .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
-            });
-        }
-    }
-
-    if let Some(format_version) = handler_args.with_options.get(FORMAT_VERSION) {
-        let format_version = format_version.parse::<u8>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "format_version must be 1, 2 or 3: {}",
-                format_version
-            ))
-        })?;
-        if format_version != 1 && format_version != 2 && format_version != 3 {
-            bail!("format_version must be 1, 2 or 3");
-        }
-        sink_with.insert(FORMAT_VERSION.to_owned(), format_version.to_string());
-
-        // remove format_version from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(FORMAT_VERSION));
-    }
-
-    if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
-        let write_mode = IcebergWriteMode::try_from(write_mode.as_str()).map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "invalid write_mode: {}, must be one of: {}, {}",
-                write_mode, ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
-            ))
-        })?;
-
-        match write_mode {
-            IcebergWriteMode::MergeOnRead => {
-                sink_with.insert(WRITE_MODE.to_owned(), write_mode.as_str().to_owned());
-            }
-
-            IcebergWriteMode::CopyOnWrite => {
-                if table.append_only {
-                    return Err(ErrorCode::NotSupported(
-                        "COPY ON WRITE is not supported for append-only iceberg table".to_owned(),
-                        "Please use MERGE ON READ instead".to_owned(),
-                    )
-                    .into());
-                }
-
-                sink_with.insert(WRITE_MODE.to_owned(), write_mode.as_str().to_owned());
-            }
-        }
-
-        // remove write_mode from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove("write_mode"));
-    } else {
-        sink_with.insert(
-            WRITE_MODE.to_owned(),
-            ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
-        );
-    }
-
-    if let Some(enable_pk_index) = handler_args.with_options.get(ENABLE_PK_INDEX) {
-        match enable_pk_index.to_lowercase().as_str() {
-            "true" => {
-                sink_with.insert(ENABLE_PK_INDEX.to_owned(), "true".to_owned());
-            }
-            "false" => {
-                sink_with.insert(ENABLE_PK_INDEX.to_owned(), "false".to_owned());
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "enable_pk_index must be true or false: {}",
-                    enable_pk_index
-                ))
-                .into());
-            }
-        }
-
-        // remove enable_pk_index from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(ENABLE_PK_INDEX));
-    }
-
-    if let Some(max_snapshots_num_before_compaction) =
-        handler_args.with_options.get(COMPACTION_MAX_SNAPSHOTS_NUM)
-    {
-        let max_snapshots_num_before_compaction = max_snapshots_num_before_compaction
-            .parse::<u32>()
-            .map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "{} must be greater than 0: {}",
-                    COMPACTION_MAX_SNAPSHOTS_NUM, max_snapshots_num_before_compaction
-                ))
-            })?;
-
-        if max_snapshots_num_before_compaction == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_MAX_SNAPSHOTS_NUM
-            ));
-        }
-
-        sink_with.insert(
-            COMPACTION_MAX_SNAPSHOTS_NUM.to_owned(),
-            max_snapshots_num_before_compaction.to_string(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(COMPACTION_MAX_SNAPSHOTS_NUM));
-    }
-
-    if let Some(small_files_threshold_mb) = handler_args
-        .with_options
-        .get(COMPACTION_SMALL_FILES_THRESHOLD_MB)
-    {
-        let small_files_threshold_mb = small_files_threshold_mb.parse::<u64>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "{} must be greater than 0: {}",
-                COMPACTION_SMALL_FILES_THRESHOLD_MB, small_files_threshold_mb
-            ))
-        })?;
-        if small_files_threshold_mb == 0 {
-            bail!(format!(
-                "{} must be a greater than 0",
-                COMPACTION_SMALL_FILES_THRESHOLD_MB
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_SMALL_FILES_THRESHOLD_MB.to_owned(),
-            small_files_threshold_mb.to_string(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_SMALL_FILES_THRESHOLD_MB)
-        });
-    }
-
-    if let Some(delete_files_count_threshold) = handler_args
-        .with_options
-        .get(COMPACTION_DELETE_FILES_COUNT_THRESHOLD)
-    {
-        let delete_files_count_threshold =
-            delete_files_count_threshold.parse::<usize>().map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "{} must be greater than 0: {}",
-                    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, delete_files_count_threshold
-                ))
-            })?;
-        if delete_files_count_threshold == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_DELETE_FILES_COUNT_THRESHOLD
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_DELETE_FILES_COUNT_THRESHOLD.to_owned(),
-            delete_files_count_threshold.to_string(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_DELETE_FILES_COUNT_THRESHOLD)
-        });
-    }
-
-    if let Some(trigger_snapshot_count) = handler_args
-        .with_options
-        .get(COMPACTION_TRIGGER_SNAPSHOT_COUNT)
-    {
-        let trigger_snapshot_count = trigger_snapshot_count.parse::<usize>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "{} must be greater than 0: {}",
-                COMPACTION_TRIGGER_SNAPSHOT_COUNT, trigger_snapshot_count
-            ))
-        })?;
-        if trigger_snapshot_count == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_TRIGGER_SNAPSHOT_COUNT
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_TRIGGER_SNAPSHOT_COUNT.to_owned(),
-            trigger_snapshot_count.to_string(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(COMPACTION_TRIGGER_SNAPSHOT_COUNT));
-    }
-
-    if let Some(target_file_size_mb) = handler_args
-        .with_options
-        .get(COMPACTION_TARGET_FILE_SIZE_MB)
-    {
-        let target_file_size_mb = target_file_size_mb.parse::<u64>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "{} must be greater than 0: {}",
-                COMPACTION_TARGET_FILE_SIZE_MB, target_file_size_mb
-            ))
-        })?;
-        if target_file_size_mb == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_TARGET_FILE_SIZE_MB
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_TARGET_FILE_SIZE_MB.to_owned(),
-            target_file_size_mb.to_string(),
-        );
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(COMPACTION_TARGET_FILE_SIZE_MB));
-    }
-
-    if let Some(compaction_type) = handler_args.with_options.get(COMPACTION_TYPE) {
-        let compaction_type = CompactionType::try_from(compaction_type.as_str()).map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "invalid compaction_type: {}, must be one of {:?}",
-                compaction_type,
-                [
-                    CompactionType::Full,
-                    CompactionType::SmallFiles,
-                    CompactionType::FilesWithDelete
-                ]
-            ))
-        })?;
-
-        sink_with.insert(
-            COMPACTION_TYPE.to_owned(),
-            compaction_type.as_str().to_owned(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(COMPACTION_TYPE));
-    }
-
-    if let Some(write_parquet_compression) = handler_args
-        .with_options
-        .get(COMPACTION_WRITE_PARQUET_COMPRESSION)
-    {
-        sink_with.insert(
-            COMPACTION_WRITE_PARQUET_COMPRESSION.to_owned(),
-            write_parquet_compression.to_owned(),
-        );
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_WRITE_PARQUET_COMPRESSION)
-        });
-    }
-
-    if let Some(write_parquet_max_row_group_rows) = handler_args
-        .with_options
-        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
-    {
-        let write_parquet_max_row_group_rows = write_parquet_max_row_group_rows
-            .parse::<usize>()
-            .map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "{} must be a positive integer: {}",
-                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, write_parquet_max_row_group_rows
-                ))
-            })?;
-        if write_parquet_max_row_group_rows == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS.to_owned(),
-            write_parquet_max_row_group_rows.to_string(),
-        );
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
-        });
-    }
-
-    if let Some(write_parquet_max_row_group_bytes) = handler_args
-        .with_options
-        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
-    {
-        let write_parquet_max_row_group_bytes = write_parquet_max_row_group_bytes
-            .parse::<usize>()
-            .map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "{} must be a positive integer: {}",
-                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, write_parquet_max_row_group_bytes
-                ))
-            })?;
-        if write_parquet_max_row_group_bytes == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES.to_owned(),
-            write_parquet_max_row_group_bytes.to_string(),
-        );
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
-        });
-    }
-
-    let partition_by = handler_args
-        .with_options
-        .get("partition_by")
-        .map(|v| v.to_owned());
-
-    if let Some(partition_by) = &partition_by {
-        let mut partition_columns = vec![];
-        for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
-            table
-                .columns()
-                .iter()
-                .find(|col| col.name().eq_ignore_ascii_case(&column))
-                .ok_or_else(|| {
-                    ErrorCode::InvalidInputSyntax(format!(
-                        "Partition source column does not exist in schema: {}",
-                        column
-                    ))
-                })?;
-
-            partition_columns.push(column);
-        }
-
-        ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, &pks).map_err(
-            |_| {
-                ErrorCode::InvalidInputSyntax(
-                    "The partition columns should be the prefix of the primary key".to_owned(),
-                )
-            },
-        )?;
-
-        sink_with.insert("partition_by".to_owned(), partition_by.to_owned());
-
-        // remove partition_by from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove("partition_by"));
-    }
-
-    let order_key = handler_args
-        .with_options
-        .get(ORDER_KEY)
-        .map(|v| v.to_owned());
-    if let Some(order_key) = &order_key {
-        validate_order_key_columns(order_key, table.columns().iter().map(|col| col.name()))
-            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_report_string()))?;
-
-        sink_with.insert(ORDER_KEY.to_owned(), order_key.to_owned());
-
-        source.as_mut().map(|x| x.with_properties.remove(ORDER_KEY));
-    }
 
     sink_handler_args.with_options =
         WithOptions::new(sink_with, Default::default(), connection_ref.clone());
@@ -2454,6 +1699,7 @@ pub async fn create_iceberg_engine_table(
         format_encode: CompatibleFormatEncode::V2(FormatEncodeOptions::none()),
         source_watermarks: vec![],
         include_column_options: vec![],
+        cdc_table_info: None,
     };
 
     let mut source_handler_args = handler_args.clone();
@@ -2468,14 +1714,14 @@ pub async fn create_iceberg_engine_table(
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
     // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
-    let (iceberg_catalog, table_identifier) = {
+    let (iceberg_catalog, table_identifier, table_created) = {
         let sink_param = SinkParam::try_from_sink_catalog(sink_catalog.clone())?;
         let iceberg_sink = IcebergSink::try_from(sink_param)?;
-        iceberg_sink.create_table_if_not_exists().await?;
+        let table_created = iceberg_sink.create_table_if_not_exists().await?;
 
         let iceberg_catalog = iceberg_sink.config.create_catalog().await?;
         let table_identifier = iceberg_sink.config.full_table_name()?;
-        (iceberg_catalog, table_identifier)
+        (iceberg_catalog, table_identifier, table_created)
     };
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
@@ -2539,16 +1785,20 @@ pub async fn create_iceberg_engine_table(
     .await;
 
     if res.is_err() {
-        let _ = iceberg_catalog
-            .drop_table(&table_identifier)
-            .await
-            .inspect_err(|err| {
-                tracing::error!(
-                    "failed to drop iceberg table {} after create iceberg engine table failed: {}",
-                    table_identifier,
-                    err.as_report()
-                );
-            });
+        // Only clean up an iceberg table this statement created; a pre-existing
+        // external table must survive a failed CREATE.
+        if table_created {
+            let _ = iceberg_catalog
+                .drop_table(&table_identifier)
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(
+                        "failed to drop iceberg table {} after create iceberg engine table failed: {}",
+                        table_identifier,
+                        err.as_report()
+                    );
+                });
+        }
         res?
     }
 
@@ -2648,8 +1898,7 @@ pub async fn generate_stream_graph_for_replace_table(
         original_catalog.associated_source_id().is_some() && format_encode.is_none();
     if is_drop_connector {
         debug_assert!(
-            source_watermarks.is_empty()
-                && include_column_options.is_empty()
+            include_column_options.is_empty()
                 && with_options
                     .iter()
                     .all(|opt| opt.name.real_value().to_lowercase() != "connector")
@@ -2721,6 +1970,15 @@ pub async fn generate_stream_graph_for_replace_table(
                 )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
+            let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
+                cdc_with_options.clone(),
+                &pk_names,
+            ))
+            .await?;
+
+            // CDC-table branch only: see the comment at the symmetric call site in
+            // `handle_create_table_plan`. Plain (non-CDC) tables don't hit this check.
+            reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
@@ -2732,6 +1990,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 source_watermarks,
                 column_catalogs,
                 pk_names,
+                pk_comparisons,
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
@@ -2802,8 +2061,21 @@ fn get_source_and_resolved_table_name(
         )?;
         source.clone()
     };
+    check_cdc_source_select_privilege(session, &source)?;
 
     Ok((source, resolved_table_name))
+}
+
+pub(crate) fn check_cdc_source_select_privilege(
+    session: &SessionImpl,
+    source: &SourceCatalog,
+) -> Result<()> {
+    session.check_privileges(&[ObjectCheckItem::new(
+        source.owner,
+        AclMode::Select,
+        source.name.clone(),
+        source.id,
+    )])
 }
 
 // validate the webhook_info and also bind the webhook_info to protobuf
@@ -2919,10 +2191,224 @@ mod tests {
     use risingwave_common::catalog::{
         DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
-    use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::types::StructType;
 
     use super::*;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
+
+    #[tokio::test]
+    async fn test_iceberg_engine_primary_key_types() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        for (primary_key, append_only, pk_index, supported) in [
+            ("id, period", false, false, false),
+            ("id, items", false, false, false),
+            ("id, mapping", false, false, false),
+            ("id, f", false, false, false),
+            ("id, d", false, false, false),
+            ("id", false, false, true),
+            ("id, ts", false, false, true),
+            ("", false, false, true),
+            ("id, period", true, false, true),
+            ("id, period", false, true, true),
+        ] {
+            let pk_clause = if primary_key.is_empty() {
+                String::new()
+            } else {
+                format!(", PRIMARY KEY ({primary_key})")
+            };
+            frontend
+                .run_sql(&format!(
+                    "CREATE TABLE t (id INT, period STRUCT<start_ts TIMESTAMPTZ, end_ts TIMESTAMPTZ>, \
+                     items INT[], mapping MAP(INT, INT), f REAL, d DOUBLE PRECISION, ts TIMESTAMPTZ \
+                     {pk_clause}) {}",
+                    if append_only { "APPEND ONLY" } else { "" }
+                ))
+                .await
+                .unwrap();
+            let session = frontend.session_ref();
+            let table = session
+                .env()
+                .catalog_reader()
+                .read_guard()
+                .get_created_table_by_name(
+                    DEFAULT_DATABASE_NAME,
+                    SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                    "t",
+                )
+                .unwrap()
+                .0
+                .clone();
+            let pks = table
+                .pk_column_names()
+                .into_iter()
+                .map(str::to_owned)
+                .collect_vec();
+            for write_mode in ["merge-on-read", "copy-on-write"] {
+                if write_mode == "copy-on-write" && (append_only || pk_index) {
+                    continue;
+                }
+                let options = BTreeMap::from([
+                    ("connector".to_owned(), "iceberg".to_owned()),
+                    ("catalog.type".to_owned(), "storage".to_owned()),
+                    (
+                        "warehouse.path".to_owned(),
+                        "s3://test/warehouse".to_owned(),
+                    ),
+                    ("database.name".to_owned(), "public".to_owned()),
+                    ("table.name".to_owned(), "t".to_owned()),
+                    ("write_mode".to_owned(), write_mode.to_owned()),
+                    ("enable_pk_index".to_owned(), pk_index.to_string()),
+                ]);
+                let result = build_iceberg_engine_sink_options(
+                    options,
+                    &WithOptions::default(),
+                    &table,
+                    &pks,
+                );
+                if supported {
+                    result.unwrap();
+                } else {
+                    let err = result.unwrap_err().to_report_string();
+                    let column = primary_key.split(", ").last().unwrap();
+                    assert!(
+                        err.contains(&format!(
+                            "Iceberg engine table primary key column \"{column}\" has unsupported type"
+                        )),
+                        "{write_mode}: {err}"
+                    );
+                }
+            }
+            frontend.run_sql("DROP TABLE t").await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cdc_relations_require_select_privilege_on_source() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        // PostgreSQL CDC with an explicit schema avoids querying upstream PK metadata,
+        // so this privilege test does not require an external database.
+        frontend
+            .run_sql(
+                r#"
+                CREATE SOURCE cdc_source WITH (
+                    connector = 'postgres-cdc',
+                    hostname = 'localhost',
+                    port = '5432',
+                    username = 'postgres',
+                    password = '',
+                    database.name = 'db'
+                ) FORMAT PLAIN ENCODE JSON
+                "#,
+            )
+            .await
+            .unwrap();
+        frontend.run_sql("CREATE USER cdc_user").await.unwrap();
+        frontend
+            .run_sql("GRANT CREATE ON SCHEMA public TO cdc_user")
+            .await
+            .unwrap();
+
+        let user_id = frontend
+            .session_ref()
+            .env()
+            .user_info_reader()
+            .read_guard()
+            .get_user_by_name("cdc_user")
+            .unwrap()
+            .id;
+        let user_session = frontend.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_owned(),
+            "cdc_user".to_owned(),
+            user_id,
+        );
+        let create_table =
+            "CREATE TABLE cdc_table (id INT PRIMARY KEY) FROM cdc_source TABLE 'public.t'";
+        let create_table_source = "CREATE SOURCE cdc_table_source (id INT PRIMARY KEY) \
+             WITH (snapshot = 'false') FROM cdc_source TABLE 'public.t'";
+
+        for sql in [create_table, create_table_source] {
+            let err = frontend
+                .run_sql_with_session(user_session.clone(), sql)
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("permission denied for source \"cdc_source\": \"SELECT\""),
+                "{err:?}"
+            );
+        }
+
+        frontend
+            .run_sql("GRANT SELECT ON SOURCE cdc_source TO cdc_user")
+            .await
+            .unwrap();
+        frontend
+            .run_sql_with_session(user_session.clone(), create_table)
+            .await
+            .unwrap();
+        frontend
+            .run_sql_with_session(user_session.clone(), create_table_source)
+            .await
+            .unwrap();
+
+        let table_source = {
+            let catalog_reader = frontend.session_ref().env().catalog_reader().read_guard();
+            catalog_reader
+                .get_source_by_name(
+                    DEFAULT_DATABASE_NAME,
+                    SchemaPath::Name("public"),
+                    "cdc_table_source",
+                )
+                .unwrap()
+                .0
+                .clone()
+        };
+        assert_eq!(table_source.with_properties.len(), 2);
+        assert_eq!(
+            table_source.with_properties.get_connector().as_deref(),
+            Some("postgres-cdc")
+        );
+        assert_eq!(
+            table_source
+                .with_properties
+                .get("snapshot")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert!(table_source.with_properties.as_secret().is_empty());
+        // The descriptor carries the resolved connect properties so that meta can validate it
+        // against the upstream table; meta clears them before persisting the catalog, which is
+        // covered by `test_create_cdc_table_source_dependency`.
+        let external_table = table_source.info.external_table.as_ref().unwrap();
+        assert!(!external_table.connect_properties.is_empty());
+
+        let err = frontend
+            .run_sql_with_session(
+                user_session.clone(),
+                "SELECT * FROM postgres_query('cdc_table_source', 'SELECT 1')",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("only accept shared CDC sources, not CDC table sources"),
+            "{err:?}"
+        );
+
+        frontend
+            .run_sql("REVOKE SELECT ON SOURCE cdc_source FROM cdc_user")
+            .await
+            .unwrap();
+        let err = frontend
+            .run_sql_with_session(user_session, "ALTER TABLE cdc_table ADD COLUMN value INT")
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("permission denied for source \"cdc_source\": \"SELECT\""),
+            "{err:?}"
+        );
+    }
 
     #[tokio::test]
     async fn test_create_table_handler() {
@@ -3099,39 +2585,6 @@ mod tests {
                 .contains("only NULL column option is supported for webhook tables"),
             "{err:?}"
         );
-    }
-
-    #[test]
-    fn test_parse_postgres_cdc_external_table_name() {
-        for (input, expected) in [
-            ("public.Note", ("public", "Note")),
-            ("public.\"Note\"", ("public", "Note")),
-            (
-                "\"Mixed.Schema\".\"Note.Table\"",
-                ("Mixed.Schema", "Note.Table"),
-            ),
-            ("public.\"Note\"\"Archive\"", ("public", "Note\"Archive")),
-        ] {
-            assert_eq!(
-                parse_postgres_cdc_external_table_name(input).unwrap(),
-                (expected.0.to_owned(), expected.1.to_owned()),
-                "input: {input}"
-            );
-        }
-
-        for input in [
-            "Note",
-            "public.",
-            ".Note",
-            "public.\"Note",
-            "public.\"Note\"Archive",
-            "public.Note.Archive",
-        ] {
-            assert!(
-                parse_postgres_cdc_external_table_name(input).is_err(),
-                "input should be rejected: {input}"
-            );
-        }
     }
 
     #[test]

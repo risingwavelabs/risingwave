@@ -95,7 +95,7 @@ async fn agg_call_filter_res(
 
     if let Some(ref filter) = agg_call.filter {
         // TODO: should we build `filter` in non-strict mode?
-        if let Bool(filter_res) = NonStrictExpression::new_topmost(&**filter, LogReport)
+        if let Bool(filter_res) = NonStrictExpression::new_topmost(filter.clone(), LogReport)
             .eval_infallible(chunk)
             .await
             .as_ref()

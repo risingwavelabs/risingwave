@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
@@ -22,11 +22,12 @@ use chrono::DateTime;
 use futures::future::try_join_all;
 use futures::{StreamExt, TryStreamExt, future};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::{
-    HummockObjectId, HummockRawObjectId, VALID_OBJECT_ID_SUFFIXES, get_object_data_path,
-    get_object_id_from_path,
+    HummockEpoch, HummockObjectId, HummockRawObjectId, VALID_OBJECT_ID_SUFFIXES,
+    get_object_data_path, get_object_id_from_path,
 };
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
 use risingwave_meta_model::{hummock_gc_history, hummock_sequence, hummock_version_delta};
@@ -184,9 +185,15 @@ impl HummockManager {
     ///
     /// Returns number of deleted deltas
     pub async fn delete_version_deltas(&self) -> Result<usize> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("delete_version_deltas")
+            .await;
         let versioning = versioning_guard.deref_mut();
-        let context_info = self.context_info.read().await;
+        let context_info = self
+            .context_info
+            .read_with_process_name("delete_version_deltas")
+            .await;
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
         // replay version.
         if !context_info.version_safe_points.is_empty() {
@@ -218,12 +225,22 @@ impl HummockManager {
         object_ids: impl Iterator<Item = HummockObjectId>,
     ) -> Result<Vec<HummockObjectId>> {
         // This lock ensures `commit_epoch` and `report_compat_task` can see the latest GC history during sanity check.
-        let versioning = self.versioning.read().await;
-        let tracked_object_ids: HashSet<HummockObjectId> = versioning
-            .get_tracked_object_ids(self.context_info.read().await.min_pinned_version_id());
+        let versioning = self
+            .versioning
+            .read_with_process_name("finalize_objects_to_delete")
+            .await;
+        let min_pinned_version_id = self
+            .context_info
+            .read_with_process_name("finalize_objects_to_delete")
+            .await
+            .min_pinned_version_id();
+        let tracked_object_ids: HashSet<HummockObjectId> =
+            versioning.get_tracked_object_ids(min_pinned_version_id);
         let to_delete = object_ids
             .filter(|object_id| !tracked_object_ids.contains(object_id))
             .collect_vec();
+        // Even an empty batch must advance the persisted GC clock and expire old history
+        // when GC history is enabled.
         self.write_gc_history(to_delete.iter().copied()).await?;
         Ok(to_delete)
     }
@@ -461,7 +478,10 @@ impl HummockManager {
         Ok(())
     }
 
-    pub async fn delete_time_travel_metadata(&self) -> MetaResult<()> {
+    pub async fn delete_time_travel_metadata(
+        &self,
+        pinned_snapshot_epochs: HashMap<TableId, HashSet<HummockEpoch>>,
+    ) -> MetaResult<()> {
         let current_epoch_time = Epoch::now().physical_time();
         let epoch_watermark = Epoch::from_physical_time(
             current_epoch_time.saturating_sub(
@@ -472,35 +492,28 @@ impl HummockManager {
             ),
         )
         .0;
-        self.truncate_time_travel_metadata(epoch_watermark).await?;
+        self.truncate_time_travel_metadata(epoch_watermark, pinned_snapshot_epochs)
+            .await?;
         Ok(())
     }
 
     /// Deletes stale objects from object store.
     ///
-    /// Returns the total count of deleted objects.
-    pub async fn delete_objects(
-        &self,
-        mut objects_to_delete: Vec<HummockObjectId>,
-    ) -> Result<usize> {
+    /// Deduplicates within each batch of at most 1,000 input IDs. On success, returns the input
+    /// count, including duplicates; deletion errors stop subsequent batches.
+    pub async fn delete_objects(&self, objects_to_delete: Vec<HummockObjectId>) -> Result<usize> {
         let total = objects_to_delete.len();
-        let mut batch_size = 1000usize;
-        while !objects_to_delete.is_empty() {
+        for objects in objects_to_delete.chunks(1000) {
             if self.env.opts.vacuum_spin_interval_ms != 0 {
                 tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
                     .await;
             }
-            batch_size = cmp::min(objects_to_delete.len(), batch_size);
-            if batch_size == 0 {
-                break;
-            }
-            let delete_batch: HashSet<_> = objects_to_delete.drain(..batch_size).collect();
+            let delete_batch: HashSet<_> = objects.iter().copied().collect();
             tracing::info!(?delete_batch, "Attempt to delete objects.");
-            let deleted_object_ids = delete_batch.clone();
             self.gc_manager
-                .delete_objects(delete_batch.into_iter())
+                .delete_objects(delete_batch.iter().copied())
                 .await?;
-            tracing::debug!(?deleted_object_ids, "Finish deleting objects.");
+            tracing::debug!(deleted_object_ids = ?delete_batch, "Finish deleting objects.");
         }
         Ok(total)
     }
@@ -518,9 +531,16 @@ impl HummockManager {
         let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids().await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
         let version_pinned = {
-            let versioning = self.versioning.read().await;
-            versioning
-                .get_tracked_object_ids(self.context_info.read().await.min_pinned_version_id())
+            let versioning = self
+                .versioning
+                .read_with_process_name("try_start_minor_gc")
+                .await;
+            let min_pinned_version_id = self
+                .context_info
+                .read_with_process_name("try_start_minor_gc")
+                .await
+                .min_pinned_version_id();
+            versioning.get_tracked_object_ids(min_pinned_version_id)
         };
         let object_ids = object_ids
             .into_iter()

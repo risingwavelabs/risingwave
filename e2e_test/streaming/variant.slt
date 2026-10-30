@@ -1,0 +1,181 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table variant_stream_t (
+    id int primary key,
+    payload variant
+);
+
+statement error VARIANT column
+create materialized view variant_bad_agg as
+select payload, count(*) from variant_stream_t group by payload;
+
+statement ok
+set rw_streaming_allow_jsonb_in_stream_key = true;
+
+statement error VARIANT column
+create materialized view variant_bad_agg_with_jsonb_opt_in as
+select payload, count(*) from variant_stream_t group by payload;
+
+statement ok
+set rw_streaming_allow_jsonb_in_stream_key = false;
+
+statement ok
+create materialized view variant_state_mv as
+select
+    id,
+    payload,
+    variant_get(payload, '$.a') as a,
+    variant_typeof(payload) as kind
+from variant_stream_t;
+
+statement ok
+insert into variant_stream_t values
+    (1, '{"a":10,"b":[1,2]}'::variant),
+    (2, to_variant('plain'::varchar));
+
+query ITT rowsort
+select id, a::varchar, kind from variant_state_mv;
+----
+1 10 object
+2 NULL string
+
+statement ok
+update variant_stream_t set payload = '{"a":20}'::variant where id = 1;
+
+query ITT rowsort
+select id, a::varchar, kind from variant_state_mv;
+----
+1 20 object
+2 NULL string
+
+statement ok
+drop materialized view variant_state_mv;
+
+statement ok
+drop table variant_stream_t;
+
+# Malformed dynamic paths must only null out the failing row in non-strict evaluation.
+# Use one actor and one multi-row insert to exercise valid and invalid paths in the same chunk.
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table variant_dynamic_path_t (
+    id int primary key,
+    payload variant,
+    path varchar
+);
+
+statement ok
+create materialized view variant_dynamic_path_mv as
+select
+    id,
+    variant_get(payload, path) as value,
+    try_variant_get(payload, path) as try_value
+from variant_dynamic_path_t;
+
+statement ok
+insert into variant_dynamic_path_t values
+    (1, '{"a":[{"b":7},{"b":8}],"x.y":9}'::variant, '$.a[0].b'),
+    (2, '{"a":[{"b":7},{"b":8}],"x.y":9}'::variant, '$.'),
+    (3, '{"a":[{"b":7},{"b":8}],"x.y":9}'::variant, '$.a[-1].b');
+
+query ITT rowsort
+select id, value::varchar, try_value::varchar from variant_dynamic_path_mv;
+----
+1 7 7
+2 NULL NULL
+3 8 8
+
+statement ok
+drop materialized view variant_dynamic_path_mv;
+
+statement ok
+drop table variant_dynamic_path_t;
+
+statement ok
+set streaming_parallelism = default;
+
+# A malformed constant path must not fail expression building or bypass SQL NULL short-circuiting.
+statement ok
+create table variant_constant_path_t (
+    id int primary key,
+    payload variant
+);
+
+statement ok
+insert into variant_constant_path_t values (1, NULL);
+
+query ITT
+select id, variant_get(payload, '.')::varchar, try_variant_get(payload, '.')::varchar
+from variant_constant_path_t;
+----
+1 NULL NULL
+
+statement ok
+create materialized view variant_constant_path_mv as
+select
+    id,
+    variant_get(payload, '.') as value,
+    try_variant_get(payload, '.') as try_value
+from variant_constant_path_t;
+
+statement ok
+insert into variant_constant_path_t values (2, NULL);
+
+query ITT rowsort
+select id, value::varchar, try_value::varchar from variant_constant_path_mv;
+----
+1 NULL NULL
+2 NULL NULL
+
+statement ok
+drop materialized view variant_constant_path_mv;
+
+# Non-NULL input must still report the cached parse error in strict batch evaluation.
+statement ok
+update variant_constant_path_t set payload = '{}'::variant where id = 1;
+
+statement error invalid variant path
+select variant_get(payload, '.') from variant_constant_path_t where id = 1;
+
+query T
+select try_variant_get(payload, '.')::varchar from variant_constant_path_t where id = 1;
+----
+NULL
+
+statement ok
+drop table variant_constant_path_t;
+
+# Nested VARIANT must not reach a streaming operator's storage key.
+statement ok
+create table variant_nested_t (
+    id int primary key,
+    s struct<v variant>
+);
+
+# TopN order key contains a nested VARIANT.
+statement error VARIANT column
+create materialized view variant_bad_topn as
+select count(*) from (select * from variant_nested_t order by s limit 10);
+
+# Over window partition key contains a nested VARIANT.
+statement error VARIANT column
+create materialized view variant_bad_over_window as
+select id from (
+    select id, rank() over (partition by s order by id) as rank
+    from variant_nested_t)
+where rank <= 2;
+
+statement error should not be in the aggregation order key
+create materialized view variant_bad_agg_order as
+select array_agg(id order by s) from variant_nested_t;
+
+statement error should not be in the distinct aggregation argument
+create materialized view variant_bad_agg_distinct as
+select count(distinct s) from variant_nested_t;
+
+statement ok
+drop table variant_nested_t;

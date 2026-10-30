@@ -1,3 +1,13 @@
+control substitution on
+
+system ok retry 30 backoff 1s
+search GET '/' >/dev/null
+
+system ok
+for index in test test1 test_route; do
+  search DELETE "/${index}" >/dev/null 2>&1 || true
+done
+
 statement ok
 set sink_decouple = false;
 
@@ -24,58 +34,50 @@ CREATE TABLE test_route (
 # Invalid field: foo, allowed fields: {"username", "url", "password"}
 statement error
 create connection es_conn_1 with (
-  type = 'elasticsearch',
+  type = '${SEARCH_SINK_CONNECTION_TYPE}',
   foo = 'bar',
-  url = 'http://elasticsearch:9200',
-  username = 'elastic',
-  password = 'risingwave'
+  url = '${SEARCH_SINK_URL}',
+  username = '${SEARCH_SINK_USER}',
+  password = '${SEARCH_SINK_PASSWORD}'
 );
 
 # please set the password when the username is set.
 statement error
 create connection es_conn_1 with (
-  type = 'elasticsearch',
-  url = 'http://elasticsearch:9200',
-  username = 'elastic'
+  type = '${SEARCH_SINK_CONNECTION_TYPE}',
+  url = '${SEARCH_SINK_URL}',
+  username = '${SEARCH_SINK_USER}'
 );
-
 
 statement ok
 create connection es_conn with (
-  type = 'elasticsearch',
-    url = 'http://elasticsearch:9200',
-    username = 'elastic',
-    password = 'risingwave',
+  type = '${SEARCH_SINK_CONNECTION_TYPE}',
+  url = '${SEARCH_SINK_URL}',
+  username = '${SEARCH_SINK_USER}',
+  password = '${SEARCH_SINK_PASSWORD}',
 );
 
 statement ok
 CREATE SINK test_route_sink from test_route WITH (
     type = 'upsert',
-    connector = 'elasticsearch',
+    ${SEARCH_SINK_ROUTE_WITH_OPTIONS},
     index = 'test_route',
-    connection = es_conn,
     routing_column = 'v3'
 );
 
 statement ok
 CREATE SINK s7 from t7 WITH (
     type = 'upsert',
-    connector = 'elasticsearch',
-    index = 'test',
-    url = 'http://elasticsearch:9200',
-    username = 'elastic',
-    password = 'risingwave'
+    ${SEARCH_SINK_WITH_OPTIONS_COMMON},
+    index = 'test'
 );
 
 statement ok
 CREATE SINK s8 from t7 WITH (
     type = 'upsert',
-    connector = 'elasticsearch',
+    ${SEARCH_SINK_WITH_OPTIONS_COMMON},
     index = 'test1',
     primary_key = 'v1,v3',
-    url = 'http://elasticsearch:9200',
-    username = 'elastic',
-    password = 'risingwave',
     delimiter = '_'
 );
 
@@ -105,6 +107,21 @@ update t7 set v2 = 55 where v1 = 2;
 
 statement ok
 FLUSH;
+
+system ok retry 10 backoff 1s
+test "$(search GET '/test/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "6"
+
+system ok retry 10 backoff 1s
+test "$(search GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 55))")" = "1"
+
+system ok retry 10 backoff 1s
+test "$(search GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 50))")" = "1"
+
+system ok retry 10 backoff 1s
+test "$(search GET '/test1/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "7"
+
+system ok retry 10 backoff 1s
+test "$(search GET '/test_route/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(','.join(sorted(d.get('_routing', '') for d in docs)))")" = "test1,test2,test3"
 
 statement ok
 DROP SINK s7;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::license::LicenseKey;
+use risingwave_common::system_param::StateStoreUrl;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -32,6 +33,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
+use risingwave_sqlparser::ast::SqlOptionRedaction;
 pub use rpc::{ElectionClient, ElectionMember};
 use server::rpc_serve;
 pub use server::started::get as is_server_started;
@@ -140,7 +142,7 @@ pub struct MetaNodeOpts {
     /// State store url
     #[clap(long, hide = true, env = "RW_STATE_STORE")]
     #[override_opts(path = system.state_store)]
-    pub state_store: Option<String>,
+    pub state_store: Option<StateStoreUrl>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, hide = true, env = "RW_DATA_DIRECTORY")]
@@ -187,9 +189,8 @@ pub struct MetaNodeOpts {
     pub license_key_path: Option<PathBuf>,
 
     /// 128-bit AES key for secret store in HEX format.
-    #[educe(Debug(ignore))] // TODO: use newtype to redact debug impl
     #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
-    pub secret_store_private_key_hex: Option<String>,
+    pub secret_store_private_key_hex: Option<Secret<String>>,
 
     /// The path of the temp secret file directory.
     #[clap(
@@ -316,11 +317,17 @@ pub fn start(
 
         let secret_store_private_key = opts
             .secret_store_private_key_hex
-            .map(|key| hex::decode(key).unwrap());
+            .map(|key| hex::decode(key.expose_secret()).unwrap());
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
+        let snapshot_backfill_finish_max_lagged_barriers = config
+            .streaming
+            .snapshot_backfill_finish_max_lagged_barriers;
+        let snapshot_backfill_barrier_amplification_factor = config
+            .streaming
+            .snapshot_backfill_barrier_amplification_factor;
         let privatelink_endpoint_default_tags =
             opts.privatelink_endpoint_default_tags.map(|tags| {
                 tags.split(',')
@@ -370,6 +377,9 @@ pub fn start(
             config.server.clone(),
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
+                clean_all_foreground_jobs_on_recovery: config
+                    .meta
+                    .clean_all_foreground_jobs_on_recovery,
                 disable_automatic_parallelism_control: config
                     .meta
                     .disable_automatic_parallelism_control,
@@ -381,6 +391,8 @@ pub fn start(
                     .meta
                     .parallelism_control_trigger_first_delay_sec,
                 in_flight_barrier_nums,
+                snapshot_backfill_finish_max_lagged_barriers,
+                snapshot_backfill_barrier_amplification_factor,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,
@@ -395,12 +407,18 @@ pub fn start(
                     .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
+                iceberg_orphan_file_cleanup_interval_sec: config
+                    .meta
+                    .iceberg_orphan_file_cleanup_interval_sec,
                 iceberg_compaction_report_timeout_sec: config
                     .meta
                     .iceberg_compaction_report_timeout_sec,
                 iceberg_compaction_config_refresh_interval_sec: config
                     .meta
                     .iceberg_compaction_config_refresh_interval_sec,
+                iceberg_compaction_schedule_on_startup: config
+                    .meta
+                    .iceberg_compaction_schedule_on_startup,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -460,9 +478,6 @@ pub fn start(
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
-                protect_drop_table_with_incoming_sink: config
-                    .meta
-                    .protect_drop_table_with_incoming_sink,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
@@ -531,18 +546,9 @@ pub fn start(
                     .streaming
                     .developer
                     .refresh_scheduler_interval_sec,
-                table_stat_high_write_throughput_ratio_for_split: config
+                table_write_throughput_retention_seconds: config
                     .meta
-                    .table_stat_high_write_throughput_ratio_for_split,
-                table_stat_low_write_throughput_ratio_for_merge: config
-                    .meta
-                    .table_stat_low_write_throughput_ratio_for_merge,
-                table_stat_throuput_window_seconds_for_split: config
-                    .meta
-                    .table_stat_throuput_window_seconds_for_split,
-                table_stat_throuput_window_seconds_for_merge: config
-                    .meta
-                    .table_stat_throuput_window_seconds_for_merge,
+                    .table_write_throughput_retention_seconds,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta
@@ -567,17 +573,18 @@ pub fn start(
                     .meta
                     .developer
                     .table_change_log_delete_batch_size,
+                table_change_log_truncate_interval_sec: config
+                    .meta
+                    .developer
+                    .table_change_log_truncate_interval_sec,
                 license_key_path: opts.license_key_path,
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
                 frontend_client_config: config.meta.developer.frontend_client_config.clone(),
-                redact_sql_option_keywords: Arc::new(
-                    config
-                        .batch
-                        .redact_sql_option_keywords
-                        .into_iter()
-                        .collect(),
-                ),
+                sql_option_redaction: Arc::new(SqlOptionRedaction::new(
+                    config.batch.redact_sql_option_keywords,
+                    config.batch.redact_sql_option_allowlist,
+                )),
                 cdc_table_split_init_sleep_interval_splits: config
                     .meta
                     .cdc_table_split_init_sleep_interval_splits,
@@ -603,43 +610,43 @@ pub fn start(
 
 fn validate_config(config: &RwConfig) {
     if config.meta.meta_leader_lease_secs <= 2 {
-        let error_msg = "meta leader lease secs should be larger than 2";
+        let error_msg = "`meta_leader_lease_secs` must be greater than 2";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.parallelism_control_batch_size == 0 {
-        let error_msg = "parallelism control batch size should be larger than 0";
+        let error_msg = "`parallelism_control_batch_size` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.checkpoint_read_chunk_size == 0 {
-        let error_msg = "checkpoint read chunk size should be larger than 0";
+        let error_msg = "`checkpoint_read_chunk_size` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.checkpoint_read_max_in_flight_chunks == 0 {
-        let error_msg = "checkpoint read max in flight chunks should be larger than 0";
+        let error_msg = "`checkpoint_read_max_in_flight_chunks` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.compaction_task_id_refill_capacity == 0 {
-        let error_msg = "compaction task id refill capacity should be larger than 0";
+        let error_msg = "`compaction_task_id_refill_capacity` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.iceberg_compaction_report_timeout_sec == 0 {
-        let error_msg = "iceberg compaction report timeout sec should be larger than 0";
+        let error_msg = "`iceberg_compaction_report_timeout_sec` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.iceberg_compaction_config_refresh_interval_sec == 0 {
-        let error_msg = "iceberg compaction config refresh interval sec should be larger than 0";
+        let error_msg = "`iceberg_compaction_config_refresh_interval_sec` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

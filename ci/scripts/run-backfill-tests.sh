@@ -34,7 +34,7 @@ else
   RUNTIME_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring'
   MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring-and-minio-rate-limit'
 fi
-export RUST_LOG="info,risingwave_stream=info,risingwave_stream::executor::backfill=debug,risingwave_batch=info,risingwave_storage=info,risingwave_meta::barrier=debug,risingwave_stream::executor::stream_reader=warn" \
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::executor::stream_reader=warn" \
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -153,7 +153,7 @@ test_backfill_tombstone() {
     done
   ' 1>deletes.log 2>&1 &
 
-  risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+  risedev psql -c "SET streaming_use_snapshot_backfill = false; CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
   wait
@@ -451,6 +451,16 @@ test_locality_backfill() {
   kill_cluster
 }
 
+test_backfill_reschedule() {
+  echo "--- e2e, backfill reschedule test, $RUNTIME_CLUSTER_PROFILE"
+
+  risedev ci-start $RUNTIME_CLUSTER_PROFILE
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/reschedule/*.slt'
+
+  kill_cluster
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
@@ -464,6 +474,7 @@ main() {
 
   test_cross_db_snapshot_backfill
   test_locality_backfill
+  test_backfill_reschedule
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then

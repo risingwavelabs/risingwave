@@ -50,13 +50,12 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 10009,
+            "plan_node_id": 10012,
             "plan_node_type": "BatchValues",
             "schema": [
               {
                 "dataType": {
-                  "typeName": "INT32",
-                  "isNullable": true
+                  "typeName": "INT32"
                 },
                 "name": "1:Int32"
               }

@@ -12,11 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod citus;
 pub mod enumerator;
 pub mod external;
 pub mod jni_source;
+pub mod mongodb;
+pub mod mysql;
+pub mod oracle;
+pub mod postgres;
 pub mod source;
 pub mod split;
+pub mod sql_server;
 
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
@@ -63,6 +69,7 @@ pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
 pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
 pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
 pub const SQL_SERVER_CDC_CONNECTOR: &str = SqlServer::CDC_CONNECTOR_NAME;
+pub const ORACLE_CDC_CONNECTOR: &str = Oracle::CDC_CONNECTOR_NAME;
 
 /// Build a unique CDC table identifier from a source ID and external table name
 pub fn build_cdc_table_id(source_id: SourceId, external_table_name: &str) -> String {
@@ -90,6 +97,23 @@ pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
     fn source_type() -> CdcSourceType;
 }
 
+/// Behavior switches.
+pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
+    /// When true, only shared sources are supported; otherwise only direct sources are supported.
+    const CAN_BACKFILL: bool = false;
+    /// When true, the planner may choose parallelized backfill.
+    const CAN_BACKFILL_IN_PARALLEL: bool = false;
+    /// When true, a shared source sets Debezium's `provide.transaction.metadata`, so that all rows
+    /// of one upstream transaction go into a single chunk.
+    const CAN_USE_TRANSACTION_METADATA: bool = false;
+    /// When true, the source executor waits for a non-empty split offset before reporting the
+    /// initial CDC offset.
+    const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = false;
+    /// When true, the consumed offset is committed back to the upstream database on each
+    /// checkpoint via a JNI call.
+    const NEEDS_OFFSET_COMMIT_ON_CHECKPOINT: bool = false;
+}
+
 for_all_classified_sources!(impl_cdc_source_type);
 
 impl<'a> From<&'a str> for CdcSourceType {
@@ -100,6 +124,7 @@ impl<'a> From<&'a str> for CdcSourceType {
             CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
             MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
             SQL_SERVER_CDC_CONNECTOR => CdcSourceType::SqlServer,
+            ORACLE_CDC_CONNECTOR => CdcSourceType::Oracle,
             _ => CdcSourceType::Unspecified,
         }
     }
@@ -113,6 +138,7 @@ impl CdcSourceType {
             CdcSourceType::Citus => "Citus",
             CdcSourceType::Mongodb => "MongoDB",
             CdcSourceType::SqlServer => "SQL Server",
+            CdcSourceType::Oracle => "Oracle",
             CdcSourceType::Unspecified => "Unspecified",
         }
     }

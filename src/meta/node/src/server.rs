@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -90,11 +90,13 @@ use crate::barrier::BarrierScheduler;
 use crate::controller::SqlMetaStore;
 use crate::controller::system_param::SystemParamsController;
 use crate::hummock::HummockManager;
-use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
-use crate::rpc::metrics::{GLOBAL_META_METRICS, start_info_monitor, start_worker_info_monitor};
+use crate::rpc::metrics::{
+    GLOBAL_META_METRICS, init_meta_metrics, start_info_monitor, start_worker_info_monitor,
+};
 use crate::serving::ServingVnodeMapping;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
@@ -192,6 +194,8 @@ pub async fn rpc_serve_with_store(
     session_init: SessionInitConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
+    init_meta_metrics(server_config.metrics_level);
+
     // TODO(shutdown): directly use cancellation token
     let (election_shutdown_tx, election_shutdown_rx) = watch::channel(());
 
@@ -204,7 +208,7 @@ pub async fn rpc_serve_with_store(
                 .run_once(lease_interval_secs as i64, election_shutdown_rx.clone())
                 .await
             {
-                tracing::error!(error = %e.as_report(), "election error happened");
+                tracing::error!(error = %e.as_report(), "an election error occurred");
             }
             // Leader lost, shutdown the service.
             shutdown.cancel();
@@ -235,7 +239,7 @@ pub async fn rpc_serve_with_store(
 
                 res = is_leader_watcher.changed() => {
                     if res.is_err() {
-                        tracing::error!("leader watcher recv failed");
+                        tracing::error!("failed to receive a leader watcher update");
                     }
                 }
             }
@@ -410,7 +414,7 @@ pub async fn start_service_as_election_leader(
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
 
     let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
+        BarrierScheduler::new_pair(hummock_manager.clone());
     tracing::info!("BarrierScheduler started");
 
     // Initialize services.
@@ -458,15 +462,21 @@ pub async fn start_service_as_election_leader(
         env.meta_store_ref().conn.clone(),
         hummock_manager.clone(),
         metadata_manager.clone(),
-        iceberg_compaction_stat_tx,
+        iceberg_compaction_stat_tx.clone(),
         env.await_tree_reg().clone(),
     );
     tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
-    let iceberg_v3_sink_manager = IcebergV3SinkManager::new(env.meta_store_ref().conn.clone());
-    tracing::info!("IcebergV3SinkManager started");
+    // Register before the barrier manager starts recovery. Dirty creating-job cleanup emits local
+    // serving mapping deletes, which must not be dropped during bootstrap.
+    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
+        env.notification_manager_ref(),
+        metadata_manager.clone(),
+        serving_vnode_mapping.clone(),
+        env.session_params_manager_impl_ref(),
+    ));
 
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
@@ -476,7 +486,15 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
+        barrier_scheduler.clone(),
     );
+
+    let iceberg_pk_index_sink_manager = IcebergPkIndexSinkManager::new(
+        metadata_manager.catalog_controller.clone(),
+        iceberg_compaction_mgr.clone(),
+        iceberg_compaction_stat_tx,
+    );
+    tracing::info!("IcebergPkIndexSinkManager started");
 
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
         iceberg_compaction_mgr.clone(),
@@ -487,16 +505,16 @@ pub async fn start_service_as_election_leader(
         iceberg_compaction_mgr.clone(),
         env.opts.iceberg_gc_interval_sec,
     ));
+    sub_tasks.push(IcebergCompactionManager::orphan_file_cleanup_loop(
+        iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_orphan_file_cleanup_interval_sec,
+    ));
 
-    let refresh_scheduler_interval = Duration::from_secs(env.opts.refresh_scheduler_interval_sec);
-    let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
-        metadata_manager.clone(),
-        barrier_scheduler.clone(),
-        &env,
-        refresh_scheduler_interval,
-    )
-    .await?;
-    sub_tasks.push((refresh_handle, refresh_shutdown));
+    if env.opts.iceberg_compaction_schedule_on_startup {
+        sub_tasks.push(IcebergCompactionManager::schedule_on_startup_task(
+            iceberg_compaction_mgr.clone(),
+        ));
+    }
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
@@ -504,16 +522,26 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
+    let refresh_scheduler_interval = Duration::from_secs(env.opts.refresh_scheduler_interval_sec);
+    let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
+        metadata_manager.clone(),
+        barrier_scheduler.clone(),
+        scale_controller.clone(),
+        refresh_scheduler_interval,
+    )
+    .await?;
+    sub_tasks.push((refresh_handle, refresh_shutdown));
+
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),
+        serving_vnode_mapping.clone(),
         source_manager.clone(),
         sink_manager.clone(),
-        iceberg_v3_sink_manager.clone(),
+        iceberg_pk_index_sink_manager.clone(),
         scale_controller.clone(),
-        barrier_scheduler.clone(),
         refresh_manager.clone(),
     )
     .await;
@@ -535,6 +563,8 @@ pub async fn start_service_as_election_leader(
             hummock_manager.clone(),
             source_manager.clone(),
             refresh_manager.clone(),
+            sink_manager.clone(),
+            iceberg_pk_index_sink_manager.clone(),
             scale_controller.clone(),
         )
         .unwrap(),
@@ -555,7 +585,7 @@ pub async fn start_service_as_election_leader(
         meta_metrics.clone(),
         iceberg_compaction_mgr.clone(),
         barrier_scheduler.clone(),
-        iceberg_v3_sink_manager.clone(),
+        iceberg_pk_index_sink_manager.clone(),
     )
     .await;
 
@@ -595,11 +625,16 @@ pub async fn start_service_as_election_leader(
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
     let system_params_srv = SystemParamsServiceImpl::new(
         env.system_params_manager_impl_ref(),
+        metadata_manager.clone(),
         env.opts.license_key_path.is_some(),
     );
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
-    let serving_srv =
-        ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
+    let serving_srv = ServingServiceImpl::new(
+        serving_vnode_mapping.clone(),
+        metadata_manager.clone(),
+        env.clone(),
+        hummock_manager.clone(),
+    );
     let cloud_srv = CloudServiceImpl::new();
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
@@ -617,7 +652,7 @@ pub async fn start_service_as_election_leader(
         env.event_log_manager_ref(),
         prometheus_client.clone(),
         prometheus_selector.clone(),
-        opts.redact_sql_option_keywords.clone(),
+        opts.sql_option_redaction.clone(),
         env.system_params_manager_impl_ref(),
     ));
 
@@ -656,17 +691,40 @@ pub async fn start_service_as_election_leader(
         backup_manager.clone(),
         &env.opts,
         {
-            let barrier_manager = barrier_manager.clone();
+            let catalog_controller = metadata_manager.catalog_controller.clone();
             Box::new(move || {
-                let barrier_manager = barrier_manager.clone();
+                let catalog_controller = catalog_controller.clone();
                 Box::pin(async move {
-                    barrier_manager.may_snapshot_backfilling_job().await.unwrap_or_else(|e| {
-                        tracing::warn!(err = %e.as_report(), "failed to check having snapshot backfilling jobs. pause vacuum time travel");
-                        true
-                    })
+                    catalog_controller
+                        .get_table_change_log_truncate_info()
+                        .await
+                        .map(Some)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(err = %e.as_report(), "failed to collect table change log retention metadata");
+                            None
+                        })
                 })
             })
-        }
+        },
+        {
+            let catalog_controller = metadata_manager.catalog_controller.clone();
+            Box::new(move || {
+                let catalog_controller = catalog_controller.clone();
+                Box::pin(async move {
+                    catalog_controller
+                        .get_pinned_snapshot_epochs()
+                        .await
+                        .map(Some)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(
+                                err = %e.as_report(),
+                                "failed to collect pinned snapshot epochs; pausing time-travel vacuum",
+                            );
+                            None
+                        })
+                })
+            })
+        },
     ));
     sub_tasks.push(start_worker_info_monitor(
         metadata_manager.clone(),
@@ -696,13 +754,6 @@ pub async fn start_service_as_election_leader(
     sub_tasks.extend(IcebergCompactionManager::iceberg_compaction_event_loop(
         iceberg_compaction_mgr.clone(),
         iceberg_compactor_event_rx,
-    ));
-
-    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
-        env.notification_manager_ref(),
-        metadata_manager.clone(),
-        serving_vnode_mapping,
-        env.session_params_manager_impl_ref(),
     ));
 
     {
@@ -777,7 +828,14 @@ pub async fn start_service_as_election_leader(
         .add_service(
             HummockManagerServiceServer::new(hummock_srv).max_decoding_message_size(usize::MAX),
         )
-        .add_service(NotificationServiceServer::new(notification_srv))
+        // Compress notifications with zstd for clients that accept it (older clients still
+        // get uncompressed responses). The initial `MetaSnapshot` carries the full hummock
+        // version; uncompressed messages larger than `i32::MAX` bytes are silently reset by
+        // hyper/h2, so compression keeps large snapshots deliverable.
+        .add_service(
+            NotificationServiceServer::new(notification_srv)
+                .send_compressed(tonic::codec::CompressionEncoding::Zstd),
+        )
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
         .add_service(UserServiceServer::new(user_srv))

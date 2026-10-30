@@ -15,13 +15,29 @@
 use anyhow::Context;
 use either::Either;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::types::StructType;
 use risingwave_expr::sig::{CreateOptions, UdfKind};
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 
 use super::*;
+use crate::binder::bind_struct_type;
 use crate::{Binder, bind_data_type};
+
+/// Non-SQL UDFs exchange data via Arrow, which does not support VARIANT yet.
+pub(crate) fn reject_variant_in_udf_signature(
+    return_type: &risingwave_common::types::DataType,
+    arg_types: &[risingwave_common::types::DataType],
+    kind: &str,
+) -> Result<()> {
+    if return_type.contains_variant() || arg_types.iter().any(|t| t.contains_variant()) {
+        return Err(ErrorCode::NotSupported(
+            format!("VARIANT type in {kind} signature"),
+            "VARIANT is not supported in UDFs yet".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
 
 pub async fn handle_create_function(
     handler_args: HandlerArgs,
@@ -99,7 +115,7 @@ pub async fn handle_create_function(
                     .into_iter()
                     .map(|c| bind_data_type(&c.data_type).map(|ty| (c.name.real_value(), ty)));
                 let fields = it.try_collect::<_, Vec<_>, _>()?;
-                return_type = StructType::new(fields).into();
+                return_type = bind_struct_type(fields)?.into();
             }
             Kind::Table(TableFunction {})
         }
@@ -117,6 +133,8 @@ pub async fn handle_create_function(
         arg_names.push(arg.name.map_or("".to_owned(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
+
+    reject_variant_in_udf_signature(&return_type, &arg_types, "function")?;
 
     // resolve database and schema id
     let session = &handler_args.session;

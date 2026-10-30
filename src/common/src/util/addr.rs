@@ -20,8 +20,9 @@ use anyhow::Context;
 use risingwave_pb::common::PbHostAddress;
 use thiserror_ext::AsReport;
 use tokio::time::sleep;
-use tokio_retry::strategy::ExponentialBackoff;
 use tracing::error;
+
+use crate::util::retry::exponential_backoff;
 
 /// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -48,11 +49,20 @@ impl TryFrom<&str> for HostAddr {
     type Error = anyhow::Error;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let s = format!("http://{s}");
-        let addr = url::Url::parse(&s).with_context(|| format!("failed to parse address: {s}"))?;
+        let url = url::Url::parse(&format!("http://{s}"))
+            .with_context(|| format!("failed to parse address: {s}"))?;
+        let port = match url.port() {
+            Some(port) => port,
+            // The parser normalizes a port equal to the scheme's default (`:80` for `http`)
+            // to `None`. Re-parse with `https` to recover it; a bare host is `None` under both.
+            None => url::Url::parse(&format!("https://{s}"))
+                .with_context(|| format!("failed to parse address: {s}"))?
+                .port()
+                .context("invalid port")?,
+        };
         Ok(HostAddr {
-            host: addr.host().context("invalid host")?.to_string(),
-            port: addr.port().context("invalid port")?,
+            host: url.host().context("invalid host")?.to_string(),
+            port,
         })
     }
 }
@@ -97,9 +107,7 @@ pub fn is_local_address(server_addr: &HostAddr, peer_addr: &HostAddr) -> bool {
 
 pub async fn try_resolve_dns(host: &str, port: i32) -> Result<SocketAddr, String> {
     let addr = format!("{}:{}", host, port);
-    let mut backoff = ExponentialBackoff::from_millis(100)
-        .max_delay(Duration::from_secs(3))
-        .factor(5);
+    let mut backoff = exponential_backoff(Duration::from_millis(100), 5, Duration::from_secs(3));
     const MAX_RETRY: usize = 20;
     for i in 1..=MAX_RETRY {
         let err = match addr.to_socket_addrs() {
@@ -115,7 +123,13 @@ pub async fn try_resolve_dns(host: &str, port: i32) -> Result<SocketAddr, String
         // It may happen that the dns information of newly registered worker node
         // has not been propagated to the meta node and cause error. Wait for a while and retry
         let delay = backoff.next().unwrap();
-        error!(attempt = i, backoff_delay = ?delay, err, addr, "fail to resolve worker node address");
+        error!(
+            attempt = i,
+            backoff_delay = ?delay,
+            err,
+            addr,
+            "failed to resolve the worker node address",
+        );
         sleep(delay).await;
     }
     Err(format!("failed to resolve dns: {}", addr))
@@ -156,6 +170,31 @@ mod tests {
             HostAddr {
                 host: String::from("test.test"),
                 port: 12345
+            }
+        );
+        // An explicit port equal to a scheme's default must not be normalized away.
+        let addr = "test.test:80";
+        assert_eq!(
+            addr.parse::<HostAddr>().unwrap(),
+            HostAddr {
+                host: String::from("test.test"),
+                port: 80
+            }
+        );
+        let addr = "test.test:443";
+        assert_eq!(
+            addr.parse::<HostAddr>().unwrap(),
+            HostAddr {
+                host: String::from("test.test"),
+                port: 443
+            }
+        );
+        let addr = "[::1]:80";
+        assert_eq!(
+            addr.parse::<HostAddr>().unwrap(),
+            HostAddr {
+                host: String::from("[::1]"),
+                port: 80
             }
         );
         let addr = "test.test";

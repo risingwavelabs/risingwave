@@ -151,23 +151,15 @@ mod tests {
     #[tokio::test]
     async fn test_values_executor() {
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
-        let exprs = vec![
-            Box::new(LiteralExpression::new(
-                DataType::Int16,
-                Some(ScalarImpl::Int16(1)),
-            )) as BoxedExpression,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(2)),
-            )),
-            Box::new(LiteralExpression::new(
-                DataType::Int64,
-                Some(ScalarImpl::Int64(3)),
-            )),
-            Box::new(LiteralExpression::new(
+        let exprs: Vec<BoxedExpression> = vec![
+            LiteralExpression::new(DataType::Int16, Some(ScalarImpl::Int16(1))).into(),
+            LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(2))).into(),
+            LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(3))).into(),
+            LiteralExpression::new(
                 StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]).into(),
                 Some(ScalarImpl::Struct(value)),
-            )) as BoxedExpression,
+            )
+            .into(),
         ];
 
         let fields = exprs
@@ -215,22 +207,10 @@ mod tests {
     #[tokio::test]
     async fn test_chunk_split_size() {
         let rows = [
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(1)),
-            )) as BoxedExpression,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(2)),
-            )) as BoxedExpression,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(3)),
-            )) as BoxedExpression,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(4)),
-            )) as BoxedExpression,
+            LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(1))).into(),
+            LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(2))).into(),
+            LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(3))).into(),
+            LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(4))).into(),
         ]
         .into_iter()
         .map(|expr| vec![expr])
