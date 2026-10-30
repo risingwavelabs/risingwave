@@ -312,8 +312,10 @@ fn task_main(
                         .set_message(format!("redis {}:{}", c.address, c.port));
                 }
                 ServiceConfig::Cassandra(c) => {
-                    CassandraService::new(c.clone()).execute(&mut ctx)?;
-                    risedev::CassandraReadyCheckTask::new(c.clone()).execute(&mut ctx)?;
+                    let mut service = CassandraService::new(c.clone());
+                    service.execute(&mut ctx)?;
+                    let mut task = risedev::CassandraReadyCheckTask::new(c.clone());
+                    task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("cassandra {}:{}", c.address, c.port));
                 }
