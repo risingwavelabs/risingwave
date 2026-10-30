@@ -66,7 +66,6 @@ public final class ValidatorUtils {
             case MYSQL:
                 return String.format("jdbc:mysql://%s:%s/%s", host, port, database);
             case POSTGRES:
-            case CITUS:
                 return String.format("jdbc:postgresql://%s:%s/%s", host, port, database);
             case SQL_SERVER:
                 return String.format(

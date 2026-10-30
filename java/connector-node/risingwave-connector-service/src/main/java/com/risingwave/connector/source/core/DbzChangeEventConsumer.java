@@ -129,8 +129,6 @@ public class DbzChangeEventConsumer
                 return SourceType.MYSQL;
             case POSTGRES:
                 return SourceType.POSTGRES;
-            case CITUS:
-                return SourceType.CITUS;
             case MONGODB:
                 return SourceType.MONGODB;
             case SQL_SERVER:

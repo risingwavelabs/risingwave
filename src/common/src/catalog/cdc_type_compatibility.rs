@@ -36,7 +36,7 @@ pub fn cdc_source_column_type_compatible(
         PbCdcTableType::SqlServer => {
             sql_server_source_column_type_compatible(&upstream_type_name, rw_type_name)
         }
-        PbCdcTableType::Postgres | PbCdcTableType::Citus => postgres_source_column_type_compatible(
+        PbCdcTableType::Postgres => postgres_source_column_type_compatible(
             &upstream_type_name,
             rw_type_name,
             char_max_length,
@@ -254,9 +254,7 @@ fn auto_schema_change_source_type_candidates(
         PbCdcTableType::SqlServer => {
             sql_server_auto_schema_change_source_type_candidates(mapped_type)
         }
-        PbCdcTableType::Postgres | PbCdcTableType::Citus => {
-            postgres_auto_schema_change_source_type_candidates(mapped_type)
-        }
+        PbCdcTableType::Postgres => postgres_auto_schema_change_source_type_candidates(mapped_type),
         PbCdcTableType::Unspecified | PbCdcTableType::Mongodb => vec![],
     }
 }

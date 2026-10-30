@@ -150,8 +150,6 @@ pub enum CdcTableType {
     #[sea_orm(string_value = "MONGO")]
     #[serde(rename = "Mongo")] // keep the serde name used in meta backup snapshots
     Mongodb,
-    #[sea_orm(string_value = "CITUS")]
-    Citus,
 }
 
 impl From<CdcTableType> for PbCdcTableType {
@@ -161,7 +159,6 @@ impl From<CdcTableType> for PbCdcTableType {
             CdcTableType::Mysql => Self::Mysql,
             CdcTableType::SqlServer => Self::SqlServer,
             CdcTableType::Mongodb => Self::Mongodb,
-            CdcTableType::Citus => Self::Citus,
             CdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -174,7 +171,6 @@ impl From<PbCdcTableType> for CdcTableType {
             PbCdcTableType::Mysql => Self::Mysql,
             PbCdcTableType::SqlServer => Self::SqlServer,
             PbCdcTableType::Mongodb => Self::Mongodb,
-            PbCdcTableType::Citus => Self::Citus,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -394,7 +390,6 @@ impl From<PbTable> for ActiveModel {
                     2 => CdcTableType::Mysql,
                     3 => CdcTableType::SqlServer,
                     4 => CdcTableType::Mongodb,
-                    5 => CdcTableType::Citus,
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),
@@ -414,7 +409,6 @@ mod tests {
             (CdcTableType::Mysql, "MYSQL", "Mysql"),
             (CdcTableType::SqlServer, "SQLSERVER", "Sqlserver"),
             (CdcTableType::Mongodb, "MONGO", "Mongo"),
-            (CdcTableType::Citus, "CITUS", "Citus"),
         ] {
             assert_eq!(cdc_table_type.to_value(), sea_orm_value);
             assert_eq!(

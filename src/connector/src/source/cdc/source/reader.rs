@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
-
-use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -22,7 +19,6 @@ use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_jni_core::{JniReceiverType, OwnedPointer, call_static_method};
 use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
@@ -42,9 +38,6 @@ pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
     source_id: u64,
     #[expect(dead_code)]
     start_offset: Option<String>,
-    // host address of worker node for a Citus cluster
-    #[expect(dead_code)]
-    server_addr: Option<String>,
     #[expect(dead_code)]
     conn_props: CdcProperties<T>,
     #[expect(dead_code)]
@@ -75,26 +68,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
 
-        let mut properties = conn_props.properties.clone();
-
-        let mut citus_server_addr = None;
-        // For citus, we need to rewrite the `table.name` to capture sharding tables
-        if matches!(T::source_type(), CdcSourceType::Citus)
-            && let Some(ref citus_split) = split.citus_split
-            && let Some(ref server_addr) = citus_split.server_addr
-        {
-            citus_server_addr = Some(server_addr.clone());
-            let host_addr =
-                HostAddr::from_str(server_addr).context("invalid server address for cdc split")?;
-            properties.insert("hostname".to_owned(), host_addr.host);
-            properties.insert("port".to_owned(), host_addr.port.to_string());
-            // rewrite table name with suffix to capture all shards in the split
-            let mut table_name = properties
-                .remove("table.name")
-                .ok_or_else(|| anyhow!("missing field 'table.name'"))?;
-            table_name.push_str("_[0-9]+");
-            properties.insert("table.name".into(), table_name);
-        }
+        let properties = conn_props.properties.clone();
 
         let source_id = split.split_id() as u64;
         let source_type = conn_props.get_source_type_pb();
@@ -187,18 +161,6 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             | CdcSourceType::Oracle => Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
-                server_addr: None,
-                conn_props,
-                split_id,
-                snapshot_done: split.snapshot_done(),
-                parser_config,
-                source_ctx,
-                rx,
-            },
-            CdcSourceType::Citus => Self {
-                source_id: split.split_id() as u64,
-                start_offset: split.start_offset().clone(),
-                server_addr: citus_server_addr,
                 conn_props,
                 split_id,
                 snapshot_done: split.snapshot_done(),

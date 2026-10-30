@@ -291,7 +291,7 @@ pub fn validate_compatibility(
         ))));
     }
 
-    if connector == POSTGRES_CDC_CONNECTOR || connector == CITUS_CDC_CONNECTOR {
+    if connector == POSTGRES_CDC_CONNECTOR {
         match props.get("slot.name") {
             None => {
                 // Build a random slot name with UUID
@@ -343,7 +343,6 @@ pub fn validate_compatibility(
     // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
     if (connector == MYSQL_CDC_CONNECTOR
         || connector == POSTGRES_CDC_CONNECTOR
-        || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
         || connector == SQL_SERVER_CDC_CONNECTOR
         || connector == ORACLE_CDC_CONNECTOR)
@@ -360,7 +359,6 @@ pub fn validate_compatibility(
     // Validate debezium.max.queue.size for all CDC connectors
     if (connector == MYSQL_CDC_CONNECTOR
         || connector == POSTGRES_CDC_CONNECTOR
-        || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
         || connector == SQL_SERVER_CDC_CONNECTOR
         || connector == ORACLE_CDC_CONNECTOR)

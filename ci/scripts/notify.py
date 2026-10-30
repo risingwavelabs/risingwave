@@ -89,7 +89,6 @@ INTEGRATION_TEST_MAP = {
     "debezium-postgres-json": ["bohan"],
     "debezium-sqlserver-json": ["bohan"],
     "tidb-cdc-sink-json": ["eric"],
-    "citus-cdc-json": ["siyuan"],
     "kinesis-s3-source-json": ["bohan"],
     "clickhouse-sink-json": ["xinhao"],
     "cockroach-sink-json": ["bohan"],

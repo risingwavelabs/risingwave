@@ -21,7 +21,6 @@ import com.risingwave.proto.ConnectorServiceProto;
 public enum SourceTypeE {
     MYSQL,
     POSTGRES,
-    CITUS,
     MONGODB,
     SQL_SERVER,
     ORACLE,
@@ -33,8 +32,6 @@ public enum SourceTypeE {
                 return SourceTypeE.MYSQL;
             case POSTGRES:
                 return SourceTypeE.POSTGRES;
-            case CITUS:
-                return SourceTypeE.CITUS;
             case MONGODB:
                 return SourceTypeE.MONGODB;
             case SQL_SERVER:
