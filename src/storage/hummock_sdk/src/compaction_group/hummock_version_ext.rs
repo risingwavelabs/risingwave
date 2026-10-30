@@ -159,36 +159,26 @@ impl HummockVersionCommon<SstableInfo> {
         &self,
         existing_table_ids: &[TableId],
     ) -> BTreeMap<TableId, TableWatermarks> {
-        safe_epoch_table_watermarks_impl(&self.table_watermarks, existing_table_ids)
+        safe_epoch_table_watermarks_impl(&self.table_watermarks, existing_table_ids.iter().copied())
     }
 }
 
 pub fn safe_epoch_table_watermarks_impl(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
-    existing_table_ids: &[TableId],
+    existing_table_ids: impl Iterator<Item = TableId>,
 ) -> BTreeMap<TableId, TableWatermarks> {
-    fn extract_single_table_watermark(
-        table_watermarks: &TableWatermarks,
-    ) -> Option<TableWatermarks> {
-        if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first() {
-            Some(TableWatermarks {
-                watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
-                direction: table_watermarks.direction,
-                watermark_type: table_watermarks.watermark_type,
-            })
-        } else {
-            None
-        }
-    }
-    table_watermarks
-        .iter()
-        .filter_map(|(table_id, table_watermarks)| {
-            if !existing_table_ids.contains(table_id) {
-                None
-            } else {
-                extract_single_table_watermark(table_watermarks)
-                    .map(|table_watermarks| (*table_id, table_watermarks))
-            }
+    existing_table_ids
+        .filter_map(|table_id| {
+            let table_watermarks = table_watermarks.get(&table_id)?;
+            let (first_epoch, first_epoch_watermark) = table_watermarks.watermarks.first()?;
+            Some((
+                table_id,
+                TableWatermarks {
+                    watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
+                    direction: table_watermarks.direction,
+                    watermark_type: table_watermarks.watermark_type,
+                },
+            ))
         })
         .collect()
 }

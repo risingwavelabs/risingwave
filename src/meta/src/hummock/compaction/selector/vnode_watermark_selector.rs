@@ -84,19 +84,16 @@ fn safe_epoch_read_table_watermarks(
     member_table_ids: &BTreeSet<TableId>,
 ) -> BTreeMap<TableId, ReadTableWatermark> {
     safe_epoch_read_table_watermarks_impl(
-        safe_epoch_table_watermarks_impl(
-            table_watermarks,
-            &member_table_ids.iter().copied().collect::<Vec<_>>(),
-        )
-        .into_iter()
-        .filter(|(_table_id, table_watermarks)| {
-            {
-                matches!(
-                    table_watermarks.watermark_type,
-                    WatermarkSerdeType::PkPrefix
-                )
-            }
-        })
-        .collect(),
+        safe_epoch_table_watermarks_impl(table_watermarks, member_table_ids.iter().copied())
+            .into_iter()
+            .filter(|(_table_id, table_watermarks)| {
+                {
+                    matches!(
+                        table_watermarks.watermark_type,
+                        WatermarkSerdeType::PkPrefix
+                    )
+                }
+            })
+            .collect(),
     )
 }

@@ -1350,7 +1350,7 @@ impl HummockManager {
             &mut compact_task,
             compaction_config.as_ref(),
             &compact_table_ids,
-            safe_epoch_table_watermarks_impl(table_watermarks, &compact_table_ids),
+            safe_epoch_table_watermarks_impl(table_watermarks, compact_table_ids.iter().copied()),
             all_versioned_table_schemas,
         );
 
