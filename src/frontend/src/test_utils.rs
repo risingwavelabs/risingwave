@@ -495,6 +495,7 @@ impl CatalogWriter for MockCatalogWriter {
         source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
+        _if_exists: bool,
     ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
@@ -512,7 +513,7 @@ impl CatalogWriter for MockCatalogWriter {
                 .read()
                 .get_all_indexes_related_to_object(database_id, schema_id, table_id);
         for index in indexes {
-            self.drop_index(index.id, cascade).await?;
+            self.drop_index(index.id, cascade, false).await?;
         }
         self.catalog
             .write()
@@ -529,7 +530,12 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
+    async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        cascade: bool,
+        _if_exists: bool,
+    ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),
@@ -543,7 +549,7 @@ impl CatalogWriter for MockCatalogWriter {
                 .read()
                 .get_all_indexes_related_to_object(database_id, schema_id, table_id);
         for index in indexes {
-            self.drop_index(index.id, cascade).await?;
+            self.drop_index(index.id, cascade, false).await?;
         }
         self.catalog
             .write()
@@ -551,7 +557,12 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()> {
+    async fn drop_source(
+        &self,
+        source_id: SourceId,
+        cascade: bool,
+        _if_exists: bool,
+    ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),
@@ -570,7 +581,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()> {
+    async fn drop_sink(&self, sink_id: SinkId, cascade: bool, _if_exists: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),
@@ -589,6 +600,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         subscription_id: SubscriptionId,
         cascade: bool,
+        _if_exists: bool,
     ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
@@ -605,7 +617,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
+    async fn drop_index(&self, index_id: IndexId, cascade: bool, _if_exists: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),
