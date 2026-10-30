@@ -543,6 +543,7 @@ pub async fn start_service_as_election_leader(
         iceberg_pk_index_sink_manager.clone(),
         scale_controller.clone(),
         refresh_manager.clone(),
+        barrier_scheduler.clone(),
     )
     .await;
     tracing::info!("GlobalBarrierManager started");

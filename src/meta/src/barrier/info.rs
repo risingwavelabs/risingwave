@@ -22,7 +22,7 @@ use parking_lot::RawRwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
@@ -40,12 +40,14 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
+use crate::barrier::bounded_progress::BoundedLoadTracker;
 use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReplaceStreamJobPlan, ThrottleConfigMap,
     extract_throttle_config,
 };
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
+use crate::barrier::load_progress::LoadReport;
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::{
@@ -410,6 +412,7 @@ pub(super) struct InflightStreamingJobInfo {
     pub subscribers: HashMap<SubscriberId, SubscriberType>,
     pub status: CreateStreamingJobStatus,
     pub cdc_table_backfill_tracker: Option<CdcTableBackfillTracker>,
+    pub bounded_load_tracker: Option<BoundedLoadTracker>,
 }
 
 impl InflightStreamingJobInfo {
@@ -706,6 +709,13 @@ impl InflightDatabaseInfo {
             };
             tracker.update_split_progress(progress);
         }
+
+        for report in LoadReport::from_responses(resps) {
+            if let Some(tracker) = self.bounded_load_tracker_mut(report.source_id) {
+                tracker.apply_progress(&report);
+            }
+        }
+
         // Handle CDC source offset updated events
         for cdc_offset_updated in resps
             .values()
@@ -761,6 +771,7 @@ impl InflightDatabaseInfo {
         let mut finished_jobs = vec![];
         let mut table_ids_to_truncate = vec![];
         let mut finished_cdc_table_backfill = vec![];
+        let mut bounded_load_actions = vec![];
         for (job_id, job) in &mut self.jobs {
             if let CreateStreamingJobStatus::Creating { tracker, .. } = &mut job.status {
                 let (is_finished, truncate_table_ids) = tracker.collect_staging_commit_info();
@@ -774,16 +785,23 @@ impl InflightDatabaseInfo {
                     finished_jobs.push(tracker.into_tracking_job());
                 }
             }
+
+            if let Some(tracker) = &mut job.bounded_load_tracker {
+                bounded_load_actions.extend(tracker.take_actions());
+            }
+
             if let Some(tracker) = &mut job.cdc_table_backfill_tracker
                 && tracker.take_pre_completed()
             {
                 finished_cdc_table_backfill.push(*job_id);
             }
         }
+
         StagingCommitInfo {
             finished_jobs,
             table_ids_to_truncate,
             finished_cdc_table_backfill,
+            bounded_load_actions,
         }
     }
 
@@ -908,6 +926,7 @@ impl InflightDatabaseInfo {
             subscribers,
             status,
             cdc_table_backfill_tracker,
+            bounded_load_tracker,
         } = job;
         self.jobs
             .try_insert(
@@ -918,6 +937,7 @@ impl InflightDatabaseInfo {
                     fragment_infos: Default::default(), // fill in later in pre_apply_new_fragments
                     status,
                     cdc_table_backfill_tracker,
+                    bounded_load_tracker,
                 },
             )
             .expect("non-duplicate");
@@ -928,11 +948,43 @@ impl InflightDatabaseInfo {
         );
     }
 
+    /// Returns whether a job of the database tracks the bounded load of `source_id`.
+    pub(super) fn is_bounded_load(&self, source_id: SourceId) -> bool {
+        self.jobs.values().any(|job| {
+            job.bounded_load_tracker
+                .as_ref()
+                .is_some_and(|tracker| tracker.source_id == source_id)
+        })
+    }
+
+    fn bounded_load_tracker_mut(&mut self, source_id: SourceId) -> Option<&mut BoundedLoadTracker> {
+        self.jobs
+            .values_mut()
+            .filter_map(|job| job.bounded_load_tracker.as_mut())
+            .find(|tracker| tracker.source_id == source_id)
+    }
+
+    pub(super) fn has_pending_bounded_load_start(&self) -> bool {
+        self.jobs
+            .values()
+            .filter_map(|job| job.bounded_load_tracker.as_ref())
+            .any(|tracker| !tracker.start_sent)
+    }
+
+    /// Returns a bounded source whose `Load { Start }` is still to be sent, marking it as sent.
+    pub(super) fn take_pending_bounded_load_start(&mut self) -> Option<SourceId> {
+        self.jobs
+            .values_mut()
+            .filter_map(|job| job.bounded_load_tracker.as_mut())
+            .find_map(|tracker| tracker.take_pending_start())
+    }
+
     /// Register a new streaming job entry (with empty `fragment_infos`).
     pub(crate) fn pre_apply_new_job(
         &mut self,
         job_id: JobId,
         cdc_table_backfill_tracker: Option<CdcTableBackfillTracker>,
+        bounded_load_tracker: Option<BoundedLoadTracker>,
     ) {
         {
             self.jobs
@@ -944,6 +996,7 @@ impl InflightDatabaseInfo {
                         subscribers: Default::default(), // no subscriber for newly create job
                         status: CreateStreamingJobStatus::Init,
                         cdc_table_backfill_tracker,
+                        bounded_load_tracker,
                     },
                 )
                 .expect("non-duplicate");

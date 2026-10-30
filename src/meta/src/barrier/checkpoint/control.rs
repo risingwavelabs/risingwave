@@ -184,6 +184,7 @@ impl CheckpointControl {
                 partial_graph_manager,
                 &mut task,
                 &self.hummock_version_stats,
+                self.in_flight_barrier_nums,
             );
         }
         task
@@ -1027,6 +1028,7 @@ impl DatabaseCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         task: &mut Option<CompleteBarrierTask>,
         hummock_version_stats: &HummockVersionStats,
+        in_flight_barrier_nums: usize,
     ) {
         // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
         let mut independent_jobs_task = vec![];
@@ -1160,6 +1162,8 @@ impl DatabaseCheckpointControl {
                 );
                 self.completing_barrier = Some(info.barrier_info.epoch());
                 task.finished_jobs.extend(staging_commit_info.finished_jobs);
+                task.bounded_load_actions
+                    .extend(staging_commit_info.bounded_load_actions);
                 task.finished_cdc_table_backfill
                     .extend(staging_commit_info.finished_cdc_table_backfill);
                 task.epoch_infos
@@ -1175,6 +1179,16 @@ impl DatabaseCheckpointControl {
         {
             periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
         }
+
+        // A forced barrier is dropped when the database is at the in-flight limit, so forcing
+        // then would only make the barrier worker spin until a barrier is collected.
+        if self.database_info.has_pending_bounded_load_start()
+            && partial_graph_manager.pending_barrier_num(self.partial_graph_id)
+                < in_flight_barrier_nums
+        {
+            periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
+        }
+
         if !independent_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
             for (job_id, epoch, resps, info, compaction) in independent_jobs_task {
@@ -1230,7 +1244,9 @@ impl DatabaseCheckpointControl {
         task: &mut Option<CompleteBarrierTask>,
         resps: &HashMap<WorkerId, BarrierCompleteResponse>,
     ) {
-        let refresh_load_progress = LoadReport::from_responses(resps).collect::<Vec<_>>();
+        let refresh_load_progress = LoadReport::from_responses(resps)
+            .filter(|report| !self.database_info.is_bounded_load(report.source_id))
+            .collect::<Vec<_>>();
         if !refresh_load_progress.is_empty() {
             let task = task.get_or_insert_default();
             task.refresh_load_progress.extend(refresh_load_progress);

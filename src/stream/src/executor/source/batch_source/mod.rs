@@ -23,7 +23,45 @@ pub use batch_opendal_fs_fetch::*;
 mod batch_iceberg_list;
 pub use batch_iceberg_list::*;
 mod batch_iceberg_fetch;
+use std::time::Duration;
+
 pub use batch_iceberg_fetch::*;
+use risingwave_connector::source::ingest_mode::IngestMode;
+
+use crate::executor::source::get_infinite_backoff_strategy;
+
+/// Retries a bounded load makes before it fails.
+const BOUNDED_LOAD_MAX_RETRIES: usize = 10;
+
+type Backoff = Box<dyn Iterator<Item = Duration> + Send>;
+
+/// How many times a load retries before it fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadRetryPolicy {
+    Unlimited,
+    Limited(usize),
+}
+
+impl LoadRetryPolicy {
+    /// Bounded loads fail after a fixed number of retries; other loads retry forever.
+    pub fn from_ingest_mode(ingest_mode: &IngestMode) -> Self {
+        if ingest_mode.is_bounded() {
+            Self::Limited(BOUNDED_LOAD_MAX_RETRIES)
+        } else {
+            Self::Unlimited
+        }
+    }
+
+    /// Delays between retries of a load. Once the backoff runs out, the load fails.
+    fn backoff(self) -> Backoff {
+        match self {
+            Self::Unlimited => Box::new(get_infinite_backoff_strategy()),
+            Self::Limited(max_retries) => {
+                Box::new(get_infinite_backoff_strategy().take(max_retries))
+            }
+        }
+    }
+}
 
 /// Define a stream executor module that is gated by a feature.
 ///

@@ -124,7 +124,13 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListBoundedJobsRequest>,
     ) -> TonicResponse<ListBoundedJobsResponse> {
-        unimplemented!("bounded ingestion metadata is implemented in the next layer")
+        let jobs = self
+            .metadata_manager
+            .catalog_controller
+            .list_bounded_jobs()
+            .await?;
+
+        Ok(Response::new(ListBoundedJobsResponse { jobs }))
     }
 
     async fn list_refresh_table_states(

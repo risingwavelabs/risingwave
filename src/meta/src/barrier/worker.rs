@@ -52,9 +52,9 @@ use crate::barrier::rpc::{
 };
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
-    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    CreateStreamingJobType, IndependentStreamingJobType, RecoveryReason, RescheduleContext,
-    UpdateDatabaseBarrierRequest, schedule,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierScheduler,
+    BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobType, IndependentStreamingJobType,
+    RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
@@ -303,6 +303,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         refresh_manager: GlobalRefreshManagerRef,
+        barrier_scheduler: BarrierScheduler,
     ) -> Self {
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
@@ -316,6 +317,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             scale_controller,
             env.clone(),
             refresh_manager,
+            barrier_scheduler,
             sink_manager,
             iceberg_pk_index_sink_manager,
         ));
@@ -1196,6 +1198,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 hummock_version_stats,
                 database_infos,
                 mut cdc_table_snapshot_splits,
+                mut active_bounded_loads,
             } = runtime_info_snapshot;
 
             // Derive a conservative job set from the snapshot already loaded for recovery. It
@@ -1270,6 +1273,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             is_paused,
                             &hummock_version_stats,
                             &mut cdc_table_snapshot_splits,
+                            &mut active_bounded_loads,
                             batch_refresh,
                             iceberg_v3,
                         )?

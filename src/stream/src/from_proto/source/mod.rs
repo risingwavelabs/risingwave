@@ -20,8 +20,6 @@ use std::collections::BTreeMap;
 
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::plan_common::SourceIngestMode;
-use risingwave_pb::plan_common::source_ingest_mode::IngestMode;
 pub use trad_source::create_source_desc_builder;
 
 use super::*;
@@ -31,11 +29,4 @@ fn get_connector_name(with_props: &BTreeMap<String, String>) -> String {
         .get(UPSTREAM_SOURCE_KEY)
         .map(|s| s.to_lowercase())
         .unwrap_or_default()
-}
-
-fn is_full_reload_refresh(ingest_mode: &Option<SourceIngestMode>) -> bool {
-    ingest_mode
-        .as_ref()
-        .map(|ingest_mode| matches!(ingest_mode.ingest_mode, Some(IngestMode::FullReload(_))))
-        .unwrap_or(false)
 }
