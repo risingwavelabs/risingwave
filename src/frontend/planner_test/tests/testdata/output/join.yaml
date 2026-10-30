@@ -577,7 +577,7 @@
     create table t3(x int);
     select x from t1 join t2 using (x) full join t3 using (x);
   logical_plan: |-
-    LogicalProject { exprs: [Coalesce(t1.x, t2.x, t3.x) as $expr1] }
+    LogicalProject { exprs: [Coalesce(t1.x, t3.x) as $expr1] }
     └─LogicalJoin { type: FullOuter, on: (t1.x = t3.x), output: all }
       ├─LogicalJoin { type: Inner, on: (t1.x = t2.x), output: all }
       │ ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id, t1._rw_timestamp] }

@@ -13,15 +13,12 @@
 // limitations under the License.
 
 use risingwave_pb::plan_common::JoinType;
-use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
-};
+use risingwave_sqlparser::ast::{Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins};
 
-use crate::binder::bind_context::BindContext;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{Binder, COLUMN_GROUP_PREFIX, Clause, Relation};
+use crate::binder::{Binder, Clause, Relation};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprImpl, ScopeId};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, ScopeId};
 
 #[derive(Debug, Clone)]
 pub struct BoundJoin {
@@ -186,14 +183,14 @@ impl Binder {
                     .indices_of
                     .iter()
                     .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
-                    .map(|(s, idxes)| (Ident::from_real_value(s), idxes))
+                    .map(|(s, _)| Ident::from_real_value(s))
                     .collect::<Vec<_>>();
-                columns.sort_by_key(|a| a.0.real_value());
+                columns.sort_by_key(|column| column.real_value());
 
                 let mut join_columns = Vec::new();
 
                 // Walk the RHS cols, checking to see if any share a name with any LHS cols
-                for (column, indices_r) in columns {
+                for column in columns {
                     // TODO: is it ok to ignore quote style?
                     // If we have a `USING` constraint, we only bind the columns appearing in the
                     // constraint.
@@ -202,72 +199,39 @@ impl Binder {
                     {
                         continue;
                     }
-                    let indices_l = match old_context.get_unqualified_indices(&column.real_value())
-                    {
-                        Err(e) => {
-                            if let ErrorCode::ItemNotFound(_) = e {
-                                continue;
-                            } else {
-                                return Err(e.into());
-                            }
-                        }
+                    let merged_l = match old_context.get_unqualified_indices(&column.real_value()) {
+                        Err(ErrorCode::ItemNotFound(_)) => continue,
+                        Err(e) => return Err(e.into()),
                         Ok(idxs) => idxs,
                     };
-                    // A side resolves to a single column unless it is a column group without a
-                    // non-nullable column, which resolves to `COALESCE` over the group.
-                    let single_l = (indices_l.len() == 1).then(|| indices_l[0]);
-                    let single_r = match self.context.get_unqualified_indices(&column.real_value())
-                    {
-                        Ok(idxs) if idxs.len() == 1 => Some(idxs[0] + l_len),
-                        _ => None,
-                    };
-                    // The merged column holds the left value for INNER and LEFT joins and the right
-                    // value for RIGHT joins. For FULL joins it is `COALESCE` over both sides.
-                    let non_nullable = match join_type {
-                        JoinType::Inner => single_l.or(single_r),
-                        JoinType::LeftOuter => single_l,
-                        JoinType::RightOuter => single_r,
-                        JoinType::FullOuter => None,
+                    // Merging the contexts offsets the right columns by the left ones.
+                    let merged_r = self
+                        .context
+                        .get_unqualified_indices(&column.real_value())?
+                        .into_iter()
+                        .map(|i| i + l_len)
+                        .collect::<Vec<_>>();
+                    // The merged column is the left column for INNER and LEFT joins, the right
+                    // column for RIGHT joins, and `COALESCE(left, right)` for FULL joins.
+                    let merged = match join_type {
+                        JoinType::Inner | JoinType::LeftOuter => merged_l.clone(),
+                        JoinType::RightOuter => merged_r.clone(),
+                        JoinType::FullOuter => [merged_l.as_slice(), merged_r.as_slice()].concat(),
                         _ => unreachable!(),
                     };
-                    let indices_r = indices_r.iter().map(|i| i + l_len).collect::<Vec<_>>();
-                    join_columns.push((column, indices_l, indices_r, non_nullable));
+                    join_columns.push((merged_l, merged_r, merged));
                 }
                 self.pop_and_merge_lateral_context()?;
 
-                // Build the join condition in the merged context: merging offsets the column
-                // indices and column group ids of the right side.
-                let mut col_indices = Vec::new();
-                let mut binary_expr = Expr::Value(Value::Boolean(true));
-                for (column, indices_l, indices_r, non_nullable) in join_columns {
-                    // Select at most one column from each natural column group from left and right
-                    col_indices.push((indices_l[0], indices_r[0], non_nullable));
-                    let left_expr = Self::get_identifier_from_indices(
-                        &self.context,
-                        &indices_l,
-                        column.clone(),
-                    )?;
-                    let right_expr = Self::get_identifier_from_indices(
-                        &self.context,
-                        &indices_r,
-                        column.clone(),
-                    )?;
-                    binary_expr = Expr::BinaryOp {
-                        left: Box::new(binary_expr),
-                        op: BinaryOperator::And,
-                        right: Box::new(Expr::BinaryOp {
-                            left: Box::new(left_expr),
-                            op: BinaryOperator::Eq,
-                            right: Box::new(right_expr),
-                        }),
-                    }
+                let mut conds = Vec::with_capacity(join_columns.len());
+                for (merged_l, merged_r, merged) in join_columns {
+                    let left = self.context.bind_column_indices(&merged_l)?;
+                    let right = self.context.bind_column_indices(&merged_r)?;
+                    conds.push(FunctionCall::new(ExprType::Equal, vec![left, right])?.into());
+                    self.context
+                        .add_natural_columns(merged_l[0], merged_r[0], merged);
                 }
-                // Bind the expression first, before allowing disambiguation of the columns involved
-                // in the join
-                let expr = self.bind_expr(&binary_expr)?;
-                for (l, r, non_nullable) in col_indices {
-                    self.context.add_natural_columns(l, r, non_nullable);
-                }
+                let expr = ExprImpl::and(conds);
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
@@ -280,29 +244,5 @@ impl Binder {
                 (bound_expr, None)
             }
         })
-    }
-
-    fn get_identifier_from_indices(
-        context: &BindContext,
-        indices: &[usize],
-        column: Ident,
-    ) -> Result<Expr> {
-        if indices.len() == 1 {
-            let right_table = context.columns[indices[0]].table_name.as_ref();
-            Ok(Expr::CompoundIdentifier(vec![
-                Ident::from_real_value(right_table),
-                column,
-            ]))
-        } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {
-            Ok(Expr::CompoundIdentifier(vec![
-                Ident::from_real_value(&format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
-                column,
-            ]))
-        } else {
-            Err(
-                ErrorCode::InternalError(format!("Ambiguous column name: {}", column.real_value()))
-                    .into(),
-            )
-        }
     }
 }
