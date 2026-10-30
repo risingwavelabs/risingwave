@@ -335,6 +335,9 @@ impl HummockManager {
         if object_ids.is_empty() {
             return Ok(0);
         }
+        // Retained owners are read asynchronously. Keep version references alive across
+        // their publication/cleanup handoff without holding a metadata lock across I/O.
+        let _safe_point = self.register_gc_safe_point().await;
         let pinned_by_metadata_backup = match backup_manager.as_ref() {
             Some(b) => b.list_pinned_object_ids().await,
             None => HashSet::default(),
@@ -364,6 +367,8 @@ impl HummockManager {
             .filter_out_objects_by_time_travel(object_ids.into_iter())
             .await?;
         tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in full GC");
+        #[cfg(test)]
+        tests::pause_gc_retention_handoff(self).await;
         let after_time_travel = object_ids.len();
         // filter by object id watermark, i.e. minimum id of uncommitted objects reported by compute nodes.
         let object_ids = object_ids
@@ -613,6 +618,292 @@ mod tests {
 
     use crate::hummock::MockHummockMetaClient;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
+
+    type GcHandoffGate = (
+        tokio::sync::oneshot::Sender<()>,
+        tokio::sync::oneshot::Receiver<()>,
+    );
+    static GC_HANDOFF_GATES: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<usize, GcHandoffGate>>,
+    > = std::sync::LazyLock::new(Default::default);
+
+    pub(super) async fn pause_gc_retention_handoff(manager: &super::HummockManager) {
+        let gate = GC_HANDOFF_GATES
+            .lock()
+            .unwrap()
+            .remove(&(std::ptr::from_ref(manager) as usize));
+        if let Some((entered, resume)) = gate {
+            entered.send(()).unwrap();
+            resume.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_full_gc_preserves_new_backup() {
+        gc_retention_handoff(true).await;
+    }
+
+    #[tokio::test]
+    async fn test_full_gc_preserves_new_time_travel_snapshot() {
+        gc_retention_handoff(false).await;
+    }
+
+    async fn gc_retention_handoff(retain_by_backup: bool) {
+        use risingwave_common::hash::VirtualNode;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
+        use risingwave_hummock_sdk::key_range::KeyRange;
+        use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
+        use risingwave_hummock_sdk::{SyncResult, get_object_data_path};
+
+        use crate::hummock::test_utils::{
+            get_sst_ids, register_table_ids_to_compaction_group, to_local_sstable_info,
+        };
+
+        let mut opts = crate::manager::MetaOpts::test(false);
+        opts.min_sst_retention_time_sec = 0;
+        let (env, manager, _, worker_id) =
+            crate::hummock::manager::tests::setup_compute_env_with_meta_opts(80, opts).await;
+        let client: Arc<dyn HummockMetaClient> =
+            Arc::new(MockHummockMetaClient::new(manager.clone(), worker_id as _));
+        use risingwave_meta_model::table;
+        use risingwave_meta_model::table::{HandleConflictBehavior, TableType};
+        use sea_orm::ActiveValue::Set;
+        use sea_orm::{ActiveModelTrait, TransactionTrait};
+
+        use crate::controller::catalog::CatalogController;
+        let txn = env.meta_store_ref().conn.begin().await.unwrap();
+        let table_id = CatalogController::create_object(
+            &txn,
+            risingwave_meta_model::object::ObjectType::Table,
+            risingwave_common::id::UserId::new(1),
+            Some(risingwave_common::id::SchemaId::new(2).as_object_id()),
+        )
+        .await
+        .unwrap()
+        .oid
+        .as_table_id();
+        table::ActiveModel {
+            table_id: Set(table_id),
+            name: Set("gc_time_travel_probe".to_owned()),
+            optional_associated_source_id: Set(None),
+            table_type: Set(TableType::Table),
+            belongs_to_job_id: Set(None),
+            columns: Set(vec![].into()),
+            pk: Set(vec![].into()),
+            distribution_key: Set(Vec::<i32>::new().into()),
+            stream_key: Set(Vec::<i32>::new().into()),
+            append_only: Set(false),
+            fragment_id: Set(None),
+            vnode_col_index: Set(None),
+            row_id_index: Set(None),
+            value_indices: Set(Vec::<i32>::new().into()),
+            definition: Set(String::new()),
+            handle_pk_conflict_behavior: Set(HandleConflictBehavior::NoCheck),
+            version_column_indices: Set(None),
+            read_prefix_len_hint: Set(0),
+            watermark_indices: Set(Vec::<i32>::new().into()),
+            dist_key_in_pk: Set(Vec::<i32>::new().into()),
+            dml_fragment_id: Set(None),
+            cardinality: Set(None),
+            cleaned_by_watermark: Set(false),
+            description: Set(None),
+            version: Set(None),
+            retention_seconds: Set(None),
+            cdc_table_id: Set(None),
+            vnode_count: Set(1),
+            webhook_info: Set(None),
+            engine: Set(None),
+            clean_watermark_index_in_pk: Set(None),
+            clean_watermark_indices: Set(None),
+            refreshable: Set(false),
+            vector_index_info: Set(None),
+            cdc_table_type: Set(None),
+        }
+        .insert(&txn)
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        let group_id = StaticCompactionGroupId::StateDefault;
+        register_table_ids_to_compaction_group(&manager, &[table_id], group_id).await;
+        let sst_id = get_sst_ids(&manager, 1).await[0];
+        let object_id = HummockObjectId::Sstable(sst_id.into());
+        let epoch = test_epoch(1);
+        let sst = SstableInfoInner {
+            object_id: sst_id.into(),
+            sst_id: sst_id.into(),
+            key_range: KeyRange::new(
+                FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "a"), epoch)
+                    .encode()
+                    .into(),
+                FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "z"), epoch)
+                    .encode()
+                    .into(),
+            ),
+            table_ids: vec![table_id],
+            file_size: 128,
+            sst_size: 128,
+            uncompressed_file_size: 128,
+            total_key_count: 1,
+            min_epoch: epoch,
+            max_epoch: epoch,
+            ..Default::default()
+        }
+        .into();
+        client
+            .commit_epoch(
+                epoch,
+                SyncResult {
+                    uncommitted_ssts: to_local_sstable_info(&[sst]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let gc = &manager.gc_manager;
+        let prefix = gc.store.get_object_prefix(
+            object_id.as_raw().as_raw_id(),
+            gc.use_new_object_prefix_strategy,
+        );
+        let path = get_object_data_path(&prefix, &gc.path_prefix, object_id);
+        // Probe contents are irrelevant to ownership filtering; this test does not decode SSTs.
+        gc.store
+            .upload(&path, bytes::Bytes::from(vec![0; 128]))
+            .await
+            .unwrap();
+        let backup = Arc::new(
+            crate::backup_restore::BackupManager::for_test(env.clone(), manager.clone()).await,
+        );
+        // Age the probe past the real GC clock; explicit channels force the race itself.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+        GC_HANDOFF_GATES
+            .lock()
+            .unwrap()
+            .insert(Arc::as_ptr(&manager) as usize, (entered_tx, resume_rx));
+        let gc_manager = manager.clone();
+        let gc_backup = backup.clone();
+        let gc_task = tokio::spawn(async move {
+            gc_manager
+                .start_full_gc(Duration::ZERO, None, Some(gc_backup))
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(10), entered_rx)
+            .await
+            .expect("GC did not finish scanning retained references")
+            .unwrap();
+
+        let snapshot_epoch = test_epoch(2);
+        if retain_by_backup {
+            use risingwave_pb::backup_service::BackupJobStatus;
+            let job_id = backup.start_backup_job(None).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    let (status, message) = backup.get_backup_job_status(job_id);
+                    match status {
+                        BackupJobStatus::Succeeded => break,
+                        BackupJobStatus::Failed => panic!("backup failed: {message}"),
+                        _ => tokio::task::yield_now().await,
+                    }
+                }
+                // The backup releases its own pin; only the GC lease should remain.
+                while manager.context_info.read().await.version_safe_points.len() > 1 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                backup
+                    .list_pinned_object_ids()
+                    .await
+                    .contains(&object_id.as_raw())
+            );
+        } else {
+            env.system_params_manager_impl_ref()
+                .set_param(
+                    "time_travel_retention_ms",
+                    Some((10 * 60 * 1000).to_string()),
+                )
+                .await
+                .unwrap();
+            client
+                .commit_epoch(snapshot_epoch, SyncResult::default())
+                .await
+                .unwrap();
+            assert!(
+                manager
+                    .epoch_to_version(snapshot_epoch, table_id)
+                    .await
+                    .unwrap()
+                    .get_object_ids()
+                    .any(|id| id == object_id)
+            );
+        }
+
+        manager.unregister_table_ids([table_id]).await.unwrap();
+        manager.create_version_checkpoint(1).await.unwrap();
+        assert!(
+            !manager
+                .get_current_version()
+                .await
+                .get_object_ids()
+                .any(|id| id == object_id)
+        );
+        resume_tx.send(()).unwrap();
+        gc_task.await.unwrap().unwrap();
+        if retain_by_backup {
+            assert!(
+                backup
+                    .list_pinned_object_ids()
+                    .await
+                    .contains(&object_id.as_raw())
+            );
+        } else {
+            assert!(
+                manager
+                    .epoch_to_version(snapshot_epoch, table_id)
+                    .await
+                    .unwrap()
+                    .get_object_ids()
+                    .any(|id| id == object_id)
+            );
+        }
+        assert!(
+            gc.store.metadata(&path).await.is_ok(),
+            "GC deleted a retained object"
+        );
+        // Releasing the batch lease must eventually allow ordinary GC to reclaim the object.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while manager.get_min_pinned_version_id().await
+                != risingwave_hummock_sdk::version::MAX_HUMMOCK_VERSION_ID
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        if retain_by_backup {
+            let backup_ids = backup
+                .manifest()
+                .await
+                .snapshot_metadata
+                .iter()
+                .map(|snapshot| snapshot.id)
+                .collect_vec();
+            backup.delete_backups(&backup_ids).await.unwrap();
+            manager
+                .start_full_gc(Duration::ZERO, None, Some(backup))
+                .await
+                .unwrap();
+            assert!(
+                gc.store.metadata(&path).await.is_err(),
+                "released object was never reclaimed"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_full_gc() {
