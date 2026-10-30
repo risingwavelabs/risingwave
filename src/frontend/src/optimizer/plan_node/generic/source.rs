@@ -119,7 +119,9 @@ impl GenericPlanNode for Source {
 impl Source {
     pub fn stream_kind(&self) -> StreamKind {
         if let Some(catalog) = &self.catalog {
-            if catalog.append_only {
+            if catalog.is_iceberg_update_source() {
+                StreamKind::Retract
+            } else if catalog.append_only {
                 StreamKind::AppendOnly
             } else {
                 // Always treat source as upsert, as we either don't parse the old record for `Update`, or we don't
@@ -134,7 +136,17 @@ impl Source {
 
     /// The output is [`risingwave_connector::source::filesystem::FsPageItem`] / [`iceberg::scan::FileScanTask`]
     pub fn file_list_node(core: Self) -> Self {
-        let column_catalog = if core.is_iceberg_connector() {
+        let column_catalog = if core.is_iceberg_update_source() {
+            // Task assignments, in the layout of the Fetch state table.
+            Self::iceberg_update_task_fields()
+                .iter()
+                .enumerate()
+                .map(|(id, field)| ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(field, id as i32),
+                    is_hidden: false,
+                })
+                .collect()
+        } else if core.is_iceberg_connector() {
             vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
@@ -236,6 +248,12 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_iceberg_connector())
     }
 
+    pub fn is_iceberg_update_source(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.is_iceberg_update_source())
+    }
+
     pub fn is_kafka_connector(&self) -> bool {
         self.catalog
             .as_ref()
@@ -258,6 +276,9 @@ impl Source {
     }
 
     pub fn exclude_iceberg_hidden_columns(mut self) -> Self {
+        if self.is_iceberg_update_source() {
+            return self;
+        }
         let Some(catalog) = &mut self.catalog else {
             return self;
         };
@@ -347,6 +368,37 @@ impl Source {
             },
             1,
         )
+    }
+
+    fn iceberg_update_task_fields() -> [Field; 3] {
+        [
+            Field {
+                data_type: DataType::Int64,
+                name: "route".to_owned(),
+            },
+            Field {
+                data_type: DataType::Int64,
+                name: "seq".to_owned(),
+            },
+            Field {
+                data_type: DataType::Jsonb,
+                name: "task".to_owned(),
+            },
+        ]
+    }
+
+    /// The Fetch state table of an Iceberg `streaming_updates` source. Tasks are keyed by
+    /// `(route, seq)` and distributed by `route`, so a Fetch actor scans the tasks of a route in
+    /// dispatch order. The List-to-Fetch exchange must hash the same `route` column.
+    pub fn infer_iceberg_update_fetch_table_catalog() -> TableCatalog {
+        let mut builder = TableCatalogBuilder::default();
+        let [route, seq, task] = Self::iceberg_update_task_fields();
+        let route = builder.add_column(&route);
+        let seq = builder.add_column(&seq);
+        builder.add_column(&task);
+        builder.add_order_column(route, OrderType::ascending());
+        builder.add_order_column(seq, OrderType::ascending());
+        builder.build(vec![route], 2)
     }
 
     pub fn clone_with_column_catalog(&self, column_catalog: Vec<ColumnCatalog>) -> Self {

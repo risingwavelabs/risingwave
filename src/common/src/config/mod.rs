@@ -437,6 +437,10 @@ pub mod default {
             1024
         }
 
+        pub fn iceberg_update_ordered_max_tasks() -> u64 {
+            16
+        }
+
         pub fn iceberg_sink_positional_delete_cache_size() -> usize {
             1024
         }

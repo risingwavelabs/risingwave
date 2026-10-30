@@ -16,9 +16,12 @@ use std::collections::{BTreeMap, HashMap};
 
 use assert_matches::assert_matches;
 use risingwave_common::bail;
+use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::{IsSingleton, VnodeCount, VnodeCountCompat};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::stream_graph_visitor::visit_tables;
+use risingwave_common::util::stream_graph_visitor::{
+    visit_fragment, visit_iceberg_completion_tables, visit_tables,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, MergeNode, StreamNode, StreamScanType,
@@ -451,6 +454,7 @@ impl ActorGraphBuilder {
 
         // Fill the vnode count for each internal table, based on schedule result.
         let mut fragment_graph = fragment_graph;
+        let mut fetch_tables = HashMap::new();
         for (id, fragment) in fragment_graph.building_fragments_mut() {
             let mut error = None;
             let fragment_vnode_count = distributions[id].vnode_count();
@@ -491,6 +495,36 @@ impl ActorGraphBuilder {
             if let Some(error) = error {
                 bail!(error);
             }
+            visit_fragment(fragment, |body| {
+                if let NodeBody::StreamFsFetch(node) = body
+                    && let Some(table) = node
+                        .node_inner
+                        .as_ref()
+                        .and_then(|source| source.state_table.as_ref())
+                {
+                    fetch_tables.insert(table.id, table.clone());
+                }
+            });
+        }
+        // The frontend only references the Fetch state table by ID. Derive the descriptor here,
+        // after vnode counts are resolved, so it always matches the persisted Fetch catalog.
+        for fragment in fragment_graph.building_fragments_mut().values_mut() {
+            let mut result = Ok(());
+            visit_iceberg_completion_tables(fragment, |desc| {
+                if result.is_err() {
+                    return;
+                }
+                result = match fetch_tables.get(&desc.table_id) {
+                    Some(fetch) => TableDesc::from_pb_table(fetch)
+                        .try_to_protobuf()
+                        .map(|filled| *desc = filled),
+                    None => Err(anyhow::anyhow!(
+                        "Iceberg completion table {} must reference a Fetch state table in this ingestion graph",
+                        desc.table_id
+                    )),
+                };
+            });
+            result?;
         }
 
         Ok(Self {
@@ -646,6 +680,219 @@ impl ActorGraphBuilder {
             );
         }
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::FragmentTypeFlag;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::common::PbColumnOrder;
+    use risingwave_pb::ddl_service::TableJobType;
+    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc, StorageTableDesc};
+    use risingwave_pb::stream_plan::stream_fragment_graph::{
+        StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
+    };
+    use risingwave_pb::stream_plan::{
+        ExchangeNode, PbDispatchOutputMapping, PbStreamContext, SourceNode,
+        StreamFragmentGraph as StreamFragmentGraphProto, StreamFsFetch, StreamFsFetchNode,
+        StreamSource,
+    };
+
+    use super::*;
+    use crate::manager::{MetaSrvEnv, StreamingJob};
+    use crate::stream::StreamFragmentGraph;
+
+    const LIST_TABLE: u32 = 0;
+    const FETCH_TABLE: u32 = 1;
+
+    fn column(name: &str, data_type: DataType) -> PbColumnCatalog {
+        PbColumnCatalog {
+            column_desc: Some(PbColumnDesc {
+                name: name.to_owned(),
+                column_type: Some(data_type.to_protobuf()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// A List fragment and its dedicated Fetch fragment, with the List referencing `reference`.
+    fn update_graph(reference: u32) -> StreamFragmentGraphProto {
+        let list = StreamNode {
+            node_body: Some(NodeBody::Source(Box::new(SourceNode {
+                source_inner: Some(StreamSource {
+                    state_table: Some(PbTable {
+                        id: LIST_TABLE.into(),
+                        columns: vec![column("state", DataType::Jsonb)],
+                        value_indices: vec![0],
+                        ..Default::default()
+                    }),
+                    iceberg_fetch_state_table: Some(StorageTableDesc {
+                        table_id: reference.into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+            }))),
+            ..Default::default()
+        };
+        let exchange = StreamNode {
+            node_body: Some(NodeBody::Exchange(Box::new(ExchangeNode {
+                strategy: Some(DispatchStrategy {
+                    r#type: DispatcherType::Hash as i32,
+                    dist_key_indices: vec![0],
+                    output_mapping: PbDispatchOutputMapping::simple(vec![0, 1]).into(),
+                }),
+            }))),
+            ..Default::default()
+        };
+        let fetch = StreamNode {
+            node_body: Some(NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
+                node_inner: Some(StreamFsFetch {
+                    state_table: Some(PbTable {
+                        id: FETCH_TABLE.into(),
+                        columns: vec![
+                            column("task", DataType::Varchar),
+                            column("state", DataType::Jsonb),
+                        ],
+                        pk: vec![PbColumnOrder {
+                            column_index: 0,
+                            order_type: Some(OrderType::ascending().to_protobuf()),
+                        }],
+                        distribution_key: vec![0],
+                        stream_key: vec![0],
+                        value_indices: vec![0, 1],
+                        read_prefix_len_hint: 1,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+            }))),
+            input: vec![exchange],
+            ..Default::default()
+        };
+        StreamFragmentGraphProto {
+            fragments: HashMap::from([
+                (
+                    1.into(),
+                    StreamFragment {
+                        fragment_id: 1.into(),
+                        node: Some(list),
+                        fragment_type_mask: FragmentTypeFlag::Source as u32,
+                        requires_singleton: true,
+                    },
+                ),
+                (
+                    0.into(),
+                    StreamFragment {
+                        fragment_id: 0.into(),
+                        node: Some(fetch),
+                        fragment_type_mask: FragmentTypeFlag::FsFetch as u32,
+                        requires_singleton: false,
+                    },
+                ),
+            ]),
+            edges: vec![StreamFragmentEdgeProto {
+                dispatch_strategy: Some(DispatchStrategy {
+                    r#type: DispatcherType::Hash as i32,
+                    dist_key_indices: vec![0],
+                    output_mapping: PbDispatchOutputMapping::simple(vec![0, 1]).into(),
+                }),
+                link_id: 1,
+                upstream_id: 1.into(),
+                downstream_id: 0.into(),
+            }],
+            ctx: Some(PbStreamContext::default()),
+            table_ids_cnt: 2,
+            max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
+            ..Default::default()
+        }
+    }
+
+    fn job() -> StreamingJob {
+        StreamingJob::Table(
+            None,
+            PbTable {
+                id: 888.into(),
+                ..Default::default()
+            },
+            TableJobType::General,
+        )
+    }
+
+    fn fetch_table_and_reference(builder: &ActorGraphBuilder) -> (PbTable, StorageTableDesc) {
+        let mut fetch = None;
+        let mut reference = None;
+        for fragment in builder.fragment_graph.building_fragments().values() {
+            visit_fragment(fragment, |body| match body {
+                NodeBody::StreamFsFetch(node) => {
+                    fetch = node.node_inner.as_ref().unwrap().state_table.clone();
+                }
+                NodeBody::Source(node) => {
+                    reference = node
+                        .source_inner
+                        .as_ref()
+                        .unwrap()
+                        .iceberg_fetch_state_table
+                        .clone();
+                }
+                _ => {}
+            });
+        }
+        (fetch.unwrap(), reference.unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_iceberg_completion_table_is_filled_from_fetch_table() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let mut fragment_graph = StreamFragmentGraph::new(&env, update_graph(FETCH_TABLE), &job())?;
+        // Mimic catalog creation assigning new IDs; the reference must follow the Fetch table.
+        let table_id_map: HashMap<_, _> = fragment_graph
+            .incomplete_internal_tables()
+            .into_keys()
+            .map(|id| (id, (id.as_raw_id() + 1000).into()))
+            .collect();
+        fragment_graph.refill_internal_table_ids(table_id_map);
+
+        let builder =
+            ActorGraphBuilder::new(CompleteStreamFragmentGraph::for_test(fragment_graph))?;
+        let (fetch, reference) = fetch_table_and_reference(&builder);
+        assert_eq!(reference.table_id, fetch.id);
+        assert_eq!(
+            reference,
+            TableDesc::from_pb_table(&fetch).try_to_protobuf()?
+        );
+        assert_eq!(reference.columns.len(), 2);
+        assert_eq!(reference.pk, fetch.pk);
+        assert_eq!(reference.dist_key_in_pk_indices, vec![0]);
+        assert_eq!(reference.value_indices, vec![0, 1]);
+        assert_eq!(reference.stream_key, vec![0]);
+        assert_eq!(reference.read_prefix_len_hint, 1);
+        assert_eq!(reference.vnode_count(), VirtualNode::COUNT_FOR_TEST);
+        assert_eq!(reference.maybe_vnode_count, fetch.maybe_vnode_count);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_iceberg_completion_table_must_reference_fetch_table() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let error = StreamFragmentGraph::new(&env, update_graph(LIST_TABLE), &job())
+            .expect_err("reference must resolve to a Fetch state table");
+        assert!(error.to_string().contains("Fetch state table"), "{error}");
+
+        // Also rejected when the graph reaches the actor builder with a dangling reference.
+        let mut fragment_graph = StreamFragmentGraph::new(&env, update_graph(FETCH_TABLE), &job())?;
+        for fragment in fragment_graph.fragments.values_mut() {
+            visit_iceberg_completion_tables(fragment, |desc| desc.table_id = 4242.into());
+        }
+        let error = ActorGraphBuilder::new(CompleteStreamFragmentGraph::for_test(fragment_graph))
+            .expect_err("dangling reference must be rejected");
+        assert!(error.to_string().contains("Fetch state table"), "{error}");
         Ok(())
     }
 }

@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use iceberg::io::FileIO;
 use iceberg::spec::{
-    DataFileBuilder, DataFileFormat, FormatVersion, Literal, NestedField, PrimitiveType, Schema,
-    SortOrder, TableMetadataBuilder, Transform, Type, UnboundPartitionField, UnboundPartitionSpec,
+    DataFileBuilder, DataFileFormat, FormatVersion, Literal, NestedField, Operation, PrimitiveType,
+    Schema, SortOrder, TableMetadataBuilder, Transform, Type, UnboundPartitionField,
+    UnboundPartitionSpec,
 };
 use iceberg::{
     Catalog, Namespace, NamespaceIdent, Runtime, TableCommit, TableCreation, TableIdent,
@@ -144,6 +145,8 @@ fn test_table_with_partition_spec(
 struct ReloadingTestCatalog {
     table: Mutex<Table>,
     loads: AtomicUsize,
+    lose_next_commit_response: AtomicBool,
+    update_count: AtomicUsize,
 }
 
 impl ReloadingTestCatalog {
@@ -151,6 +154,8 @@ impl ReloadingTestCatalog {
         Self {
             table: Mutex::new(table),
             loads: AtomicUsize::new(0),
+            lose_next_commit_response: AtomicBool::new(false),
+            update_count: AtomicUsize::new(0),
         }
     }
 
@@ -245,10 +250,21 @@ impl Catalog for ReloadingTestCatalog {
         unreachable!("test only loads a table")
     }
 
+    #[expect(
+        clippy::disallowed_types,
+        reason = "the test catalog injects an Iceberg API error"
+    )]
     async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
         let mut table = self.table.lock().unwrap();
         let updated = commit.apply(table.clone())?;
         *table = updated.clone();
+        self.update_count.fetch_add(1, Ordering::SeqCst);
+        if self.lose_next_commit_response.swap(false, Ordering::SeqCst) {
+            return Err(iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "injected lost response after successful catalog commit",
+            ));
+        }
         Ok(updated)
     }
 }
@@ -357,11 +373,12 @@ async fn compaction_pre_commit_rejects_writer_or_merger_files() -> Result<()> {
 }
 
 #[test]
-fn pre_commit_state_round_trip_preserves_format_version() -> Result<()> {
+fn pre_commit_state_round_trip_preserves_format_version_and_operation() -> Result<()> {
     let input = IcebergPkIndexSinkAggResult {
         schema_id: 3,
         partition_spec_id: 4,
         format_version: Some(FormatVersion::V3),
+        is_compaction: true,
         data_files: vec![serialized_file("data")],
         delete_files: vec![serialized_file("delete")],
         overwrite_files: vec![serialized_file("overwrite")],
@@ -372,6 +389,7 @@ fn pre_commit_state_round_trip_preserves_format_version() -> Result<()> {
 
     assert_eq!(snapshot_id, 99);
     assert_eq!(decoded.format_version, Some(FormatVersion::V3));
+    assert!(decoded.is_compaction);
     assert_eq!(decoded.schema_id, 3);
     assert_eq!(decoded.partition_spec_id, 4);
     assert_eq!(decoded.data_files.len(), 1);
@@ -399,6 +417,7 @@ fn pre_commit_state_decodes_legacy_state_without_format_version() -> Result<()> 
 
     assert_eq!(snapshot_id, 99);
     assert_eq!(decoded.format_version, None);
+    assert!(!decoded.is_compaction);
     Ok(())
 }
 
@@ -548,6 +567,7 @@ fn empty_epoch_commit(snapshot_id: i64, staged_on_current_table: bool) -> EpochC
             schema_id: 0,
             partition_spec_id: 0,
             format_version: Some(FormatVersion::V2),
+            is_compaction: false,
             data_files: vec![],
             delete_files: vec![],
             overwrite_files: vec![],
@@ -814,5 +834,119 @@ async fn committed_data_file_partitions_reset_on_foreign_or_data_file_removals()
     // Recovered epochs carry no materialized files.
     let commit = empty_epoch_commit(2, false);
     assert!(index().advance(&foreign, &commit, false).is_none());
+    Ok(())
+}
+
+fn empty_aggregate(table: &Table) -> IcebergPkIndexSinkAggResult {
+    IcebergPkIndexSinkAggResult {
+        schema_id: table.metadata().current_schema_id(),
+        partition_spec_id: table.metadata().default_partition_spec_id(),
+        format_version: Some(table.metadata().format_version()),
+        is_compaction: false,
+        data_files: vec![],
+        delete_files: vec![],
+        overwrite_files: vec![],
+    }
+}
+
+#[tokio::test]
+async fn commits_standard_operations_and_recovers_pending_epochs() -> Result<()> {
+    for version in [FormatVersion::V2, FormatVersion::V3] {
+        let db = pending_sink_state_db().await?;
+        let temp_dir = tempfile::tempdir()?;
+        let mut table = committable_table(test_table(&temp_dir, version)?)?;
+        let catalog = Arc::new(ReloadingTestCatalog::new(table.clone()));
+        let mut previous_file = None;
+        for (snapshot_id, has_new_data, recover_before_commit) in
+            [(101, true, false), (102, false, false), (103, false, true)]
+        {
+            let mut aggregate = empty_aggregate(&table);
+            // Use metadata-only files with matching row counts for each pure rewrite.
+            let output = output_data_file_with_partition(
+                &table,
+                &format!("data-{snapshot_id}"),
+                Struct::empty(),
+            )?;
+            aggregate.data_files = serialize_data_files_default_spec(&table, vec![output.clone()])?;
+            if let Some(input) = previous_file.replace(output) {
+                aggregate.overwrite_files = serialize_data_files_default_spec(&table, vec![input])?;
+            }
+            let mut coordinator = test_coordinator(table.clone(), catalog.clone(), db.clone());
+            coordinator
+                .stage_pre_commit(snapshot_id as u64, aggregate, !has_new_data)
+                .await?;
+            let mut epoch = coordinator.waiting_commit.take().unwrap();
+            let snapshot_id = epoch.snapshot_id;
+            assert_eq!(epoch.merged.is_compaction, !has_new_data);
+            assert_eq!(epoch.has_new_data, has_new_data);
+            if recover_before_commit {
+                let (_, mut recovered) = recovery(&db, SinkId::new(42)).await?;
+                epoch = recovered.pop().unwrap();
+                assert_eq!(epoch.merged.is_compaction, !has_new_data);
+            }
+            catalog
+                .lose_next_commit_response
+                .store(true, Ordering::SeqCst);
+            let update_count = catalog.update_count.load(Ordering::SeqCst);
+            (table, _) = commit_one_epoch(
+                catalog.clone(),
+                table.identifier().clone(),
+                None,
+                "main".to_owned(),
+                SinkId::new(42),
+                &epoch,
+                1,
+            )
+            .await
+            .map_err(|error| match error {
+                CommitError::Commit(error) | CommitError::ReloadTable(error) => error,
+            })?;
+            assert_eq!(
+                catalog.update_count.load(Ordering::SeqCst),
+                update_count + 1
+            );
+            let snapshot = table.metadata().snapshot_by_id(snapshot_id).unwrap();
+            assert_eq!(
+                snapshot.summary().operation,
+                if has_new_data {
+                    Operation::Overwrite
+                } else {
+                    Operation::Replace
+                }
+            );
+            assert_eq!(
+                snapshot
+                    .summary()
+                    .additional_properties
+                    .get(RISINGWAVE_ICEBERG_COMMIT_EPOCH),
+                Some(&epoch.epoch.to_string())
+            );
+            let snapshot_count = table.metadata().snapshots().len();
+            let (prev_committed_epoch, mut recovered) = recovery(&db, SinkId::new(42)).await?;
+            assert_eq!(prev_committed_epoch, None);
+            let recovered = recovered.pop().unwrap();
+            assert_eq!(recovered.snapshot_id, snapshot_id);
+            assert_eq!(recovered.merged.is_compaction, !has_new_data);
+            // Recovery preserves Replace even when the first commit response was lost.
+            (table, _) = commit_one_epoch(
+                catalog.clone(),
+                table.identifier().clone(),
+                None,
+                "main".to_owned(),
+                SinkId::new(42),
+                &recovered,
+                0,
+            )
+            .await
+            .map_err(|error| match error {
+                CommitError::Commit(error) | CommitError::ReloadTable(error) => error,
+            })?;
+            assert_eq!(table.metadata().snapshots().len(), snapshot_count);
+            assert_eq!(
+                catalog.update_count.load(Ordering::SeqCst),
+                update_count + 1
+            );
+        }
+    }
     Ok(())
 }

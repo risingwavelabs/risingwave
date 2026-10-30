@@ -26,12 +26,12 @@ use risingwave_storage::StateStore;
 use crate::error::StreamResult;
 use crate::executor::source::{
     BatchAdbcSnowflakeFetchExecutor, BatchIcebergFetchExecutor, BatchOpendalFsFetchExecutor,
-    BatchPosixFsFetchExecutor, FsFetchExecutor, IcebergFetchExecutor, SourceStateTableHandler,
-    StreamSourceCore,
+    BatchPosixFsFetchExecutor, FsFetchExecutor, IcebergFetchExecutor, IcebergUpdateFetchExecutor,
+    SourceStateTableHandler, StreamSourceCore,
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
-use crate::from_proto::source::is_full_reload_refresh;
+use crate::from_proto::source::{iceberg_update_mode, is_full_reload_refresh};
 use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
@@ -74,6 +74,16 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             .collect();
 
         let vnodes = Some(Arc::new(params.vnode_bitmap));
+        let is_iceberg_update = iceberg_update_mode(
+            &source.with_properties,
+            &source.refresh_mode,
+            source.rate_limit,
+            source.row_id_index,
+            params.info.stream_kind,
+        )?;
+        if is_iceberg_update {
+            crate::executor::source::validate_update_state_table(source.get_state_table()?, false)?;
+        }
         let state_table_handler = SourceStateTableHandler::from_table_catalog_with_vnodes(
             source.state_table.as_ref().unwrap(),
             store.clone(),
@@ -132,7 +142,30 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                 }
             }
             risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
-                if is_full_reload_refresh {
+                if is_iceberg_update {
+                    let output_columns: Vec<risingwave_common::catalog::ColumnCatalog> =
+                        source.columns.iter().cloned().map(Into::into).collect();
+                    if output_columns
+                        .iter()
+                        .map(|column| column.data_type().clone())
+                        .collect::<Vec<_>>()
+                        != params.info.schema.data_types()
+                    {
+                        return Err(anyhow::anyhow!(
+                            "Iceberg update Fetch columns differ from its output schema"
+                        )
+                        .into());
+                    }
+                    IcebergUpdateFetchExecutor::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        params.config.clone(),
+                        output_columns,
+                        params.info.stream_key.clone(),
+                    )
+                    .boxed()
+                } else if is_full_reload_refresh {
                     BatchIcebergFetchExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
