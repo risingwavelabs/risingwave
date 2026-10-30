@@ -104,13 +104,6 @@ impl WorkerNodeManager {
             .collect()
     }
 
-    fn list_streaming_worker_nodes(&self) -> Vec<WorkerNode> {
-        self.list_compute_nodes()
-            .into_iter()
-            .filter(|w| w.property.as_ref().is_some_and(|p| p.is_streaming))
-            .collect()
-    }
-
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes.insert(node.id, node);
@@ -325,36 +318,24 @@ impl WorkerNodeManagerInner {
     }
 }
 
-/// Selects workers for query according to `enable_barrier_read`
+/// Selects serving workers for batch queries.
 #[derive(Clone)]
 pub struct WorkerNodeSelector {
     pub manager: WorkerNodeManagerRef,
-    enable_barrier_read: bool,
 }
 
 impl WorkerNodeSelector {
-    pub fn new(manager: WorkerNodeManagerRef, enable_barrier_read: bool) -> Self {
-        Self {
-            manager,
-            enable_barrier_read,
-        }
+    pub fn new(manager: WorkerNodeManagerRef) -> Self {
+        Self { manager }
     }
 
     pub fn worker_node_count(&self) -> usize {
-        if self.enable_barrier_read {
-            self.manager.list_streaming_worker_nodes().len()
-        } else {
-            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
-                .len()
-        }
+        self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
+            .len()
     }
 
     pub fn schedule_unit_count(&self) -> usize {
-        let worker_nodes = if self.enable_barrier_read {
-            self.manager.list_streaming_worker_nodes()
-        } else {
-            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
-        };
+        let worker_nodes = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
         worker_nodes
             .iter()
             .map(|node| node.compute_node_parallelism())
@@ -366,51 +347,42 @@ impl WorkerNodeSelector {
         fragment_id: FragmentId,
         batch_parallelism: usize,
     ) -> Result<WorkerSlotMapping> {
-        if self.enable_barrier_read {
+        let mapping = (self.manager.serving_fragment_mapping(fragment_id)).or_else(|_| {
+            tracing::warn!(
+                %fragment_id,
+                "Serving fragment mapping not found, fall back to streaming fragment mapping."
+            );
             self.manager.get_streaming_fragment_mapping(&fragment_id)
-        } else {
-            let mapping = (self.manager.serving_fragment_mapping(fragment_id)).or_else(|_| {
-                tracing::warn!(
-                    %fragment_id,
-                    "Serving fragment mapping not found, fall back to streaming one."
-                );
-                self.manager.get_streaming_fragment_mapping(&fragment_id)
-            })?;
-            let workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
+        })?;
+        let workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
 
-            // Filter out unavailable workers.
-            if workers.is_empty() {
-                Err(BatchError::EmptyWorkerNodes)
+        // Filter out unavailable workers.
+        if workers.is_empty() {
+            Err(BatchError::EmptyWorkerNodes)
+        } else {
+            let worker_ids = workers
+                .iter()
+                .map(|worker| worker.id)
+                .collect::<HashSet<_>>();
+            let mapping_uses_only_available_workers = mapping
+                .iter_unique()
+                .all(|slot| worker_ids.contains(&slot.worker_id()));
+            if mapping_uses_only_available_workers {
+                Ok(mapping)
             } else {
-                let worker_ids = workers
-                    .iter()
-                    .map(|worker| worker.id)
-                    .collect::<HashSet<_>>();
-                let mapping_uses_only_available_workers = mapping
-                    .iter_unique()
-                    .all(|slot| worker_ids.contains(&slot.worker_id()));
-                if mapping_uses_only_available_workers {
-                    Ok(mapping)
-                } else {
-                    // If it's a singleton, set max_parallelism=1 for place_vnode.
-                    // Otherwise, cap re-placement by the query's effective batch parallelism.
-                    let max_parallelism =
-                        mapping.to_single().map(|_| 1).or(Some(batch_parallelism));
-                    let masked_mapping =
-                        place_vnode(Some(&mapping), &workers, max_parallelism, mapping.len())
-                            .ok_or_else(|| BatchError::EmptyWorkerNodes)?;
-                    Ok(masked_mapping)
-                }
+                // If it's a singleton, set max_parallelism=1 for place_vnode.
+                // Otherwise, cap re-placement by the query's effective batch parallelism.
+                let max_parallelism = mapping.to_single().map(|_| 1).or(Some(batch_parallelism));
+                let masked_mapping =
+                    place_vnode(Some(&mapping), &workers, max_parallelism, mapping.len())
+                        .ok_or_else(|| BatchError::EmptyWorkerNodes)?;
+                Ok(masked_mapping)
             }
         }
     }
 
     pub fn next_random_worker(&self) -> Result<WorkerNode> {
-        let worker_nodes = if self.enable_barrier_read {
-            self.manager.list_streaming_worker_nodes()
-        } else {
-            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
-        };
+        let worker_nodes = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
         worker_nodes
             .choose(&mut rand::rng())
             .ok_or_else(|| BatchError::EmptyWorkerNodes)
@@ -464,7 +436,6 @@ mod tests {
     fn test_worker_node_manager() {
         let manager = WorkerNodeManager::mock(vec![]);
         assert_eq!(manager.list_serving_worker_nodes().len(), 0);
-        assert_eq!(manager.list_streaming_worker_nodes().len(), 0);
         assert_eq!(manager.list_compute_nodes(), vec![]);
 
         let worker_nodes = vec![
@@ -499,7 +470,6 @@ mod tests {
             .iter()
             .for_each(|w| manager.add_worker_node(w.clone()));
         assert_eq!(manager.list_serving_worker_nodes().len(), 2);
-        assert_eq!(manager.list_streaming_worker_nodes().len(), 1);
         assert_eq!(
             manager
                 .list_compute_nodes()
@@ -511,7 +481,6 @@ mod tests {
 
         manager.remove_worker_node(worker_nodes[0].clone());
         assert_eq!(manager.list_serving_worker_nodes().len(), 1);
-        assert_eq!(manager.list_streaming_worker_nodes().len(), 0);
         assert_eq!(
             manager
                 .list_compute_nodes()
@@ -546,6 +515,14 @@ mod tests {
         }
     }
 
+    fn streaming_worker(id: u32) -> WorkerNode {
+        let mut worker = serving_worker(id, Some(RW_VERSION));
+        let property = worker.property.as_mut().unwrap();
+        property.is_serving = false;
+        property.is_streaming = true;
+        worker
+    }
+
     fn fragment_mapping_worker_ids(mapping: &WorkerSlotMapping) -> Vec<WorkerId> {
         mapping
             .iter_unique()
@@ -565,12 +542,29 @@ mod tests {
     }
 
     #[test]
+    fn test_selector_does_not_use_streaming_workers() {
+        let manager = Arc::new(WorkerNodeManager::mock(vec![streaming_worker(1)]));
+        let selector = WorkerNodeSelector::new(manager.clone());
+        manager.insert_streaming_fragment_mapping(0.into(), worker_slot_mapping([1]));
+
+        assert_eq!(selector.worker_node_count(), 0);
+        assert!(matches!(
+            selector.fragment_mapping(0.into(), 1),
+            Err(BatchError::EmptyWorkerNodes)
+        ));
+        assert!(matches!(
+            selector.next_random_worker(),
+            Err(BatchError::EmptyWorkerNodes)
+        ));
+    }
+
+    #[test]
     fn test_fragment_mapping_masks_serving_workers_with_version_mismatch() {
         let manager = Arc::new(WorkerNodeManager::mock(vec![
             serving_worker(1, Some(RW_VERSION)),
             serving_worker(2, Some("different-version")),
         ]));
-        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        let selector = WorkerNodeSelector::new(manager.clone());
         manager
             .set_serving_fragment_mapping(HashMap::from([(0.into(), worker_slot_mapping([1, 2]))]));
 
@@ -588,7 +582,7 @@ mod tests {
             serving_worker(1, Some(RW_VERSION)),
             serving_worker(2, Some(RW_VERSION)),
         ]));
-        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        let selector = WorkerNodeSelector::new(manager.clone());
         manager
             .set_serving_fragment_mapping(HashMap::from([(0.into(), worker_slot_mapping([1, 2]))]));
 
@@ -607,7 +601,7 @@ mod tests {
             serving_worker(2, None),
             serving_worker(3, Some("")),
         ]));
-        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        let selector = WorkerNodeSelector::new(manager.clone());
         manager.set_serving_fragment_mapping(HashMap::from([(
             0.into(),
             worker_slot_mapping([1, 2, 3]),
@@ -628,7 +622,7 @@ mod tests {
             serving_worker(2, None),
             serving_worker(3, Some("")),
         ]));
-        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        let selector = WorkerNodeSelector::new(manager.clone());
         manager.set_serving_fragment_mapping(HashMap::from([(
             0.into(),
             worker_slot_mapping([1, 2, 3]),
@@ -646,7 +640,7 @@ mod tests {
             serving_worker(1, Some(RW_VERSION)),
             serving_worker(2, Some("different-version")),
         ]));
-        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        let selector = WorkerNodeSelector::new(manager.clone());
         manager
             .set_serving_fragment_mapping(HashMap::from([(0.into(), worker_slot_mapping([1, 2]))]));
         manager.mask_worker_node(1.into(), Duration::from_secs(60));
@@ -666,7 +660,7 @@ mod tests {
             serving_worker(2, Some(RW_VERSION)),
             serving_worker(3, Some("different-version")),
         ]));
-        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        let selector = WorkerNodeSelector::new(manager.clone());
         manager.set_serving_fragment_mapping(HashMap::from([(
             0.into(),
             worker_slot_mapping([1, 2, 3]),
@@ -717,7 +711,7 @@ mod tests {
             },
         ];
         let manager = Arc::new(WorkerNodeManager::mock(worker_nodes));
-        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        let selector = WorkerNodeSelector::new(manager.clone());
         let fragment_id = 1.into();
         let worker_slot_ids = (0..8)
             .map(|slot| WorkerSlotId::new(1.into(), slot))

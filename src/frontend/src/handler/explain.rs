@@ -283,10 +283,8 @@ pub async fn do_handle_explain(
                 if let Ok(plan) = &plan {
                     match plan {
                         PlanToExplain::Rw(PhysicalPlanRef::Batch(plan)) => {
-                            let worker_node_manager_reader = WorkerNodeSelector::new(
-                                session.env().worker_node_manager_ref(),
-                                session.is_barrier_read(),
-                            );
+                            let worker_node_manager_reader =
+                                WorkerNodeSelector::new(session.env().worker_node_manager_ref());
                             batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),

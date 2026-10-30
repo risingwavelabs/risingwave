@@ -69,12 +69,10 @@ impl LocalQueryExecution {
     pub fn new(
         query: Query,
         front_env: FrontendEnv,
-        support_barrier_read: bool,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
     ) -> Self {
-        let worker_node_manager =
-            WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
+        let worker_node_manager = WorkerNodeSelector::new(front_env.worker_node_manager_ref());
 
         Self {
             query,
