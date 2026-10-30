@@ -62,6 +62,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
+use risingwave_connector::sink::iceberg::ENABLE_PK_INDEX;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
@@ -1136,6 +1137,19 @@ impl LogicalPlanRoot {
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
         allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
+        let is_iceberg_v3 = properties.is_iceberg_connector()
+            && properties
+                .get(ENABLE_PK_INDEX)
+                .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+
+        if is_iceberg_v3 && auto_refresh_schema_from_table.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Iceberg sink with `enable_pk_index='true'` does not support `auto.schema.change='true'`."
+                    .to_owned(),
+            )
+            .into());
+        }
+
         let backfill_type = if without_backfill {
             BackfillType::UpstreamOnly
         } else if allow_snapshot_backfill
