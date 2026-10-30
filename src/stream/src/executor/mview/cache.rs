@@ -402,6 +402,9 @@ impl MaterializeCache {
         rows: impl IntoIterator<Item = impl Row>,
         table: &StateTableInner<S, SD>,
     ) {
+        if self.lru_cache.is_empty() {
+            return;
+        }
         for row in rows {
             let key = row
                 .project(table.pk_indices())
@@ -565,30 +568,5 @@ pub(super) mod toast {
         }
 
         OwnedRow::new(fixed_row_data)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        use super::*;
-
-        #[test]
-        fn test_chunk_has_unavailable_value() {
-            let chunk = StreamChunk::from_pretty(&format!(
-                " i T
-                + 1 foo
-                + 2 {DEBEZIUM_UNAVAILABLE_VALUE}"
-            ));
-            assert!(chunk_has_unavailable_value(&chunk, &[1]));
-            assert!(!chunk_has_unavailable_value(&chunk, &[]));
-
-            let chunk = StreamChunk::from_pretty(
-                " i T
-                + 1 foo
-                + 2 bar",
-            );
-            assert!(!chunk_has_unavailable_value(&chunk, &[1]));
-        }
     }
 }

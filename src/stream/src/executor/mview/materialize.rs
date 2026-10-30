@@ -530,6 +530,16 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         }
                                     }
                                     ConflictBehavior::NoCheck => {
+                                        // Demoted TOAST chunks bypass the cache: drop their keys so a
+                                        // later placeholder is not filled from a stale cached row.
+                                        if self.toastable_column_indices.is_some()
+                                            && let Some(cache) = &mut self.materialize_cache
+                                        {
+                                            cache.invalidate_rows(
+                                                chunk.rows().map(|(_, row)| row),
+                                                &self.state_table,
+                                            );
+                                        }
                                         self.state_table.write_chunk(chunk.clone());
                                         self.state_table.try_flush().await?;
 
@@ -1099,6 +1109,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             conflict_behavior,
             None,
             None,
+            None,
         )
         .await
     }
@@ -1124,6 +1135,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             watermark_epoch,
             conflict_behavior,
             Some(stream_key),
+            None,
             None,
         )
         .await
@@ -1158,6 +1170,33 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             conflict_behavior,
             Some(stream_key),
             Some(ttl_column),
+            None,
+        )
+        .await
+    }
+
+    /// Create a `MaterializeExecutor` of a PostgreSQL CDC table with TOAST-able columns and no
+    /// downstream, for test purpose.
+    #[cfg(any(test, feature = "test"))]
+    pub async fn for_test_with_toast(
+        input: Executor,
+        store: S,
+        table_id: TableId,
+        keys: Vec<ColumnOrder>,
+        column_ids: Vec<risingwave_common::catalog::ColumnId>,
+        toastable_column_indices: Vec<usize>,
+    ) -> Self {
+        Self::for_test_inner(
+            input,
+            store,
+            table_id,
+            keys,
+            column_ids,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            ConflictBehavior::Overwrite,
+            None,
+            None,
+            Some(toastable_column_indices),
         )
         .await
     }
@@ -1174,6 +1213,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         conflict_behavior: ConflictBehavior,
         stream_key: Option<Vec<usize>>,
         ttl_column: Option<usize>,
+        toastable_column_indices: Option<Vec<usize>>,
     ) -> Self {
         use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -1199,8 +1239,10 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             0,
         );
         table_catalog.stream_key = stream_key_indices.iter().map(|i| *i as i32).collect();
-        let state_table = if let Some(ttl_column) = ttl_column {
+        if let Some(ttl_column) = ttl_column {
             table_catalog.clean_watermark_indices = vec![ttl_column as u32];
+        }
+        let state_table = if ttl_column.is_some() || toastable_column_indices.is_some() {
             StateTableInner::from_table_catalog_inconsistent_op(&table_catalog, store, None).await
         } else {
             StateTableInner::from_table_catalog(&table_catalog, store, None).await
@@ -1209,6 +1251,8 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         let unused = StreamingMetrics::unused();
         let metrics = unused.new_materialize_metrics(table_id, 1.into(), 2.into());
         let cache_metrics = unused.new_materialize_cache_metrics(table_id, 1.into(), 2.into());
+        // Without downstream, an `Overwrite` table may skip the conflict check.
+        let may_have_downstream = toastable_column_indices.is_none();
 
         Self {
             input,
@@ -1223,15 +1267,15 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 row_serde,
                 vec![],
                 conflict_behavior,
-                None,
+                toastable_column_indices.clone(),
                 cache_metrics,
             ),
-            toastable_column_indices: None,
+            toastable_column_indices,
             conflict_behavior,
             cleaned_by_ttl_watermark: ttl_column.is_some(),
             version_column_indices: vec![],
             is_dummy_table: false,
-            may_have_downstream: true,
+            may_have_downstream,
             subscriber_ids: HashSet::new(),
             metrics,
             refresh_args: None, // Test constructor doesn't support refresh functionality
@@ -1457,6 +1501,97 @@ mod tests {
                 assert!(row.is_none());
             }
             _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_toast_with_skipped_conflict_check() {
+        use risingwave_common::types::DEBEZIUM_UNAVAILABLE_VALUE as TOAST;
+
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Varchar),
+        ]);
+        let column_ids = vec![0.into(), 1.into(), 2.into()];
+
+        // Each chunk is followed by a barrier to check the state after it.
+        let chunks = [
+            // No placeholder: conflict check skipped.
+            " i i T
+            + 1 1 v1",
+            // Placeholder: filled from state, the row is cached.
+            &format!(
+                " i i T
+                + 1 2 {TOAST}"
+            ),
+            // No placeholder: conflict check skipped, the cached row must be invalidated.
+            " i i T
+            + 1 3 v2",
+            // Placeholder: must be filled with v2, not the stale cached v1.
+            &format!(
+                " i i T
+                + 1 4 {TOAST}"
+            ),
+        ];
+        let mut messages = vec![Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))];
+        for (i, chunk) in chunks.iter().enumerate() {
+            messages.push(Message::Chunk(StreamChunk::from_pretty(chunk)));
+            messages.push(Message::Barrier(Barrier::new_test_barrier(test_epoch(
+                i as u64 + 2,
+            ))));
+        }
+        let source = MockSource::with_messages(messages).into_executor(schema, StreamKey::new());
+
+        let table = BatchTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            vec![
+                ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+                ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+                ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
+            ],
+            vec![OrderType::ascending()],
+            vec![0],
+            vec![0, 1, 2],
+        );
+
+        let mut materialize_executor = MaterializeExecutor::for_test_with_toast(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            vec![2],
+        )
+        .await
+        .boxed()
+        .execute();
+        materialize_executor.next().await.transpose().unwrap();
+
+        for (v, toast) in [(1, "v1"), (2, "v1"), (3, "v2"), (4, "v2")] {
+            // Skip the output chunk, if any.
+            while !matches!(
+                materialize_executor.next().await.transpose().unwrap(),
+                Some(Message::Barrier(_))
+            ) {}
+            let row = table
+                .get_row(
+                    &OwnedRow::new(vec![Some(1_i32.into())]),
+                    HummockReadEpoch::NoWait(u64::MAX),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                row,
+                Some(OwnedRow::new(vec![
+                    Some(1_i32.into()),
+                    Some(v.into()),
+                    Some(toast.into())
+                ]))
+            );
         }
     }
 
