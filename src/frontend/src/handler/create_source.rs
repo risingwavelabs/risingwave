@@ -23,7 +23,6 @@ use external_schema::nexmark::check_nexmark_schema;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
-use rand::Rng;
 use risingwave_common::array::arrow::{IcebergArrowConvert, arrow_schema_iceberg};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
@@ -36,8 +35,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::additional_columns::{
-    build_additional_column_desc, get_supported_additional_columns,
-    source_add_partition_offset_cols,
+    build_additional_column_desc, source_add_partition_offset_cols,
 };
 use risingwave_connector::parser::{
     AvroParserConfig, DEBEZIUM_IGNORE_KEY, DebeziumAvroParserConfig, ProtobufParserConfig,
@@ -57,8 +55,7 @@ use risingwave_connector::schema::schema_registry::{
 use risingwave_connector::source::cdc::{
     CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
     CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CdcSourceRuntimeFlags, MONGODB_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, ORACLE_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CdcSourceDdlValidator, CdcSourceRuntimeFlags,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -123,9 +120,10 @@ mod external_schema;
 pub use external_schema::{
     bind_columns_from_source, get_schema_location, schema_has_schema_registry,
 };
+use external_schema::{format_to_prost, row_encode_to_prost};
 mod validate;
+pub use validate::validate_compatibility;
 use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY};
-pub use validate::{validate_compatibility, validate_heartbeat_interval};
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
@@ -823,14 +821,6 @@ pub fn bind_connector_props(
                     .to_string(),
             );
         }
-    }
-    if with_properties.is_mysql_cdc_connector() {
-        // Generate a random server id for mysql cdc source if needed
-        // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
-        // group (that is, different from any other server id being used by any master or slave)
-        with_properties
-            .entry("server.id".to_owned())
-            .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
     Ok((with_properties, refresh_mode))
 }

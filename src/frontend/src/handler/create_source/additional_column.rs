@@ -58,15 +58,6 @@ pub fn handle_addition_columns(
 ) -> Result<()> {
     let connector_name = with_properties.get_connector().unwrap(); // there must be a connector in source
 
-    if get_supported_additional_columns(connector_name.as_str(), is_cdc_backfill_table).is_none()
-        && !additional_columns.is_empty()
-    {
-        return Err(RwError::from(ProtocolError(format!(
-            "Connector {} accepts no additional column but got {:?}",
-            connector_name, additional_columns
-        ))));
-    }
-
     while let Some(item) = additional_columns.pop() {
         check_additional_column_compatibility(&item, format_encode)?;
 

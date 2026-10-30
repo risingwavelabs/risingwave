@@ -28,11 +28,14 @@ use std::marker::PhantomData;
 
 pub use enumerator::*;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::id::{ActorId, SourceId};
+use risingwave_common::license::FeatureNotAvailable;
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
-use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::{ExternalTableDesc, PbEncodeType, PbFormatType};
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
@@ -110,6 +113,149 @@ pub trait CdcSourceRuntimeFlags: CdcSourceTypeTrait {
     /// When true, the consumed offset is committed back to the upstream database on each
     /// checkpoint via a JNI call.
     const NEEDS_OFFSET_COMMIT_ON_CHECKPOINT: bool = false;
+}
+
+/// Checks the `CREATE` and `ALTER` statements of a CDC source connector.
+pub trait CdcSourceDdlValidator: CdcSourceTypeTrait {
+    /// Checks the `FORMAT ... ENCODE ...` clause of a `CREATE` statement.
+    fn check_format_encode(format: PbFormatType, encode: PbEncodeType) -> ConnectorResult<()> {
+        check_format_encode_inner(
+            Self::CDC_CONNECTOR_NAME,
+            format,
+            encode,
+            &[
+                (PbFormatType::Debezium, &[PbEncodeType::Json]),
+                // support source stream job
+                (PbFormatType::Plain, &[PbEncodeType::Json]),
+            ],
+        )
+    }
+
+    /// Checks an additional column type in the `INCLUDE` clause of a `CREATE` statement, such as
+    /// `timestamp` in `INCLUDE timestamp AS ts`.
+    fn check_include_column(additional_column_type: &str) -> ConnectorResult<()> {
+        bail!(
+            "additional column type {} is not supported for connector {}, which accepts no additional column",
+            additional_column_type,
+            Self::CDC_CONNECTOR_NAME
+        )
+    }
+
+    /// Checks the `WITH (...)` options of a `CREATE` statement, and fills in the options that the
+    /// CDC source generates when they are omitted, such as a random `slot.name` for Postgres.
+    /// The connector node later renders the filled options into the Debezium config through the
+    /// `.properties` template of the CDC source. An override calls [`check_common_with_options`]
+    /// first.
+    fn check_and_fill_create_with_options(
+        props: &mut BTreeMap<String, String>,
+    ) -> ConnectorResult<()> {
+        check_common_with_options(props)
+    }
+
+    /// Checks that the license allows the CDC source.
+    fn check_license() -> Result<(), FeatureNotAvailable> {
+        Ok(())
+    }
+
+    /// Checks that `ALTER SOURCE ... CONNECTOR WITH (...)` only changes options that a running
+    /// CDC source can apply. An override calls [`check_common_with_options`] first.
+    fn check_alter_with_options(
+        props: &BTreeMap<String, String>,
+        _secret_refs: &BTreeMap<String, PbSecretRef>,
+    ) -> ConnectorResult<()> {
+        check_common_with_options(props)
+    }
+}
+
+/// Checks the `WITH (...)` options that every CDC source accepts, on both `CREATE` and `ALTER`.
+pub fn check_common_with_options(props: &BTreeMap<String, String>) -> ConnectorResult<()> {
+    // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
+    // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
+    // override must retain the common `string` default from `debezium.properties`.
+    if let Some(mode) = props.get("debezium.decimal.handling.mode")
+        && mode != "string"
+    {
+        bail!("'debezium.decimal.handling.mode' must be 'string', got: '{mode}'");
+    }
+    for key in [
+        CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
+        "debezium.max.queue.size",
+    ] {
+        if let Some(value) = props.get(key)
+            && value.parse::<u32>().is_err()
+        {
+            bail!("Invalid value `{value}` for `{key}`");
+        }
+    }
+    // Keep this policy in sync with Java's `SourceValidateHandler.validateHeartbeatInterval`:
+    // match Java's ASCII integer syntax and Debezium's signed 32-bit range.
+    if let Some(value) = props.get("debezium.heartbeat.interval.ms")
+        && !value.parse::<i32>().is_ok_and(|interval| interval > 0)
+    {
+        bail!("'debezium.heartbeat.interval.ms' must be a positive integer, got: '{value}'");
+    }
+    Ok(())
+}
+
+pub fn check_format_encode_inner(
+    connector_name: &str,
+    format: PbFormatType,
+    encode: PbEncodeType,
+    compatible_formats: &[(PbFormatType, &[PbEncodeType])],
+) -> ConnectorResult<()> {
+    let Some((_, compatible_encodes)) = compatible_formats.iter().find(|(f, _)| *f == format)
+    else {
+        bail!(
+            "connector {} does not support format {:?}",
+            connector_name,
+            format
+        );
+    };
+    if !compatible_encodes.contains(&encode) {
+        bail!(
+            "connector {} does not support format {:?} with encode {:?}",
+            connector_name,
+            format,
+            encode
+        );
+    }
+    Ok(())
+}
+
+pub fn check_include_column_inner(
+    connector_name: &str,
+    additional_column_type: &str,
+    compatible_additional_column_types: &[&str],
+) -> ConnectorResult<()> {
+    if !compatible_additional_column_types.contains(&additional_column_type) {
+        bail!(
+            "additional column type {} is not supported for connector {}, acceptable column types: {:?}",
+            additional_column_type,
+            connector_name,
+            compatible_additional_column_types
+        );
+    }
+    Ok(())
+}
+
+pub fn check_alter_with_options_inner(
+    connector_name: &str,
+    props: &BTreeMap<String, String>,
+    secret_refs: &BTreeMap<String, PbSecretRef>,
+    allowed_keys: &[&str],
+) -> ConnectorResult<()> {
+    if let Some(key) = props
+        .keys()
+        .chain(secret_refs.keys())
+        .find(|key| !allowed_keys.contains(&key.as_str()))
+    {
+        bail!(
+            "Field '{}' is not allowed to be altered on the fly for connector: {}",
+            key,
+            connector_name
+        );
+    }
+    Ok(())
 }
 
 for_all_classified_sources!(impl_cdc_source_type);
