@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use mysql_async::Row as MysqlRow;
-use mysql_common::constants::ColumnFlags;
+use mysql_async::consts::ColumnFlags;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
@@ -288,18 +288,30 @@ mod tests {
     use std::sync::Arc;
 
     use futures::pin_mut;
-    use mysql_async::Row as MySqlRow;
+    use mysql_async::consts::ColumnType;
     use mysql_async::prelude::*;
-    use mysql_common::constants::ColumnType;
-    use mysql_common::packets::Column;
-    use mysql_common::row::new_row;
-    use mysql_common::value::Value;
+    use mysql_async::{Column, Row as MySqlRow, Value};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
     use tokio_stream::StreamExt;
 
     use crate::parser::{mysql_row_to_owned_row, mysql_row_to_owned_row_with_strict_pk};
+
+    /// `mysql_async` neither re-exports `mysql_common::row::new_row` nor its row
+    /// deserializers, and a `mysql_common` of a different version than the one
+    /// `mysql_async` pins produces a distinct `Row` type. `BinlogRow`, behind the
+    /// `binlog` feature, is the only public constructor of a `mysql_async::Row`.
+    fn new_row(values: Vec<Value>, columns: Arc<[Column]>) -> MySqlRow {
+        use mysql_async::binlog::row::BinlogRow;
+        use mysql_async::binlog::value::BinlogValue;
+
+        let values = values
+            .into_iter()
+            .map(|value| Some(BinlogValue::Value(value)))
+            .collect();
+        BinlogRow::new(values, columns).try_into().unwrap()
+    }
 
     fn mysql_row(values: Vec<Value>, names: &[&str]) -> MySqlRow {
         let columns = names

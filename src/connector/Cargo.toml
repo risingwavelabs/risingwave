@@ -106,9 +106,6 @@ maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
 mongodb = "3.5.1"
 mysql_async = { workspace = true }
-mysql_common = { version = "0.37", default-features = false, features = [
-    "chrono",
-] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = { workspace = true, features = [
@@ -229,6 +226,7 @@ fs-err = "3"
 lance = { workspace = true }
 lance-table = { workspace = true }
 lancedb = { workspace = true }
+mysql_async = { workspace = true, features = ["binlog"] }
 paste = "1"
 pretty_assertions = "1"
 proc-macro2 = "1.0"
