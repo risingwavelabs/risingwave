@@ -1128,11 +1128,7 @@ impl HummockVersionReader {
                 let table_infos =
                     prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range);
                 // Overlapping
-                let fetch_meta_req = table_infos.rev().collect_vec();
-                if fetch_meta_req.is_empty() {
-                    continue;
-                }
-                for sstable_info in fetch_meta_req {
+                for sstable_info in table_infos.rev() {
                     let sstable = self
                         .sstable_store
                         .sstable(sstable_info, local_stats)

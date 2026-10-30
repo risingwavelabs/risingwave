@@ -376,8 +376,9 @@ fn generate_splits(
         let mut last_key: Vec<u8> = vec![];
         for (data_size, key) in size_and_start_user_keys {
             if last_buffer_size >= sub_compaction_data_size && !last_key.eq(&key) {
-                splits.last_mut().unwrap().right = Bytes::from(key.clone());
-                splits.push(KeyRange::new(Bytes::from(key.clone()), Bytes::default()));
+                let split_key = Bytes::copy_from_slice(&key);
+                splits.last_mut().unwrap().right = split_key.clone();
+                splits.push(KeyRange::new(split_key, Bytes::default()));
                 last_buffer_size = data_size;
             } else {
                 last_buffer_size += data_size;

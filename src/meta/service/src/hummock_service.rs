@@ -705,9 +705,7 @@ impl HummockManagerService for HummockServiceImpl {
                 epoch_only,
                 start_epoch_inclusive,
                 end_epoch_inclusive,
-                table_ids
-                    .map(|t| t.table_ids.into_iter().collect::<HashSet<_>>())
-                    .clone(),
+                table_ids.map(|t| t.table_ids.into_iter().collect::<HashSet<_>>()),
                 exclude_empty,
                 limit,
             )
