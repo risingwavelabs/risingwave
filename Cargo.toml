@@ -204,6 +204,7 @@ lru = "0.18"
 madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.37", features = [
+    "chrono",
     "native-tls-tls",
     "rust_decimal",
 ] }

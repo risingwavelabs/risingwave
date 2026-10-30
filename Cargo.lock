@@ -10359,6 +10359,7 @@ checksum = "0f27695f286b461da077b8c2f72f47feaa04ce3c3f9c0976257410e90e21208a"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.1",
+ "bitvec",
  "btoi",
  "byteorder",
  "bytes",
@@ -10378,6 +10379,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.17",
  "uuid",
+ "zstd",
 ]
 
 [[package]]
@@ -14698,7 +14700,6 @@ dependencies = [
  "moka",
  "mongodb",
  "mysql_async",
- "mysql_common",
  "nexmark",
  "num-bigint 0.4.6",
  "opendal 0.58.1",
@@ -15050,7 +15051,6 @@ dependencies = [
  "md-5 0.10.6",
  "memcomparable",
  "mysql_async",
- "mysql_common",
  "num-integer",
  "parking_lot 0.12.5",
  "parse-display",
