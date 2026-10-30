@@ -302,33 +302,21 @@ impl From<PbCompactTask> for CompactTask {
             base_level: pb_compact_task.base_level,
             task_status: TaskStatus::try_from(pb_compact_task.task_status).unwrap(),
             compaction_group_id: pb_compact_task.compaction_group_id,
-            existing_table_ids: pb_compact_task.existing_table_ids.clone(),
+            existing_table_ids: pb_compact_task.existing_table_ids,
             compression_algorithm: pb_compact_task.compression_algorithm,
             target_file_size: pb_compact_task.target_file_size,
             compaction_filter_mask: pb_compact_task.compaction_filter_mask,
-            table_options: pb_compact_task
-                .table_options
-                .iter()
-                .map(|(table_id, v)| (*table_id, *v))
-                .collect(),
+            table_options: pb_compact_task.table_options,
             current_epoch_time: pb_compact_task.current_epoch_time,
             target_sub_level_id: pb_compact_task.target_sub_level_id,
             task_type: PbTaskType::try_from(pb_compact_task.task_type).unwrap(),
             split_by_state_table: pb_compact_task.split_by_state_table,
             split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
-            table_vnode_partition: pb_compact_task
-                .table_vnode_partition
-                .iter()
-                .map(|(table_id, v)| (*table_id, *v))
-                .collect(),
+            table_vnode_partition: pb_compact_task.table_vnode_partition,
             pk_prefix_table_watermarks,
             non_pk_prefix_table_watermarks,
             value_table_watermarks,
-            table_schemas: pb_compact_task
-                .table_schemas
-                .iter()
-                .map(|(table_id, v)| (*table_id, v.clone()))
-                .collect(),
+            table_schemas: pb_compact_task.table_schemas,
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             blocked_xor_filter_kv_count_threshold: pb_compact_task.max_kv_count_for_xor16,
@@ -444,16 +432,16 @@ impl From<CompactTask> for PbCompactTask {
             base_level: compact_task.base_level,
             task_status: compact_task.task_status.into(),
             compaction_group_id: compact_task.compaction_group_id,
-            existing_table_ids: compact_task.existing_table_ids.clone(),
+            existing_table_ids: compact_task.existing_table_ids,
             compression_algorithm: compact_task.compression_algorithm,
             target_file_size: compact_task.target_file_size,
             compaction_filter_mask: compact_task.compaction_filter_mask,
-            table_options: compact_task.table_options.clone(),
+            table_options: compact_task.table_options,
             current_epoch_time: compact_task.current_epoch_time,
             target_sub_level_id: compact_task.target_sub_level_id,
             task_type: compact_task.task_type.into(),
             split_weight_by_vnode: compact_task.split_weight_by_vnode,
-            table_vnode_partition: compact_task.table_vnode_partition.clone(),
+            table_vnode_partition: compact_task.table_vnode_partition,
             table_watermarks: compact_task
                 .pk_prefix_table_watermarks
                 .into_iter()
@@ -462,7 +450,7 @@ impl From<CompactTask> for PbCompactTask {
                 .map(|(table_id, table_watermark)| (table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
-            table_schemas: compact_task.table_schemas.clone(),
+            table_schemas: compact_task.table_schemas,
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.blocked_xor_filter_kv_count_threshold,
@@ -581,7 +569,7 @@ impl From<PbValidationTask> for ValidationTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.into_iter().collect(),
+            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id,
         }
     }
 }
@@ -611,7 +599,7 @@ pub struct ReportTask {
 impl From<PbReportTask> for ReportTask {
     fn from(value: PbReportTask) -> Self {
         Self {
-            table_stats_change: value.table_stats_change.clone(),
+            table_stats_change: value.table_stats_change,
             task_id: value.task_id,
             task_status: PbTaskStatus::try_from(value.task_status).unwrap(),
             sorted_output_ssts: value
@@ -627,7 +615,7 @@ impl From<PbReportTask> for ReportTask {
 impl From<ReportTask> for PbReportTask {
     fn from(value: ReportTask) -> Self {
         Self {
-            table_stats_change: value.table_stats_change.clone(),
+            table_stats_change: value.table_stats_change,
             task_id: value.task_id,
             task_status: value.task_status.into(),
             sorted_output_ssts: value
