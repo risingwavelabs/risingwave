@@ -53,6 +53,7 @@ use crate::source::SplitImpl::{
     CitusCdc, MongodbCdc, MysqlCdc, OracleCdc, PostgresCdc, SqlServerCdc,
 };
 use crate::source::batch::BatchSourceSplitImpl;
+use crate::source::ingest_mode::BoundedInput;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
@@ -125,6 +126,11 @@ pub trait SourceProperties:
 
     /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     fn init_from_pb_cdc_table_desc(&mut self, _table_desc: &ExternalTableDesc) {}
+
+    /// The input of a bounded read, if the options make the read bounded.
+    fn bounded_input(&self) -> Result<Option<BoundedInput>> {
+        Ok(None)
+    }
 }
 
 pub trait UnknownFields {
@@ -727,6 +733,11 @@ impl ConnectorProperties {
             .init_from_pb_cdc_table_desc(cdc_table_desc))
     }
 
+    /// The input of a bounded read, if the options make the read bounded.
+    pub fn bounded_input(&self) -> Result<Option<BoundedInput>> {
+        dispatch_source_prop!(self, |prop| prop.bounded_input())
+    }
+
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
             || matches!(self, ConnectorProperties::OpendalS3(_))
@@ -992,9 +1003,11 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 mod tests {
     use maplit::*;
     use nexmark::event::EventType;
+    use thiserror_ext::AsReport;
 
     use super::*;
     use crate::source::cdc::{DebeziumCdcSplit, Mysql};
+    use crate::source::iceberg::IcebergBoundedScan;
     use crate::source::kafka::KafkaSplit;
 
     #[test]
@@ -1056,6 +1069,66 @@ mod tests {
         } else {
             panic!("extract nexmark config failed");
         }
+    }
+
+    #[test]
+    fn test_bounded_input() {
+        fn bounded_input(extra: &[(&str, &str)]) -> Result<Option<BoundedInput>> {
+            let mut props = convert_args!(btreemap!(
+                "connector" => "iceberg",
+                "catalog.type" => "storage",
+                "warehouse.path" => "s3://bucket/warehouse",
+                "database.name" => "db",
+                "table.name" => "t",
+            ));
+            props.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap()
+                .bounded_input()
+        }
+
+        assert_eq!(bounded_input(&[]).unwrap(), None);
+        assert_eq!(
+            bounded_input(&[
+                ("scan.bounded.mode", "snapshot"),
+                ("scan.bounded.snapshot.id", "42"),
+            ])
+            .unwrap(),
+            Some(BoundedInput::Iceberg(IcebergBoundedScan::Snapshot {
+                snapshot_id: 42
+            }))
+        );
+
+        for invalid in [
+            vec![("scan.bounded.mode", "snapshot")],
+            vec![("scan.bounded.snapshot.id", "42")],
+            vec![
+                ("scan.bounded.mode", "snapshot"),
+                ("scan.bounded.snapshot.id", "latest"),
+            ],
+            vec![
+                ("scan.bounded.mode", "timestamp"),
+                ("scan.bounded.snapshot.id", "42"),
+            ],
+        ] {
+            assert!(bounded_input(&invalid).is_err(), "{invalid:?}");
+        }
+
+        let kafka = convert_args!(btreemap!(
+            "connector" => "kafka",
+            "properties.bootstrap.server" => "b1",
+            "topic" => "test",
+            "scan.bounded.mode" => "snapshot",
+        ));
+        let err =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(kafka), true)
+                .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("Unknown fields in the WITH clause"),
+            "{}",
+            err.to_report_string()
+        );
     }
 
     #[test]

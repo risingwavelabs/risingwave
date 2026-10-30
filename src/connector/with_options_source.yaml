@@ -386,6 +386,14 @@ IcebergProperties:
   - name: catalog.jdbc.password
     field_type: String
     required: false
+  - name: scan.bounded.mode
+    field_type: String
+    comments: Makes the read bounded. Only 'snapshot' is supported, which loads `scan.bounded.snapshot.id`.
+    required: false
+  - name: scan.bounded.snapshot.id
+    field_type: String
+    comments: The snapshot to load when `scan.bounded.mode` is 'snapshot'.
+    required: false
 KafkaProperties:
   fields:
   - name: bytes.per.second
