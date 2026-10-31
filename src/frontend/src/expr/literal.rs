@@ -12,17 +12,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType, Datum, ToText, literal_type_match};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, ToText, literal_type_match};
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
 use crate::expr::ExprType;
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq)]
 pub struct Literal {
     data: Datum,
     // `null` or `'foo'` is of `unknown` type until used in a typed context (e.g. func arg)
     data_type: Option<DataType>,
+}
+
+// `Interval` equality treats `'1 mon'`, `'30 days'` and `'720:00:00'` as equal, but they give
+// different results when added to a timestamp, so literals must compare all fields exactly.
+impl Literal {
+    fn interval_fields(&self) -> Option<(i32, i32, i64)> {
+        match &self.data {
+            Some(ScalarImpl::Interval(i)) => Some((i.months(), i.days(), i.usecs())),
+            _ => None,
+        }
+    }
+}
+
+impl PartialEq for Literal {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+            && self.data_type == other.data_type
+            && self.interval_fields() == other.interval_fields()
+    }
+}
+
+impl std::hash::Hash for Literal {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.data.hash(state);
+        self.data_type.hash(state);
+        self.interval_fields().hash(state);
+    }
 }
 
 impl std::fmt::Debug for Literal {
