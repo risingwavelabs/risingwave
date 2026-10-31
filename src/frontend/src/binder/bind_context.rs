@@ -24,11 +24,11 @@ use risingwave_sqlparser::ast::{TableAlias, WindowSpec};
 
 use crate::binder::Relation;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprImpl, ScopeId};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, ScopeId};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
-use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
+use crate::binder::{BoundQuery, ShareId};
 
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
@@ -148,12 +148,11 @@ pub struct ColumnGroupContext {
 pub struct ColumnGroup {
     /// Indices of the columns in the group
     pub indices: HashSet<usize>,
-    /// A non-nullable column is never NULL.
-    /// If `None`, ambiguous references to the column name will be resolved to a `COALESCE(col1,
-    /// col2, ..., coln)` over each column in the group
-    pub non_nullable_column: Option<usize>,
-
-    pub column_name: Option<String>,
+    /// The merged column that unqualified references to the column name resolve to: `COALESCE`
+    /// over these columns in order, or the column itself if there is only one. Each `USING` join
+    /// merges into the left column for INNER and LEFT joins, the right column for RIGHT joins,
+    /// and `COALESCE(left, right)` for FULL joins.
+    pub merged: Vec<usize>,
 }
 
 impl BindContext {
@@ -173,9 +172,9 @@ impl BindContext {
         }
     }
 
-    /// If return Vec has len > 1, it means we have an unqualified reference to a column which has
-    /// been naturally joined upon, wherein none of the columns are min-nullable. This will be
-    /// handled in downstream as a `COALESCE` expression
+    /// If return Vec has len > 1, it means we have an unqualified reference to a column merged by
+    /// `NATURAL` or `USING` joins. This will be handled in downstream as `COALESCE` over the
+    /// columns in order, see [`Self::bind_column_indices`].
     pub fn get_column_binding_indices(
         &self,
         schema_name: &Option<String>,
@@ -183,20 +182,29 @@ impl BindContext {
         column_name: &String,
     ) -> LiteResult<Vec<usize>> {
         match table_name {
-            Some(table_name) => {
-                if let Some(group_id_str) = table_name.strip_prefix(COLUMN_GROUP_PREFIX) {
-                    let group_id = group_id_str.parse::<u32>().map_err(|_|ErrorCode::InternalError(
-                        format!("Could not parse {:?} as virtual table name `{COLUMN_GROUP_PREFIX}[group_id]`", table_name)))?;
-                    self.get_indices_with_group_id(group_id, column_name)
-                } else {
-                    Ok(vec![self.get_index_with_table_name(
-                        column_name,
-                        table_name,
-                        schema_name,
-                    )?])
-                }
-            }
+            Some(table_name) => Ok(vec![self.get_index_with_table_name(
+                column_name,
+                table_name,
+                schema_name,
+            )?]),
             None => self.get_unqualified_indices(column_name),
+        }
+    }
+
+    /// Binds the indices returned by [`Self::get_column_binding_indices`] to the column, or to
+    /// `COALESCE` over the columns merged by `NATURAL` or `USING` joins.
+    pub fn bind_column_indices(&self, indices: &[usize]) -> Result<ExprImpl> {
+        let mut inputs: Vec<ExprImpl> = indices
+            .iter()
+            .map(|index| {
+                let column = &self.columns[*index];
+                InputRef::new(column.index, column.field.data_type.clone()).into()
+            })
+            .collect();
+        if inputs.len() == 1 {
+            Ok(inputs.pop().unwrap())
+        } else {
+            Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
         }
     }
 
@@ -222,38 +230,6 @@ impl BindContext {
         Ok(None)
     }
 
-    fn get_indices_with_group_id(
-        &self,
-        group_id: u32,
-        column_name: &String,
-    ) -> LiteResult<Vec<usize>> {
-        // The group-id qualifier is also reachable from a quoted user identifier, so a missing
-        // group or a group of another column is "not found" rather than an internal invariant.
-        let Some(group) = self
-            .column_group_context
-            .groups
-            .get(&group_id)
-            .filter(|group| {
-                group
-                    .column_name
-                    .as_ref()
-                    .is_none_or(|name| name == column_name)
-            })
-        else {
-            return Err(ErrorCode::ItemNotFound(format!(
-                "Invalid column: {column_name}"
-            )));
-        };
-        if let Some(non_nullable) = &group.non_nullable_column {
-            Ok(vec![*non_nullable])
-        } else {
-            // These will be converted to a `COALESCE(col1, col2, ..., coln)`
-            let mut indices: Vec<_> = group.indices.iter().copied().collect();
-            indices.sort(); // ensure a deterministic result
-            Ok(indices)
-        }
-    }
-
     pub fn get_unqualified_indices(&self, column_name: &String) -> LiteResult<Vec<usize>> {
         let columns = self
             .indices_of
@@ -265,12 +241,7 @@ impl BindContext {
             if let Some(group_id) = self.column_group_context.mapping.get(&columns[0]) {
                 let group = self.column_group_context.groups.get(group_id).unwrap();
                 if columns.iter().all(|idx| group.indices.contains(idx)) {
-                    if let Some(non_nullable) = &group.non_nullable_column {
-                        return Ok(vec![*non_nullable]);
-                    } else {
-                        // These will be converted to a `COALESCE(col1, col2, ..., coln)`
-                        return Ok(columns.clone());
-                    }
+                    return Ok(group.merged.clone());
                 }
             }
             Err(ErrorCode::InvalidReference(format!(
@@ -328,14 +299,8 @@ impl BindContext {
         Ok(())
     }
 
-    /// Identifies two columns as being in the same group. Additionally, possibly provides one of
-    /// the columns as being `non_nullable`
-    pub fn add_natural_columns(
-        &mut self,
-        left: usize,
-        right: usize,
-        non_nullable_column: Option<usize>,
-    ) {
+    /// Identifies two columns as being in the same group, and sets the merged column of the group.
+    pub fn add_natural_columns(&mut self, left: usize, right: usize, merged: Vec<usize>) {
         match (
             self.column_group_context.mapping.get(&left).copied(),
             self.column_group_context.mapping.get(&right).copied(),
@@ -346,8 +311,7 @@ impl BindContext {
 
                 let group = ColumnGroup {
                     indices: HashSet::from([left, right]),
-                    non_nullable_column,
-                    column_name: Some(self.columns[left].field.name.clone()),
+                    merged,
                 };
                 self.column_group_context.groups.insert(group_id, group);
                 self.column_group_context.mapping.insert(left, group_id);
@@ -356,17 +320,13 @@ impl BindContext {
             (Some(group_id), None) => {
                 let group = self.column_group_context.groups.get_mut(&group_id).unwrap();
                 group.indices.insert(right);
-                if group.non_nullable_column.is_none() {
-                    group.non_nullable_column = non_nullable_column;
-                }
+                group.merged = merged;
                 self.column_group_context.mapping.insert(right, group_id);
             }
             (None, Some(group_id)) => {
                 let group = self.column_group_context.groups.get_mut(&group_id).unwrap();
                 group.indices.insert(left);
-                if group.non_nullable_column.is_none() {
-                    group.non_nullable_column = non_nullable_column;
-                }
+                group.merged = merged;
                 self.column_group_context.mapping.insert(left, group_id);
             }
             (Some(l_group_id), Some(r_group_id)) => {
@@ -389,13 +349,7 @@ impl BindContext {
                     *self.column_group_context.mapping.get_mut(idx).unwrap() = l_group_id;
                     l_group.indices.insert(*idx);
                 }
-                if l_group.non_nullable_column.is_none() {
-                    l_group.non_nullable_column = if r_group.non_nullable_column.is_none() {
-                        non_nullable_column
-                    } else {
-                        r_group.non_nullable_column
-                    };
-                }
+                l_group.merged = merged;
             }
         }
     }
@@ -545,7 +499,7 @@ impl BindContext {
         }
         for (group_id, mut group) in groups {
             group.indices = group.indices.into_iter().map(|idx| idx + begin).collect();
-            if let Some(col) = &mut group.non_nullable_column {
+            for col in &mut group.merged {
                 *col += begin;
             }
             self.column_group_context

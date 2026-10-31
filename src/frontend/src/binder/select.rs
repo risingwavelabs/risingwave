@@ -29,7 +29,7 @@ use super::{BoundShareInput, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_column_name_not_reserved;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, ScopeId};
+use crate::expr::{CorrelatedId, Expr as _, ExprImpl, InputRef, ScopeId};
 use crate::optimizer::plan_node::generic::CHANGELOG_OP;
 use crate::utils::group_by::GroupBy;
 
@@ -389,7 +389,7 @@ impl Binder {
                     // Bind the column groups
                     // In psql, the USING and NATURAL columns come before the rest of the
                     // columns in a SELECT * statement
-                    let (exprs, names) = self.iter_column_groups();
+                    let (exprs, names) = self.iter_column_groups()?;
                     select_list.extend(exprs);
                     aliases.extend(names);
 
@@ -575,39 +575,17 @@ impl Binder {
             .unzip()
     }
 
-    pub fn iter_column_groups(&self) -> (Vec<ExprImpl>, Vec<Option<String>>) {
-        self.context
-            .column_group_context
-            .groups
-            .values()
-            .rev() // ensure that the outermost col group gets put first in the list
-            .map(|g| {
-                if let Some(col) = &g.non_nullable_column {
-                    let c = &self.context.columns[*col];
-                    (
-                        InputRef::new(c.index, c.field.data_type.clone()).into(),
-                        Some(c.field.name.clone()),
-                    )
-                } else {
-                    let mut input_idxes = g.indices.iter().collect::<Vec<_>>();
-                    input_idxes.sort();
-                    let inputs = input_idxes
-                        .into_iter()
-                        .map(|index| {
-                            let column = &self.context.columns[*index];
-                            InputRef::new(column.index, column.field.data_type.clone()).into()
-                        })
-                        .collect::<Vec<_>>();
-                    let c = &self.context.columns[*g.indices.iter().next().unwrap()];
-                    (
-                        FunctionCall::new(ExprType::Coalesce, inputs)
-                            .expect("Failure binding COALESCE function call")
-                            .into(),
-                        Some(c.field.name.clone()),
-                    )
-                }
-            })
-            .unzip()
+    pub fn iter_column_groups(&self) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
+        let mut exprs = vec![];
+        let mut names = vec![];
+        // ensure that the outermost col group gets put first in the list
+        for group in self.context.column_group_context.groups.values().rev() {
+            exprs.push(self.context.bind_column_indices(&group.merged)?);
+            names.push(Some(
+                self.context.columns[group.merged[0]].field.name.clone(),
+            ));
+        }
+        Ok((exprs, names))
     }
 
     /// Bind `DISTINCT` clause in a [`Select`].
