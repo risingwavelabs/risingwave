@@ -77,7 +77,11 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
             let (agg_impl, enable_delta) =
                 if agg_func_sig.is_retractable() && call.frame.exclusion.is_no_others() {
                     let init_state = agg_func.create_state()?;
-                    (AggImpl::Incremental(agg_func, init_state), true)
+                    let non_null_count = needs_non_null_count(*kind).then_some(0);
+                    (
+                        AggImpl::Incremental(agg_func, init_state, non_null_count),
+                        true,
+                    )
                 } else {
                     (AggImpl::Full(agg_func), false)
                 };
@@ -190,12 +194,16 @@ where
                 };
                 wrapper.aggregate(self.buffer.curr_window_values())
             }
-            AggImpl::Incremental(ref agg_func, ref mut state) => {
+            AggImpl::Incremental(ref agg_func, ref mut state, ref mut non_null_count) => {
                 let wrapper = AggregatorWrapper {
                     agg_func: agg_func.as_ref(),
                     arg_data_types: &self.arg_data_types,
                 };
-                wrapper.update(state, self.buffer.consume_curr_window_values_delta())
+                wrapper.update(
+                    state,
+                    non_null_count.as_mut(),
+                    self.buffer.consume_curr_window_values_delta(),
+                )
             }
             AggImpl::Shortcut(shortcut) => match shortcut {
                 Shortcut::FirstValue => Ok(if !self.ignore_nulls {
@@ -232,14 +240,18 @@ where
     fn slide_no_output(&mut self) -> Result<StateEvictHint> {
         match self.agg_impl {
             AggImpl::Full(..) => {}
-            AggImpl::Incremental(ref agg_func, ref mut state) => {
+            AggImpl::Incremental(ref agg_func, ref mut state, ref mut non_null_count) => {
                 // for incremental agg, we need to update the state even if the caller doesn't need
                 // the output
                 let wrapper = AggregatorWrapper {
                     agg_func: agg_func.as_ref(),
                     arg_data_types: &self.arg_data_types,
                 };
-                wrapper.update(state, self.buffer.consume_curr_window_values_delta())?;
+                wrapper.update(
+                    state,
+                    non_null_count.as_mut(),
+                    self.buffer.consume_curr_window_values_delta(),
+                )?;
             }
             AggImpl::Shortcut(..) => {}
         };
@@ -260,9 +272,32 @@ where
 #[derive(Educe)]
 #[educe(Debug)]
 enum AggImpl {
-    Incremental(#[educe(Debug(ignore))] BoxedAggregateFunction, AggImplState),
+    /// The optional `usize` is the number of non-NULL inputs in the current window, maintained only
+    /// for aggregates that need it to output NULL correctly, see [`needs_non_null_count`].
+    Incremental(
+        #[educe(Debug(ignore))] BoxedAggregateFunction,
+        AggImplState,
+        Option<usize>,
+    ),
     Full(#[educe(Debug(ignore))] BoxedAggregateFunction),
     Shortcut(Shortcut),
+}
+
+/// Aggregates like `sum` should output NULL once no non-NULL input is left in the window. Their
+/// retractable state can't tell that apart from inputs cancelling out (e.g. `sum` goes back to `0`),
+/// so we count the non-NULL inputs alongside the state and output NULL when the count is `0`.
+///
+/// Keep this in sync with `LogicalAgg::guard_empty_input_with_count` in the frontend.
+fn needs_non_null_count(kind: PbAggKind) -> bool {
+    matches!(
+        kind,
+        PbAggKind::Sum
+            | PbAggKind::BitAnd
+            | PbAggKind::BitOr
+            | PbAggKind::BitXor
+            | PbAggKind::BoolAnd
+            | PbAggKind::BoolOr
+    )
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -284,6 +319,7 @@ impl AggregatorWrapper<'_> {
         let mut state = self.agg_func.create_state()?;
         self.update(
             &mut state,
+            None,
             values.into_iter().map(|args| (Op::Insert, args)),
         )
     }
@@ -291,6 +327,7 @@ impl AggregatorWrapper<'_> {
     fn update<V>(
         &self,
         state: &mut AggImplState,
+        mut non_null_count: Option<&mut usize>,
         delta: impl IntoIterator<Item = (Op, V)>,
     ) -> Result<Datum>
     where
@@ -306,6 +343,14 @@ impl AggregatorWrapper<'_> {
         for (op, value) in delta {
             n_rows += 1;
             ops.push(op);
+            if let Some(count) = non_null_count.as_deref_mut()
+                && value.as_ref().iter().all(|datum| datum.is_some())
+            {
+                match op {
+                    Op::Insert | Op::UpdateInsert => *count += 1,
+                    Op::Delete | Op::UpdateDelete => *count -= 1,
+                }
+            }
             for (builder, datum) in args_builders.iter_mut().zip_eq_fast(value.as_ref()) {
                 builder.append(datum);
             }
@@ -320,6 +365,9 @@ impl AggregatorWrapper<'_> {
             .update(state, &chunk)
             .now_or_never()
             .expect("we don't support UDAF currently, so the function should return immediately")?;
+        if non_null_count.is_some_and(|count| *count == 0) {
+            return Ok(None);
+        }
         self.agg_func
             .get_result(state)
             .now_or_never()
@@ -329,5 +377,86 @@ impl AggregatorWrapper<'_> {
 
 #[cfg(test)]
 mod tests {
-    // TODO(rc): need to add some unit tests
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::util::memcmp_encoding;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::aggregate::AggArgs;
+    use risingwave_expr::window_function::{Frame, FrameBound};
+    use smallvec::smallvec;
+
+    use super::*;
+
+    fn create_state_key(order: i64) -> StateKey {
+        StateKey {
+            order_key: memcmp_encoding::encode_value(
+                Some(ScalarImpl::from(order)),
+                OrderType::ascending(),
+            )
+            .unwrap(),
+            pk: OwnedRow::new(vec![Some(order.into())]).into(),
+        }
+    }
+
+    /// Feeds `values` into a `ROWS BETWEEN 1 PRECEDING AND CURRENT ROW` window and returns the
+    /// output for each row.
+    fn run_rows_window(
+        kind: PbAggKind,
+        arg_type: DataType,
+        return_type: DataType,
+        values: Vec<Datum>,
+    ) -> Vec<Datum> {
+        let call = WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(AggType::Builtin(kind)),
+            return_type,
+            args: AggArgs::from_iter([(arg_type, 0)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
+        };
+        let mut state = new(&call).unwrap();
+        let mut outputs = vec![];
+        for (i, value) in values.into_iter().enumerate() {
+            state.append(create_state_key(i as i64), smallvec![value]);
+            assert!(state.curr_window().is_ready);
+            outputs.push(state.slide().unwrap().0);
+        }
+        outputs
+    }
+
+    #[test]
+    fn test_null_after_non_null_inputs_leave_frame() {
+        let int = |v: i32| Some(ScalarImpl::Int32(v));
+        let bigint = |v: i64| Some(ScalarImpl::Int64(v));
+        let boolean = |v: bool| Some(ScalarImpl::Bool(v));
+
+        let ints = vec![int(5), None, None, int(3)];
+        assert_eq!(
+            run_rows_window(
+                PbAggKind::Sum,
+                DataType::Int32,
+                DataType::Int64,
+                ints.clone()
+            ),
+            vec![bigint(5), bigint(5), None, bigint(3)]
+        );
+        for kind in [PbAggKind::BitAnd, PbAggKind::BitOr, PbAggKind::BitXor] {
+            assert_eq!(
+                run_rows_window(kind, DataType::Int32, DataType::Int32, ints.clone()),
+                vec![int(5), int(5), None, int(3)]
+            );
+        }
+        // `count` should still output `0` rather than NULL.
+        assert_eq!(
+            run_rows_window(PbAggKind::Count, DataType::Int32, DataType::Int64, ints),
+            vec![bigint(1), bigint(1), bigint(0), bigint(1)]
+        );
+
+        let bools = vec![boolean(true), None, None, boolean(false)];
+        for kind in [PbAggKind::BoolAnd, PbAggKind::BoolOr] {
+            assert_eq!(
+                run_rows_window(kind, DataType::Boolean, DataType::Boolean, bools.clone()),
+                vec![boolean(true), boolean(true), None, boolean(false)]
+            );
+        }
+    }
 }
