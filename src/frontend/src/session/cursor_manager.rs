@@ -41,7 +41,7 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::HandlerArgs;
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
-use crate::handler::query::{RwBatchQueryPlanResult, gen_batch_plan_fragmenter};
+use crate::handler::query::{RwBatchQueryPlanResult, gen_batch_plan_fragmenter_with_snapshot};
 use crate::handler::util::{
     DataChunkToRowSetAdapter, StaticSessionData, convert_logstore_u64_to_unix_millis,
     pg_value_format, to_pg_field,
@@ -441,11 +441,17 @@ impl SubscriptionCursor {
             // future fetch on the cursor starts from the snapshot when the cursor is declared.
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (chunk_stream, init_query_timer, table_catalog) =
-                Self::initiate_query(None, dependent_table_id, handler_args.clone(), None).await?;
-            let pinned_epoch = match handler_args.session.get_pinned_snapshot().ok_or_else(
-                || ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_owned()),
-            )? {
+            let snapshot = match handler_args.session.pinned_snapshot() {
+                ReadSnapshot::LatestCommitted => ReadSnapshot::FrontendPinned {
+                    snapshot: handler_args
+                        .session
+                        .env()
+                        .hummock_snapshot_manager()
+                        .acquire(),
+                },
+                snapshot => snapshot,
+            };
+            let pinned_epoch = match &snapshot {
                 ReadSnapshot::FrontendPinned { snapshot, .. } => {
                     snapshot
                         .version()
@@ -460,6 +466,12 @@ impl SubscriptionCursor {
                 ReadSnapshot::Other(_) => {
                     return Err(ErrorCode::InternalError("Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`".to_owned()).into());
                 }
+                ReadSnapshot::LatestCommitted => {
+                    return Err(ErrorCode::InternalError(
+                        "Subscription snapshot must be frontend-pinned".to_owned(),
+                    )
+                    .into());
+                }
                 ReadSnapshot::ReadUncommitted => {
                     return Err(ErrorCode::InternalError(
                         "Fetch Cursor don't support read uncommitted".to_owned(),
@@ -467,6 +479,15 @@ impl SubscriptionCursor {
                     .into());
                 }
             };
+            // Execute against exactly the snapshot used for the transition to the change log.
+            let (chunk_stream, init_query_timer, table_catalog) = Self::initiate_query(
+                None,
+                dependent_table_id,
+                handler_args.clone(),
+                None,
+                Some(snapshot),
+            )
+            .await?;
             let start_timestamp = pinned_epoch;
 
             (
@@ -526,6 +547,7 @@ impl SubscriptionCursor {
                                     Some(rw_timestamp),
                                     self.dependent_table_id,
                                     handler_args.clone(),
+                                    None,
                                     None,
                                 )
                                 .await?;
@@ -854,6 +876,7 @@ impl SubscriptionCursor {
         dependent_table_id: TableId,
         handler_args: HandlerArgs,
         seek_pk_row: Option<Row>,
+        snapshot_override: Option<ReadSnapshot>,
     ) -> Result<(CursorDataChunkStream, Instant, Arc<TableCatalog>)> {
         let init_query_timer = Instant::now();
         let session = handler_args.clone().session;
@@ -864,7 +887,11 @@ impl SubscriptionCursor {
             handler_args.clone(),
             seek_pk_row,
         )?;
-        let plan_fragmenter_result = gen_batch_plan_fragmenter(&handler_args.session, plan_result)?;
+        let plan_fragmenter_result = gen_batch_plan_fragmenter_with_snapshot(
+            &handler_args.session,
+            plan_result,
+            snapshot_override,
+        )?;
         let (chunk_stream, _) =
             create_chunk_stream_for_cursor(handler_args.session, plan_fragmenter_result).await?;
         Ok((chunk_stream, init_query_timer, table_catalog))

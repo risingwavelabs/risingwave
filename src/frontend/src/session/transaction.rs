@@ -225,6 +225,8 @@ impl SessionImpl {
 
                 if let Some(query_epoch) = query_epoch {
                     ReadSnapshot::Other(query_epoch)
+                } else if self.config().batch_read_latest_committed() {
+                    ReadSnapshot::LatestCommitted
                 } else if self.is_barrier_read() {
                     ReadSnapshot::ReadUncommitted
                 } else {
@@ -271,5 +273,59 @@ impl SessionImpl {
     pub fn user_info_writer(&self) -> Result<&dyn UserInfoWriter> {
         self.txn_write_guard()
             .map(|guard| self.env().user_info_writer(guard))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_latest_committed_snapshot_precedence() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        session.set_config("visibility_mode", "all".into()).unwrap();
+        {
+            let _txn = session.txn_begin_implicit();
+            assert!(session.is_barrier_read());
+            assert!(matches!(
+                session.pinned_snapshot(),
+                ReadSnapshot::ReadUncommitted
+            ));
+        }
+        session
+            .set_config("batch_read_latest_committed", "true".into())
+            .unwrap();
+        {
+            let _txn = session.txn_begin_implicit();
+            assert!(!session.is_barrier_read());
+            assert!(matches!(
+                session.pinned_snapshot(),
+                ReadSnapshot::LatestCommitted
+            ));
+            // Changing configuration does not reacquire an existing transaction snapshot.
+            session.reset_config("batch_read_latest_committed").unwrap();
+            assert!(matches!(
+                session.pinned_snapshot(),
+                ReadSnapshot::LatestCommitted
+            ));
+        }
+        session
+            .set_config("batch_read_latest_committed", "true".into())
+            .unwrap();
+        session.set_config("query_epoch", "65536".into()).unwrap();
+        {
+            let _txn = session.txn_begin_implicit();
+            assert!(!session.is_barrier_read());
+            assert!(matches!(session.pinned_snapshot(), ReadSnapshot::Other(_)));
+        }
+        session.reset_config("query_epoch").unwrap();
+        session.reset_config("batch_read_latest_committed").unwrap();
+        let _txn = session.txn_begin_implicit();
+        assert!(matches!(
+            session.pinned_snapshot(),
+            ReadSnapshot::ReadUncommitted
+        ));
     }
 }
