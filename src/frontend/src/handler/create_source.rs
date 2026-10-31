@@ -78,7 +78,7 @@ use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
+    ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
     ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, Value, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
@@ -143,8 +143,8 @@ fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
 fn try_consume_string_from_options(
     format_encode_options: &mut BTreeMap<String, String>,
     key: &str,
-) -> Option<AstString> {
-    format_encode_options.remove(key).map(AstString)
+) -> Option<String> {
+    format_encode_options.remove(key)
 }
 
 fn try_consume_schema_registry_config_from_options(
@@ -185,7 +185,7 @@ fn try_consume_pulsar_schema_config_from_options(
 fn consume_string_from_options(
     format_encode_options: &mut BTreeMap<String, String>,
     key: &str,
-) -> Result<AstString> {
+) -> Result<String> {
     try_consume_string_from_options(format_encode_options, key).ok_or(RwError::from(ProtocolError(
         format!("missing field {} in options", key),
     )))
