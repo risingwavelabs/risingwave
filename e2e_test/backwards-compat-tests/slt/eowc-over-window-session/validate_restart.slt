@@ -1,0 +1,25 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Advance the watermark to 11:25, which would close the session of 10:30 by watermark.
+statement ok
+INSERT INTO eowc_session_input VALUES ('2024-01-01 11:30:00', 0, 3);
+
+# The MV created before the upgrade still closes sessions only by later rows.
+query TIIII rowsort retry 11 backoff 1s
+SELECT * FROM eowc_session_mv;
+----
+2024-01-01 10:00:00 1 1 2 NULL
+2024-01-01 10:01:00 2 1 2 1
+
+# The session of 10:30 is closed by the next row of bar 1, which the EOWC sort releases once the
+# watermark passes it, and the rows retained for `lag` are not output again.
+statement ok
+INSERT INTO eowc_session_input VALUES ('2024-01-01 12:00:00', 4, 1), ('2024-01-01 12:10:00', 0, 4);
+
+query TIIII rowsort retry 11 backoff 1s
+SELECT * FROM eowc_session_mv;
+----
+2024-01-01 10:00:00 1 1 2 NULL
+2024-01-01 10:01:00 2 1 2 1
+2024-01-01 10:30:00 3 1 1 2

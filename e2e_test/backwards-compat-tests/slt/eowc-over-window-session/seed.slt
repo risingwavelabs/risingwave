@@ -1,0 +1,31 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE eowc_session_input (
+    tm TIMESTAMP,
+    foo INT,
+    bar INT,
+    WATERMARK FOR tm AS tm - INTERVAL '5 minutes'
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW eowc_session_mv AS
+SELECT
+    tm,
+    foo,
+    bar,
+    count(*) OVER (PARTITION BY bar ORDER BY tm SESSION WITH GAP '10 minutes') AS cnt,
+    lag(foo) OVER (PARTITION BY bar ORDER BY tm) AS prev_foo
+FROM eowc_session_input
+EMIT ON WINDOW CLOSE;
+
+statement ok
+INSERT INTO eowc_session_input VALUES
+  ('2024-01-01 10:00:00', 1, 1)
+, ('2024-01-01 10:01:00', 2, 1)
+, ('2024-01-01 10:30:00', 3, 1)
+, ('2024-01-01 11:00:00', 0, 2);
