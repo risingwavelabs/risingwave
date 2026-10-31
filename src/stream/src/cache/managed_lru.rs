@@ -21,7 +21,7 @@ use std::sync::atomic::Ordering;
 
 use risingwave_common::lru::{LruCache, RandomState};
 use risingwave_common::metrics::RelabeledAggregatedIntGauge;
-use risingwave_common::sequence::AtomicSequence;
+use risingwave_common::sequence::{AtomicSequence, Sequence};
 use risingwave_common_estimate_size::EstimateSize;
 
 use crate::common::metrics::MetricsInfo;
@@ -87,6 +87,20 @@ where
     pub fn evict(&mut self) {
         let sequence = self.watermark_sequence.load(Ordering::Relaxed);
         while let Some((key, value, _)) = self.inner.pop_with_sequence(sequence) {
+            let charge = key.estimated_size() + value.estimated_size();
+            self.reporter.dec(charge);
+        }
+    }
+
+    /// Evicts the least recently used entries until at most `max_entries` remain, regardless of
+    /// the watermark.
+    pub fn evict_to_capacity(&mut self, max_entries: usize) {
+        while self.inner.len() > max_entries {
+            // Every entry has a sequence below `Sequence::MAX`, so this pops the least recently used
+            // entry.
+            let Some((key, value, _)) = self.inner.pop_with_sequence(Sequence::MAX) else {
+                break;
+            };
             let charge = key.estimated_size() + value.estimated_size();
             self.reporter.dec(charge);
         }
@@ -278,5 +292,41 @@ impl HeapSizeReporter {
 impl Drop for HeapSizeReporter {
     fn drop(&mut self) {
         self.metrics.set(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::sequence::AtomicSequence;
+
+    use super::*;
+
+    #[test]
+    fn test_evict_to_capacity() {
+        let mut cache: ManagedLruCache<u64, u64> =
+            ManagedLruCache::unbounded(Arc::new(AtomicSequence::new(0)), MetricsInfo::for_test());
+        for i in 0..10 {
+            cache.put(i, i);
+        }
+        // Make 0 and 1 the most recently used.
+        assert!(cache.get(&0).is_some());
+        assert!(cache.get(&1).is_some());
+
+        cache.evict_to_capacity(10);
+        assert_eq!(cache.len(), 10);
+
+        cache.evict_to_capacity(4);
+        assert_eq!(cache.len(), 4);
+        for k in [0, 1, 8, 9] {
+            assert!(cache.contains(&k), "key {k} should be kept");
+        }
+        // Evicted entries are no longer counted in the reported heap size.
+        assert_eq!(cache.reporter.heap_size, 4 * 2 * 0u64.estimated_size());
+
+        cache.evict_to_capacity(0);
+        assert!(cache.is_empty());
+        assert_eq!(cache.reporter.heap_size, 0);
     }
 }
