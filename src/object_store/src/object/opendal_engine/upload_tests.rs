@@ -141,6 +141,6 @@ async fn check_large_metadata(simulate_timeout: bool) {
             .values()
             .flat_map(|buffer| buffer.to_bytes().to_vec())
             .collect::<Vec<_>>();
-        assert_eq!(actual, expected);
+        assert!(actual == expected, "multipart upload changed object bytes");
     }
 }
