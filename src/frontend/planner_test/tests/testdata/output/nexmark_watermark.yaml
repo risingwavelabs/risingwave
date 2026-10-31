@@ -878,13 +878,13 @@
 
     Table 3 { columns: [ $expr6, $expr8, $expr7, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 2, 0, 1 ], read pk prefix len hint: 3, clean watermark indices: [0] }
 
-    Table 4 { columns: [ $expr3, $expr4, $expr2, $expr5, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
+    Table 4 { columns: [ $expr3, $expr4, $expr2, $expr5, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $0 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4, clean watermark indices: [2] }
 
     Table 5 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 6 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ $expr7, $expr6, $expr8, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 7 { columns: [ $expr7, $expr6, $expr8, _row_id, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3, clean watermark indices: [1] }
 
     Table 4294967294 { columns: [ id, name, starttime, $expr5, $expr7, $expr6, $expr8, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
 
