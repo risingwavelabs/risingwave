@@ -22,7 +22,6 @@ import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.connector.source.common.CdcConnectorException;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
-import com.risingwave.proto.ConnectorServiceProto.SourceType;
 import io.debezium.connector.postgresql.PostgresOffsetContext;
 import io.debezium.embedded.EmbeddedEngineChangeEventProxy;
 import io.debezium.engine.ChangeEvent;
@@ -120,26 +119,6 @@ public class DbzChangeEventConsumer
         }
     }
 
-    private static SourceType toProtoSourceType(SourceTypeE connector) {
-        if (connector == null) {
-            return SourceType.UNSPECIFIED;
-        }
-        switch (connector) {
-            case MYSQL:
-                return SourceType.MYSQL;
-            case POSTGRES:
-                return SourceType.POSTGRES;
-            case MONGODB:
-                return SourceType.MONGODB;
-            case SQL_SERVER:
-                return SourceType.SQL_SERVER;
-            case ORACLE:
-                return SourceType.ORACLE;
-            default:
-                return SourceType.UNSPECIFIED;
-        }
-    }
-
     private boolean isHeartbeatEvent(SourceRecord record) {
         String topic = record.topic();
         return topic != null
@@ -184,8 +163,7 @@ public class DbzChangeEventConsumer
             var msgBuilder =
                     CdcMessage.newBuilder()
                             .setOffset(offsetStr)
-                            .setPartition(String.valueOf(sourceId))
-                            .setSourceType(toProtoSourceType(connector));
+                            .setPartition(String.valueOf(sourceId));
 
             switch (eventType) {
                 case HEARTBEAT:

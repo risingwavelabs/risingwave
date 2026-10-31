@@ -45,7 +45,7 @@ use crate::binder::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
-use crate::handler::cdc::derive_with_options_for_cdc_table;
+use crate::handler::cdc::derive_connect_properties_for_cdc_table;
 use crate::optimizer::IcebergSnapshotInfo;
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
@@ -1053,10 +1053,10 @@ fn resolve_current_cdc_table_desc(
     mut desc: CdcTableDesc,
     upstream_properties: &WithOptionsSecResolved,
 ) -> Result<CdcTableDesc> {
-    let (current_properties, normalized_external_table_name) =
-        derive_with_options_for_cdc_table(upstream_properties, desc.external_table_name)?;
+    let (current_properties, external_table_name) =
+        derive_connect_properties_for_cdc_table(upstream_properties, desc.external_table_name)?;
     let (connect_properties, secret_refs) = current_properties.into_parts();
-    desc.external_table_name = normalized_external_table_name;
+    desc.external_table_name = external_table_name;
     desc.connect_properties = connect_properties;
     desc.secret_refs = secret_refs;
     Ok(desc)

@@ -18,9 +18,11 @@ use risingwave_common::license::{Feature, FeatureNotAvailable};
 use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
+use crate::source::cdc::external::{DATABASE_NAME_KEY, SchemaTableName};
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, SqlServer,
-    check_alter_with_options_inner, check_common_with_options,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, SqlServer, check_alter_with_options_inner, check_common_with_options,
+    split_quoted_identifier_inner,
 };
 
 // ------- Runtime flags -------
@@ -69,5 +71,27 @@ impl CdcSourceDdlValidator for SqlServer {
                 "password",
             ],
         )
+    }
+}
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for SqlServer {
+    /// Debezium SQL Server always names topics in multi-partition mode, so the topic suffix
+    /// starts with the database: `database.schema.table`.
+    fn canonical_name(connect_properties: &BTreeMap<String, String>) -> String {
+        let SchemaTableName {
+            schema_name,
+            table_name,
+        } = SchemaTableName::from_properties(connect_properties);
+        let database_name = connect_properties
+            .get(DATABASE_NAME_KEY)
+            .map(String::as_str)
+            .unwrap_or_default();
+        format!("{database_name}.{schema_name}.{table_name}")
+    }
+
+    fn split_quoted_identifier(name: &str) -> Option<Vec<String>> {
+        split_quoted_identifier_inner(name, '[', ']')
     }
 }

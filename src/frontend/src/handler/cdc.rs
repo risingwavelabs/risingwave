@@ -23,7 +23,8 @@ use risingwave_connector::source::cdc::external::{
     TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::{
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CdcSourceExternalTableIdentifier, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, Postgres,
+    SQL_SERVER_CDC_CONNECTOR, SqlServer,
 };
 use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
 use thiserror_ext::AsReport;
@@ -32,14 +33,15 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::create_source::reject_variant_columns;
 use crate::handler::create_table::{bind_sql_columns, bind_sql_pk_names, bind_table_constraints};
 
-/// Derive connector properties and normalize `external_table_name` for CDC tables.
+/// Derive the connect properties of a CDC table from the properties of its source and the
+/// `external_table_name` in its `TABLE '...'` clause.
 ///
-/// Returns (`connector_properties`, `normalized_external_table_name`) where:
-/// - For SQL Server: Normalizes 'db.schema.table' (3 parts) to 'schema.table' (2 parts),
-///   because users can optionally include database name for verification, but it needs to be
-///   stripped to match the format returned by Debezium's `extract_table_name()`.
+/// Returns (`connect_properties`, `external_table_name`) where `external_table_name` keeps the
+/// user's spelling:
+/// - For SQL Server: 'schema.table' (2 parts) gets the database name of the source prepended, so
+///   that it names the table the same way as Debezium's topic, 'database.schema.table'.
 /// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
-pub(crate) fn derive_with_options_for_cdc_table(
+pub(crate) fn derive_connect_properties_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
 ) -> Result<(WithOptionsSecResolved, String)> {
@@ -92,15 +94,18 @@ pub(crate) fn derive_with_options_for_cdc_table(
                 // We do NOT allow single table name (e.g., 't') because:
                 // - Unlike database name (already in source), schema name is NOT pre-specified
                 // - User must explicitly provide schema (even if it's 'dbo')
-                let parts: Vec<&str> = external_table_name.split('.').collect();
-                let (schema_name, table_name) = match parts.len() {
-                    3 => {
+                let invalid_format = || {
+                    anyhow!(
+                        "Invalid table name format '{}'. Expected 'schema.table' or 'database.schema.table'.",
+                        external_table_name
+                    )
+                };
+                let parts = SqlServer::split_quoted_identifier(&external_table_name)
+                    .ok_or_else(invalid_format)?;
+                let (schema_name, table_name, external_table_name) = match parts.as_slice() {
+                    [db_name, schema_name, table_name] => {
                         // Format: database.schema.table
                         // Verify that the database name matches the one in source definition
-                        let db_name = parts[0];
-                        let schema_name = parts[1];
-                        let table_name = parts[2];
-
                         if db_name != source_database_name {
                             return Err(anyhow!(
                                 "The database name '{}' in FROM clause does not match the database name '{}' specified in source definition. \
@@ -109,16 +114,20 @@ pub(crate) fn derive_with_options_for_cdc_table(
                                 source_database_name
                             ).into());
                         }
-                        (schema_name, table_name)
+                        (schema_name, table_name, external_table_name)
                     }
-                    2 => {
+                    [schema_name, table_name] => {
                         // Format: schema.table (recommended)
-                        // Database name is taken from source definition
-                        let schema_name = parts[0];
-                        let table_name = parts[1];
-                        (schema_name, table_name)
+                        // Database name is taken from source definition. It may contain `]`, so
+                        // wrap it in `[]` and escape `]` to keep `database.schema.table` idempotent.
+                        let external_table_name = format!(
+                            "[{}].{}",
+                            source_database_name.replace(']', "]]"),
+                            external_table_name
+                        );
+                        (schema_name, table_name, external_table_name)
                     }
-                    1 => {
+                    [_] => {
                         // Format: table only
                         // Reject with clear error message
                         return Err(anyhow!(
@@ -130,23 +139,13 @@ pub(crate) fn derive_with_options_for_cdc_table(
                             external_table_name
                         ).into());
                     }
-                    _ => {
-                        // Invalid format (4+ parts or empty)
-                        return Err(anyhow!(
-                            "Invalid table name format '{}'. Expected 'schema.table' or 'database.schema.table'.",
-                            external_table_name
-                        ).into());
-                    }
+                    _ => return Err(invalid_format().into()),
                 };
 
                 // Insert schema and table names into connector properties
-                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
-                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
-
-                // Normalize external_table_name to 'schema.table' format
-                // This ensures consistency with extract_table_name() in message.rs
-                let normalized_external_table_name = format!("{}.{}", schema_name, table_name);
-                return Ok((with_options, normalized_external_table_name));
+                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.clone());
+                with_options.insert(TABLE_NAME_KEY.into(), table_name.clone());
+                return Ok((with_options, external_table_name));
             }
             _ => {
                 return Err(RwError::from(anyhow!(
@@ -164,68 +163,12 @@ pub(crate) fn derive_with_options_for_cdc_table(
 /// Column names do not need the same parsing here: wildcard schema derivation reads
 /// them from PostgreSQL catalogs after the exact table has been identified.
 fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
-    let mut parts = vec![];
-    let mut current = String::new();
-    let mut chars = external_table_name.chars().peekable();
-    let mut in_quote = false;
-    let mut just_closed_quote = false;
-
-    while let Some(ch) = chars.next() {
-        if in_quote {
-            if ch == '"' {
-                if chars.peek() == Some(&'"') {
-                    current.push('"');
-                    chars.next();
-                } else {
-                    in_quote = false;
-                    just_closed_quote = true;
-                }
-            } else {
-                current.push(ch);
-            }
-        } else {
-            match ch {
-                '.' => {
-                    if current.is_empty() {
-                        return Err(anyhow!(
-                            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                            external_table_name
-                        )
-                        .into());
-                    }
-                    parts.push(std::mem::take(&mut current));
-                    just_closed_quote = false;
-                }
-                '"' if current.is_empty() => {
-                    in_quote = true;
-                }
-                '"' => {
-                    return Err(anyhow!(
-                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                        external_table_name
-                    )
-                    .into());
-                }
-                _ if just_closed_quote => {
-                    return Err(anyhow!(
-                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
-                        external_table_name
-                    )
-                    .into());
-                }
-                _ => current.push(ch),
-            }
-        }
-    }
-
-    if in_quote || current.is_empty() {
-        return Err(anyhow!(
+    let parts = Postgres::split_quoted_identifier(external_table_name).ok_or_else(|| {
+        anyhow!(
             "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
             external_table_name
         )
-        .into());
-    }
-    parts.push(current);
+    })?;
 
     if let [schema_name, table_name] = parts.as_slice() {
         Ok((schema_name.clone(), table_name.clone()))
@@ -622,6 +565,86 @@ mod tests {
         ] {
             assert!(
                 parse_postgres_cdc_external_table_name(input).is_err(),
+                "input should be rejected: {input}"
+            );
+        }
+    }
+
+    fn sql_server_source_properties(database_name: &str) -> WithOptionsSecResolved {
+        WithOptionsSecResolved::new(
+            [
+                (UPSTREAM_SOURCE_KEY, SQL_SERVER_CDC_CONNECTOR),
+                (DATABASE_NAME_KEY, database_name),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect(),
+            Default::default(),
+        )
+    }
+
+    #[test]
+    fn test_derive_sql_server_connect_properties() {
+        for (database_name, input, expected_external_table_name, expected_table_name) in [
+            ("repro", "dbo.orders", "[repro].dbo.orders", "orders"),
+            ("repro", "repro.dbo.orders", "repro.dbo.orders", "orders"),
+            (
+                "repro",
+                "[repro].dbo.orders",
+                "[repro].dbo.orders",
+                "orders",
+            ),
+            ("repro", "dbo.[a.b]", "[repro].dbo.[a.b]", "a.b"),
+            ("repro", "repro.dbo.[a.b]", "repro.dbo.[a.b]", "a.b"),
+            ("repro", "dbo.[a]]b]", "[repro].dbo.[a]]b]", "a]b"),
+            ("my.db", "dbo.orders", "[my.db].dbo.orders", "orders"),
+            ("x]y", "dbo.orders", "[x]]y].dbo.orders", "orders"),
+        ] {
+            let source_properties = sql_server_source_properties(database_name);
+            let (props, external_table_name) =
+                derive_connect_properties_for_cdc_table(&source_properties, input.to_owned())
+                    .unwrap();
+            assert_eq!(
+                external_table_name, expected_external_table_name,
+                "input: {input}"
+            );
+            assert_eq!(props.get(SCHEMA_NAME_KEY).unwrap(), "dbo", "input: {input}");
+            assert_eq!(
+                props.get(TABLE_NAME_KEY).unwrap(),
+                expected_table_name,
+                "input: {input}"
+            );
+
+            let (props_again, external_table_name_again) = derive_connect_properties_for_cdc_table(
+                &source_properties,
+                external_table_name.clone(),
+            )
+            .unwrap();
+            assert_eq!(
+                external_table_name_again, external_table_name,
+                "input: {input}"
+            );
+            assert_eq!(
+                props_again.into_parts().0,
+                props.into_parts().0,
+                "input: {input}"
+            );
+        }
+
+        for input in [
+            "orders",
+            "other.dbo.orders",
+            "repro.dbo.a.b",
+            "dbo.[a.b",
+            "dbo.[a]b]",
+            "dbo.a[b",
+        ] {
+            assert!(
+                derive_connect_properties_for_cdc_table(
+                    &sql_server_source_properties("repro"),
+                    input.to_owned()
+                )
+                .is_err(),
                 "input should be rejected: {input}"
             );
         }
