@@ -630,6 +630,10 @@ impl<A> ChangeEvent for DebeziumChangeEvent<A>
 where
     A: Access,
 {
+    /// Reads a column from the event image or its Debezium source metadata.
+    ///
+    /// MongoDB deletes obtain `_id` from the key and namespace columns from the
+    /// source envelope, so composite keys do not require a document pre-image.
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult<DatumCow<'_>> {
         match self.op()? {
             ChangeEventOperation::Delete => {
@@ -641,6 +645,26 @@ where
                         .as_ref()
                         .expect("key_accessor must be provided for delete operation")
                         .access(&[&desc.name], &desc.data_type);
+                }
+
+                // MongoDB does not provide a pre-image by default. Namespace
+                // columns needed for a composite key are present in source.
+                if self.is_mongodb {
+                    let source_field = match desc.additional_column.column_type.as_ref() {
+                        Some(ColumnType::DatabaseName(_)) => Some(SOURCE_DB),
+                        Some(ColumnType::CollectionName(_)) => Some(SOURCE_COLLECTION),
+                        _ => None,
+                    };
+                    if let Some(source_field) = source_field {
+                        return self
+                            .value_accessor
+                            .as_ref()
+                            .ok_or_else(|| AccessError::Undefined {
+                                name: desc.name.clone(),
+                                path: Default::default(),
+                            })?
+                            .access(&[SOURCE, source_field], &desc.data_type);
+                    }
                 }
 
                 if let Some(va) = self.value_accessor.as_ref() {

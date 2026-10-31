@@ -934,6 +934,9 @@ profile:
       - use: oracle
         address: oracle
         user-managed: true
+      - use: mongodb
+        address: mongodb
+        user-managed: true
 
   ci-source-pulsar-test:
     config-path: src/config/ci-recovery.toml
