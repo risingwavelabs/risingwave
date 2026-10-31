@@ -18,9 +18,7 @@ use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::{BindContext, Binder, Clause, LateralBindContext};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{
-    CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal, ScopeId,
-};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, Literal, ScopeId};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -51,29 +49,7 @@ impl Binder {
             .context
             .get_column_binding_indices(&schema_name, &table_name, &column_name)
         {
-            Ok(mut indices) => {
-                match indices.len() {
-                    0 => unreachable!(),
-                    1 => {
-                        let index = indices[0];
-                        let column = &self.context.columns[index];
-                        return Ok(
-                            InputRef::new(column.index, column.field.data_type.clone()).into()
-                        );
-                    }
-                    _ => {
-                        indices.sort(); // make sure we have a consistent result
-                        let inputs = indices
-                            .iter()
-                            .map(|index| {
-                                let column = &self.context.columns[*index];
-                                InputRef::new(column.index, column.field.data_type.clone()).into()
-                            })
-                            .collect::<Vec<_>>();
-                        return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into());
-                    }
-                }
-            }
+            Ok(indices) => return self.context.bind_column_indices(&indices),
             Err(e) => {
                 // If a column is referenced using three-level qualification and the table has an alias,
                 // prompt the user to use the table alias instead.
@@ -131,8 +107,7 @@ impl Binder {
                 }
             }
 
-            if let Some((context, mut indices)) = found {
-                indices.sort(); // make sure we have a consistent result
+            if let Some((context, indices)) = found {
                 let mut inputs = indices
                     .iter()
                     .map(|index| {
