@@ -2260,6 +2260,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bnum"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "119771309b95163ec7aaf79810da82f7cd0599c19722d48b9c03894dca833966"
+
+[[package]]
 name = "bon"
 version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2774,40 +2780,54 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clickhouse"
-version = "0.13.2"
-source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=f05029d2cb65164d61fa8699dd955f808375a618#f05029d2cb65164d61fa8699dd955f808375a618"
+version = "0.15.3"
+source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=dad4c6dd8a40aaeaa7534abf38155219f6fd73b5#dad4c6dd8a40aaeaa7534abf38155219f6fd73b5"
 dependencies = [
+ "bnum 0.13.0",
  "bstr",
  "bytes",
  "cityhash-rs",
- "clickhouse-derive",
- "futures",
+ "clickhouse-macros",
+ "clickhouse-types",
  "futures-channel",
+ "futures-util",
+ "half 2.7.1",
+ "hashbrown 0.17.1",
  "http-body-util",
  "hyper 1.12.0",
  "hyper-rustls 0.27.5",
  "hyper-util",
- "lz4_flex 0.11.6",
- "replace_with",
+ "lz4_flex 0.14.0",
+ "rand 0.9.5",
  "rustls 0.23.35",
- "sealed",
  "serde",
- "static_assertions",
- "thiserror 1.0.63",
+ "serde_json",
+ "thiserror 2.0.17",
  "time",
  "tokio",
+ "tracing",
+ "twox-hash",
  "url",
 ]
 
 [[package]]
-name = "clickhouse-derive"
-version = "0.2.0"
-source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=f05029d2cb65164d61fa8699dd955f808375a618#f05029d2cb65164d61fa8699dd955f808375a618"
+name = "clickhouse-macros"
+version = "0.3.0"
+source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=dad4c6dd8a40aaeaa7534abf38155219f6fd73b5#dad4c6dd8a40aaeaa7534abf38155219f6fd73b5"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde_derive_internals",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "clickhouse-types"
+version = "0.1.4"
+source = "git+https://github.com/risingwavelabs/clickhouse.rs?rev=dad4c6dd8a40aaeaa7534abf38155219f6fd73b5#dad4c6dd8a40aaeaa7534abf38155219f6fd73b5"
+dependencies = [
+ "bytes",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -6239,7 +6259,7 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4089ab2dfd45d8ddc92febb5ca80644389d5ebb954f40231274a3f18341762e2"
 dependencies = [
- "bnum",
+ "bnum 0.12.1",
  "num-integer",
  "num-traits",
  "serde",
@@ -9702,18 +9722,18 @@ dependencies = [
 
 [[package]]
 name = "lz4_flex"
-version = "0.11.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
-
-[[package]]
-name = "lz4_flex"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db9a0d582c2874f68138a16ce1867e0ffde6c0bb0a0df85e1f36d04146db488a"
 dependencies = [
  "twox-hash",
 ]
+
+[[package]]
+name = "lz4_flex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecbdfe44b1bd960b68170b417450a628c43f7cf56bb3c5317e61cb230ee7f226"
 
 [[package]]
 name = "mach2"
@@ -13712,12 +13732,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "replace_with"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51743d3e274e2b18df81c4dc6caf8a5b8e15dbe799e0dca05c7617380094e884"
-
-[[package]]
 name = "reqsign-aliyun-oss"
 version = "3.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14665,6 +14679,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clickhouse",
+ "clickhouse-types",
  "criterion",
  "csv",
  "deltalake",
@@ -16721,17 +16736,6 @@ name = "seahash"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
-
-[[package]]
-name = "sealed"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22f968c5ea23d555e670b449c1c5e7b2fc399fdaec1d304a17cd48e288abc107"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
 
 [[package]]
 name = "sec1"
