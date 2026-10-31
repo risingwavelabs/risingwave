@@ -65,12 +65,12 @@
         <!-- dependency versions -->
         <protobuf.version>3.25.8</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
         <grpc.version>1.75.0</grpc.version>
-        <log4j.version>2.25.4</log4j.version>
+        <log4j.version>2.25.5</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
         <debezium.version>3.2.4.Final-rw-SNAPSHOT</debezium.version>
         <oracle.jdbc.version>21.15.0.0</oracle.jdbc.version>
         <bouncycastle.version>1.84</bouncycastle.version>
-        <jackson.version>2.22.1</jackson.version>
+        <jackson.version>2.22.4</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <!-- Iceberg's HiveCatalog is compiled against Hive 2.3.x. -->
         <hive.version>2.3.10</hive.version>
@@ -321,7 +321,7 @@
             <dependency>
                 <groupId>com.google.guava</groupId>
                 <artifactId>guava</artifactId>
-                <version>33.4.8-jre</version>
+                <version>33.7.2-jre</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.httpcomponents</groupId>
@@ -388,7 +388,7 @@
             <dependency>
                 <groupId>org.xerial.snappy</groupId>
                 <artifactId>snappy-java</artifactId>
-                <version>1.1.10.8</version>
+                <version>1.1.10.12</version>
             </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
