@@ -64,3 +64,89 @@ DROP TABLE t6;
 
 system ok
 clickhouse --query="DROP TABLE demo_test"
+
+# Verify delete column validation and insert, update, and delete behavior with a valid UInt8 column.
+statement ok
+DROP SINK IF EXISTS ck_delete_sink;
+
+statement ok
+DROP TABLE IF EXISTS ck_delete_source;
+
+system ok
+clickhouse --multiquery --query="DROP TABLE IF EXISTS ck_delete_target; CREATE TABLE ck_delete_target(k Int32, ver UInt64, v String, is_deleted UInt8, nullable_flag Nullable(UInt8), wide_flag UInt32) ENGINE = ReplacingMergeTree(ver, is_deleted) ORDER BY k;"
+
+statement ok
+CREATE TABLE ck_delete_source (k int PRIMARY KEY, ver bigint, v varchar);
+
+statement error clickhouse\.delete\.column.*"is_delete".*does not exist
+CREATE SINK ck_delete_sink FROM ck_delete_source WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'k',
+    clickhouse.table = 'ck_delete_target',
+    clickhouse.delete.column = 'is_delete'
+);
+
+statement error clickhouse\.delete\.column.*"nullable_flag".*Nullable\(UInt8\).*expected UInt8 or Int8
+CREATE SINK ck_delete_sink FROM ck_delete_source WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'k',
+    clickhouse.table = 'ck_delete_target',
+    clickhouse.delete.column = 'nullable_flag'
+);
+
+statement error clickhouse\.delete\.column.*"wide_flag".*UInt32.*expected UInt8 or Int8
+CREATE SINK ck_delete_sink FROM ck_delete_source WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'k',
+    clickhouse.table = 'ck_delete_target',
+    clickhouse.delete.column = 'wide_flag'
+);
+
+statement ok
+CREATE SINK ck_delete_sink FROM ck_delete_source WITH (
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'k',
+    clickhouse.table = 'ck_delete_target',
+    clickhouse.delete.column = 'is_deleted',
+    commit_checkpoint_interval = '1'
+);
+
+statement ok
+INSERT INTO ck_delete_source VALUES (1, 1, 'before'), (2, 1, 'to delete');
+
+statement ok
+FLUSH;
+
+system ok retry 60 backoff 2s
+test "$(clickhouse --query="SELECT count() = 2 AND countIf((k, ver, v, is_deleted) = (1, 1, 'before', 0)) = 1 AND countIf((k, ver, v, is_deleted) = (2, 1, 'to delete', 0)) = 1 FROM ck_delete_target FINAL")" = 1
+
+statement ok
+UPDATE ck_delete_source SET ver = 2, v = 'after' WHERE k = 1;
+
+statement ok
+FLUSH;
+
+system ok retry 60 backoff 2s
+test "$(clickhouse --query="SELECT count() = 2 AND countIf((k, ver, v, is_deleted) = (1, 2, 'after', 0)) = 1 AND countIf((k, ver, v, is_deleted) = (2, 1, 'to delete', 0)) = 1 FROM ck_delete_target FINAL")" = 1
+
+statement ok
+DELETE FROM ck_delete_source WHERE k = 2;
+
+statement ok
+FLUSH;
+
+system ok retry 60 backoff 2s
+test "$(clickhouse --query="SELECT count() = 1 AND countIf((k, ver, v, is_deleted) = (1, 2, 'after', 0)) = 1 FROM ck_delete_target FINAL")" = 1
+
+statement ok
+DROP SINK ck_delete_sink;
+
+statement ok
+DROP TABLE ck_delete_source;
+
+system ok
+clickhouse --query="DROP TABLE ck_delete_target"
