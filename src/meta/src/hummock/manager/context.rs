@@ -474,6 +474,30 @@ impl HummockManager {
         safe_point
     }
 
+    /// Keep references that can move from a live/pinned version to a backup or archive
+    /// while GC scans those retained owners. Inherit older pins before they can be released.
+    pub(super) async fn register_gc_safe_point(&self) -> HummockVersionSafePoint {
+        let versioning = self
+            .versioning
+            .read_with_process_name("register_gc_safe_point")
+            .await;
+        let mut context = self
+            .context_info
+            .write_with_process_name("register_gc_safe_point")
+            .await;
+        let safe_point = HummockVersionSafePoint {
+            // Stale objects are indexed by the version that removed them. Objects already
+            // removed in the current version must remain reclaimable in an idle cluster.
+            id: context
+                .min_pinned_version_id()
+                .min(versioning.current_version.id + 1),
+            event_sender: self.event_sender.clone(),
+        };
+        context.version_safe_points.push(safe_point.id);
+        trigger_safepoint_stat(&self.metrics, &context.version_safe_points);
+        safe_point
+    }
+
     pub async fn unregister_safe_point(&self, safe_point: HummockVersionId) {
         let mut wl = self
             .context_info
@@ -502,6 +526,41 @@ mod tests {
 
     use super::*;
     use crate::hummock::test_utils::setup_compute_env;
+
+    #[tokio::test]
+    async fn test_gc_safe_point_inherits_older_pin() {
+        let (_, manager, ..) = setup_compute_env(80).await;
+        let backup_pin = manager.register_safe_point().await;
+        let old_version = backup_pin.id;
+        crate::hummock::test_utils::register_table_ids_to_compaction_group(
+            &manager,
+            &[1],
+            risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId::StateDefault,
+        )
+        .await;
+        assert!(manager.get_current_version().await.id > old_version);
+        let gc_pin = manager.register_gc_safe_point().await;
+        assert_eq!(gc_pin.id, old_version);
+        drop(backup_pin);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while manager.context_info.read().await.version_safe_points.len() != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(manager.get_min_pinned_version_id().await, old_version);
+        drop(gc_pin);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while manager.get_min_pinned_version_id().await
+                != risingwave_hummock_sdk::version::MAX_HUMMOCK_VERSION_ID
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
 
     #[tokio::test]
     async fn test_check_gc_history_in_batches() {
