@@ -59,10 +59,8 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::elasticsearch_opensearch::elasticsearch_converter::{
-    StreamChunkConverter, is_remote_es_sink,
-};
-use super::elasticsearch_opensearch::elasticsearch_opensearch_config::ES_OPTION_DELIMITER;
+use super::elasticsearch_opensearch::config::ES_OPTION_DELIMITER;
+use super::elasticsearch_opensearch::remote_converter::{StreamChunkConverter, is_remote_es_sink};
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;

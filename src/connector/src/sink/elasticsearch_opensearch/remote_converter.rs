@@ -22,10 +22,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::{JsonbVal, Scalar};
 use serde_json::Value;
 
-use super::elasticsearch_opensearch_config::{
+use super::config::{
     ES_OPTION_DELIMITER, ES_OPTION_INDEX, ES_OPTION_INDEX_COLUMN, ES_OPTION_ROUTING_COLUMN,
 };
-use super::elasticsearch_opensearch_formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
+use super::formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
 use crate::sink::Result;
 
 #[expect(clippy::large_enum_variant)]
