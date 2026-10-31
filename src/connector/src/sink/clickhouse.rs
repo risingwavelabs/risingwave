@@ -17,8 +17,10 @@ use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::anyhow;
-use clickhouse::insert::Insert;
+use bytes::{BufMut, BytesMut};
+use clickhouse::insert_formatted::InsertFormatted;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
+use clickhouse_types::put_leb128;
 use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
@@ -26,8 +28,7 @@ use risingwave_common::catalog::{FieldLike, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use serde::ser::{SerializeSeq, SerializeStruct};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tonic::async_trait;
@@ -58,6 +59,9 @@ const OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING: &str = "output_format_binary_wr
 /// `ClickHouse` backs `Decimal(P, S)` with `Decimal256` once `P > 38`, which takes 32 bytes on the
 /// wire, while [`ClickHouseDecimal`] never writes more than 16.
 const MAX_ENCODABLE_DECIMAL_PRECISION: u8 = 38;
+
+/// Encoded rows are sent once they reach this size, each send compressed as one block.
+const INSERT_CHUNK_SIZE: usize = 256 * 1024;
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -321,9 +325,9 @@ impl ClickHouseCommon {
             .with_user(&self.user)
             .with_password(&self.password)
             .with_database(&self.database)
-            .with_option(ALLOW_EXPERIMENTAL_JSON_TYPE, "1")
-            .with_option(INPUT_FORMAT_BINARY_READ_JSON_AS_STRING, "1")
-            .with_option(OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING, "1");
+            .with_setting(ALLOW_EXPERIMENTAL_JSON_TYPE, "1")
+            .with_setting(INPUT_FORMAT_BINARY_READ_JSON_AS_STRING, "1")
+            .with_setting(OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING, "1");
         Ok(client)
     }
 }
@@ -643,7 +647,9 @@ pub struct ClickHouseSinkWriter {
     column_correct_map: HashMap<String, ClickHouseSchemaFeature>,
     rw_fields_name_after_calibration: Vec<String>,
     clickhouse_engine: ClickHouseEngine,
-    inserter: Option<Insert<ClickHouseColumn>>,
+    inserter: Option<InsertFormatted>,
+    /// `RowBinary` rows not sent to `inserter` yet.
+    buf: BytesMut,
 }
 #[derive(Debug)]
 struct ClickHouseSchemaFeature {
@@ -705,6 +711,7 @@ impl ClickHouseSinkWriter {
             rw_fields_name_after_calibration,
             clickhouse_engine,
             inserter: None,
+            buf: BytesMut::new(),
         })
     }
 
@@ -744,12 +751,14 @@ impl ClickHouseSinkWriter {
     }
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.inserter.is_none() {
-            self.inserter = Some(self.client.insert_with_fields_name(
-                &self.config.common.table,
-                self.rw_fields_name_after_calibration.clone(),
-            )?);
-        }
+        let inserter = self.inserter.get_or_insert_with(|| {
+            let sql = format!(
+                "INSERT INTO {}({}) FORMAT RowBinary",
+                self.config.common.table,
+                self.rw_fields_name_after_calibration.join(",")
+            );
+            self.client.insert_formatted_with(sql)
+        });
         for (op, row) in chunk.rows() {
             let mut clickhouse_filed_vec = vec![];
             for (data, field) in row.iter().zip_eq_debug(self.schema.fields()) {
@@ -793,14 +802,12 @@ impl ClickHouseSinkWriter {
                     }
                 }
             }
-            let clickhouse_column = ClickHouseColumn {
-                row: clickhouse_filed_vec,
-            };
-            self.inserter
-                .as_mut()
-                .unwrap()
-                .write(&clickhouse_column)
-                .await?;
+            for field in &clickhouse_filed_vec {
+                field.write_row_binary(&mut self.buf);
+            }
+            if self.buf.len() >= INSERT_CHUNK_SIZE {
+                inserter.send(self.buf.split().freeze()).await?;
+            }
         }
         Ok(())
     }
@@ -821,7 +828,10 @@ impl SinkWriter for ClickHouseSinkWriter {
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint && let Some(inserter) = self.inserter.take() {
+        if is_checkpoint && let Some(mut inserter) = self.inserter.take() {
+            if !self.buf.is_empty() {
+                inserter.send(self.buf.split().freeze()).await?;
+            }
             inserter.end().await?;
         }
         Ok(())
@@ -916,12 +926,6 @@ async fn query_column_engine_from_ck(
     Ok((clickhouse_column, clickhouse_engine))
 }
 
-/// Serialize this structure to simulate the `struct` call clickhouse interface
-#[derive(ClickHouseRow, Debug)]
-struct ClickHouseColumn {
-    row: Vec<ClickHouseFieldWithNull>,
-}
-
 /// Basic data types for use with the clickhouse interface
 #[derive(Debug)]
 enum ClickHouseField {
@@ -942,18 +946,6 @@ enum ClickHouseDecimal {
     Decimal32(i32),
     Decimal64(i64),
     Decimal128(i128),
-}
-impl Serialize for ClickHouseDecimal {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            ClickHouseDecimal::Decimal32(v) => serializer.serialize_i32(*v),
-            ClickHouseDecimal::Decimal64(v) => serializer.serialize_i64(*v),
-            ClickHouseDecimal::Decimal128(v) => serializer.serialize_i128(*v),
-        }
-    }
 }
 
 /// Enum that support clickhouse nullable
@@ -1137,54 +1129,46 @@ impl ClickHouseFieldWithNull {
     }
 }
 
-impl Serialize for ClickHouseField {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
+impl ClickHouseField {
+    /// Appends the value in the `RowBinary` format.
+    fn write_row_binary(&self, buf: &mut BytesMut) {
         match self {
-            ClickHouseField::Int16(v) => serializer.serialize_i16(*v),
-            ClickHouseField::Int32(v) => serializer.serialize_i32(*v),
-            ClickHouseField::Int64(v) => serializer.serialize_i64(*v),
-            ClickHouseField::Serial(v) => v.serialize(serializer),
-            ClickHouseField::Float32(v) => serializer.serialize_f32(*v),
-            ClickHouseField::Float64(v) => serializer.serialize_f64(*v),
-            ClickHouseField::String(v) => serializer.serialize_str(v),
-            ClickHouseField::Bool(v) => serializer.serialize_bool(*v),
-            ClickHouseField::List(v) => {
-                let mut s = serializer.serialize_seq(Some(v.len()))?;
-                for i in v {
-                    s.serialize_element(i)?;
-                }
-                s.end()
+            ClickHouseField::Int8(v) => buf.put_i8(*v),
+            ClickHouseField::Int16(v) => buf.put_i16_le(*v),
+            ClickHouseField::Int32(v) => buf.put_i32_le(*v),
+            ClickHouseField::Int64(v) => buf.put_i64_le(*v),
+            ClickHouseField::Serial(v) => buf.put_i64_le((*v).into()),
+            ClickHouseField::Float32(v) => buf.put_f32_le(*v),
+            ClickHouseField::Float64(v) => buf.put_f64_le(*v),
+            ClickHouseField::String(v) => {
+                put_leb128(&mut *buf, v.len() as u64);
+                buf.put_slice(v.as_bytes());
             }
-            ClickHouseField::Decimal(v) => v.serialize(serializer),
-            ClickHouseField::Int8(v) => serializer.serialize_i8(*v),
+            ClickHouseField::Bool(v) => buf.put_u8(*v as u8),
+            ClickHouseField::List(v) => {
+                put_leb128(&mut *buf, v.len() as u64);
+                for element in v {
+                    element.write_row_binary(buf);
+                }
+            }
+            ClickHouseField::Decimal(ClickHouseDecimal::Decimal32(v)) => buf.put_i32_le(*v),
+            ClickHouseField::Decimal(ClickHouseDecimal::Decimal64(v)) => buf.put_i64_le(*v),
+            ClickHouseField::Decimal(ClickHouseDecimal::Decimal128(v)) => buf.put_i128_le(*v),
         }
     }
 }
-impl Serialize for ClickHouseFieldWithNull {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
+
+impl ClickHouseFieldWithNull {
+    /// Appends the value in the `RowBinary` format, with the `Nullable` marker when it has one.
+    fn write_row_binary(&self, buf: &mut BytesMut) {
         match self {
-            ClickHouseFieldWithNull::WithSome(v) => serializer.serialize_some(v),
-            ClickHouseFieldWithNull::WithoutSome(v) => v.serialize(serializer),
-            ClickHouseFieldWithNull::None => serializer.serialize_none(),
+            ClickHouseFieldWithNull::WithSome(v) => {
+                buf.put_u8(0);
+                v.write_row_binary(buf);
+            }
+            ClickHouseFieldWithNull::WithoutSome(v) => v.write_row_binary(buf),
+            ClickHouseFieldWithNull::None => buf.put_u8(1),
         }
-    }
-}
-impl Serialize for ClickHouseColumn {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut s = serializer.serialize_struct("useless", self.row.len())?;
-        for data in &self.row {
-            s.serialize_field("useless", &data)?
-        }
-        s.end()
     }
 }
 
@@ -1262,5 +1246,33 @@ mod tests {
         assert!(err.contains("amount"), "{err}");
         assert!(err.contains("Decimal(76, 4)"), "{err}");
         assert!(err.contains("precision 76"), "{err}");
+    }
+
+    #[test]
+    fn test_row_binary_encoding() {
+        // 200 bytes, so the length prefix takes two bytes.
+        let long = "é".repeat(100);
+        let fields = [
+            ClickHouseFieldWithNull::WithSome(ClickHouseField::Int32(-2)),
+            ClickHouseFieldWithNull::None,
+            ClickHouseFieldWithNull::WithoutSome(ClickHouseField::String(long.clone())),
+            ClickHouseFieldWithNull::WithoutSome(ClickHouseField::List(vec![
+                ClickHouseFieldWithNull::WithSome(ClickHouseField::Int8(1)),
+                ClickHouseFieldWithNull::None,
+            ])),
+            ClickHouseFieldWithNull::WithoutSome(ClickHouseField::Decimal(
+                ClickHouseDecimal::Decimal128(-1),
+            )),
+        ];
+        let mut buf = BytesMut::new();
+        for field in &fields {
+            field.write_row_binary(&mut buf);
+        }
+
+        let mut expected = vec![0, 0xfe, 0xff, 0xff, 0xff, 1, 0xc8, 0x01];
+        expected.extend(long.as_bytes());
+        expected.extend([2, 0, 1, 1]);
+        expected.extend([0xff; 16]);
+        assert_eq!(&buf[..], expected.as_slice());
     }
 }
