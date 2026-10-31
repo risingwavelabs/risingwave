@@ -384,8 +384,16 @@ impl OpendalStreamingUploader {
                     .with_jitter(),
             )
             .writer_with(&path)
-            .concurrent(config.opendal_upload_concurrency)
-            .await?;
+            .concurrent(config.opendal_upload_concurrency);
+        // A single SST metadata buffer can be much larger than upload_part_size.
+        // Without an explicit chunk size, OpenDAL forwards that entire buffer as
+        // one multipart request. Enable strict chunking only for shared workers.
+        let writer = if config.streaming_upload_use_exact_chunks {
+            writer.chunk(config.upload_part_size)
+        } else {
+            writer
+        }
+        .await?;
         Ok(Self {
             writer,
             buf: vec![],
@@ -453,6 +461,10 @@ impl StreamingUploader for OpendalStreamingUploader {
         self.not_uploaded_len as u64
     }
 }
+
+#[cfg(test)]
+#[path = "upload_tests.rs"]
+mod upload_tests;
 
 #[cfg(test)]
 mod tests {

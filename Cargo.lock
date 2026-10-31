@@ -12387,6 +12387,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
+ "http 1.4.0",
  "hyper 0.14.27",
  "hyper-rustls 0.24.2",
  "itertools 0.14.0",

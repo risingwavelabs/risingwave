@@ -357,7 +357,8 @@ pub async fn shared_compactor_serve(
     opts: CompactorOpts,
     shutdown: CancellationToken,
 ) {
-    let config = load_config(&opts.config_path, &opts);
+    let mut config = load_config(&opts.config_path, &opts);
+    config.storage.object_store = config.storage.object_store.with_shared_compactor_uploads();
     info!("Starting shared compactor node",);
     info!("> config: {:?}", config);
     info!(

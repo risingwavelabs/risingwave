@@ -514,11 +514,24 @@ pub struct ObjectStoreConfig {
 
     #[serde(default = "default::object_store_config::upload_part_size")]
     pub upload_part_size: usize,
+
+    /// Runtime policy for shared compactors, not a persisted cluster setting.
+    #[serde(skip)]
+    pub streaming_upload_use_exact_chunks: bool,
 }
 
 impl ObjectStoreConfig {
     pub fn set_atomic_write_dir(&mut self) {
         self.set_atomic_write_dir = true;
+    }
+
+    /// Bound both multipart request size and per-upload fan-out for shared workers.
+    /// Other processes retain their configured upload behavior.
+    pub fn with_shared_compactor_uploads(mut self) -> Self {
+        self.streaming_upload_use_exact_chunks = true;
+        // At the default 16 MiB part size, at most 64 MiB is dispatched per upload.
+        self.opendal_upload_concurrency = self.opendal_upload_concurrency.clamp(1, 4);
+        self
     }
 }
 
@@ -1402,5 +1415,39 @@ pub mod default {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod shared_upload_tests {
+    use super::*;
+
+    #[test]
+    fn shared_upload_policy_is_local_and_preserves_timeouts() {
+        let original = ObjectStoreConfig::default();
+        assert!(!original.streaming_upload_use_exact_chunks);
+        let shared = original.clone().with_shared_compactor_uploads();
+        assert!(!original.streaming_upload_use_exact_chunks);
+        assert!(shared.streaming_upload_use_exact_chunks);
+        assert_eq!(shared.opendal_upload_concurrency, 4);
+        assert_eq!(shared.upload_part_size, original.upload_part_size);
+        assert_eq!(
+            shared.retry.streaming_upload_attempt_timeout_ms,
+            original.retry.streaming_upload_attempt_timeout_ms
+        );
+        assert_eq!(
+            shared.retry.streaming_upload_retry_attempts,
+            original.retry.streaming_upload_retry_attempts
+        );
+        let smaller = ObjectStoreConfig {
+            opendal_upload_concurrency: 2,
+            ..Default::default()
+        }
+        .with_shared_compactor_uploads();
+        assert_eq!(smaller.opendal_upload_concurrency, 2);
+        // Runtime policy cannot be enabled by changing a persisted cluster config.
+        let persisted: ObjectStoreConfig =
+            toml::from_str("streaming_upload_use_exact_chunks = true").unwrap();
+        assert!(!persisted.streaming_upload_use_exact_chunks);
     }
 }
