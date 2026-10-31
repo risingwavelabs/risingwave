@@ -78,7 +78,9 @@ impl CdcSourceDdlValidator for SqlServer {
 
 impl CdcSourceExternalTableIdentifier for SqlServer {
     /// Debezium SQL Server always names topics in multi-partition mode, so the topic suffix
-    /// starts with the database: `database.schema.table`.
+    /// starts with the database: `database.schema.table`. The database part must be the name
+    /// SQL Server reports, which the Java validator guarantees by checking `database.name`
+    /// against `DB_NAME()` exactly.
     fn canonical_name(connect_properties: &BTreeMap<String, String>) -> String {
         let SchemaTableName {
             schema_name,

@@ -20,9 +20,11 @@
 //! - the `_rw_table_name` literal of the `CdcFilter` node: `database.schema.table`
 //! - `ExternalTableDesc.table_name` of the `StreamCdcScan` node: `[database].schema.table`
 //! - `table.cdc_table_id`: `<source id>.database.schema.table`
+//!
+//! A `CdcFilter` literal is matched to its table by the source it filters
+//! (`CdcFilterNode.upstream_source_id`) and the literal, since one source captures one database.
 
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 
 use prost::Message;
 use risingwave_pb::expr::ExprNode;
@@ -39,6 +41,7 @@ const SQL_SERVER_CDC_CONNECTOR: &str = "sqlserver-cdc";
 const DATABASE_NAME_KEY: &str = "database.name";
 const SCHEMA_NAME_KEY: &str = "schema.name";
 const TABLE_NAME_KEY: &str = "table.name";
+const LEGACY_DEFAULT_SCHEMA_NAME: &str = "dbo";
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -79,12 +82,13 @@ impl MigrationTrait for Migration {
             collect_sql_server_tables(stream_node, tables_by_job.entry(*job_id).or_default());
         }
         tables_by_job.retain(|_, tables| !tables.is_empty());
+        let rewrites = filter_literal_rewrites(tables_by_job.values().flatten());
 
         for (fragment_id, job_id, mut stream_node) in fragments {
-            let Some(tables) = tables_by_job.get(&job_id) else {
+            if !tables_by_job.contains_key(&job_id) {
                 continue;
-            };
-            if rewrite_stream_node(&mut stream_node, &filter_literal_rewrites(tables)) {
+            }
+            if rewrite_stream_node(&mut stream_node, &rewrites) {
                 manager
                     .exec_stmt(
                         Query::update()
@@ -180,28 +184,25 @@ fn collect_sql_server_tables(node: &StreamNode, tables: &mut Vec<SqlServerTable>
     }
 }
 
-/// Maps every name that a persisted `CdcFilter` literal of the job's SQL Server tables may hold
-/// to its canonical name: `table` and `schema.table` from clauses without a database, and the
-/// canonical name itself. A name shared by two tables of the job maps to `None` and is kept.
-fn filter_literal_rewrites(tables: &[SqlServerTable]) -> HashMap<String, Option<String>> {
+/// Maps `(source id, literal)` for every literal that a persisted `CdcFilter` of a SQL Server table
+/// may hold to the table's canonical name: `schema.table` from a clause without a database, the
+/// canonical name itself, and `table` from a clause that also omitted the schema, which the
+/// frontend before #23739 resolved to `dbo`.
+fn filter_literal_rewrites<'a>(
+    tables: impl IntoIterator<Item = &'a SqlServerTable>,
+) -> HashMap<(String, String), String> {
     let mut rewrites = HashMap::new();
     for table in tables {
         let canonical_name = table.canonical_name();
-        for literal in [
-            table.table_name.clone(),
+        let mut literals = vec![
             format!("{}.{}", table.schema_name, table.table_name),
             canonical_name.clone(),
-        ] {
-            match rewrites.entry(literal) {
-                Entry::Vacant(entry) => {
-                    entry.insert(Some(canonical_name.clone()));
-                }
-                Entry::Occupied(mut entry) => {
-                    if entry.get().as_ref() != Some(&canonical_name) {
-                        entry.insert(None);
-                    }
-                }
-            }
+        ];
+        if table.schema_name == LEGACY_DEFAULT_SCHEMA_NAME {
+            literals.push(table.table_name.clone());
+        }
+        for literal in literals {
+            rewrites.insert((table.source_id.clone(), literal), canonical_name.clone());
         }
     }
     rewrites
@@ -210,7 +211,7 @@ fn filter_literal_rewrites(tables: &[SqlServerTable]) -> HashMap<String, Option<
 /// Returns whether `node` or any of its inputs changed.
 fn rewrite_stream_node(
     node: &mut StreamNode,
-    filter_literal_rewrites: &HashMap<String, Option<String>>,
+    filter_literal_rewrites: &HashMap<(String, String), String>,
 ) -> bool {
     let mut changed = false;
     match &mut node.node_body {
@@ -226,8 +227,10 @@ fn rewrite_stream_node(
             }
         }
         Some(NodeBody::CdcFilter(filter)) => {
+            let source_id = filter.upstream_source_id.to_string();
             if let Some(search_condition) = &mut filter.search_condition {
-                changed |= rewrite_filter_literals(search_condition, filter_literal_rewrites);
+                changed |=
+                    rewrite_filter_literals(search_condition, &source_id, filter_literal_rewrites);
             }
         }
         _ => {}
@@ -240,12 +243,14 @@ fn rewrite_stream_node(
 
 fn rewrite_filter_literals(
     expr: &mut ExprNode,
-    filter_literal_rewrites: &HashMap<String, Option<String>>,
+    source_id: &str,
+    filter_literal_rewrites: &HashMap<(String, String), String>,
 ) -> bool {
     match &mut expr.rex_node {
         Some(RexNode::Constant(constant)) => {
             if let Some(literal) = decode_varchar_literal(&constant.body)
-                && let Some(Some(canonical_name)) = filter_literal_rewrites.get(literal)
+                && let Some(canonical_name) =
+                    filter_literal_rewrites.get(&(source_id.to_owned(), literal.to_owned()))
                 && literal != canonical_name
             {
                 constant.body = encode_varchar_literal(canonical_name);
@@ -257,7 +262,7 @@ fn rewrite_filter_literals(
         Some(RexNode::FuncCall(func_call)) => {
             let mut changed = false;
             for child in &mut func_call.children {
-                changed |= rewrite_filter_literals(child, filter_literal_rewrites);
+                changed |= rewrite_filter_literals(child, source_id, filter_literal_rewrites);
             }
             changed
         }
@@ -318,11 +323,11 @@ mod tests {
 
     use super::*;
 
-    fn sql_server_scan_node(database_name: &str, table_name: &str) -> StreamNode {
+    fn sql_server_scan_node(source_id: u32, database_name: &str, table_name: &str) -> StreamNode {
         StreamNode {
             node_body: Some(NodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
                 cdc_table_desc: Some(ExternalTableDesc {
-                    source_id: 7.into(),
+                    source_id: source_id.into(),
                     table_name: table_name.to_owned(),
                     connect_properties: [
                         (CONNECTOR_KEY, SQL_SERVER_CDC_CONNECTOR),
@@ -341,7 +346,7 @@ mod tests {
         }
     }
 
-    fn cdc_filter_node(literal: &str) -> StreamNode {
+    fn cdc_filter_node(source_id: u32, literal: &str) -> StreamNode {
         let search_condition = ExprNode {
             function_type: ExprType::Equal as i32,
             rex_node: Some(RexNode::FuncCall(FunctionCall {
@@ -363,7 +368,7 @@ mod tests {
         StreamNode {
             node_body: Some(NodeBody::CdcFilter(Box::new(CdcFilterNode {
                 search_condition: Some(search_condition),
-                ..Default::default()
+                upstream_source_id: source_id.into(),
             }))),
             ..Default::default()
         }
@@ -407,8 +412,8 @@ mod tests {
             ("repro.dbo.orders", "repro.dbo.orders"),
             ("orders", "orders"),
         ] {
-            let mut scan = sql_server_scan_node("repro", table_name);
-            let mut filter = cdc_filter_node(literal);
+            let mut scan = sql_server_scan_node(7, "repro", table_name);
+            let mut filter = cdc_filter_node(7, literal);
             let mut tables = vec![];
             collect_sql_server_tables(&scan, &mut tables);
             let rewrites = filter_literal_rewrites(&tables);
@@ -427,8 +432,8 @@ mod tests {
 
     #[test]
     fn test_rewrite_is_idempotent() {
-        let mut scan = sql_server_scan_node("x]y", "dbo.orders");
-        let mut filter = cdc_filter_node("dbo.orders");
+        let mut scan = sql_server_scan_node(7, "x]y", "dbo.orders");
+        let mut filter = cdc_filter_node(7, "dbo.orders");
         let mut tables = vec![];
         collect_sql_server_tables(&scan, &mut tables);
         let rewrites = filter_literal_rewrites(&tables);
@@ -443,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_skip_other_connectors() {
-        let mut scan = sql_server_scan_node("repro", "public.orders");
+        let mut scan = sql_server_scan_node(7, "repro", "public.orders");
         let Some(NodeBody::StreamCdcScan(scan_node)) = &mut scan.node_body else {
             unreachable!()
         };
@@ -462,18 +467,22 @@ mod tests {
     }
 
     #[test]
-    fn test_ambiguous_literal_is_kept() {
+    fn test_same_literal_on_two_sources() {
         let mut tables = vec![];
-        collect_sql_server_tables(&sql_server_scan_node("db1", "dbo.orders"), &mut tables);
-        collect_sql_server_tables(&sql_server_scan_node("db2", "dbo.orders"), &mut tables);
+        collect_sql_server_tables(&sql_server_scan_node(7, "db1", "dbo.orders"), &mut tables);
+        collect_sql_server_tables(&sql_server_scan_node(8, "db2", "dbo.orders"), &mut tables);
         let rewrites = filter_literal_rewrites(&tables);
 
-        let mut filter = cdc_filter_node("dbo.orders");
+        let mut filter = cdc_filter_node(7, "dbo.orders");
+        assert!(rewrite_stream_node(&mut filter, &rewrites));
+        assert_eq!(filter_literal(&filter), "db1.dbo.orders");
+
+        let mut filter = cdc_filter_node(8, "dbo.orders");
+        assert!(rewrite_stream_node(&mut filter, &rewrites));
+        assert_eq!(filter_literal(&filter), "db2.dbo.orders");
+
+        let mut filter = cdc_filter_node(9, "dbo.orders");
         assert!(!rewrite_stream_node(&mut filter, &rewrites));
         assert_eq!(filter_literal(&filter), "dbo.orders");
-
-        let mut filter = cdc_filter_node("db1.dbo.orders");
-        assert!(!rewrite_stream_node(&mut filter, &rewrites));
-        assert_eq!(filter_literal(&filter), "db1.dbo.orders");
     }
 }

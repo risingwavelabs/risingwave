@@ -913,7 +913,13 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
     let cdc_table_type = ExternalCdcTableType::from_properties(&options);
-    let cdc_table_desc = Rc::new(CdcTableDesc {
+    let canonical_name = dispatch_cdc_source_type!(
+        options.cdc_source_type(),
+        T,
+        T::canonical_name(&options),
+        unreachable!("CDC table without a CDC connector")
+    );
+    let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id, // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
@@ -923,7 +929,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         stream_key: pk_column_indices,
         connect_properties: options,
         secret_refs,
-    });
+    };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
     let options = build_cdc_scan_options_with_options(
@@ -933,7 +939,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name,
-        cdc_table_desc.clone(),
+        Rc::new(cdc_table_desc),
         context.clone(),
         options,
     );
@@ -948,12 +954,6 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
-    let canonical_name = dispatch_cdc_source_type!(
-        cdc_table_desc.connect_properties.cdc_source_type(),
-        T,
-        T::canonical_name(&cdc_table_desc.connect_properties),
-        unreachable!("CDC table without a CDC connector")
-    );
     let cdc_table_id = build_cdc_table_id(source.id, &canonical_name);
     let materialize = plan_root.gen_table_plan(
         context,
