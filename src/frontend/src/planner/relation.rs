@@ -62,6 +62,36 @@ use crate::utils::{ColIndexMapping, Condition};
 const ERROR_WINDOW_SIZE_ARG: &str =
     "The size arg of window table function should be an interval literal.";
 
+/// `tumble_start` treats a month as 30 days and a day as 24 hours, so window bounds must be
+/// computed with the same fixed lengths. Adding a calendar month (or a DST-aware day) instead
+/// would give a `window_end` that doesn't line up with the next `window_start`.
+fn to_fixed_length(interval: Interval) -> Result<Interval> {
+    let usecs = || {
+        (interval.months() as i64)
+            .checked_mul(Interval::USECS_PER_MONTH)?
+            .checked_add((interval.days() as i64).checked_mul(Interval::USECS_PER_DAY)?)?
+            .checked_add(interval.usecs())
+    };
+    let usecs = usecs().ok_or_else(|| {
+        ErrorCode::BindError(format!("window interval {interval} is out of range"))
+    })?;
+    Ok(Interval::from_month_day_usec(0, 0, usecs))
+}
+
+fn to_fixed_length_literal(expr: ExprImpl) -> Result<ExprImpl> {
+    // Untyped literals like `'1 month'` would otherwise only become intervals later.
+    let expr = match expr.clone().cast_implicit(&DataType::Interval) {
+        Ok(lit @ ExprImpl::Literal(_)) => lit,
+        _ => expr,
+    };
+    match expr.as_literal().and_then(|lit| lit.get_data().as_ref()) {
+        Some(ScalarImpl::Interval(interval)) => {
+            Ok(Literal::new(Some(to_fixed_length(*interval)?.into()), DataType::Interval).into())
+        }
+        _ => Ok(expr),
+    }
+}
+
 impl Planner {
     pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
@@ -687,6 +717,7 @@ source: {:?}",
 
         match (args.next(), args.next(), args.next()) {
             (Some(window_size @ ExprImpl::Literal(_)), None, None) => {
+                let window_size = to_fixed_length_literal(window_size)?;
                 let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
                 for (idx, col_dt) in col_data_types.iter().enumerate() {
                     exprs.push(InputRef::new(idx, col_dt.clone()).into());
@@ -713,6 +744,7 @@ source: {:?}",
                 Some(window_offset @ ExprImpl::Literal(_)),
                 None,
             ) => {
+                let window_size = to_fixed_length_literal(window_size)?;
                 let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
                 for (idx, col_dt) in col_data_types.iter().enumerate() {
                     exprs.push(InputRef::new(idx, col_dt.clone()).into());
@@ -780,15 +812,18 @@ source: {:?}",
             .into());
         }
 
-        if window_size.exact_div(&window_slide).is_none() {
+        let fixed_slide = to_fixed_length(window_slide)?;
+        let fixed_size = to_fixed_length(window_size)?;
+
+        if fixed_size.exact_div(&fixed_slide).is_none() {
             return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
         }
 
         Ok(LogicalHopWindow::create(
             input,
             time_col,
-            window_slide,
-            window_size,
+            fixed_slide,
+            fixed_size,
             window_offset,
         ))
     }
