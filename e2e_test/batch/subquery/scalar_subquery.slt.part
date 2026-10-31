@@ -32,3 +32,28 @@ select (select x from t) x, 1 one;
 
 statement ok
 drop table t;
+
+# Only equality on every primary key column bounds a scalar subquery to one row. Other predicates
+# on the primary key can match several rows and must keep the runtime check.
+statement ok
+create table t_pk (pk int primary key, v int);
+
+statement ok
+insert into t_pk values (1, 10), (2, 20), (3, 30);
+
+query I
+select (select v from t_pk where pk = 2);
+----
+20
+
+query error Scalar subquery produced more than one row
+select (select v from t_pk where pk > 1);
+
+query error Scalar subquery produced more than one row
+select (select v from t_pk where pk = 1 or pk = 2);
+
+statement error Scalar subquery might produce more than one row
+create materialized view mv_pk_range as select (select v from t_pk where pk > 1) v;
+
+statement ok
+drop table t_pk;
