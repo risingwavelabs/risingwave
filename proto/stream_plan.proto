@@ -517,6 +517,10 @@ message MaterializeNode {
 
   // Whether the table can clean itself by TTL watermark, i.e., is defined with `WATERMARK ... WITH TTL`.
   bool cleaned_by_ttl_watermark = 7;
+
+  // Whether to emit every change in order instead of compacting changes on the same key within a chunk,
+  // i.e., the table is defined with `WITH (preserve_changes = true)`.
+  bool preserve_changes = 8;
 }
 
 message AggCallState {
