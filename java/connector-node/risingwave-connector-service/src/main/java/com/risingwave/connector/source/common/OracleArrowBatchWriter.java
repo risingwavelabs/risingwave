@@ -31,7 +31,6 @@ import java.util.List;
 import java.util.Map;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.BigIntVector;
-import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.Float4Vector;
 import org.apache.arrow.vector.Float8Vector;
@@ -114,7 +113,6 @@ final class OracleArrowBatchWriter implements AutoCloseable {
                     case INT64 -> new ArrowType.Int(64, true);
                     case FLOAT -> new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE);
                     case DOUBLE -> new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE);
-                    case BOOLEAN -> ArrowType.Bool.INSTANCE;
                     case TIMESTAMP -> new ArrowType.Timestamp(TimeUnit.MICROSECOND, null);
                     case TIMESTAMPTZ -> new ArrowType.Timestamp(TimeUnit.MICROSECOND, UTC);
                     case DECIMAL, VARCHAR -> ArrowType.Utf8.INSTANCE;
@@ -186,17 +184,6 @@ final class OracleArrowBatchWriter implements AutoCloseable {
                         target.setNull(row);
                     } else {
                         target.setSafe(row, value);
-                    }
-                };
-            }
-            case BOOLEAN -> {
-                var target = (BitVector) vector;
-                yield (result, row) -> {
-                    var value = result.getBoolean(column);
-                    if (result.wasNull()) {
-                        target.setNull(row);
-                    } else {
-                        target.setSafe(row, value ? 1 : 0);
                     }
                 };
             }

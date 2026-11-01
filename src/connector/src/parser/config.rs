@@ -116,7 +116,7 @@ impl SpecificParserConfig {
             timestamptz_handling: None,
             time_handling: None,
             bigint_unsigned_handling: None,
-            handle_toast_columns: false,
+            handle_postgres_toast_columns: false,
         }),
         protocol_config: ProtocolProperties::Plain,
     };
@@ -304,7 +304,7 @@ impl SpecificParserConfig {
                     .transpose()?,
                 time_handling: None,
                 bigint_unsigned_handling: None,
-                handle_toast_columns: false,
+                handle_postgres_toast_columns: false,
             }),
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
                 let props = MongoProperties::from(&format_encode_options_with_secret);
@@ -401,7 +401,9 @@ pub struct JsonProperties {
     pub timestamptz_handling: Option<TimestamptzHandling>,
     pub time_handling: Option<TimeHandling>,
     pub bigint_unsigned_handling: Option<BigintUnsignedHandlingMode>,
-    pub handle_toast_columns: bool,
+    /// PostgreSQL CDC only. See
+    /// [`JsonParseOptions::handle_postgres_toast_columns`](super::unified::json::JsonParseOptions::handle_postgres_toast_columns).
+    pub handle_postgres_toast_columns: bool,
 }
 
 #[derive(Debug, Default, Clone)]
