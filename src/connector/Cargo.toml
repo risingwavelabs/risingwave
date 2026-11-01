@@ -107,7 +107,7 @@ moka = { version = "0.12.10", features = ["future"] }
 mongodb = "3.5.1"
 mysql_async = { workspace = true }
 nexmark = { version = "0.2", features = ["serde"] }
-num-bigint = "0.4"
+num-bigint = "0.5"
 opendal = { workspace = true, features = [
     "executors-tokio",
     "services-azblob",
