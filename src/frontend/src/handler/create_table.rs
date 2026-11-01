@@ -55,10 +55,11 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, ConnectionRefValue, CreateSink,
-    CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format,
-    FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
-    Statement, TableConstraint, WebhookSourceInfo, WithProperties,
+    CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY, CdcTableInfo, ColumnDef, ColumnOption,
+    CompatibleFormatEncode, ConnectionRefValue, CreateSink, CreateSinkStatement,
+    CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format, FormatEncodeOptions,
+    Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark, Statement, TableConstraint,
+    WebhookSourceInfo, WithProperties, parse_cdc_table_excluded_columns,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -75,7 +76,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    derive_with_options_for_cdc_table, exclude_cdc_table_columns, not_null_check_for_cdc_table,
     reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_source::{
@@ -1117,8 +1118,34 @@ pub(super) async fn handle_create_table_plan(
                     cdc_table.external_table_name.clone(),
                 )?;
 
+            let excluded_columns = handler_args
+                .with_options
+                .get(CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY)
+                .map(|list| {
+                    let columns = parse_cdc_table_excluded_columns(list);
+                    if columns.is_empty() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "`{CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY}` must list at least one column"
+                        )));
+                    }
+                    Ok(columns)
+                })
+                .transpose()?
+                .unwrap_or_default();
+
             let (columns, pk_names, pk_comparisons) = match wildcard_idx {
-                Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                Some(_) => {
+                    let (mut columns, pk_names, pk_comparisons) =
+                        bind_cdc_table_schema_externally(cdc_with_options.clone()).await?;
+                    exclude_cdc_table_columns(&mut columns, &pk_names, &excluded_columns)?;
+                    (columns, pk_names, pk_comparisons)
+                }
+                None if !excluded_columns.is_empty() => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "`{CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY}` requires the `(*)` wildcard in the column list"
+                    ))
+                    .into());
+                }
                 None => {
                     for column_def in &column_defs {
                         for option_def in &column_def.options {
