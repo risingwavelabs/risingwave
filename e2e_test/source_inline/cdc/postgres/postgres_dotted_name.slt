@@ -1,0 +1,87 @@
+statement ok
+drop source if exists pg_dotted_name_source cascade;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -q <<'EOF'
+SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots
+WHERE slot_name = 'dotted_name_slot' AND active_pid IS NOT NULL;
+SELECT pg_sleep(1);
+SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = 'dotted_name_slot';
+DROP PUBLICATION IF EXISTS dotted_name_pub;
+DROP TABLE IF EXISTS public."a.b";
+DROP TABLE IF EXISTS public.plain;
+DROP SCHEMA IF EXISTS a CASCADE;
+CREATE SCHEMA a;
+CREATE TABLE public."a.b" (id INT PRIMARY KEY, v VARCHAR);
+CREATE TABLE a.b (id INT PRIMARY KEY, v VARCHAR);
+CREATE TABLE public.plain (id INT PRIMARY KEY, v VARCHAR);
+EOF
+
+control substitution on
+
+statement ok
+create source pg_dotted_name_source with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    publication.name = 'dotted_name_pub',
+    slot.name = 'dotted_name_slot'
+);
+
+control substitution off
+
+statement ok
+create table rw_dotted (id int primary key, v varchar)
+include table_name as upstream_table
+from pg_dotted_name_source table 'public."a.b"';
+
+statement ok
+create table rw_decoy (id int primary key, v varchar)
+from pg_dotted_name_source table 'a.b';
+
+statement ok
+create table rw_plain (id int primary key, v varchar)
+from pg_dotted_name_source table 'public.plain';
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -q <<'EOF'
+INSERT INTO public."a.b" VALUES (1, 'dotted');
+INSERT INTO a.b VALUES (2, 'decoy');
+INSERT INTO public.plain VALUES (3, 'plain');
+EOF
+
+query TIT retry 30 backoff 1s
+select 'dotted', id, v from rw_dotted
+union all select 'decoy', * from rw_decoy
+union all select 'plain', * from rw_plain
+order by 2;
+----
+dotted 1 dotted
+decoy 2 decoy
+plain 3 plain
+
+query IT
+select id, upstream_table from rw_dotted;
+----
+1 a.b
+
+statement ok
+drop source pg_dotted_name_source cascade;
+
+sleep 2s
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -q <<'EOF'
+SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots
+WHERE slot_name = 'dotted_name_slot' AND active_pid IS NOT NULL;
+SELECT pg_sleep(1);
+SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = 'dotted_name_slot';
+DROP PUBLICATION IF EXISTS dotted_name_pub;
+DROP TABLE IF EXISTS public."a.b";
+DROP TABLE IF EXISTS public.plain;
+DROP SCHEMA IF EXISTS a CASCADE;
+EOF

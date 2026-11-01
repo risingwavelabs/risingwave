@@ -19,8 +19,8 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcSourceDdlValidator, CdcSourceRuntimeFlags, CdcSourceTypeTrait, Postgres,
-    check_alter_with_options_inner, check_common_with_options,
+    CdcSourceDdlValidator, CdcSourceExternalTableIdentifier, CdcSourceRuntimeFlags,
+    CdcSourceTypeTrait, Postgres, check_alter_with_options_inner, check_common_with_options,
 };
 
 // ------- Runtime flags -------
@@ -104,3 +104,7 @@ impl CdcSourceDdlValidator for Postgres {
         )
     }
 }
+
+// ------- External table identifier -------
+
+impl CdcSourceExternalTableIdentifier for Postgres {}

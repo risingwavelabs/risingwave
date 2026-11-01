@@ -171,10 +171,9 @@ message CdcMessage {
   // The key of the Debezium message, which only used by `mongodb-cdc` connector.
   string key = 7;
 
-  // The CDC source type of this message. This is required to disambiguate the parsing logic for
-  // `full_table_name` (e.g. `db.table` in MySQL vs `schema.table` in
-  // Postgres/SQL Server/Oracle).
-  SourceType source_type = 8;
+  // Deprecated: SourceType source_type = 8;
+  reserved "source_type";
+  reserved 8;
 }
 
 enum SourceType {
