@@ -3,24 +3,34 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-while getopts 'c:f:' opt; do
-    case ${opt} in
-        c )
-            case=$OPTARG
-            ;;
-        f )
-            format=$OPTARG
-            ;;
-        \? )
-            echo "Invalid Option: -$OPTARG" 1>&2
-            exit 1
-            ;;
-        : )
-            echo "Invalid option: $OPTARG requires an argument" 1>&2
-            ;;
+usage_error() {
+    echo "Error: $1" >&2
+    echo "Usage: $0 -c <test-case> -f <format>" >&2
+    exit 1
+}
+
+case=''
+format=''
+
+while getopts ':c:f:' opt; do
+    case "$opt" in
+        c) case=$OPTARG ;;
+        f) format=$OPTARG ;;
+        \?) usage_error "Unknown option: -$OPTARG" ;;
+        :) usage_error "Option -$OPTARG requires an argument" ;;
     esac
 done
-shift $((OPTIND -1))
+shift "$((OPTIND - 1))"
+
+if [[ -z "$case" || "$case" == -* ]]; then
+    usage_error "Option -c requires a non-empty test case that does not start with '-'"
+fi
+if [[ -z "$format" || "$format" == -* ]]; then
+    usage_error "Option -f requires a non-empty format that does not start with '-'"
+fi
+if (( $# > 0 )); then
+    usage_error "Unexpected argument: $1"
+fi
 
 echo "export INTEGRATION_TEST_CASE=${case}" > env_vars.sh
 
