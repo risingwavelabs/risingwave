@@ -47,26 +47,26 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
 echo "+++ set RW_IMAGE"
 
-if [[ -n "${RW_IMAGE_TAG+x}" ]]; then
-  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_TAG}"
-  echo Docker image: "$RW_IMAGE"
+# explicit tag -> explicit image -> nightly image -> the image defined in docker-compose.yml
+if [[ -n "${RW_IMAGE_TAG:-}" ]]; then
+  RW_IMAGE="ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_TAG}"
+elif [[ -z "${RW_IMAGE:-}" ]]; then
+  case "${BUILDKITE_SOURCE:-}" in
+    schedule)
+      RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
+      ;;
+    webhook)
+      # Use yesterday's nightly image for webhook builds (PRs).
+      RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date -d '-1 day' '+%Y%m%d')"
+      ;;
+  esac
 fi
 
-if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
-  # Use ghcr nightly image for scheduled build. If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
-  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
+if [[ -n "${RW_IMAGE:-}" ]]; then
+  export RW_IMAGE
   echo Docker image: "$RW_IMAGE"
-fi
-
-if [ "${BUILDKITE_SOURCE}" == "webhook" ]; then
-  # Use ghcr nightly image for webhook build (PR). If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
-  # use yesterday's date
-  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date -d '-1 day' '+%Y%m%d')"
-  echo Docker image: "$RW_IMAGE"
-fi
-
-if [ -z "${RW_IMAGE+x}" ]; then
-  echo "RW_IMAGE is not set. The image defined in docker-compose.yml will be used."
+else
+  echo "RW_IMAGE is unset or empty. The image defined in docker-compose.yml will be used."
 fi
 
 echo "--- case: ${case}, format: ${format}"
