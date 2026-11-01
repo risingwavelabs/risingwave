@@ -1176,7 +1176,7 @@ mod tests {
                         DataType::Int64 => 1i64.into(),
                         DataType::Float32 => 1f32.into(),
                         DataType::Float64 => 1f64.into(),
-                        DataType::Decimal => risingwave_common::types::Decimal::NaN.into(),
+                        DataType::Decimal => risingwave_common::types::Decimal::NAN.into(),
                         _ => unimplemented!(),
                     }),
                     t,
