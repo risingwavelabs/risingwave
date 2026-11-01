@@ -143,7 +143,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-    mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
+    mv_depended_subscriptions: HashMap<TableId, HashSet<SubscriptionId>>,
     creating_jobs: HashSet<JobId>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
@@ -229,7 +229,7 @@ struct DatabaseRuntimeInfoSnapshot {
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-    mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
+    mv_depended_subscriptions: HashMap<TableId, HashSet<SubscriptionId>>,
     creating_jobs: HashSet<JobId>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
 }
