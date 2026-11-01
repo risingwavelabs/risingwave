@@ -86,6 +86,7 @@ criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
+twox-hash = "2.1"
 uuid = { version = "1", features = ["v4"] }
 
 [[bench]]
@@ -116,6 +117,11 @@ harness = false
 
 [[bench]]
 name = "bench_sstable_builder"
+harness = false
+required-features = ["test"]
+
+[[bench]]
+name = "bench_sstable_meta"
 harness = false
 required-features = ["test"]
 
