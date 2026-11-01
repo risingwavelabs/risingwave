@@ -876,10 +876,6 @@ fn replay_archive(
     Ok(last_version)
 }
 
-pub fn require_sql_meta_store_err() -> Error {
-    Error::TimeTravel(anyhow!("require SQL meta store"))
-}
-
 /// Time travel delta replay only expect `NewL0SubLevel`. In all other cases, a new version snapshot should be created.
 pub fn should_mark_next_time_travel_version_snapshot(delta: &HummockVersionDelta) -> bool {
     delta.group_deltas.iter().any(|(_, deltas)| {
