@@ -182,6 +182,15 @@ impl CompactTask {
             .dedup()
     }
 
+    /// Returns whether the input SSTs reference exactly one distinct table.
+    pub fn is_single_table(&self) -> bool {
+        let mut table_ids = self.read_input_ssts().flat_map(|sst| sst.table_ids.iter());
+        match table_ids.next() {
+            Some(first) => table_ids.all(|table_id| table_id == first),
+            None => false,
+        }
+    }
+
     pub fn is_expired(&self, compaction_group_version_id_expected: u64) -> bool {
         is_compaction_task_expired(
             self.compaction_group_version_id,
@@ -219,7 +228,7 @@ impl CompactTask {
     /// The hint is only meaningful when all input SSTs belong to a single table.
     pub fn effective_max_vnode_key_range_bytes(&self) -> Option<usize> {
         let limit = self.max_vnode_key_range_bytes.filter(|&v| v > 0)? as usize;
-        (self.get_table_ids_from_input_ssts().count() == 1).then_some(limit)
+        self.is_single_table().then_some(limit)
     }
 
     /// Returns input SSTs that should be read by the compactor.

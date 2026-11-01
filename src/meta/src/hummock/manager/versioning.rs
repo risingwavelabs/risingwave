@@ -17,11 +17,11 @@ use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
+    BranchedSstInfo, get_table_compaction_group_id_mapping,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{PbTableStatsMap, add_prost_table_stats_map};
@@ -255,9 +255,8 @@ impl HummockManager {
             cg_manager.write_limit.clone(),
             &versioning.current_version,
         );
-        let all_group_ids: HashSet<_> =
-            HashSet::from_iter(get_compaction_group_ids(&versioning.current_version));
-        new_write_limits.retain(|group_id, _| all_group_ids.contains(group_id));
+        new_write_limits
+            .retain(|group_id, _| versioning.current_version.levels.contains_key(group_id));
         if new_write_limits == cg_manager.write_limit {
             return false;
         }
@@ -354,14 +353,14 @@ impl HummockManager {
         }
         let table_change_logs = self
             .on_current_version_and_table_change_log(|_, table_change_logs| {
-                table_change_logs
-                    .iter()
-                    .filter_map(|(id, change_log)| {
-                        if let Some(table_filter) = &table_ids
-                            && !table_filter.contains(id)
-                        {
-                            return None;
-                        }
+                let selected_logs = match &table_ids {
+                    Some(table_ids) => Either::Left(table_ids.iter().filter_map(|id| {
+                        table_change_logs.get(id).map(|change_log| (id, change_log))
+                    })),
+                    None => Either::Right(table_change_logs.iter()),
+                };
+                selected_logs
+                    .map(|(id, change_log)| {
                         let filtered_change_logs = change_log
                             .filter_epoch((start_epoch, end_epoch))
                             .filter(|change_log| {
@@ -388,7 +387,7 @@ impl HummockManager {
                                     change_log.clone()
                                 }
                             });
-                        Some((id.to_owned(), TableChangeLog::new(filtered_change_logs)))
+                        (*id, TableChangeLog::new(filtered_change_logs))
                     })
                     .collect()
             })
