@@ -66,12 +66,20 @@ impl StreamSource {
         if !self.core.is_iceberg_connector() {
             generic::Source::infer_internal_table_catalog(false)
         } else {
-            // iceberg list node (singleton) stores last_snapshot (just 1 row, no pk)
+            // Iceberg List stores a single value without a primary key.
             let mut builder = TableCatalogBuilder::default();
-            builder.add_column(&Field {
-                data_type: DataType::Int64,
-                name: "last_snapshot".to_owned(),
-            });
+            let field = if self.core.is_iceberg_update_source() {
+                Field {
+                    data_type: DataType::Jsonb,
+                    name: "list_state".to_owned(),
+                }
+            } else {
+                Field {
+                    data_type: DataType::Int64,
+                    name: "last_snapshot".to_owned(),
+                }
+            };
+            builder.add_column(&field);
             builder.build(vec![], 0)
         }
     }
@@ -123,6 +131,7 @@ impl StreamNode for StreamSource {
                 }),
                 refresh_mode: source_catalog.refresh_mode,
                 associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
+                iceberg_fetch_state_table: None,
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))
