@@ -530,15 +530,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         }
                                     }
                                     ConflictBehavior::NoCheck => {
-                                        // Demoted TOAST chunks bypass the cache: drop their keys so a
+                                        // Demoted TOAST chunks bypass the cache: write them through so a
                                         // later placeholder is not filled from a stale cached row.
                                         if self.toastable_column_indices.is_some()
                                             && let Some(cache) = &mut self.materialize_cache
                                         {
-                                            cache.invalidate_rows(
-                                                chunk.rows().map(|(_, row)| row),
-                                                &self.state_table,
-                                            );
+                                            cache.write_through(&chunk, &self.state_table);
                                         }
                                         self.state_table.write_chunk(chunk.clone());
                                         self.state_table.try_flush().await?;
@@ -1110,6 +1107,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             None,
             None,
             None,
+            true,
         )
         .await
     }
@@ -1137,6 +1135,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             Some(stream_key),
             None,
             None,
+            true,
         )
         .await
     }
@@ -1171,6 +1170,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             Some(stream_key),
             Some(ttl_column),
             None,
+            true,
         )
         .await
     }
@@ -1197,6 +1197,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             None,
             None,
             Some(toastable_column_indices),
+            false,
         )
         .await
     }
@@ -1214,6 +1215,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         stream_key: Option<Vec<usize>>,
         ttl_column: Option<usize>,
         toastable_column_indices: Option<Vec<usize>>,
+        may_have_downstream: bool,
     ) -> Self {
         use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -1242,7 +1244,13 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         if let Some(ttl_column) = ttl_column {
             table_catalog.clean_watermark_indices = vec![ttl_column as u32];
         }
-        let state_table = if ttl_column.is_some() || toastable_column_indices.is_some() {
+        let op_consistency_level = get_op_consistency_level(
+            ttl_column.is_some(),
+            conflict_behavior,
+            may_have_downstream,
+            &HashSet::new(),
+        );
+        let state_table = if op_consistency_level == StateTableOpConsistencyLevel::Inconsistent {
             StateTableInner::from_table_catalog_inconsistent_op(&table_catalog, store, None).await
         } else {
             StateTableInner::from_table_catalog(&table_catalog, store, None).await
@@ -1251,8 +1259,6 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         let unused = StreamingMetrics::unused();
         let metrics = unused.new_materialize_metrics(table_id, 1.into(), 2.into());
         let cache_metrics = unused.new_materialize_cache_metrics(table_id, 1.into(), 2.into());
-        // Without downstream, an `Overwrite` table may skip the conflict check.
-        let may_have_downstream = toastable_column_indices.is_none();
 
         Self {
             input,
@@ -1527,7 +1533,7 @@ mod tests {
                 " i i T
                 + 1 2 {TOAST}"
             ),
-            // No placeholder: conflict check skipped, the cached row must be invalidated.
+            // No placeholder: conflict check skipped, the cached row must be updated.
             " i i T
             + 1 3 v2",
             // Placeholder: must be filled with v2, not the stale cached v1.

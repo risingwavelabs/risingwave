@@ -402,14 +402,31 @@ impl MaterializeCache {
         rows: impl IntoIterator<Item = impl Row>,
         table: &StateTableInner<S, SD>,
     ) {
-        if self.lru_cache.is_empty() {
-            return;
-        }
         for row in rows {
             let key = row
                 .project(table.pk_indices())
                 .memcmp_serialize(table.pk_serde());
             self.lru_cache.remove(&key);
+        }
+    }
+
+    /// Write the rows of a chunk applied to `table` without going through [`Self::handle_new`].
+    pub fn write_through<S: StateStore, SD: ValueRowSerde>(
+        &mut self,
+        chunk: &StreamChunk,
+        table: &StateTableInner<S, SD>,
+    ) {
+        for (op, row) in chunk.rows() {
+            let key = row
+                .project(table.pk_indices())
+                .memcmp_serialize(table.pk_serde());
+            let value = match op {
+                Op::Insert | Op::UpdateInsert => Some(CompactedRow {
+                    row: Bytes::from(self.row_serde.serializer.serialize(row)),
+                }),
+                Op::Delete | Op::UpdateDelete => None,
+            };
+            self.lru_cache.put(key, value);
         }
     }
 
