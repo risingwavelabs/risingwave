@@ -689,7 +689,11 @@ impl MySqlExternalTableReader {
 
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         // schema name is the database name in mysql
-        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
+        format!(
+            "`{}`.`{}`",
+            table_name.schema_name.replace('`', "``"),
+            table_name.table_name.replace('`', "``")
+        )
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -807,8 +811,9 @@ impl MySqlExternalTableReader {
             // fill in start primary key params
             let params: Vec<_> = primary_keys
                 .iter()
+                .enumerate()
                 .zip_eq_fast(start_pk_row.into_iter())
-                .map(|(pk, datum)| {
+                .map(|((idx, pk), datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
                         let val = match ty {
@@ -840,7 +845,7 @@ impl MySqlExternalTableReader {
                             }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
-                        ConnectorResult::Ok((pk.to_lowercase(), val))
+                        ConnectorResult::Ok((format!("p{}", idx), val))
                     } else {
                         bail!("primary key {} cannot be null", pk);
                     }
@@ -889,34 +894,22 @@ impl MySqlExternalTableReader {
     fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
-        conditions.push(format!(
-            "({} > :{})",
-            Self::quote_column(&columns[0]),
-            columns[0].to_lowercase()
-        ));
+        conditions.push(format!("({} > :p0)", Self::quote_column(&columns[0])));
         for i in 2..=columns.len() {
             // '=' condition
             let mut condition = String::new();
             for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
-                    condition.push_str(&format!(
-                        "({} = :{})",
-                        Self::quote_column(col),
-                        col.to_lowercase()
-                    ));
+                    condition.push_str(&format!("({} = :p{})", Self::quote_column(col), j));
                 } else {
-                    condition.push_str(&format!(
-                        " AND ({} = :{})",
-                        Self::quote_column(col),
-                        col.to_lowercase()
-                    ));
+                    condition.push_str(&format!(" AND ({} = :p{})", Self::quote_column(col), j));
                 }
             }
             // '>' condition
             condition.push_str(&format!(
-                " AND ({} > :{})",
+                " AND ({} > :p{})",
                 Self::quote_column(&columns[i - 1]),
-                columns[i - 1].to_lowercase()
+                i - 1
             ));
             conditions.push(format!("({})", condition));
         }
@@ -928,7 +921,7 @@ impl MySqlExternalTableReader {
     }
 
     fn quote_column(column: &str) -> String {
-        format!("`{}`", column)
+        format!("`{}`", column.replace('`', "``"))
     }
 }
 
@@ -1146,13 +1139,13 @@ mod tests {
     fn test_mysql_filter_expr() {
         let cols = vec!["id".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
-        assert_eq!(expr, "(`id` > :id)");
+        assert_eq!(expr, "(`id` > :p0)");
 
         let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
-            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+            "(`aa` > :p0) OR ((`aa` = :p0) AND (`bb` > :p1)) OR ((`aa` = :p0) AND (`bb` = :p1) AND (`cc` > :p2))"
         );
     }
 
