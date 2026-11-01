@@ -30,10 +30,14 @@ use parking_lot::Mutex;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, FormatIterator, Row};
+use prometheus::core::Atomic;
+use risingwave_batch::error::BatchError;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::error::BoxedError;
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, ScalarImpl, StructType, StructValue};
@@ -313,7 +317,7 @@ async fn execute_fetch<S: CursorPgResponseStream>(
     cancel_handle: &mut FetchCursorCancelHandle,
     mut record_poll: impl FnMut(Duration),
 ) -> Result<Vec<Row>> {
-    let result: Result<Vec<Row>> = async {
+    let result: Result<Vec<Row, MonitoredGlobalAlloc>> = async {
         let deadline =
             timeout_seconds.map(|seconds| tokio::time::Instant::now() + Duration::from_secs(seconds));
         let timeout = async {
@@ -323,7 +327,12 @@ async fn execute_fetch<S: CursorPgResponseStream>(
             }
         };
         tokio::pin!(timeout);
-        let mut rows = Vec::with_capacity(count.min(100) as usize);
+        let output_memory_context =
+            MemoryContext::new(Some(stream.memory_context()), TrAdderAtomic::new(0));
+        let mut rows = Vec::with_capacity_in(
+            count.min(100) as usize,
+            output_memory_context.global_allocator(),
+        );
         while rows.len() < count as usize {
             let started = Instant::now();
             let row = if timeout_seconds == Some(0) {
@@ -347,11 +356,18 @@ async fn execute_fetch<S: CursorPgResponseStream>(
                     row = stream.next() => row,
                 }
             };
-            let Some(row) = row.transpose()? else {
+            let Some((row, row_nested_heap_size)) = row.transpose()? else {
                 break;
             };
             record_poll(started.elapsed());
             rows.push(row);
+            // The response stream releases each row's charge when it moves out of the current
+            // chunk. Charge it to the FETCH output together with its monitored vector capacity.
+            output_memory_context.add_unchecked(row_nested_heap_size);
+            if !output_memory_context.check_memory_usage() {
+                stream.fail_fetch();
+                return Err(BatchError::OutOfMemory(output_memory_context.mem_limit()).into());
+            }
             // Ready rows may keep this task running without letting the timer driver advance.
             // Check elapsed time directly as well; zero timeout still returns at most one ready row.
             if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
@@ -363,7 +379,10 @@ async fn execute_fetch<S: CursorPgResponseStream>(
     match result {
         Ok(rows) => {
             stream.commit_fetch();
-            Ok(rows)
+            // TODO: Moving the rows to pgwire's materialized response ends FETCH accounting even
+            // though pgwire may retain them until the response is dropped. A streaming FETCH
+            // should release rows or chunks progressively as pgwire sends them.
+            Ok(rows.into_iter().collect())
         }
         Err(error) => {
             stream.abort_fetch();
@@ -374,6 +393,7 @@ async fn execute_fetch<S: CursorPgResponseStream>(
 
 pub struct QueryCursor {
     shutdown_handle: CursorShutdownHandle,
+    _memory_context: MemoryContext,
     pg_response_stream: QueryCursorPgResponseStream,
 }
 
@@ -385,12 +405,19 @@ impl QueryCursor {
     ) -> Result<Self> {
         let shutdown_handle = CursorShutdownHandle::new();
         let snapshot = session.pinned_snapshot();
+        let memory_context =
+            MemoryContext::new(Some(session.env().mem_context()), TrAdderAtomic::new(0));
         let (query_stream, fields) =
             create_cursor_query_stream(session, plan_fragmenter_result, snapshot).await?;
         let data_stream = QueryCursorDataChunkStream::new(query_stream, fields.clone());
         Ok(Self {
             shutdown_handle,
-            pg_response_stream: QueryCursorPgResponseStream::new(data_stream, fields),
+            pg_response_stream: QueryCursorPgResponseStream::new(
+                data_stream,
+                fields,
+                memory_context.clone(),
+            ),
+            _memory_context: memory_context,
         })
     }
 
@@ -539,6 +566,7 @@ impl FieldsManager {
 
 pub struct SubscriptionCursor {
     shutdown_handle: CursorShutdownHandle,
+    _memory_context: MemoryContext,
     cursor_name: String,
     subscription: Arc<SubscriptionCatalog>,
     dependent_table_id: TableId,
@@ -610,6 +638,10 @@ impl SubscriptionCursor {
                 FieldsManager::new(&table_catalog),
             )
         };
+        let memory_context = MemoryContext::new(
+            Some(handler_args.session.env().mem_context()),
+            TrAdderAtomic::new(0),
+        );
         let expires_at = Instant::now() + Duration::from_secs(subscription.retention_seconds);
         let output_fields = fields_manager.get_output_fields();
         let response_state = state.strip_query_stream();
@@ -631,7 +663,9 @@ impl SubscriptionCursor {
                 output_fields,
                 response_state,
                 expires_at,
+                memory_context.clone(),
             ),
+            _memory_context: memory_context,
             cursor_metrics,
             last_fetch: Instant::now(),
         })
@@ -1302,6 +1336,7 @@ mod cursor_lifecycle_tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::error::BoxedError;
+    use risingwave_common::memory::MemoryContext;
     use risingwave_sqlparser::parser::Parser;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
@@ -1331,7 +1366,12 @@ mod cursor_lifecycle_tests {
             let data_stream = QueryCursorDataChunkStream::new(query_stream, fields.clone());
             Self {
                 shutdown_handle: CursorShutdownHandle::new(),
-                pg_response_stream: QueryCursorPgResponseStream::new(data_stream, fields),
+                _memory_context: MemoryContext::none(),
+                pg_response_stream: QueryCursorPgResponseStream::new(
+                    data_stream,
+                    fields,
+                    risingwave_common::memory::MemoryContext::none(),
+                ),
             }
         }
     }
@@ -1427,6 +1467,7 @@ mod cursor_lifecycle_tests {
         );
         let cursor = SubscriptionCursor {
             shutdown_handle: CursorShutdownHandle::new(),
+            _memory_context: MemoryContext::none(),
             cursor_name: name.to_owned(),
             subscription,
             dependent_table_id: TableId::new(1),
@@ -1435,6 +1476,7 @@ mod cursor_lifecycle_tests {
                 output_fields,
                 response_state,
                 Instant::now() + Duration::from_secs(60),
+                risingwave_common::memory::MemoryContext::none(),
             ),
             cursor_metrics,
             last_fetch: Instant::now(),
@@ -1745,13 +1787,13 @@ mod cursor_lifecycle_tests {
         use crate::error::Result;
 
         struct TestResponseStream {
-            inner: futures::stream::BoxStream<'static, Result<Row>>,
+            inner: futures::stream::BoxStream<'static, Result<(Row, i64)>>,
             commits: usize,
             aborts: usize,
         }
 
         impl Stream for TestResponseStream {
-            type Item = Result<Row>;
+            type Item = Result<(Row, i64)>;
 
             fn poll_next(
                 mut self: Pin<&mut Self>,
@@ -1773,6 +1815,10 @@ mod cursor_lifecycle_tests {
             fn fail_fetch(&mut self) {
                 panic!("this fixture does not produce terminal failures");
             }
+
+            fn memory_context(&self) -> MemoryContext {
+                MemoryContext::none()
+            }
         }
 
         let rows = futures::stream::iter((1..=3).map(|value| {
@@ -1781,7 +1827,9 @@ mod cursor_lifecycle_tests {
                 // still returns Ready, including those for the remaining rows.
                 std::thread::sleep(Duration::from_millis(1100));
             }
-            Ok(Row::new(vec![Some(value.to_string().into())]))
+            let row = Row::new(vec![Some(value.to_string().into())]);
+            let row_nested_heap_size = row.estimated_heap_size();
+            Ok((row, row_nested_heap_size))
         }));
         let mut stream = TestResponseStream {
             inner: rows.boxed(),
