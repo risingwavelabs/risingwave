@@ -21,6 +21,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
+use musli_zerocopy::ZeroCopy;
 use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Deserialize, Serialize};
@@ -31,7 +32,18 @@ use crate::array::ArrayResult;
 
 /// Timestamp with timezone.
 #[derive(
-    Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+    Default,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    ZeroCopy,
 )]
 #[repr(transparent)]
 pub struct Timestamptz(i64);
