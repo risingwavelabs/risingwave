@@ -198,8 +198,13 @@ select pow(0::decimal, -2::decimal);
 statement error a negative number raised to a non-integer power yields a complex result
 select pow(-1::decimal, 0.5);
 
-statement error overflow
+query R
 select pow(2::decimal, 96::decimal);
+----
+79228162514264337593543950336
+
+statement error overflow
+select pow(2::decimal, 127::decimal);
 
 # This is considered underflow error for float8 but okay for decimal
 query R
@@ -207,9 +212,10 @@ select pow(0.5::decimal, 2000::decimal)::float8;
 ----
 0
 
-# But rust_decimal is not good at this. Should be 0.
-statement error
+query R
 select pow(1e28, -2);
+----
+0
 
 query R
 select exp(0.0);
