@@ -342,6 +342,22 @@ mod tests {
             }
             _ => panic!("unexpected parse result: {:?}", res),
         }
+
+        // Additional columns are also filled for delete events.
+        let payload = r#"{ "payload": { "before": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "after": null, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277758000, "snapshot": "false", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3900, "row": 0, "thread": null, "query": null }, "op": "d", "ts_ms": 1695277758017, "transaction": null } }"#;
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(payload.as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await;
+        assert!(matches!(res, Ok(ParseResult::Rows)));
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
+        let (_, row) = chunk.rows().next().unwrap();
+        let commit_ts = row.datum_at(5).unwrap().into_timestamptz();
+        assert_eq!(commit_ts, Timestamptz::from_millis(1695277758000).unwrap());
     }
 
     #[tokio::test]

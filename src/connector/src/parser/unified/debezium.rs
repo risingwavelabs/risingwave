@@ -632,7 +632,10 @@ where
 {
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult<DatumCow<'_>> {
         match self.op()? {
-            ChangeEventOperation::Delete => {
+            ChangeEventOperation::Delete
+                if desc.additional_column.column_type.is_none()
+                    || self.value_accessor.is_none() =>
+            {
                 // For delete events of MongoDB, the "before" and "after" field both are null in the value,
                 // we need to extract the _id field from the key.
                 if self.is_mongodb && desc.name == "_id" {
@@ -654,8 +657,8 @@ where
             }
 
             // value should not be None.
-            ChangeEventOperation::Upsert => {
-                // For upsert operation, if desc is an additional column, access field in the `SOURCE` field.
+            ChangeEventOperation::Upsert | ChangeEventOperation::Delete => {
+                // For upsert and delete operations, if desc is an additional column, access field in the `SOURCE` field.
                 desc.additional_column.column_type.as_ref().map_or_else(
                     || {
                         self.value_accessor
