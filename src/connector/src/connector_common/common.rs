@@ -270,18 +270,15 @@ pub struct KafkaConnectionProps {
 
     /// Path to client's Kerberos keytab file under SASL/GSSAPI.
     #[serde(rename = "properties.sasl.kerberos.keytab")]
+    #[serde(default, deserialize_with = "deserialize_kinit_arg")]
     #[with_option(allow_alter_on_fly)]
     sasl_kerberos_keytab: Option<String>,
 
     /// Client's Kerberos principal name under SASL/GSSAPI.
     #[serde(rename = "properties.sasl.kerberos.principal")]
+    #[serde(default, deserialize_with = "deserialize_kinit_arg")]
     #[with_option(allow_alter_on_fly)]
     sasl_kerberos_principal: Option<String>,
-
-    /// Shell command to refresh or acquire the client's Kerberos ticket under SASL/GSSAPI.
-    #[serde(rename = "properties.sasl.kerberos.kinit.cmd")]
-    #[with_option(allow_alter_on_fly)]
-    sasl_kerberos_kinit_cmd: Option<String>,
 
     /// Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
     #[serde(rename = "properties.sasl.kerberos.min.time.before.relogin")]
@@ -503,7 +500,6 @@ impl KafkaConnectionProps {
             sasl_kerberos_service_name: None,
             sasl_kerberos_keytab: None,
             sasl_kerberos_principal: None,
-            sasl_kerberos_kinit_cmd: None,
             sasl_kerberos_min_time_before_relogin: None,
             sasl_oathbearer_config: None,
             sasl_oauthbearer_method: None,
@@ -574,6 +570,9 @@ impl KafkaConnectionProps {
         }
 
         // SASL/GSSAPI
+        // Always override librdkafka's unquoted default. It is only run for GSSAPI, which is
+        // also librdkafka's default mechanism when `sasl.mechanism` is omitted.
+        config.set("sasl.kerberos.kinit.cmd", KINIT_CMD);
         if let Some(sasl_kerberos_service_name) = self.sasl_kerberos_service_name.as_ref() {
             config.set("sasl.kerberos.service.name", sasl_kerberos_service_name);
         }
@@ -582,9 +581,6 @@ impl KafkaConnectionProps {
         }
         if let Some(sasl_kerberos_principal) = self.sasl_kerberos_principal.as_ref() {
             config.set("sasl.kerberos.principal", sasl_kerberos_principal);
-        }
-        if let Some(sasl_kerberos_kinit_cmd) = self.sasl_kerberos_kinit_cmd.as_ref() {
-            config.set("sasl.kerberos.kinit.cmd", sasl_kerberos_kinit_cmd);
         }
         if let Some(sasl_kerberos_min_time_before_relogin) =
             self.sasl_kerberos_min_time_before_relogin.as_ref()
@@ -1367,9 +1363,65 @@ const fn default_tcp_keepalive_count() -> u32 {
     3
 }
 
+/// librdkafka's default `kinit` command, overridden to single-quote the keytab and principal.
+/// The default leaves them unquoted or double-quoted, so user-supplied values can inject shell
+/// commands.
+///
+/// Default: <https://github.com/confluentinc/librdkafka/blob/v2.10.0/src/rdkafka_conf.c#L950-L960>
+const KINIT_CMD: &str = "kinit -R -t '%{sasl.kerberos.keytab}' -k '%{sasl.kerberos.principal}' \
+    || kinit -t '%{sasl.kerberos.keytab}' -k '%{sasl.kerberos.principal}'";
+
+/// Rejects values that could escape the quotes in [`KINIT_CMD`] or be parsed as a `kinit` flag.
+fn deserialize_kinit_arg<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    if let Some(v) = &value
+        && (v.contains('\'') || v.starts_with('-'))
+    {
+        return Err(serde::de::Error::custom(format!(
+            "invalid Kerberos value `{v}`: must not contain `'` or start with `-`"
+        )));
+    }
+    Ok(value)
+}
+
 #[cfg(all(test, not(madsim)))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_kinit_cmd_quoted_and_args_validated() {
+        // The quoted command is set for every mechanism, including an omitted one, which
+        // librdkafka treats as GSSAPI.
+        for mechanism in [None, Some("GSSAPI"), Some("PLAIN")] {
+            let mut props = KafkaConnectionProps::test_default();
+            props.sasl_mechanism = mechanism.map(str::to_owned);
+            let mut config = rdkafka::ClientConfig::new();
+            props.set_security_properties(&mut config);
+            assert_eq!(
+                config.config_map().get("sasl.kerberos.kinit.cmd").unwrap(),
+                KINIT_CMD
+            );
+        }
+
+        // Values that could escape the quotes or be parsed as a `kinit` flag are rejected.
+        for key in [
+            "properties.sasl.kerberos.principal",
+            "properties.sasl.kerberos.keytab",
+        ] {
+            for bad in ["x'; id; '", "'", "-c/tmp/cache", "--help"] {
+                let map = BTreeMap::from([
+                    ("properties.bootstrap.server", "localhost:9092"),
+                    (key, bad),
+                ]);
+                let result: Result<KafkaConnectionProps, _> =
+                    serde_json::from_value(serde_json::to_value(map).unwrap());
+                assert!(result.is_err(), "{key}={bad:?} should be rejected");
+            }
+        }
+    }
 
     #[test]
     fn test_oauthbearer_oidc_does_not_set_unsecure_jwt() {
