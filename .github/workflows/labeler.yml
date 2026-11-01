@@ -5,7 +5,9 @@ permissions:
   pull-requests: write
 
 on:
-  pull_request:
+  # Runs with a write token on base (main): never check out PR HEAD or run PR code here.
+  # https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target
+  pull_request_target:
     types: [opened, edited, synchronize]
 
 jobs:
@@ -13,6 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     name: pr-labeler
     steps:
-    - uses: srvaroa/labeler@master
+    - uses: srvaroa/labeler@bf262763a8a8e191f5847873aecc0f29df84f957 # v1.14.0
       env:
         GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
