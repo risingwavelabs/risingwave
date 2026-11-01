@@ -92,9 +92,24 @@ if [ "${format}" == "protobuf" ]; then
   python3 integration_tests/scripts/gen_pb_compose.py "${case}" "${format}"
 fi
 
-echo "--- set vm.max_map_count=2000000 for doris"
-max_map_count_original_value=$(sysctl -n vm.max_map_count)
-sudo sysctl -w vm.max_map_count=2000000
+restore_max_map_count() {
+  local exit_status=$?
+  echo "--- reset vm.max_map_count=${max_map_count_original_value} ---"
+  if ! sudo sysctl -w vm.max_map_count="$max_map_count_original_value"; then
+    echo "Error: failed to restore vm.max_map_count=${max_map_count_original_value}" >&2
+    if (( exit_status == 0 )); then
+      exit_status=1
+    fi
+  fi
+  exit "$exit_status"
+}
+
+if [ "${case}" == "doris-sink" ]; then
+  echo "--- set vm.max_map_count=2000000 for doris ---"
+  max_map_count_original_value=$(sysctl -n vm.max_map_count)
+  trap restore_max_map_count EXIT
+  sudo sysctl -w vm.max_map_count=2000000
+fi
 
 echo "--- run Demos"
 python3 integration_tests/scripts/run_demos.py --case "${case}" --format "${format}"
@@ -106,6 +121,3 @@ echo "--- check if the ingestion is successful"
 # extract the type of upstream source,e.g. mysql,postgres,etc
 upstream=$(echo "${case}" | cut -d'-' -f 1)
 python3 integration_tests/scripts/check_data.py "${case}" "${upstream}"
-
-echo "--- reset vm.max_map_count={$max_map_count_original_value}"
-sudo sysctl -w vm.max_map_count="$max_map_count_original_value"
