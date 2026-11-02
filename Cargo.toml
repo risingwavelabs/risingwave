@@ -460,6 +460,8 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
+# Borrowed XOR readers reuse xorf's query implementation for pooled fingerprints.
+xorf = { git = "https://github.com/Li0k/xorf.git", rev = "3f76ab1cd9f382f23709dd4239a6cea5570ff0ea" }
 # Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
 foyer = { git = "https://github.com/Li0k/foyer.git", rev = "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }

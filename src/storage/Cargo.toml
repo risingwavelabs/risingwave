@@ -136,5 +136,10 @@ harness = false
 name = "bench_table_watermarks"
 harness = false
 
+[[bench]]
+name = "bench_blocked_xor_pooling"
+harness = false
+required-features = ["test"]
+
 [lints]
 workspace = true

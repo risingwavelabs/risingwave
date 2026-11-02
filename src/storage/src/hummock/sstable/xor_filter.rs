@@ -21,7 +21,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
-use xorf::{Filter, Xor8, Xor16};
+use xorf::{Filter, Xor8, Xor8Ref, Xor16, Xor16Ref};
 
 use super::{
     DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP, FilterBuilder, FilterBuilderOptions, Sstable,
@@ -436,30 +436,129 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     }
 }
 
-pub struct BlockBasedXorFilter<F> {
-    filters: Vec<F>,
+// Runtime-only index into the shared fingerprint array. Offsets are not persisted.
+#[derive(Clone)]
+struct XorFilterBlock {
+    seed: u64,
+    block_length: u32,
+    offset: u32,
 }
 
-pub type BlockBasedXor8Filter = BlockBasedXorFilter<Xor8>;
-pub type BlockBasedXor16Filter = BlockBasedXorFilter<Xor16>;
+#[derive(Clone)]
+pub struct BlockBasedXorFilter<T> {
+    filters: Vec<XorFilterBlock>,
+    fingerprints: Vec<T>,
+}
 
-impl<F: Clone> Clone for BlockBasedXorFilter<F> {
-    fn clone(&self) -> Self {
+pub type BlockBasedXor8Filter = BlockBasedXorFilter<u8>;
+pub type BlockBasedXor16Filter = BlockBasedXorFilter<u16>;
+
+impl<T> BlockBasedXorFilter<T> {
+    fn decode(
+        data: &[u8],
+        metas: &[BlockMeta],
+        mut append: impl FnMut(&[u8], &mut Vec<T>),
+    ) -> Self {
+        let footer = data.len() - BLOCKED_XOR_FILTER_FOOTER_LEN;
+        let count = (&data[footer..]).get_u32_le() as usize;
+        assert_eq!(count, metas.len());
+        let mut reader = &data[..footer];
+        let mut filters = Vec::with_capacity(count);
+        // A normal child has a length prefix, seed, block length and tag. Legacy
+        // footer-only empty XOR16 children can underestimate this reservation.
+        let payload_len = footer.saturating_sub(
+            count * (BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + PLAIN_XOR_FILTER_FIXED_LEN),
+        );
+        let mut fingerprints = Vec::with_capacity(payload_len / size_of::<T>());
+        for _ in 0..count {
+            let len = reader.get_u32_le() as usize;
+            let mut child = &reader[..len];
+            reader.advance(len);
+            let offset = u32::try_from(fingerprints.len())
+                .expect("blocked filter offset exceeds its u32-encoded byte length");
+            let (seed, block_length) = if size_of::<T>() == 2 && len == 1 {
+                assert_eq!(child[0], FOOTER_XOR16);
+                (0, 0)
+            } else {
+                if size_of::<T>() == 2 {
+                    assert_eq!(child.last(), Some(&FOOTER_XOR16));
+                }
+                let seed = child.get_u64_le();
+                let block_length = child.get_u32_le();
+                append(&child[..child.len() - 1], &mut fingerprints);
+                (seed, block_length)
+            };
+            filters.push(XorFilterBlock {
+                seed,
+                block_length,
+                offset,
+            });
+        }
         Self {
-            filters: self.filters.clone(),
+            filters,
+            fingerprints,
         }
     }
-}
 
-impl<F> BlockBasedXorFilter<F>
-where
-    F: Filter<u64>,
-{
-    pub fn may_exist(
+    fn block_fingerprints(&self, index: usize) -> &[T] {
+        let start = self.filters[index].offset as usize;
+        let end = self
+            .filters
+            .get(index + 1)
+            .map_or(self.fingerprints.len(), |next| next.offset as usize);
+        &self.fingerprints[start..end]
+    }
+
+    fn encode_block(
+        &self,
+        index: usize,
+        out: &mut Vec<u8>,
+        tag: u8,
+        write_fingerprints: impl Fn(&[T], &mut Vec<u8>),
+    ) {
+        let block = &self.filters[index];
+        out.put_u64_le(block.seed);
+        out.put_u32_le(block.block_length);
+        write_fingerprints(self.block_fingerprints(index), out);
+        out.put_u8(tag);
+    }
+
+    fn encode(
+        &self,
+        tag: u8,
+        blocked_tag: u8,
+        write_fingerprints: impl Fn(&[T], &mut Vec<u8>),
+    ) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.serialized_len());
+        for index in 0..self.filters.len() {
+            let len =
+                PLAIN_XOR_FILTER_FIXED_LEN + std::mem::size_of_val(self.block_fingerprints(index));
+            out.put_u32_le(len as u32);
+            self.encode_block(index, &mut out, tag, &write_fingerprints);
+        }
+        out.put_u32_le(self.filters.len() as u32);
+        out.put_u8(blocked_tag);
+        out
+    }
+
+    fn serialized_len(&self) -> usize {
+        BLOCKED_XOR_FILTER_FOOTER_LEN
+            + self.filters.len()
+                * (BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + PLAIN_XOR_FILTER_FIXED_LEN)
+            + self.fingerprints.len() * size_of::<T>()
+    }
+
+    fn estimated_heap_size(&self) -> usize {
+        self.filters.capacity() * size_of::<XorFilterBlock>()
+            + self.fingerprints.capacity() * size_of::<T>()
+    }
+
+    fn may_exist(
         &self,
         block_metas: &[BlockMeta],
         user_key_range: &UserKeyRangeRef<'_>,
         h: u64,
+        contains: impl Fn(&XorFilterBlock, &[T], u64) -> bool,
     ) -> bool {
         debug_assert_eq!(self.filters.len(), block_metas.len());
         let mut block_idx = match user_key_range.0 {
@@ -493,7 +592,11 @@ where
             if read_bound {
                 break;
             }
-            if self.filters[block_idx].contains(&h) {
+            if contains(
+                &self.filters[block_idx],
+                self.block_fingerprints(block_idx),
+                h,
+            ) {
                 return true;
             }
             block_idx += 1;
@@ -587,36 +690,17 @@ impl XorFilterReader {
         }
     }
 
-    fn to_block_xor16(mut data: &[u8], metas: &[BlockMeta]) -> BlockBasedXor16Filter {
-        let l = data.len();
-        let reader = &mut &data[(l - 5)..];
-        let block_count = reader.get_u32_le() as usize;
-        assert_eq!(block_count, metas.len());
-        let reader = &mut data;
-        let mut filters = Vec::with_capacity(block_count);
-        for _ in 0..block_count {
-            let len = reader.get_u32_le() as usize;
-            let xor16 = Self::to_xor16(&reader[..len]);
-            reader.advance(len);
-            filters.push(xor16);
-        }
-        BlockBasedXor16Filter { filters }
+    fn to_block_xor16(data: &[u8], metas: &[BlockMeta]) -> BlockBasedXor16Filter {
+        BlockBasedXorFilter::decode(data, metas, |bytes, fingerprints| {
+            let (words, _) = bytes.as_chunks::<2>();
+            fingerprints.extend(words.iter().copied().map(u16::from_le_bytes));
+        })
     }
 
-    fn to_block_xor8(mut data: &[u8], metas: &[BlockMeta]) -> BlockBasedXor8Filter {
-        let l = data.len();
-        let reader = &mut &data[(l - 5)..];
-        let block_count = reader.get_u32_le() as usize;
-        assert_eq!(block_count, metas.len());
-        let reader = &mut data;
-        let mut filters = Vec::with_capacity(block_count);
-        for _ in 0..block_count {
-            let len = reader.get_u32_le() as usize;
-            let xor8 = Self::to_xor8(&reader[..len]);
-            reader.advance(len);
-            filters.push(xor8);
-        }
-        BlockBasedXor8Filter { filters }
+    fn to_block_xor8(data: &[u8], metas: &[BlockMeta]) -> BlockBasedXor8Filter {
+        BlockBasedXorFilter::decode(data, metas, |bytes, fingerprints| {
+            fingerprints.extend_from_slice(bytes);
+        })
     }
 
     /// Returns the serialized byte length of the decoded filter reader.
@@ -628,26 +712,8 @@ impl XorFilterReader {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
             XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),
-            XorFilter::BlockXor8(reader) => {
-                let finished_blocks_len = reader
-                    .filters
-                    .iter()
-                    .map(|filter| {
-                        BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + xor8_filter_serialized_len(filter)
-                    })
-                    .sum();
-                blocked_xor_filter_serialized_len(finished_blocks_len, None)
-            }
-            XorFilter::BlockXor16(reader) => {
-                let finished_blocks_len = reader
-                    .filters
-                    .iter()
-                    .map(|filter| {
-                        BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + xor16_filter_serialized_len(filter)
-                    })
-                    .sum();
-                blocked_xor_filter_serialized_len(finished_blocks_len, None)
-            }
+            XorFilter::BlockXor8(reader) => reader.serialized_len(),
+            XorFilter::BlockXor16(reader) => reader.serialized_len(),
         }
     }
 
@@ -658,22 +724,8 @@ impl XorFilterReader {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_heap_size(filter),
             XorFilter::Xor16(filter) => xor16_filter_heap_size(filter),
-            XorFilter::BlockXor8(reader) => {
-                reader.filters.capacity() * std::mem::size_of::<Xor8>()
-                    + reader
-                        .filters
-                        .iter()
-                        .map(xor8_filter_heap_size)
-                        .sum::<usize>()
-            }
-            XorFilter::BlockXor16(reader) => {
-                reader.filters.capacity() * std::mem::size_of::<Xor16>()
-                    + reader
-                        .filters
-                        .iter()
-                        .map(xor16_filter_heap_size)
-                        .sum::<usize>()
-            }
+            XorFilter::BlockXor8(reader) => reader.estimated_heap_size(),
+            XorFilter::BlockXor16(reader) => reader.estimated_heap_size(),
         }
     }
 
@@ -705,8 +757,26 @@ impl XorFilterReader {
             match &self.filter {
                 XorFilter::Xor8(filter) => filter.contains(&h),
                 XorFilter::Xor16(filter) => filter.contains(&h),
-                XorFilter::BlockXor8(reader) => reader.may_exist(block_metas, user_key_range, h),
-                XorFilter::BlockXor16(reader) => reader.may_exist(block_metas, user_key_range, h),
+                XorFilter::BlockXor8(reader) => {
+                    reader.may_exist(block_metas, user_key_range, h, |block, fingerprints, h| {
+                        Xor8Ref {
+                            seed: block.seed,
+                            block_length: block.block_length as usize,
+                            fingerprints,
+                        }
+                        .contains(&h)
+                    })
+                }
+                XorFilter::BlockXor16(reader) => {
+                    reader.may_exist(block_metas, user_key_range, h, |block, fingerprints, h| {
+                        Xor16Ref {
+                            seed: block.seed,
+                            block_length: block.block_length as usize,
+                            fingerprints,
+                        }
+                        .contains(&h)
+                    })
+                }
             }
         }
     }
@@ -714,10 +784,24 @@ impl XorFilterReader {
     pub fn get_block_raw_filter(&self, block_index: usize) -> Vec<u8> {
         match &self.filter {
             XorFilter::BlockXor8(reader) => {
-                Xor8FilterBuilder::build_from_xor8(&reader.filters[block_index])
+                let mut out = Vec::with_capacity(
+                    PLAIN_XOR_FILTER_FIXED_LEN
+                        + std::mem::size_of_val(reader.block_fingerprints(block_index)),
+                );
+                reader.encode_block(block_index, &mut out, FOOTER_XOR8, |fp, out| {
+                    out.extend_from_slice(fp);
+                });
+                out
             }
             XorFilter::BlockXor16(reader) => {
-                Xor16FilterBuilder::build_from_xor16(&reader.filters[block_index])
+                let mut out = Vec::with_capacity(
+                    PLAIN_XOR_FILTER_FIXED_LEN
+                        + std::mem::size_of_val(reader.block_fingerprints(block_index)),
+                );
+                reader.encode_block(block_index, &mut out, FOOTER_XOR16, |fp, out| {
+                    fp.iter().for_each(|fp| out.put_u16_le(*fp));
+                });
+                out
             }
             _ => unreachable!("get_block_raw_filter requires a blocked xor filter"),
         }
@@ -735,27 +819,14 @@ impl XorFilterReader {
             XorFilter::Xor8(filter) => Xor8FilterBuilder::build_from_xor8(filter),
             XorFilter::Xor16(filter) => Xor16FilterBuilder::build_from_xor16(filter),
             XorFilter::BlockXor8(reader) => {
-                let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
-                for filter in &reader.filters {
-                    let block = Xor8FilterBuilder::build_from_xor8(filter);
-                    data.put_u32_le(block.len() as u32);
-                    data.extend(block);
-                }
-                data.put_u32_le(reader.filters.len() as u32);
-                data.put_u8(FOOTER_BLOCKED_XOR8);
-                data
+                reader.encode(FOOTER_XOR8, FOOTER_BLOCKED_XOR8, |fp, out| {
+                    out.extend_from_slice(fp);
+                })
             }
             XorFilter::BlockXor16(reader) => {
-                let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
-                for filter in &reader.filters {
-                    let block = Xor16FilterBuilder::build_from_xor16(filter);
-                    data.put_u32_le(block.len() as u32);
-                    data.extend(block);
-                }
-                // Add footer to tell which kind of filter. 253 indicates a blocked xor16 filter.
-                data.put_u32_le(reader.filters.len() as u32);
-                data.put_u8(FOOTER_BLOCKED_XOR16);
-                data
+                reader.encode(FOOTER_XOR16, FOOTER_BLOCKED_XOR16, |fp, out| {
+                    fp.iter().for_each(|fp| out.put_u16_le(*fp));
+                })
             }
         }
     }
@@ -796,6 +867,7 @@ mod tests {
     use rand::RngCore;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::panic::rw_catch_unwind;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -808,6 +880,160 @@ mod tests {
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BlockIterator, CachePolicy, SstableWriterOptions};
     use crate::monitor::StoreLocalStatistic;
+
+    #[test]
+    fn test_pooled_blocked_filter_compatibility() {
+        assert_eq!(size_of::<XorFilterBlock>(), 16);
+        for width in [1, 2] {
+            let mut encoded = Vec::new();
+            let mut children = Vec::new();
+            let mut inserted = Vec::new();
+            let metas: Vec<_> = (0..4)
+                .map(|i| BlockMeta {
+                    smallest_key: FullKey::for_test(
+                        0.into(),
+                        (i as u64).to_be_bytes(),
+                        test_epoch(1),
+                    )
+                    .encode(),
+                    ..Default::default()
+                })
+                .collect();
+            for i in 0..metas.len() {
+                let keys: Vec<_> = (0..i as u64 * 37)
+                    .map(|k| k.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(i as u64))
+                    .collect();
+                let child = if width == 1 {
+                    Xor8FilterBuilder::build_from_xor8(&Xor8::from(&keys))
+                } else {
+                    Xor16FilterBuilder::build_from_xor16(&Xor16::from(&keys))
+                };
+                encoded.put_u32_le(child.len() as u32);
+                encoded.extend_from_slice(&child);
+                children.push(child);
+                inserted.push(keys);
+            }
+            encoded.put_u32_le(metas.len() as u32);
+            encoded.put_u8(if width == 1 {
+                FOOTER_BLOCKED_XOR8
+            } else {
+                FOOTER_BLOCKED_XOR16
+            });
+            let reader = {
+                let original = XorFilterReader::new(&encoded, &metas);
+                let cloned = original.clone();
+                drop(original);
+                cloned
+            };
+            assert_eq!(reader.encode_to_bytes(), encoded);
+            for (i, child) in children.iter().enumerate() {
+                assert_eq!(reader.get_block_raw_filter(i), *child);
+                let oracle = XorFilterReader::new(child, &[]);
+                let key = FullKey::decode(&metas[i].smallest_key).user_key;
+                let range = (Bound::Included(key), Bound::Included(key));
+                for hash in inserted[i]
+                    .iter()
+                    .copied()
+                    .chain((0..512_u64).map(|k| k.wrapping_mul(0xd6e8_feb8_6659_fd93)))
+                {
+                    let expected =
+                        oracle.may_match(&[], &(Bound::Unbounded, Bound::Unbounded), hash);
+                    assert_eq!(reader.may_match(&metas, &range, hash), expected);
+                }
+            }
+            // The old cache schema stores id and SstableMeta; it never stores
+            // the runtime index. Check both reads and writes against that shape.
+            for skip in [false, true] {
+                let mut meta = super::super::SstableMeta {
+                    block_metas: metas.clone(),
+                    bloom_filter: encoded.clone(),
+                    ..Default::default()
+                };
+                let sstable = Sstable::new(42.into(), meta.clone(), skip);
+                if skip {
+                    meta.bloom_filter.clear();
+                }
+                let old_cache_bytes = bincode::serialize(&(sstable.id, &meta)).unwrap();
+                assert_eq!(bincode::serialize(&sstable).unwrap(), old_cache_bytes);
+                let restored: Sstable =
+                    bincode::deserialize_from(&mut &old_cache_bytes[..]).unwrap();
+                if skip {
+                    assert!(restored.filter_reader.is_empty());
+                } else {
+                    assert_eq!(restored.filter_reader.encode_to_bytes(), encoded);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_pooled_blocked_filter_legacy_empty() {
+        for tag in [FOOTER_BLOCKED_XOR8, FOOTER_BLOCKED_XOR16] {
+            let data = [0, 0, 0, 0, tag];
+            let reader = XorFilterReader::new(&data, &[]);
+            assert!(reader.is_empty());
+            assert_eq!(reader.encode_to_bytes(), data);
+        }
+        // The legacy XOR16 decoder also accepts a footer-only empty child.
+        let data = [1, 0, 0, 0, FOOTER_XOR16, 1, 0, 0, 0, FOOTER_BLOCKED_XOR16];
+        let reader = XorFilterReader::new(&data, &[BlockMeta::default()]);
+        let canonical =
+            Xor16FilterBuilder::build_from_xor16(&XorFilterReader::to_xor16(&[FOOTER_XOR16]));
+        assert_eq!(reader.get_block_raw_filter(0), canonical);
+
+        let next = Xor16FilterBuilder::build_from_xor16(&Xor16::from(&vec![42]));
+        let mut mixed = data[..5].to_vec();
+        mixed.put_u32_le(next.len() as u32);
+        mixed.extend_from_slice(&next);
+        mixed.put_u32_le(2);
+        mixed.put_u8(FOOTER_BLOCKED_XOR16);
+        let reader = XorFilterReader::new(&mixed, &[BlockMeta::default(), BlockMeta::default()]);
+        assert_eq!(reader.get_block_raw_filter(0), canonical);
+        assert_eq!(reader.get_block_raw_filter(1), next);
+        if let XorFilter::BlockXor16(pooled) = &reader.filter {
+            let block = &pooled.filters[0];
+            assert!(
+                rw_catch_unwind(|| {
+                    Xor16Ref {
+                        seed: block.seed,
+                        block_length: block.block_length as usize,
+                        fingerprints: pooled.block_fingerprints(0),
+                    }
+                    .contains(&42)
+                })
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_pooled_blocked_filter_keeps_child_bounds() {
+        // Three probes at block_length=1 need three fingerprints. A truncated
+        // first child must not borrow the first fingerprint of the next child.
+        let mut child = Vec::new();
+        child.put_u64_le(0);
+        child.put_u32_le(1);
+        child.put_u16_le(11);
+        child.put_u16_le(22);
+        child.put_u8(FOOTER_XOR16);
+        let mut data = Vec::new();
+        data.put_u32_le(child.len() as u32);
+        data.extend_from_slice(&child);
+        data.put_u32_le(child.len() as u32);
+        data.extend_from_slice(&child);
+        data.put_u32_le(2);
+        data.put_u8(FOOTER_BLOCKED_XOR16);
+        let metas: Vec<_> = (0..2_u64)
+            .map(|i| BlockMeta {
+                smallest_key: FullKey::for_test(0.into(), i.to_be_bytes(), test_epoch(1)).encode(),
+                ..Default::default()
+            })
+            .collect();
+        let reader = XorFilterReader::new(&data, &metas);
+        let key = FullKey::decode(&metas[0].smallest_key).user_key;
+        reader.may_match(&metas, &(Bound::Included(key), Bound::Included(key)), 42);
+    }
 
     #[tokio::test]
     async fn test_blocked_xor_filter() {
@@ -866,7 +1092,7 @@ mod tests {
             .sstable(&sst, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        if let XorFilter::BlockXor16(reader) = &sstable.filter_reader.filter {
+        if let XorFilter::BlockXor16(_) = &sstable.filter_reader.filter {
             for idx in 0..sstable.meta.block_metas.len() {
                 let resp = sstable_store
                     .get_block_response(&sstable, idx, CachePolicy::Fill(Hint::Normal))
@@ -878,7 +1104,13 @@ mod tests {
                 while iter.is_valid() {
                     let k = iter.key().user_key.encode();
                     let h = Sstable::hash_for_filter(&k, iter.key().user_key.table_id.as_raw_id());
-                    assert!(reader.filters[idx].contains(&h));
+                    let user_key = iter.key().user_key;
+                    let range = (Bound::Included(user_key), Bound::Included(user_key));
+                    assert!(
+                        sstable
+                            .filter_reader
+                            .may_match(&sstable.meta.block_metas, &range, h)
+                    );
                     iter.next();
                 }
             }
