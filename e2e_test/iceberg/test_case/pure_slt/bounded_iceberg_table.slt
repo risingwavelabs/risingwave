@@ -18,6 +18,12 @@ DROP SINK IF EXISTS bounded_upstream_sink;
 statement ok
 DROP TABLE IF EXISTS bounded_upstream;
 
+statement ok
+DROP TABLE IF EXISTS bounded_invalid;
+
+statement ok
+DROP SOURCE IF EXISTS bounded_invalid_src;
+
 system ok
 ./risedev mc rm --recursive --force hummock-minio/hummock001/bounded_iceberg/
 
