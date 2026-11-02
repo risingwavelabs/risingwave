@@ -1173,3 +1173,22 @@
     - logical_plan
     - batch_plan
     - stream_plan
+- name: group by on a single-row input must not become a simple agg (https://github.com/risingwavelabs/risingwave/issues/27451)
+  sql: |
+    create materialized view m6 as select min(x) as col_0 from (values (1)) as v(x);
+    select col_0 from m6 where false group by col_0;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+    - batch_plan
+    - stream_plan
+- name: group by multiple columns on a single-row input keeps one group key
+  sql: |
+    create materialized view m7 as select min(x) as a, max(x) as b from (values (1)) as v(x);
+    select a, b, count(*) from m7 where a > 0 group by a, b;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+    - batch_plan
+    - stream_plan

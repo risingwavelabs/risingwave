@@ -34,6 +34,9 @@ use crate::executor::{Mutation, UpdateMutation};
 use crate::task::LocalBarrierManager;
 
 const CHUNK_SIZE: usize = 1024;
+// Small enough that multi-row tests exercise more lookups than the in-flight limit.
+const LOOKUP_CONCURRENCY: usize = 2;
+const MAX_BATCH_ROWS: usize = 4096;
 const TEST_FILE_PATH: &str = "file1.parquet";
 
 fn compaction_update(
@@ -158,12 +161,16 @@ struct WriterTestHarness {
 
 impl WriterTestHarness {
     async fn new() -> Self {
-        Self::with_schema(input_schema()).await
+        Self::with_options(input_schema(), MAX_BATCH_ROWS).await
+    }
+
+    async fn with_max_batch_rows(max_batch_rows: usize) -> Self {
+        Self::with_options(input_schema(), max_batch_rows).await
     }
 
     /// Build a harness with a custom input schema. The PK is always the first column (Int64)
     /// so the shared `create_pk_index_state_table` schema applies.
-    async fn with_schema(input_schema: Schema) -> Self {
+    async fn with_options(input_schema: Schema, max_batch_rows: usize) -> Self {
         let store = MemoryStateStore::new();
         let state_table = create_pk_index_state_table(store, TableId::new(1)).await;
         let writer = IcebergWriterMock::new(TEST_FILE_PATH);
@@ -188,6 +195,8 @@ impl WriterTestHarness {
             state_table,
             writer,
             CHUNK_SIZE,
+            LOOKUP_CONCURRENCY,
+            max_batch_rows,
             SinkId::new(0),
             LocalBarrierManager::for_test(),
         )
@@ -453,9 +462,11 @@ async fn test_writer_executor_duplicate_delete_in_same_chunk_panics() {
     harness.expect_barrier().await;
 }
 
+/// Without batching, each chunk is written on its own, so the insert reaches Iceberg and the
+/// later delete becomes a position delete.
 #[tokio::test]
 async fn test_writer_executor_insert_then_delete_in_different_chunks_same_checkpoint() {
-    let mut harness = WriterTestHarness::new().await;
+    let mut harness = WriterTestHarness::with_max_batch_rows(1).await;
     harness.init().await;
 
     harness.push_pretty_chunk(
@@ -481,6 +492,187 @@ async fn test_writer_executor_insert_then_delete_in_different_chunks_same_checkp
     );
 }
 
+/// Chunks that are already buffered are compacted as one batch, so an insert and a delete in
+/// different chunks cancel out before reaching Iceberg.
+#[tokio::test]
+async fn test_writer_executor_batches_buffered_chunks() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    harness.push_pretty_chunk(
+        " I I
+            + 1 10",
+    );
+    harness.push_pretty_chunk(
+        " I I
+            - 1 10",
+    );
+    harness.push_barrier(2);
+
+    harness.expect_barrier().await;
+    assert!(harness.written_chunks().is_empty());
+}
+
+/// A delete and an insert of the same existing PK in different chunks of one batch turn into a
+/// position delete plus a fresh insert, and the index points at the new position afterwards.
+#[tokio::test]
+async fn test_writer_executor_batched_delete_then_insert_rewrites_existing_row() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    harness.push_pretty_chunk(
+        " I I
+            + 1 10",
+    );
+    harness.push_barrier(2);
+    harness.expect_barrier().await;
+
+    harness.push_pretty_chunk(
+        " I I
+            - 1 10",
+    );
+    harness.push_pretty_chunk(
+        " I I
+            + 1 99",
+    );
+    harness.push_barrier(3);
+    harness
+        .expect_position_chunk(vec![test_file_position(0)])
+        .await;
+    harness.expect_barrier().await;
+
+    harness.push_pretty_chunk(
+        " I I
+            - 1 99",
+    );
+    harness.push_barrier(4);
+    harness
+        .expect_position_chunk(vec![test_file_position(1)])
+        .await;
+    harness.expect_barrier().await;
+
+    assert_eq!(
+        harness.written_chunks(),
+        vec![
+            StreamChunk::from_pretty(
+                " I I
+                    + 1 10",
+            ),
+            StreamChunk::from_pretty(
+                " I I
+                    + 1 99",
+            ),
+        ]
+    );
+}
+
+/// Lookups run concurrently, but position deletes and inserts keep the input record order.
+#[tokio::test]
+async fn test_writer_executor_concurrent_lookups_keep_record_order() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    harness.push_pretty_chunk(
+        " I I
+            + 1 10
+            + 2 20
+            + 3 30
+            + 4 40
+            + 5 50
+            + 6 60",
+    );
+    harness.push_barrier(2);
+    harness.expect_barrier().await;
+
+    harness.push_pretty_chunk(
+        " I I
+            - 5 50
+            U- 2 20
+            U+ 2 21
+            - 4 40",
+    );
+    harness.push_pretty_chunk(
+        " I I
+            - 1 10
+            + 7 70
+            U- 6 60
+            U+ 6 61",
+    );
+    harness.push_barrier(3);
+
+    harness
+        .expect_position_chunk(vec![
+            test_file_position(4),
+            test_file_position(1),
+            test_file_position(3),
+            test_file_position(0),
+            test_file_position(5),
+        ])
+        .await;
+    harness.expect_barrier().await;
+
+    assert_eq!(
+        harness.written_chunks()[1],
+        StreamChunk::from_pretty(
+            " I I
+                + 2 21
+                + 7 70
+                + 6 61",
+        )
+    );
+
+    // The rewritten rows point at their new positions.
+    harness.push_pretty_chunk(
+        " I I
+            - 6 61
+            - 2 21
+            - 7 70",
+    );
+    harness.push_barrier(4);
+    harness
+        .expect_position_chunk(vec![
+            test_file_position(8),
+            test_file_position(6),
+            test_file_position(7),
+        ])
+        .await;
+    harness.expect_barrier().await;
+}
+
+/// A watermark ends the current batch: chunks before it are processed before the watermark is
+/// forwarded, and chunks after it form a new batch.
+#[tokio::test]
+async fn test_writer_executor_watermark_splits_batch() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    harness.push_pretty_chunk(
+        " I I
+            + 1 10",
+    );
+    harness.left_tx.push_int64_watermark(0, 42);
+    harness.push_pretty_chunk(
+        " I I
+            - 1 10",
+    );
+    harness.push_barrier(2);
+
+    assert!(matches!(
+        harness.executor.next().await,
+        Some(Ok(Message::Watermark(_)))
+    ));
+    assert_eq!(
+        harness.written_chunks(),
+        vec![StreamChunk::from_pretty(
+            " I I
+                + 1 10",
+        )]
+    );
+    harness
+        .expect_position_chunk(vec![test_file_position(0)])
+        .await;
+    harness.expect_barrier().await;
+}
 /// Two inserts for the same PK within one chunk are inconsistent input: the upstream stream key
 /// guarantees PK uniqueness within a chunk, so the writer panics on compaction.
 #[tokio::test]
@@ -737,6 +929,8 @@ async fn test_writer_executor_compaction_rejects_right_eof_before_b2() {
         state_table,
         writer,
         CHUNK_SIZE,
+        LOOKUP_CONCURRENCY,
+        MAX_BATCH_ROWS,
         SinkId::new(0),
         LocalBarrierManager::for_test(),
     )
@@ -781,6 +975,8 @@ async fn test_writer_executor_compaction_rejects_left_eof_before_b2() {
         state_table,
         writer,
         CHUNK_SIZE,
+        LOOKUP_CONCURRENCY,
+        MAX_BATCH_ROWS,
         SinkId::new(0),
         LocalBarrierManager::for_test(),
     )

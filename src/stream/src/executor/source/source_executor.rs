@@ -26,9 +26,11 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_connector::dispatch_cdc_source_type;
 use risingwave_connector::source::cdc::split::{
     extract_postgres_lsn_from_offset_str, extract_sql_server_commit_lsn_from_offset_str,
 };
+use risingwave_connector::source::cdc::{CdcSourceRuntimeFlags, CdcSourceType};
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -628,17 +630,20 @@ impl<S: StateStore> SourceExecutor<S> {
             })?;
         let first_epoch = first_barrier.epoch;
         // must_report_cdc_offset is true if and only if the source is a CDC source.
-        // must_wait_cdc_offset_before_report is true if and only if the source is a MySQL or SQL Server CDC source.
         let (mut boot_state, mut must_report_cdc_offset_once, must_wait_cdc_offset_before_report) =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
                 // CDC source must reach this branch.
                 tracing::debug!(?splits, "boot with splits");
                 // Skip report for non-CDC.
                 let must_report_cdc_offset_once = splits.iter().any(|split| split.is_cdc_split());
-                // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
                 let must_wait_cdc_offset_before_report = must_report_cdc_offset_once
                     && splits.iter().any(|split| {
-                        matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                        dispatch_cdc_source_type!(
+                            CdcSourceType::from(split),
+                            T,
+                            T::NEEDS_NON_EMPTY_INITIAL_OFFSET,
+                            false
+                        )
                     });
                 (
                     splits.to_vec(),
@@ -918,16 +923,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                                         mongo_split.inner.start_offset = None;
                                                     }
                                                 }
-                                                SplitImpl::CitusCdc(debezium_split) => {
-                                                    if let Some(citus_split) = debezium_split.citus_split.as_mut() {
-                                                        tracing::info!(
-                                                            split_id = ?citus_split.inner.split_id,
-                                                            old_offset = ?citus_split.inner.start_offset,
-                                                            "Clearing Citus CDC offset"
-                                                        );
-                                                        citus_split.inner.start_offset = None;
-                                                    }
-                                                }
                                                 SplitImpl::SqlServerCdc(debezium_split) => {
                                                     if let Some(sqlserver_split) = debezium_split.sql_server_split.as_mut() {
                                                         tracing::info!(
@@ -1030,14 +1025,8 @@ impl<S: StateStore> SourceExecutor<S> {
                         must_wait_cdc_offset_before_report,
                     );
 
-                    // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
-                    if barrier.kind.is_checkpoint()
-                        && let Some(task_builder) = &mut wait_checkpoint_task_builder
-                    {
-                        task_builder.update_task_on_checkpoint(updated_splits);
-
-                        tracing::debug!("epoch to wait {:?}", epoch);
-                        task_builder.send(Epoch(epoch.prev));
+                    if let Some(task_builder) = &mut wait_checkpoint_task_builder {
+                        task_builder.on_barrier(&barrier, updated_splits);
                     }
 
                     let barrier_epoch = barrier.epoch;
@@ -1202,7 +1191,16 @@ impl WaitCheckpointTaskBuilder {
         }
     }
 
-    fn update_task_on_checkpoint(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
+    /// Offsets persisted at non-checkpoint barriers are committed with the next checkpoint.
+    fn on_barrier(&mut self, barrier: &Barrier, updated_splits: HashMap<SplitId, SplitImpl>) {
+        self.update_task_on_barrier(updated_splits);
+        if barrier.kind.is_checkpoint() {
+            tracing::debug!("epoch to wait {:?}", barrier.epoch);
+            self.send(Epoch(barrier.epoch.prev));
+        }
+    }
+
+    fn update_task_on_barrier(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
         if let WaitCheckpointTask::CommitCdcOffset(offsets) = &mut self.building_task
             && !updated_splits.is_empty()
         {
@@ -1350,6 +1348,7 @@ mod tests {
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
+    use risingwave_pb::stream_plan::barrier::BarrierKind;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
     use tracing_test::traced_test;
@@ -1414,6 +1413,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_build_cdc_commit_task_across_non_checkpoint_barriers() {
+        let (wait_checkpoint_tx, mut wait_checkpoint_rx) = unbounded_channel();
+        let mut builder = WaitCheckpointTaskBuilder {
+            wait_checkpoint_tx,
+            building_task: WaitCheckpointTask::CommitCdcOffset(None),
+        };
+        let split = SplitImpl::PostgresCdc(DebeziumCdcSplit::new(1, Some("offset".to_owned())));
+
+        let non_checkpoint = Barrier {
+            kind: BarrierKind::Barrier,
+            ..Barrier::new_test_barrier(test_epoch(1))
+        };
+        builder.on_barrier(&non_checkpoint, hashmap! { split.id() => split.clone() });
+        assert!(wait_checkpoint_rx.try_recv().is_err());
+
+        let checkpoint = Barrier::new_test_barrier(test_epoch(2));
+        builder.on_barrier(&checkpoint, HashMap::new());
+        let (epoch, task) = wait_checkpoint_rx.try_recv().unwrap();
+        assert_eq!(epoch.0, checkpoint.epoch.prev);
+        let WaitCheckpointTask::CommitCdcOffset(Some((split_id, offset))) = task else {
+            panic!("the offset persisted at the non-checkpoint barrier should be committed");
+        };
+        assert_eq!(split_id, split.id());
+        assert_eq!(offset, "offset");
+
+        builder.on_barrier(&Barrier::new_test_barrier(test_epoch(3)), HashMap::new());
+        let (_, task) = wait_checkpoint_rx.try_recv().unwrap();
+        assert!(matches!(task, WaitCheckpointTask::CommitCdcOffset(None)));
+    }
+
     #[tokio::test]
     async fn test_recovered_mysql_cdc_state_file_seq_metric_is_initialized()
     -> StreamExecutorResult<()> {
@@ -1426,10 +1456,8 @@ mod tests {
         let persisted_split = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
             1001,
             Some(offset.to_owned()),
-            None,
         ));
-        let uninitialized_split =
-            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+        let uninitialized_split = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None));
         let epoch_1 = EpochPair::new_test_epoch(test_epoch(1));
         let epoch_2 = EpochPair::new_test_epoch(test_epoch(2));
         let epoch_3 = EpochPair::new_test_epoch(test_epoch(3));
@@ -1487,10 +1515,8 @@ mod tests {
         let split_with_offset = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
             1001,
             Some(r#"{"sourceOffset":{"file":"binlog.000123","pos":45678}}"#.to_owned()),
-            None,
         ));
-        let split_without_offset =
-            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+        let split_without_offset = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None));
 
         update_mysql_cdc_state_file_seq_metric(
             &mut metric_guard,

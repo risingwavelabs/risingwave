@@ -513,7 +513,7 @@ source: {:?}",
         let correlated_id = self.ctx.next_correlated_id();
         let correlated_indices = join
             .right
-            .collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+            .collect_correlated_indices_by_scope_and_assign_id(join.left_scope, correlated_id);
         let left = self.plan_relation(join.left)?;
         let right = self.plan_relation(join.right)?;
 

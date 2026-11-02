@@ -80,7 +80,7 @@ RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cac
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db" \
     && cargo uninstall cargo-cache
-RUN cargo install --locked cargo-dylint@6.0.1 dylint-link@6.0.1
+RUN cargo install --locked cargo-dylint@6.3.0 dylint-link@6.3.0
 
 # install risedev
 COPY <<EOF /root/.cargo/bin/risedev
