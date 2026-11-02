@@ -111,7 +111,12 @@ impl AggState {
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
-                let chunk = chunk.project_with_vis(call.args.val_indices(), visibility);
+                let chunk = if super::is_list_value_state(call) {
+                    // `ListStateAgg` projects by itself since it also needs the order columns
+                    chunk.clone_with_vis(visibility)
+                } else {
+                    chunk.project_with_vis(call.args.val_indices(), visibility)
+                };
                 func.update(state, &chunk).await?;
                 Ok(())
             }

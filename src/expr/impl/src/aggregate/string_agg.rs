@@ -34,7 +34,7 @@ fn string_agg(
 mod tests {
     use risingwave_common::array::*;
     use risingwave_expr::Result;
-    use risingwave_expr::aggregate::{AggCall, build_append_only};
+    use risingwave_expr::aggregate::{AggCall, build_append_only, build_list_state};
 
     #[tokio::test]
     async fn test_string_agg_basic() -> Result<()> {
@@ -75,6 +75,41 @@ mod tests {
             string_agg.get_result(&state).await?,
             Some("aaa_cccddd".into())
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_string_agg_list_state() -> Result<()> {
+        // string_agg(value, delimiter order by k desc) where value=$0, delimiter=$1, k=$2
+        let agg = build_list_state(&AggCall::from_pretty(
+            "(string_agg:varchar $0:varchar $1:varchar orderby $2:desc)",
+        ))?;
+        let mut state = agg.create_state()?;
+        agg.update(
+            &mut state,
+            &StreamChunk::from_pretty(
+                " T   T i
+                + aaa , 1
+                + .   , 5
+                + bbb _ 2
+                + ccc . 3", // NULL delimiter
+            ),
+        )
+        .await?;
+        assert_eq!(agg.get_result(&state).await?, Some("ccc_bbb,aaa".into()));
+
+        let encoded = agg.encode_state(&state)?;
+        let mut state = agg.decode_state(encoded)?;
+        agg.update(
+            &mut state,
+            &StreamChunk::from_pretty(
+                " T   T i
+                - bbb _ 2
+                + ddd - 4",
+            ),
+        )
+        .await?;
+        assert_eq!(agg.get_result(&state).await?, Some("dddccc,aaa".into()));
         Ok(())
     }
 }

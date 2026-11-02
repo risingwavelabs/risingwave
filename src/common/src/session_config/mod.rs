@@ -231,6 +231,16 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_streaming_enable_delta_join")]
     streaming_enable_delta_join: bool,
 
+    /// Use a value (incremental) state instead of a materialized-input state for `array_agg` and
+    /// `string_agg` in streaming queries. Defaults to false.
+    ///
+    /// The whole group's element list is kept in one row of the intermediate state table, so no
+    /// per-group storage scan is needed on change, but every change rewrites the whole list,
+    /// i.e. O(group size). Intended for groups of modest size (tens to thousands of elements).
+    /// Without `ORDER BY`, elements come out in arrival order instead of input-pk order.
+    #[parameter(default = false)]
+    streaming_enable_value_state_array_agg: bool,
+
     /// Enable bushy join for streaming queries. Defaults to true.
     #[parameter(default = true, alias = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
