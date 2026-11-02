@@ -263,8 +263,9 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::iceberg_fetch_batch_size")]
     pub iceberg_fetch_batch_size: u64,
 
-    /// `IcebergUpdateListExecutor`: A `streaming_updates` phase with at most this many files is
-    /// fetched in order by a single Fetch actor, without waiting for the previous phase to commit.
+    /// `IcebergUpdateListExecutor`: A `streaming_updates` phase with at most this many files
+    /// (capped by `iceberg_fetch_batch_size`) is fetched in order by a single Fetch actor,
+    /// without waiting for the previous phase to commit.
     /// Larger phases are spread across Fetch actors and wait for their completion. Set to 0 to
     /// always spread phases.
     #[serde(default = "default::developer::iceberg_update_ordered_max_tasks")]

@@ -92,8 +92,9 @@ produce errors rather than a silent resnapshot.
 
 `streaming.developer.iceberg_fetch_batch_size` controls both the number of tasks
 per List page and the number of pending tasks loaded per Fetch batch.
-`streaming.developer.iceberg_update_ordered_max_tasks` (default 16) is the
-largest phase sent to the ordered route; `0` fans out every phase. Raising it
+`streaming.developer.iceberg_update_ordered_max_tasks` (default 16), capped by
+`streaming.developer.iceberg_fetch_batch_size`, is the largest phase sent to the
+ordered route; `0` fans out every phase. Raising the effective limit
 trades Fetch parallelism for fewer checkpoint waits. When List finds no new work, it waits `streaming.developer.iceberg_list_interval_sec` before polling the
 catalog again.
 
