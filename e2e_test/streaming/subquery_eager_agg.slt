@@ -1,0 +1,123 @@
+# Correlated aggregate subqueries whose value on an empty group is a non-null constant
+# (`ARRAY(...)` -> `{}`, `count(*)` -> 0) are planned as `HashAgg(group by key)` + left outer
+# join, with the empty-group value restored above the join. Check batch and streaming agree.
+
+statement ok
+create table event (id int primary key, name varchar);
+
+statement ok
+create table child (id int primary key, event_id int, name varchar, pos int);
+
+statement ok
+create table tag (id int primary key, event_id int, label varchar);
+
+statement ok
+create materialized view mv as
+select e.id,
+  array(select c.name from child c where c.event_id = e.id order by c.pos) as items,
+  array(select t.label from tag t where t.event_id = e.id) as tags,
+  (select count(*) from child c where c.event_id = e.id) as cnt
+from event e;
+
+statement ok
+create table cap (id int, items varchar[], tags varchar[], cnt bigint) append only;
+
+statement ok
+create sink s into cap from mv with (type = 'append-only', force_append_only = 'true');
+
+# Parents without children (3 has a NULL-keyed child only).
+statement ok
+insert into event values (1, 'a'), (2, 'b'), (3, 'c');
+
+statement ok
+insert into child values (30, null, 'orphan', 1);
+
+statement ok
+flush;
+
+query ITTI rowsort
+select e.id, items, tags, cnt from mv e;
+----
+1 {} {} 0
+2 {} {} 0
+3 {} {} 0
+
+query ITTI rowsort
+select e.id,
+  array(select c.name from child c where c.event_id = e.id order by c.pos) as items,
+  array(select t.label from tag t where t.event_id = e.id) as tags,
+  (select count(*) from child c where c.event_id = e.id) as cnt
+from event e;
+----
+1 {} {} 0
+2 {} {} 0
+3 {} {} 0
+
+statement ok
+insert into child values (10, 1, 'x', 2), (11, 1, 'w', 1), (20, 2, 'y', 1);
+
+statement ok
+insert into tag values (100, 1, 'red');
+
+statement ok
+flush;
+
+query ITTI rowsort
+select e.id, items, tags, cnt from mv e;
+----
+1 {w,x} {red} 2
+2 {y} {} 1
+3 {} {} 0
+
+query ITTI rowsort
+select e.id,
+  array(select c.name from child c where c.event_id = e.id order by c.pos) as items,
+  array(select t.label from tag t where t.event_id = e.id) as tags,
+  (select count(*) from child c where c.event_id = e.id) as cnt
+from event e;
+----
+1 {w,x} {red} 2
+2 {y} {} 1
+3 {} {} 0
+
+# Deleting the last child goes back to the empty-group value, not NULL.
+statement ok
+delete from child where id = 20;
+
+statement ok
+delete from tag;
+
+statement ok
+flush;
+
+query ITTI rowsort
+select e.id, items, tags, cnt from mv e;
+----
+1 {w,x} {} 2
+2 {} {} 0
+3 {} {} 0
+
+sleep 3s
+
+query I
+select count(*) from cap where items is null or tags is null or cnt is null;
+----
+0
+
+statement ok
+drop sink s;
+
+statement ok
+drop table cap;
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table tag;
+
+statement ok
+drop table child;
+
+statement ok
+drop table event;

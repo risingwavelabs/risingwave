@@ -1,0 +1,56 @@
+# Correlated aggregate subqueries whose result on an empty group is a non-null
+# constant (e.g. `ARRAY(...)` -> `{}`, `count(*)` -> 0) are decorrelated by
+# `PullUpCorrelatedPredicateAggRule` into `HashAgg(group by key)` + `LeftOuter`
+# join on the key, instead of the generic domain (`Dedup` + domain join) path.
+- name: correlated array subquery
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar);
+    select e.id, e.name, array(select w.name from child w where w.event_id = e.id) as items from event e;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - stream_plan
+- name: two correlated array subqueries on the same parent
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar);
+    create table tag(id int primary key, event_id int, label varchar);
+    select e.id,
+      array(select w.name from child w where w.event_id = e.id) as items,
+      array(select t.label from tag t where t.event_id = e.id) as tags
+    from event e;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - stream_plan
+- name: correlated array subquery with an inner join inside
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table tag(id int primary key, name varchar);
+    create table event_tag(event_id int, tag_id int);
+    select e.id, array(select t.name from tag t join event_tag et on et.tag_id = t.id where et.event_id = e.id) as tags from event e;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - stream_plan
+- name: correlated scalar count(*) subquery
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar);
+    select e.id, (select count(*) from child c where c.event_id = e.id) as cnt from event e;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - stream_plan
+- name: correlated scalar count(*) subquery in where clause
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar);
+    select e.id from event e where (select count(*) from child c where c.event_id = e.id) = 0;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- name: correlated ordered array subquery
+  sql: |
+    create table event(id int primary key, name varchar);
+    create table child(id int primary key, event_id int, name varchar, pos int);
+    select e.id, array(select w.name from child w where w.event_id = e.id order by w.pos) as items from event e;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - stream_plan
