@@ -16,6 +16,7 @@ use anyhow::{Context, anyhow};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 
+use crate::sink::formatter::debezium_json::SCHEMAS_ENABLE;
 use crate::sink::redis::REDIS_VALUE_TYPE_STREAM;
 use crate::sink::{Result, SinkError};
 
@@ -145,7 +146,7 @@ impl EncoderBuild for JsonEncoder {
             TimeHandlingMode::Milli,
             jsonb_handling_mode,
         );
-        let encoder = if let Some(s) = b.format_desc.options.get("schemas.enable") {
+        let encoder = if let Some(s) = b.format_desc.options.get(SCHEMAS_ENABLE) {
             match s.to_lowercase().parse::<bool>() {
                 Ok(true) => {
                     let kafka_connect = KafkaConnectParams {
@@ -471,12 +472,19 @@ impl FormatterBuild for DebeziumJsonFormatter {
     async fn build(b: FormatterParams<'_>) -> Result<Self> {
         assert_eq!(b.builder.format_desc.encode, SinkEncode::Json);
 
+        let with_schema = b
+            .builder
+            .format_desc
+            .options
+            .get(SCHEMAS_ENABLE)
+            .is_none_or(|s| s.to_lowercase().parse::<bool>().unwrap_or(true));
+
         Ok(DebeziumJsonFormatter::new(
             b.builder.schema,
             b.pk_indices,
             b.builder.db_name,
             b.builder.sink_from_name,
-            DebeziumAdapterOpts::default(),
+            DebeziumAdapterOpts::default().with_schema(with_schema),
         ))
     }
 }
