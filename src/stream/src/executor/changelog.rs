@@ -26,6 +26,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl, Serial};
 use risingwave_common::util::row_id::ChangelogRowIdGenerator;
+use risingwave_pb::stream_plan::stream_node::StreamKind;
 
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 use crate::common::change_buffer::InconsistencyBehavior;
@@ -132,13 +133,18 @@ impl ChangeLogExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_keyed(mut self) {
-        let compaction_keys = self
-            .stream_keys
-            .iter()
-            .chain(&self.distribution_keys)
-            .copied()
-            .unique()
-            .collect_vec();
+        let input_kind = self.input.stream_kind();
+        let compaction_keys = if input_kind == StreamKind::Upsert {
+            // Upsert deletes only guarantee the stream key columns.
+            self.stream_keys.clone()
+        } else {
+            self.stream_keys
+                .iter()
+                .chain(&self.distribution_keys)
+                .copied()
+                .unique()
+                .collect_vec()
+        };
         let mut builder = StreamChunkBuilder::new(
             self.ctx.config.developer.chunk_size,
             self.output_data_types(),
@@ -155,6 +161,7 @@ impl ChangeLogExecutor {
                     let chunks = StreamChunkCompactor::new(
                         compaction_keys.clone(),
                         std::mem::take(&mut chunk_buffer),
+                        input_kind,
                     )
                     .into_compacted_chunks_inline::<RETRACT>(InconsistencyBehavior::Warn);
 
@@ -255,6 +262,76 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{ActorContext, Barrier};
+
+    #[tokio::test]
+    async fn test_keyed_changelog_upsert_retains_delete() {
+        use crate::executor::ExecutorInfo;
+
+        let source = Executor::new(
+            ExecutorInfo {
+                stream_kind: StreamKind::Upsert,
+                ..ExecutorInfo::for_test(
+                    Schema::new(vec![Field::unnamed(DataType::Int64); 2]),
+                    vec![0],
+                    "MockSource".to_owned(),
+                    0,
+                )
+            },
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(StreamChunk::from_pretty("I I\n+ 1 10")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+                Message::Chunk(StreamChunk::from_pretty("I I\n+ 1 20")),
+                Message::Chunk(StreamChunk::from_pretty("I I\n- 1 .")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+            ])
+            .stop_on_finish(false)
+            .boxed(),
+        );
+        let mut output = ChangeLogExecutor::new(
+            ActorContext::for_test(1),
+            source,
+            true,
+            VirtualNode::COUNT_FOR_TEST,
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            ChangeLogMode::Keyed,
+            vec![0],
+            vec![0],
+        )
+        .boxed()
+        .execute();
+
+        let mut epochs = Vec::new();
+        let mut events = Vec::new();
+        while let Some(message) = output.next().await {
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        assert_eq!(op, Op::Insert);
+                        events.push(row.project(&[0, 1, 2]).into_owned_row());
+                    }
+                }
+                Message::Barrier(_) => epochs.push(std::mem::take(&mut events)),
+                Message::Watermark(_) => panic!("unexpected watermark"),
+            }
+        }
+        assert_eq!(
+            epochs,
+            vec![
+                vec![],
+                vec![OwnedRow::new(vec![
+                    Some(1_i64.into()),
+                    Some(10_i64.into()),
+                    Some(Op::Insert.to_i16().into())
+                ])],
+                vec![OwnedRow::new(vec![
+                    Some(1_i64.into()),
+                    None,
+                    Some(Op::Delete.to_i16().into())
+                ])],
+            ]
+        );
+    }
 
     #[tokio::test]
     async fn test_keyed_changelog_reorders_replacement() {
