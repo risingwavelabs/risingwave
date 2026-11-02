@@ -386,3 +386,69 @@ NULL 4 4 4
 
 statement ok
 DROP TABLE t_is_null cascade;
+
+# ---- Test 13: Nothing comes after the largest key of a descending pk ----
+
+statement ok
+CREATE TABLE t_desc(a INT, b INT, c INT, PRIMARY KEY(a, b));
+
+statement ok
+INSERT INTO t_desc VALUES (-2147483648, -2147483648, 1), (-2147483648, 0, 2), (0, 0, 3);
+
+statement ok
+CREATE TABLE t_desc_str(a VARCHAR PRIMARY KEY);
+
+statement ok
+INSERT INTO t_desc_str VALUES (''), ('a');
+
+statement ok
+flush;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc AS SELECT a, b, c FROM t_desc ORDER BY a DESC, b DESC;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc_str AS SELECT a FROM t_desc_str ORDER BY a DESC;
+
+query III
+SELECT * FROM mv_desc WHERE a < -2147483648;
+----
+
+# OR arms merge into the same bound.
+query III
+SELECT * FROM mv_desc WHERE a < -2147483648 OR a < -2147483648::BIGINT;
+----
+
+query III
+SELECT * FROM mv_desc WHERE a = -2147483648 AND b < -2147483648;
+----
+
+query T
+SELECT * FROM mv_desc_str WHERE a < '';
+----
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc_min AS SELECT * FROM mv_desc WHERE a < -2147483648;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc_min_or AS SELECT * FROM mv_desc WHERE a < -2147483648 OR a < -2147483648::BIGINT;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_desc_min_prefix AS SELECT * FROM mv_desc WHERE a = -2147483648 AND b < -2147483648;
+
+query I
+SELECT (SELECT count(*) FROM mv_desc_min) + (SELECT count(*) FROM mv_desc_min_or) + (SELECT count(*) FROM mv_desc_min_prefix);
+----
+0
+
+query III rowsort
+SELECT * FROM mv_desc WHERE a <= -2147483648;
+----
+-2147483648 -2147483648 1
+-2147483648 0 2
+
+statement ok
+DROP TABLE t_desc cascade;
+
+statement ok
+DROP TABLE t_desc_str cascade;
