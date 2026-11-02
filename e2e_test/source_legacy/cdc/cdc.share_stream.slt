@@ -124,7 +124,7 @@ select distribution_type,flags from rw_fragments order by fragment_id;
 ----
 SINGLE {SOURCE}
 HASH {MVIEW,UPSTREAM_SINK_UNION}
-SINGLE {STREAM_SCAN}
+SINGLE {STREAM_SCAN,STREAM_CDC_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}
 

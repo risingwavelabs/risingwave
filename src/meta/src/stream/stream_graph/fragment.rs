@@ -34,7 +34,6 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
-use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::expr::{ExprNode as PbExprNode, expr_node};
 use risingwave_pb::id::{RelationId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
@@ -1760,129 +1759,124 @@ impl CompleteStreamFragmentGraph {
                     let upstream_root_fragment_id =
                         GlobalFragmentId::new(upstream_fragment.fragment_id);
 
-                    let edge = match job_type {
-                        StreamingJobType::Table(TableJobType::SharedCdcSource) => {
-                            // we traverse all fragments in the graph, and we should find out the
-                            // CdcFilter fragment and add an edge between upstream source fragment and it.
-                            assert_ne!(
-                                (fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32),
-                                0
-                            );
+                    let edge = if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32
+                        != 0
+                    {
+                        tracing::debug!(
+                            ?upstream_root_fragment_id,
+                            ?required_columns,
+                            identity = ?fragment.inner.get_node().unwrap().get_identity(),
+                            current_frag_id=?id,
+                            "CdcFilter with upstream source fragment"
+                        );
 
-                            tracing::debug!(
-                                ?upstream_root_fragment_id,
-                                ?required_columns,
-                                identity = ?fragment.inner.get_node().unwrap().get_identity(),
-                                current_frag_id=?id,
-                                "CdcFilter with upstream source fragment"
-                            );
-
-                            StreamFragmentEdge {
-                                id: EdgeId::UpstreamExternal {
-                                    upstream_job_id,
-                                    downstream_fragment_id: id,
-                                },
-                                // We always use `NoShuffle` for the exchange between the upstream
-                                // `Source` and the downstream `StreamScan` of the new cdc table.
-                                dispatch_strategy: DispatchStrategy {
-                                    r#type: DispatcherType::NoShuffle as _,
-                                    dist_key_indices: vec![], // not used for `NoShuffle`
-                                    output_mapping: DispatchOutputMapping::identical(
-                                        CDC_SOURCE_COLUMN_NUM as _,
-                                    )
-                                    .into(),
-                                },
-                            }
+                        StreamFragmentEdge {
+                            id: EdgeId::UpstreamExternal {
+                                upstream_job_id,
+                                downstream_fragment_id: id,
+                            },
+                            // A `CdcFilter` always consumes the complete raw CDC source schema,
+                            // regardless of whether the downstream job is a table or an MV.
+                            dispatch_strategy: DispatchStrategy {
+                                r#type: DispatcherType::NoShuffle as _,
+                                dist_key_indices: vec![], // not used for `NoShuffle`
+                                output_mapping: DispatchOutputMapping::identical(
+                                    CDC_SOURCE_COLUMN_NUM as _,
+                                )
+                                .into(),
+                            },
                         }
-
-                        // handle MV on MV/Source
-                        StreamingJobType::MaterializedView
-                        | StreamingJobType::Sink
-                        | StreamingJobType::Index => {
-                            // Build the extra edges between the upstream `Materialize` and
-                            // the downstream `StreamScan` of the new job.
-                            if upstream_fragment
-                                .fragment_type_mask
-                                .contains(FragmentTypeFlag::Mview)
-                            {
-                                // Resolve the required output columns from the upstream materialized view.
-                                let (dist_key_indices, output_mapping) = {
-                                    let mview_node = upstream_fragment
-                                        .nodes
-                                        .get_node_body()
-                                        .unwrap()
-                                        .as_materialize()
-                                        .unwrap();
-                                    let all_columns = mview_node.column_descs();
-                                    let dist_key_indices = mview_node.dist_key_indices();
-                                    let output_mapping = gen_output_mapping(
+                    } else {
+                        match job_type {
+                            // handle MV on MV/Source
+                            StreamingJobType::MaterializedView
+                            | StreamingJobType::Sink
+                            | StreamingJobType::Index => {
+                                // Build the extra edges between the upstream `Materialize` and
+                                // the downstream `StreamScan` of the new job.
+                                if upstream_fragment
+                                    .fragment_type_mask
+                                    .contains(FragmentTypeFlag::Mview)
+                                {
+                                    // Resolve the required output columns from the upstream materialized view.
+                                    let (dist_key_indices, output_mapping) = {
+                                        let mview_node = upstream_fragment
+                                            .nodes
+                                            .get_node_body()
+                                            .unwrap()
+                                            .as_materialize()
+                                            .unwrap();
+                                        let all_columns = mview_node.column_descs();
+                                        let dist_key_indices = mview_node.dist_key_indices();
+                                        let output_mapping = gen_output_mapping(
                                         required_columns,
                                         &all_columns,
                                     )
                                     .context(
                                         "BUG: column not found in the upstream materialized view",
                                     )?;
-                                    (dist_key_indices, output_mapping)
-                                };
-                                let dispatch_strategy = mv_on_mv_dispatch_strategy(
-                                    uses_shuffled_backfill,
-                                    dist_key_indices,
-                                    output_mapping,
-                                );
+                                        (dist_key_indices, output_mapping)
+                                    };
+                                    let dispatch_strategy = mv_on_mv_dispatch_strategy(
+                                        uses_shuffled_backfill,
+                                        dist_key_indices,
+                                        output_mapping,
+                                    );
 
-                                StreamFragmentEdge {
-                                    id: EdgeId::UpstreamExternal {
-                                        upstream_job_id,
-                                        downstream_fragment_id: id,
-                                    },
-                                    dispatch_strategy,
+                                    StreamFragmentEdge {
+                                        id: EdgeId::UpstreamExternal {
+                                            upstream_job_id,
+                                            downstream_fragment_id: id,
+                                        },
+                                        dispatch_strategy,
+                                    }
+                                }
+                                // Build the extra edges between the upstream `Source` and
+                                // the downstream `SourceBackfill` of the new job.
+                                else if upstream_fragment
+                                    .fragment_type_mask
+                                    .contains(FragmentTypeFlag::Source)
+                                {
+                                    let output_mapping = {
+                                        let source_node = upstream_fragment
+                                            .nodes
+                                            .get_node_body()
+                                            .unwrap()
+                                            .as_source()
+                                            .unwrap();
+
+                                        let all_columns = source_node.column_descs().unwrap();
+                                        gen_output_mapping(required_columns, &all_columns).context(
+                                            "BUG: column not found in the upstream source node",
+                                        )?
+                                    };
+
+                                    StreamFragmentEdge {
+                                        id: EdgeId::UpstreamExternal {
+                                            upstream_job_id,
+                                            downstream_fragment_id: id,
+                                        },
+                                        // We always use `NoShuffle` for the exchange between the upstream
+                                        // `Source` and the downstream `StreamScan` of the new MV.
+                                        dispatch_strategy: DispatchStrategy {
+                                            r#type: DispatcherType::NoShuffle as _,
+                                            dist_key_indices: vec![], // not used for `NoShuffle`
+                                            output_mapping: Some(output_mapping),
+                                        },
+                                    }
+                                } else {
+                                    bail!(
+                                        "the upstream fragment should be a MView or Source, got fragment type: {:b}",
+                                        upstream_fragment.fragment_type_mask
+                                    )
                                 }
                             }
-                            // Build the extra edges between the upstream `Source` and
-                            // the downstream `SourceBackfill` of the new job.
-                            else if upstream_fragment
-                                .fragment_type_mask
-                                .contains(FragmentTypeFlag::Source)
-                            {
-                                let output_mapping = {
-                                    let source_node = upstream_fragment
-                                        .nodes
-                                        .get_node_body()
-                                        .unwrap()
-                                        .as_source()
-                                        .unwrap();
-
-                                    let all_columns = source_node.column_descs().unwrap();
-                                    gen_output_mapping(required_columns, &all_columns).context(
-                                        "BUG: column not found in the upstream source node",
-                                    )?
-                                };
-
-                                StreamFragmentEdge {
-                                    id: EdgeId::UpstreamExternal {
-                                        upstream_job_id,
-                                        downstream_fragment_id: id,
-                                    },
-                                    // We always use `NoShuffle` for the exchange between the upstream
-                                    // `Source` and the downstream `StreamScan` of the new MV.
-                                    dispatch_strategy: DispatchStrategy {
-                                        r#type: DispatcherType::NoShuffle as _,
-                                        dist_key_indices: vec![], // not used for `NoShuffle`
-                                        output_mapping: Some(output_mapping),
-                                    },
-                                }
-                            } else {
+                            StreamingJobType::Source | StreamingJobType::Table(_) => {
                                 bail!(
-                                    "the upstream fragment should be a MView or Source, got fragment type: {:b}",
-                                    upstream_fragment.fragment_type_mask
+                                    "the streaming job shouldn't have an upstream fragment, job_type: {:?}",
+                                    job_type
                                 )
                             }
-                        }
-                        StreamingJobType::Source | StreamingJobType::Table(_) => {
-                            bail!(
-                                "the streaming job shouldn't have an upstream fragment, job_type: {:?}",
-                                job_type
-                            )
                         }
                     };
 

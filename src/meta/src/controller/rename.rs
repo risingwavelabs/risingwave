@@ -110,6 +110,15 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                 ..
             }),
             ..
+        } | Statement::CreateSource {
+            stmt: CreateSourceStatement {
+                cdc_table_info:
+                    Some(CdcTableInfo {
+                        source_name: table_name,
+                        ..
+                    }),
+                ..
+            },
         } => replace_table_name(table_name, to),
         Statement::CreateSink {
             stmt: CreateSinkStatement {
