@@ -32,9 +32,11 @@ pub struct StreamChunkCompactor {
 }
 
 impl StreamChunkCompactor {
-    /// For upsert input, `key` must be the stream key: deletes only guarantee these columns,
-    /// and inserts may overwrite rows from earlier batches. Upsert input always produces
-    /// upsert operations, since the old rows needed for retract output are unavailable.
+    /// For upsert input, compaction retains the final operation per `key`. Lossless compaction
+    /// of the input stream requires its stream key; using another key requires caller-defined
+    /// reconciliation. Delete rows only guarantee the stream key columns, and inserts may
+    /// overwrite rows from earlier batches. Upsert input always produces upsert operations,
+    /// since the old rows needed for retract output are unavailable.
     pub fn new(key: Vec<usize>, chunks: Vec<StreamChunk>, input_kind: StreamKind) -> Self {
         Self {
             chunks,
