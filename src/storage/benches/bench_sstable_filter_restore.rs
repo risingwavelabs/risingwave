@@ -26,6 +26,8 @@ use risingwave_storage::hummock::sstable::{
 };
 use sstable_meta_fixture::sstable_meta;
 
+risingwave_common::enable_jemalloc!();
+
 fn bench_sstable_filter_restore(c: &mut Criterion) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{GlobalAlloc, Layout};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup};
 
-struct CountedSystem;
+struct CountedJemalloc;
 static COUNT: AtomicBool = AtomicBool::new(false);
 static ALLOCS: AtomicU64 = AtomicU64::new(0);
 static BYTES: AtomicU64 = AtomicU64::new(0);
@@ -30,28 +30,28 @@ fn count(size: usize) {
         BYTES.fetch_add(size as u64, Ordering::Relaxed);
     }
 }
-unsafe impl GlobalAlloc for CountedSystem {
+unsafe impl GlobalAlloc for CountedJemalloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         count(layout.size());
-        unsafe { System.alloc(layout) }
+        unsafe { tikv_jemallocator::Jemalloc.alloc(layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         count(layout.size());
-        unsafe { System.alloc_zeroed(layout) }
+        unsafe { tikv_jemallocator::Jemalloc.alloc_zeroed(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
+        unsafe { tikv_jemallocator::Jemalloc.dealloc(ptr, layout) }
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
         count(size);
-        unsafe { System.realloc(ptr, layout, size) }
+        unsafe { tikv_jemallocator::Jemalloc.realloc(ptr, layout, size) }
     }
 }
 #[global_allocator]
-static ALLOCATOR: CountedSystem = CountedSystem;
+static ALLOCATOR: CountedJemalloc = CountedJemalloc;
 
 fn cpu_ns() -> u64 {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
