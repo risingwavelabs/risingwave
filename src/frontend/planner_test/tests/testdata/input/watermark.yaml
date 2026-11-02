@@ -97,6 +97,12 @@
     select window_start from hop(t, ts, interval '1' minute, interval '3' minute);
   expected_outputs:
   - stream_plan
+- name: timestamp plus or minus months derives no watermark
+  sql: |
+    create table t (ts timestamp, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select ts + interval '1' month as plus_month, interval '1' month + ts as month_plus, ts - interval '1' month as minus_month, ts + interval '1' day as plus_day, ts - interval '1' day as minus_day from t;
+  expected_outputs:
+  - stream_plan
 - name: unnest
   sql: |
     create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;

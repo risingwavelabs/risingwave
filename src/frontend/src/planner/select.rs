@@ -438,13 +438,23 @@ impl Planner {
                 _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
             };
 
+            // `Array` subqueries decorrelate to a scalar aggregate with
+            // `Coalesce(array_agg, ARRAY[])`, guaranteeing one row per outer key, so
+            // `Inner` is equivalent to `LeftOuter` in batch. `Inner` also avoids the
+            // streaming transient-NULL caused by `StreamHashJoin(LeftOuter)`
+            // null-padding the outer row before the right-side aggregate arrives.
+            let join_type = if matches!(subquery.kind, SubqueryKind::Array) {
+                JoinType::Inner
+            } else {
+                JoinType::LeftOuter
+            };
             root = Self::create_apply(
                 correlated_id,
                 correlated_indices,
                 root,
                 right,
                 ExprImpl::literal_bool(true),
-                JoinType::LeftOuter,
+                join_type,
                 true,
             );
         }
@@ -518,6 +528,7 @@ impl Planner {
             .collect();
 
         let mut right = None;
+        let mut all_array_subqueries = true;
 
         for subquery in rewriter.subqueries {
             let return_type = subquery.return_type();
@@ -547,6 +558,9 @@ impl Planner {
                 SubqueryKind::Array => subroot.into_array_agg()?,
                 _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
             };
+            if !matches!(subquery.kind, SubqueryKind::Array) {
+                all_array_subqueries = false;
+            }
             if right.is_none() {
                 right = Some(subplan);
             } else {
@@ -569,13 +583,21 @@ impl Planner {
             correlated_indices.sort();
             correlated_indices.dedup();
 
+            // Same reasoning as `substitute_subqueries_in_left_deep_tree_way`:
+            // only safe when every combined subquery is `Array` (Scalar/Existential
+            // legitimately need `LeftOuter` null-padding).
+            let join_type = if all_array_subqueries {
+                JoinType::Inner
+            } else {
+                JoinType::LeftOuter
+            };
             Self::create_apply(
                 rewriter.correlated_id.expect("must have a correlated id"),
                 correlated_indices,
                 root,
                 right,
                 ExprImpl::literal_bool(true),
-                JoinType::LeftOuter,
+                join_type,
                 true,
             )
         } else {

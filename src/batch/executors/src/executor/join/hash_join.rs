@@ -497,7 +497,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut build_side_stream = self.build_side_source.execute();
         #[for_await]
         for build_chunk in &mut build_side_stream {
-            let build_chunk = build_chunk?;
+            // Unmatched build rows are emitted by walking all physical rows, so drop invisible rows
+            // here to keep them out of right outer/anti and full outer join results.
+            let build_chunk = build_chunk?.compact_vis();
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
                 let chunk_estimated_heap_size = build_chunk.estimated_heap_size();
@@ -1593,7 +1595,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 .enumerate()
                 .filter_by_bitmap(probe_chunk.visibility())
             {
-                left_non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     left_non_equi_state
                         .first_output_row_id
@@ -2261,8 +2262,11 @@ impl DataChunkMutator {
                 new_visibility.set(row_id, true);
             }
         }
-        if !*has_more_output_rows && !*found_matched {
-            new_visibility.set(start_row_id, true);
+        if !*has_more_output_rows {
+            if !*found_matched {
+                new_visibility.set(start_row_id, true);
+            }
+            *found_matched = false;
         }
 
         first_output_row_id.clear();
@@ -3421,6 +3425,65 @@ mod tests {
         test_fixture.do_test(expected_chunk, true, false).await;
     }
 
+    /// Build rows hidden by visibility must not be emitted as unmatched build rows.
+    #[tokio::test]
+    async fn test_invisible_build_rows_are_not_emitted() {
+        let cases = [
+            (
+                JoinType::RightOuter,
+                "i f   i F
+                 1 1.0 1 2.0
+                 . .   3 4.0",
+            ),
+            (
+                JoinType::FullOuter,
+                "i f   i F
+                 1 1.0 1 2.0
+                 . .   3 4.0",
+            ),
+            (
+                JoinType::RightAnti,
+                "i F
+                 3 4.0",
+            ),
+        ];
+        for (join_type, expected) in cases {
+            for has_non_equi_cond in [false, true] {
+                for test_spill in [false, true] {
+                    let mut left = MockExecutor::new(Schema::new(vec![
+                        Field::unnamed(DataType::Int32),
+                        Field::unnamed(DataType::Float32),
+                    ]));
+                    left.add(DataChunk::from_pretty(
+                        "i f
+                         1 1.0",
+                    ));
+                    let mut right = MockExecutor::new(Schema::new(vec![
+                        Field::unnamed(DataType::Int32),
+                        Field::unnamed(DataType::Float64),
+                    ]));
+                    right.add(DataChunk::from_pretty(
+                        "i F
+                         1 2.0
+                         2 3.0 D
+                         3 4.0",
+                    ));
+                    TestFixture::with_join_type(join_type)
+                        .do_test_with_chunk_size_and_executors(
+                            DataChunk::from_pretty(expected),
+                            has_non_equi_cond,
+                            false,
+                            CHUNK_SIZE,
+                            Box::new(left),
+                            Box::new(right),
+                            test_spill,
+                        )
+                        .await;
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_process_left_outer_join_non_equi_condition() {
         let chunk = DataChunk::from_pretty(
@@ -3991,7 +4054,7 @@ mod tests {
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
-        assert!(left_state.found_matched);
+        assert!(!left_state.found_matched);
         assert_eq!(right_state.build_row_ids, Vec::new());
         assert_eq!(
             right_state.build_row_matched,

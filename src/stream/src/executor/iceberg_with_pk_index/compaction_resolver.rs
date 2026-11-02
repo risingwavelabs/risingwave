@@ -510,11 +510,9 @@ async fn write_conflict_delete_files(
 
     let mut delete_files = Vec::with_capacity(conflicts.len());
     for (output_file, delete_vector) in conflicts {
-        // Compaction outputs are not committed yet and the resolver only receives their paths.
-        // Meta retains the full output data-file metadata through the resolver detach checkpoint
-        // and backfills each resolver/merger delete file's partition from its referenced data file
-        // during pre-commit.
-        // Therefore these provisional delete artifacts intentionally omit `PartitionKey` here.
+        // Compaction outputs are not committed yet and the resolver only receives their paths,
+        // so these delete files intentionally omit `PartitionKey`. Meta backfills each partition
+        // from the referenced compactor output file during the compaction pre-commit.
         let file = write_position_delete_file(
             table,
             config,

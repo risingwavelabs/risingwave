@@ -298,19 +298,7 @@ impl FrontendObserverNode {
                                 table.schema_id,
                                 table.id,
                             ),
-                            Operation::Update => {
-                                let old_fragment_id = catalog_guard
-                                    .get_any_table_by_id(table.id)
-                                    .unwrap()
-                                    .fragment_id;
-                                catalog_guard.update_table(table);
-                                if old_fragment_id != table.fragment_id {
-                                    // FIXME: the frontend node delete its fragment for the update
-                                    // operation by itself.
-                                    self.worker_node_manager
-                                        .remove_streaming_fragment_mapping(&old_fragment_id);
-                                }
-                            }
+                            Operation::Update => catalog_guard.update_table(table),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
                         PbObjectInfo::Source(source) => match resp.operation() {

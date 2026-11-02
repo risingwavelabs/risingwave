@@ -248,6 +248,14 @@
     └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_start, t._row_id], output_watermarks: [[window_start]] }
       └─StreamFilter { predicate: IsNotNull(t.ts) }
         └─StreamTableScan { table: t, columns: [t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: timestamp plus or minus months derives no watermark
+  sql: |
+    create table t (ts timestamp, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select ts + interval '1' month as plus_month, interval '1' month + ts as month_plus, ts - interval '1' month as minus_month, ts + interval '1' day as plus_day, ts - interval '1' day as minus_day from t;
+  stream_plan: |-
+    StreamMaterialize { columns: [plus_month, month_plus, minus_month, plus_day, minus_day, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [plus_day, minus_day] }
+    └─StreamProject { exprs: [(t.ts + '1 mon':Interval) as $expr1, ('1 mon':Interval + t.ts) as $expr2, (t.ts - '1 mon':Interval) as $expr3, (t.ts + '1 day':Interval) as $expr4, (t.ts - '1 day':Interval) as $expr5, t._row_id], output_watermarks: [[$expr4, $expr5]] }
+      └─StreamTableScan { table: t, columns: [t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: unnest
   sql: |
     create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;

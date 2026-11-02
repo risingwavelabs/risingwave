@@ -1102,6 +1102,7 @@ fn test_alter_pk_index_maintenance_options() {
     values.insert("enable_pk_index".to_owned(), "true".to_owned());
     let alter_props = BTreeMap::from([
         ("enable_compaction".to_owned(), "true".to_owned()),
+        ("commit_checkpoint_interval".to_owned(), "2".to_owned()),
         (
             "compaction.trigger_snapshot_count".to_owned(),
             "2".to_owned(),
@@ -1114,7 +1115,6 @@ fn test_alter_pk_index_maintenance_options() {
     IcebergSink::validate_alter_config_change(&values, &alter_props).unwrap();
 
     for (key, value) in [
-        ("commit_checkpoint_interval", "1"),
         ("compaction.max_snapshots_num", "10"),
         ("compaction.delete_files_count_threshold", "10"),
         ("compaction.write_parquet_compression", "snappy"),
@@ -1127,6 +1127,28 @@ fn test_alter_pk_index_maintenance_options() {
         let error = IcebergSink::validate_alter_config_change(&changed, &alter_props).unwrap_err();
         assert!(error.to_string().contains(key), "{error}");
         assert!(error.to_string().contains("not supported"), "{error}");
+    }
+}
+
+#[test]
+fn test_alter_pk_index_commit_checkpoint_interval() {
+    use crate::sink::Sink;
+    use crate::sink::iceberg::IcebergSink;
+
+    let mut values = iceberg_compaction_alter_config("merge-on-read", "full", false);
+    values.insert("enable_pk_index".to_owned(), "true".to_owned());
+    for value in ["1", "60", "120"] {
+        let alter_props =
+            BTreeMap::from([("commit_checkpoint_interval".to_owned(), value.to_owned())]);
+        values.extend(alter_props.clone());
+        IcebergSink::validate_alter_config_change(&values, &alter_props).unwrap();
+    }
+    for value in ["0", "-1", "invalid"] {
+        let alter_props =
+            BTreeMap::from([("commit_checkpoint_interval".to_owned(), value.to_owned())]);
+        let mut changed = values.clone();
+        changed.extend(alter_props.clone());
+        assert!(IcebergSink::validate_alter_config_change(&changed, &alter_props).is_err());
     }
 }
 
