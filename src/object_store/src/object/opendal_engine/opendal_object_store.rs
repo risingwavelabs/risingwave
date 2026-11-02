@@ -255,6 +255,16 @@ impl ObjectStore for OpendalObjectStore {
     ) -> ObjectResult<ObjectMetadataIter> {
         let mut object_lister = self.op.lister_with(prefix).recursive(true);
         if let Some(start_after) = start_after {
+            // Some backends silently ignore this option. Never return an unresumed
+            // listing to a caller that relies on it to make progress.
+            if !self.op.info().capability().list_with_start_after {
+                return Err(opendal::Error::new(
+                    opendal::ErrorKind::Unsupported,
+                    "object store does not support listing with start_after",
+                )
+                .with_context("service", self.store_media_type())
+                .into());
+            }
             object_lister = object_lister.start_after(&start_after);
         }
         let object_lister = object_lister.await?;
@@ -529,6 +539,45 @@ mod tests {
             .try_collect::<Vec<_>>()
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_list_rejects_unsupported_start_after() {
+        let memory = OpendalObjectStore::test_new_memory_engine().unwrap();
+        memory
+            .upload("prefix/1.data", Bytes::from_static(b"data"))
+            .await
+            .unwrap();
+        assert_eq!(list_all("prefix/", &memory).await.len(), 1);
+
+        // Building the Azure operator does not require credentials or network access.
+        let azblob = OpendalObjectStore {
+            op: Operator::new(
+                opendal::services::Azblob::default()
+                    .container("test")
+                    .endpoint("https://test.blob.core.windows.net"),
+            )
+            .unwrap(),
+            media_type: MediaType::Azblob,
+            config: memory.config.clone(),
+            metrics: memory.metrics.clone(),
+        };
+        for store in [memory, azblob] {
+            assert!(!store.op.info().capability().list_with_start_after);
+            let error = match store
+                .list("prefix/", Some("prefix/1.data".to_owned()), Some(2))
+                .await
+            {
+                Ok(_) => panic!("unsupported start_after must not be silently ignored"),
+                Err(error) => error,
+            };
+            assert!(matches!(
+                error.inner(),
+                crate::object::ObjectErrorInner::Opendal(error)
+                    if error.kind() == opendal::ErrorKind::Unsupported
+            ));
+            assert!(!error.should_retry(false));
+        }
     }
 
     #[tokio::test]
