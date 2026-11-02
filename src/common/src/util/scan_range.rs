@@ -15,7 +15,6 @@
 use std::cmp::Ordering;
 use std::ops::{Bound, RangeBounds};
 
-use itertools::Itertools;
 use paste::paste;
 use risingwave_pb::batch_plan::ScanRange as PbScanRange;
 use risingwave_pb::batch_plan::scan_range::Bound as PbBound;
@@ -130,118 +129,157 @@ impl ScanRange {
         (new_left, new_right)
     }
 
+    /// Returns whether the two ranges may contain a common row.
+    ///
+    /// `order_types` are the pk order types with descending ones reversed, i.e. the order in which
+    /// the range bounds are compared.
     pub fn is_overlap(left: &ScanRange, right: &ScanRange, order_types: &[OrderType]) -> bool {
-        let range_left = left.convert_to_range();
-        let range_right = right.convert_to_range();
-        Self::range_overlap_check(range_left, range_right, order_types)
+        cmp_cut(
+            &left.start_cut(order_types),
+            &right.end_cut(order_types),
+            order_types,
+        )
+        .is_lt()
+            && cmp_cut(
+                &right.start_cut(order_types),
+                &left.end_cut(order_types),
+                order_types,
+            )
+            .is_lt()
     }
 
-    fn range_overlap_check(
-        left: (Bound<Vec<Datum>>, Bound<Vec<Datum>>),
-        right: (Bound<Vec<Datum>>, Bound<Vec<Datum>>),
-        order_types: &[OrderType],
-    ) -> bool {
-        let (left_start, left_end) = &left;
-        let (right_start, right_end) = &right;
+    /// Compares where the two ranges start. See [`Self::is_overlap`] for `order_types`.
+    pub fn cmp_start(left: &ScanRange, right: &ScanRange, order_types: &[OrderType]) -> Ordering {
+        cmp_cut(
+            &left.start_cut(order_types),
+            &right.start_cut(order_types),
+            order_types,
+        )
+    }
 
-        let left_start_vec = match &left_start {
-            Bound::Included(vec) | Bound::Excluded(vec) => vec,
-            _ => &vec![],
-        };
-        let right_start_vec = match &right_start {
-            Bound::Included(vec) | Bound::Excluded(vec) => vec,
-            _ => &vec![],
-        };
-
-        if left_start_vec.is_empty() && right_start_vec.is_empty() {
-            return true;
+    /// Returns a range covering two overlapping ranges. It is exact if one range contains the other
+    /// or both have the same `eq_conds`. Otherwise, it is widened to the whole common prefix of
+    /// their `eq_conds`. See [`Self::is_overlap`] for `order_types`.
+    pub fn union(self, other: ScanRange, order_types: &[OrderType]) -> ScanRange {
+        let cmp_start = Self::cmp_start(&self, &other, order_types);
+        let cmp_end = cmp_cut(
+            &self.end_cut(order_types),
+            &other.end_cut(order_types),
+            order_types,
+        );
+        if cmp_start.is_le() && cmp_end.is_ge() {
+            return self;
         }
-
-        let order_types = if order_types.iter().all(|o| o.is_ascending()) {
-            order_types
-        } else {
-            // reverse order types to ascending
-            &order_types
-                .iter()
-                .cloned()
-                .map(|o| if o.is_descending() { o.reverse() } else { o })
-                .collect_vec()
-        };
-
-        // Unbounded is always less than any other bound
-        if left_start_vec.is_empty() {
-            // pass
-        } else if right_start_vec.is_empty() {
-            return Self::range_overlap_check(right, left, order_types);
-        } else {
-            assert!(!left_start_vec.is_empty());
-            assert!(!right_start_vec.is_empty());
-            let cmp_column_len = left_start_vec.len().min(right_start_vec.len());
-            let cmp_start = cmp_rows(
-                &left_start_vec[0..cmp_column_len],
-                &right_start_vec[0..cmp_column_len],
-                &order_types[0..cmp_column_len],
-            );
-
-            let right_start_before_left_start = cmp_start.is_gt();
-
-            if right_start_before_left_start {
-                return Self::range_overlap_check(right, left, order_types);
-            }
-
-            if cmp_start == Ordering::Equal
-                && let (Bound::Included(_), Bound::Included(_)) = (left_start, right_start)
-            {
-                return true;
-            }
+        if cmp_start.is_ge() && cmp_end.is_le() {
+            return other;
         }
-
-        let left_end_vec = match &left_end {
-            Bound::Included(vec) | Bound::Excluded(vec) => vec,
-            _ => &vec![],
-        };
-        let right_end_vec = match &right_end {
-            Bound::Included(vec) | Bound::Excluded(vec) => vec,
-            _ => &vec![],
-        };
-
-        if left_end_vec.is_empty() && right_end_vec.is_empty() {
-            return true;
-        }
-
-        if left_end_vec.is_empty() {
-            true
-        } else {
-            // cmp left_end and right_start
-            assert!(!left_end_vec.is_empty());
-            assert!(!right_start_vec.is_empty());
-
-            let cmp_column_len = left_end_vec.len().min(right_start_vec.len());
-            let cmp_end = cmp_rows(
-                &left_end_vec[0..cmp_column_len],
-                &right_start_vec[0..cmp_column_len],
-                &order_types[0..cmp_column_len],
-            );
-
-            match cmp_end {
-                Ordering::Equal => {
-                    if let (Bound::Included(_), Bound::Included(_)) = (left_end, right_start) {
-                        return true;
-                    }
-                }
-
-                Ordering::Greater => {
-                    return true;
-                }
-
-                Ordering::Less => {
-                    return false;
-                }
+        if self.eq_conds == other.eq_conds {
+            let start = if cmp_start.is_le() {
+                self.range.0
+            } else {
+                other.range.0
+            };
+            let end = if cmp_end.is_ge() {
+                self.range.1
+            } else {
+                other.range.1
+            };
+            ScanRange {
+                eq_conds: self.eq_conds,
+                range: (start, end),
             }
-
-            false
+        } else {
+            let common_len = (0..self.eq_conds.len().min(other.eq_conds.len()))
+                .take_while(|&i| self.eq_conds[i] == other.eq_conds[i])
+                .count();
+            let mut eq_conds = self.eq_conds;
+            eq_conds.truncate(common_len);
+            ScanRange {
+                eq_conds,
+                range: full_range(),
+            }
         }
     }
+
+    /// Where the range starts in pk order. See [`Cut`].
+    fn start_cut(&self, order_types: &[OrderType]) -> Cut {
+        let mut prefix = self.eq_conds.clone();
+        let after = match &self.range.0 {
+            Bound::Included(literal) => {
+                prefix.extend_from_slice(literal);
+                false
+            }
+            Bound::Excluded(literal) => {
+                prefix.extend_from_slice(literal);
+                true
+            }
+            Bound::Unbounded => {
+                if self.skipped_nulls_are_largest(order_types) == Some(false) {
+                    prefix.push(None);
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+        (prefix, after)
+    }
+
+    /// Where the range ends in pk order. See [`Cut`].
+    fn end_cut(&self, order_types: &[OrderType]) -> Cut {
+        let mut prefix = self.eq_conds.clone();
+        let after = match &self.range.1 {
+            Bound::Included(literal) => {
+                prefix.extend_from_slice(literal);
+                true
+            }
+            Bound::Excluded(literal) => {
+                prefix.extend_from_slice(literal);
+                false
+            }
+            Bound::Unbounded => {
+                if self.skipped_nulls_are_largest(order_types) == Some(true) {
+                    prefix.push(None);
+                    false
+                } else {
+                    true
+                }
+            }
+        };
+        (prefix, after)
+    }
+
+    /// When only one side of the range is bounded, storage skips the NULLs of the first range
+    /// column (see `PkScanRange::convert_to_range_bounds`). Returns whether those NULLs sort after
+    /// the other values, or `None` if no NULLs are skipped.
+    fn skipped_nulls_are_largest(&self, order_types: &[OrderType]) -> Option<bool> {
+        let half_bounded =
+            matches!(self.range.0, Bound::Unbounded) != matches!(self.range.1, Bound::Unbounded);
+        let order_type = order_types.get(self.eq_conds.len())?;
+        half_bounded.then(|| order_type.nulls_are_largest())
+    }
+}
+
+/// A position in pk order: right before (`false`) or right after (`true`) all the keys starting
+/// with the prefix.
+type Cut = (Vec<Datum>, bool);
+
+/// Compares two cuts. When one prefix is shorter, it is compared as if extended with -inf or +inf.
+fn cmp_cut(
+    (left, left_after): &Cut,
+    (right, right_after): &Cut,
+    order_types: &[OrderType],
+) -> Ordering {
+    let len = left.len().min(right.len());
+    cmp_rows(&left[..len], &right[..len], &order_types[..len]).then_with(|| {
+        match left.len().cmp(&right.len()) {
+            Ordering::Equal => left_after.cmp(right_after),
+            Ordering::Less if *left_after => Ordering::Greater,
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater if *right_after => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+        }
+    })
 }
 
 pub const fn full_range<T>() -> (Bound<T>, Bound<T>) {
@@ -274,10 +312,13 @@ macro_rules! impl_split_small_range {
                         if let (Bound::Included(left),Bound::Included(right)) = (&self.range.0, &self.range.1){
                             match (left.get(0),right.get(0)) {
                                 $(
+                                    // Compute the gap in i128 so that it cannot overflow.
                                     (
                                         Some(Some(ScalarImpl::$type_name(left))),
                                         Some(Some(ScalarImpl::$type_name(right))),
-                                    ) if (right - left + 1) as u64 <= max_gap => {
+                                    ) if (0..i128::from(max_gap))
+                                        .contains(&(i128::from(*right) - i128::from(*left))) =>
+                                    {
                                         return Some(
                                             (*left..=*right)
                                                 .map(|i| ScanRange {
@@ -469,12 +510,24 @@ mod tests {
         }
     }
 
+    fn range_overlap_check(
+        left: (Bound<Vec<Datum>>, Bound<Vec<Datum>>),
+        right: (Bound<Vec<Datum>>, Bound<Vec<Datum>>),
+        order_types: &[OrderType],
+    ) -> bool {
+        let to_scan_range = |range| ScanRange {
+            eq_conds: vec![],
+            range,
+        };
+        ScanRange::is_overlap(&to_scan_range(left), &to_scan_range(right), order_types)
+    }
+
     #[test]
     fn test_range_overlap_check() {
         let order_types = vec![OrderType::ascending()];
 
         // (Included, Included) vs (Included, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))])
@@ -487,7 +540,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Included, Excluded)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))])
@@ -500,7 +553,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Excluded, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))])
@@ -513,7 +566,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Excluded, Excluded)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))])
@@ -526,7 +579,7 @@ mod tests {
         ));
 
         // (Included, Excluded) vs (Included, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(5))])
@@ -539,7 +592,7 @@ mod tests {
         ));
 
         // (Included, Excluded) vs (Included, Excluded)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(5))])
@@ -552,7 +605,7 @@ mod tests {
         ));
 
         // (Included, Excluded) vs (Excluded, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(5))])
@@ -565,7 +618,7 @@ mod tests {
         ));
 
         // (Included, Excluded) vs (Excluded, Excluded)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(5))])
@@ -578,7 +631,7 @@ mod tests {
         ));
 
         // (Excluded, Included) vs (Included, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))])
@@ -591,7 +644,7 @@ mod tests {
         ));
 
         // (Excluded, Included) vs (Included, Excluded)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))])
@@ -604,7 +657,7 @@ mod tests {
         ));
 
         // (Excluded, Included) vs (Excluded, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))])
@@ -617,7 +670,7 @@ mod tests {
         ));
 
         // (Excluded, Included) vs (Excluded, Excluded)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))])
@@ -630,7 +683,7 @@ mod tests {
         ));
 
         // (Excluded, Excluded) vs (Included, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(5))])
@@ -643,7 +696,7 @@ mod tests {
         ));
 
         // (Excluded, Excluded) vs (Included, Excluded)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(5))])
@@ -656,7 +709,7 @@ mod tests {
         ));
 
         // (Excluded, Excluded) vs (Excluded, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(5))])
@@ -669,7 +722,7 @@ mod tests {
         ));
 
         // (Excluded, Excluded) vs (Excluded, Excluded)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Excluded(vec![Some(ScalarImpl::Int32(5))])
@@ -682,7 +735,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Included, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(3))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(7))])
@@ -695,7 +748,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Included, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(3)), Some(ScalarImpl::Int32(3))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(7)), Some(ScalarImpl::Int32(7))])
@@ -708,7 +761,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Included, Included)
-        assert!(!ScanRange::range_overlap_check(
+        assert!(!range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(3))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(7))])
@@ -721,7 +774,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Included, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(3))])
@@ -734,7 +787,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Excluded, Included)
-        assert!(!ScanRange::range_overlap_check(
+        assert!(!range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(3))])
@@ -747,7 +800,7 @@ mod tests {
         ));
 
         // (Included, Included) vs (Included, Included)
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(3))])
@@ -759,7 +812,7 @@ mod tests {
             &order_types
         ));
 
-        assert!(!ScanRange::range_overlap_check(
+        assert!(!range_overlap_check(
             (
                 Bound::Unbounded,
                 Bound::Included(vec![Some(ScalarImpl::Int32(3))])
@@ -771,7 +824,7 @@ mod tests {
             &order_types
         ));
 
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Unbounded,
                 Bound::Included(vec![Some(ScalarImpl::Int32(10))])
@@ -783,7 +836,7 @@ mod tests {
             &order_types
         ));
 
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (Bound::Unbounded, Bound::Unbounded,),
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(5))]),
@@ -792,13 +845,13 @@ mod tests {
             &order_types
         ));
 
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (Bound::Unbounded, Bound::Unbounded),
             (Bound::Unbounded, Bound::Unbounded),
             &order_types
         ));
 
-        assert!(!ScanRange::range_overlap_check(
+        assert!(!range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(3))])
@@ -810,7 +863,7 @@ mod tests {
             &order_types
         ));
 
-        assert!(ScanRange::range_overlap_check(
+        assert!(range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
                 Bound::Included(vec![Some(ScalarImpl::Int32(3))])
@@ -821,5 +874,76 @@ mod tests {
             ),
             &order_types
         ));
+    }
+    #[test]
+    fn test_overlap_and_union_with_prefix_bounds() {
+        let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+        let int = |v: i32| Some(ScalarImpl::Int32(v));
+        let range = |eq_conds: Vec<Datum>, range| ScanRange { eq_conds, range };
+
+        // `a = 1` covers `a = 1 AND b > 5`.
+        let a_eq_1 = range(vec![int(1)], full_range());
+        let a_eq_1_b_gt_5 = range(
+            vec![int(1)],
+            (Bound::Excluded(vec![int(5)]), Bound::Unbounded),
+        );
+        assert!(ScanRange::is_overlap(&a_eq_1, &a_eq_1_b_gt_5, &order_types));
+        assert_eq!(
+            a_eq_1.clone().union(a_eq_1_b_gt_5.clone(), &order_types),
+            a_eq_1
+        );
+
+        // `a BETWEEN 0 AND 100` covers `a = 1 AND b > 5`.
+        let a_0_100 = range(
+            vec![],
+            (
+                Bound::Included(vec![int(0)]),
+                Bound::Included(vec![int(100)]),
+            ),
+        );
+        assert!(ScanRange::is_overlap(
+            &a_eq_1_b_gt_5,
+            &a_0_100,
+            &order_types
+        ));
+        assert_eq!(
+            a_eq_1_b_gt_5.clone().union(a_0_100.clone(), &order_types),
+            a_0_100
+        );
+
+        // `a >= 1` covers `(a, b) > (1, 5)`.
+        let a_b_gt_1_5 = range(
+            vec![],
+            (Bound::Excluded(vec![int(1), int(5)]), Bound::Unbounded),
+        );
+        let a_ge_1 = range(vec![], (Bound::Included(vec![int(1)]), Bound::Unbounded));
+        assert_eq!(
+            a_b_gt_1_5.clone().union(a_ge_1.clone(), &order_types),
+            a_ge_1
+        );
+        assert_eq!(
+            ScanRange::cmp_start(&a_ge_1, &a_b_gt_1_5, &order_types),
+            Ordering::Less
+        );
+
+        // `a > 0` skips NULLs, so it does not overlap with `a IS NULL`.
+        let a_is_null = range(vec![None], full_range());
+        let a_gt_0 = range(vec![], (Bound::Excluded(vec![int(0)]), Bound::Unbounded));
+        assert!(!ScanRange::is_overlap(&a_is_null, &a_gt_0, &order_types));
+
+        // Otherwise, the union is widened to the common prefix of `eq_conds`.
+        let a_b_gt_1_6 = range(
+            vec![],
+            (Bound::Excluded(vec![int(1), int(6)]), Bound::Unbounded),
+        );
+        assert!(ScanRange::is_overlap(
+            &a_eq_1_b_gt_5,
+            &a_b_gt_1_6,
+            &order_types
+        ));
+        assert_eq!(
+            a_eq_1_b_gt_5.union(a_b_gt_1_6, &order_types),
+            ScanRange::full_table_scan()
+        );
     }
 }

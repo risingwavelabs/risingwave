@@ -63,3 +63,24 @@ drop materialized view mv1;
 
 statement ok
 drop table t1;
+
+statement ok
+create table row_filter_short_pk (a int primary key, b int);
+
+statement ok
+insert into row_filter_short_pk values (0, 9), (1, 4), (2, 0);
+
+query II
+select * from row_filter_short_pk where (a, b) > (1, 3) order by a;
+----
+1 4
+2 0
+
+query II
+select * from row_filter_short_pk where (a, b) < (1, 5) order by a;
+----
+0 9
+1 4
+
+statement ok
+drop table row_filter_short_pk;

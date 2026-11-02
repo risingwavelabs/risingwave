@@ -529,3 +529,35 @@
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 20) or (user_id != 10);
   expected_outputs:
     - batch_plan
+- name: When OR clauses with different eq prefixes overlap, the scan ranges are merged.
+  before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE (user_id = 1 and date > 5) or (user_id between 0 and 100);
+  expected_outputs:
+    - batch_plan
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE (user_id between 0 and 5) or (user_id = 1 and date > 5);
+  expected_outputs:
+    - batch_plan
+- name: A range with one side bounded skips NULLs, so it does not overlap with IS NULL.
+  before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id is null or user_id > 10;
+  expected_outputs:
+    - batch_plan
+- name: A bound on a shorter pk prefix covers all the keys extending it.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) > (1, 5) or a >= 1;
+  expected_outputs:
+    - batch_plan
+- name: The full range of a small integer type is not split into points.
+  sql: |
+    create table t(a smallint primary key);
+    select * from t where a between -32768 and 32767;
+  expected_outputs:
+    - batch_plan

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::ops::Bound;
@@ -24,7 +23,6 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{ScanRange, is_full_range};
-use risingwave_common::util::sort_util::{OrderType, cmp_rows};
 
 use crate::TableCatalog;
 use crate::error::Result;
@@ -318,7 +316,6 @@ impl Condition {
     }
 
     /// Generate range scans from each arm of `OR` clause and merge them.
-    /// Currently, only support equal type range scans.
     /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
     fn disjunctions_to_scan_ranges(
         table: &TableCatalog,
@@ -401,127 +398,22 @@ impl Condition {
                     }
                 })
                 .collect_vec();
-            scan_ranges.sort_by(|left, right| {
-                let (left_start, _left_end) = &left.convert_to_range();
-                let (right_start, _right_end) = &right.convert_to_range();
+            scan_ranges.sort_by(|left, right| ScanRange::cmp_start(left, right, &order_types));
 
-                let left_start_vec = match &left_start {
-                    Bound::Included(vec) | Bound::Excluded(vec) => vec,
-                    _ => &vec![],
-                };
-                let right_start_vec = match &right_start {
-                    Bound::Included(vec) | Bound::Excluded(vec) => vec,
-                    _ => &vec![],
-                };
-
-                if left_start_vec.is_empty() && right_start_vec.is_empty() {
-                    return Ordering::Less;
-                }
-
-                if left_start_vec.is_empty() {
-                    return Ordering::Less;
-                }
-
-                if right_start_vec.is_empty() {
-                    return Ordering::Greater;
-                }
-
-                let cmp_column_len = left_start_vec.len().min(right_start_vec.len());
-                cmp_rows(
-                    &left_start_vec[0..cmp_column_len],
-                    &right_start_vec[0..cmp_column_len],
-                    &order_types[0..cmp_column_len],
-                )
-            });
-
-            if scan_ranges.is_empty() {
-                return Ok(None);
-            }
-
-            if scan_ranges.len() == 1 {
-                return Ok(Some((scan_ranges, true)));
-            }
-
+            // Merge overlapping ranges so that no row is scanned twice. A merged range may start
+            // earlier than the last one, so check it against the previous ones again.
             let mut output_scan_ranges: Vec<ScanRange> = vec![];
-            output_scan_ranges.push(scan_ranges[0].clone());
-            let mut idx = 1;
-            loop {
-                if idx >= scan_ranges.len() {
-                    break;
+            for mut scan_range in scan_ranges {
+                while let Some(last) = output_scan_ranges.last()
+                    && ScanRange::is_overlap(last, &scan_range, &order_types)
+                {
+                    let last = output_scan_ranges.pop().unwrap();
+                    scan_range = last.union(scan_range, &order_types);
                 }
-
-                let scan_range_left = output_scan_ranges.last_mut().unwrap();
-                let scan_range_right = &scan_ranges[idx];
-
-                if scan_range_left.eq_conds == scan_range_right.eq_conds {
-                    // range merge
-
-                    if !ScanRange::is_overlap(scan_range_left, scan_range_right, &order_types) {
-                        // not merge
-                        output_scan_ranges.push(scan_range_right.clone());
-                        idx += 1;
-                        continue;
-                    }
-
-                    // merge range
-                    fn merge_bound(
-                        left_scan_range: &Bound<Vec<Option<ScalarImpl>>>,
-                        right_scan_range: &Bound<Vec<Option<ScalarImpl>>>,
-                        order_types: &[OrderType],
-                        left_bound: bool,
-                    ) -> Bound<Vec<Option<ScalarImpl>>> {
-                        let left_scan_range = match left_scan_range {
-                            Bound::Included(vec) | Bound::Excluded(vec) => vec,
-                            Bound::Unbounded => return Bound::Unbounded,
-                        };
-
-                        let right_scan_range = match right_scan_range {
-                            Bound::Included(vec) | Bound::Excluded(vec) => vec,
-                            Bound::Unbounded => return Bound::Unbounded,
-                        };
-
-                        let cmp_len = left_scan_range.len().min(right_scan_range.len());
-
-                        let cmp = cmp_rows(
-                            &left_scan_range[..cmp_len],
-                            &right_scan_range[..cmp_len],
-                            &order_types[..cmp_len],
-                        );
-
-                        let bound = {
-                            if (cmp.is_le() && left_bound) || (cmp.is_ge() && !left_bound) {
-                                left_scan_range.clone()
-                            } else {
-                                right_scan_range.clone()
-                            }
-                        };
-
-                        // Included Bound just for convenience, the correctness will be guaranteed by the upper level filter.
-                        Bound::Included(bound)
-                    }
-
-                    scan_range_left.range.0 = merge_bound(
-                        &scan_range_left.range.0,
-                        &scan_range_right.range.0,
-                        &order_types,
-                        true,
-                    );
-
-                    scan_range_left.range.1 = merge_bound(
-                        &scan_range_left.range.1,
-                        &scan_range_right.range.1,
-                        &order_types,
-                        false,
-                    );
-
-                    if scan_range_left.is_full_table_scan() {
-                        return Ok(None);
-                    }
-                } else {
-                    output_scan_ranges.push(scan_range_right.clone());
+                if scan_range.is_full_table_scan() {
+                    return Ok(None);
                 }
-
-                idx += 1;
+                output_scan_ranges.push(scan_range);
             }
 
             Ok(Some((output_scan_ranges, true)))
@@ -604,6 +496,10 @@ impl Condition {
                         }
                         pk_struct.push(right_expr.clone());
                     }
+                }
+                // The row is longer than the pk, so the scan range only bounds a prefix of it.
+                if pk_struct.len() < row_left_inputs.len() {
+                    all_added = false;
                 }
 
                 // Here it is necessary to determine whether all of row is included in the `ScanRanges`, if so, the data for eq is not needed
