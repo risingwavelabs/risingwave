@@ -1,0 +1,85 @@
+include oracle_test_env.slt.part
+
+# Restore an interrupted test crash, reject in-memory storage, and replace any stale
+# test proxy. Oracle itself is never stopped or modified by the fault utilities.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_faults_utils import control_compute, control_oracle_proxy
+control_compute("start")
+control_compute("check")
+control_oracle_proxy("start")
+PY
+
+# 1. Actual compute/JVM crash while Oracle connectivity stays available.
+include oracle_restart_prepare.slt.part
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_faults_utils import control_compute
+try:
+    control_compute("crash")
+finally:
+    control_compute("start")
+PY
+
+include oracle_restart_check.slt.part
+
+# 2. Drop existing Oracle connections and reject reconnects; compute stays alive.
+include oracle_restart_prepare.slt.part
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_faults_utils import control_compute, control_oracle_proxy
+pid = control_compute("check")
+try:
+    control_oracle_proxy("disconnect")
+    control_oracle_proxy("wait-rejected")
+finally:
+    control_oracle_proxy("reconnect")
+assert control_compute("check") == pid, "compute restarted during the Oracle-only outage"
+PY
+
+include oracle_restart_check.slt.part
+
+# 3. Both unavailable. Start compute first and prove it attempts to reconnect while
+# Oracle is still unreachable. Process startup must not wait for Oracle readiness.
+include oracle_restart_prepare.slt.part
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_faults_utils import control_compute, control_oracle_proxy
+try:
+    control_compute("crash")
+    control_oracle_proxy("disconnect")
+    control_compute("start")
+    control_oracle_proxy("wait-rejected")
+finally:
+    try:
+        control_oracle_proxy("reconnect")
+    finally:
+        control_compute("start")
+PY
+
+include oracle_restart_check.slt.part
+
+# 4. Both unavailable. Restore Oracle connectivity before starting compute.
+include oracle_restart_prepare.slt.part
+
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_faults_utils import control_compute, control_oracle_proxy
+try:
+    control_compute("crash")
+    control_oracle_proxy("disconnect")
+    control_oracle_proxy("reconnect")
+finally:
+    try:
+        control_oracle_proxy("reconnect")
+    finally:
+        control_compute("start")
+PY
+
+include oracle_restart_check.slt.part
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_faults_utils.py cleanup

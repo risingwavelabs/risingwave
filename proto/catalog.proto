@@ -444,6 +444,7 @@ message Table {
     CDC_TABLE_TYPE_MONGO = 4 [deprecated = true];
     reserved 5;
     reserved "CDC_TABLE_TYPE_CITUS"; // removed connector
+    CDC_TABLE_TYPE_ORACLE = 6;
   }
 
   uint32 id = 1;

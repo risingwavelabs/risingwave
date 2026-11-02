@@ -56,6 +56,7 @@ use risingwave_connector::source::cdc::{
     CDC_BACKFILL_ENABLE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
     CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
     CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CdcSourceDdlValidator, CdcSourceRuntimeFlags,
+    ORACLE_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -799,6 +800,15 @@ pub fn bind_connector_props(
                 ))
             })?
         {
+            if with_properties.get_connector().as_deref() == Some(ORACLE_CDC_CONNECTOR) {
+                // TODO(oracle-cdc): Handle Oracle schema-change events and type compatibility
+                // before enabling CDC auto schema change.
+                return Err(ErrorCode::NotSupported(
+                    "Oracle CDC auto schema change is not supported".to_owned(),
+                    "Disable auto.schema.change".to_owned(),
+                )
+                .into());
+            }
             Feature::CdcAutoSchemaChange.check_available()?;
         }
 
