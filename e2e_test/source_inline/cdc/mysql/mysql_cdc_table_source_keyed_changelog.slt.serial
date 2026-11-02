@@ -1,0 +1,239 @@
+# Explicit CHANGELOG keys over a catalog-only CDC table source.
+# Wait for every consumer after each upstream change so assertions do not depend on
+# which events are compacted together within a keyed changelog epoch.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism TO 4;
+
+statement ok
+DROP SOURCE IF EXISTS keyed_cl_table CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS keyed_cl_source CASCADE;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS keyed_cl;
+    CREATE TABLE keyed_cl (id INT NOT NULL PRIMARY KEY, k INT NOT NULL, payload VARCHAR(20) NOT NULL) ENGINE=InnoDB;
+    DROP USER IF EXISTS 'keyed-cl-cdc'@'%';
+    CREATE USER 'keyed-cl-cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'keyed-cl-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+CREATE SOURCE keyed_cl_source WITH (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'keyed-cl-cdc',
+    password = 'abcdef',
+    database.name = 'risedev',
+    server.id = '5416'
+);
+
+sleep 2s
+
+statement ok
+CREATE SOURCE keyed_cl_table (*)
+WITH (snapshot = 'false')
+FROM keyed_cl_source TABLE 'risedev.keyed_cl';
+
+# Explicit key equal to the upstream primary key.
+statement ok
+CREATE MATERIALIZED VIEW keyed_cl_pk AS
+WITH c AS CHANGELOG FROM keyed_cl_table KEY (id)
+SELECT id, k, payload, changelog_op FROM c;
+
+# Explicit key different from the upstream primary key. Distinct upstream rows
+# sharing k must not be compacted into a single row.
+statement ok
+CREATE MATERIALIZED VIEW keyed_cl_value AS
+WITH c AS CHANGELOG FROM keyed_cl_table KEY (k)
+SELECT id, k, payload, changelog_op FROM c;
+
+# Neither the explicit key nor the upstream primary key is selected.
+statement ok
+CREATE MATERIALIZED VIEW keyed_cl_pruned AS
+WITH c AS CHANGELOG FROM keyed_cl_table KEY (k)
+SELECT payload, changelog_op FROM c;
+
+system ok
+mysql -e "USE risedev; INSERT INTO keyed_cl VALUES (1,10,'a'),(2,10,'b');"
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_pk;
+----
+1 10 a 1
+2 10 b 1
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_value;
+----
+1 10 a 1
+2 10 b 1
+
+query TI rowsort retry 30 backoff 1s
+SELECT payload, changelog_op FROM keyed_cl_pruned;
+----
+a 1
+b 1
+
+system ok
+mysql -e "USE risedev; UPDATE keyed_cl SET payload = 'a2' WHERE id = 1;"
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_pk;
+----
+1 10 a 1
+1 10 a2 1
+2 10 b 1
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_value;
+----
+1 10 a 1
+1 10 a2 1
+2 10 b 1
+
+query TI rowsort retry 30 backoff 1s
+SELECT payload, changelog_op FROM keyed_cl_pruned;
+----
+a 1
+a2 1
+b 1
+
+system ok
+mysql -e "USE risedev; DELETE FROM keyed_cl WHERE id = 2;"
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_pk;
+----
+1 10 a 1
+1 10 a2 1
+2 10 b 1
+2 10 b 2
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_value;
+----
+1 10 a 1
+1 10 a2 1
+2 10 b 1
+2 10 b 2
+
+query TI rowsort retry 30 backoff 1s
+SELECT payload, changelog_op FROM keyed_cl_pruned;
+----
+a 1
+a2 1
+b 1
+b 2
+
+# Change the explicit routing key after rescaling the consumers.
+statement ok
+ALTER MATERIALIZED VIEW keyed_cl_pk SET PARALLELISM = 1;
+
+statement ok
+ALTER MATERIALIZED VIEW keyed_cl_value SET PARALLELISM = 2;
+
+statement ok
+ALTER MATERIALIZED VIEW keyed_cl_pruned SET PARALLELISM = 3;
+
+system ok
+mysql -e "USE risedev; UPDATE keyed_cl SET k = 20, payload = 'a3' WHERE id = 1;"
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_pk;
+----
+1 10 a 1
+1 10 a2 1
+1 20 a3 1
+2 10 b 1
+2 10 b 2
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_value;
+----
+1 10 a 1
+1 10 a2 1
+1 20 a3 1
+2 10 b 1
+2 10 b 2
+
+query TI rowsort retry 30 backoff 1s
+SELECT payload, changelog_op FROM keyed_cl_pruned;
+----
+a 1
+a2 1
+a3 1
+b 1
+b 2
+
+system ok
+mysql -e "USE risedev; DELETE FROM keyed_cl WHERE id = 1;"
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_pk;
+----
+1 10 a 1
+1 10 a2 1
+1 20 a3 1
+1 20 a3 2
+2 10 b 1
+2 10 b 2
+
+query IITI rowsort retry 30 backoff 1s
+SELECT id, k, payload, changelog_op FROM keyed_cl_value;
+----
+1 10 a 1
+1 10 a2 1
+1 20 a3 1
+1 20 a3 2
+2 10 b 1
+2 10 b 2
+
+query TI rowsort retry 30 backoff 1s
+SELECT payload, changelog_op FROM keyed_cl_pruned;
+----
+a 1
+a2 1
+a3 1
+a3 2
+b 1
+b 2
+
+# Every recorded event has a unique generated row ID in each consumer.
+query II rowsort
+SELECT count(*), count(DISTINCT _changelog_row_id) FROM keyed_cl_pk
+UNION ALL
+SELECT count(*), count(DISTINCT _changelog_row_id) FROM keyed_cl_value
+UNION ALL
+SELECT count(*), count(DISTINCT _changelog_row_id) FROM keyed_cl_pruned;
+----
+6 6
+6 6
+6 6
+
+statement ok
+DROP MATERIALIZED VIEW keyed_cl_pruned;
+
+statement ok
+DROP MATERIALIZED VIEW keyed_cl_value;
+
+statement ok
+DROP MATERIALIZED VIEW keyed_cl_pk;
+
+statement ok
+DROP SOURCE keyed_cl_table;
+
+statement ok
+DROP SOURCE keyed_cl_source;
+
+system ok
+mysql -e "USE risedev; DROP TABLE keyed_cl; DROP USER IF EXISTS 'keyed-cl-cdc'@'%';"
