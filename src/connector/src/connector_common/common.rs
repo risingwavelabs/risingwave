@@ -153,7 +153,7 @@ impl AwsAuthProps {
             ))
         } else if !env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
             Ok(SharedCredentialsProvider::new(
-                aws_config::default_provider::credentials::default_provider().await,
+                Box::pin(aws_config::default_provider::credentials::default_provider()).await,
             ))
         } else {
             bail!("Both `access_key` and `secret_key` must be provided")
@@ -172,7 +172,7 @@ impl AwsAuthProps {
             if let Some(id) = &self.external_id {
                 role = role.external_id(id);
             }
-            let provider = role.build_from_provider(credential).await;
+            let provider = Box::pin(role.build_from_provider(credential)).await;
             Ok(SharedCredentialsProvider::new(provider))
         } else {
             Ok(credential)
@@ -192,7 +192,7 @@ impl AwsAuthProps {
             config_loader = config_loader.endpoint_url(endpoint);
         }
 
-        Ok(config_loader.load().await)
+        Ok(Box::pin(config_loader.load()).await)
     }
 }
 

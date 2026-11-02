@@ -56,8 +56,6 @@ public class DbzConnectorConfig {
     public static final String DB_NAME = "database.name";
     public static final String TABLE_NAME = "table.name";
 
-    public static final String DB_SERVERS = "database.servers";
-
     /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
     public static final String MYSQL_SSL_MODE = "ssl.mode";
@@ -288,28 +286,6 @@ public class DbzConnectorConfig {
             if (userProps.containsKey(PG_SSL_ROOT_CERT)) {
                 dbzProps.setProperty("database.sslrootcert", userProps.get(PG_SSL_ROOT_CERT));
             }
-        } else if (source == SourceTypeE.CITUS) {
-            var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
-
-            // citus needs all_tables publication to capture all shards
-            postgresProps.setProperty("publication.autocreate.mode", "all_tables");
-
-            // disable publication auto creation if needed
-            var pubAutoCreate =
-                    Boolean.parseBoolean(
-                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
-
-            if (!pubAutoCreate) {
-                postgresProps.setProperty("publication.autocreate.mode", "disabled");
-            }
-            // if snapshot phase is finished and offset is specified, we will continue reading
-            // changes from the given offset
-            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                postgresProps.setProperty("snapshot.mode", "no_data");
-                postgresProps.setProperty(
-                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
-            }
-            dbzProps.putAll(postgresProps);
         } else if (source == SourceTypeE.MONGODB) {
             var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);
 

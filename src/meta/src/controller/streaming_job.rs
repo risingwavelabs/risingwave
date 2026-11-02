@@ -38,10 +38,13 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::source::cdc::{CdcSourceDdlValidator, CdcSourceType};
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
 };
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::{
+    WithOptionsSecResolved, WithPropertiesExt, dispatch_cdc_source_type, match_sink_name_str,
+};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::refresh_job::RefreshState;
@@ -2971,14 +2974,21 @@ impl CatalogController {
 
         // Only check alter-on-fly restrictions for SQL ALTER SOURCE, not for admin risectl operations
         if !skip_alter_on_fly_check {
-            let prop_keys: Vec<String> = alter_props
-                .keys()
-                .chain(alter_secret_refs.keys())
-                .cloned()
-                .collect();
-            risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
-                &connector, &prop_keys,
-            )?;
+            dispatch_cdc_source_type!(
+                CdcSourceType::from(connector.as_str()),
+                T,
+                T::check_alter_with_options(&alter_props, &alter_secret_refs)?,
+                {
+                    let prop_keys: Vec<String> = alter_props
+                        .keys()
+                        .chain(alter_secret_refs.keys())
+                        .cloned()
+                        .collect();
+                    risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+                        &connector, &prop_keys,
+                    )?
+                }
+            );
         }
 
         let mut options_with_secret = WithOptionsSecResolved::new(

@@ -53,7 +53,6 @@ pub enum ExternalCdcTableType {
     Mysql,
     Postgres,
     SqlServer,
-    Citus,
     Mongodb,
 }
 
@@ -63,7 +62,6 @@ impl ExternalCdcTableType {
         match connector.as_str() {
             "mysql-cdc" => Self::Mysql,
             "postgres-cdc" => Self::Postgres,
-            "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
             "mongodb-cdc" => Self::Mongodb,
             _ => Self::Unspecified,
@@ -76,7 +74,7 @@ impl ExternalCdcTableType {
             Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
             Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
             Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
-            Self::Unspecified | Self::Citus | Self::Mongodb => {
+            Self::Unspecified | Self::Mongodb => {
                 bail!("invalid external table type: {:?}", *self)
             }
         }
@@ -107,9 +105,8 @@ impl ExternalCdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
-            // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
-            Self::Unspecified | Self::Citus | Self::Mongodb => {
+            Self::Unspecified | Self::Mongodb => {
                 bail!("invalid external table type: {:?}", *self)
             }
         }
@@ -122,8 +119,6 @@ impl From<ExternalCdcTableType> for PbCdcTableType {
             ExternalCdcTableType::Postgres => Self::Postgres,
             ExternalCdcTableType::Mysql => Self::Mysql,
             ExternalCdcTableType::SqlServer => Self::SqlServer,
-
-            ExternalCdcTableType::Citus => Self::Citus,
             ExternalCdcTableType::Mongodb => Self::Mongodb,
             ExternalCdcTableType::Unspecified | ExternalCdcTableType::Mock => Self::Unspecified,
         }
@@ -137,7 +132,6 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
             PbCdcTableType::Mysql => Self::Mysql,
             PbCdcTableType::SqlServer => Self::SqlServer,
             PbCdcTableType::Mongodb => Self::Mongodb,
-            PbCdcTableType::Citus => Self::Citus,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -164,7 +158,7 @@ impl SchemaTableName {
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            ExternalCdcTableType::Postgres | ExternalCdcTableType::Citus => {
+            ExternalCdcTableType::Postgres => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
             ExternalCdcTableType::SqlServer => {
@@ -533,10 +527,7 @@ impl ExternalTableImpl {
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,
             )),
-            CdcSourceType::Citus
-            | CdcSourceType::Mongodb
-            | CdcSourceType::Oracle
-            | CdcSourceType::Unspecified => {
+            CdcSourceType::Mongodb | CdcSourceType::Oracle | CdcSourceType::Unspecified => {
                 Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into())
             }
         }
@@ -594,7 +585,6 @@ impl ExternalTableImpl {
                 MysqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
             }
             CdcSourceType::Postgres
-            | CdcSourceType::Citus
             | CdcSourceType::Mongodb
             | CdcSourceType::SqlServer
             | CdcSourceType::Oracle
