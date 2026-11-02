@@ -27,8 +27,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::metrics::TrAdderAtomic;
-use risingwave_common::row::{Row, RowExt, repeat_n};
-use risingwave_common::types::{DataType, Datum, DefaultOrd};
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
@@ -926,6 +926,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
             output.row_data_types(&probe_data_types, &build_data_types, &full_data_types),
             chunk_size,
         );
+        // One row of NULLs for each side, to pad the unmatched rows of the other side.
+        let null_probe_row = Self::null_row(&probe_data_types);
+        let null_build_row = Self::null_row(&build_data_types);
         let mut matched = MatchState {
             probe: (output.probe_rows != RowOutput::Omit).then(Vec::new),
             build: (output.build_rows != RowOutput::Omit)
@@ -1033,7 +1036,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             output.probe_rows,
                             &probe_chunk,
                             probe_row_id,
-                            build_data_types.len(),
+                            &null_build_row,
                         )
                     {
                         yield chunk
@@ -1062,7 +1065,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         output.build_rows,
                         &build_side[build_row_id.chunk_id()],
                         build_row_id.row_id(),
-                        probe_data_types.len(),
+                        &null_probe_row,
                     )
                 {
                     yield chunk
@@ -1074,19 +1077,27 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
+    fn null_row(data_types: &[DataType]) -> DataChunk {
+        let columns = data_types
+            .iter()
+            .map(|data_type| {
+                let mut builder = data_type.create_array_builder(1);
+                builder.append_null();
+                builder.finish().into()
+            })
+            .collect();
+        DataChunk::new(columns, 1)
+    }
+
     fn append_probe_row_output(
         chunk_builder: &mut DataChunkBuilder,
         output: RowOutput,
         probe_chunk: &DataChunk,
         probe_row_id: usize,
-        build_column_count: usize,
+        null_build_row: &DataChunk,
     ) -> Option<DataChunk> {
         if output == RowOutput::UnmatchedWithNulls {
-            Self::append_one_row_with_null_build_side(
-                chunk_builder,
-                probe_chunk.row_at_unchecked_vis(probe_row_id),
-                build_column_count,
-            )
+            Self::append_one_row(chunk_builder, probe_chunk, probe_row_id, null_build_row, 0)
         } else {
             Self::append_one_probe_row(chunk_builder, probe_chunk, probe_row_id)
         }
@@ -1097,14 +1108,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
         output: RowOutput,
         build_chunk: &DataChunk,
         build_row_id: usize,
-        probe_column_count: usize,
+        null_probe_row: &DataChunk,
     ) -> Option<DataChunk> {
         if output == RowOutput::UnmatchedWithNulls {
-            Self::append_one_row_with_null_probe_side(
-                chunk_builder,
-                build_chunk.row_at_unchecked_vis(build_row_id),
-                probe_column_count,
-            )
+            Self::append_one_row(chunk_builder, null_probe_row, 0, build_chunk, build_row_id)
         } else {
             Self::append_one_build_row(chunk_builder, build_chunk, build_row_id)
         }
@@ -1149,22 +1156,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_chunk.columns().iter().map(|c| c.as_ref()),
             build_row_id,
         )
-    }
-
-    fn append_one_row_with_null_build_side(
-        chunk_builder: &mut DataChunkBuilder,
-        probe_row_ref: RowRef<'_>,
-        build_column_count: usize,
-    ) -> Option<DataChunk> {
-        chunk_builder.append_one_row(probe_row_ref.chain(repeat_n(Datum::None, build_column_count)))
-    }
-
-    fn append_one_row_with_null_probe_side(
-        chunk_builder: &mut DataChunkBuilder,
-        build_row_ref: RowRef<'_>,
-        probe_column_count: usize,
-    ) -> Option<DataChunk> {
-        chunk_builder.append_one_row(repeat_n(Datum::None, probe_column_count).chain(build_row_ref))
     }
 
     fn find_asof_matched_rows(
