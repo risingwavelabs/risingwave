@@ -18,7 +18,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
-use itertools::Itertools;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
 use xorf::{Filter, Xor8, Xor16};
@@ -574,11 +573,11 @@ impl XorFilterReader {
         let buf = &mut data;
         let xor_filter_seed = buf.get_u64_le();
         let xor_filter_block_length = buf.get_u32_le();
-        // is correct even when there is an extra 0xff byte in the end of buf
-        let len = buf.len() / 2;
-        let xor_filter_fingerprints = (0..len)
-            .map(|_| buf.get_u16_le())
-            .collect_vec()
+        // Decode complete fingerprints in bulk, leaving the one-byte footer out.
+        let xor_filter_fingerprints = buf
+            .chunks_exact(2)
+            .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+            .collect::<Vec<_>>()
             .into_boxed_slice();
         Xor16 {
             seed: xor_filter_seed,
