@@ -320,17 +320,20 @@ pub(crate) fn bounded_load_sources<'a>(
     Ok(sources)
 }
 
-pub(crate) async fn insert_bounded_job(
+pub(crate) async fn insert_bounded_jobs(
     conn: &impl ConnectionTrait,
     job_id: JobId,
-    source_id: SourceId,
+    source_ids: impl IntoIterator<Item = SourceId>,
 ) -> MetaResult<()> {
-    bounded_job::Entity::insert(bounded_job::ActiveModel {
-        job_id: ActiveValue::Set(job_id),
-        source_id: ActiveValue::Set(source_id),
-        status: ActiveValue::Set(BoundedJobStatus::Loading),
-        completed_at: ActiveValue::Set(None),
-    })
+    bounded_job::Entity::insert_many(source_ids.into_iter().map(|source_id| {
+        bounded_job::ActiveModel {
+            job_id: ActiveValue::Set(job_id),
+            source_id: ActiveValue::Set(source_id),
+            status: ActiveValue::Set(BoundedJobStatus::Loading),
+            completed_at: ActiveValue::Set(None),
+        }
+    }))
+    .on_empty_do_nothing()
     .exec(conn)
     .await?;
 
