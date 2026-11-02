@@ -2147,9 +2147,28 @@ impl Parser<'_> {
             parser_err!("CDC source cannot define columns and constraints");
         }
 
-        // row format for nexmark source must be native
-        // default row format for datagen source is native
-        let format_encode = self.parse_format_encode_with_connector(&connector, cdc_source_job)?;
+        let cdc_table_info = if self.parse_keyword(Keyword::FROM) {
+            let source_name = self.parse_object_name()?;
+            self.expect_keyword(Keyword::TABLE)?;
+            let external_table_name = self.parse_literal_string()?;
+            Some(CdcTableInfo {
+                source_name,
+                external_table_name,
+            })
+        } else {
+            None
+        };
+
+        // A CDC table source reuses the schema of an upstream shared CDC source and therefore has
+        // no FORMAT/ENCODE clause. Keep a native placeholder to avoid making the existing AST field
+        // optional; the frontend ignores it for this source kind.
+        let format_encode = if cdc_table_info.is_some() {
+            FormatEncodeOptions::native().into()
+        } else {
+            // row format for nexmark source must be native
+            // default row format for datagen source is native
+            self.parse_format_encode_with_connector(&connector, cdc_source_job)?
+        };
 
         let stmt = CreateSourceStatement {
             temporary,
@@ -2162,6 +2181,7 @@ impl Parser<'_> {
             format_encode,
             source_watermarks,
             include_column_options: include_options,
+            cdc_table_info,
         };
 
         Ok(Statement::CreateSource { stmt })
