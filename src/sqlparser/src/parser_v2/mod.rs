@@ -24,6 +24,7 @@ use crate::tokenizer::{Token, TokenWithLocation};
 mod compact;
 mod data_type;
 mod expr;
+mod expr_core;
 mod impl_;
 mod number;
 
