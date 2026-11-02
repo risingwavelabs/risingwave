@@ -574,9 +574,11 @@ impl XorFilterReader {
         let xor_filter_seed = buf.get_u64_le();
         let xor_filter_block_length = buf.get_u32_le();
         // Decode complete fingerprints in bulk, leaving the one-byte footer out.
-        let xor_filter_fingerprints = buf
-            .chunks_exact(2)
-            .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        let (fingerprints, _) = buf.as_chunks::<2>();
+        let xor_filter_fingerprints = fingerprints
+            .iter()
+            .copied()
+            .map(u16::from_le_bytes)
             .collect::<Vec<_>>()
             .into_boxed_slice();
         Xor16 {
