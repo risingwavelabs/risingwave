@@ -226,6 +226,19 @@ impl Sstable {
             + self.meta.estimated_heap_size()
             + self.filter_reader.estimated_heap_size()
     }
+
+    /// Size of the meta disk-cache value, without cloning metadata or encoding its filter.
+    pub(crate) fn serde_encoded_size(&self) -> usize {
+        // Bincode's default format encodes a struct like a tuple and uses a fixed-width
+        // length prefix for byte vectors. Replacing the bloom payload changes only its
+        // byte count. Keep sizing the other fields through serde as the format evolves.
+        let size = bincode::serialized_size(&(self.id, &self.meta)).unwrap() as usize;
+        if self.skip_bloom_filter_in_serde {
+            size
+        } else {
+            size - self.meta.bloom_filter.len() + self.filter_reader.serialized_len()
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -631,5 +644,52 @@ mod tests {
             s.filter_reader.encode_to_bytes(),
             sstable.filter_reader.encode_to_bytes()
         );
+    }
+
+    #[tokio::test]
+    async fn test_meta_cache_codec_compatibility() {
+        use foyer::Code;
+
+        use crate::hummock::SstableMetaCacheValue;
+
+        fn check(sstable: Sstable) {
+            let legacy_bytes = bincode::serialize(&sstable).unwrap();
+            let legacy: Box<Sstable> = bincode::deserialize(&legacy_bytes).unwrap();
+            let value = SstableMetaCacheValue::from(sstable);
+            assert_eq!(value.estimated_size(), legacy_bytes.len());
+            let mut bytes = Vec::new();
+            value.encode(&mut bytes).unwrap();
+            assert_eq!(bytes, legacy_bytes);
+            // Existing disk entries remain readable, and new entries retain the old format.
+            let decoded = SstableMetaCacheValue::decode(&mut &legacy_bytes[..]).unwrap();
+            let decoded_legacy: Box<Sstable> = bincode::deserialize(&bytes).unwrap();
+            for sstable in [&*decoded, &*decoded_legacy] {
+                assert_eq!(sstable.id, legacy.id);
+                assert_eq!(sstable.meta, legacy.meta);
+                assert_eq!(
+                    sstable.filter_reader.encode_to_bytes(),
+                    legacy.filter_reader.encode_to_bytes()
+                );
+            }
+        }
+
+        let (_, meta) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            (0..100).map(|x| (iterator_test_key_of(x), HummockValue::put(vec![42]))),
+        )
+        .await;
+        for skip_filter in [false, true] {
+            check(Sstable::new(42.into(), meta.clone(), skip_filter));
+            let mut sstable = Sstable::new(42.into(), meta.clone(), skip_filter);
+            // Public metadata can contain a replacement bloom payload. Serialization only
+            // uses it when skip_filter is true; otherwise it encodes the decoded reader.
+            sstable.meta.bloom_filter = vec![255];
+            check(sstable);
+
+            let mut empty_meta = meta.clone();
+            empty_meta.bloom_filter.clear();
+            // An empty reader encodes a canonical header/footer, not zero bytes.
+            check(Sstable::new(42.into(), empty_meta, skip_filter));
+        }
     }
 }
