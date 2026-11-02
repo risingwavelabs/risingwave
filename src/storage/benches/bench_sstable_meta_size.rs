@@ -25,6 +25,8 @@ use risingwave_storage::hummock::SstableMetaCacheValue;
 use risingwave_storage::hummock::sstable::{BlockedXor16FilterBuilder, Sstable};
 use sstable_meta_fixture::sstable_meta;
 
+risingwave_common::enable_jemalloc!();
+
 fn bench_sstable_meta_size(c: &mut Criterion) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
