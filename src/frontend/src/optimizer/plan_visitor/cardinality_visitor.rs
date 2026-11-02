@@ -17,6 +17,7 @@ use std::ops::{Mul, Sub};
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor, PlanVisitor};
@@ -98,7 +99,7 @@ impl CardinalityVisitor {
         if let (Some(lhs_fields), Some(rhs_fields)) = (Self::row_fields(lhs), Self::row_fields(rhs))
             && lhs_fields.len() == rhs_fields.len()
         {
-            for (lhs, rhs) in lhs_fields.iter().zip(rhs_fields) {
+            for (lhs, rhs) in lhs_fields.iter().zip_eq_fast(rhs_fields) {
                 Self::collect_equality_fixed_columns(lhs, rhs, fixed);
             }
             return;
