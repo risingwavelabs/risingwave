@@ -322,3 +322,67 @@ SELECT * FROM t_in WHERE a IN (2, 5, 8) EXCEPT SELECT * FROM mv_in;
 
 statement ok
 DROP TABLE t_in cascade;
+
+# ---- Test 12: IS NULL branches keep the NULL rows ----
+
+statement ok
+CREATE TABLE t_is_null(a INT, b INT, c INT, d INT, PRIMARY KEY(a, b, c));
+
+statement ok
+INSERT INTO t_is_null VALUES (NULL, 1, 1, 1), (NULL, 2, 5, -1), (NULL, 3, 3, -1), (1, 1, 1, 0), (2, 1, 1, 0);
+
+statement ok
+flush;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_is_null AS SELECT * FROM t_is_null WHERE a IS NULL OR a = 1;
+
+# The third arm is contained in the first one, so only eq ranges are left.
+statement ok
+CREATE MATERIALIZED VIEW mv_is_null_merged AS SELECT * FROM t_is_null WHERE a IS NULL OR a = 1 OR (a IS NULL AND b = 2 AND c > 3);
+
+query IIII rowsort
+SELECT * FROM mv_is_null;
+----
+1 1 1 0
+NULL 1 1 1
+NULL 2 5 -1
+NULL 3 3 -1
+
+query IIII rowsort
+SELECT * FROM mv_is_null_merged;
+----
+1 1 1 0
+NULL 1 1 1
+NULL 2 5 -1
+NULL 3 3 -1
+
+statement ok
+INSERT INTO t_is_null VALUES (NULL, 4, 4, 4), (1, 2, 2, 2), (3, 1, 1, 1);
+
+statement ok
+DELETE FROM t_is_null WHERE a IS NULL AND b = 1;
+
+statement ok
+flush;
+
+query IIII rowsort
+SELECT * FROM mv_is_null;
+----
+1 1 1 0
+1 2 2 2
+NULL 2 5 -1
+NULL 3 3 -1
+NULL 4 4 4
+
+query IIII rowsort
+SELECT * FROM mv_is_null_merged;
+----
+1 1 1 0
+1 2 2 2
+NULL 2 5 -1
+NULL 3 3 -1
+NULL 4 4 4
+
+statement ok
+DROP TABLE t_is_null cascade;
