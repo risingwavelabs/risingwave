@@ -14,6 +14,37 @@ INSERT INTO correlated_aggregate_outer VALUES (1), (1), (2), (3), (NULL);
 statement ok
 INSERT INTO correlated_aggregate_facts VALUES (1, 10), (1, 20), (2, 5), (NULL, 100);
 
+# A scalar aggregate produces one row even when the correlated input is empty.
+query I rowsort
+SELECT s.id FROM correlated_aggregate_outer s
+WHERE EXISTS (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id);
+----
+1
+1
+2
+3
+NULL
+
+query I rowsort
+SELECT s.id FROM correlated_aggregate_outer s
+WHERE NOT EXISTS (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id);
+----
+
+# Approximate distinct count is zero, not NULL, on empty input.
+query IB rowsort
+SELECT s.id, a.is_empty
+FROM correlated_aggregate_outer s,
+LATERAL (
+  SELECT approx_count_distinct(f.amount) = 0 AS is_empty
+  FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a;
+----
+1 f
+1 f
+2 f
+3 t
+NULL t
+
 query II rowsort
 SELECT s.id, a.total
 FROM correlated_aggregate_outer s,
