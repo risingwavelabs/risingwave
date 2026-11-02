@@ -15,6 +15,8 @@
 mod chunked_data;
 mod distributed_lookup_join;
 pub mod hash_join;
+#[cfg(test)]
+mod hash_join_differential_test;
 pub mod local_lookup_join;
 mod lookup_join_base;
 pub mod nested_loop_join;
