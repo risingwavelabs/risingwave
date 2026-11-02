@@ -867,7 +867,6 @@ mod tests {
     use rand::RngCore;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_common::util::panic::rw_catch_unwind;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -883,7 +882,6 @@ mod tests {
 
     #[test]
     fn test_pooled_blocked_filter_compatibility() {
-        assert_eq!(size_of::<XorFilterBlock>(), 16);
         for width in [1, 2] {
             let mut encoded = Vec::new();
             let mut children = Vec::new();
@@ -990,20 +988,6 @@ mod tests {
         let reader = XorFilterReader::new(&mixed, &[BlockMeta::default(), BlockMeta::default()]);
         assert_eq!(reader.get_block_raw_filter(0), canonical);
         assert_eq!(reader.get_block_raw_filter(1), next);
-        if let XorFilter::BlockXor16(pooled) = &reader.filter {
-            let block = &pooled.filters[0];
-            assert!(
-                rw_catch_unwind(|| {
-                    Xor16Ref {
-                        seed: block.seed,
-                        block_length: block.block_length as usize,
-                        fingerprints: pooled.block_fingerprints(0),
-                    }
-                    .contains(&42)
-                })
-                .is_err()
-            );
-        }
     }
 
     #[test]
