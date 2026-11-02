@@ -71,7 +71,7 @@ use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::Instrument;
 
-use crate::barrier::bounded_progress::{bounded_load_sources, insert_bounded_job};
+use crate::barrier::bounded_progress::{bounded_load_sources, insert_bounded_jobs};
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
@@ -2090,9 +2090,12 @@ impl DdlController {
                 .map(|fragment| &fragment.nodes),
         )?;
 
-        for &source_id in &bounded_load_sources {
-            insert_bounded_job(&self.env.meta_store_ref().conn, stream_job.id(), source_id).await?;
-        }
+        insert_bounded_jobs(
+            &self.env.meta_store_ref().conn,
+            stream_job.id(),
+            bounded_load_sources.iter().copied(),
+        )
+        .await?;
 
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
