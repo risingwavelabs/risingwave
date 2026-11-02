@@ -371,20 +371,9 @@ pub(super) struct BarrierInfo {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
     pub kind: BarrierKind,
-    pub barrier_interval_ms: u32,
 }
 
 impl BarrierInfo {
-    pub(super) fn new_initial(prev_epoch: TracedEpoch, barrier_interval_ms: u32) -> Self {
-        let curr_epoch = prev_epoch.next();
-        Self {
-            prev_epoch,
-            curr_epoch,
-            kind: BarrierKind::Initial,
-            barrier_interval_ms,
-        }
-    }
-
     pub(super) fn prev_epoch(&self) -> u64 {
         self.prev_epoch.value().0
     }
@@ -444,11 +433,15 @@ impl InflightStreamingJobInfo {
     pub fn tracking_progress_actor_ids(
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Vec<(ActorId, BackfillUpstreamType)> {
-        StreamJobFragments::tracking_progress_actor_ids_impl(
-            fragment_infos
-                .values()
-                .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
-        )
+        StreamJobFragments::tracking_progress_actor_ids_impl(fragment_infos.values().map(
+            |fragment| {
+                (
+                    fragment.fragment_type_mask,
+                    &fragment.nodes,
+                    fragment.actors.keys().copied(),
+                )
+            },
+        ))
     }
 }
 
