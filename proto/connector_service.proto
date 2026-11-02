@@ -181,7 +181,8 @@ enum SourceType {
   UNSPECIFIED = 0;
   MYSQL = 1;
   POSTGRES = 2;
-  CITUS = 3;
+  reserved 3;
+  reserved "CITUS"; // removed connector
   MONGODB = 4;
   SQL_SERVER = 5;
   ORACLE = 6;

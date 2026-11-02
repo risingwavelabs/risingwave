@@ -7,7 +7,7 @@
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf tmux cyrus-sasl lld openssl@3 libomp parallel
+brew install postgresql cmake protobuf tmux cyrus-sasl lld openssl@3 libomp parallel flock
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 

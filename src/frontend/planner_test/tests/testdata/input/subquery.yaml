@@ -281,6 +281,73 @@
     select *, (select 1 from (select 1 from t2) where t1.i = 1) from t1;
   expected_outputs:
     - optimizer_error
+- name: a range predicate on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk > t1.a) from t1;
+  expected_outputs:
+    - optimizer_error
+- name: a disjunction on the primary key does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1 or pk = 2);
+  expected_outputs:
+    - batch_plan
+- name: an equality between the primary key and another column does not bound a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = v);
+  expected_outputs:
+    - batch_plan
+- name: a correlated equality on the primary key bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where t2.pk = t1.a) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: an equality on a primary key cast to decimal bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk = 1.5);
+  expected_outputs:
+    - batch_plan
+- name: an equality on a primary key widened to bigint bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a BIGINT);
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select a, (select v from t2 where pk::bigint = t1.a) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a row equality on every primary key column bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t1(a INT, b INT);
+    CREATE TABLE t2(a INT, b INT, v INT, PRIMARY KEY(a, b));
+    select t1.a, (select v from t2 where (t2.a, t2.b) = (t1.a, t1.b)) as v from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a row equality with a constant on every primary key column bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(a INT, b INT, v INT, PRIMARY KEY(a, b));
+    select (select v from t2 where (a, b) = (1, 2));
+  expected_outputs:
+    - batch_plan
+- name: a single-item IN list on the primary key bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk INT PRIMARY KEY, v INT);
+    select (select v from t2 where pk in (2));
+  expected_outputs:
+    - batch_plan
+- name: a boolean primary key used as a predicate bounds a scalar subquery to one row
+  sql: |
+    CREATE TABLE t2(pk BOOLEAN PRIMARY KEY, v INT);
+    select (select v from t2 where pk), (select v from t2 where not pk);
+  expected_outputs:
+    - batch_plan
 
 - name: test grouping sets subquery 1
   sql: |

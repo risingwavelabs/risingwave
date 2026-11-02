@@ -410,6 +410,26 @@ impl MaterializeCache {
         }
     }
 
+    /// Write the rows of a chunk applied to `table` without going through [`Self::handle_new`].
+    pub fn write_through<S: StateStore, SD: ValueRowSerde>(
+        &mut self,
+        chunk: &StreamChunk,
+        table: &StateTableInner<S, SD>,
+    ) {
+        for (op, row) in chunk.rows() {
+            let key = row
+                .project(table.pk_indices())
+                .memcmp_serialize(table.pk_serde());
+            let value = match op {
+                Op::Insert | Op::UpdateInsert => Some(CompactedRow {
+                    row: Bytes::from(self.row_serde.serializer.serialize(row)),
+                }),
+                Op::Delete | Op::UpdateDelete => None,
+            };
+            self.lru_cache.put(key, value);
+        }
+    }
+
     /// Evict the LRU cache entries that are lower than the watermark.
     pub fn evict(&mut self) {
         self.lru_cache.evict()
@@ -469,7 +489,7 @@ fn versions_are_newer_or_equal(
 }
 
 /// TOAST column handling for CDC tables with TOAST columns.
-mod toast {
+pub(super) mod toast {
     use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DEBEZIUM_UNAVAILABLE_VECTOR_ELEM};
 
     use super::*;
@@ -534,6 +554,15 @@ mod toast {
             }
             _ => false,
         }
+    }
+
+    /// Whether any row in the chunk carries an unchanged-TOAST placeholder in a TOAST-able column.
+    pub fn chunk_has_unavailable_value(chunk: &StreamChunk, toastable_indices: &[usize]) -> bool {
+        chunk.rows().any(|(_, row)| {
+            toastable_indices
+                .iter()
+                .any(|&idx| is_debezium_unavailable_value(&row.datum_at(idx)))
+        })
     }
 
     /// Fix TOAST columns by replacing unavailable values with old row values.

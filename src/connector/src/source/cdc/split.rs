@@ -84,8 +84,6 @@ pub struct MysqlCdcSplit {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct PostgresCdcSplit {
     pub inner: CdcSplitBase,
-    // the hostname and port of a node that holding shard tables (for Citus)
-    pub server_addr: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
@@ -166,16 +164,13 @@ impl CdcSplitTrait for MysqlCdcSplit {
 }
 
 impl PostgresCdcSplit {
-    pub fn new(split_id: u32, start_offset: Option<String>, server_addr: Option<String>) -> Self {
+    pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
         let split = CdcSplitBase {
             split_id,
             start_offset,
             snapshot_done: false,
         };
-        Self {
-            inner: split,
-            server_addr,
-        }
+        Self { inner: split }
     }
 
     /// Extract PostgreSQL LSN value from the offset JSON string.
@@ -412,7 +407,6 @@ pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
 
     #[serde(rename = "pg_split")] // backward compatibility
     pub postgres_split: Option<PostgresCdcSplit>,
-    pub citus_split: Option<PostgresCdcSplit>,
     pub mongodb_split: Option<MongodbCdcSplit>,
     pub sql_server_split: Option<SqlServerCdcSplit>,
     pub oracle_split: Option<OracleCdcSplit>,
@@ -447,7 +441,6 @@ macro_rules! dispatch_cdc_split {
         dispatch_cdc_split_inner!($dbz_split, $as_type, {
             {Mysql, mysql_split},
             {Postgres, postgres_split},
-            {Citus, citus_split},
             {Mongodb, mongodb_split},
             {SqlServer, sql_server_split},
             {Oracle, oracle_split}
@@ -474,11 +467,10 @@ impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
 }
 
 impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
-    pub fn new(split_id: u32, start_offset: Option<String>, server_addr: Option<String>) -> Self {
+    pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
         let mut ret = Self {
             mysql_split: None,
             postgres_split: None,
-            citus_split: None,
             mongodb_split: None,
             sql_server_split: None,
             oracle_split: None,
@@ -490,12 +482,8 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
                 ret.mysql_split = Some(split);
             }
             CdcSourceType::Postgres => {
-                let split = PostgresCdcSplit::new(split_id, start_offset, None);
+                let split = PostgresCdcSplit::new(split_id, start_offset);
                 ret.postgres_split = Some(split);
-            }
-            CdcSourceType::Citus => {
-                let split = PostgresCdcSplit::new(split_id, start_offset, server_addr);
-                ret.citus_split = Some(split);
             }
             CdcSourceType::Mongodb => {
                 let split = MongodbCdcSplit::new(split_id, start_offset);
@@ -690,7 +678,7 @@ mod tests {
 
     #[test]
     fn test_postgres_offset_monotonic_guard_rejects_backward_lsn() {
-        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
+        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)));
 
         // Push a backward LSN -- must be rejected, current offset kept.
         split
@@ -701,7 +689,7 @@ mod tests {
 
     #[test]
     fn test_postgres_offset_monotonic_guard_allows_forward_lsn() {
-        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
+        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)));
 
         split.update_offset(pg_streaming_offset_json(250)).unwrap();
         assert_eq!(split.pg_lsn(), Some(250));
@@ -709,7 +697,7 @@ mod tests {
 
     #[test]
     fn test_postgres_offset_monotonic_guard_allows_equal_lsn() {
-        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
+        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)));
 
         // Equal is allowed (no regression).
         split.update_offset(pg_streaming_offset_json(200)).unwrap();
@@ -728,7 +716,7 @@ mod tests {
             },
             "isHeartbeat": false
         }"#;
-        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
+        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)));
 
         // Snapshot / incomplete offsets do not have a comparable streaming
         // `lsn_proc`, so they pass through even when the plain `lsn` is lower.
@@ -742,7 +730,7 @@ mod tests {
         // the field validateLogPosition checks, regression here is the
         // catastrophic case.
         let initial = pg_streaming_offset_json_full(200, 200, 200);
-        let mut split = PostgresCdcSplit::new(1, Some(initial), None);
+        let mut split = PostgresCdcSplit::new(1, Some(initial));
 
         // lsn_commit 200 -> 150, but lsn / lsn_proc stay at 200.
         let new = pg_streaming_offset_json_full(200, 200, 150);
@@ -761,7 +749,7 @@ mod tests {
         // field dbz uses as the startStreaming resume position, and
         // WalPositionLocator's dedup key on restart.
         let initial = pg_streaming_offset_json_full(200, 200, 200);
-        let mut split = PostgresCdcSplit::new(1, Some(initial), None);
+        let mut split = PostgresCdcSplit::new(1, Some(initial));
 
         // lsn_proc 200 -> 150, but lsn / lsn_commit stay at 200.
         let new = pg_streaming_offset_json_full(200, 150, 200);
@@ -783,7 +771,7 @@ mod tests {
         // `lsn_commit` first, then `lsn_proc`. Since the commit LSN
         // advances, this update is not a regression.
         let initial = pg_streaming_offset_json_full(33_967_592, 33_967_592, 33_893_392);
-        let mut split = PostgresCdcSplit::new(1, Some(initial), None);
+        let mut split = PostgresCdcSplit::new(1, Some(initial));
 
         let new = pg_streaming_offset_json_full(33_918_336, 33_918_336, 33_969_832);
         split.update_offset(new).unwrap();
