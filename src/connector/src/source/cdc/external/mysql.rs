@@ -21,8 +21,7 @@ use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
-use mysql_common::params::Params;
-use mysql_common::value::Value;
+use mysql_async::{Params, Value};
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     CDC_OFFSET_COLUMN_NAME, CdcKeyComparison, ColumnDesc, ColumnId, Field, Schema,

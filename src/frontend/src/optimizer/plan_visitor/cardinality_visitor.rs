@@ -88,7 +88,8 @@ impl LogicalPlanVisitor for CardinalityVisitor {
         let input = self.visit(plan.input());
 
         if plan.group_key().is_empty() {
-            input.min(1)
+            // A simple agg always yields exactly one row, even over an empty input.
+            1.into()
         } else {
             input.min(1..)
         }

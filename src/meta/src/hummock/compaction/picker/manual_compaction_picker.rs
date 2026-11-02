@@ -82,12 +82,16 @@ impl ManualCompactionPicker {
             }
         };
         // Construct input.
+        // The interval may include sublevels that did not match the option filter.
         for level in l0
             .sub_levels
             .iter()
             .skip(start_idx as usize)
             .take((end_idx - start_idx + 1) as usize)
         {
+            if level_handlers[0].is_level_pending_compact(level) {
+                return None;
+            }
             input_levels.push(InputLevel {
                 level_idx: 0,
                 level_type: level.level_type,
@@ -136,6 +140,10 @@ impl ManualCompactionPicker {
         }
         // Construct input.
         for idx in 0..=max_sub_level_idx {
+            // The prefix may include sublevels that did not match the option filter.
+            if level_handlers[0].is_level_pending_compact(&l0.sub_levels[idx]) {
+                return None;
+            }
             for table in &l0.sub_levels[idx].table_infos {
                 info.update(&table.key_range);
             }
