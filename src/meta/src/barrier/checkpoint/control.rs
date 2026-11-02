@@ -1538,6 +1538,7 @@ mod tests {
                             subscribers: HashMap::new(),
                             status: CreateStreamingJobStatus::Created,
                             cdc_table_backfill_tracker: None,
+                            bounded_load_tracker: None,
                         });
                 }
                 if resetting {
