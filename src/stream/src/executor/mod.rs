@@ -42,6 +42,7 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::SplitImpl;
+use risingwave_connector::source::ingest_mode::INVALID_LOAD_ATTEMPT;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::data::PbEpoch;
@@ -378,6 +379,7 @@ pub enum Mutation {
     },
     Load {
         source_id: SourceId,
+        attempt: u64,
         action: LoadAction,
     },
     LoadFinish {
@@ -1024,10 +1026,15 @@ impl Mutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
-            Mutation::Load { source_id, action } => {
+            Mutation::Load {
+                source_id,
+                attempt,
+                action,
+            } => {
                 PbMutation::Load(risingwave_pb::stream_plan::LoadMutation {
                     load_id: Some(risingwave_pb::stream_plan::LoadId {
                         source_id: *source_id,
+                        attempt: *attempt,
                     }),
                     action: Some(match action {
                         LoadAction::Start => PbLoadAction::Start(Default::default()),
@@ -1216,13 +1223,26 @@ impl Mutation {
                         .collect(),
                 }
             }
-            PbMutation::Load(load) => Mutation::Load {
-                source_id: load.load_id.as_ref().unwrap().source_id,
-                action: match load.action.as_ref().unwrap() {
-                    PbLoadAction::Start(_) => LoadAction::Start,
-                    PbLoadAction::ListFinish(_) => LoadAction::ListFinish,
-                },
-            },
+            PbMutation::Load(load) => {
+                let load_id = load.load_id.as_ref().unwrap();
+
+                if load_id.attempt == INVALID_LOAD_ATTEMPT {
+                    return Err(anyhow!(
+                        "load mutation of source {} has no attempt",
+                        load_id.source_id
+                    )
+                    .into());
+                }
+
+                Mutation::Load {
+                    source_id: load_id.source_id,
+                    attempt: load_id.attempt,
+                    action: match load.action.as_ref().unwrap() {
+                        PbLoadAction::Start(_) => LoadAction::Start,
+                        PbLoadAction::ListFinish(_) => LoadAction::ListFinish,
+                    },
+                }
+            }
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
                 associated_source_id: load_finish.associated_source_id,
             },

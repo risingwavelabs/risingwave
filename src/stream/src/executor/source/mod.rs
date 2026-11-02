@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{SerialArray, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_common_rate_limit::RateLimiter;
@@ -130,6 +130,17 @@ pub fn prune_additional_cols(
             .filter(|&idx| !to_prune_indices.contains(&idx) || column_descs[idx].is_visible())
             .collect_vec(),
     )
+}
+
+/// Inserts a null `_row_id` column at `row_id_idx`, for `RowIdGen` downstream to fill.
+pub fn pad_row_id(chunk: StreamChunk, row_id_idx: usize) -> StreamChunk {
+    let cap = chunk.data_chunk().capacity();
+    let (ops, mut columns, vis) = chunk.into_inner();
+
+    let row_id_col = SerialArray::from_iter(std::iter::repeat_n(None, cap));
+    columns.insert(row_id_idx, Arc::new(row_id_col.into()));
+
+    StreamChunk::with_visibility(ops, columns, vis)
 }
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]

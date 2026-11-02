@@ -20,6 +20,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::{JobId, PartialGraphId, SinkId};
+use risingwave_connector::source::ingest_mode::BOUNDED_LOAD_ATTEMPT;
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
@@ -328,10 +329,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 database_id,
                 source_id,
             } => {
-                if let Err(error) = self
-                    .barrier_scheduler
-                    .run_command_no_wait(database_id, Command::ListFinish { source_id })
-                {
+                if let Err(error) = self.barrier_scheduler.run_command_no_wait(
+                    database_id,
+                    Command::ListFinish {
+                        source_id,
+                        attempt: BOUNDED_LOAD_ATTEMPT,
+                    },
+                ) {
                     tracing::warn!(
                         %database_id,
                         %source_id,
@@ -690,6 +694,7 @@ impl PostCollectCommand {
                 associated_source_id,
                 staging_table_id,
                 trigger_time,
+                attempt,
                 actors,
             } => {
                 barrier_manager_context
@@ -700,6 +705,7 @@ impl PostCollectCommand {
                         associated_source_id,
                         staging_table_id,
                         trigger_time,
+                        attempt,
                         actors,
                     )
                     .await?;

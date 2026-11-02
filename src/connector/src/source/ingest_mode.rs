@@ -23,6 +23,17 @@ use risingwave_pb::plan_common::source_ingest_mode::{
 use crate::error::ConnectorResult;
 use crate::source::iceberg::IcebergBoundedScan;
 
+pub const INVALID_LOAD_ATTEMPT: u64 = 0;
+
+/// Attempts decide whether a load resumes or resets.
+///
+/// Each full reload cycle uses the epoch of the barrier that starts it, so every
+/// refresh gets a new attempt and starts from scratch.
+///
+/// Since the input of a bounded table is fixed, it always uses the same attempt
+/// to resume from its last progress.
+pub const BOUNDED_LOAD_ATTEMPT: u64 = 1;
+
 /// Decoded from [`PbSourceIngestMode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum IngestMode {

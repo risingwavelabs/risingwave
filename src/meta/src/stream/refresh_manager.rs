@@ -273,6 +273,7 @@ impl GlobalRefreshManager {
         associated_source_id: SourceId,
         staging_table_id: TableId,
         trigger_time: NaiveDateTime,
+        attempt: u64,
         actors: RefreshCycleActors,
     ) -> MetaResult<()> {
         // Installed before the row moves, so the row never says `Refreshing` without it.
@@ -283,6 +284,7 @@ impl GlobalRefreshManager {
                 associated_source_id,
                 staging_table_id,
                 trigger_time,
+                attempt,
                 actors,
             ),
         );
@@ -346,15 +348,17 @@ impl GlobalRefreshManager {
         if !tracker.stage_mut(stage).report(stage, &actors)? {
             return Ok(());
         }
-        let (database_id, associated_source_id, staging_table_id, trigger_time) = (
+        let (database_id, associated_source_id, staging_table_id, trigger_time, attempt) = (
             tracker.database_id,
             tracker.associated_source_id,
             tracker.staging_table_id,
             tracker.trigger_time,
+            tracker.attempt,
         );
         let command = match stage {
             RefreshStage::List => Command::ListFinish {
                 source_id: associated_source_id,
+                attempt,
             },
             RefreshStage::Fetch => Command::LoadFinish {
                 table_id,
@@ -690,6 +694,7 @@ struct CycleTracker {
     associated_source_id: SourceId,
     staging_table_id: TableId,
     trigger_time: NaiveDateTime,
+    attempt: u64,
     list: StageProgress,
     fetch: StageProgress,
     mview: StageProgress,
@@ -702,6 +707,7 @@ impl CycleTracker {
         associated_source_id: SourceId,
         staging_table_id: TableId,
         trigger_time: NaiveDateTime,
+        attempt: u64,
         actors: RefreshCycleActors,
     ) -> Self {
         Self {
@@ -709,6 +715,7 @@ impl CycleTracker {
             associated_source_id,
             staging_table_id,
             trigger_time,
+            attempt,
             list: StageProgress::new(actors.list),
             fetch: StageProgress::new(actors.fetch),
             mview: StageProgress::new(actors.mview),
