@@ -293,7 +293,11 @@ pub struct MetaOpts {
 
     pub compaction_group_merge_dimension_threshold: f64,
 
-    // The private key for the secret store, used when the secret is stored in the meta.
+    /// The private key for the secret store, used when the secret is stored in the meta.
+    ///
+    /// Never serialize this: `MetaOpts` is dumped as JSON into the `META_NODE_START` event log
+    /// on every meta startup
+    #[serde(skip)]
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
     pub temp_secret_file_dir: String,
@@ -621,5 +625,22 @@ impl MetaSrvEnv {
         )
         .await
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_secret_store_private_key_is_not_serialized() {
+        let opts = MetaOpts::test(false);
+        assert!(opts.secret_store_private_key.is_some());
+
+        let json = serde_json::to_string(&opts).unwrap();
+        assert!(
+            !json.contains("secret_store_private_key"),
+            "secret_store_private_key must not be serialized into MetaOpts JSON"
+        );
     }
 }
