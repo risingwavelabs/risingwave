@@ -485,6 +485,11 @@ impl Condition {
                             all_added = false;
                             break;
                         }
+                        // A NULL field has no position in the pk, so the range stops before it.
+                        if right_expr.is_none() {
+                            all_added = false;
+                            break;
+                        }
                         match order_type {
                             Some(o) => {
                                 if o != column_order.order_type {

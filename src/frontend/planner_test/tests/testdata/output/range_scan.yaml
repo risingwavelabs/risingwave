@@ -677,3 +677,11 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: t, columns: [t.a], scan_ranges: [t.a >= Int16(-32768) AND t.a <= Int16(32767)], distribution: UpstreamHashShard(t.a) }
+- name: A NULL field in a row must not produce an empty range between overlapping arms.
+  sql: |
+    create table t(a int primary key, b int, c int);
+    select * from t where a is null or (a, b) > (null::int, 0) or (a is null and c > 0);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: ((IsNull(t.a) OR (Row(t.a, t.b) > '(,0)':Struct(Int32, Int32))) OR (IsNull(t.a) AND (t.c > 0:Int32))) }
+      └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: UpstreamHashShard(t.a) }

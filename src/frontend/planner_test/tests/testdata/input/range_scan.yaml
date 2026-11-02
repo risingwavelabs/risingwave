@@ -561,3 +561,9 @@
     select * from t where a between -32768 and 32767;
   expected_outputs:
     - batch_plan
+- name: A NULL field in a row must not produce an empty range between overlapping arms.
+  sql: |
+    create table t(a int primary key, b int, c int);
+    select * from t where a is null or (a, b) > (null::int, 0) or (a is null and c > 0);
+  expected_outputs:
+    - batch_plan

@@ -48,3 +48,18 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (Row(t.v1, t.v2) > '(1,2)':Struct(Int32, Int32)) }
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], scan_ranges: [t.v1 >= Int32(1)], distribution: UpstreamHashShard(t.v1) }
+- name: A NULL field in the row stops the scan range before it.
+  sql: |
+    create table t(v1 int, v2 int, primary key(v1, v2));
+    select * from t where (v1,v2) > (1,null::int);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (Row(t.v1, t.v2) > '(1,)':Struct(Int32, Int32)) }
+      └─BatchScan { table: t, columns: [t.v1, t.v2], scan_ranges: [t.v1 >= Int32(1)], distribution: UpstreamHashShard(t.v1, t.v2) }
+- sql: |
+    create table t(v1 int, v2 int, primary key(v1, v2));
+    select * from t where (v1,v2) > (null::int,1);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (Row(t.v1, t.v2) > '(,1)':Struct(Int32, Int32)) }
+      └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: UpstreamHashShard(t.v1, t.v2) }
