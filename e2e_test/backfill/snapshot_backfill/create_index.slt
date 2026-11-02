@@ -1,0 +1,116 @@
+# Test that `CREATE INDEX` uses snapshot backfill when
+# `streaming_use_snapshot_backfill` is enabled, and that the resulting
+# index is usable and consistent with the base table.
+
+statement ok
+set streaming_use_snapshot_backfill = true;
+
+statement ok
+create table t_idx_sb(a int primary key, b int, c varchar);
+
+statement ok
+insert into t_idx_sb select i, i % 100, 'v' || i from generate_series(1, 100000) as s(i);
+
+statement ok
+flush;
+
+# ---- Foreground creation ----
+
+statement ok
+create index idx_sb_b on t_idx_sb(b);
+
+query I
+select count(*) from rw_catalog.rw_fragments f
+join rw_catalog.rw_indexes i on f.table_id = i.id
+where i.name = 'idx_sb_b' and f.flags @> ARRAY['SNAPSHOT_BACKFILL_STREAM_SCAN'];
+----
+1
+
+query I
+select count(*) from t_idx_sb where b = 42;
+----
+1000
+
+query T
+select a, b from t_idx_sb where b = 7 except select a, b from idx_sb_b where b = 7;
+----
+
+# Index keeps up with upstream changes after backfill
+statement ok
+insert into t_idx_sb values (100001, 42, 'new');
+
+statement ok
+flush;
+
+query I
+select count(*) from idx_sb_b where b = 42;
+----
+1001
+
+statement ok
+delete from t_idx_sb where a = 100001;
+
+statement ok
+flush;
+
+query I
+select count(*) from idx_sb_b where b = 42;
+----
+1000
+
+# ---- Background creation with rate limit, check rw_ddl_progress ----
+
+statement ok
+set background_ddl = true;
+
+statement ok
+set backfill_rate_limit = 10000;
+
+statement ok
+create index idx_sb_c on t_idx_sb(c);
+
+query T retry 6 backoff 1s
+select backfill_type from rw_catalog.rw_ddl_progress where ddl_statement like '%idx_sb_c%';
+----
+SNAPSHOT_BACKFILL
+
+statement ok
+wait;
+
+statement ok
+set background_ddl = false;
+
+statement ok
+set backfill_rate_limit = default;
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+0
+
+query I
+select count(*) from idx_sb_c;
+----
+100000
+
+query T
+select a from t_idx_sb where c = 'v12345' except select a from idx_sb_c where c = 'v12345';
+----
+
+# ---- Disabled: fall back to arrangement backfill ----
+
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+statement ok
+create index idx_sb_a on t_idx_sb(a, b);
+
+query I
+select count(*) from rw_catalog.rw_fragments f
+join rw_catalog.rw_indexes i on f.table_id = i.id
+where i.name = 'idx_sb_a' and f.flags @> ARRAY['SNAPSHOT_BACKFILL_STREAM_SCAN'];
+----
+0
+
+statement ok
+drop table t_idx_sb cascade;
