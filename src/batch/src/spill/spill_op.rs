@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::BuildHasher;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
@@ -29,12 +28,10 @@ use risingwave_pb::Message;
 use risingwave_pb::data::DataChunk as PbDataChunk;
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
-use twox_hash::XxHash64;
 
 use crate::error::{BatchError, Result};
 use crate::monitor::BatchSpillMetrics;
 
-pub const DEFAULT_SPILL_PARTITION_NUM: usize = 20;
 const RW_MANAGED_SPILL_DIR: &str = "rw_batch_spill/";
 const DEFAULT_IO_BUFFER_SIZE: usize = 256 * 1024;
 const DEFAULT_IO_CONCURRENT_TASK: usize = 8;
@@ -107,6 +104,23 @@ impl SpillOp {
             .await?)
     }
 
+    /// Appends `chunk` to a spill file written by `writer`. See [`Self::read_stream`] for the
+    /// file format.
+    pub async fn write_chunk(
+        writer: &mut opendal::Writer,
+        chunk: DataChunk,
+        spill_metrics: &BatchSpillMetrics,
+    ) -> Result<()> {
+        let buf = Message::encode_to_vec(&chunk.to_protobuf());
+        let len_bytes = (buf.len() as u32).to_le_bytes();
+        spill_metrics
+            .batch_spill_write_bytes
+            .inc_by((buf.len() + len_bytes.len()) as u64);
+        writer.write(len_bytes.to_vec()).await?;
+        writer.write(buf).await?;
+        Ok(())
+    }
+
     /// spill file content will look like the below.
     ///
     /// ```text
@@ -167,16 +181,3 @@ impl Deref for SpillOp {
         &self.op
     }
 }
-
-#[derive(Default, Clone, Copy)]
-pub struct SpillBuildHasher(pub u64);
-
-impl BuildHasher for SpillBuildHasher {
-    type Hasher = XxHash64;
-
-    fn build_hasher(&self) -> Self::Hasher {
-        XxHash64::with_seed(self.0)
-    }
-}
-
-pub const SPILL_AT_LEAST_MEMORY: u64 = 1024 * 1024;

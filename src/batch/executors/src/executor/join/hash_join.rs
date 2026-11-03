@@ -17,7 +17,6 @@ use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use prometheus::core::Atomic;
@@ -32,9 +31,7 @@ use risingwave_common::types::{DataType, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
-use risingwave_pb::Message;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::data::DataChunk as PbDataChunk;
 
 use super::{AsOfDesc, AsOfInequalityType, ChunkedData, JoinType, RowId};
 use crate::error::{BatchError, Result};
@@ -44,10 +41,9 @@ use crate::executor::{
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
+use crate::spill::partition::{Partitioning, SpillContext};
+use crate::spill::spill_op::SpillBackend;
 use crate::spill::spill_op::SpillBackend::Disk;
-use crate::spill::spill_op::{
-    DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY, SpillBackend, SpillBuildHasher, SpillOp,
-};
 use crate::task::ShutdownToken;
 
 /// Hash Join Executor
@@ -87,10 +83,7 @@ pub struct HashJoinExecutor<K> {
     /// Whether the join is an as-of join
     asof_desc: Option<AsOfDesc>,
 
-    spill_backend: Option<SpillBackend>,
-    spill_metrics: Arc<BatchSpillMetrics>,
-    /// The upper bound of memory usage for this executor.
-    memory_upper_bound: Option<u64>,
+    spill: SpillContext,
 
     shutdown_rx: ShutdownToken,
 
@@ -366,233 +359,6 @@ impl PairRowIds {
     }
 }
 
-pub struct JoinSpillManager {
-    op: SpillOp,
-    partition_num: usize,
-    probe_side_writers: Vec<opendal::Writer>,
-    build_side_writers: Vec<opendal::Writer>,
-    probe_side_chunk_builders: Vec<DataChunkBuilder>,
-    build_side_chunk_builders: Vec<DataChunkBuilder>,
-    spill_build_hasher: SpillBuildHasher,
-    probe_side_data_types: Vec<DataType>,
-    build_side_data_types: Vec<DataType>,
-    spill_chunk_size: usize,
-    spill_metrics: Arc<BatchSpillMetrics>,
-}
-
-/// `JoinSpillManager` is used to manage how to write spill data file and read them back.
-/// The spill data first need to be partitioned. Each partition contains 2 files: `join_probe_side_file` and `join_build_side_file`.
-/// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
-/// Finally, spill file content will look like the below.
-/// The file write pattern is append-only and the read pattern is sequential scan.
-/// This can maximize the disk IO performance.
-///
-/// ```text
-/// [proto_len]
-/// [proto_bytes]
-/// ...
-/// [proto_len]
-/// [proto_bytes]
-/// ```
-impl JoinSpillManager {
-    pub fn new(
-        spill_backend: SpillBackend,
-        join_identity: &String,
-        partition_num: usize,
-        probe_side_data_types: Vec<DataType>,
-        build_side_data_types: Vec<DataType>,
-        spill_chunk_size: usize,
-        spill_metrics: Arc<BatchSpillMetrics>,
-    ) -> Result<Self> {
-        let suffix_uuid = uuid::Uuid::new_v4();
-        let dir = format!("{}-{}/", join_identity, suffix_uuid);
-        let op = SpillOp::create(dir, spill_backend)?;
-        let probe_side_writers = Vec::with_capacity(partition_num);
-        let build_side_writers = Vec::with_capacity(partition_num);
-        let probe_side_chunk_builders = Vec::with_capacity(partition_num);
-        let build_side_chunk_builders = Vec::with_capacity(partition_num);
-        let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
-        Ok(Self {
-            op,
-            partition_num,
-            probe_side_writers,
-            build_side_writers,
-            probe_side_chunk_builders,
-            build_side_chunk_builders,
-            spill_build_hasher,
-            probe_side_data_types,
-            build_side_data_types,
-            spill_chunk_size,
-            spill_metrics,
-        })
-    }
-
-    pub async fn init_writers(&mut self) -> Result<()> {
-        for i in 0..self.partition_num {
-            let join_probe_side_partition_file_name = format!("join-probe-side-p{}", i);
-            let w = self
-                .op
-                .writer_with(&join_probe_side_partition_file_name)
-                .await?;
-            self.probe_side_writers.push(w);
-
-            let join_build_side_partition_file_name = format!("join-build-side-p{}", i);
-            let w = self
-                .op
-                .writer_with(&join_build_side_partition_file_name)
-                .await?;
-            self.build_side_writers.push(w);
-            self.probe_side_chunk_builders.push(DataChunkBuilder::new(
-                self.probe_side_data_types.clone(),
-                self.spill_chunk_size,
-            ));
-            self.build_side_chunk_builders.push(DataChunkBuilder::new(
-                self.build_side_data_types.clone(),
-                self.spill_chunk_size,
-            ));
-        }
-        Ok(())
-    }
-
-    pub async fn write_probe_side_chunk(
-        &mut self,
-        chunk: DataChunk,
-        hash_codes: Vec<u64>,
-    ) -> Result<()> {
-        let (columns, vis) = chunk.into_parts_v2();
-        for partition in 0..self.partition_num {
-            let new_vis = vis.clone()
-                & Bitmap::from_iter(
-                    hash_codes
-                        .iter()
-                        .map(|hash_code| (*hash_code as usize % self.partition_num) == partition),
-                );
-            let new_chunk = DataChunk::from_parts(columns.clone(), new_vis);
-            for output_chunk in self.probe_side_chunk_builders[partition].append_chunk(new_chunk) {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.probe_side_writers[partition].write(len_bytes).await?;
-                self.probe_side_writers[partition].write(buf).await?;
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn write_build_side_chunk(
-        &mut self,
-        chunk: DataChunk,
-        hash_codes: Vec<u64>,
-    ) -> Result<()> {
-        let (columns, vis) = chunk.into_parts_v2();
-        for partition in 0..self.partition_num {
-            let new_vis = vis.clone()
-                & Bitmap::from_iter(
-                    hash_codes
-                        .iter()
-                        .map(|hash_code| (*hash_code as usize % self.partition_num) == partition),
-                );
-            let new_chunk = DataChunk::from_parts(columns.clone(), new_vis);
-            for output_chunk in self.build_side_chunk_builders[partition].append_chunk(new_chunk) {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.build_side_writers[partition].write(len_bytes).await?;
-                self.build_side_writers[partition].write(buf).await?;
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn close_writers(&mut self) -> Result<()> {
-        for partition in 0..self.partition_num {
-            if let Some(output_chunk) = self.probe_side_chunk_builders[partition].consume_all() {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.probe_side_writers[partition].write(len_bytes).await?;
-                self.probe_side_writers[partition].write(buf).await?;
-            }
-
-            if let Some(output_chunk) = self.build_side_chunk_builders[partition].consume_all() {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.build_side_writers[partition].write(len_bytes).await?;
-                self.build_side_writers[partition].write(buf).await?;
-            }
-        }
-
-        for mut w in self.probe_side_writers.drain(..) {
-            w.close().await?;
-        }
-        for mut w in self.build_side_writers.drain(..) {
-            w.close().await?;
-        }
-        Ok(())
-    }
-
-    async fn read_probe_side_partition(
-        &mut self,
-        partition: usize,
-    ) -> Result<BoxedDataChunkStream> {
-        let join_probe_side_partition_file_name = format!("join-probe-side-p{}", partition);
-        let r = self
-            .op
-            .reader_with(&join_probe_side_partition_file_name)
-            .await?;
-        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
-    }
-
-    async fn read_build_side_partition(
-        &mut self,
-        partition: usize,
-    ) -> Result<BoxedDataChunkStream> {
-        let join_build_side_partition_file_name = format!("join-build-side-p{}", partition);
-        let r = self
-            .op
-            .reader_with(&join_build_side_partition_file_name)
-            .await?;
-        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
-    }
-
-    pub async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
-        let join_probe_side_partition_file_name = format!("join-probe-side-p{}", partition);
-        let probe_size = self
-            .op
-            .stat(&join_probe_side_partition_file_name)
-            .await?
-            .content_length();
-        let join_build_side_partition_file_name = format!("join-build-side-p{}", partition);
-        let build_size = self
-            .op
-            .stat(&join_build_side_partition_file_name)
-            .await?
-            .content_length();
-        Ok(probe_size + build_size)
-    }
-
-    async fn clear_partition(&mut self, partition: usize) -> Result<()> {
-        let join_probe_side_partition_file_name = format!("join-probe-side-p{}", partition);
-        self.op.delete(&join_probe_side_partition_file_name).await?;
-        let join_build_side_partition_file_name = format!("join-build-side-p{}", partition);
-        self.op.delete(&join_build_side_partition_file_name).await?;
-        Ok(())
-    }
-}
-
 impl<K: HashKey> HashJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
@@ -600,11 +366,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
         // on completion, errors, or cancellation, even if the shared parent stays alive.
         let mem_ctx = MemoryContext::new(Some(self.mem_ctx.clone()), TrAdderAtomic::new(0));
         let mut need_to_spill = false;
-        // If the memory upper bound is less than 1MB, we don't need to check memory usage.
-        let check_memory = match self.memory_upper_bound {
-            Some(upper_bound) => upper_bound > SPILL_AT_LEAST_MEMORY,
-            None => true,
-        };
 
         let probe_schema = self.probe_side_source.schema().clone();
         let build_schema = self.build_side_source.schema().clone();
@@ -626,13 +387,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 // push build_chunk to build_side before checking memory limit, otherwise we will lose that chunk when spilling.
                 build_side.push(build_chunk);
                 mem_ctx.add_unchecked(chunk_estimated_heap_size as i64);
-                if check_memory && !mem_ctx.check_memory_usage() {
-                    if self.spill_backend.is_some() {
-                        need_to_spill = true;
-                        break;
-                    } else {
-                        Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
-                    }
+                if self.spill.should_spill(&mem_ctx)? {
+                    need_to_spill = true;
+                    break;
                 }
             }
         }
@@ -666,13 +423,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         // Retain and charge the key before deciding whether to spill the table.
                         mem_added_by_hash_table += build_key_size;
                         mem_ctx.add_unchecked(build_key_size);
-                        if check_memory && !mem_ctx.check_memory_usage() {
-                            if self.spill_backend.is_some() {
-                                need_to_spill = true;
-                                break 'build;
-                            } else {
-                                Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
-                            }
+                        if self.spill.should_spill(&mem_ctx)? {
+                            need_to_spill = true;
+                            break 'build;
                         }
                     }
                 }
@@ -681,97 +434,49 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
         if need_to_spill {
             // A spilling version of hash join based on the RFC: Spill Hash Join https://github.com/risingwavelabs/rfcs/pull/91
-            // When HashJoinExecutor told memory is insufficient, JoinSpillManager will start to partition the hash table and spill to disk.
-            // After spilling the hash table, JoinSpillManager will consume all chunks from its build side input executor and probe side input executor.
-            // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original build side input and probr side input data.
-            // A sub HashJoinExecutor would be used to consume each partition one by one.
-            // If memory is still not enough in the sub HashJoinExecutor, it will spill its inputs recursively.
-            info!(
-                "batch hash join executor {} starts to spill out",
-                &self.identity
-            );
-            let mut join_spill_manager = JoinSpillManager::new(
-                self.spill_backend.clone().unwrap(),
-                &self.identity,
-                DEFAULT_SPILL_PARTITION_NUM,
-                probe_data_types.clone(),
-                build_data_types.clone(),
-                self.chunk_size,
-                self.spill_metrics.clone(),
-            )?;
-            join_spill_manager.init_writers().await?;
+            // Both sides are partitioned by join key, so matching rows meet in the same partition,
+            // which is joined by a sub `HashJoinExecutor` that may spill again.
+            const BUILD: usize = 0;
+            const PROBE: usize = 1;
+            let mut spill = (self.spill)
+                .start(
+                    &self.identity,
+                    self.chunk_size,
+                    [
+                        (
+                            build_data_types.clone(),
+                            Partitioning::Hash(self.build_key_idxs.clone()),
+                        ),
+                        (
+                            probe_data_types.clone(),
+                            Partitioning::Hash(self.probe_key_idxs.clone()),
+                        ),
+                    ],
+                )
+                .await?;
 
             // Release memory occupied by the hash map
             drop(hash_map);
             drop(next_build_row_with_same_key);
             mem_ctx.add_unchecked(-mem_added_by_hash_table);
 
-            // Spill buffered build side chunks
             for chunk in build_side {
-                // Release the memory occupied by the buffered chunks
                 let chunk_size = chunk.estimated_heap_size() as i64;
-                let hash_codes = chunk.get_hash_values(
-                    self.build_key_idxs.as_slice(),
-                    join_spill_manager.spill_build_hasher,
-                );
-                join_spill_manager
-                    .write_build_side_chunk(
-                        chunk,
-                        hash_codes
-                            .into_iter()
-                            .map(|hash_code| hash_code.value())
-                            .collect(),
-                    )
-                    .await?;
+                spill.write(BUILD, chunk).await?;
                 mem_ctx.add_unchecked(-chunk_size);
             }
-
-            // Spill build side chunks
             #[for_await]
             for chunk in build_side_stream {
-                let chunk = chunk?;
-                let hash_codes = chunk.get_hash_values(
-                    self.build_key_idxs.as_slice(),
-                    join_spill_manager.spill_build_hasher,
-                );
-                join_spill_manager
-                    .write_build_side_chunk(
-                        chunk,
-                        hash_codes
-                            .into_iter()
-                            .map(|hash_code| hash_code.value())
-                            .collect(),
-                    )
-                    .await?;
+                spill.write(BUILD, chunk?).await?;
             }
-
-            // Spill probe side chunks
             #[for_await]
             for chunk in self.probe_side_source.execute() {
-                let chunk = chunk?;
-                let hash_codes = chunk.get_hash_values(
-                    self.probe_key_idxs.as_slice(),
-                    join_spill_manager.spill_build_hasher,
-                );
-                join_spill_manager
-                    .write_probe_side_chunk(
-                        chunk,
-                        hash_codes
-                            .into_iter()
-                            .map(|hash_code| hash_code.value())
-                            .collect(),
-                    )
-                    .await?;
+                spill.write(PROBE, chunk?).await?;
             }
+            let partitions = spill.finish().await?;
 
-            join_spill_manager.close_writers().await?;
-
-            // Process each partition one by one.
-            for i in 0..join_spill_manager.partition_num {
-                let partition_size = join_spill_manager.estimate_partition_size(i).await?;
-                let probe_side_stream = join_spill_manager.read_probe_side_partition(i).await?;
-                let build_side_stream = join_spill_manager.read_build_side_partition(i).await?;
-
+            for i in 0..partitions.partition_num() {
+                let ([build_side_stream, probe_side_stream], spill) = partitions.read(i).await?;
                 let sub_hash_join_executor: HashJoinExecutor<K> = HashJoinExecutor::new_inner(
                     self.join_type,
                     self.output_indices.clone(),
@@ -790,28 +495,17 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
                     self.asof_desc.clone(),
-                    self.spill_backend.clone(),
-                    self.spill_metrics.clone(),
-                    Some(partition_size),
+                    spill,
                     self.shutdown_rx.clone(),
                     self.mem_ctx.clone(),
                 );
 
-                debug!(
-                    "create sub_hash_join {} for hash_join {} to spill",
-                    sub_hash_join_executor.identity, self.identity
-                );
-
-                let sub_hash_join_executor = Box::new(sub_hash_join_executor).execute();
-
                 #[for_await]
-                for chunk in sub_hash_join_executor {
-                    let chunk = chunk?;
-                    yield chunk;
+                for chunk in Box::new(sub_hash_join_executor).execute() {
+                    yield chunk?;
                 }
 
-                // Clear files of the current partition.
-                join_spill_manager.clear_partition(i).await?;
+                partitions.clear(i).await?;
             }
         } else {
             let params = EquiJoinParams::new(
@@ -1372,9 +1066,7 @@ impl<K> HashJoinExecutor<K> {
             identity,
             chunk_size,
             asof_desc,
-            spill_backend,
-            spill_metrics,
-            None,
+            SpillContext::new(spill_backend, spill_metrics),
             shutdown_rx,
             mem_ctx,
         )
@@ -1393,9 +1085,7 @@ impl<K> HashJoinExecutor<K> {
         identity: String,
         chunk_size: usize,
         asof_desc: Option<AsOfDesc>,
-        spill_backend: Option<SpillBackend>,
-        spill_metrics: Arc<BatchSpillMetrics>,
-        memory_upper_bound: Option<u64>,
+        spill: SpillContext,
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
     ) -> Self {
@@ -1433,9 +1123,7 @@ impl<K> HashJoinExecutor<K> {
             chunk_size,
             asof_desc,
             shutdown_rx,
-            spill_backend,
-            spill_metrics,
-            memory_upper_bound,
+            spill,
             mem_ctx,
             _phantom: PhantomData,
         }
@@ -1447,7 +1135,7 @@ mod tests {
     use futures::StreamExt;
     use futures_async_stream::for_await;
     use itertools::Itertools;
-    use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+    use risingwave_common::array::{Array, ArrayBuilderImpl, DataChunk, I32Array, I64Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::Key32;
     use risingwave_common::memory::MemoryContext;
@@ -1460,7 +1148,7 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, build_from_pretty};
 
     use super::{AsOfDesc, AsOfInequalityType, ChunkedData, HashJoinExecutor, JoinType, RowId};
-    use crate::error::Result;
+    use crate::error::{BatchError, Result};
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{BoxedExecutor, Executor};
     use crate::monitor::BatchSpillMetrics;
@@ -2572,5 +2260,57 @@ mod tests {
         let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
         test_fixture.do_test_shutdown(false).await;
         test_fixture.do_test_shutdown(true).await;
+    }
+
+    /// All build rows share one key, so re-partitioning never shrinks the spilled partition. The
+    /// join gives up after a bounded number of spills instead of re-spilling until the stack
+    /// overflows.
+    #[tokio::test]
+    async fn test_spill_skewed_key_fails_with_out_of_memory() {
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int64),
+        ]);
+        // Large enough that every spilled partition exceeds the size checked against the limit.
+        let rows = 1 << 17;
+        let mut build_side = MockExecutor::new(schema.clone());
+        build_side.add(DataChunk::new(
+            vec![
+                I32Array::from_iter(std::iter::repeat_n(Some(1), rows)).into_ref(),
+                I64Array::from_iter((0..rows as i64).map(Some)).into_ref(),
+            ],
+            rows,
+        ));
+        let mut probe_side = MockExecutor::new(schema);
+        probe_side.add(DataChunk::from_pretty(
+            "i I
+             1 1",
+        ));
+        let join = Box::new(HashJoinExecutor::<Key32>::new(
+            JoinType::Inner,
+            (0..4).collect(),
+            Box::new(probe_side),
+            Box::new(build_side),
+            vec![0],
+            vec![0],
+            vec![false],
+            None,
+            "HashJoinExecutor".to_owned(),
+            CHUNK_SIZE,
+            None,
+            Some(SpillBackend::Memory),
+            BatchSpillMetrics::for_test(),
+            ShutdownToken::empty(),
+            MemoryContext::for_spill_test(),
+        ));
+        let mut stream = join.execute();
+        let error = loop {
+            match stream.next().await {
+                Some(Ok(_)) => {}
+                Some(Err(error)) => break error,
+                None => panic!("the skewed join should run out of memory"),
+            }
+        };
+        assert!(matches!(error, BatchError::OutOfMemory(_)), "{error:?}");
     }
 }

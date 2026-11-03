@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::core::Atomic;
@@ -22,14 +21,11 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
-use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::Message;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::data::DataChunk as PbDataChunk;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -38,10 +34,9 @@ use super::{
 use crate::error::{BatchError, Result};
 use crate::executor::merge_sort::MergeSortExecutor;
 use crate::monitor::BatchSpillMetrics;
+use crate::spill::partition::{Partitioning, SpillContext};
+use crate::spill::spill_op::SpillBackend;
 use crate::spill::spill_op::SpillBackend::Disk;
-use crate::spill::spill_op::{
-    DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY, SpillBackend, SpillOp,
-};
 
 /// Sort Executor
 ///
@@ -57,10 +52,7 @@ pub struct SortExecutor {
     schema: Schema,
     chunk_size: usize,
     mem_context: MemoryContext,
-    spill_backend: Option<SpillBackend>,
-    spill_metrics: Arc<BatchSpillMetrics>,
-    /// The upper bound of memory usage for this executor.
-    memory_upper_bound: Option<u64>,
+    spill: SpillContext,
 }
 
 impl Executor for SortExecutor {
@@ -118,11 +110,6 @@ impl SortExecutor {
         let mem_context = MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0));
         let child_schema = self.child.schema().clone();
         let mut need_to_spill = false;
-        // If the memory upper bound is less than 1MB, we don't need to check memory usage.
-        let check_memory = match self.memory_upper_bound {
-            Some(upper_bound) => upper_bound > SPILL_AT_LEAST_MEMORY,
-            None => true,
-        };
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         let mut chunks = Vec::new_in(mem_context.global_allocator());
@@ -135,13 +122,9 @@ impl SortExecutor {
             chunks.push(chunk);
             // The chunk is retained for sorting or spilling regardless of the budget check.
             mem_context.add_unchecked(chunk_estimated_heap_size as i64);
-            if check_memory && !mem_context.check_memory_usage() {
-                if self.spill_backend.is_some() {
-                    need_to_spill = true;
-                    break;
-                } else {
-                    Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
-                }
+            if self.spill.should_spill(&mem_context)? {
+                need_to_spill = true;
+                break;
             }
         }
 
@@ -162,33 +145,23 @@ impl SortExecutor {
             );
             encoded_rows_heap_size += chunk_estimated_heap_size as i64;
             mem_context.add_unchecked(chunk_estimated_heap_size as i64);
-            if check_memory && !mem_context.check_memory_usage() {
-                if self.spill_backend.is_some() {
-                    need_to_spill = true;
-                    break;
-                } else {
-                    Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
-                }
+            if self.spill.should_spill(&mem_context)? {
+                need_to_spill = true;
+                break;
             }
         }
 
         if need_to_spill {
             // A spilling version of sort, a.k.a. external sort.
-            // When SortExecutor told memory is insufficient, SortSpillManager will start to partition the sort buffer and spill to disk.
-            // After spilling the sort buffer, SortSpillManager will consume all chunks from its input executor.
-            // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original input data.
-            // A sub SortExecutor would be used to sort each partition respectively and then a MergeSortExecutor would be used to merge all sorted partitions.
-            // If memory is still not enough in the sub SortExecutor, it will spill its inputs recursively.
-            info!("batch sort executor {} starts to spill out", &self.identity);
-            let mut sort_spill_manager = SortSpillManager::new(
-                self.spill_backend.clone().unwrap(),
-                &self.identity,
-                DEFAULT_SPILL_PARTITION_NUM,
-                child_schema.data_types(),
-                self.chunk_size,
-                self.spill_metrics.clone(),
-            )?;
-            sort_spill_manager.init_writers().await?;
+            // The input is spread evenly over the partitions. Each partition is sorted by a sub
+            // `SortExecutor`, which may spill again, and the sorted partitions are merged.
+            let mut spill = (self.spill)
+                .start(
+                    &self.identity,
+                    self.chunk_size,
+                    [(child_schema.data_types(), Partitioning::RoundRobin)],
+                )
+                .await?;
 
             // Release memory
             drop(encoded_rows);
@@ -197,44 +170,27 @@ impl SortExecutor {
             // Release manual buffer charges before recursive sorts charge the shared context.
             for chunk in chunks {
                 let chunk_heap_size = chunk.estimated_heap_size() as i64;
-                sort_spill_manager.write_input_chunk(chunk).await?;
+                spill.write(0, chunk).await?;
                 mem_context.add_unchecked(-chunk_heap_size);
             }
-
-            // Spill input chunks.
             #[for_await]
             for chunk in input_stream {
-                let chunk: DataChunk = chunk?;
-                sort_spill_manager.write_input_chunk(chunk).await?;
+                spill.write(0, chunk?).await?;
             }
+            let partitions = spill.finish().await?;
 
-            sort_spill_manager.close_writers().await?;
-
-            let partition_num = sort_spill_manager.partition_num;
-            // Merge sorted-partitions
-            let mut sorted_inputs: Vec<BoxedExecutor> = Vec::with_capacity(partition_num);
-            for i in 0..partition_num {
-                let partition_size = sort_spill_manager.estimate_partition_size(i).await?;
-
-                let input_stream = sort_spill_manager.read_input_partition(i).await?;
-
-                let sub_sort_executor: SortExecutor = SortExecutor::new_inner(
+            let mut sorted_inputs: Vec<BoxedExecutor> =
+                Vec::with_capacity(partitions.partition_num());
+            for i in 0..partitions.partition_num() {
+                let ([input_stream], spill) = partitions.read(i).await?;
+                sorted_inputs.push(Box::new(SortExecutor::new_inner(
                     Box::new(WrapStreamExecutor::new(child_schema.clone(), input_stream)),
                     self.column_orders.clone(),
                     format!("{}-sub{}", self.identity.clone(), i),
                     self.chunk_size,
                     self.mem_context.clone(),
-                    self.spill_backend.clone(),
-                    self.spill_metrics.clone(),
-                    Some(partition_size),
-                );
-
-                debug!(
-                    "create sub_sort {} for sort {} to spill",
-                    sub_sort_executor.identity, self.identity
-                );
-
-                sorted_inputs.push(Box::new(sub_sort_executor));
+                    spill,
+                )));
             }
 
             let merge_sort = MergeSortExecutor::new(
@@ -282,9 +238,7 @@ impl SortExecutor {
             identity,
             chunk_size,
             mem_context,
-            spill_backend,
-            spill_metrics,
-            None,
+            SpillContext::new(spill_backend, spill_metrics),
         )
     }
 
@@ -294,9 +248,7 @@ impl SortExecutor {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        spill_backend: Option<SpillBackend>,
-        spill_metrics: Arc<BatchSpillMetrics>,
-        memory_upper_bound: Option<u64>,
+        spill: SpillContext,
     ) -> Self {
         let schema = child.schema().clone();
         Self {
@@ -306,129 +258,8 @@ impl SortExecutor {
             schema,
             chunk_size,
             mem_context,
-            spill_backend,
-            spill_metrics,
-            memory_upper_bound,
+            spill,
         }
-    }
-}
-
-/// `SortSpillManager` is used to manage how to write spill data file and read them back.
-/// The spill data first need to be partitioned in a round-robin way. Each partition contains 1 file: `input_chunks_file`
-/// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
-/// Finally, spill file content will look like the below.
-/// The file write pattern is append-only and the read pattern is sequential scan.
-/// This can maximize the disk IO performance.
-///
-/// ```text
-/// [proto_len]
-/// [proto_bytes]
-/// ...
-/// [proto_len]
-/// [proto_bytes]
-/// ```
-struct SortSpillManager {
-    op: SpillOp,
-    partition_num: usize,
-    round_robin_idx: usize,
-    input_writers: Vec<opendal::Writer>,
-    input_chunk_builders: Vec<DataChunkBuilder>,
-    child_data_types: Vec<DataType>,
-    spill_chunk_size: usize,
-    spill_metrics: Arc<BatchSpillMetrics>,
-}
-
-impl SortSpillManager {
-    fn new(
-        spill_backend: SpillBackend,
-        agg_identity: &String,
-        partition_num: usize,
-        child_data_types: Vec<DataType>,
-        spill_chunk_size: usize,
-        spill_metrics: Arc<BatchSpillMetrics>,
-    ) -> Result<Self> {
-        let suffix_uuid = uuid::Uuid::new_v4();
-        let dir = format!("{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir, spill_backend)?;
-        let input_writers = Vec::with_capacity(partition_num);
-        let input_chunk_builders = Vec::with_capacity(partition_num);
-        Ok(Self {
-            op,
-            partition_num,
-            input_writers,
-            input_chunk_builders,
-            round_robin_idx: 0,
-            child_data_types,
-            spill_chunk_size,
-            spill_metrics,
-        })
-    }
-
-    async fn init_writers(&mut self) -> Result<()> {
-        for i in 0..self.partition_num {
-            let partition_file_name = format!("input-chunks-p{}", i);
-            let w = self.op.writer_with(&partition_file_name).await?;
-            self.input_writers.push(w);
-            self.input_chunk_builders.push(DataChunkBuilder::new(
-                self.child_data_types.clone(),
-                self.spill_chunk_size,
-            ));
-        }
-        Ok(())
-    }
-
-    async fn write_input_chunk(&mut self, chunk: DataChunk) -> Result<()> {
-        for row in chunk.rows() {
-            let partition = self.round_robin_idx;
-            if let Some(chunk) = self.input_chunk_builders[partition].append_one_row(row) {
-                let chunk_pb: PbDataChunk = chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.input_writers[partition].write(len_bytes).await?;
-                self.input_writers[partition].write(buf).await?;
-            }
-            self.round_robin_idx = (self.round_robin_idx + 1) % self.partition_num;
-        }
-        Ok(())
-    }
-
-    async fn close_writers(&mut self) -> Result<()> {
-        for partition in 0..self.partition_num {
-            if let Some(output_chunk) = self.input_chunk_builders[partition].consume_all() {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.input_writers[partition].write(len_bytes).await?;
-                self.input_writers[partition].write(buf).await?;
-            }
-        }
-
-        for mut w in self.input_writers.drain(..) {
-            w.close().await?;
-        }
-        Ok(())
-    }
-
-    async fn read_input_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
-        let input_partition_file_name = format!("input-chunks-p{}", partition);
-        let r = self.op.reader_with(&input_partition_file_name).await?;
-        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
-    }
-
-    async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
-        let input_partition_file_name = format!("input-chunks-p{}", partition);
-        let input_size = self
-            .op
-            .stat(&input_partition_file_name)
-            .await?
-            .content_length();
-        Ok(input_size)
     }
 }
 
@@ -437,7 +268,9 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{Date, F32, Interval, Scalar, StructType, Time, Timestamp};
+    use risingwave_common::types::{
+        DataType, Date, F32, Interval, Scalar, StructType, Time, Timestamp,
+    };
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
