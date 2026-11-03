@@ -457,14 +457,8 @@ impl SubscriptionCursor {
                         })?
                         .committed_epoch
                 }
-                ReadSnapshot::Other(_) => {
+                ReadSnapshot::Backup(_) => {
                     return Err(ErrorCode::InternalError("Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`".to_owned()).into());
-                }
-                ReadSnapshot::ReadUncommitted => {
-                    return Err(ErrorCode::InternalError(
-                        "Fetch Cursor don't support read uncommitted".to_owned(),
-                    )
-                    .into());
                 }
             };
             let start_timestamp = pinned_epoch;

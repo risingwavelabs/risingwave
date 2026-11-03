@@ -41,7 +41,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_dml::dml_manager::DmlManager;
-use risingwave_hummock_sdk::test_batch_query_epoch;
+use risingwave_hummock_sdk::test_batch_query_committed_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_storage::memory::MemoryStateStore;
@@ -258,7 +258,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         table.clone(),
         vec![ScanRange::full()],
         true,
-        test_batch_query_epoch(),
+        test_batch_query_committed_epoch(),
         1024,
         "RowSeqExecutor2".to_owned(),
         None,
@@ -328,7 +328,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         table.clone(),
         vec![ScanRange::full()],
         true,
-        test_batch_query_epoch(),
+        test_batch_query_committed_epoch(),
         1024,
         "RowSeqScanExecutor2".to_owned(),
         None,
@@ -410,7 +410,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         table,
         vec![ScanRange::full()],
         true,
-        test_batch_query_epoch(),
+        test_batch_query_committed_epoch(),
         1024,
         "RowSeqScanExecutor2".to_owned(),
         None,
@@ -488,7 +488,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         table,
         vec![ScanRange::full()],
         true,
-        test_batch_query_epoch(),
+        test_batch_query_committed_epoch(),
         1,
         "RowSeqScanExecutor2".to_owned(),
         None,

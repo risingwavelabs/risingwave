@@ -156,10 +156,6 @@ pub struct FrontendOpts {
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
 
-    #[clap(long, hide = true, env = "ENABLE_BARRIER_READ")]
-    #[override_opts(path = batch.enable_barrier_read)]
-    pub enable_barrier_read: Option<bool>,
-
     /// The path of the temp secret file directory.
     #[clap(
         long,

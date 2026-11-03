@@ -20,6 +20,8 @@ use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::SubscriptionConfig;
 
 const TOPIC: &str = "test-topic";
+const OBSERVATION_TOPIC: &str = "test-observation-topic";
+const OBSERVATION_SUBSCRIPTION: &str = "test-observation-subscription";
 
 const SUBSCRIPTION_COUNT: usize = 50;
 
@@ -60,6 +62,24 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
         }
+
+        let observation_topic = client.topic(OBSERVATION_TOPIC);
+        for subscription in observation_topic.subscriptions(None).await? {
+            subscription.delete(None).await?;
+        }
+        let _ = observation_topic.delete(None).await;
+        observation_topic.create(Some(Default::default()), None).await?;
+        client
+            .create_subscription(
+                OBSERVATION_SUBSCRIPTION,
+                OBSERVATION_TOPIC,
+                SubscriptionConfig {
+                    retain_acked_messages: false,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
     } else if command == "publish" {
         let publisher = topic.new_publisher(Default::default());
         for i in 0..10 {

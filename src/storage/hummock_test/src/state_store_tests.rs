@@ -1083,7 +1083,7 @@ async fn test_multiple_epoch_sync() {
     local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     local.ingest_batch(batch3).await.unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
-    let test_get = |read_committed: bool| {
+    let test_get = || {
         let hummock_storage_clone = &hummock_storage;
         async move {
             assert_eq!(
@@ -1092,7 +1092,6 @@ async fn test_multiple_epoch_sync() {
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch1,
                         ReadOptions {
-                            read_committed,
                             cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         }
@@ -1108,7 +1107,6 @@ async fn test_multiple_epoch_sync() {
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch2,
                         ReadOptions {
-                            read_committed,
                             cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         }
@@ -1123,7 +1121,6 @@ async fn test_multiple_epoch_sync() {
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch3,
                         ReadOptions {
-                            read_committed,
                             cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         }
@@ -1136,7 +1133,6 @@ async fn test_multiple_epoch_sync() {
         }
     };
 
-    test_get(false).await;
     let sync_result1 = hummock_storage
         .seal_and_sync_epoch(epoch1, table_id_set.clone())
         .await
@@ -1149,8 +1145,6 @@ async fn test_multiple_epoch_sync() {
         .seal_and_sync_epoch(epoch3, table_id_set)
         .await
         .unwrap();
-    test_get(false).await;
-
     meta_client
         .commit_epoch(epoch1, sync_result1)
         .await
@@ -1170,7 +1164,7 @@ async fn test_multiple_epoch_sync() {
         )
         .await
         .unwrap();
-    test_get(true).await;
+    test_get().await;
 }
 
 #[tokio::test]

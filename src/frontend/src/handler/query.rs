@@ -453,10 +453,8 @@ pub fn gen_batch_plan_fragmenter(
         plan.explain_to_string(),
         query_mode
     );
-    let worker_node_manager_reader = WorkerNodeSelector::new(
-        session.env().worker_node_manager_ref(),
-        session.is_barrier_read(),
-    );
+    let worker_node_manager_reader =
+        WorkerNodeSelector::new(session.env().worker_node_manager_ref());
     let plan_fragmenter = BatchPlanFragmenter::new(
         worker_node_manager_reader,
         session.env().catalog_reader().clone(),
@@ -637,13 +635,7 @@ pub async fn local_execute(
 
     snapshot.fill_batch_query_epoch(&mut query)?;
 
-    let execution = LocalQueryExecution::new(
-        query,
-        front_env.clone(),
-        snapshot.support_barrier_read(),
-        session,
-        timeout,
-    );
+    let execution = LocalQueryExecution::new(query, front_env.clone(), session, timeout);
 
     Ok(execution.stream_rows())
 }

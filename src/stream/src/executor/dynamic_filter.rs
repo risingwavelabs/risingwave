@@ -1170,7 +1170,7 @@ mod tests {
         let row = table
             .get_row(
                 &OwnedRow::new(vec![Some(x.into())]),
-                HummockReadEpoch::NoWait(u64::MAX),
+                HummockReadEpoch::Committed(u64::MAX),
             )
             .await
             .unwrap();

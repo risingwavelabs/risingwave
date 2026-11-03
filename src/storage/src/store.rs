@@ -532,12 +532,12 @@ impl ReadOptions {
         table_option: TableOption,
     ) -> TracedReadOptions {
         let value = self;
-        let (read_version_from_backup, read_committed) = match epoch {
-            None | Some(HummockReadEpoch::NoWait(_)) => (false, false),
-            Some(HummockReadEpoch::Backup(_)) => (true, false),
+        let read_version_from_backup = match epoch {
+            None => false,
+            Some(HummockReadEpoch::Backup(_)) => true,
             Some(HummockReadEpoch::Committed(_))
             | Some(HummockReadEpoch::BatchQueryCommitted(_, _))
-            | Some(HummockReadEpoch::TimeTravel(_)) => (false, true),
+            | Some(HummockReadEpoch::TimeTravel(_)) => false,
         };
         TracedReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
@@ -546,7 +546,6 @@ impl ReadOptions {
             retention_seconds: table_option.retention_seconds,
             table_id: table_id.into(),
             read_version_from_backup,
-            read_committed,
         }
     }
 }
