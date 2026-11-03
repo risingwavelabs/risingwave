@@ -175,17 +175,6 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             .as_ref()
             .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
 
-        if ordered {
-            // Currently we execute range-scans concurrently so the order is not guaranteed if
-            // there're multiple ranges.
-            // TODO: reserve the order for multiple ranges.
-            assert_eq!(scan_ranges.len(), 1);
-        }
-
-        let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
-            .into_iter()
-            .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
-
         // the number of rows have been returned as execute result
         let mut returned = 0;
         if let Some(limit) = &limit
@@ -194,13 +183,31 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             return Ok(());
         }
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
-        // Point Get
-        for point_get in point_gets {
-            let table = table.clone();
-            if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
-                && let Some(chunk) = data_chunk_builder.append_one_row(row)
-            {
+
+        // The ranges are read one by one, so with `ordered` the output keeps their order.
+        // WARN: DO NOT use `select` to execute range scans concurrently
+        //       it can consume too much memory if there're too many ranges.
+        for scan_range in scan_ranges {
+            // Point Get
+            if scan_range.pk_prefix.len() == table.pk_indices().len() {
+                let table = table.clone();
+                if let Some(row) =
+                    Self::execute_point_get(table, scan_range, query_epoch, histogram).await?
+                    && let Some(chunk) = data_chunk_builder.append_one_row(row)
+                {
+                    returned += chunk.cardinality() as u64;
+                    yield chunk;
+                    if let Some(limit) = &limit
+                        && returned >= *limit
+                    {
+                        return Ok(());
+                    }
+                }
+                continue;
+            }
+
+            // Range Scan, after the rows of the point gets before it
+            if let Some(chunk) = data_chunk_builder.consume_all() {
                 returned += chunk.cardinality() as u64;
                 yield chunk;
                 if let Some(limit) = &limit
@@ -209,24 +216,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     return Ok(());
                 }
             }
-        }
-        if let Some(chunk) = data_chunk_builder.consume_all() {
-            returned += chunk.cardinality() as u64;
-            yield chunk;
-            if let Some(limit) = &limit
-                && returned >= *limit
-            {
-                return Ok(());
-            }
-        }
-
-        // Range Scan
-        // WARN: DO NOT use `select` to execute range scans concurrently
-        //       it can consume too much memory if there're too many ranges.
-        for range in range_scans {
             let stream = Self::execute_range(
                 table.clone(),
-                range,
+                scan_range,
                 ordered,
                 query_epoch,
                 chunk_size,
@@ -244,6 +236,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     return Ok(());
                 }
             }
+        }
+        if let Some(chunk) = data_chunk_builder.consume_all() {
+            yield chunk;
         }
     }
 
