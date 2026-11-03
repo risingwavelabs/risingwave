@@ -16,6 +16,7 @@
 
 package com.risingwave.connector.source.common;
 
+import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import io.debezium.heartbeat.DatabaseHeartbeatImpl;
 import java.util.Properties;
 
@@ -24,6 +25,7 @@ public class OracleDbzConnectorConfig extends DbzConnectorConfig {
     public static final String HEARTBEAT_TABLE_NAME = "heartbeat.table.name";
     public static final String HEARTBEAT_ACTION_QUERY_KEY =
             DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
+    public static final String DEBEZIUM_RAC_NODES = "debezium.rac.nodes";
 
     OracleDbzConnectorConfig(CdcSource source) {
         super(source);
@@ -32,6 +34,18 @@ public class OracleDbzConnectorConfig extends DbzConnectorConfig {
     @Override
     protected void customizeDebeziumProperties(Properties dbzProps) {
         var oracleProps = loadPropertiesTemplate("oracle.properties");
+        // RisingWave backfills each table on demand, so the shared Debezium connector only
+        // captures schemas and streams changes. On recovery, rebuild the in-memory schema
+        // history and resume from the opaque offset persisted in the CDC split.
+        // Include transactions that were already open when the shared source started.
+        // Debezium defines this property with an internal. prefix.
+        oracleProps.setProperty("internal.log.mining.transaction.snapshot.boundary.mode", "all");
+        if (hasStartOffset()) {
+            oracleProps.setProperty("snapshot.mode", "recovery");
+            oracleProps.setProperty(ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+        } else {
+            oracleProps.setProperty("snapshot.mode", "no_data");
+        }
         var heartbeatTable = OracleHeartbeatTable.parse(userProps.get(HEARTBEAT_TABLE_NAME));
         oracleProps.setProperty(
                 DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME,

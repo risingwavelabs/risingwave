@@ -17,10 +17,11 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
+import com.risingwave.proto.Data.DataType.TypeName;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -54,6 +55,7 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
     private final OracleHeartbeatTable heartbeatTable;
     private final boolean autoInitializeHeartbeatTable;
     private final boolean isCdcSourceJob;
+    private final String racNodes;
 
     public OracleValidator(
             Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
@@ -86,6 +88,7 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
         this.schemaName = userProps.get(DbzConnectorConfig.SCHEMA_NAME);
         this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
         this.isCdcSourceJob = isCdcSourceJob;
+        this.racNodes = userProps.get(OracleDbzConnectorConfig.DEBEZIUM_RAC_NODES);
     }
 
     @Override
@@ -98,9 +101,30 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
     void validateDbConfig() {
         try {
             validateLoggingConfiguration();
+            if (isCdcSourceJob) {
+                validateRacConfiguration();
+            }
             validatePdb();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
+        }
+    }
+
+    private void validateRacConfiguration() throws SQLException {
+        try (var stmt = jdbcConnection.createStatement();
+                var result =
+                        stmt.executeQuery(
+                                "SELECT VALUE FROM V$PARAMETER WHERE NAME = 'cluster_database'")) {
+            if (!result.next()) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Unable to determine whether Oracle RAC is enabled");
+            }
+            if ("TRUE".equalsIgnoreCase(result.getString(1))
+                    && (racNodes == null || racNodes.isBlank())) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Oracle RAC requires 'debezium.rac.nodes' so LogMiner discovers "
+                                + "transactions on every instance");
+            }
         }
     }
 
@@ -210,25 +234,31 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
         try {
             switchToPdb();
             validateTableExists();
-            validateTableColumns();
-            validateTablePrimaryKey();
             validateTableSupplementalLogging();
+            validateTableSchema();
+            validateTablePrimaryKey();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
-    private void validateTableColumns() throws SQLException {
-        var upstreamColumns = new HashSet<String>();
+    private void validateTableSchema() throws SQLException {
+        var upstreamColumns = new HashMap<String, ColumnInfo>();
         try (var stmt =
                 jdbcConnection.prepareStatement(
-                        "SELECT COLUMN_NAME FROM ALL_TAB_COLS "
+                        "SELECT COLUMN_NAME, DATA_TYPE, DATA_PRECISION, DATA_SCALE "
+                                + "FROM ALL_TAB_COLS "
                                 + "WHERE OWNER = ? AND TABLE_NAME = ? AND HIDDEN_COLUMN = 'NO'")) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             try (var result = stmt.executeQuery()) {
                 while (result.next()) {
-                    upstreamColumns.add(result.getString("COLUMN_NAME"));
+                    upstreamColumns.put(
+                            result.getString("COLUMN_NAME"),
+                            new ColumnInfo(
+                                    result.getString("DATA_TYPE"),
+                                    OracleExternalTable.nullableInteger(result, "DATA_PRECISION"),
+                                    OracleExternalTable.nullableInteger(result, "DATA_SCALE")));
                 }
             }
         }
@@ -236,51 +266,76 @@ public class OracleValidator extends CdcSourceValidator implements AutoCloseable
             if (columnName.startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                 continue;
             }
-            if (!upstreamColumns.contains(columnName)) {
+            var columnInfo = upstreamColumns.get(columnName);
+            if (columnInfo == null) {
                 throw ValidatorUtils.invalidArgument(
                         "Column '"
                                 + columnName
                                 + "' not found in the upstream database.\nHint: Oracle stores unquoted column names in uppercase. Use double quotes (\") in RisingWave to preserve the upstream column name.");
             }
+            if (!isDataTypeCompatible(columnInfo, tableSchema.getColumnType(columnName))) {
+                throw ValidatorUtils.invalidArgument(
+                        "Incompatible data type of column '"
+                                + columnName
+                                + "': Oracle type "
+                                + columnInfo.dataType()
+                                + " cannot be declared as "
+                                + tableSchema.getColumnType(columnName));
+            }
         }
     }
 
+    private static boolean isDataTypeCompatible(ColumnInfo columnInfo, TypeName typeName)
+            throws SQLException {
+        return validateCdcSourceColumnType(
+                columnInfo.dataType(), columnInfo.precision(), columnInfo.scale(), typeName);
+    }
+
+    /**
+     * Returns whether an Oracle column can be declared with the given RisingWave type: only the
+     * type that {@code CREATE TABLE (*)} derives for it is accepted. Throws for Oracle types that
+     * are not supported at all.
+     *
+     * <p>Unlike the other connectors, this does not call {@code
+     * Binding.validateCdcSourceColumnType}. The Oracle connector does not use a Rust driver: it
+     * discovers schemas and reads snapshots over JDBC, so the Oracle-to-RisingWave type mapping
+     * lives in Java in {@link OracleExternalTable#oracleTypeToRisingWaveType}, which this reuses.
+     */
+    private static boolean validateCdcSourceColumnType(
+            String dataType, Integer precision, Integer scale, TypeName typeName)
+            throws SQLException {
+        return OracleExternalTable.oracleTypeToRisingWaveType(dataType, precision, scale)
+                        .getTypeName()
+                == typeName;
+    }
+
+    private record ColumnInfo(String dataType, Integer precision, Integer scale) {}
+
     private void validateTablePrimaryKey() throws SQLException {
-        var pkFields = new ArrayList<String>();
-        String indexName = null;
-        var indexUsable = true;
+        var pkFields =
+                OracleExternalTable.discoverPrimaryKeys(jdbcConnection, schemaName, tableName);
+        primaryKeyCheck(tableSchema, pkFields);
         try (var stmt =
                 jdbcConnection.prepareStatement(
-                        "SELECT cols.COLUMN_NAME, ix.INDEX_NAME, ix.STATUS, ix.VISIBILITY "
-                                + "FROM ALL_CONSTRAINTS cons "
-                                + "JOIN ALL_CONS_COLUMNS cols ON cons.OWNER = cols.OWNER "
-                                + "AND cons.CONSTRAINT_NAME = cols.CONSTRAINT_NAME "
+                        "SELECT ix.INDEX_NAME, ix.STATUS, ix.VISIBILITY FROM ALL_CONSTRAINTS cons "
                                 + "JOIN ALL_INDEXES ix ON ix.OWNER = cons.INDEX_OWNER "
                                 + "AND ix.INDEX_NAME = cons.INDEX_NAME "
-                                + "JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = ix.OWNER "
-                                + "AND ic.INDEX_NAME = ix.INDEX_NAME AND ic.COLUMN_NAME = cols.COLUMN_NAME "
                                 + "WHERE cons.OWNER = ? AND cons.TABLE_NAME = ? "
-                                + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED' "
-                                + "ORDER BY ic.COLUMN_POSITION")) {
+                                + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED'")) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             try (var result = stmt.executeQuery()) {
                 while (result.next()) {
-                    pkFields.add(result.getString("COLUMN_NAME"));
-                    indexName = result.getString("INDEX_NAME");
                     var status = result.getString("STATUS");
-                    indexUsable &=
-                            ("VALID".equals(status) || "N/A".equals(status))
-                                    && "VISIBLE".equals(result.getString("VISIBILITY"));
+                    if (!("VALID".equals(status) || "N/A".equals(status))
+                            || !"VISIBLE".equals(result.getString("VISIBILITY"))) {
+                        throw ValidatorUtils.invalidArgument(
+                                String.format(
+                                        "The index '%s' enforcing the primary key of Oracle table '%s.%s' must be valid and visible, so CDC backfill can read the table in primary-key order through it.",
+                                        result.getString("INDEX_NAME"), schemaName, tableName));
+                    }
                 }
             }
-        }
-        primaryKeyCheck(tableSchema, pkFields);
-        if (!indexUsable) {
-            throw ValidatorUtils.invalidArgument(
-                    String.format(
-                            "The index '%s' enforcing the primary key of Oracle table '%s.%s' must be valid and visible, so CDC backfill can read the table in primary-key order through it.",
-                            indexName, schemaName, tableName));
         }
     }
 

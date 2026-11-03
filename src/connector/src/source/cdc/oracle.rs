@@ -28,7 +28,11 @@ const HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY: &str = "heartbeat.table.auto.initiali
 
 // ------- Runtime flags -------
 
-impl CdcSourceRuntimeFlags for Oracle {}
+impl CdcSourceRuntimeFlags for Oracle {
+    const CAN_BACKFILL: bool = true;
+    const NEEDS_NON_EMPTY_INITIAL_OFFSET: bool = true;
+    const NEEDS_PARSING_NUMBER_IN_DEBEZIUM_EVENT_AS_STRING: bool = true;
+}
 
 // ------- DDL validation -------
 

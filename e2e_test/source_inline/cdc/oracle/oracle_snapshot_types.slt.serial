@@ -1,0 +1,336 @@
+include oracle_test_env.slt.part
+
+statement ok
+DROP SOURCE IF EXISTS oracle_types_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare
+
+# Rows exist before the source is created, so every value below is read by the snapshot backfill.
+system ok
+PYTHONPATH=e2e_test/source_inline/cdc/oracle python3 - <<'PY'
+from oracle_test_utils import execute_oracle_sqls
+execute_oracle_sqls([
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES ("
+    "ID NUMBER(9) PRIMARY KEY, N4 NUMBER(4), N9 NUMBER(9), N18 NUMBER(18), N19 NUMBER(19), "
+    "N7_NEG2 NUMBER(7,-2), N10_2 NUMBER(10,2), N_UNBOUNDED NUMBER, FLOAT_VALUE FLOAT, "
+    "BINARY_FLOAT_VALUE BINARY_FLOAT, BINARY_DOUBLE_VALUE BINARY_DOUBLE, "
+    "CHAR_VALUE CHAR(5), NCHAR_VALUE NCHAR(4), VARCHAR_VALUE VARCHAR2(50), "
+    "NVARCHAR_VALUE NVARCHAR2(20), CLOB_VALUE CLOB, NCLOB_VALUE NCLOB, "
+    "RAW_VALUE RAW(16), BLOB_VALUE BLOB, "
+    "DATE_VALUE DATE, TIMESTAMP_VALUE TIMESTAMP(6), "
+    "TIMESTAMPTZ_VALUE TIMESTAMP(6) WITH TIME ZONE, "
+    "TIMESTAMPLTZ_VALUE TIMESTAMP(6) WITH LOCAL TIME ZONE, "
+    "N_STAR NUMBER(*,0), DOUBLE_VALUE DOUBLE PRECISION)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES VALUES ("
+    "1, 9999, 999999999, 999999999999999999, 9223372036854775808, "
+    "1234567, 12345.67, 123456789012345678.9, 3.14159, 1.5f, 1.25d, "
+    "'ab', N'ab', 'héllo, 世界', N'naïve 世界', TO_CLOB('clob text'), TO_NCLOB('nclob 文本'), "
+    "HEXTORAW('DEADBEEF'), TO_BLOB(HEXTORAW('00FF10')), "
+    "TO_DATE('1999-12-31 08:30:00', 'YYYY-MM-DD HH24:MI:SS'), "
+    "TIMESTAMP '2024-02-29 23:59:59.123456', "
+    "TIMESTAMP '2024-03-10 08:00:00.25 +05:30', "
+    "TIMESTAMP '2024-03-10 08:00:00.25 +05:30', "
+    "123456789012345678901, 3.141592653589793238)",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES VALUES ("
+    "2, -9999, -999999999, -999999999999999999, -9223372036854775809, "
+    "-1234549, -0.01, -0.000001, -2.5, -0.375f, -1e300d, "
+    "'abcde', N'abcd', ' padded ', N'x', TO_CLOB(' '), TO_NCLOB('n'), "
+    "HEXTORAW('00'), TO_BLOB(HEXTORAW('FF')), "
+    "TO_DATE('1965-07-04 12:00:00', 'YYYY-MM-DD HH24:MI:SS'), "
+    "TIMESTAMP '1965-07-04 12:00:00.5', "
+    "TIMESTAMP '1969-12-31 23:59:59.999999 -08:00', "
+    "TIMESTAMP '1969-12-31 23:59:59.999999 -08:00', "
+    "-1, -0.5)",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_TYPES (ID) VALUES (3)",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_KEYS ("
+    "CODE VARCHAR2(16), CREATED TIMESTAMP(6), TAG RAW(4), NOTE VARCHAR2(16), "
+    "PRIMARY KEY (CODE, CREATED, TAG))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_KEYS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_KEYS VALUES ('a', TIMESTAMP '2024-01-01 00:00:00.000001', HEXTORAW('01'), 'r1')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_KEYS VALUES ('a', TIMESTAMP '2024-01-01 00:00:00.000001', HEXTORAW('02'), 'r2')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_KEYS VALUES ('a', TIMESTAMP '2024-01-01 00:00:00.000002', HEXTORAW('01'), 'r3')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_KEYS VALUES ('b', TIMESTAMP '2024-01-01 00:00:00.000001', HEXTORAW('01'), 'r4')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_KEYS VALUES ('B', TIMESTAMP '2024-01-01 00:00:00.000001', HEXTORAW('01'), 'r5')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY (CODE CHAR(4) PRIMARY KEY, NOTE VARCHAR2(16))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('a', 'c1')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('ab', 'c2')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_CHAR_KEY VALUES ('b', 'c3')",
+    "BEGIN IF DBTIMEZONE = '+00:00' THEN "
+    "RAISE_APPLICATION_ERROR(-20000, 'the PDB time zone must not be UTC'); END IF; END;",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY "
+    "(TS TIMESTAMP(6) WITH LOCAL TIME ZONE PRIMARY KEY, NOTE VARCHAR2(16))",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY VALUES (TIMESTAMP '2025-12-31 20:00:00 +00:00', 'r1')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY VALUES (TIMESTAMP '2026-01-01 00:00:00 +00:00', 'r2')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY VALUES (TIMESTAMP '2026-01-01 04:00:00 +00:00', 'r3')",
+    "INSERT INTO $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LTZ_KEY VALUES (TIMESTAMP '2026-01-01 09:00:00 +00:00', 'r4')",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_INTERVAL "
+    "(ID NUMBER(9) PRIMARY KEY, INTERVAL_VALUE INTERVAL DAY TO SECOND)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_INTERVAL ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_JSON "
+    "(ID NUMBER(9) PRIMARY KEY, JSON_VALUE JSON)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_JSON ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LONG (ID NUMBER(9) PRIMARY KEY, LONG_VALUE LONG)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LONG ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LONG_RAW (ID NUMBER(9) PRIMARY KEY, LONG_RAW_VALUE LONG RAW)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_LONG_RAW ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_BOOLEAN (ID NUMBER(9) PRIMARY KEY, BOOLEAN_VALUE BOOLEAN)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_BOOLEAN ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_UROWID (ID NUMBER(9) PRIMARY KEY, UROWID_VALUE UROWID)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_UROWID ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+    "CREATE TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_XMLTYPE (ID NUMBER(9) PRIMARY KEY, XML_VALUE XMLTYPE)",
+    "ALTER TABLE $TEST_ORACLE_SOURCE_SCHEMA.RW_SNAPSHOT_XMLTYPE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS",
+])
+PY
+
+statement ok
+CREATE SOURCE oracle_types_source WITH (
+    ${TEST_ORACLE_WITH_OPTIONS_COMMON},
+    schema.name = '${TEST_ORACLE_SOURCE_SCHEMA}',
+    heartbeat.table.name = '${TEST_ORACLE_USER}.${TEST_ORACLE_HEARTBEAT_TABLE}',
+    heartbeat.table.auto.initialize = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+# One-row pages make every row after the first start from a key read back through the reader.
+statement ok
+CREATE TABLE oracle_snapshot_types (*) WITH (snapshot.batch_size = 1)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement ok
+CREATE TABLE oracle_snapshot_keys (*) WITH (snapshot.batch_size = 1)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_KEYS';
+
+statement ok
+CREATE TABLE oracle_snapshot_char_key (*) WITH (snapshot.batch_size = 1)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_CHAR_KEY';
+
+statement ok
+CREATE TABLE oracle_snapshot_ltz_key (*) WITH (snapshot.batch_size = 1)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_LTZ_KEY';
+
+# Discovery must reject Oracle types it cannot map, without leaving a catalog object.
+statement error (?s).*Unsupported Oracle data type: INTERVAL DAY.*
+CREATE TABLE oracle_snapshot_interval (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_INTERVAL';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations WHERE name = 'oracle_snapshot_interval';
+----
+0
+
+statement error (?s).*Unsupported Oracle data type: JSON.*
+CREATE TABLE oracle_snapshot_json (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_JSON';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations WHERE name = 'oracle_snapshot_json';
+----
+0
+
+# Debezium cannot stream these Oracle types, so a table with one of them is rejected even though
+# the snapshot could read it.
+statement error (?s).*Unsupported Oracle data type: LONG.*
+CREATE TABLE oracle_snapshot_long (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_LONG';
+
+statement error (?s).*Unsupported Oracle data type: LONG RAW.*
+CREATE TABLE oracle_snapshot_long_raw (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_LONG_RAW';
+
+statement error (?s).*Unsupported Oracle data type: BOOLEAN.*
+CREATE TABLE oracle_snapshot_boolean (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_BOOLEAN';
+
+statement error (?s).*Unsupported Oracle data type: UROWID.*
+CREATE TABLE oracle_snapshot_urowid (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_UROWID';
+
+statement error (?s).*Unsupported Oracle data type: XMLTYPE.*
+CREATE TABLE oracle_snapshot_xmltype (*)
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_XMLTYPE';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations
+WHERE name IN ('oracle_snapshot_long', 'oracle_snapshot_long_raw', 'oracle_snapshot_boolean',
+               'oracle_snapshot_urowid', 'oracle_snapshot_xmltype');
+----
+0
+
+# Declared columns must use the type discovery derives, so values are neither truncated nor
+# converted differently by the snapshot and the stream.
+statement error (?s).*Incompatible data type of column 'DATE_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "DATE_VALUE" DATE, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'TIMESTAMPTZ_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "TIMESTAMPTZ_VALUE" TIMESTAMP, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'N10_2'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "N10_2" INT, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'N18'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "N18" INT, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'BINARY_DOUBLE_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "BINARY_DOUBLE_VALUE" REAL, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'VARCHAR_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "VARCHAR_VALUE" INT, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'CLOB_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "CLOB_VALUE" BYTEA, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Incompatible data type of column 'RAW_VALUE'.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "RAW_VALUE" VARCHAR, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+statement error (?s).*Unsupported Oracle data type: JSON.*
+CREATE TABLE oracle_declared_wrong ("ID" INT, "JSON_VALUE" JSONB, PRIMARY KEY ("ID"))
+FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_JSON';
+
+query I
+SELECT count(*) FROM rw_catalog.rw_relations WHERE name = 'oracle_declared_wrong';
+----
+0
+
+statement ok
+CREATE TABLE oracle_declared_types (
+    "ID" INT,
+    "N18" BIGINT,
+    "N10_2" NUMERIC,
+    "DATE_VALUE" TIMESTAMP,
+    "TIMESTAMPTZ_VALUE" TIMESTAMPTZ,
+    "RAW_VALUE" BYTEA,
+    PRIMARY KEY ("ID")
+) FROM oracle_types_source TABLE 'APP.RW_SNAPSHOT_TYPES';
+
+# Discovered types match Debezium's mapping, so snapshot and CDC values agree.
+query TT
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_name = 'oracle_snapshot_types' AND NOT starts_with(column_name, '_rw')
+ORDER BY ordinal_position;
+----
+ID integer
+N4 smallint
+N9 integer
+N18 bigint
+N19 numeric
+N7_NEG2 integer
+N10_2 numeric
+N_UNBOUNDED numeric
+FLOAT_VALUE numeric
+BINARY_FLOAT_VALUE real
+BINARY_DOUBLE_VALUE double precision
+CHAR_VALUE character varying
+NCHAR_VALUE character varying
+VARCHAR_VALUE character varying
+NVARCHAR_VALUE character varying
+CLOB_VALUE character varying
+NCLOB_VALUE character varying
+RAW_VALUE bytea
+BLOB_VALUE bytea
+DATE_VALUE timestamp without time zone
+TIMESTAMP_VALUE timestamp without time zone
+TIMESTAMPTZ_VALUE timestamp with time zone
+TIMESTAMPLTZ_VALUE timestamp with time zone
+N_STAR numeric
+DOUBLE_VALUE numeric
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM oracle_snapshot_types;
+----
+3
+
+query T
+SELECT "ID", "N4", "N9", "N18", "N19", "N7_NEG2", "N10_2", "N_UNBOUNDED", "FLOAT_VALUE",
+       "BINARY_FLOAT_VALUE", "BINARY_DOUBLE_VALUE"
+FROM oracle_snapshot_types ORDER BY "ID";
+----
+1 9999 999999999 999999999999999999 9223372036854775808 1234600 12345.67 123456789012345678.9 3.14159 1.5 1.25
+2 -9999 -999999999 -999999999999999999 -9223372036854775809 -1234500 -0.01 -0.000001 -2.5 -0.375 -1e+300
+3 NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL
+
+# NUMBER(*,0) and DOUBLE PRECISION are decimals: values beyond BIGINT and beyond a double's
+# precision stay exact.
+query T
+SELECT "ID", "N_STAR", "DOUBLE_VALUE" FROM oracle_snapshot_types ORDER BY "ID";
+----
+1 123456789012345678901 3.141592653589793238
+2 -1 -0.5
+3 NULL NULL
+
+# Blanks are shown as underscores so CHAR/NCHAR padding and kept spaces are compared exactly.
+query T
+SELECT "ID", replace("CHAR_VALUE", ' ', '_'), replace("NCHAR_VALUE", ' ', '_'),
+       replace("VARCHAR_VALUE", ' ', '_'), replace("NVARCHAR_VALUE", ' ', '_'),
+       replace("CLOB_VALUE", ' ', '_'), replace("NCLOB_VALUE", ' ', '_')
+FROM oracle_snapshot_types ORDER BY "ID";
+----
+1 ab___ ab__ héllo,_世界 naïve_世界 clob_text nclob_文本
+2 abcde abcd _padded_ x _ n
+3 NULL NULL NULL NULL NULL NULL
+
+query T
+SELECT "ID", "RAW_VALUE", "BLOB_VALUE" FROM oracle_snapshot_types ORDER BY "ID";
+----
+1 \xdeadbeef \x00ff10
+2 \x00 \xff
+3 NULL NULL
+
+query T
+SELECT "ID", "DATE_VALUE", "TIMESTAMP_VALUE", "TIMESTAMPTZ_VALUE", "TIMESTAMPLTZ_VALUE"
+FROM oracle_snapshot_types ORDER BY "ID";
+----
+1 1999-12-31 08:30:00 2024-02-29 23:59:59.123456 2024-03-10 02:30:00.250+00:00 2024-03-10 02:30:00.250+00:00
+2 1965-07-04 12:00:00 1965-07-04 12:00:00.500 1970-01-01 07:59:59.999999+00:00 1970-01-01 07:59:59.999999+00:00
+3 NULL NULL NULL NULL
+
+# Declaring the discovered types reads the same values, including the time of an Oracle DATE.
+query T retry 30 backoff 1s
+SELECT "ID", "N18", "N10_2", "DATE_VALUE", "TIMESTAMPTZ_VALUE", "RAW_VALUE"
+FROM oracle_declared_types ORDER BY "ID";
+----
+1 999999999999999999 12345.67 1999-12-31 08:30:00 2024-03-10 02:30:00.250+00:00 \xdeadbeef
+2 -999999999999999999 -0.01 1965-07-04 12:00:00 1970-01-01 07:59:59.999999+00:00 \x00
+3 NULL NULL NULL NULL NULL
+
+query T retry 30 backoff 1s
+SELECT "CODE", "CREATED", "TAG", "NOTE" FROM oracle_snapshot_keys ORDER BY "NOTE";
+----
+a 2024-01-01 00:00:00.000001 \x01 r1
+a 2024-01-01 00:00:00.000001 \x02 r2
+a 2024-01-01 00:00:00.000002 \x01 r3
+b 2024-01-01 00:00:00.000001 \x01 r4
+B 2024-01-01 00:00:00.000001 \x01 r5
+
+query T retry 30 backoff 1s
+SELECT replace("CODE", ' ', '_'), "NOTE" FROM oracle_snapshot_char_key ORDER BY "NOTE";
+----
+a___ c1
+ab__ c2
+b___ c3
+
+# Every page after the first starts from a LOCAL TIME ZONE key read back by the snapshot. A key
+# shifted by the PDB time zone would skip the rows between the real and the shifted value.
+query T retry 30 backoff 1s
+SELECT "TS", "NOTE" FROM oracle_snapshot_ltz_key ORDER BY "TS";
+----
+2025-12-31 20:00:00+00:00 r1
+2026-01-01 00:00:00+00:00 r2
+2026-01-01 04:00:00+00:00 r3
+2026-01-01 09:00:00+00:00 r4
+
+statement ok
+DROP SOURCE oracle_types_source CASCADE;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

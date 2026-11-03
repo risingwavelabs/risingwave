@@ -18,7 +18,10 @@ package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
+import java.util.HashMap;
 import java.util.Map;
+import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.source.SourceRecord;
 
 public class OracleCdcSource extends CdcSource {
     OracleCdcSource(
@@ -60,5 +63,25 @@ public class OracleCdcSource extends CdcSource {
         try (var validator = new OracleValidator(userProps, tableSchema, isCdcSourceJob())) {
             validator.validateAll();
         }
+    }
+
+    /**
+     * Adds the commit SCN of a data event to its offset as {@code decoded_commit_scn}, by which the
+     * backfill orders change events against the snapshot SCN. Debezium's own {@code commit_scn} in
+     * the offset is a per-redo-thread recovery map, not the SCN of this event.
+     */
+    @Override
+    public Map<String, ?> getEventSourceOffset(SourceRecord record, CdcEventType eventType) {
+        var sourceOffset = record.sourceOffset();
+        if (eventType != CdcEventType.DATA || record.value() == null) {
+            return sourceOffset;
+        }
+        var source = ((Struct) record.value()).getStruct("source");
+        if (source == null || source.getString("commit_scn") == null) {
+            throw new CdcConnectorException("Oracle data event is missing source.commit_scn");
+        }
+        Map<String, Object> comparisonOffset = new HashMap<>(sourceOffset);
+        comparisonOffset.put("decoded_commit_scn", source.getString("commit_scn"));
+        return comparisonOffset;
     }
 }
