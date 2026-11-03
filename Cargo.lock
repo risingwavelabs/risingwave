@@ -1778,9 +1778,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-types"
-version = "1.8.1"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69bb407740a197147da48238ecc94498493c9e85445732360cec180296ca45f1"
+checksum = "55752025c39c0e094962fd73f1c57014b191f678612e517f219468e575af9822"
 dependencies = [
  "base64-simd",
  "bytes",
@@ -1794,7 +1794,6 @@ dependencies = [
  "itoa",
  "num-integer",
  "pin-project-lite",
- "pin-utils",
  "ryu",
  "serde",
  "time",
@@ -15502,7 +15501,7 @@ dependencies = [
  "await-tree",
  "aws-config",
  "aws-credential-types",
- "aws-smithy-http 0.63.6",
+ "aws-smithy-http 0.64.1",
  "aws-smithy-http-client",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
