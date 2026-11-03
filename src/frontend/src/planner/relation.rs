@@ -380,9 +380,11 @@ source: {:?}",
             BoundShareInput::ChangeLog {
                 relation,
                 key_indices,
+                distribution_key_indices,
             } => {
                 let id = share.share_id;
-                let result = self.plan_changelog(relation, key_indices)?;
+                let result =
+                    self.plan_changelog(relation, key_indices, distribution_key_indices)?;
                 let logical_share = LogicalShare::create(result);
                 self.share_cache.insert(id, logical_share.clone());
                 Ok(logical_share)

@@ -78,6 +78,7 @@ pub enum BindingCteState {
     ChangeLog {
         table: Relation,
         key_indices: Option<Vec<usize>>,
+        distribution_key_indices: Option<Vec<usize>>,
     },
 }
 

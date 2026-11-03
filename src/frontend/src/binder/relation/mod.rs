@@ -461,10 +461,15 @@ impl Binder {
                     // no matter it's recursive or not.
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
-                BindingCteState::ChangeLog { table, key_indices } => {
+                BindingCteState::ChangeLog {
+                    table,
+                    key_indices,
+                    distribution_key_indices,
+                } => {
                     let input = BoundShareInput::ChangeLog {
                         relation: table,
                         key_indices,
+                        distribution_key_indices,
                     };
                     self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
