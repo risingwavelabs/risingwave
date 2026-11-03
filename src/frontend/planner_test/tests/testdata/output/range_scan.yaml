@@ -162,8 +162,7 @@
     SELECT * FROM orders_count_by_user WHERE user_id in (2147483648, 2147483649) AND date = 6666
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (orders_count_by_user.date = 6666:Int32) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(2147483648), orders_count_by_user.user_id = Int64(2147483649)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(2147483648) AND orders_count_by_user.date = Int32(6666), orders_count_by_user.user_id = Int64(2147483649) AND orders_count_by_user.date = Int32(6666)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
@@ -221,8 +220,7 @@
     SELECT * FROM orders_count_by_user WHERE user_id in (2147483648, 2147483649) AND date in (2222, 3333)
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: In(orders_count_by_user.date, 2222:Int32, 3333:Int32) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(2147483648), orders_count_by_user.user_id = Int64(2147483649)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(2147483648) AND orders_count_by_user.date = Int32(2222), orders_count_by_user.user_id = Int64(2147483648) AND orders_count_by_user.date = Int32(3333), orders_count_by_user.user_id = Int64(2147483649) AND orders_count_by_user.date = Int32(2222), orders_count_by_user.user_id = Int64(2147483649) AND orders_count_by_user.date = Int32(3333)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - id: create_table_and_mv_ordered
   sql: |
     CREATE TABLE orders (
@@ -421,15 +419,14 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (((orders_count_by_user.user_id = 1:Int32) OR ((orders_count_by_user.user_id = 2:Int32) AND In(orders_count_by_user.date, 1111:Int32, 2222:Int32))) OR (orders_count_by_user.user_id <> 3:Int32)) }
       └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
-- name: When any arm of or clause is not equal type, we can't convert it to scan range yet.
+- name: When any arm of or clause is not equal type, it can still be a scan range.
   before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > 1 or user_id < 10
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((orders_count_by_user.user_id > 1:Int32) OR (orders_count_by_user.user_id < 10:Int32)) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < null], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
@@ -512,64 +509,56 @@
     SELECT * FROM orders_count_by_user WHERE (user_id < 10) or (user_id > 20);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((orders_count_by_user.user_id < 10:Int32) OR (orders_count_by_user.user_id > 20:Int32)) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id > Int64(20)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id > Int64(20)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 10) or (user_id > 20);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((orders_count_by_user_desc.user_id < 10:Int32) OR (orders_count_by_user_desc.user_id > 20:Int32)) }
-      └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id < Int64(10), orders_count_by_user_desc.user_id > Int64(20)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
+    └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id > Int64(20), orders_count_by_user_desc.user_id < Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE (user_id < 10) or (user_id >= 10);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((orders_count_by_user.user_id < 10:Int32) OR (orders_count_by_user.user_id >= 10:Int32)) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id >= Int64(10)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < null], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 10) or (user_id >= 10);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((orders_count_by_user_desc.user_id < 10:Int32) OR (orders_count_by_user_desc.user_id >= 10:Int32)) }
-      └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id < Int64(10), orders_count_by_user_desc.user_id >= Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
+    └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id < null], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE (user_id < 10) or (user_id > 20) or (user_id = 15);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((orders_count_by_user.user_id < 10:Int32) OR (orders_count_by_user.user_id > 20:Int32)) OR (orders_count_by_user.user_id = 15:Int32)) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id = Int64(15), orders_count_by_user.user_id > Int64(20)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id = Int64(15), orders_count_by_user.user_id > Int64(20)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 10) or (user_id > 20) or (user_id = 15);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((orders_count_by_user_desc.user_id < 10:Int32) OR (orders_count_by_user_desc.user_id > 20:Int32)) OR (orders_count_by_user_desc.user_id = 15:Int32)) }
-      └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id < Int64(10), orders_count_by_user_desc.user_id = Int64(15), orders_count_by_user_desc.user_id > Int64(20)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
+    └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id > Int64(20), orders_count_by_user_desc.user_id = Int64(15), orders_count_by_user_desc.user_id < Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE (user_id < 10 and user_id > 1) or (user_id > 20 and user_id < 30) or (user_id >= 30 and user_id < 40);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((((orders_count_by_user.user_id < 10:Int32) AND (orders_count_by_user.user_id > 1:Int32)) OR ((orders_count_by_user.user_id > 20:Int32) AND (orders_count_by_user.user_id < 30:Int32))) OR ((orders_count_by_user.user_id >= 30:Int32) AND (orders_count_by_user.user_id < 40:Int32))) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id > Int64(1) AND orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id > Int64(20) AND orders_count_by_user.user_id < Int64(30), orders_count_by_user.user_id >= Int64(30) AND orders_count_by_user.user_id < Int64(40)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id > Int64(1) AND orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id > Int64(20) AND orders_count_by_user.user_id < Int64(40)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 10 and user_id > 1) or (user_id > 20 and user_id < 30) or (user_id >= 30 and user_id < 40);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((((orders_count_by_user_desc.user_id < 10:Int32) AND (orders_count_by_user_desc.user_id > 1:Int32)) OR ((orders_count_by_user_desc.user_id > 20:Int32) AND (orders_count_by_user_desc.user_id < 30:Int32))) OR ((orders_count_by_user_desc.user_id >= 30:Int32) AND (orders_count_by_user_desc.user_id < 40:Int32))) }
-      └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id > Int64(1) AND orders_count_by_user_desc.user_id < Int64(10), orders_count_by_user_desc.user_id > Int64(20) AND orders_count_by_user_desc.user_id < Int64(30), orders_count_by_user_desc.user_id >= Int64(30) AND orders_count_by_user_desc.user_id < Int64(40)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
+    └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id > Int64(20) AND orders_count_by_user_desc.user_id < Int64(40), orders_count_by_user_desc.user_id > Int64(1) AND orders_count_by_user_desc.user_id < Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
 - name: When OR clauses contain overlapping conditions, we can merge serveral scan_range and pushdown.
   before:
   - create_table_and_mv
@@ -577,49 +566,43 @@
     SELECT * FROM orders_count_by_user WHERE (user_id < 10 and user_id > 1) or (user_id > 20 and user_id <= 30) or (user_id >= 30 and user_id < 40) or (user_id = 15);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((((orders_count_by_user.user_id < 10:Int32) AND (orders_count_by_user.user_id > 1:Int32)) OR ((orders_count_by_user.user_id > 20:Int32) AND (orders_count_by_user.user_id <= 30:Int32))) OR (((orders_count_by_user.user_id >= 30:Int32) AND (orders_count_by_user.user_id < 40:Int32)) OR (orders_count_by_user.user_id = 15:Int32))) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id > Int64(1) AND orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id = Int64(15), orders_count_by_user.user_id > Int64(20) AND orders_count_by_user.user_id < Int64(40)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id > Int64(1) AND orders_count_by_user.user_id < Int64(10), orders_count_by_user.user_id = Int64(15), orders_count_by_user.user_id > Int64(20) AND orders_count_by_user.user_id < Int64(40)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 10 and user_id > 1) or (user_id > 20 and user_id <= 30) or (user_id >= 30 and user_id < 40) or (user_id = 15);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((((orders_count_by_user_desc.user_id < 10:Int32) AND (orders_count_by_user_desc.user_id > 1:Int32)) OR ((orders_count_by_user_desc.user_id > 20:Int32) AND (orders_count_by_user_desc.user_id <= 30:Int32))) OR (((orders_count_by_user_desc.user_id >= 30:Int32) AND (orders_count_by_user_desc.user_id < 40:Int32)) OR (orders_count_by_user_desc.user_id = 15:Int32))) }
-      └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id > Int64(1) AND orders_count_by_user_desc.user_id < Int64(10), orders_count_by_user_desc.user_id = Int64(15), orders_count_by_user_desc.user_id > Int64(20) AND orders_count_by_user_desc.user_id < Int64(40)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
+    └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id > Int64(20) AND orders_count_by_user_desc.user_id < Int64(40), orders_count_by_user_desc.user_id = Int64(15), orders_count_by_user_desc.user_id > Int64(1) AND orders_count_by_user_desc.user_id < Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE (user_id < 10) or (user_id > 30) or (user_id > 5 and user_id < 15);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((orders_count_by_user.user_id < 10:Int32) OR (orders_count_by_user.user_id > 30:Int32)) OR ((orders_count_by_user.user_id > 5:Int32) AND (orders_count_by_user.user_id < 15:Int32))) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < Int64(15), orders_count_by_user.user_id > Int64(30)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < Int64(15), orders_count_by_user.user_id > Int64(30)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 10) or (user_id > 30) or (user_id > 5 and user_id < 15);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((orders_count_by_user_desc.user_id < 10:Int32) OR (orders_count_by_user_desc.user_id > 30:Int32)) OR ((orders_count_by_user_desc.user_id > 5:Int32) AND (orders_count_by_user_desc.user_id < 15:Int32))) }
-      └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id < Int64(15), orders_count_by_user_desc.user_id > Int64(30)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
-- name: When OR clauses contain overlapping conditions, we cannot push down if it results in a full table scan.
+    └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id > Int64(30), orders_count_by_user_desc.user_id < Int64(15)], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
+- name: When OR clauses contain overlapping conditions and cover all values, only NULLs are left out.
   before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE (user_id < 20) or (user_id > 10);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((orders_count_by_user.user_id < 20:Int32) OR (orders_count_by_user.user_id > 10:Int32)) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id < null], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user_desc WHERE (user_id < 20) or (user_id > 10);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: ((orders_count_by_user_desc.user_id < 20:Int32) OR (orders_count_by_user_desc.user_id > 10:Int32)) }
-      └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
+    └─BatchScan { table: orders_count_by_user_desc, columns: [orders_count_by_user_desc.user_id, orders_count_by_user_desc.date, orders_count_by_user_desc.orders_count], scan_ranges: [orders_count_by_user_desc.user_id < null], distribution: UpstreamHashShard(orders_count_by_user_desc.user_id, orders_count_by_user_desc.date) }
 - before:
   - create_table_and_mv
   sql: |
@@ -643,33 +626,57 @@
     SELECT * FROM orders_count_by_user WHERE (user_id = 1 and date > 5) or (user_id between 0 and 100);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((orders_count_by_user.user_id = 1:Int32) AND (orders_count_by_user.date > 5:Int32)) OR ((orders_count_by_user.user_id >= 0:Int32) AND (orders_count_by_user.user_id <= 100:Int32))) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id >= Int64(0) AND orders_count_by_user.user_id <= Int64(100)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id >= Int64(0) AND orders_count_by_user.user_id <= Int64(100)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE (user_id between 0 and 5) or (user_id = 1 and date > 5);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (((orders_count_by_user.user_id >= 0:Int32) AND (orders_count_by_user.user_id <= 5:Int32)) OR ((orders_count_by_user.user_id = 1:Int32) AND (orders_count_by_user.date > 5:Int32))) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(0), orders_count_by_user.user_id = Int64(1), orders_count_by_user.user_id = Int64(2), orders_count_by_user.user_id = Int64(3), orders_count_by_user.user_id = Int64(4), orders_count_by_user.user_id = Int64(5)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
-- name: A range with one side bounded skips NULLs, so it does not overlap with IS NULL.
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(0), orders_count_by_user.user_id = Int64(1), orders_count_by_user.user_id = Int64(2), orders_count_by_user.user_id = Int64(3), orders_count_by_user.user_id = Int64(4), orders_count_by_user.user_id = Int64(5)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- name: Several ranges provide key order, so a limit can stop early.
+  before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 AND (date < 5 OR date > 10) ORDER BY date LIMIT 1;
+  batch_plan: |-
+    BatchSort { order: [orders_count_by_user.date ASC] }
+    └─BatchTopN { order: [orders_count_by_user.user_id ASC, orders_count_by_user.date ASC], limit: 1, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 1, offset: 0 }
+          └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) AND orders_count_by_user.date < Int32(5), orders_count_by_user.user_id = Int64(1) AND orders_count_by_user.date > Int32(10)], limit: 1, distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- name: A point get and a range keep key order too.
+  sql: |
+    create table t(a int primary key, b int);
+    select * from t where a = 1 or a > 5 order by a limit 1;
+  batch_plan: |-
+    BatchTopN { order: [t.a ASC], limit: 1, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 1, offset: 0 }
+        └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a = Int32(1), t.a > Int32(5)], limit: 1, distribution: UpstreamHashShard(t.a) }
+- name: A list of values of the next column is several ranges.
+  before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 AND date IN (5, 7);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) AND orders_count_by_user.date = Int32(5), orders_count_by_user.user_id = Int64(1) AND orders_count_by_user.date = Int32(7)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- name: A range with one side bounded ends right before the NULLs, so IS NULL extends it.
   before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id is null or user_id > 10;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (IsNull(orders_count_by_user.user_id) OR (orders_count_by_user.user_id > 10:Int32)) }
-      └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id > Int64(10), orders_count_by_user.user_id IS NULL], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+    └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id > Int64(10) AND orders_count_by_user.user_id <= null], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - name: A bound on a shorter pk prefix covers all the keys extending it.
   sql: |
     create table t(a int, b int, primary key(a, b));
     select * from t where (a, b) > (1, 5) or a >= 1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (RowGreaterThan(Row(t.a, t.b), '(1,5)':Struct(Int32, Int32)) OR (t.a >= 1:Int32)) }
-      └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a >= Int32(1)], distribution: UpstreamHashShard(t.a, t.b) }
+    └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a >= Int32(1)], distribution: UpstreamHashShard(t.a, t.b) }
 - name: The full range of a small integer type is not split into points.
   sql: |
     create table t(a smallint primary key);
@@ -684,4 +691,67 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: ((IsNull(t.a) OR RowGreaterThan(Row(t.a, t.b), '(,0)':Struct(Int32, Int32))) OR (IsNull(t.a) AND (t.c > 0:Int32))) }
-      └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: UpstreamHashShard(t.a) }
+      └─BatchScan { table: t, columns: [t.a, t.b, t.c], scan_ranges: [t.a IS NULL], distribution: UpstreamHashShard(t.a) }
+- name: A contradiction in an OR arm does not widen the scan.
+  sql: |
+    create table t(a int primary key, b int);
+    select * from t where (a > 5 and a < 3) or a = 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a = Int32(1)], distribution: UpstreamHashShard(t.a) }
+- name: The union of a row comparison and a part of it is exact, so there is no filter.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) > (1, 5) or a = 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a >= Int32(1)], distribution: UpstreamHashShard(t.a, t.b) }
+- name: Both arms cover all non-NULL values, and the NULLs stay out.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) < (7, 1) or (a, b) > (6, 7);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a < null], distribution: UpstreamHashShard(t.a, t.b) }
+- name: A NULL in the first field of a row comparison selects nothing.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) > (null::int, 1) or a = 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a = Int32(1)], distribution: UpstreamHashShard(t.a, t.b) }
+- name: Later columns narrow every value of an IN list.
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a in (1, 2) and b > 5;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b, t.c], scan_ranges: [t.a = Int32(1) AND t.b > Int32(5), t.a = Int32(2) AND t.b > Int32(5)], distribution: UpstreamHashShard(t.a, t.b) }
+- sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a in (1, 2) and b in (3, 4);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b, t.c], scan_ranges: [t.a = Int32(1) AND t.b = Int32(3), t.a = Int32(1) AND t.b = Int32(4), t.a = Int32(2) AND t.b = Int32(3), t.a = Int32(2) AND t.b = Int32(4)], distribution: UpstreamHashShard(t.a, t.b) }
+- name: A row comparison after an equality on the pk prefix.
+  sql: |
+    create table t(a int, b int, c int, d int, primary key(a, b, c));
+    select * from t where a = 1 and (b, c) > (2, 3);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c > Int32(3), t.a = Int32(1) AND t.b > Int32(2)], distribution: UpstreamHashShard(t.a, t.b, t.c) }
+- name: A row comparison on a mixed order pk is two exact ranges.
+  sql: |
+    create table t(a int, b int, c int);
+    create materialized view mv as select * from t order by a, b desc;
+    select * from mv where (a, b) > (1, 5);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv, columns: [mv.a, mv.b, mv.c], scan_ranges: [mv.a = Int32(1) AND mv.b > Int32(5), mv.a > Int32(1)], distribution: SomeShard }
+- name: Row comparisons with non-strict operators and BETWEEN get ranges too.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) between (1, 2) and (3, 4);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [t.a, t.b], scan_ranges: [t.a = Int32(1) AND t.b >= Int32(2), t.a > Int32(1) AND (t.a, t.b) <= (Int32(3), Int32(4))], distribution: UpstreamHashShard(t.a, t.b) }

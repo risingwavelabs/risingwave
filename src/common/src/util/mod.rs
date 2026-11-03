@@ -24,6 +24,7 @@ pub mod env_var;
 pub mod epoch;
 pub mod hash_util;
 pub use rw_iter_util as iter_util;
+pub mod key_set;
 pub mod memcmp_encoding;
 pub mod meta_addr;
 pub mod panic;

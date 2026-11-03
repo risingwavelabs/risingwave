@@ -46,28 +46,24 @@ impl BatchSeqScan {
         scan_ranges: Vec<ScanRange>,
         limit: Option<u64>,
     ) -> Self {
-        let orders = if scan_ranges.len() > 1 {
-            vec![Order::any()]
-        } else {
-            let base_order = core.get_out_column_index_order();
-            if scan_ranges.len() == 1 && !base_order.is_any() {
-                let eq_prefix_len = scan_ranges[0].eq_conds.len();
-                if eq_prefix_len > 0 {
-                    let mut orders = vec![base_order.clone()];
-                    let max_trim = eq_prefix_len.min(base_order.column_orders.len());
-                    for trim in 1..=max_trim {
-                        orders.push(Order {
-                            column_orders: base_order.column_orders[trim..].to_vec(),
-                        });
-                    }
-                    orders
-                } else {
-                    vec![base_order]
-                }
-            } else {
-                vec![base_order]
-            }
-        };
+        // Scan ranges are in key order and read one by one, so they provide key order however many
+        // there are. Columns that are equal in all of them can be left out of it.
+        let base_order = core.get_out_column_index_order();
+        let eq_prefix_len = scan_ranges.first().map_or(0, |first| {
+            (0..first.eq_conds.len())
+                .take_while(|&i| {
+                    scan_ranges
+                        .iter()
+                        .all(|range| range.eq_conds.get(i) == Some(&first.eq_conds[i]))
+                })
+                .count()
+        });
+        let max_trim = eq_prefix_len.min(base_order.column_orders.len());
+        let orders = (0..=max_trim)
+            .map(|trim| Order {
+                column_orders: base_order.column_orders[trim..].to_vec(),
+            })
+            .collect();
         let base = PlanBase::new_batch_with_core_and_orders(&core, dist, orders);
 
         {
