@@ -59,7 +59,7 @@ impl ExecutionContext {
         Self { session, timeout }
     }
 
-    pub fn session(&self) -> &SessionImpl {
+    pub fn session(&self) -> &Arc<SessionImpl> {
         &self.session
     }
 
