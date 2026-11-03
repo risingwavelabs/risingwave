@@ -94,6 +94,12 @@ impl TestSuite {
                         is_full,
                     )
                     .await?;
+                    self.subscription_cursor_fetch_formats(
+                        is_distributed,
+                        is_binary_format,
+                        is_full,
+                    )
+                    .await?;
                 }
             }
         }
@@ -733,6 +739,88 @@ impl TestSuite {
                 .await??;
             let rows = Self::cursor_rows(&client, "select 1::int", is_binary_format).await?;
             test_eq!(rows[0][0].as_deref(), Some("1"));
+            Ok(())
+        })
+        .await?
+    }
+
+    /// Checks result-format changes across successful subscription FETCH commands and typed-key
+    /// EXPLAIN after binary output. This is format/provenance coverage, not cancellation replay.
+    async fn subscription_cursor_fetch_formats(
+        &self,
+        is_distributed: bool,
+        is_binary_format: bool,
+        is_full: bool,
+    ) -> anyhow::Result<()> {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            tracing::info!(
+                is_distributed,
+                is_binary_format,
+                is_full,
+                "subscription FETCH format acceptance"
+            );
+            let client = self.create_client(is_distributed).await?;
+            let suffix = format!(
+                "{}_{}_{}",
+                if is_distributed { "dist" } else { "local" },
+                if is_binary_format { "binary" } else { "text" },
+                if is_full { "full" } else { "since" }
+            );
+            let table = format!("cursor_formats_t_{suffix}");
+            let subscription = format!("cursor_formats_s_{suffix}");
+            client
+                .simple_query(&format!("drop table if exists {table} cascade"))
+                .await?;
+            client
+                .simple_query(&format!(
+                    "create table {table}(a int, b int, primary key(b, a)); \
+                create subscription {subscription} from {table} with(retention = '1D')"
+                ))
+                .await?;
+            let initial_rows = if is_full {
+                "(7,42),(8,43),(9,44)"
+            } else {
+                "(0,0)"
+            };
+            client
+                .simple_query(&format!("insert into {table} values {initial_rows}; flush"))
+                .await?;
+            let start = if is_full { "full" } else { "since now()" };
+            client
+                .simple_query(&format!(
+                    "declare format_cursor subscription cursor for {subscription} {start}"
+                ))
+                .await?;
+            if !is_full {
+                client
+                    .simple_query(&format!(
+                        "flush; insert into {table} values (7,42),(8,43),(9,44); flush"
+                    ))
+                    .await?;
+            }
+            for (a, b, is_binary_format) in [
+                (7, 42, is_binary_format),
+                (8, 43, !is_binary_format),
+                (9, 44, is_binary_format),
+            ] {
+                let rows = Self::cursor_rows(
+                    &client,
+                    "fetch 1 from format_cursor with (timeout = '5s')",
+                    is_binary_format,
+                )
+                .await?;
+                test_eq!(rows.len(), 1);
+                test_eq!(rows[0][0], Some(a.to_string()));
+                test_eq!(rows[0][1], Some(b.to_string()));
+                test_eq!(rows[0][2].as_deref(), Some("Insert"));
+                test_eq!(rows[0][3].is_none(), is_full);
+                client
+                    .simple_query("explain fetch 1 from format_cursor")
+                    .await?;
+            }
+            client
+                .simple_query(&format!("close format_cursor; drop table {table} cascade"))
+                .await?;
             Ok(())
         })
         .await?
