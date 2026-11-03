@@ -185,6 +185,11 @@ GcsProperties:
     default: Default::default
 IcebergProperties:
   fields:
+  - name: streaming_updates
+    field_type: bool
+    comments: Opt in to Insert/Delete ingestion of RisingWave PK-index sink output.
+    required: false
+    default: Default::default
   - name: catalog.type
     field_type: String
     required: false
