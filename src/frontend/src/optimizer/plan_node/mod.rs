@@ -564,12 +564,21 @@ impl LogicalPlanRef {
             }
 
             fn visit_logical_source(&mut self, plan: &LogicalSource) -> Self::Result {
-                if self.warning_msg.is_none() && plan.is_shared_source() {
-                    self.warning_msg = Some(format!(
-                        "snapshot backfill disabled due to using shared source {:?}",
-                        plan.core.catalog.as_ref().map(|c| &c.name)
-                    ));
+                if self.warning_msg.is_some() {
+                    return;
                 }
+                let kind = if plan.is_shared_source() {
+                    "shared"
+                } else if plan.is_bounded_source() {
+                    "bounded"
+                } else {
+                    return;
+                };
+
+                self.warning_msg = Some(format!(
+                    "snapshot backfill disabled due to using {kind} source {:?}",
+                    plan.core.catalog.as_ref().map(|c| &c.name)
+                ));
             }
         }
         let mut forbid_snapshot = ForbidSnapshotBackfill { warning_msg: None };
