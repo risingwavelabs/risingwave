@@ -147,6 +147,7 @@ pub async fn handle_create_aggregate(
         owner: session.user_id(),
         always_retry_on_network_error: false,
         unsafe_skip_materializing_exprs: false,
+        is_immutable: false,
         is_async: None,
         is_batched: None,
         created_at_epoch: None,

@@ -21,15 +21,25 @@ statement error using an impure expression \(RANDOM\) in AGGREGATE FILTER
 create materialized view mv_impure_agg_filter as
 select sum(a) filter (where random() > 0.5) from t;
 
+# UDTFs ignore `IMMUTABLE` and `unsafe_skip_materializing_exprs`: both are honored only for scalar
+# UDFs. Neither is stored, and the UDTF stays impure even though it is wrongly declared immutable.
 skipif madsim
 statement ok
-create function rand_series(n int) returns table (x int) language javascript as $$
+create function rand_series(n int) returns table (x int) language javascript immutable as $$
 export function* rand_series(n) {
     for (let i = 0; i < n; i++) {
         yield { x: Math.floor(Math.random() * 100) };
     }
 }
-$$;
+$$ with (unsafe_skip_materializing_exprs = true);
+
+skipif madsim
+query BB
+select is_immutable, unsafe_skip_materializing_exprs
+from rw_catalog.rw_functions
+where name = 'rand_series';
+----
+f f
 
 # StreamProjectSet: user-defined table function on retract stream should error.
 # TODO: we should extract it and materialize it.
@@ -42,14 +52,14 @@ skipif madsim
 statement ok
 drop function rand_series(int);
 
-# External scalar UDFs require network retries when opting out of stored results. Validation runs
-# before RisingWave connects to the UDF server, so this test does not require a running server.
+# Pure expressions may be re-evaluated on retract streams, so `IMMUTABLE` external scalar UDFs
+# require network retries. Validation runs before RisingWave connects to the UDF server, so this
+# test does not require a running server.
 skipif madsim
-statement error `always_retry_on_network_error` must be true when `unsafe_skip_materializing_exprs` is true for an external scalar UDF
+statement error `always_retry_on_network_error` must be true for an `IMMUTABLE` external scalar UDF
 create function rejected_external_without_retry(v int) returns int language java immutable
 as 'identity'
-using link 'http://localhost:8815'
-with (unsafe_skip_materializing_exprs = true);
+using link 'http://localhost:8815';
 
 skipif madsim
 statement error `IMMUTABLE` must be specified when `unsafe_skip_materializing_exprs` is true
@@ -76,16 +86,42 @@ export function identity_with_stored_result(v) {
 }
 $$ with (always_retry_on_network_error = true);
 
-# The per-function execution policy must be visible to users through the function catalog.
 skipif madsim
-query TB
-select name, unsafe_skip_materializing_exprs
+statement ok
+create function identity_volatile(v int) returns int language javascript as $$
+export function identity_volatile(v) {
+    return v;
+}
+$$;
+
+# The per-function purity and execution policy must be visible to users through the function
+# catalog.
+skipif madsim
+query TBB
+select name, is_immutable, unsafe_skip_materializing_exprs
 from rw_catalog.rw_functions
-where name in ('identity_with_stored_result', 'identity_without_stored_result')
+where name in ('identity_volatile', 'identity_with_stored_result', 'identity_without_stored_result')
 order by name;
 ----
-identity_with_stored_result f
-identity_without_stored_result t
+identity_volatile f f
+identity_with_stored_result t f
+identity_without_stored_result t t
+
+# Purity follows `IMMUTABLE`: a filter on a retract stream accepts an `IMMUTABLE` UDF even when it
+# keeps materialization, and rejects a UDF that is not `IMMUTABLE`.
+skipif madsim
+statement error using an impure expression \(user-defined function `identity_volatile`\) in WHERE or HAVING
+create materialized view mv_volatile_filter as
+select * from t where identity_volatile(a) > 0;
+
+skipif madsim
+statement ok
+create materialized view mv_immutable_filter as
+select * from t where identity_with_stored_result(a) > 0;
+
+skipif madsim
+statement ok
+drop materialized view mv_immutable_filter;
 
 # A generated-column expression is persisted as an ExprNode in the target table catalog and then
 # reconstructed while planning the sink. The sink reads its source snapshot as a RETRACT stream,
@@ -174,15 +210,30 @@ from scan_node;
 STREAM_KIND_RETRACT STREAM_SCAN_TYPE_SNAPSHOT_BACKFILL
 
 skipif madsim
-query I
-select count(*)
-from rw_catalog.rw_internal_tables
-where job_id = (
-    select id from rw_catalog.rw_materialized_views where name = 'mv_without_stored_result'
-)
-and name like '%materializedexprs%';
+statement ok
+create materialized view mv_with_stored_result as
+select identity_with_stored_result(a) as a from t;
+
+skipif madsim
+statement ok
+create materialized view mv_volatile as
+select identity_volatile(a) as a from t;
+
+# Materialization follows `unsafe_skip_materializing_exprs`, not `IMMUTABLE`: only the opted-out UDF
+# skips the MaterializedExprs state table.
+skipif madsim
+query TI
+select mv.name, count(it.id)
+from rw_catalog.rw_materialized_views mv
+left join rw_catalog.rw_internal_tables it
+on it.job_id = mv.id and it.name like '%materializedexprs%'
+where mv.name in ('mv_volatile', 'mv_with_stored_result', 'mv_without_stored_result')
+group by mv.name
+order by mv.name;
 ----
-0
+mv_volatile 1
+mv_with_stored_result 1
+mv_without_stored_result 0
 
 # Exercise the opted-out UDF on an actual RETRACT stream. The update emits a complete old row and
 # a new row; the delete then retracts the second result.
@@ -363,6 +414,18 @@ drop materialized view mv_nested_random;
 skipif madsim
 statement ok
 drop materialized view mv_without_stored_result;
+
+skipif madsim
+statement ok
+drop materialized view mv_with_stored_result;
+
+skipif madsim
+statement ok
+drop materialized view mv_volatile;
+
+skipif madsim
+statement ok
+drop function identity_volatile(int);
 
 skipif madsim
 statement ok

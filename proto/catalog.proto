@@ -368,8 +368,12 @@ message Function {
   optional string created_at_cluster_version = 23;
   // Unsafe: whether to skip materializing evaluated results of this function for retractable
   // streams. Re-evaluation can produce inconsistent results or fail if the function is not truly
-  // deterministic and side-effect-free. False by default.
+  // deterministic and side-effect-free. Only honored for scalar functions. False by default.
   bool unsafe_skip_materializing_exprs = 24;
+  // Whether the function is declared `IMMUTABLE`. The planner trusts the declaration and treats
+  // the function as pure when all of its arguments are pure. Only honored for scalar functions.
+  // False by default.
+  bool is_immutable = 25;
 
   oneof kind {
     ScalarFunction scalar = 11;

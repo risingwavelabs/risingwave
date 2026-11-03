@@ -698,6 +698,9 @@ message UserDefinedFunction {
   // Unsafe: whether to skip materializing evaluated results of this function for retractable
   // streams. This must travel with persisted expressions, such as generated columns.
   bool unsafe_skip_materializing_exprs = 15;
+  // Whether the function is declared `IMMUTABLE`. This must travel with persisted expressions,
+  // such as generated columns.
+  bool is_immutable = 16;
 
   UdfExprVersion version = 1000;
 }

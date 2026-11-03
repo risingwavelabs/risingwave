@@ -513,6 +513,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
             unsafe_skip_materializing_exprs: value.0.unsafe_skip_materializing_exprs,
+            is_immutable: value.0.is_immutable,
             is_async: value
                 .0
                 .options
