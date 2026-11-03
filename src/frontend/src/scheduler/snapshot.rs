@@ -23,7 +23,9 @@ use risingwave_hummock_sdk::{
     FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch, batch_query_epoch};
+use risingwave_pb::common::{
+    BatchQueryCommittedEpoch, BatchQueryEpoch, BatchQueryLatestCommittedEpoch, batch_query_epoch,
+};
 use risingwave_pb::hummock::{HummockVersionDeltas, StateTableInfoDelta};
 use tokio::sync::watch;
 
@@ -43,8 +45,10 @@ pub enum ReadSnapshot {
 
     ReadUncommitted,
 
-    /// Resolve a stable committed snapshot independently at each serving node.
-    LatestCommitted,
+    /// Resolve a committed snapshot for each storage read at the serving node.
+    LatestCommitted {
+        hummock_version_id: HummockVersionId,
+    },
 
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
@@ -67,8 +71,12 @@ impl ReadSnapshot {
                     },
                 )),
             },
-            ReadSnapshot::LatestCommitted => BatchQueryEpoch {
-                epoch: Some(batch_query_epoch::Epoch::LatestCommitted(Default::default())),
+            ReadSnapshot::LatestCommitted { hummock_version_id } => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::LatestCommitted(
+                    BatchQueryLatestCommittedEpoch {
+                        hummock_version_id: *hummock_version_id,
+                    },
+                )),
             },
             ReadSnapshot::ReadUncommitted => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Current(Epoch::now().0)),
@@ -143,7 +151,7 @@ impl ReadSnapshot {
                 .max_table_committed_epoch()
                 .map(Epoch)
                 .unwrap_or_else(Epoch::now),
-            ReadSnapshot::ReadUncommitted | ReadSnapshot::LatestCommitted => Epoch::now(),
+            ReadSnapshot::ReadUncommitted | ReadSnapshot::LatestCommitted { .. } => Epoch::now(),
             ReadSnapshot::Other(epoch) => *epoch,
         };
         InlineNowProcTime::new(epoch)
@@ -369,9 +377,11 @@ mod tests {
         use crate::expr::{ExprRewriter, Now};
 
         let before = Epoch::now().as_scalar();
-        let value = ReadSnapshot::LatestCommitted
-            .inline_now_proc_time()
-            .rewrite_now(Now);
+        let value = ReadSnapshot::LatestCommitted {
+            hummock_version_id: 123.into(),
+        }
+        .inline_now_proc_time()
+        .rewrite_now(Now);
         let after = Epoch::now().as_scalar();
         let value = value.as_literal().unwrap().get_data().as_ref().unwrap();
         assert!(before.as_timestamptz() <= value.as_timestamptz());
@@ -429,10 +439,18 @@ mod tests {
                 })
                 .collect();
         }
-        let snapshot = ReadSnapshot::LatestCommitted;
+        let snapshot = ReadSnapshot::LatestCommitted {
+            hummock_version_id: 123.into(),
+        };
         assert!(!snapshot.support_barrier_read());
         snapshot.fill_batch_query_epoch(&mut query).unwrap();
-        let latest = Some(snapshot.batch_query_epoch(&HashSet::new()).unwrap());
+        let latest = Some(BatchQueryEpoch {
+            epoch: Some(batch_query_epoch::Epoch::LatestCommitted(
+                BatchQueryLatestCommittedEpoch {
+                    hummock_version_id: 123.into(),
+                },
+            )),
+        });
         for stage in query.stage_graph.stages.values() {
             for (i, child) in stage.root.children.iter().enumerate() {
                 let epoch = match &child.node {

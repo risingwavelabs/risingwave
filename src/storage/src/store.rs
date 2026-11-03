@@ -544,7 +544,7 @@ impl ReadOptions {
             Some(HummockReadEpoch::Committed(_))
             | Some(HummockReadEpoch::BatchQueryCommitted(_, _))
             | Some(HummockReadEpoch::TimeTravel(_))
-            | Some(HummockReadEpoch::LatestCommitted) => (false, true),
+            | Some(HummockReadEpoch::LatestCommitted(_)) => (false, true),
         };
         TracedReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),

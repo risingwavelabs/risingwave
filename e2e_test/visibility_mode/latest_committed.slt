@@ -15,6 +15,46 @@ true
 statement ok
 SET visibility_mode = all;
 
+# Table registration must be awaited without relying on query retries or FLUSH.
+statement ok
+SET query_mode = local;
+
+statement ok
+CREATE TABLE latest_committed_new_local (id INT);
+
+query I
+SELECT COUNT(*) FROM latest_committed_new_local;
+----
+0
+
+statement ok
+DROP TABLE latest_committed_new_local;
+
+statement ok
+SET query_mode = distributed;
+
+statement ok
+CREATE TABLE latest_committed_new_distributed (id INT);
+
+query I
+SELECT COUNT(*) FROM latest_committed_new_distributed;
+----
+0
+
+statement ok
+CREATE MATERIALIZED VIEW latest_committed_new_mv AS SELECT id FROM latest_committed_new_distributed;
+
+query I
+SELECT COUNT(*) FROM latest_committed_new_mv;
+----
+0
+
+statement ok
+DROP MATERIALIZED VIEW latest_committed_new_mv;
+
+statement ok
+DROP TABLE latest_committed_new_distributed;
+
 statement ok
 CREATE TABLE latest_committed_reads (id INT PRIMARY KEY, v INT);
 

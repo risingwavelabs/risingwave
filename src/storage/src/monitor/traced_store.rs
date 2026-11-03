@@ -337,7 +337,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
             .await
             .map(|snapshot| {
                 // Replay needs the epoch captured by this snapshot, not a later local version.
-                let epoch = if matches!(epoch, HummockReadEpoch::LatestCommitted) {
+                let epoch = if matches!(epoch, HummockReadEpoch::LatestCommitted(_)) {
                     HummockReadEpoch::Committed(
                         snapshot
                             .read_epoch()
@@ -536,7 +536,7 @@ mod tests {
         let store = TracedStateStore::new_global(MemoryStateStore::new());
         let snapshot = store
             .new_read_snapshot(
-                HummockReadEpoch::LatestCommitted,
+                HummockReadEpoch::LatestCommitted(0.into()),
                 NewReadSnapshotOptions {
                     table_id: TableId::new(1),
                     table_option: TableOption::default(),

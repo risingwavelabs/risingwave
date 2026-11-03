@@ -129,7 +129,10 @@ message BatchQueryCommittedEpoch {
 }
 
 // Resolve the committed epoch from the serving node at storage snapshot creation.
-message BatchQueryLatestCommittedEpoch {}
+message BatchQueryLatestCommittedEpoch {
+  // Wait for table registration only while the serving node is behind this version.
+  uint64 hummock_version_id = 1;
+}
 
 message BatchQueryEpoch {
   oneof epoch {

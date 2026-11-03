@@ -81,7 +81,7 @@ async fn test_latest_committed_vector_snapshot() {
     let snapshot = || {
         storage
             .new_read_snapshot(
-                HummockReadEpoch::LatestCommitted,
+                HummockReadEpoch::LatestCommitted(storage.get_pinned_version().id),
                 NewReadSnapshotOptions {
                     table_id,
                     table_option: TableOption::default(),

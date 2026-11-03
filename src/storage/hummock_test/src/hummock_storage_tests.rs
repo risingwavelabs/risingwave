@@ -100,15 +100,15 @@ async fn test_latest_committed_snapshot() {
     assert!(futures::poll!(&mut wait).is_pending());
     storage
         .try_wait_epoch(
-            HummockReadEpoch::LatestCommitted,
+            HummockReadEpoch::LatestCommitted(storage.get_pinned_version().id),
             TryWaitEpochOptions::for_test(table_id),
         )
         .now_or_never()
-        .expect("latest committed must never wait")
+        .expect("latest committed must not wait for an existing table")
         .unwrap();
     let snapshot = storage
         .new_read_snapshot(
-            HummockReadEpoch::LatestCommitted,
+            HummockReadEpoch::LatestCommitted(storage.get_pinned_version().id),
             NewReadSnapshotOptions {
                 table_id,
                 table_option: TableOption::default(),
@@ -172,7 +172,7 @@ async fn test_latest_committed_snapshot() {
     check(&snapshot, &[("a", "old"), ("b", "deleted")]).await;
     let newer = storage
         .new_read_snapshot(
-            HummockReadEpoch::LatestCommitted,
+            HummockReadEpoch::LatestCommitted(storage.get_pinned_version().id),
             NewReadSnapshotOptions {
                 table_id,
                 table_option: TableOption::default(),
@@ -228,7 +228,7 @@ async fn test_latest_committed_watermark_and_retention() {
         let snapshot = || {
             storage
                 .new_read_snapshot(
-                    HummockReadEpoch::LatestCommitted,
+                    HummockReadEpoch::LatestCommitted(storage.get_pinned_version().id),
                     NewReadSnapshotOptions {
                         table_id,
                         table_option: TableOption {
@@ -295,44 +295,95 @@ async fn test_latest_committed_watermark_and_retention() {
 }
 
 #[tokio::test]
-async fn test_latest_committed_absent_table() {
+async fn test_latest_committed_delayed_registration() {
     let table_id = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
     let storage = &test_env.storage;
-    let future_version = storage.get_pinned_version().id + 100;
-    let wait = storage.try_wait_epoch(
-        HummockReadEpoch::BatchQueryCommitted(0, future_version),
-        TryWaitEpochOptions::for_test(table_id),
+    let requested_version = storage.get_pinned_version().id + 100;
+    let epoch = HummockReadEpoch::LatestCommitted(requested_version);
+    let wait = storage.try_wait_epoch(epoch, TryWaitEpochOptions::for_test(table_id));
+    let snapshot = storage.new_read_snapshot(
+        epoch,
+        NewReadSnapshotOptions {
+            table_id,
+            table_option: TableOption::default(),
+        },
     );
-    futures::pin_mut!(wait);
+    futures::pin_mut!(wait, snapshot);
     assert!(futures::poll!(&mut wait).is_pending());
-    let snapshot = || {
-        storage.new_read_snapshot(
-            HummockReadEpoch::LatestCommitted,
+    assert!(futures::poll!(&mut snapshot).is_pending());
+
+    // An unrelated version update must not mistake a delayed registration for a dropped table.
+    test_env.register_table_id(TableId::new(234)).await;
+    assert!(futures::poll!(&mut wait).is_pending());
+    assert!(futures::poll!(&mut snapshot).is_pending());
+
+    test_env.register_table_id(table_id).await;
+    assert!(storage.get_pinned_version().id < requested_version);
+    wait.now_or_never()
+        .expect("registration must release the epoch wait")
+        .unwrap();
+    snapshot
+        .now_or_never()
+        .expect("registration must release snapshot creation")
+        .unwrap();
+
+    // The fast path must also accept the table without waiting for unrelated newer versions.
+    storage
+        .try_wait_epoch(epoch, TryWaitEpochOptions::for_test(table_id))
+        .now_or_never()
+        .unwrap()
+        .unwrap();
+    storage
+        .new_read_snapshot(
+            epoch,
             NewReadSnapshotOptions {
                 table_id,
                 table_option: TableOption::default(),
             },
         )
-    };
-    let error = snapshot()
         .now_or_never()
-        .expect("missing tables must fail immediately")
-        .err()
+        .unwrap()
         .unwrap();
-    assert!(error.to_string().contains("table 233 is not available"));
-    test_env.register_table_id(table_id).await;
-    snapshot().now_or_never().unwrap().unwrap();
-    wait.await.unwrap();
+}
 
-    let version = storage.get_pinned_version();
-    let mut dropped = version.to_protobuf();
-    dropped.id = version.id + 1;
-    dropped.state_table_info.remove(&table_id);
-    storage
-        .update_version_and_wait(HummockVersion::from_rpc_protobuf(&dropped))
-        .await;
-    assert!(snapshot().now_or_never().unwrap().is_err());
+#[tokio::test]
+async fn test_latest_committed_absent_table() {
+    // Absence becomes an error once the local version reaches or passes the frontend's version.
+    for version_offset in [0, 1] {
+        let table_id = TableId::new(233);
+        let test_env = prepare_hummock_test_env().await;
+        let storage = &test_env.storage;
+        let requested_version = storage.get_pinned_version().id + 1;
+        let epoch = HummockReadEpoch::LatestCommitted(requested_version);
+        let snapshot = || {
+            storage.new_read_snapshot(
+                epoch,
+                NewReadSnapshotOptions {
+                    table_id,
+                    table_option: TableOption::default(),
+                },
+            )
+        };
+        let waiting = snapshot();
+        futures::pin_mut!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+        let mut updated = storage.get_pinned_version().to_protobuf();
+        updated.id = requested_version + version_offset;
+        storage
+            .update_version_and_wait(HummockVersion::from_rpc_protobuf(&updated))
+            .await;
+        let error = waiting.now_or_never().unwrap().err().unwrap();
+        assert!(error.to_string().contains("table id 233 has been dropped"));
+        assert!(snapshot().now_or_never().unwrap().is_err());
+        assert!(
+            storage
+                .try_wait_epoch(epoch, TryWaitEpochOptions::for_test(table_id))
+                .now_or_never()
+                .unwrap()
+                .is_err()
+        );
+    }
 }
 
 #[tokio::test]

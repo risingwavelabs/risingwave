@@ -442,7 +442,7 @@ impl SubscriptionCursor {
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
             let snapshot = match handler_args.session.pinned_snapshot() {
-                ReadSnapshot::LatestCommitted => ReadSnapshot::FrontendPinned {
+                ReadSnapshot::LatestCommitted { .. } => ReadSnapshot::FrontendPinned {
                     snapshot: handler_args
                         .session
                         .env()
@@ -466,7 +466,7 @@ impl SubscriptionCursor {
                 ReadSnapshot::Other(_) => {
                     return Err(ErrorCode::InternalError("Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`".to_owned()).into());
                 }
-                ReadSnapshot::LatestCommitted => {
+                ReadSnapshot::LatestCommitted { .. } => {
                     return Err(ErrorCode::InternalError(
                         "Subscription snapshot must be frontend-pinned".to_owned(),
                     )

@@ -394,7 +394,7 @@ impl HummockStorageReadSnapshot {
             ));
         }
         match epoch {
-            HummockReadEpoch::LatestCommitted => unreachable!("snapshot epoch must be resolved"),
+            HummockReadEpoch::LatestCommitted(_) => unreachable!("snapshot epoch must be resolved"),
             HummockReadEpoch::Backup(epoch) => {
                 self.build_read_version_tuple_from_backup(epoch, self.table_id, key_range)
                     .await
@@ -778,7 +778,7 @@ impl StateStoreReadVector for HummockStorageReadSnapshot {
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
         let version = match self.epoch {
-            HummockReadEpoch::LatestCommitted => unreachable!("snapshot epoch must be resolved"),
+            HummockReadEpoch::LatestCommitted(_) => unreachable!("snapshot epoch must be resolved"),
             HummockReadEpoch::Committed(epoch)
             | HummockReadEpoch::BatchQueryCommitted(epoch, _)
             | HummockReadEpoch::TimeTravel(epoch) => {
@@ -925,12 +925,15 @@ impl HummockStorage {
             table_id
         );
         match wait_epoch {
-            HummockReadEpoch::LatestCommitted => return Ok(()),
             HummockReadEpoch::Committed(wait_epoch) => {
                 assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
                 wait_for_epoch(&self.version_update_notifier_tx, wait_epoch, table_id).await?;
             }
-            HummockReadEpoch::BatchQueryCommitted(wait_epoch, wait_version_id) => {
+            HummockReadEpoch::BatchQueryCommitted(_, wait_version_id)
+            | HummockReadEpoch::LatestCommitted(wait_version_id) => {
+                // Latest-committed reads only wait for registration, so any committed epoch
+                // suffices. Existing tables never wait for unrelated version updates.
+                let wait_epoch = wait_epoch.get_epoch().unwrap_or(0);
                 assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
                 // fast path by checking recent_versions
                 {
@@ -1003,7 +1006,7 @@ impl StateStore for HummockStorage {
     ) -> StorageResult<Self::ReadSnapshot> {
         self.try_wait_epoch_impl(epoch, options.table_id).await?;
         let (epoch, latest_committed_version) =
-            if matches!(epoch, HummockReadEpoch::LatestCommitted) {
+            if matches!(epoch, HummockReadEpoch::LatestCommitted(_)) {
                 let version = self.recent_versions.load().latest_version().clone();
                 let committed_epoch =
                     version

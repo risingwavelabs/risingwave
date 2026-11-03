@@ -265,7 +265,8 @@ pub enum HummockReadEpoch {
     Backup(HummockEpoch),
     TimeTravel(HummockEpoch),
     /// Resolve the local committed version and table epoch when creating a snapshot.
-    LatestCommitted,
+    /// The version ID distinguishes delayed table registration from a dropped table.
+    LatestCommitted(HummockVersionId),
 }
 
 impl From<BatchQueryEpoch> for HummockReadEpoch {
@@ -277,7 +278,9 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
             batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::NoWait(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
-            batch_query_epoch::Epoch::LatestCommitted(_) => HummockReadEpoch::LatestCommitted,
+            batch_query_epoch::Epoch::LatestCommitted(epoch) => {
+                HummockReadEpoch::LatestCommitted(epoch.hummock_version_id)
+            }
         }
     }
 }
@@ -297,7 +300,7 @@ impl HummockReadEpoch {
             | HummockReadEpoch::NoWait(epoch)
             | HummockReadEpoch::Backup(epoch)
             | HummockReadEpoch::TimeTravel(epoch) => Some(*epoch),
-            HummockReadEpoch::LatestCommitted => None,
+            HummockReadEpoch::LatestCommitted(_) => None,
         }
     }
 
@@ -306,7 +309,7 @@ impl HummockReadEpoch {
             HummockReadEpoch::Committed(_)
             | HummockReadEpoch::TimeTravel(_)
             | HummockReadEpoch::BatchQueryCommitted(_, _)
-            | HummockReadEpoch::LatestCommitted => true,
+            | HummockReadEpoch::LatestCommitted(_) => true,
             HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => false,
         }
     }
@@ -502,9 +505,15 @@ mod tests {
     #[test]
     fn test_latest_committed_epoch() {
         let epoch = HummockReadEpoch::from(BatchQueryEpoch {
-            epoch: Some(batch_query_epoch::Epoch::LatestCommitted(Default::default())),
+            epoch: Some(batch_query_epoch::Epoch::LatestCommitted(
+                risingwave_pb::common::BatchQueryLatestCommittedEpoch {
+                    hummock_version_id: 123.into(),
+                },
+            )),
         });
-        assert!(matches!(epoch, HummockReadEpoch::LatestCommitted));
+        assert!(
+            matches!(epoch, HummockReadEpoch::LatestCommitted(version_id) if version_id == HummockVersionId::new(123))
+        );
         assert_eq!(epoch.get_epoch(), None);
         assert!(epoch.is_read_committed());
         assert_eq!(HummockReadEpoch::Committed(42).get_epoch(), Some(42));
