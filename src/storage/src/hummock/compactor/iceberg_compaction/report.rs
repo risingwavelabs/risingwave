@@ -116,7 +116,7 @@ pub fn set_simulated_pk_index_compaction_result(result: Option<PbPkIndexCompacti
 
 #[cfg(madsim)]
 pub(crate) fn simulated_pk_index_compaction_result() -> Option<PbPkIndexCompactionResult> {
-    SIMULATED_PK_INDEX_RESULT.lock().unwrap().clone()
+    SIMULATED_PK_INDEX_RESULT.lock().unwrap().take()
 }
 
 pub(crate) enum ReportSendResult {

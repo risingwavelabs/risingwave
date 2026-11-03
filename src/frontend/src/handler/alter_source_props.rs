@@ -16,7 +16,6 @@ use risingwave_common::id::{ConnectionId, SourceId};
 use risingwave_pb::catalog::connection::Info::ConnectionParams;
 
 use super::RwPgResponse;
-use super::create_source::validate_heartbeat_interval;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
@@ -93,30 +92,6 @@ async fn handle_alter_source_props_inner(
         )
         .into());
     }
-
-    // Validate cdc.source.wait.streaming.start.timeout if present
-    if let Some(timeout_value) = changed_props.get("cdc.source.wait.streaming.start.timeout")
-        && timeout_value.parse::<u32>().is_err()
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "cdc.source.wait.streaming.start.timeout".to_owned(),
-            config_value: timeout_value.to_owned(),
-        }
-        .into());
-    }
-
-    // Validate debezium.max.queue.size if present
-    if let Some(queue_size_value) = changed_props.get("debezium.max.queue.size")
-        && queue_size_value.parse::<u32>().is_err()
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "debezium.max.queue.size".to_owned(),
-            config_value: queue_size_value.to_owned(),
-        }
-        .into());
-    }
-
-    validate_heartbeat_interval(&changed_props)?;
 
     meta_client
         .alter_source_connector_props(

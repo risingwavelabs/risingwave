@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
 use foyer::Hint;
-use futures::TryStreamExt;
+use futures::{FutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{TableId, TableOption};
@@ -36,7 +36,8 @@ use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
-use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::{EpochWithGap, HummockReadEpoch, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
 use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
@@ -49,6 +50,135 @@ use risingwave_storage::store::*;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{TestIngestBatch, gen_key_from_str, prepare_hummock_test_env};
+
+#[tokio::test]
+async fn test_batch_query_wait_epoch_ignores_unrelated_versions() {
+    let table_id = TableId::new(233);
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(table_id).await;
+    let storage = &test_env.storage;
+    let version = storage.get_pinned_version();
+    let committed_epoch = version.table_committed_epoch(table_id).unwrap();
+    let requested_version_id = version.id + 3;
+    let query_epoch = HummockReadEpoch::BatchQueryCommitted(committed_epoch, requested_version_id);
+
+    // Both entry points must accept an already readable epoch without a newer version.
+    storage
+        .try_wait_epoch(query_epoch, TryWaitEpochOptions::for_test(table_id))
+        .now_or_never()
+        .expect("a readable epoch must not wait for unrelated versions")
+        .unwrap();
+    storage
+        .new_read_snapshot(
+            query_epoch,
+            NewReadSnapshotOptions {
+                table_id,
+                table_option: TableOption::default(),
+            },
+        )
+        .now_or_never()
+        .expect("snapshot creation must not wait for unrelated versions")
+        .unwrap();
+
+    let requested_epoch = committed_epoch.next_epoch();
+    let wait = storage.try_wait_epoch(
+        HummockReadEpoch::BatchQueryCommitted(requested_epoch, requested_version_id),
+        TryWaitEpochOptions::for_test(table_id),
+    );
+    let wait_with_current_version = storage.try_wait_epoch(
+        HummockReadEpoch::BatchQueryCommitted(requested_epoch, version.id),
+        TryWaitEpochOptions::for_test(table_id),
+    );
+    futures::pin_mut!(wait, wait_with_current_version);
+    assert!(futures::poll!(&mut wait).is_pending());
+    assert!(futures::poll!(&mut wait_with_current_version).is_pending());
+
+    // Advancing the version alone must not release a query whose epoch is still behind.
+    let mut updated_version = version.to_protobuf();
+    updated_version.id = version.id + 1;
+    storage
+        .update_version_and_wait(HummockVersion::from_rpc_protobuf(&updated_version))
+        .await;
+    assert!(futures::poll!(&mut wait).is_pending());
+
+    // The notification path must also complete before the requested version arrives.
+    updated_version.id = version.id + 2;
+    updated_version
+        .state_table_info
+        .get_mut(&table_id)
+        .unwrap()
+        .committed_epoch = requested_epoch;
+    storage
+        .update_version_and_wait(HummockVersion::from_rpc_protobuf(&updated_version))
+        .await;
+    wait.now_or_never()
+        .expect("the committed epoch is sufficient after the update")
+        .unwrap();
+    wait_with_current_version
+        .now_or_never()
+        .expect("the query must complete once its epoch is committed")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_batch_query_wait_epoch_delayed_registration() {
+    let table_id = TableId::new(233);
+    let test_env = prepare_hummock_test_env().await;
+    let storage = &test_env.storage;
+    let requested_version_id = storage.get_pinned_version().id + 100;
+    let wait = storage.try_wait_epoch(
+        HummockReadEpoch::BatchQueryCommitted(0, requested_version_id),
+        TryWaitEpochOptions::for_test(table_id),
+    );
+    futures::pin_mut!(wait);
+    assert!(futures::poll!(&mut wait).is_pending());
+
+    // Absence before the requested version is not evidence that the table was dropped.
+    test_env.register_table_id(table_id).await;
+    assert!(storage.get_pinned_version().id < requested_version_id);
+    wait.now_or_never()
+        .expect("registration with a sufficient epoch must release the query")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_batch_query_wait_epoch_dropped_table() {
+    let table_id = TableId::new(233);
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(table_id).await;
+    let storage = &test_env.storage;
+    let version = storage.get_pinned_version();
+    let requested_epoch = version
+        .table_committed_epoch(table_id)
+        .unwrap()
+        .next_epoch();
+    let requested_version_id = version.id;
+    let query_epoch = HummockReadEpoch::BatchQueryCommitted(requested_epoch, requested_version_id);
+    let wait = storage.try_wait_epoch(query_epoch, TryWaitEpochOptions::for_test(table_id));
+    futures::pin_mut!(wait);
+    assert!(futures::poll!(&mut wait).is_pending());
+
+    let mut updated_version = version.to_protobuf();
+    updated_version.id = version.id + 1;
+    updated_version.state_table_info.remove(&table_id);
+    storage
+        .update_version_and_wait(HummockVersion::from_rpc_protobuf(&updated_version))
+        .await;
+    let error = wait
+        .now_or_never()
+        .expect("a dropped table must not wait forever")
+        .unwrap_err();
+    assert!(error.to_string().contains("table id 233 has been dropped"));
+
+    // A query starting after the drop must fail immediately as well.
+    assert!(
+        storage
+            .try_wait_epoch(query_epoch, TryWaitEpochOptions::for_test(table_id))
+            .now_or_never()
+            .expect("an already dropped table must fail immediately")
+            .is_err()
+    );
+}
 
 #[tokio::test]
 async fn test_storage_basic() {

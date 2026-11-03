@@ -18,7 +18,7 @@ use risingwave_common::types::{DataType, StructType};
 
 use super::{Expr, ExprImpl, ExprType};
 use crate::binder::{BoundQuery, UNNAMED_COLUMN};
-use crate::expr::{CorrelatedId, Depth};
+use crate::expr::{CorrelatedId, ScopeId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SubqueryKind {
@@ -44,25 +44,32 @@ pub enum SubqueryKind {
 pub struct Subquery {
     pub query: BoundQuery,
     pub kind: SubqueryKind,
+    /// The scope this subquery is evaluated in. Its references to columns of this scope are bound
+    /// to the Apply operator that plans the subquery.
+    pub outer_scope: ScopeId,
 }
 
 impl Subquery {
-    pub fn new(query: BoundQuery, kind: SubqueryKind) -> Self {
-        Self { query, kind }
+    pub fn new(query: BoundQuery, kind: SubqueryKind, outer_scope: ScopeId) -> Self {
+        Self {
+            query,
+            kind,
+            outer_scope,
+        }
     }
 
-    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_scope(&self, scope: ScopeId) -> bool {
         let is_correlated = match &self.kind {
-            SubqueryKind::In(expr) => expr.has_correlated_input_ref_by_depth(depth),
+            SubqueryKind::In(expr) => expr.has_correlated_input_ref_by_scope(scope),
             SubqueryKind::Some(expr, _) | SubqueryKind::All(expr, _) => {
-                expr.has_correlated_input_ref_by_depth(depth)
+                expr.has_correlated_input_ref_by_scope(scope)
             }
             SubqueryKind::Array
             | SubqueryKind::Scalar
             | SubqueryKind::UpdateSet
             | SubqueryKind::Existential => false,
         };
-        is_correlated || self.query.is_correlated_by_depth(depth)
+        is_correlated || self.query.is_correlated_by_scope(scope)
     }
 
     pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
@@ -79,24 +86,24 @@ impl Subquery {
         is_correlated || self.query.is_correlated_by_correlated_id(correlated_id)
     }
 
-    pub fn collect_correlated_indices_by_depth_and_assign_id(
+    pub fn collect_correlated_indices_by_scope_and_assign_id(
         &mut self,
-        depth: Depth,
+        scope: ScopeId,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         let mut correlated_indices = self
             .query
-            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
+            .collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id);
 
         match &mut self.kind {
             SubqueryKind::In(expr) => {
                 correlated_indices.extend(
-                    expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    expr.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                 );
             }
             SubqueryKind::Some(expr, _) | SubqueryKind::All(expr, _) => {
                 correlated_indices.extend(
-                    expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    expr.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                 );
             }
             SubqueryKind::Array

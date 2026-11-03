@@ -26,8 +26,7 @@
 //! The two phases dispatched from `complete_barrier`:
 //!
 //! 1. `pre_commit` — reload the table, aggregate the reports, generate a `snapshot_id`, and persist
-//!    the merged file list under `pending_sink_state`. Combined compaction pre-commit may also coalesce
-//!    duplicate position-delete artifacts through Iceberg file I/O.
+//!    the merged file list under `pending_sink_state`.
 //! 2. `commit` — run an iceberg `overwrite_files` transaction (keyed on the pre-generated `snapshot_id`
 //!    for idempotency), then mark the row Committed and prune the prior epoch's row.
 //!
@@ -36,30 +35,24 @@
 //! persisted `pending_sink_state` rows.
 
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use iceberg::Catalog;
-use iceberg::delete_vector::DeleteVector;
 use iceberg::spec::{
-    DataContentType, DataFile, DataFileFormat, FormatVersion, ManifestContentType, PartitionKey,
-    SerializedDataFile,
+    DataContentType, DataFile, FormatVersion, ManifestContentType, SerializedDataFile, SnapshotRef,
+    Struct,
 };
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
-use iceberg::writer::file_writer::location_generator::{
-    DefaultLocationGenerator, FileNameGenerator, LocationGenerator,
-};
 use prost::Message;
 use risingwave_connector::connector_common::IcebergCommittedSnapshot;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError, CommitRetryLogContext};
 use risingwave_connector::sink::iceberg::{
-    IcebergCommitResult, IcebergConfig, IcebergPositionDeleteCommitResult,
-    PositionDeleteFileNameGenerators, commit_branch, read_position_deletes_from_file,
-    resolve_partition_type, serialize_data_files_default_spec, write_position_delete_file,
+    IcebergCommitResult, IcebergConfig, IcebergPositionDeleteCommitResult, commit_branch,
+    resolve_partition_type, serialize_data_files_default_spec,
 };
 use risingwave_meta_model::pending_sink_state::SinkState;
 use risingwave_pb::connector_service::PbIcebergPkIndexPreCommitState;
@@ -69,7 +62,6 @@ use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::timeout;
-use twox_hash::XxHash64;
 
 use super::CompactionOverwrite;
 use crate::manager::exactly_once_util::{
@@ -95,6 +87,10 @@ struct EpochCommit {
     /// so the files are not deserialized again. `None` on the recovery path (and for unpartitioned
     /// tables that skip backfill), where the commit materializes them from `merged` once.
     materialized_add_files: Option<Vec<DataFile>>,
+    /// Whether the coordinator's table was loaded by this epoch's pre-commit, so the first commit
+    /// attempt can skip reloading it. Recovered epochs reload first: their `snapshot_id` may
+    /// already be committed, and the idempotency check must see the latest snapshots.
+    staged_on_current_table: bool,
 }
 
 /// Per-sink iceberg pk-index commit coordinator. Owns the loaded iceberg catalog/table (reused across commits)
@@ -104,12 +100,12 @@ pub struct IcebergPkIndexSinkCoordinator {
     db: DatabaseConnection,
     catalog: Arc<dyn Catalog>,
     table: Table,
-    iceberg_config: IcebergConfig,
     target_branch: String,
     retry_num: usize,
     /// The epoch pre-committed but not yet committed, carried from `pre_commit` to the next `commit`.
     waiting_commit: Option<EpochCommit>,
     prev_committed_epoch: Option<u64>,
+    committed_data_file_partitions: Option<CommittedDataFilePartitions>,
 }
 
 impl IcebergPkIndexSinkCoordinator {
@@ -118,7 +114,6 @@ impl IcebergPkIndexSinkCoordinator {
         sink_id: SinkId,
         table: Table,
         catalog: Arc<dyn Catalog>,
-        iceberg_config: IcebergConfig,
         db: DatabaseConnection,
     ) -> Self {
         Self {
@@ -126,11 +121,11 @@ impl IcebergPkIndexSinkCoordinator {
             db,
             catalog,
             table,
-            iceberg_config,
             target_branch: "main".to_owned(),
             retry_num: 0,
             waiting_commit: None,
             prev_committed_epoch: None,
+            committed_data_file_partitions: None,
         }
     }
 
@@ -170,11 +165,11 @@ impl IcebergPkIndexSinkCoordinator {
             db,
             catalog,
             table,
-            iceberg_config,
             target_branch,
             retry_num,
             waiting_commit: None,
             prev_committed_epoch,
+            committed_data_file_partitions: None,
         };
 
         for commit in recovered {
@@ -239,6 +234,20 @@ impl IcebergPkIndexSinkCoordinator {
             read_snapshot_id,
         } = compaction;
         debug_assert_eq!(sink_id, self.sink_id);
+        // The barrier scheduler stops the normal input between the compaction Begin and End
+        // barriers, so the End epoch only carries compactor output and resolver deletes.
+        if let Some(ordinary) = &ordinary_aggregate
+            && !(ordinary.data_files.is_empty()
+                && ordinary.delete_files.is_empty()
+                && ordinary.overwrite_files.is_empty())
+        {
+            bail!(
+                "pk-index sink {} compaction epoch {} unexpectedly has writer or merger files: {:?}",
+                self.sink_id,
+                prev_epoch,
+                ordinary
+            );
+        }
         if epoch != prev_epoch {
             bail!(
                 "pk-index sink {} compaction epoch {} does not match pre-commit epoch {}",
@@ -265,69 +274,16 @@ impl IcebergPkIndexSinkCoordinator {
                     read_snapshot_id
                 )
             })?;
-        let partition_spec = self
-            .table
-            .metadata()
-            .partition_spec_by_id(output_partition_spec_id)
-            .context("find compactor output partition spec")?;
-        let output_schema = self
-            .table
-            .metadata()
-            .schema_by_id(output_schema_id)
-            .context("find compactor output schema")?;
-        let partition_type = partition_spec.partition_type(output_schema)?;
-        let output_data_files = output_files
-            .iter()
-            .cloned()
-            .map(|file| file.try_into(output_partition_spec_id, &partition_type, output_schema))
-            .try_collect::<Vec<DataFile>>()?;
         let merged = combine_compaction_aggregate(
             current_schema_id,
             current_partition_spec_id,
             current_format_version,
-            ordinary_aggregate,
             output_files,
             resolver_delete_aggregate,
             overwrite_files,
         )?;
-        let mut added_delete_files = merged
-            .delete_files
-            .iter()
-            .cloned()
-            .map(|file| {
-                file.try_into(
-                    current_partition_spec_id,
-                    &partition_type,
-                    self.table.metadata().current_schema(),
-                )
-            })
-            .try_collect::<Vec<DataFile>>()?;
-        // TODO(pk-index-compaction): Remove
-        // `coalesce_position_delete_files` once the resolver attach/detach protocol
-        // guarantees that foreground sink writes cannot author position-delete
-        // artifacts for compaction output data files in the compaction commit epoch.
-        // Until then, resolver masking deletes and PositionDeleteMerger deletes may
-        // reference the same output file, so Meta must union their positions and
-        // persist exactly one replacement artifact.
-        let discarded_paths = coalesce_position_delete_files(
-            &self.table,
-            &self.iceberg_config,
-            prev_epoch,
-            &output_data_files,
-            &mut added_delete_files,
-        )
-        .await?;
-        let serialized_delete_files =
-            serialize_data_files_default_spec(&self.table, added_delete_files)?;
-        let merged = IcebergPkIndexSinkAggResult {
-            delete_files: serialized_delete_files,
-            ..merged
-        };
         self.stage_pre_commit(prev_epoch, merged, has_new_data)
-            .await?;
-        self.cleanup_discarded_uncommitted_paths(prev_epoch, discarded_paths)
-            .await;
-        Ok(())
+            .await
     }
 
     async fn reload_table_for_pre_commit(&mut self) -> Result<()> {
@@ -360,22 +316,9 @@ impl IcebergPkIndexSinkCoordinator {
             snapshot_id,
             has_new_data,
             materialized_add_files,
+            staged_on_current_table: true,
         });
         Ok(())
-    }
-
-    async fn cleanup_discarded_uncommitted_paths(&self, epoch: u64, paths: Vec<String>) {
-        for path in paths {
-            if let Err(error) = self.table.file_io().delete(&path).await {
-                tracing::warn!(
-                    error = %error.as_report(),
-                    sink_id = %self.sink_id,
-                    epoch,
-                    path,
-                    "failed to clean redundant uncommitted pk-index position-delete artifact",
-                );
-            }
-        }
     }
 
     async fn resolve_compaction_overwrite_files(
@@ -441,9 +384,11 @@ impl IcebergPkIndexSinkCoordinator {
             return Ok(None);
         };
 
-        let refreshed_table = commit_one_epoch(
+        let initial_table = commit.staged_on_current_table.then(|| self.table.clone());
+        let (refreshed_table, removed_data_files) = commit_one_epoch(
             self.catalog.clone(),
             self.table.identifier().clone(),
+            initial_table,
             self.target_branch.clone(),
             self.sink_id,
             &commit,
@@ -460,6 +405,18 @@ impl IcebergPkIndexSinkCoordinator {
             ))
         })?;
         self.table = refreshed_table;
+        self.committed_data_file_partitions = self
+            .committed_data_file_partitions
+            .take()
+            .and_then(|committed| committed.advance(&self.table, &commit, removed_data_files));
+
+        // Leave the durable overwrite's row Pending so recovery must replay it.
+        if !commit.merged.overwrite_files.is_empty() {
+            fail::fail_point!("iceberg_pk_index_compaction_after_commit_reached");
+            fail::fail_point!("iceberg_pk_index_compaction_after_commit", |_| Err(
+                anyhow!("injected failure after compaction commit, before marking Committed")
+            ));
+        }
 
         commit_and_prune_epoch(
             &self.db,
@@ -498,12 +455,32 @@ impl IcebergPkIndexSinkCoordinator {
         self.table.metadata().current_snapshot_id()
     }
 
+    /// Returns the partition index for the current snapshot, rebuilding it when the snapshot
+    /// changed outside this coordinator's commits.
+    async fn committed_data_file_partitions(
+        &mut self,
+    ) -> Result<Option<&CommittedDataFilePartitions>> {
+        let Some(snapshot) = self.table.metadata().current_snapshot() else {
+            self.committed_data_file_partitions = None;
+            return Ok(None);
+        };
+        if self
+            .committed_data_file_partitions
+            .as_ref()
+            .is_none_or(|committed| committed.snapshot_id != snapshot.snapshot_id())
+        {
+            self.committed_data_file_partitions =
+                Some(load_committed_data_file_partitions(&self.table, snapshot).await?);
+        }
+        Ok(self.committed_data_file_partitions.as_ref())
+    }
+
     /// Backfills missing partition values on the delete files (partitioned tables only) from the
     /// referenced data files. Each delete file's partition is resolved from this epoch's
-    /// not-yet-committed writer data files and the current committed snapshot's data files, built
-    /// fresh per pre-commit (no persistent cache).
+    /// not-yet-committed data files (writer output, or compactor output in a compaction epoch) and
+    /// the cached committed snapshot's data-file partitions.
     async fn backfill_delete_file_partitions(
-        &self,
+        &mut self,
         merged: IcebergPkIndexSinkAggResult,
     ) -> Result<(IcebergPkIndexSinkAggResult, Option<Vec<DataFile>>)> {
         let partition_spec = self
@@ -542,8 +519,16 @@ impl IcebergPkIndexSinkCoordinator {
                     }
                 }
             }
-            if !pending.is_empty() {
-                probe_committed_data_files(&self.table, &mut pending).await?;
+            if !pending.is_empty()
+                && let Some(committed) = self.committed_data_file_partitions().await?
+            {
+                pending.retain(|referenced, delete_file| {
+                    let Some(partition) = committed.partitions.get(referenced) else {
+                        return true;
+                    };
+                    delete_file.set_partition(partition.clone());
+                    false
+                });
             }
             if !pending.is_empty() {
                 anyhow::bail!(
@@ -594,23 +579,60 @@ pub fn pending_delete_files_by_referenced(
     Ok(pending)
 }
 
-/// Scan the table's current-snapshot data manifests, resolving pending delete-file
-/// partitions as their referenced data files are found. Stops as soon as every pending
-/// delete file has been resolved. Data-file references not present in the snapshot are
-/// left in `pending` for the caller to report.
-async fn probe_committed_data_files(
+/// Partitions of the live data files in the table's current snapshot, keyed by file path.
+/// Pre-commit resolves delete-file partitions from it instead of scanning every data manifest
+/// each epoch. It is only valid for `snapshot_id`: the coordinator advances it across its own
+/// commits and rebuilds it after any other snapshot change.
+struct CommittedDataFilePartitions {
+    snapshot_id: i64,
+    partitions: HashMap<String, Struct>,
+}
+
+impl CommittedDataFilePartitions {
+    /// Advances the index across the commit that produced `table`'s current snapshot. Returns
+    /// `None` when the index cannot be advanced locally and must be rebuilt by the next probe.
+    fn advance(
+        mut self,
+        table: &Table,
+        commit: &EpochCommit,
+        removed_data_files: bool,
+    ) -> Option<Self> {
+        let snapshot = table.metadata().current_snapshot()?;
+        if snapshot.snapshot_id() == self.snapshot_id {
+            // The commit went to a branch other than the one the index reads.
+            return Some(self);
+        }
+        if snapshot.snapshot_id() != commit.snapshot_id
+            || snapshot.parent_snapshot_id() != Some(self.snapshot_id)
+            // Ordinary epochs only replace deletion vectors; only compaction removes data files.
+            || removed_data_files
+        {
+            return None;
+        }
+        let added_files = commit.materialized_add_files.as_ref()?;
+        for file in added_files {
+            if file.content_type() == DataContentType::Data {
+                self.partitions
+                    .insert(file.file_path().to_owned(), file.partition().clone());
+            }
+        }
+        self.snapshot_id = commit.snapshot_id;
+        Some(self)
+    }
+}
+
+/// Scan the data manifests of `snapshot` and index every live data file's partition.
+async fn load_committed_data_file_partitions(
     table: &Table,
-    pending: &mut HashMap<String, &mut DataFile>,
-) -> Result<()> {
-    let Some(snapshot) = table.metadata().current_snapshot() else {
-        return Ok(());
-    };
+    snapshot: &SnapshotRef,
+) -> Result<CommittedDataFilePartitions> {
     let manifest_list = table
         .object_cache()
         .get_manifest_list(snapshot, &table.metadata_ref())
         .await
         .context("load manifest list for pk-index delete-file partition backfill")?;
 
+    let mut partitions = HashMap::new();
     for manifest_file in manifest_list.entries() {
         if manifest_file.content != ManifestContentType::Data {
             continue;
@@ -624,15 +646,13 @@ async fn probe_committed_data_files(
                 continue;
             }
             let f = entry.data_file();
-            if let Some(delete_file) = pending.remove(f.file_path()) {
-                delete_file.set_partition(f.partition().clone());
-                if pending.is_empty() {
-                    return Ok(());
-                }
-            }
+            partitions.insert(f.file_path().to_owned(), f.partition().clone());
         }
     }
-    Ok(())
+    Ok(CommittedDataFilePartitions {
+        snapshot_id: snapshot.snapshot_id(),
+        partitions,
+    })
 }
 
 async fn load_catalog_and_table(
@@ -688,6 +708,7 @@ async fn recovery(
                     // Recovered from the persisted blob; the commit materializes files from
                     // `merged` once.
                     materialized_add_files: None,
+                    staged_on_current_table: false,
                 });
             }
             SinkState::Aborted => {
@@ -718,16 +739,18 @@ async fn recovery(
 async fn commit_one_epoch(
     catalog: Arc<dyn Catalog>,
     table_ident: iceberg::TableIdent,
+    initial_table: Option<Table>,
     target_branch: String,
     sink_id: SinkId,
     commit: &EpochCommit,
     retry_num: usize,
-) -> Result<Table, CommitError> {
+) -> Result<(Table, bool), CommitError> {
     let merged = commit.merged.clone();
     let snapshot_id = commit.snapshot_id;
     let materialized_add_files = commit.materialized_add_files.clone();
 
-    commit_retry::run_with_retry(
+    commit_retry::run_with_retry_from_table(
+        initial_table,
         catalog.clone(),
         table_ident.clone(),
         merged.schema_id,
@@ -757,7 +780,11 @@ async fn commit_one_epoch(
                     .snapshots()
                     .any(|s| s.snapshot_id() == snapshot_id)
                 {
-                    return Ok(table);
+                    if !merged.overwrite_files.is_empty() {
+                        fail::fail_point!("iceberg_pk_index_compaction_replayed");
+                    }
+                    // The overwrite files were not materialized, so assume data files may have left.
+                    return Ok((table, true));
                 }
 
                 let schema = table.metadata().current_schema();
@@ -795,11 +822,13 @@ async fn commit_one_epoch(
                     .map(&materialize)
                     .collect::<Result<Vec<_>, _>>()?;
 
+                let removed_data_files = removes_data_files(&overwrite_files);
                 let txn = Transaction::new(&table);
                 let action = txn
                     .overwrite_files()
                     .set_snapshot_id(snapshot_id)
                     .set_target_branch(target_branch)
+                    .set_enable_delete_filter_manager(removed_data_files)
                     .add_data_files(add_files)
                     .delete_files(overwrite_files);
                 let txn = action.apply(txn).map_err(|err| {
@@ -812,12 +841,22 @@ async fn commit_one_epoch(
                         anyhow!(err).context("commit iceberg pk-index sink transaction"),
                     )
                 })?;
-                Ok(table)
+                Ok((table, removed_data_files))
             }
         },
     )
     .await
     .map_err(CommitError::Commit)
+}
+
+/// The delete filter manager re-reads every live delete manifest to drop dangling or
+/// sequence-expired delete files. Both only change when data files leave the table, which for
+/// this sink happens only in compaction commits. Ordinary epochs replace deletion vectors only,
+/// and `overwrite_files` already removes the replaced ones.
+fn removes_data_files(overwrite_files: &[DataFile]) -> bool {
+    overwrite_files
+        .iter()
+        .any(|file| file.content_type() == DataContentType::Data)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -848,160 +887,6 @@ struct CompactionResolverDeleteAggregate {
     schema_id: i32,
     partition_spec_id: i32,
     delete_files: Vec<SerializedDataFile>,
-}
-
-// TODO(pk-index-compaction): Remove
-// `coalesce_position_delete_files` once the resolver attach/detach protocol
-// guarantees that foreground sink writes cannot author position-delete
-// artifacts for compaction output data files in the compaction commit epoch.
-// Until then, resolver masking deletes and PositionDeleteMerger deletes may
-// reference the same output file, so Meta must union their positions and
-// persist exactly one replacement artifact.
-async fn coalesce_position_delete_files(
-    table: &Table,
-    config: &IcebergConfig,
-    epoch: u64,
-    compaction_output_files: &[DataFile],
-    added_delete_files: &mut Vec<DataFile>,
-) -> Result<Vec<String>> {
-    let mut outputs = HashMap::with_capacity(compaction_output_files.len());
-    let mut reserved_paths =
-        HashSet::with_capacity(compaction_output_files.len() + added_delete_files.len());
-    for output in compaction_output_files {
-        if outputs.insert(output.file_path(), output).is_some()
-            || !reserved_paths.insert(output.file_path().to_owned())
-        {
-            bail!("duplicate compaction output path {}", output.file_path());
-        }
-    }
-    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
-
-    for delete_file in added_delete_files.iter() {
-        if !reserved_paths.insert(delete_file.file_path().to_owned()) {
-            bail!(
-                "duplicate or overlapping compaction file path {}",
-                delete_file.file_path()
-            );
-        }
-    }
-
-    for (index, delete_file) in added_delete_files.iter().enumerate() {
-        if delete_file.content_type() != DataContentType::PositionDeletes {
-            continue;
-        }
-        let referenced_path = delete_file.referenced_data_file().ok_or_else(|| {
-            anyhow!(
-                "position-delete artifact {} missing referenced_data_file",
-                delete_file.file_path()
-            )
-        })?;
-        if !outputs.contains_key(referenced_path.as_str()) {
-            continue;
-        }
-        groups.entry(referenced_path).or_default().push(index);
-    }
-
-    let format = if table.metadata().format_version() >= FormatVersion::V3 {
-        DataFileFormat::Puffin
-    } else {
-        DataFileFormat::Parquet
-    };
-    let location_generator = DefaultLocationGenerator::new(table.metadata())?;
-    let partition_spec = table.metadata().default_partition_spec();
-    let schema = table.metadata().current_schema();
-    let mut replacement_plans = groups
-        .into_iter()
-        .filter(|(_, indices)| indices.len() > 1)
-        .collect::<Vec<_>>();
-    replacement_plans.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-    let replacement_plans = replacement_plans
-        .into_iter()
-        .map(|(referenced_path, indices)| {
-            let output = outputs[referenced_path.as_str()];
-            let partition_key = PartitionKey::new(
-                partition_spec.as_ref().clone(),
-                schema.clone(),
-                output.partition().clone(),
-            );
-            let mut hasher = XxHash64::with_seed(0);
-            referenced_path.hash(&mut hasher);
-            let identity = format!("{}-{:016x}", epoch, hasher.finish());
-            let preview_generator = PositionDeleteFileNameGenerators::new(&identity);
-            let replacement_location = location_generator.generate_location(
-                Some(&partition_key),
-                &preview_generator.for_format(format)?.generate_file_name(),
-            );
-            if !reserved_paths.insert(replacement_location.clone()) {
-                bail!(
-                    "generated compaction position-delete replacement path {} collides with another compaction file",
-                    replacement_location
-                );
-            }
-            Ok((
-                referenced_path,
-                indices,
-                partition_key,
-                identity,
-                replacement_location,
-            ))
-        })
-        .try_collect::<Vec<_>>()?;
-    let mut replacements = Vec::with_capacity(replacement_plans.len());
-    let mut replaced_indices = vec![false; added_delete_files.len()];
-    let mut discarded_paths = Vec::new();
-
-    for (referenced_path, indices, partition_key, identity, replacement_location) in
-        replacement_plans
-    {
-        let mut delete_vector = DeleteVector::default();
-        for index in &indices {
-            let source = &added_delete_files[*index];
-            let positions = read_position_deletes_from_file(table.file_io(), source)
-                .await
-                .with_context(|| {
-                    format!(
-                        "read compaction output position deletes from {}",
-                        source.file_path()
-                    )
-                })?;
-            delete_vector.extend(positions.iter());
-            discarded_paths.push(source.file_path().to_owned());
-            replaced_indices[*index] = true;
-        }
-
-        table
-            .file_io()
-            .delete(&replacement_location)
-            .await
-            .with_context(|| {
-                format!(
-                    "delete prior uncommitted compaction position-delete replacement {replacement_location}"
-                )
-            })?;
-        let file_name_generators = PositionDeleteFileNameGenerators::new(identity);
-        let replacement = write_position_delete_file(
-            table,
-            config,
-            &location_generator,
-            &file_name_generators,
-            table.metadata().format_version(),
-            referenced_path.clone(),
-            &delete_vector,
-            Some(&partition_key),
-        )
-        .await?;
-        replacements.push(replacement);
-    }
-
-    if replaced_indices.iter().any(|replaced| *replaced) {
-        *added_delete_files = added_delete_files
-            .drain(..)
-            .enumerate()
-            .filter_map(|(index, file)| (!replaced_indices[index]).then_some(file))
-            .chain(replacements)
-            .collect();
-    }
-    Ok(discarded_paths)
 }
 
 fn validate_aggregate_ids(
@@ -1048,36 +933,31 @@ fn combine_compaction_aggregate(
     current_schema_id: i32,
     current_partition_spec_id: i32,
     current_format_version: FormatVersion,
-    ordinary: Option<IcebergPkIndexSinkAggResult>,
     output_files: Vec<SerializedDataFile>,
     resolver: Option<CompactionResolverDeleteAggregate>,
     overwrite_files: Vec<SerializedDataFile>,
 ) -> Result<IcebergPkIndexSinkAggResult> {
-    if let Some(resolver) = &resolver {
-        validate_aggregate_ids(
-            "compaction resolver reports",
-            resolver.schema_id,
-            resolver.partition_spec_id,
-            current_schema_id,
-            current_partition_spec_id,
-        )?;
-    }
-
-    let mut merged = ordinary.unwrap_or(IcebergPkIndexSinkAggResult {
+    let delete_files = match resolver {
+        Some(resolver) => {
+            validate_aggregate_ids(
+                "compaction resolver reports",
+                resolver.schema_id,
+                resolver.partition_spec_id,
+                current_schema_id,
+                current_partition_spec_id,
+            )?;
+            resolver.delete_files
+        }
+        None => vec![],
+    };
+    Ok(IcebergPkIndexSinkAggResult {
         schema_id: current_schema_id,
         partition_spec_id: current_partition_spec_id,
-        format_version: None,
-        data_files: vec![],
-        delete_files: vec![],
-        overwrite_files: vec![],
-    });
-    merged.format_version = Some(current_format_version);
-    merged.data_files.extend(output_files);
-    if let Some(resolver) = resolver {
-        merged.delete_files.extend(resolver.delete_files);
-    }
-    merged.overwrite_files.extend(overwrite_files);
-    Ok(merged)
+        format_version: Some(current_format_version),
+        data_files: output_files,
+        delete_files,
+        overwrite_files,
+    })
 }
 
 fn aggregate_reports(

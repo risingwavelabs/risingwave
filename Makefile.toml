@@ -961,6 +961,9 @@ condition = { env_set = [
     "USE_SYSTEM_RISINGWAVE",
 ], files_modified = { input = [
     "./java/connector-node/**/*",
+    "./java/debezium/**/*",
+    "./java/build-debezium.sh",
+    "./java/pom.xml",
 ], output = [
     "./java/connector-node/assembly/target/**/*",
 ] } }
@@ -980,6 +983,7 @@ TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
 echo "Building connector node..."
 cd "${JAVA_DIR}"
+./build-debezium.sh
 "${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip -Dno-build-rust
 
 rm -rf ${PREFIX_BIN}/connector-node

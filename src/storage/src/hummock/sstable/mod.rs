@@ -230,6 +230,7 @@ impl Sstable {
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BlockMeta {
+    #[serde(with = "serde_bytes")]
     pub smallest_key: Vec<u8>,
     pub offset: u32,
     pub len: u32,
@@ -305,10 +306,13 @@ impl BlockMeta {
 #[derive(Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
+    #[serde(with = "serde_bytes")]
     pub bloom_filter: Vec<u8>,
     pub estimated_size: u32,
     pub key_count: u32,
+    #[serde(with = "serde_bytes")]
     pub smallest_key: Vec<u8>,
+    #[serde(with = "serde_bytes")]
     pub largest_key: Vec<u8>,
     pub meta_offset: u64,
     /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
@@ -589,7 +593,38 @@ mod tests {
         let decoded_meta = SstableMeta::decode(&buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
 
-        println!("buf: {}", buf.len());
+        // Bincode encodes structs like tuples. Plain Vec<u8> fields here reproduce the
+        // meta disk-cache format before serde_bytes, including nested block metadata.
+        let legacy_block_metas: Vec<_> = meta
+            .block_metas
+            .iter()
+            .map(|block| {
+                (
+                    &block.smallest_key,
+                    block.offset,
+                    block.len,
+                    block.uncompressed_size,
+                    block.total_key_count,
+                    block.stale_key_count,
+                )
+            })
+            .collect();
+        #[expect(deprecated)]
+        let legacy_meta = (
+            legacy_block_metas,
+            &meta.bloom_filter,
+            meta.estimated_size,
+            meta.key_count,
+            &meta.smallest_key,
+            &meta.largest_key,
+            meta.meta_offset,
+            &meta.monotonic_tombstone_events,
+            meta.version,
+        );
+        let legacy_bytes = bincode::serialize(&legacy_meta).unwrap();
+        assert_eq!(bincode::serialize(&meta).unwrap(), legacy_bytes);
+        let decoded_meta: SstableMeta = bincode::deserialize_from(&mut &legacy_bytes[..]).unwrap();
+        assert_eq!(decoded_meta, meta);
     }
 
     #[tokio::test]
