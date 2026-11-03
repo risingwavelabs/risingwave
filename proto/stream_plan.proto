@@ -405,7 +405,13 @@ message FilterNode {
 }
 
 message ChangeLogNode {
-  message Keyed {}
+  message Keyed {
+    // Input column indices in KEY but absent from distribution_keys.
+    // Compaction uses stream_keys, distribution_keys, and these columns.
+    // We retain distribution_keys in compaction for backward compatibility:
+    // older keyed plans stored the full KEY there, so this list defaults to empty.
+    repeated uint32 additional_key_columns = 1;
+  }
 
   // Whether or not there is an op in the final output.
   bool need_op = 1;

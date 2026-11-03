@@ -36,17 +36,28 @@ pub struct LogicalChangeLog {
 }
 
 impl LogicalChangeLog {
-    pub fn create(input: PlanRef, key_indices: Option<Vec<usize>>) -> PlanRef {
-        Self::new(input, key_indices, true, true).into()
+    pub fn create(
+        input: PlanRef,
+        key_indices: Option<Vec<usize>>,
+        distribution_key_indices: Option<Vec<usize>>,
+    ) -> PlanRef {
+        Self::new(input, key_indices, distribution_key_indices, true, true).into()
     }
 
     pub fn new(
         input: PlanRef,
         key_indices: Option<Vec<usize>>,
+        distribution_key_indices: Option<Vec<usize>>,
         need_op: bool,
         need_changelog_row_id: bool,
     ) -> Self {
-        let core = generic::ChangeLog::new(input, key_indices, need_op, need_changelog_row_id);
+        let core = generic::ChangeLog::new(
+            input,
+            key_indices,
+            distribution_key_indices,
+            need_op,
+            need_changelog_row_id,
+        );
         Self::with_core(core)
     }
 
@@ -77,7 +88,18 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
             .key_indices
             .as_ref()
             .map(|key| input_col_change.map_all(key));
-        let changelog = Self::new(input, key_indices, self.core.need_op, true);
+        let distribution_key_indices = self
+            .core
+            .distribution_key_indices
+            .as_ref()
+            .map(|key| input_col_change.map_all(key));
+        let changelog = Self::new(
+            input,
+            key_indices,
+            distribution_key_indices,
+            self.core.need_op,
+            true,
+        );
 
         let out_col_change = if self.core.need_op {
             let (mut output_vec, len) = input_col_change.into_parts();
@@ -151,6 +173,15 @@ impl ColPrunable for LogicalChangeLog {
             }
         }
 
+        // Distribution columns must survive pruning even when the query does not select them.
+        if let Some(key) = &self.core.distribution_key_indices {
+            for &index in key {
+                if !input_required_cols.contains(&index) {
+                    input_required_cols.push(index);
+                }
+            }
+        }
+
         let new_input = self.input().prune_col(&input_required_cols, ctx);
         let input_mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
@@ -162,9 +193,21 @@ impl ColPrunable for LogicalChangeLog {
             .as_ref()
             .map(|key| input_mapping.map_all(key));
 
+        let distribution_key_indices = self
+            .core
+            .distribution_key_indices
+            .as_ref()
+            .map(|key| input_mapping.map_all(key));
+
         // updated plan with new inputs
-        let changelog: PlanRef =
-            Self::new(new_input, key_indices, need_op, need_changelog_row_id).into();
+        let changelog: PlanRef = Self::new(
+            new_input,
+            key_indices,
+            distribution_key_indices,
+            need_op,
+            need_changelog_row_id,
+        )
+        .into();
 
         // output now contains business keys as well, we need to hide it if not requested by the parent
         let (mut output_mapping, new_output_len) = input_mapping.into_parts();
@@ -202,7 +245,10 @@ impl ToBatch for LogicalChangeLog {
 impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         let input = self.input().to_stream(ctx)?;
-        let input = if let Some(key) = &self.core.key_indices {
+
+        let input = if let Some(key) = &self.core.distribution_key_indices {
+            RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?
+        } else if let Some(key) = &self.core.key_indices {
             RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?
         } else {
             input

@@ -77,11 +77,15 @@ impl_distill_by_unit!(StreamChangeLog, core, "StreamChangeLog");
 
 impl StreamNode for StreamChangeLog {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        let mode = self
-            .core
-            .key_indices
-            .is_some()
-            .then_some(Mode::Keyed(Keyed {}));
+        let mode = self.core.key_indices.as_ref().map(|key| {
+            Mode::Keyed(Keyed {
+                additional_key_columns: key
+                    .iter()
+                    .map(|&index| index as u32)
+                    .filter(|index| !self.distribution_keys.contains(index))
+                    .collect(),
+            })
+        });
         PbNodeBody::Changelog(Box::new(ChangeLogNode {
             need_op: self.core.need_op,
             distribution_keys: self.distribution_keys.clone(),
@@ -100,3 +104,68 @@ impl StreamNode for StreamChangeLog {
 impl ExprRewritable<Stream> for StreamChangeLog {}
 
 impl ExprVisitable for StreamChangeLog {}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::{LogicalValues, StreamExchange, StreamValues};
+    use crate::optimizer::property::FunctionalDependencySet;
+
+    #[test]
+    fn test_changelog_separates_input_distribution_and_additional_keys() {
+        for (key_indices, distribution_keys, additional_key_columns) in [
+            (Some(vec![1, 2]), vec![1], Some(vec![2])),
+            (Some(vec![1, 2]), vec![2, 1], Some(vec![])),
+            (None, vec![1], None),
+        ] {
+            let ctx = OptimizerContext::mock();
+            let schema = Schema::new(vec![
+                Field::with_name(DataType::Int32, "id"),
+                Field::with_name(DataType::Int32, "tenant"),
+                Field::with_name(DataType::Int32, "business_key"),
+            ]);
+            let mut values = LogicalValues::new(vec![], schema.clone(), ctx.clone());
+            values.base =
+                PlanBase::new_logical(ctx, schema, Some(vec![0]), FunctionalDependencySet::new(3));
+            let values = StreamValues::new(values);
+            let input = StreamExchange::new(
+                values.into(),
+                Distribution::HashShard(distribution_keys.clone()),
+            );
+            let core = generic::ChangeLog::new(
+                input.into(),
+                key_indices,
+                Some(distribution_keys.clone()),
+                true,
+                true,
+            );
+            let distribution_keys = distribution_keys
+                .into_iter()
+                .map(|index| index as u32)
+                .collect::<Vec<_>>();
+            let changelog = StreamChangeLog::new_with_dist(
+                core,
+                Distribution::HashShard(vec![4]),
+                distribution_keys.clone(),
+            );
+            let PbNodeBody::Changelog(node) =
+                changelog.to_stream_prost_body(&mut BuildFragmentGraphState::default())
+            else {
+                panic!("expected a changelog node");
+            };
+
+            assert_eq!(node.stream_keys, vec![0]);
+            assert_eq!(node.distribution_keys, distribution_keys);
+            assert_eq!(
+                node.mode,
+                additional_key_columns.map(|additional_key_columns| Mode::Keyed(Keyed {
+                    additional_key_columns,
+                }))
+            );
+        }
+    }
+}
