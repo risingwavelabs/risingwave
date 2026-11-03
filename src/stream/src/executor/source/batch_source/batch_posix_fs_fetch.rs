@@ -35,10 +35,11 @@ use thiserror_ext::AsReport;
 use tokio::fs;
 
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::LoadAction;
 use crate::executor::prelude::*;
 use crate::executor::source::{StreamSourceCore, get_split_offset_col_idx, prune_additional_cols};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::LocalBarrierManager;
+use crate::task::{LoadProgress, LocalBarrierManager};
 
 /// Maximum number of files to process in a single batch
 const BATCH_SIZE: usize = 1000;
@@ -65,7 +66,7 @@ fn into_data_chunk_stream(
 ///
 /// Key characteristics:
 /// - Uses **ephemeral in-memory state** (no persistent state table)
-/// - State is cleared on recovery and `RefreshStart` mutations
+/// - State is cleared on recovery and `Load { Start }` mutations
 /// - Suitable for refreshable materialized views
 pub struct BatchPosixFsFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -86,7 +87,7 @@ pub struct BatchPosixFsFetchExecutor<S: StateStore> {
     barrier_manager: LocalBarrierManager,
 
     /// In-memory queue of file assignments to process (`file_path`, `split_json`).
-    /// This is ephemeral and cleared on recovery and `RefreshStart` mutations.
+    /// This is ephemeral and cleared on recovery and `Load { Start }` mutations.
     file_queue: VecDeque<(String, JsonbVal)>,
 
     /// Associated table ID for reporting load finished
@@ -328,19 +329,18 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     }
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
-                                    Mutation::RefreshStart {
-                                        associated_source_id,
-                                        ..
-                                    } if associated_source_id.as_raw_id()
-                                        == core.source_id.as_raw_id() =>
-                                    {
+                                    Mutation::Load {
+                                        source_id,
+                                        action: LoadAction::Start,
+                                    } if *source_id == core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %actor_ctx.id,
                                             source_id = %core.source_id,
+                                            table_id = %self.associated_table_id,
                                             queue_len = file_queue.len(),
                                             files_in_progress,
-                                            "RefreshStart: clearing state and aborting workload"
+                                            "load started, clearing state and aborting workload"
                                         );
 
                                         // Clear all in-memory state
@@ -352,17 +352,17 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         // Abort current file reader
                                         stream.replace_data_stream(stream::pending().boxed());
                                     }
-                                    Mutation::ListFinish {
-                                        associated_source_id,
-                                    } if associated_source_id.as_raw_id()
-                                        == core.source_id.as_raw_id() =>
-                                    {
-                                        // ListFinish is for our source
+                                    Mutation::Load {
+                                        source_id,
+                                        action: LoadAction::ListFinish,
+                                    } if *source_id == core.source_id => {
+                                        // Listing is finished for our source
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %actor_ctx.id,
                                             source_id = %core.source_id,
-                                            "received ListFinish mutation"
+                                            table_id = %self.associated_table_id,
+                                            "listing finished"
                                         );
                                         list_finished = true;
                                     }
@@ -374,7 +374,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
 
                             // Report load finished BEFORE yielding barrier when:
                             // 1. All files have been processed (files_in_progress == 0 and file_queue is empty)
-                            // 2. ListFinish mutation has been received
+                            // 2. Listing has finished
                             //
                             // IMPORTANT: Must report BEFORE yield to ensure epoch is still in inflight_barriers.
                             // If we yield first, the barrier worker may collect the barrier and remove the epoch
@@ -389,13 +389,14 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     ?epoch,
                                     actor_id = %actor_ctx.id,
                                     source_id = %core.source_id,
+                                    table_id = %self.associated_table_id,
                                     "Reporting source load finished"
                                 );
-                                barrier_manager.report_source_load_finished(
+                                barrier_manager.report_load_progress(
                                     epoch,
                                     actor_ctx.id,
-                                    self.associated_table_id,
                                     core.source_id,
+                                    LoadProgress::ReaderDone,
                                 );
                                 // Reset the flag to avoid duplicate reports
                                 list_finished = false;

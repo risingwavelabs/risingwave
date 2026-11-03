@@ -31,10 +31,11 @@ use risingwave_connector::source::reader::desc::SourceDesc;
 use thiserror_ext::AsReport;
 
 use super::batch_adbc_snowflake_list::AdbcSnowflakeSplit;
+use crate::executor::LoadAction;
 use crate::executor::prelude::*;
 use crate::executor::source::StreamSourceCore;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::LocalBarrierManager;
+use crate::task::{LoadProgress, LocalBarrierManager};
 
 pub struct BatchAdbcSnowflakeFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -119,16 +120,16 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
                                 match mutation {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
-                                    Mutation::RefreshStart {
-                                        associated_source_id,
-                                        ..
-                                    } if associated_source_id == &core.source_id => {
+                                    Mutation::Load {
+                                        source_id,
+                                        action: LoadAction::Start,
+                                    } if *source_id == core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
                                             source_id = %core.source_id,
                                             table_id = %self.associated_table_id,
-                                            "RefreshStart:"
+                                            "load started"
                                         );
 
                                         // reset states and abort current workload
@@ -140,15 +141,16 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
 
                                         need_rebuild_reader = true;
                                     }
-                                    Mutation::ListFinish {
-                                        associated_source_id,
-                                    } if associated_source_id == &core.source_id => {
+                                    Mutation::Load {
+                                        source_id,
+                                        action: LoadAction::ListFinish,
+                                    } if *source_id == core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
                                             source_id = %core.source_id,
                                             table_id = %self.associated_table_id,
-                                            "ListFinish:"
+                                            "listing finished"
                                         );
                                         is_list_finished = true;
                                     }
@@ -171,11 +173,11 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
                                     table_id = %self.associated_table_id,
                                     "Reporting load finished"
                                 );
-                                self.barrier_manager.report_source_load_finished(
+                                self.barrier_manager.report_load_progress(
                                     barrier.epoch,
                                     self.actor_ctx.id,
-                                    self.associated_table_id,
                                     core.source_id,
+                                    LoadProgress::ReaderDone,
                                 );
 
                                 // reset flags

@@ -33,13 +33,14 @@ use risingwave_pb::common::ThrottleType;
 use thiserror_ext::AsReport;
 
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::LoadAction;
 use crate::executor::prelude::*;
 use crate::executor::source::{
     StreamSourceCore, apply_shared_rate_limit_to_file_source_reader, get_split_offset_col_idx,
     prune_additional_cols, source_reader_event_to_chunk_stream,
 };
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::LocalBarrierManager;
+use crate::task::{LoadProgress, LocalBarrierManager};
 
 const BATCH_SIZE: usize = 1000;
 
@@ -243,10 +244,10 @@ where
                                     }
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
-                                    Mutation::RefreshStart {
-                                        associated_source_id,
-                                        ..
-                                    } if associated_source_id == &core.source_id => {
+                                    Mutation::Load {
+                                        source_id,
+                                        action: LoadAction::Start,
+                                    } if *source_id == core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
@@ -254,7 +255,7 @@ where
                                             table_id = %self.associated_table_id,
                                             queue_len = file_queue.len(),
                                             files_in_progress,
-                                            "RefreshStart: clearing batch OpenDAL fetch state"
+                                            "load started, clearing batch OpenDAL fetch state"
                                         );
                                         file_queue.clear();
                                         files_in_progress = 0;
@@ -262,15 +263,16 @@ where
                                         is_refreshing = true;
                                         stream.replace_data_stream(stream::pending().boxed());
                                     }
-                                    Mutation::ListFinish {
-                                        associated_source_id,
-                                    } if associated_source_id == &core.source_id => {
+                                    Mutation::Load {
+                                        source_id,
+                                        action: LoadAction::ListFinish,
+                                    } if *source_id == core.source_id => {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = %self.actor_ctx.id,
                                             source_id = %core.source_id,
                                             table_id = %self.associated_table_id,
-                                            "received ListFinish mutation"
+                                            "listing finished"
                                         );
                                         list_finished = true;
                                     }
@@ -291,11 +293,11 @@ where
                                     table_id = %self.associated_table_id,
                                     "Reporting batch OpenDAL source load finished"
                                 );
-                                self.barrier_manager.report_source_load_finished(
+                                self.barrier_manager.report_load_progress(
                                     barrier.epoch,
                                     self.actor_ctx.id,
-                                    self.associated_table_id,
                                     core.source_id,
+                                    LoadProgress::ReaderDone,
                                 );
                                 list_finished = false;
                                 is_refreshing = false;

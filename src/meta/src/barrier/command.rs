@@ -39,13 +39,14 @@ use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
+use risingwave_pb::stream_plan::load_mutation::Action as PbLoadAction;
 use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, DropSubscriptionsMutation,
-    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
-    PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
+    LoadFinishMutation, LoadId, LoadMutation, PauseMutation, PbSinkAddColumnsOp,
+    PbSinkDropColumnsOp, PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
@@ -568,9 +569,10 @@ pub enum Command {
         staging_table_id: TableId,
         trigger_time: NaiveDateTime,
     },
+    /// Seals the listing of the load of `source_id`: its readers finish once their assigned
+    /// input is read.
     ListFinish {
-        table_id: TableId,
-        associated_source_id: SourceId,
+        source_id: SourceId,
     },
     LoadFinish {
         table_id: TableId,
@@ -687,14 +689,7 @@ impl std::fmt::Display for Command {
                 "Refresh: {} (source: {}, cycle: {})",
                 table_id, associated_source_id, trigger_time
             ),
-            Command::ListFinish {
-                table_id,
-                associated_source_id,
-            } => write!(
-                f,
-                "ListFinish: {} (source: {})",
-                table_id, associated_source_id
-            ),
+            Command::ListFinish { source_id } => write!(f, "ListFinish: {source_id}"),
             Command::LoadFinish {
                 table_id,
                 associated_source_id,
@@ -1452,21 +1447,20 @@ impl Command {
         }
     }
 
-    /// Build the `RefreshStart` mutation.
-    pub(super) fn refresh_to_mutation(
-        table_id: TableId,
-        associated_source_id: SourceId,
-    ) -> Mutation {
-        Mutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
-            table_id,
-            associated_source_id,
-        })
+    /// Build the `Load { Start }` mutation for the load of `source_id`.
+    pub(super) fn start_load_mutation(source_id: SourceId) -> Mutation {
+        Self::load_mutation(source_id, PbLoadAction::Start(Default::default()))
     }
 
-    /// Build the `ListFinish` mutation.
-    pub(super) fn list_finish_to_mutation(associated_source_id: SourceId) -> Mutation {
-        Mutation::ListFinish(ListFinishMutation {
-            associated_source_id,
+    /// Build the `Load { ListFinish }` mutation for the load of `source_id`.
+    pub(super) fn list_finish_mutation(source_id: SourceId) -> Mutation {
+        Self::load_mutation(source_id, PbLoadAction::ListFinish(Default::default()))
+    }
+
+    fn load_mutation(source_id: SourceId, action: PbLoadAction) -> Mutation {
+        Mutation::Load(LoadMutation {
+            load_id: Some(LoadId { source_id }),
+            action: Some(action),
         })
     }
 
