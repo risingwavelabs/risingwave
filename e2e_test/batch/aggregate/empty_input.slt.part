@@ -1,0 +1,28 @@
+# A simple aggregation yields exactly one row even when its input is provably empty,
+# including when the outer query prunes the aggregate result. See #27666.
+
+query I
+SELECT NULL::INT AS col_0 FROM (SELECT SUM(DISTINCT INT '822') AS s WHERE false) AS q;
+----
+NULL
+
+query I
+SELECT 1 FROM (SELECT SUM(INT '822') AS s WHERE false) AS q;
+----
+1
+
+statement ok
+CREATE TABLE empty_input_t (v INT);
+
+query I
+SELECT 1 FROM (SELECT SUM(v) AS s FROM empty_input_t WHERE false) AS q;
+----
+1
+
+query I
+SELECT 1 FROM (SELECT COUNT(*) AS c FROM empty_input_t) AS q;
+----
+1
+
+statement ok
+DROP TABLE empty_input_t;

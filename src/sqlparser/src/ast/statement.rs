@@ -23,7 +23,7 @@ use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
 use super::value::escape_single_quote_string;
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
-    CdcTableInfo, ColumnDef, ObjectName, REDACT_SQL_OPTION_KEYWORDS, SqlOption, TableConstraint,
+    CdcTableInfo, ColumnDef, ObjectName, SQL_OPTION_REDACTION, SqlOption, TableConstraint,
     display_comma_separated, display_separated,
 };
 use crate::keywords::Keyword;
@@ -1077,7 +1077,7 @@ impl fmt::Display for UserOption {
 pub struct UserOptions(pub Vec<UserOption>, pub bool);
 
 fn should_redact_user_password() -> bool {
-    REDACT_SQL_OPTION_KEYWORDS.try_with(|_| ()).is_ok()
+    SQL_OPTION_REDACTION.try_with(|_| ()).is_ok()
 }
 
 #[derive(Default)]

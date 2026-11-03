@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::str::FromStr;
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -53,7 +54,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::SessionImpl;
-use crate::{Binder, HashSet, TableCatalog};
+use crate::{Binder, TableCatalog};
 
 pub fn ensure_local_fs_connector_allowed(session: &SessionImpl, connector: &str) -> RwResult<()> {
     let is_local_fs_connector = is_local_fs_connector(connector);

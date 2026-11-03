@@ -283,7 +283,11 @@ impl OpendalObjectStore {
         let meta = object.metadata();
         let mut last_modified = meta.last_modified().map(timestamp_to_secs);
         let mut total_size = meta.content_length() as usize;
-        if last_modified.is_none() || total_size == 0 {
+        // FS listing includes the actual size, even for empty files. Avoid a redundant stat
+        // that can fail if an atomic upload renames the listed temporary file.
+        if last_modified.is_none()
+            || (total_size == 0 && op.info().scheme() != opendal::services::FS_SCHEME)
+        {
             // Propagate stat failures; treating one as EOF can make recovery trust a partial scan.
             let stat_meta = op.stat(&key).await?;
             last_modified = stat_meta.last_modified().map(timestamp_to_secs);
@@ -600,6 +604,33 @@ mod tests {
         );
 
         uploader.finish().await.unwrap_err();
+    }
+
+    #[cfg(not(madsim))] // OpenDAL FS uses real filesystem I/O.
+    #[tokio::test]
+    async fn test_listed_empty_fs_file_survives_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let op = Operator::new(opendal::services::Fs::default().root(dir.path().to_str().unwrap()))
+            .unwrap();
+        tokio::fs::write(dir.path().join("sst.tmp"), b"")
+            .await
+            .unwrap();
+        let mut objects = op.lister_with("").recursive(true).await.unwrap();
+        let object = objects.next().await.unwrap().unwrap();
+        assert_eq!(object.path(), "sst.tmp");
+        assert_eq!(object.metadata().content_length(), 0);
+        let last_modified = timestamp_to_secs(object.metadata().last_modified().unwrap());
+
+        // Model an atomic upload finishing after LIST has captured the temporary file.
+        tokio::fs::rename(dir.path().join("sst.tmp"), dir.path().join("sst"))
+            .await
+            .unwrap();
+        let metadata = OpendalObjectStore::listed_object_metadata(&op, object)
+            .await
+            .unwrap();
+        assert_eq!(metadata.key, "sst.tmp");
+        assert_eq!(metadata.total_size, 0);
+        assert_eq!(metadata.last_modified, last_modified);
     }
 
     #[tokio::test]

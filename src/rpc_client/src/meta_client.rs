@@ -924,6 +924,14 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn remove_iceberg_table_orphan_files(
+        &self,
+        sink_id: SinkId,
+    ) -> Result<RemoveIcebergTableOrphanFilesResponse> {
+        let request = RemoveIcebergTableOrphanFilesRequest { sink_id };
+        self.inner.remove_iceberg_table_orphan_files(request).await
+    }
+
     pub async fn drop_view(&self, view_id: ViewId, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
@@ -2335,8 +2343,12 @@ impl GrpcMetaClientCore {
             DdlServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let hummock_client =
             HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
-        let notification_client =
-            NotificationServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        // Accept zstd-compressed notifications: the initial `MetaSnapshot` on `Subscribe`
+        // carries the full hummock version, and a single uncompressed gRPC message larger
+        // than `i32::MAX` bytes is silently reset by hyper/h2 and can never be delivered.
+        let notification_client = NotificationServiceClient::new(channel.clone())
+            .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
+            .max_decoding_message_size(usize::MAX);
         let stream_client =
             StreamManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let user_client = UserServiceClient::new(channel.clone());
@@ -2799,6 +2811,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
             ,{ ddl_client, rewrite_iceberg_table_manifests, RewriteIcebergTableManifestsRequest, RewriteIcebergTableManifestsResponse }
             ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
+            ,{ ddl_client, remove_iceberg_table_orphan_files, RemoveIcebergTableOrphanFilesRequest, RemoveIcebergTableOrphanFilesResponse }
             ,{ ddl_client, create_iceberg_table, CreateIcebergTableRequest, CreateIcebergTableResponse }
             ,{ ddl_client, wait_iceberg_pk_index_sink_epoch, WaitIcebergPkIndexSinkEpochRequest, WaitIcebergPkIndexSinkEpochResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }

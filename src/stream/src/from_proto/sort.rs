@@ -33,7 +33,7 @@ impl ExecutorBuilder for SortExecutorBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
             .enable_preload_all_rows_by_config(&params.config)
             .build()

@@ -46,7 +46,9 @@ use crate::hummock::metrics_utils::{
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::time_travel::should_mark_next_time_travel_version_snapshot;
-use crate::hummock::{HummockManager, commit_multi_var_with_provided_txn};
+use crate::hummock::{
+    CommittedTableChangeLogProgress, HummockManager, commit_multi_var_with_provided_txn,
+};
 
 pub struct NewTableFragmentInfo {
     pub table_ids: HashSet<TableId>,
@@ -62,6 +64,7 @@ pub struct CommitEpochInfo {
     pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
+    pub table_change_log_progress: Vec<CommittedTableChangeLogProgress>,
 
     pub truncate_tables: HashSet<TableId>,
 }
@@ -78,6 +81,7 @@ impl HummockManager {
             change_log_delta,
             vector_index_delta,
             tables_to_commit,
+            table_change_log_progress,
             truncate_tables,
         } = commit_info;
         let mut versioning_guard = self
@@ -367,6 +371,7 @@ impl HummockManager {
                 }
             }
         }
+        self.update_table_change_log_progress(table_change_log_progress);
         drop(table_stats_change);
         let may_delete_object_ids =
             &table_change_log_object_ids_before_commit - &table_change_log_object_ids_after_commit;

@@ -651,7 +651,7 @@ mod tests {
                 Arc::new(session_mgr),
                 ConnectionContext {
                     tls_config: None,
-                    redact_sql_option_keywords: None,
+                    sql_option_redaction: None,
                     message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
                         .into(),
                     stream_flush_threshold_bytes: 64 * 1024,
@@ -725,7 +725,7 @@ mod tests {
                 Arc::new(MockSessionManager {}),
                 ConnectionContext {
                     tls_config: None,
-                    redact_sql_option_keywords: None,
+                    sql_option_redaction: None,
                     message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
                         .into(),
                     stream_flush_threshold_bytes: 64 * 1024,

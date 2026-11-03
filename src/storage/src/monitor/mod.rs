@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod cache_refill_metrics;
+pub use cache_refill_metrics::*;
 mod hummock_state_store_metrics;
 use futures::Future;
 pub use hummock_state_store_metrics::*;

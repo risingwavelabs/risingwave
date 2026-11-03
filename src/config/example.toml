@@ -23,6 +23,7 @@ periodic_compaction_interval_sec = 300
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
 iceberg_gc_interval_sec = 3600
+iceberg_orphan_file_cleanup_interval_sec = 604800
 iceberg_compaction_report_timeout_sec = 1800
 iceberg_compaction_config_refresh_interval_sec = 60
 iceberg_compaction_schedule_on_startup = false
@@ -167,6 +168,7 @@ statement_timeout_in_sec = 3600
 frontend_compute_runtime_worker_threads = ""
 mask_worker_temporary_secs = 30
 redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
+redact_sql_option_allowlist = ["primary_key"]
 enable_spill = true
 
 [batch.developer]
@@ -256,8 +258,11 @@ enable_explain_analyze_stats = true
 snapshot_iter_rebuild_interval_secs = 600
 iceberg_list_interval_sec = 10
 iceberg_fetch_batch_size = 1024
+iceberg_update_ordered_max_tasks = 16
 iceberg_sink_positional_delete_cache_size = 1024
 iceberg_sink_write_parquet_max_row_group_rows = 100000
+iceberg_pk_index_sink_lookup_concurrency = 64
+iceberg_pk_index_sink_max_batch_rows = 4096
 materialize_force_overwrite_on_no_check = false
 default_enable_mem_preload_state_table = false
 mem_preload_state_table_ids_whitelist = []

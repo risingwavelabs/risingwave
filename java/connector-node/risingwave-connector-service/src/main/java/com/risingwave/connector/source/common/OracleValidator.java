@@ -46,12 +46,14 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             Set.of("SELECT_CATALOG_ROLE", "EXECUTE_CATALOG_ROLE");
 
     private static final int ORA_CONTAINER_DOES_NOT_EXIST = 65011;
+    private static final int INITIALIZATION_TIMEOUT_SECONDS = 30;
 
     private final Connection jdbcConnection;
     private final String pdbName;
     private final String schemaName;
     private final String tableName;
     private final OracleHeartbeatTable heartbeatTable;
+    private final boolean autoInitializeHeartbeatTable;
     private final boolean isCdcSourceJob;
 
     public OracleValidator(Map<String, String> userProps, boolean isCdcSourceJob)
@@ -60,6 +62,11 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         this.heartbeatTable =
                 OracleHeartbeatTable.parse(
                         userProps.get(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
+        this.autoInitializeHeartbeatTable =
+                "true"
+                        .equals(
+                                userProps.get(
+                                        DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY));
         var jdbcUrl =
                 ValidatorUtils.getJdbcUrl(
                         SourceTypeE.ORACLE,
@@ -236,18 +243,200 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     void validateHeartbeatTable(OracleHeartbeatTable heartbeatTable) {
         try {
             switchToPdb();
-            validateTableExists(
-                    heartbeatTable.owner(), heartbeatTable.table(), "Oracle heartbeat table");
-            validateHeartbeatColumns(heartbeatTable);
-            validateHeartbeatPrimaryKey(heartbeatTable);
-            validateHeartbeatTableHasRow(heartbeatTable);
-            validateHeartbeatUpdatePrivilege(heartbeatTable);
+            var sessionUser = querySessionUser();
+            validateHeartbeatSchemaExists(heartbeatTable, sessionUser);
+            if (autoInitializeHeartbeatTable) {
+                tryInitializeHeartbeatTable(heartbeatTable, sessionUser);
+            } else {
+                validateHeartbeatTableExists(heartbeatTable, sessionUser);
+                validateHeartbeatColumns(heartbeatTable, sessionUser);
+                validateHeartbeatPrimaryKey(heartbeatTable, sessionUser);
+                validateHeartbeatTableHasRow(heartbeatTable, sessionUser);
+            }
+            validateHeartbeatUpdatePrivilege(heartbeatTable, sessionUser);
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
-    private void validateHeartbeatColumns(OracleHeartbeatTable heartbeatTable) throws SQLException {
+    private String querySessionUser() throws SQLException {
+        return querySingleColumn("SELECT SYS_CONTEXT('USERENV', 'SESSION_USER') FROM DUAL")
+                .iterator()
+                .next();
+    }
+
+    private void validateHeartbeatSchemaExists(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) throws SQLException {
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        "SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME = ?")) {
+            stmt.setString(1, heartbeatTable.owner());
+            try (var result = stmt.executeQuery()) {
+                result.next();
+                if (result.getInt(1) == 0) {
+                    throw ValidatorUtils.invalidArgument(
+                            String.format(
+                                    "Oracle schema '%s' does not exist in PDB '%s'. Have a DBA "
+                                            + "create the user/schema or choose an existing schema. "
+                                            + "After the schema exists, have a DBA run:\n%s",
+                                    heartbeatTable.owner(),
+                                    pdbName,
+                                    heartbeatTable.manualSetupSql(
+                                            pdbName,
+                                            sessionUser,
+                                            OracleHeartbeatTable.ManualSetup.TABLE_AND_SEED_ROW)));
+                }
+            }
+        }
+    }
+
+    private boolean heartbeatTableExists(OracleHeartbeatTable heartbeatTable) throws SQLException {
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        "SELECT COUNT(*) FROM ALL_TABLES WHERE OWNER = ? AND TABLE_NAME = ?")) {
+            stmt.setString(1, heartbeatTable.owner());
+            stmt.setString(2, heartbeatTable.table());
+            try (var result = stmt.executeQuery()) {
+                result.next();
+                return result.getInt(1) != 0;
+            }
+        }
+    }
+
+    private Set<String> heartbeatObjectTypes(OracleHeartbeatTable heartbeatTable)
+            throws SQLException {
+        return querySingleColumn(
+                "SELECT OBJECT_TYPE FROM ALL_OBJECTS WHERE OWNER = ? AND OBJECT_NAME = ?",
+                heartbeatTable.owner(),
+                heartbeatTable.table());
+    }
+
+    private void validateHeartbeatTableExists(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) throws SQLException {
+        if (heartbeatTableExists(heartbeatTable)) {
+            return;
+        }
+        var objectTypes = heartbeatObjectTypes(heartbeatTable);
+        if (!objectTypes.isEmpty()) {
+            throw incompatibleHeartbeatObject(heartbeatTable, objectTypes, sessionUser);
+        }
+        throw ValidatorUtils.invalidArgument(
+                String.format(
+                        "Oracle heartbeat table '%s' does not exist in PDB '%s'. Have a DBA run:\n%s",
+                        heartbeatTable.qualifiedName(),
+                        pdbName,
+                        heartbeatTable.manualSetupSql(
+                                pdbName,
+                                sessionUser,
+                                OracleHeartbeatTable.ManualSetup.TABLE_AND_SEED_ROW)));
+    }
+
+    private void tryInitializeHeartbeatTable(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) throws SQLException {
+        if (!heartbeatTableExists(heartbeatTable)) {
+            SQLException createError = null;
+            try {
+                executeInitializationStatement(heartbeatTable.createTableSql());
+            } catch (SQLException e) {
+                createError = e;
+            }
+            if (!heartbeatTableExists(heartbeatTable)) {
+                var objectTypes = heartbeatObjectTypes(heartbeatTable);
+                if (!objectTypes.isEmpty()) {
+                    throw incompatibleHeartbeatObject(heartbeatTable, objectTypes, sessionUser);
+                }
+                throw initializationFailure(
+                        "create",
+                        heartbeatTable,
+                        createError,
+                        heartbeatTable.manualSetupSql(
+                                pdbName,
+                                sessionUser,
+                                OracleHeartbeatTable.ManualSetup.TABLE_AND_SEED_ROW));
+            }
+        }
+
+        // Never seed a table until its existing structure has been validated.
+        validateHeartbeatColumns(heartbeatTable, sessionUser);
+        validateHeartbeatPrimaryKey(heartbeatTable, sessionUser);
+        if (!heartbeatRowExists(heartbeatTable)) {
+            SQLException seedError = null;
+            try {
+                executeInitializationStatement(heartbeatTable.insertSeedRowSql());
+                if (!jdbcConnection.getAutoCommit()) {
+                    jdbcConnection.commit();
+                }
+            } catch (SQLException e) {
+                seedError = e;
+                if (!jdbcConnection.getAutoCommit()) {
+                    try {
+                        jdbcConnection.rollback();
+                    } catch (SQLException rollbackError) {
+                        e.addSuppressed(rollbackError);
+                    }
+                }
+            }
+            if (!heartbeatRowExists(heartbeatTable)) {
+                throw initializationFailure(
+                        "insert the seed row into",
+                        heartbeatTable,
+                        seedError,
+                        heartbeatTable.manualSetupSql(
+                                pdbName, sessionUser, OracleHeartbeatTable.ManualSetup.SEED_ROW));
+            }
+        }
+    }
+
+    private void executeInitializationStatement(String sql) throws SQLException {
+        try (var stmt = jdbcConnection.createStatement()) {
+            stmt.setQueryTimeout(INITIALIZATION_TIMEOUT_SECONDS);
+            stmt.executeUpdate(sql);
+        }
+    }
+
+    private RuntimeException initializationFailure(
+            String operation,
+            OracleHeartbeatTable heartbeatTable,
+            SQLException error,
+            String setupSql) {
+        // A null error means the statement succeeded, but the follow-up check still cannot see
+        // its result, for example because a trigger or row-level security policy hides the row.
+        var cause =
+                error == null
+                        ? "the result is not visible to the connector user"
+                        : String.format(
+                                "Oracle error %d: %s", error.getErrorCode(), error.getMessage());
+        return ValidatorUtils.failedPrecondition(
+                String.format(
+                        "Failed to %s Oracle heartbeat table '%s' in PDB '%s' "
+                                + "(%s). A DBA can prepare it with:\n%s",
+                        operation, heartbeatTable.qualifiedName(), pdbName, cause, setupSql));
+    }
+
+    private RuntimeException incompatibleHeartbeatObject(
+            OracleHeartbeatTable heartbeatTable, Set<String> objectTypes, String sessionUser) {
+        return ValidatorUtils.invalidArgument(
+                String.format(
+                        "Oracle object '%s' already exists in PDB '%s' with type(s) %s, but a "
+                                + "heartbeat table is required%s",
+                        heartbeatTable.qualifiedName(),
+                        pdbName,
+                        objectTypes,
+                        incompatibleHeartbeatTableHint(heartbeatTable, sessionUser)));
+    }
+
+    private String incompatibleHeartbeatTableHint(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) {
+        return String.format(
+                ". RisingWave will not modify the existing object. Choose another "
+                        + "'heartbeat.table.name' or have a DBA resolve it. After resolving it, "
+                        + "have a DBA run:\n%s",
+                heartbeatTable.manualSetupSql(
+                        pdbName, sessionUser, OracleHeartbeatTable.ManualSetup.TABLE_AND_SEED_ROW));
+    }
+
+    private void validateHeartbeatColumns(OracleHeartbeatTable heartbeatTable, String sessionUser)
+            throws SQLException {
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         "SELECT COLUMN_NAME, DATA_TYPE FROM ALL_TAB_COLUMNS "
@@ -260,7 +449,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                 var columns = new HashSet<String>();
                 while (result.next()) {
                     if ("NUMBER".equalsIgnoreCase(result.getString("DATA_TYPE"))) {
-                        columns.add(result.getString("COLUMN_NAME").toUpperCase(Locale.ROOT));
+                        columns.add(result.getString("COLUMN_NAME"));
                     }
                 }
                 if (!columns.containsAll(
@@ -270,17 +459,18 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                     throw ValidatorUtils.invalidArgument(
                             String.format(
                                     "Oracle heartbeat table '%s' must contain NUMBER columns "
-                                            + "named '%s' and '%s'",
+                                            + "named '%s' and '%s'%s",
                                     heartbeatTable.qualifiedName(),
                                     OracleHeartbeatTable.ID_COLUMN,
-                                    OracleHeartbeatTable.HEARTBEAT_COLUMN));
+                                    OracleHeartbeatTable.HEARTBEAT_COLUMN,
+                                    incompatibleHeartbeatTableHint(heartbeatTable, sessionUser)));
                 }
             }
         }
     }
 
-    private void validateHeartbeatPrimaryKey(OracleHeartbeatTable heartbeatTable)
-            throws SQLException {
+    private void validateHeartbeatPrimaryKey(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) throws SQLException {
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         "SELECT COUNT(*) FROM ("
@@ -288,6 +478,8 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                                 + "JOIN ALL_CONS_COLUMNS CC "
                                 + "ON C.OWNER = CC.OWNER AND C.CONSTRAINT_NAME = CC.CONSTRAINT_NAME "
                                 + "WHERE C.OWNER = ? AND C.TABLE_NAME = ? AND C.CONSTRAINT_TYPE = 'P' "
+                                + "AND C.STATUS = 'ENABLED' AND C.VALIDATED = 'VALIDATED' "
+                                + "AND C.DEFERRABLE = 'NOT DEFERRABLE' "
                                 + "GROUP BY C.CONSTRAINT_NAME "
                                 + "HAVING COUNT(*) = 1 AND MAX(CC.COLUMN_NAME) = ?)")) {
             stmt.setString(1, heartbeatTable.owner());
@@ -299,37 +491,44 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                     throw ValidatorUtils.invalidArgument(
                             String.format(
                                     "Oracle heartbeat table '%s' must use '%s' as its "
-                                            + "single-column primary key",
+                                            + "single-column primary key, enabled, validated, "
+                                            + "and not deferrable%s",
                                     heartbeatTable.qualifiedName(),
-                                    OracleHeartbeatTable.ID_COLUMN));
+                                    OracleHeartbeatTable.ID_COLUMN,
+                                    incompatibleHeartbeatTableHint(heartbeatTable, sessionUser)));
                 }
             }
         }
     }
 
-    private void validateHeartbeatTableHasRow(OracleHeartbeatTable heartbeatTable)
-            throws SQLException {
+    private boolean heartbeatRowExists(OracleHeartbeatTable heartbeatTable) throws SQLException {
         var sql =
                 String.format(
                         "SELECT 1 FROM %s WHERE %s = 1",
                         heartbeatTable.qualifiedName(), OracleHeartbeatTable.ID_COLUMN);
         try (var stmt = jdbcConnection.createStatement();
                 var result = stmt.executeQuery(sql)) {
-            if (!result.next()) {
-                throw ValidatorUtils.invalidArgument(
-                        String.format(
-                                "Oracle heartbeat table '%s' must contain a row with %s = 1",
-                                heartbeatTable.qualifiedName(), OracleHeartbeatTable.ID_COLUMN));
-            }
+            return result.next();
         }
     }
 
-    private void validateHeartbeatUpdatePrivilege(OracleHeartbeatTable heartbeatTable)
-            throws SQLException {
-        var sessionUser =
-                querySingleColumn("SELECT SYS_CONTEXT('USERENV', 'SESSION_USER') FROM DUAL")
-                        .iterator()
-                        .next();
+    private void validateHeartbeatTableHasRow(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) throws SQLException {
+        if (!heartbeatRowExists(heartbeatTable)) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "Oracle heartbeat table '%s' must contain a row with %s = 1. Have a DBA run:\n%s",
+                            heartbeatTable.qualifiedName(),
+                            OracleHeartbeatTable.ID_COLUMN,
+                            heartbeatTable.manualSetupSql(
+                                    pdbName,
+                                    sessionUser,
+                                    OracleHeartbeatTable.ManualSetup.SEED_ROW)));
+        }
+    }
+
+    private void validateHeartbeatUpdatePrivilege(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) throws SQLException {
         var sessionPrivileges = querySingleColumn("SELECT PRIVILEGE FROM SESSION_PRIVS");
         var sessionRoles = querySingleColumn("SELECT ROLE FROM SESSION_ROLES");
         var updateGrantees =
@@ -353,8 +552,14 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                 updateGrantees)) {
             throw ValidatorUtils.invalidArgument(
                     String.format(
-                            "Oracle user '%s' needs UPDATE permission on heartbeat table '%s'",
-                            sessionUser, heartbeatTable.qualifiedName()));
+                            "Oracle user '%s' needs UPDATE permission on heartbeat table '%s'. "
+                                    + "A DBA can grant access with:\n%s",
+                            sessionUser,
+                            heartbeatTable.qualifiedName(),
+                            heartbeatTable.manualSetupSql(
+                                    pdbName,
+                                    sessionUser,
+                                    OracleHeartbeatTable.ManualSetup.ACCESS_GRANTS)));
         }
     }
 

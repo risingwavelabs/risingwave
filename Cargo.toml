@@ -144,7 +144,7 @@ aws-sdk-sqs = { version = "1", default-features = false, features = [
     "default-https-client",
     "rt-tokio",
 ] }
-aws-smithy-http = "0.62"
+aws-smithy-http = "0.63"
 aws-smithy-http-client = { version = "1.1", default-features = false, features = [
     "rustls-aws-lc",
 ] }
@@ -176,10 +176,10 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260807
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
-iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "60438a156fa9846fb692bb47c4da42ff3653c8e2" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "60438a156fa9846fb692bb47c4da42ff3653c8e2" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "60438a156fa9846fb692bb47c4da42ff3653c8e2" }
+iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "60438a156fa9846fb692bb47c4da42ff3653c8e2", features = [
     "opendal-azblob",
     "opendal-azdls",
     "opendal-fs",
@@ -203,7 +203,8 @@ linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.18"
 madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
-mysql_async = { version = "0.36", features = [
+mysql_async = { version = "0.37", features = [
+    "chrono",
     "native-tls-tls",
     "rust_decimal",
 ] }

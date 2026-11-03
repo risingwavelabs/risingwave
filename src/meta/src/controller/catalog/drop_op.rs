@@ -163,20 +163,15 @@ impl CatalogController {
             })
             .collect();
 
-        // Iceberg sinks (and the pk-index subset) can be user-created with arbitrary
+        // Iceberg sinks can be user-created with arbitrary
         // names, so unlike the iceberg-table cleanup above, identify them by
         // inspecting properties rather than by name prefix.
         let mut removed_iceberg_sink_ids: Vec<SinkId> = Vec::new();
-        let mut removed_iceberg_pk_index_sink_ids: Vec<SinkId> = Vec::new();
         for object_info in &removed_catalog_models {
-            if let PbObjectInfo::Sink(sink) = object_info {
-                if crate::manager::iceberg_compaction::is_iceberg_sink(&sink.properties) {
-                    removed_iceberg_sink_ids.push(sink.id);
-                }
-                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
-                {
-                    removed_iceberg_pk_index_sink_ids.push(sink.id);
-                }
+            if let PbObjectInfo::Sink(sink) = object_info
+                && crate::manager::iceberg_compaction::is_iceberg_sink(&sink.properties)
+            {
+                removed_iceberg_sink_ids.push(sink.id);
             }
         }
 
@@ -346,7 +341,6 @@ impl CatalogController {
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
                 removed_iceberg_sink_ids,
-                removed_iceberg_pk_index_sink_ids,
             },
             version,
         ))

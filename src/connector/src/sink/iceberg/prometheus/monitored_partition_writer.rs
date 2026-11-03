@@ -19,19 +19,19 @@ use iceberg::writer::function_writer::fanout_partition_writer::{
 };
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder, PositionDeleteInput};
 use risingwave_common::array::arrow::arrow_array_iceberg;
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::RelabeledAggregatedIntGauge;
 
 #[derive(Clone)]
 pub struct MonitoredFanoutPartitionedWriterBuilder<B: IcebergWriterBuilder> {
     inner: FanoutPartitionWriterBuilder<B>,
-    partition_num_metrics: LabelGuardedIntGauge,
+    partition_num_metrics: RelabeledAggregatedIntGauge,
 }
 
 impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
     #[expect(dead_code)]
     pub fn new(
         inner: FanoutPartitionWriterBuilder<B>,
-        partition_num: LabelGuardedIntGauge,
+        partition_num: RelabeledAggregatedIntGauge,
     ) -> Self {
         Self {
             inner,
@@ -56,7 +56,7 @@ impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredFanoutPartitione
 
 pub struct MonitoredFanoutPartitionedWriter<B: IcebergWriterBuilder> {
     inner: FanoutPartitionWriter<B>,
-    partition_num_metrics: LabelGuardedIntGauge,
+    partition_num_metrics: RelabeledAggregatedIntGauge,
     last_partition_num: usize,
 }
 

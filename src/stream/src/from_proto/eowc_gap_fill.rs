@@ -69,7 +69,7 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
         let fill_columns_with_strategies: HashMap<usize, FillStrategy> =
             fill_columns.into_iter().zip_eq(fill_strategies).collect();
 
-        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let vnodes = Some(Arc::new(params.vnode_bitmap));
 
         let prev_row_table =
             StateTableBuilder::new(node.get_prev_row_table().as_ref().unwrap(), store, vnodes)

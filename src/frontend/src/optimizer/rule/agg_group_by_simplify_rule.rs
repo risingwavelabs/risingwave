@@ -35,10 +35,16 @@ impl Rule<Logical> for AggGroupBySimplifyRule {
         }
         let functional_dependency = agg_input.functional_dependency();
         let group_key = group_key.to_vec();
-        if !functional_dependency.is_key(&group_key) {
+        if group_key.is_empty() || !functional_dependency.is_key(&group_key) {
             return None;
         }
-        let minimized_group_key = functional_dependency.minimize_key(&group_key);
+        let mut minimized_group_key = functional_dependency.minimize_key(&group_key);
+        // The minimized key is empty when the input has at most one row. Keep one group key
+        // column, otherwise the grouped agg would become a simple agg, which outputs one row
+        // instead of zero rows on empty input.
+        if minimized_group_key.is_empty() {
+            minimized_group_key.push(group_key[0]);
+        }
         if minimized_group_key.len() < group_key.len() {
             let new_group_key = IndexSet::from(minimized_group_key);
             let new_group_key_len = new_group_key.len();

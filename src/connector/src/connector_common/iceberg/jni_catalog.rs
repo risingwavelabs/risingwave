@@ -338,7 +338,7 @@ impl Catalog for JniCatalog {
 
                 let resp: LoadTableResponse = serde_json::from_str(&rust_json_str)?;
 
-                let _metadata_location = resp.metadata_location.ok_or_else(|| {
+                let metadata_location = resp.metadata_location.ok_or_else(|| {
                     iceberg::Error::new(
                         iceberg::ErrorKind::FeatureUnsupported,
                         "Loading uncommitted table is not supported!",
@@ -356,6 +356,7 @@ impl Catalog for JniCatalog {
                     .file_io(file_io)
                     .identifier(TableIdent::new(namespace, creation.name))
                     .metadata(table_metadata)
+                    .metadata_location(metadata_location)
                     .runtime(runtime)
                     .build())
             })
@@ -412,6 +413,7 @@ impl Catalog for JniCatalog {
                     .file_io(file_io)
                     .identifier(table)
                     .metadata(table_metadata)
+                    .metadata_location(metadata_location)
                     .runtime(runtime)
                     .build())
             })
@@ -552,6 +554,7 @@ impl Catalog for JniCatalog {
                     .file_io(file_io)
                     .identifier(commit.identifier().clone())
                     .metadata(table_metadata)
+                    .metadata_location(response.metadata_location)
                     .runtime(runtime)
                     .build()?)
             })

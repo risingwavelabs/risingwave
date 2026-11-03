@@ -218,6 +218,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .cloned()
                     .map(|table_id| (table_id, epoch))
                     .collect(),
+                table_change_log_progress: Vec::new(),
                 truncate_tables: HashSet::new(),
             })
             .await

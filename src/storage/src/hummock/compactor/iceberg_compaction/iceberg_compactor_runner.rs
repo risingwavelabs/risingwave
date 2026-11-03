@@ -20,17 +20,18 @@ use derive_builder::Builder;
 use iceberg::spec::{DataContentType, DataFile, FormatVersion, MAIN_BRANCH};
 use iceberg::table::Table;
 use iceberg::{Catalog, TableIdent};
+use iceberg_compaction_core::CompactionError;
 use iceberg_compaction_core::compaction::{
     CommitConsistencyParams, CommitManagerRetryConfig, Compaction, CompactionBuilder,
     CompactionPlan, CompactionPlanner, CompactionResult, RewriteResult,
 };
 use iceberg_compaction_core::config::{
     AutoCompactionConfigBuilder, CompactionExecutionConfigBuilder, CompactionPlanningConfig,
-    FileGroupScope, FilesWithDeletesConfigBuilder, FullCompactionConfigBuilder, GroupFilters,
-    SmallFilesConfigBuilder,
+    DeleteSelection, FileGroupScope, FilesWithDeletesConfigBuilder, FullCompactionConfigBuilder,
+    GroupFilters, SmallFilesConfigBuilder,
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
-use iceberg_compaction_core::file_selection::FileGroup;
+use iceberg_compaction_core::file_selection::{FileGroup, PlanStrategy};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet_58::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
@@ -43,6 +44,7 @@ use risingwave_connector::sink::iceberg::{
 };
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_task::Status;
 use risingwave_pb::id::IcebergCompactionTaskId;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -52,9 +54,19 @@ use super::{IcebergTaskMeta, PkIndexCompactionResult, build_pk_index_compaction_
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
-pub struct IcebergTaskExecution {
-    pub sink_id: u32,
-    pub plan_runners: Vec<IcebergCompactionPlanRunner>,
+pub(crate) enum IcebergTaskExecution {
+    NoWork {
+        sink_id: u32,
+    },
+    Ready {
+        sink_id: u32,
+        plan_runners: Vec<IcebergCompactionPlanRunner>,
+    },
+    Blocked {
+        sink_id: u32,
+        status: Status,
+        reason: String,
+    },
 }
 
 static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
@@ -210,8 +222,6 @@ pub struct IcebergCompactionPlanRunner {
     compaction_kind: IcebergCompactionKind,
     branch: String,
     compaction_plan: CompactionPlan,
-    /// When true, run the rewrite without committing and report the result back to meta for
-    /// pk-index coordinated compaction. When false, behavior is unchanged (rewrite + commit).
     pk_index_coordinated: bool,
     pub memory_reservation_bytes: usize,
 }
@@ -277,20 +287,7 @@ impl IcebergCompactionPlanRunner {
         let unique_ident = self.unique_ident();
         let now = std::time::Instant::now();
 
-        let compact_task = Self::compact_impl(
-            self.task_id,
-            self.plan_index,
-            self.catalog,
-            self.table_ident,
-            self.iceberg_config,
-            self.config,
-            self.metrics,
-            self.compaction_kind,
-            self.branch,
-            self.compaction_plan,
-            self.pk_index_coordinated,
-            self.memory_reservation_bytes,
-        );
+        let compact_task = self.compact_impl();
 
         tokio::select! {
             _ = shutdown_rx => {
@@ -347,21 +344,24 @@ impl IcebergCompactionPlanRunner {
         }
     }
 
-    #[expect(clippy::too_many_arguments)]
     async fn compact_impl(
-        task_id: IcebergCompactionTaskId,
-        plan_index: usize,
-        catalog: Arc<dyn Catalog>,
-        table_ident: TableIdent,
-        iceberg_config: IcebergConfig,
-        config: IcebergCompactorRunnerConfig,
-        metrics: Arc<CompactorMetrics>,
-        compaction_kind: IcebergCompactionKind,
-        branch: String,
-        compaction_plan: CompactionPlan,
-        pk_index_coordinated: bool,
-        memory_reservation_bytes: usize,
+        self,
     ) -> HummockResult<(RewriteFilesStat, Option<PkIndexCompactionResult>)> {
+        let Self {
+            task_id,
+            plan_index,
+            catalog,
+            table_ident,
+            iceberg_config,
+            config,
+            metrics,
+            compaction_kind,
+            branch,
+            compaction_plan,
+            pk_index_coordinated,
+            memory_reservation_bytes,
+            ..
+        } = self;
         let retry_config = CommitManagerRetryConfig::default();
         let compaction = CompactionBuilder::new(catalog.clone(), table_ident.clone())
             .with_catalog_name(iceberg_config.catalog_name())
@@ -460,22 +460,6 @@ impl IcebergCompactionPlanRunner {
             },
         );
 
-        // Capture plan-derived report inputs before the rewrite consumes `compaction_plan`.
-        // Only used by the pk-index coordinated path below.
-        let pk_index_read_snapshot_id = compaction_plan.snapshot_id;
-        let pk_index_input_file_paths: Vec<String> = if pk_index_coordinated {
-            compaction_plan
-                .file_group
-                .data_files
-                .iter()
-                .chain(compaction_plan.file_group.position_delete_files.iter())
-                .chain(compaction_plan.file_group.equality_delete_files.iter())
-                .map(|task| task.data_file_path.clone())
-                .collect()
-        } else {
-            Vec::new()
-        };
-
         if pk_index_coordinated {
             // `compact_with_plan` commits its rewrite internally. A pk-index compaction must leave
             // the input files live until meta has paused the writer and can atomically commit the
@@ -485,23 +469,12 @@ impl IcebergCompactionPlanRunner {
                 .load_table(&table_ident)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            let RewriteResult {
-                output_data_files: data_files,
-                stats,
-                ..
-            } = compaction
+            let rewrite = compaction
                 .rewrite_plan(compaction_plan, &compaction_execution_config, &table)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-            let pk_index_result = build_pk_index_compaction_result(
-                &table,
-                data_files,
-                pk_index_input_file_paths,
-                pk_index_read_snapshot_id,
-            )?;
-
-            return Ok((stats, Some(pk_index_result)));
+            return coordinated_rewrite_result(&table, rewrite);
         }
 
         let compaction_result = compaction
@@ -534,6 +507,22 @@ impl IcebergCompactionPlanRunner {
 
         Ok((stats, None))
     }
+}
+
+fn coordinated_rewrite_result(
+    table: &Table,
+    rewrite: RewriteResult,
+) -> HummockResult<(RewriteFilesStat, Option<PkIndexCompactionResult>)> {
+    // Shared deletes may still apply to unselected files. Meta removes only the replaced
+    // data files and their file-scoped deletes when it commits the resolved PK-index.
+    let input_paths = pk_index_replaced_data_files(&rewrite.plan);
+    let result = build_pk_index_compaction_result(
+        table,
+        rewrite.output_data_files,
+        input_paths,
+        rewrite.plan.snapshot_id,
+    )?;
+    Ok((rewrite.stats, Some(result)))
 }
 
 async fn live_data_files_for_snapshot(
@@ -758,7 +747,9 @@ fn build_task_planning_config(
     iceberg_config: &IcebergConfig,
     config: &IcebergCompactorRunnerConfig,
     max_file_sequence_number: Option<i64>,
+    pk_index_coordinated: bool,
 ) -> HummockResult<CompactionPlanningConfig> {
+    let bounded_coordinated = pk_index_coordinated && max_file_sequence_number.is_some();
     let grouping_strategy = match iceberg_config.write_mode {
         IcebergWriteMode::CopyOnWrite => iceberg_compaction_core::config::GroupingStrategy::Single,
         IcebergWriteMode::MergeOnRead => match config.target_binpack_group_size_mb {
@@ -773,15 +764,20 @@ fn build_task_planning_config(
         },
     };
 
-    let group_filters =
-        if config.min_group_size_mb.is_some() || config.min_group_file_count.is_some() {
-            Some(GroupFilters {
-                min_group_size_bytes: config.min_group_size_mb.map(|mb| mb * 1024 * 1024),
-                min_group_file_count: config.min_group_file_count,
-            })
-        } else {
-            None
-        };
+    // Coordinated merge rounds must not repeatedly rewrite healthy singleton files.
+    let min_group_file_count = if bounded_coordinated {
+        Some(config.min_group_file_count.unwrap_or(2).max(2))
+    } else {
+        config.min_group_file_count
+    };
+    let group_filters = if config.min_group_size_mb.is_some() || min_group_file_count.is_some() {
+        Some(GroupFilters {
+            min_group_size_bytes: config.min_group_size_mb.map(|mb| mb * 1024 * 1024),
+            min_group_file_count,
+        })
+    } else {
+        None
+    };
 
     let planning_config = match compaction_kind {
         IcebergCompactionKind::Auto | IcebergCompactionKind::CopyOnWriteAuto => {
@@ -812,9 +808,13 @@ fn build_task_planning_config(
             if let Some(boundary) = max_file_sequence_number {
                 builder.max_file_sequence_number(boundary);
             }
+            if bounded_coordinated {
+                builder.delete_selection(DeleteSelection::DeletedRowRatioPercent(
+                    iceberg_config.delete_ratio_percent(),
+                ));
+            }
 
-            // COW must not filter out a group containing delete-affected files, otherwise its
-            // publish-only fallback could expose rows that should have been deleted.
+            // Keep COW's table-wide rewrite policy independent of per-group merge thresholds.
             if !is_copy_on_write && let Some(group_filters) = group_filters {
                 builder.group_filters(group_filters);
             }
@@ -879,6 +879,11 @@ fn build_task_planning_config(
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .grouping_strategy(grouping_strategy)
                 .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold());
+            if bounded_coordinated {
+                builder.delete_selection(DeleteSelection::DeletedRowRatioPercent(
+                    iceberg_config.delete_ratio_percent(),
+                ));
+            }
             if let Some(boundary) = max_file_sequence_number {
                 builder.max_file_sequence_number(boundary);
             }
@@ -911,7 +916,7 @@ fn build_task_planning_config(
 }
 
 /// Creates a task execution context from an iceberg compaction task.
-pub async fn create_task_execution(
+pub(crate) async fn create_task_execution(
     iceberg_compaction_task: IcebergCompactionTask,
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
@@ -940,9 +945,7 @@ pub async fn create_task_execution(
     let parsed_task_type = TaskType::try_from(task_type)
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
     let compaction_kind = IcebergCompactionKind::resolve(parsed_task_type, &iceberg_config)?;
-    if max_file_sequence_number.is_some()
-        && (pk_index_coordinated || compaction_kind.is_copy_on_write())
-    {
+    if max_file_sequence_number.is_some() && compaction_kind.is_copy_on_write() {
         return Err(HummockError::compaction_executor(anyhow::anyhow!(
             "bounded compaction is not supported for copy-on-write tasks"
         )));
@@ -956,25 +959,7 @@ pub async fn create_task_execution(
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
     if let Some(boundary) = max_file_sequence_number {
-        // An empty bounded plan is reported as `Drained`, so fail closed unless
-        // the loaded branch can prove that this fixed boundary is meaningful.
-        if table.metadata().format_version() < FormatVersion::V2 {
-            return Err(HummockError::compaction_executor(anyhow::anyhow!(
-                "bounded compaction requires Iceberg format V2 or V3"
-            )));
-        }
-        let head = table.metadata().snapshot_for_ref(&branch).ok_or_else(|| {
-            HummockError::compaction_executor(anyhow::anyhow!(
-                "bounded compaction branch {branch} has no snapshot"
-            ))
-        })?;
-        if head.sequence_number() < boundary {
-            return Err(HummockError::compaction_executor(anyhow::anyhow!(
-                "bounded compaction head sequence {} is older than boundary {}",
-                head.sequence_number(),
-                boundary
-            )));
-        }
+        validate_compaction_boundary(&table, &branch, boundary)?;
     }
 
     let planning_config = build_task_planning_config(
@@ -982,38 +967,37 @@ pub async fn create_task_execution(
         &iceberg_config,
         &config,
         max_file_sequence_number,
+        pk_index_coordinated,
     )?;
 
-    let compaction_plans = CompactionPlanner::new(planning_config)
+    let planning_started_at = std::time::Instant::now();
+    let bounded_coordinated = pk_index_coordinated && max_file_sequence_number.is_some();
+    // Validate configuration even when the branch has no snapshot to scan.
+    PlanStrategy::try_from(&planning_config)
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let mut compaction_plans = match CompactionPlanner::new(planning_config.clone())
         .plan_compaction_with_branch(&table, &branch)
         .await
-        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-    let compaction_plans = if compaction_plans.is_empty() && compaction_kind.is_copy_on_write() {
-        // Keep a publish-only COW task executable when no data file needs a rewrite, for example
-        // after inserts that produced only clean data files.
-        table
-            .metadata()
-            .snapshot_for_ref(&branch)
-            .map(|snapshot| {
-                vec![CompactionPlan::new(
-                    FileGroup::empty(),
-                    branch.clone(),
-                    snapshot.snapshot_id(),
-                )]
-            })
-            .unwrap_or_default()
-    } else {
-        compaction_plans
+    {
+        Ok(plans) => plans,
+        Err(error)
+            if bounded_coordinated
+                && matches!(
+                    error,
+                    CompactionError::DeleteStatistics { .. } | CompactionError::Config(_)
+                ) =>
+        {
+            return Ok(IcebergTaskExecution::Blocked {
+                sink_id,
+                status: Status::BlockedStatistics,
+                reason: error.as_report().to_string(),
+            });
+        }
+        Err(error) => return Err(HummockError::compaction_executor(error.as_report())),
     };
 
-    // Each COW plan publishes a complete table state to `main`, so independent plans could
-    // overwrite one another instead of composing their rewrites.
-    if compaction_kind.is_copy_on_write() && compaction_plans.len() > 1 {
-        return Err(HummockError::compaction_executor(anyhow::anyhow!(
-            "COW compaction must produce at most one table-scoped plan, got {}",
-            compaction_plans.len()
-        )));
+    if compaction_kind.is_copy_on_write() {
+        prepare_cow_compaction_plans(&mut compaction_plans, &planning_config, &table, &branch)?;
     }
 
     if compaction_plans.is_empty() {
@@ -1021,23 +1005,20 @@ pub async fn create_task_execution(
             iceberg_component = "compaction_worker",
             iceberg_operation = "plan_task",
             task_id = %task_id,
-            sink_id = sink_id,
+            sink_id,
             task_type = ?compaction_kind,
             table = %table_ident,
             branch = %branch,
+            planning_duration_ms = planning_started_at.elapsed().as_millis() as u64,
             "iceberg_compaction_task_skipped_no_files",
         );
-        return Ok(IcebergTaskExecution {
-            sink_id,
-            plan_runners: vec![],
-        });
+        return Ok(IcebergTaskExecution::NoWork { sink_id });
     }
 
     let table_schema = table.metadata().current_schema();
     let format_version = table.metadata().format_version();
     let requires_sort = !table.metadata().default_sort_order().fields.is_empty();
     let mut runners = Vec::with_capacity(compaction_plans.len());
-
     for (plan_index, compaction_plan) in compaction_plans.into_iter().enumerate() {
         let memory_reservation_bytes = estimate_plan_memory(
             &compaction_plan,
@@ -1073,13 +1054,70 @@ pub async fn create_task_execution(
         table = %table_ident,
         branch = %branch,
         plan_count = runners.len(),
+        planning_duration_ms = planning_started_at.elapsed().as_millis() as u64,
         "iceberg_compaction_task_planned",
     );
 
-    Ok(IcebergTaskExecution {
+    Ok(IcebergTaskExecution::Ready {
         sink_id,
         plan_runners: runners,
     })
+}
+
+fn validate_compaction_boundary(table: &Table, branch: &str, boundary: i64) -> HummockResult<()> {
+    if table.metadata().format_version() < FormatVersion::V2 {
+        return Err(HummockError::compaction_executor(
+            "bounded compaction requires Iceberg format V2 or V3",
+        ));
+    }
+    let head = table.metadata().snapshot_for_ref(branch).ok_or_else(|| {
+        HummockError::compaction_executor(anyhow::anyhow!(
+            "bounded compaction branch {branch} has no snapshot"
+        ))
+    })?;
+    if head.sequence_number() < boundary {
+        return Err(HummockError::compaction_executor(anyhow::anyhow!(
+            "bounded compaction head sequence {} is older than boundary {}",
+            head.sequence_number(),
+            boundary
+        )));
+    }
+    Ok(())
+}
+
+fn prepare_cow_compaction_plans(
+    plans: &mut Vec<CompactionPlan>,
+    config: &CompactionPlanningConfig,
+    table: &Table,
+    branch: &str,
+) -> HummockResult<()> {
+    // Auto separates merge and delete groups, but COW publishes one complete snapshot.
+    if plans.len() > 1 {
+        let mut combined = plans.remove(0);
+        let mut files = std::mem::take(&mut combined.file_group.data_files);
+        files.extend(plans.drain(..).flat_map(|plan| plan.file_group.data_files));
+        combined.file_group = FileGroup::with_parallelism(files, config)
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+        plans.push(combined);
+    }
+    if plans.is_empty()
+        && let Some(snapshot) = table.metadata().snapshot_for_ref(branch)
+    {
+        plans.push(CompactionPlan::new(
+            FileGroup::empty(),
+            branch.to_owned(),
+            snapshot.snapshot_id(),
+        ));
+    }
+    Ok(())
+}
+
+fn pk_index_replaced_data_files(plan: &CompactionPlan) -> Vec<String> {
+    plan.file_group
+        .data_files
+        .iter()
+        .map(|task| task.data_file_path.clone())
+        .collect()
 }
 
 #[cfg(test)]
@@ -1094,8 +1132,70 @@ mod tests {
         UnboundPartitionSpec,
     };
     use iceberg::{NamespaceIdent, Runtime};
+    use iceberg_compaction_core::file_selection::FileGroup;
 
     use super::*;
+
+    fn selection_test_plan(path: &str) -> CompactionPlan {
+        use iceberg::scan::{FileScanTask, FileScanTaskDeleteFile};
+
+        let task = FileScanTask {
+            start: 0,
+            length: 10,
+            record_count: Some(1),
+            first_row_id: None,
+            data_sequence_number: Some(1),
+            data_file_path: path.to_owned(),
+            data_file_format: DataFileFormat::Parquet,
+            schema: Arc::new(
+                Schema::builder()
+                    .with_fields(vec![
+                        NestedField::new(1, "id", Type::Primitive(PrimitiveType::Int), false)
+                            .into(),
+                    ])
+                    .build()
+                    .unwrap(),
+            ),
+            project_field_ids: vec![],
+            predicate: None,
+            deletes: vec![
+                FileScanTaskDeleteFile::builder()
+                    .with_file_path("shared-delete.parquet".to_owned())
+                    .with_file_size_in_bytes(10)
+                    .with_file_type(DataContentType::PositionDeletes)
+                    .with_partition_spec_id(0)
+                    .with_file_format(DataFileFormat::Parquet)
+                    .with_record_count(Some(1))
+                    .with_sequence_number(2)
+                    .build(),
+            ],
+            sequence_number: 1,
+            file_sequence_number: Some(1),
+            file_size_in_bytes: 10,
+            partition: None,
+            partition_spec: None,
+            name_mapping: None,
+            unified_partition_type: None,
+            case_sensitive: true,
+            key_metadata: None,
+        };
+        CompactionPlan::new(FileGroup::new(vec![task]), "main", 7)
+    }
+
+    #[test]
+    fn test_coordinated_plans_preserve_shared_deletes_without_replacing_them() {
+        for path in ["a.parquet", "b.parquet"] {
+            let plan = selection_test_plan(path);
+            assert_eq!(plan.snapshot_id, 7);
+            assert_eq!(pk_index_replaced_data_files(&plan), vec![path]);
+            assert_eq!(plan.file_group.position_delete_files.len(), 1);
+            assert_eq!(
+                plan.file_group.position_delete_files[0].data_file_path,
+                "shared-delete.parquet"
+            );
+            assert_eq!(plan.file_group.data_files[0].deletes.len(), 1);
+        }
+    }
 
     fn test_runner_config() -> IcebergCompactorRunnerConfig {
         IcebergCompactorRunnerConfig {
@@ -1111,6 +1211,20 @@ mod tests {
             min_group_size_mb: Some(32),
             min_group_file_count: Some(3),
         }
+    }
+
+    fn test_iceberg_config() -> IcebergConfig {
+        IcebergConfig::from_btreemap(BTreeMap::from([
+            ("connector".to_owned(), "iceberg".to_owned()),
+            ("type".to_owned(), "append-only".to_owned()),
+            ("force_append_only".to_owned(), "true".to_owned()),
+            ("catalog.name".to_owned(), "test-catalog".to_owned()),
+            ("catalog.type".to_owned(), "storage".to_owned()),
+            ("warehouse.path".to_owned(), "s3://iceberg".to_owned()),
+            ("database.name".to_owned(), "test_db".to_owned()),
+            ("table.name".to_owned(), "test_table".to_owned()),
+        ]))
+        .unwrap()
     }
 
     fn test_data_file(path: &str) -> DataFile {
@@ -1254,6 +1368,38 @@ mod tests {
         manifest_list_path
     }
 
+    async fn test_table_with_files(
+        data_files: Vec<DataFile>,
+        delete_files: Vec<DataFile>,
+    ) -> Table {
+        let table = test_table();
+        let manifest_list =
+            write_snapshot_manifests(&table, 1, None, data_files, delete_files).await;
+        let metadata = table
+            .metadata()
+            .clone()
+            .into_builder(None)
+            .add_snapshot(test_snapshot(
+                1,
+                None,
+                manifest_list,
+                table.metadata().last_updated_ms() + 1,
+            ))
+            .unwrap()
+            .set_ref(MAIN_BRANCH, test_snapshot_ref(1))
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+        Table::builder()
+            .identifier(table.identifier().clone())
+            .file_io(table.file_io().clone())
+            .runtime(Runtime::try_current().unwrap())
+            .metadata(metadata)
+            .build()
+            .unwrap()
+    }
+
     fn sorted_file_paths(files: &[DataFile]) -> Vec<&str> {
         let mut paths = files
             .iter()
@@ -1261,6 +1407,289 @@ mod tests {
             .collect::<Vec<_>>();
         paths.sort_unstable();
         paths
+    }
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_planning_distinguishes_empty_scope_from_invalid_boundary_and_cow_publication() {
+        use iceberg_compaction_core::config::FilesWithDeletesConfig;
+
+        let table = test_table();
+        assert!(
+            CompactionPlanner::new(CompactionPlanningConfig::default())
+                .plan_compaction_with_branch(&table, MAIN_BRANCH)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let config = CompactionPlanningConfig::FilesWithDeletes(FilesWithDeletesConfig {
+            max_file_sequence_number: Some(1),
+            ..Default::default()
+        });
+        let error = validate_compaction_boundary(&table, MAIN_BRANCH, 1).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("bounded compaction branch main has no snapshot")
+        );
+
+        let manifest_list = write_snapshot_manifests(
+            &table,
+            1,
+            None,
+            vec![test_data_file("data/clean.parquet")],
+            vec![],
+        )
+        .await;
+        let metadata = table
+            .metadata()
+            .clone()
+            .into_builder(None)
+            .add_snapshot(test_snapshot(
+                1,
+                None,
+                manifest_list,
+                table.metadata().last_updated_ms() + 1,
+            ))
+            .unwrap()
+            .set_ref(MAIN_BRANCH, test_snapshot_ref(1))
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+        let table = Table::builder()
+            .identifier(table.identifier().clone())
+            .file_io(table.file_io().clone())
+            .runtime(Runtime::try_current().unwrap())
+            .metadata(metadata)
+            .build()
+            .unwrap();
+        validate_compaction_boundary(&table, MAIN_BRANCH, 1).unwrap();
+        assert!(
+            CompactionPlanner::new(config)
+                .plan_compaction_with_branch(&table, MAIN_BRANCH)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let error = validate_compaction_boundary(&table, MAIN_BRANCH, 2).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("head sequence 1 is older than boundary 2")
+        );
+
+        let config = CompactionPlanningConfig::FilesWithDeletes(FilesWithDeletesConfig {
+            min_delete_file_count_threshold: 1,
+            file_group_scope: FileGroupScope::Table,
+            ..Default::default()
+        });
+        let mut plans = CompactionPlanner::new(config.clone())
+            .plan_compaction_with_branch(&table, MAIN_BRANCH)
+            .await
+            .unwrap();
+        assert!(plans.is_empty());
+        prepare_cow_compaction_plans(&mut plans, &config, &table, MAIN_BRANCH).unwrap();
+        assert_eq!(plans.len(), 1);
+        assert!(!plans[0].has_files());
+        assert_eq!(plans[0].snapshot_id, 1);
+    }
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_cow_auto_combines_merge_and_delete_groups() {
+        use iceberg_compaction_core::config::AutoCompactionConfig;
+
+        let files = [
+            ("data/small-a.parquet", 1),
+            ("data/small-b.parquet", 1),
+            ("data/heavy.parquet", 1000),
+            ("data/healthy.parquet", 1000),
+        ]
+        .into_iter()
+        .map(|(path, bytes)| {
+            DataFileBuilder::default()
+                .content(DataContentType::Data)
+                .file_path(path.to_owned())
+                .file_format(DataFileFormat::Parquet)
+                .partition(Struct::empty())
+                .partition_spec_id(0)
+                .record_count(100)
+                .file_size_in_bytes(bytes)
+                .build()
+                .unwrap()
+        })
+        .collect();
+        let delete = DataFileBuilder::default()
+            .content(DataContentType::PositionDeletes)
+            .file_path("data/heavy.pos.parquet".to_owned())
+            .file_format(DataFileFormat::Parquet)
+            .partition(Struct::empty())
+            .partition_spec_id(0)
+            .referenced_data_file(Some("data/heavy.parquet".to_owned()))
+            .record_count(1)
+            .file_size_in_bytes(100)
+            .build()
+            .unwrap();
+        let table = test_table_with_files(files, vec![delete]).await;
+        let config = CompactionPlanningConfig::Auto(AutoCompactionConfig {
+            small_file_threshold_bytes: 2,
+            min_delete_file_count_threshold: 1,
+            file_group_scope: FileGroupScope::Table,
+            max_input_parallelism: 1,
+            max_output_parallelism: 1,
+            ..Default::default()
+        });
+        let mut plans = CompactionPlanner::new(config.clone())
+            .plan_compaction_with_branch(&table, MAIN_BRANCH)
+            .await
+            .unwrap();
+        assert_eq!(plans.len(), 2);
+        prepare_cow_compaction_plans(&mut plans, &config, &table, MAIN_BRANCH).unwrap();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].file_group.total_size, 1002);
+        let mut paths = pk_index_replaced_data_files(&plans[0]);
+        paths.sort();
+        assert_eq!(
+            paths,
+            [
+                "data/heavy.parquet",
+                "data/small-a.parquet",
+                "data/small-b.parquet"
+            ]
+        );
+    }
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_pk_index_selection_uses_file_scoped_v2_delete_statistics_from_scan() {
+        use iceberg_compaction_core::config::AutoCompactionConfig;
+
+        let data = DataFileBuilder::default()
+            .content(DataContentType::Data)
+            .file_path("data/heavy.parquet".to_owned())
+            .file_format(DataFileFormat::Parquet)
+            .partition(Struct::empty())
+            .partition_spec_id(0)
+            .record_count(100)
+            .file_size_in_bytes(1000)
+            .build()
+            .unwrap();
+        let deletes = DataFileBuilder::default()
+            .content(DataContentType::PositionDeletes)
+            .file_path("data/deletes.parquet".to_owned())
+            .file_format(DataFileFormat::Parquet)
+            .partition(Struct::empty())
+            .partition_spec_id(0)
+            .referenced_data_file(Some(data.file_path().to_owned()))
+            .record_count(30)
+            .file_size_in_bytes(100)
+            .build()
+            .unwrap();
+        let table = test_table_with_files(vec![data], vec![deletes]).await;
+        let tasks =
+            iceberg_compaction_core::file_selection::FileSelector::scan_data_files(&table, 1)
+                .await
+                .unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].record_count, Some(100));
+        assert_eq!(tasks[0].deletes.len(), 1);
+        assert_eq!(tasks[0].deletes[0].record_count, Some(30));
+        assert_eq!(
+            tasks[0].deletes[0].referenced_data_file.as_deref(),
+            Some("data/heavy.parquet")
+        );
+        let plans = iceberg_compaction_core::compaction::CompactionPlanner::new(
+            CompactionPlanningConfig::Auto(AutoCompactionConfig {
+                max_file_sequence_number: Some(1),
+                small_file_threshold_bytes: 64,
+                delete_selection: Some(DeleteSelection::DeletedRowRatioPercent(30)),
+                ..Default::default()
+            }),
+        )
+        .plan_compaction_with_branch(&table, MAIN_BRANCH)
+        .await
+        .unwrap();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            pk_index_replaced_data_files(&plans[0]),
+            ["data/heavy.parquet"]
+        );
+
+        // Ordinary and coordinated planning retain their own delete-benefit predicates.
+        let mut iceberg_config = test_iceberg_config();
+        iceberg_config.small_files_threshold_mb = Some(0);
+        iceberg_config.delete_files_count_threshold = Some(1);
+        let mut runner_config = test_runner_config();
+        runner_config.min_group_size_mb = None;
+        runner_config.min_group_file_count = None;
+        for pk_index_coordinated in [false, true] {
+            let config = build_task_planning_config(
+                IcebergCompactionKind::Auto,
+                &iceberg_config,
+                &runner_config,
+                Some(1),
+                pk_index_coordinated,
+            )
+            .unwrap();
+            let plans = CompactionPlanner::new(config)
+                .plan_compaction_with_branch(&table, MAIN_BRANCH)
+                .await
+                .unwrap();
+            assert_eq!(plans.len(), 1);
+            assert_eq!(
+                pk_index_replaced_data_files(&plans[0]),
+                ["data/heavy.parquet"]
+            );
+        }
+        let mut config = build_task_planning_config(
+            IcebergCompactionKind::Auto,
+            &iceberg_config,
+            &runner_config,
+            Some(1),
+            false,
+        )
+        .unwrap();
+        let CompactionPlanningConfig::Auto(auto) = &mut config else {
+            unreachable!()
+        };
+        auto.min_delete_file_count_threshold = 2;
+        assert!(
+            CompactionPlanner::new(config)
+                .plan_compaction_with_branch(&table, MAIN_BRANCH)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_coordinated_payload_uses_rewrite_plan_and_keeps_shared_deletes_live() {
+        let table = test_table();
+        let (stats, result) = coordinated_rewrite_result(
+            &table,
+            RewriteResult {
+                plan: selection_test_plan("data/input.parquet"),
+                output_data_files: vec![test_data_file("data/output.parquet")],
+                stats: RewriteFilesStat {
+                    input_files_count: 1,
+                    ..Default::default()
+                },
+                validation_info: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(stats.input_files_count, 1);
+        let result = result.unwrap();
+        assert_eq!(result.input_file_paths, ["data/input.parquet"]);
+        assert_eq!(result.read_snapshot_id, 7);
+        assert_eq!(result.output_files.len(), 1);
+        assert_eq!(result.schema_id, table.metadata().current_schema_id());
+        assert_eq!(
+            result.partition_spec_id,
+            table.metadata().default_partition_spec_id()
+        );
     }
 
     #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
@@ -1356,6 +1785,132 @@ mod tests {
         assert_eq!(rewrite_statistics.skipped_rewrite_data_file_size_bytes, 1);
     }
 
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
+    #[tokio::test]
+    async fn test_bounded_ratio_planning_blocks_invalid_counts_but_skips_shared_deletes() {
+        use iceberg_compaction_core::config::AutoCompactionConfig;
+
+        for file_scoped in [false, true] {
+            let data = DataFileBuilder::default()
+                .content(DataContentType::Data)
+                .file_path("data/heavy.parquet".to_owned())
+                .file_format(DataFileFormat::Parquet)
+                .partition(Struct::empty())
+                .partition_spec_id(0)
+                .record_count(100)
+                .file_size_in_bytes(1000)
+                .build()
+                .unwrap();
+            let delete = DataFileBuilder::default()
+                .content(DataContentType::PositionDeletes)
+                .file_path("data/deletes.parquet".to_owned())
+                .file_format(DataFileFormat::Parquet)
+                .partition(Struct::empty())
+                .partition_spec_id(0)
+                .referenced_data_file(file_scoped.then(|| data.file_path().to_owned()))
+                .record_count(101)
+                .file_size_in_bytes(100)
+                .build()
+                .unwrap();
+            let table = test_table_with_files(vec![data], vec![delete]).await;
+            let outcome =
+                CompactionPlanner::new(CompactionPlanningConfig::Auto(AutoCompactionConfig {
+                    max_file_sequence_number: Some(1),
+                    small_file_threshold_bytes: 64,
+                    delete_selection: Some(DeleteSelection::DeletedRowRatioPercent(30)),
+                    ..Default::default()
+                }))
+                .plan_compaction_with_branch(&table, MAIN_BRANCH)
+                .await;
+            if file_scoped {
+                let error = outcome.unwrap_err();
+                assert!(matches!(error, CompactionError::DeleteStatistics { .. }));
+                assert!(error.to_string().contains("data/heavy.parquet"));
+            } else {
+                assert!(outcome.unwrap().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn test_build_task_planning_config_applies_coordinated_selection_only_to_bounded_tasks() {
+        let mut iceberg_config = test_iceberg_config();
+        iceberg_config.delete_files_count_threshold = Some(0);
+        iceberg_config.delete_ratio_percent = Some(45);
+
+        for (boundary, pk_index_coordinated, coordinated) in [
+            (Some(10), true, true),
+            (Some(10), false, false),
+            (None, true, false),
+        ] {
+            for min_count in [None, Some(0), Some(1), Some(3)] {
+                for min_size_mb in [None, Some(32)] {
+                    let mut runner_config = test_runner_config();
+                    runner_config.min_group_file_count = min_count;
+                    runner_config.min_group_size_mb = min_size_mb;
+                    let expected_min_count = if coordinated {
+                        Some(min_count.unwrap_or(2).max(2))
+                    } else {
+                        min_count
+                    };
+                    let expected_filters = (expected_min_count.is_some() || min_size_mb.is_some())
+                        .then_some(GroupFilters {
+                            min_group_file_count: expected_min_count,
+                            min_group_size_bytes: min_size_mb.map(|mb| mb * 1024 * 1024),
+                        });
+                    let expected_selection =
+                        coordinated.then_some(DeleteSelection::DeletedRowRatioPercent(45));
+
+                    for kind in [
+                        IcebergCompactionKind::Auto,
+                        IcebergCompactionKind::SmallFiles,
+                        IcebergCompactionKind::FilesWithDeletes,
+                        IcebergCompactionKind::Full,
+                    ] {
+                        let config = build_task_planning_config(
+                            kind,
+                            &iceberg_config,
+                            &runner_config,
+                            boundary,
+                            pk_index_coordinated,
+                        )
+                        .unwrap();
+                        assert_eq!(config.max_file_sequence_number(), boundary);
+                        match config {
+                            CompactionPlanningConfig::Auto(config) => {
+                                assert_eq!(config.delete_selection, expected_selection);
+                                assert_eq!(config.min_delete_file_count_threshold, 0);
+                                assert_eq!(config.group_filters, expected_filters);
+                            }
+                            CompactionPlanningConfig::SmallFiles(config) => {
+                                assert_eq!(config.group_filters, expected_filters);
+                            }
+                            CompactionPlanningConfig::FilesWithDeletes(config) => {
+                                assert_eq!(config.delete_selection, expected_selection);
+                                assert_eq!(config.min_delete_file_count_threshold, 0);
+                            }
+                            CompactionPlanningConfig::Full(config) => {
+                                assert_eq!(config.file_group_scope, FileGroupScope::Partition);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_invalid_ratio_configuration_cannot_prove_an_empty_round_drained() {
+        use iceberg_compaction_core::config::AutoCompactionConfig;
+
+        let config = CompactionPlanningConfig::Auto(AutoCompactionConfig {
+            delete_selection: Some(DeleteSelection::DeletedRowRatioPercent(101)),
+            ..Default::default()
+        });
+        let error = PlanStrategy::try_from(&config).err().unwrap();
+        assert!(error.to_string().contains("between 0 and 100"));
+    }
+
     #[test]
     fn test_build_auto_compaction_planning_config() {
         let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from([
@@ -1389,6 +1944,7 @@ mod tests {
             &iceberg_config,
             &runner_config,
             None,
+            false,
         )
         .unwrap() else {
             panic!("expected auto planning config");
@@ -1451,6 +2007,7 @@ mod tests {
             &iceberg_config,
             &test_runner_config(),
             None,
+            true,
         )
         .unwrap() else {
             panic!("expected auto planning config");
@@ -1464,5 +2021,6 @@ mod tests {
             iceberg_compaction_core::config::GroupingStrategy::Single
         );
         assert_eq!(config.group_filters, None);
+        assert_eq!(config.delete_selection, None);
     }
 }

@@ -15,19 +15,16 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use itertools::Itertools;
 use mysql_async::Row;
 use mysql_async::prelude::*;
 use prost::Message;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::id::SourceId;
 use risingwave_common::metrics::{LabelGuardedIntGauge, LabelGuardedIntGaugeVec};
-use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
@@ -40,19 +37,16 @@ use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::mysql::build_mysql_connection_pool;
 use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Oracle, Postgres,
+    CdcProperties, CdcSourceTypeTrait, DebeziumCdcSplit, Mongodb, Mysql, Oracle, Postgres,
     SqlServer, table_schema_exclude_additional_columns,
 };
 use crate::source::monitor::metrics::EnumeratorMetrics;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
-pub const DATABASE_SERVERS_KEY: &str = "database.servers";
-
 #[derive(Debug)]
 pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
     /// The `source_id` in the catalog
     source_id: SourceId,
-    worker_node_addrs: Vec<HostAddr>,
     metrics: Arc<EnumeratorMetrics>,
     pg_cdc_upstream_max_lsn: Option<LabelGuardedIntGauge>,
     pg_cdc_confirmed_flush_lsn: Option<LabelGuardedIntGauge>,
@@ -85,17 +79,6 @@ where
         props: CdcProperties<T>,
         context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<Self> {
-        let server_addrs = props
-            .properties
-            .get(DATABASE_SERVERS_KEY)
-            .map(|s| {
-                s.split(',')
-                    .map(HostAddr::from_str)
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()?
-            .unwrap_or_default();
-
         assert_eq!(
             props.get_source_type_pb(),
             SourceType::from(T::source_type())
@@ -153,7 +136,6 @@ where
         tracing::debug!("validate cdc source properties success");
         Ok(Self {
             source_id,
-            worker_node_addrs: server_addrs,
             metrics: context.metrics.clone(),
             pg_cdc_upstream_max_lsn: None,
             pg_cdc_confirmed_flush_lsn: None,
@@ -510,11 +492,6 @@ impl DebeziumSplitEnumerator<Mysql> {
             .properties
             .get("password")
             .ok_or_else(|| anyhow::anyhow!("missing `password` in CDC properties"))?;
-        let database = self
-            .properties
-            .get("database.name")
-            .ok_or_else(|| anyhow::anyhow!("missing `database.name` in CDC properties"))?;
-
         // Get SSL mode configuration (default to Disabled if not specified)
         let ssl_mode = self
             .properties
@@ -522,9 +499,9 @@ impl DebeziumSplitEnumerator<Mysql> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(SslMode::Preferred);
 
-        // Build MySQL connection pool with proper SSL configuration
-        let pool =
-            build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
+        // SHOW BINARY LOGS is server-wide. Do not select a default database: database.name
+        // can be a comma-separated list for a shared source.
+        let pool = build_mysql_connection_pool(hostname, port, username, password, None, ssl_mode);
         let mut conn = pool
             .get_conn()
             .await
@@ -570,7 +547,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
             None,
-            None,
         )]
     }
 }
@@ -592,7 +568,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
             None,
-            None,
         )]
     }
 }
@@ -606,23 +581,6 @@ impl CdcMonitor for DebeziumSplitEnumerator<Postgres> {
     }
 }
 
-impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
-    type CdcSourceType = Citus;
-
-    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        self.worker_node_addrs
-            .iter()
-            .enumerate()
-            .map(|(id, addr)| {
-                DebeziumCdcSplit::<Self::CdcSourceType>::new(
-                    id as u32,
-                    None,
-                    Some(addr.to_string()),
-                )
-            })
-            .collect_vec()
-    }
-}
 impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
     type CdcSourceType = Mongodb;
 
@@ -630,7 +588,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
         // CDC source only supports single split
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
-            None,
             None,
         )]
     }
@@ -643,7 +600,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
             None,
-            None,
         )]
     }
 }
@@ -654,7 +610,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Oracle> {
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
             self.source_id.as_raw_id(),
-            None,
             None,
         )]
     }

@@ -437,12 +437,24 @@ pub mod default {
             1024
         }
 
+        pub fn iceberg_update_ordered_max_tasks() -> u64 {
+            16
+        }
+
         pub fn iceberg_sink_positional_delete_cache_size() -> usize {
             1024
         }
 
         pub fn iceberg_sink_write_parquet_max_row_group_rows() -> usize {
             100_000
+        }
+
+        pub fn iceberg_pk_index_sink_lookup_concurrency() -> usize {
+            64
+        }
+
+        pub fn iceberg_pk_index_sink_max_batch_rows() -> usize {
+            4096
         }
 
         pub fn materialize_force_overwrite_on_no_check() -> bool {
@@ -540,6 +552,19 @@ pub mod tests {
         let expected = rw_config_to_markdown();
         let actual = expect_test::expect_file!["../../../config/docs.md"];
         actual.assert_eq(&expected);
+    }
+
+    #[test]
+    fn test_sql_option_redaction_allowlist_config() {
+        let config: RwConfig = toml::from_str("").unwrap();
+        assert_eq!(config.batch.redact_sql_option_allowlist, ["primary_key"]);
+
+        let config: RwConfig = toml::from_str("[batch]\nredact_sql_option_allowlist = []").unwrap();
+        assert!(config.batch.redact_sql_option_allowlist.is_empty());
+
+        let config: RwConfig =
+            toml::from_str("[batch]\nredact_sql_option_allowlist = ['partition_key']").unwrap();
+        assert_eq!(config.batch.redact_sql_option_allowlist, ["partition_key"]);
     }
 
     #[test]

@@ -318,11 +318,6 @@ impl SstableStore {
         Ok(())
     }
 
-    pub fn delete_cache(&self, object_id: HummockSstableObjectId) -> HummockResult<()> {
-        self.meta_cache.remove(&object_id);
-        Ok(())
-    }
-
     pub(crate) async fn put_sst_data(
         &self,
         object_id: HummockSstableObjectId,
@@ -737,9 +732,7 @@ impl SstableStore {
                 .read(&meta_path, range)
                 .instrument_await("get_meta_response".verbose())
                 .await?;
-            let meta = SstableMeta::decode(&buf[..])?;
-
-            let sst = Sstable::new(object_id, meta, skip_bloom_filter_in_serde);
+            let sst = Sstable::from_meta_bytes(object_id, &buf, skip_bloom_filter_in_serde)?;
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
             Ok::<_, anyhow::Error>(Box::new(sst))
@@ -784,21 +777,6 @@ impl SstableStore {
     pub fn insert_meta_cache(&self, object_id: HummockSstableObjectId, meta: SstableMeta) {
         let sst = Sstable::new(object_id, meta, self.skip_bloom_filter_in_serde);
         self.meta_cache.insert(object_id, Box::new(sst));
-    }
-
-    pub fn insert_block_cache(
-        &self,
-        object_id: HummockSstableObjectId,
-        block_index: u64,
-        block: Box<Block>,
-    ) {
-        self.block_cache.insert(
-            SstableBlockIndex {
-                sst_id: object_id,
-                block_idx: block_index,
-            },
-            block,
-        );
     }
 
     pub fn get_prefetch_memory_usage(&self) -> usize {

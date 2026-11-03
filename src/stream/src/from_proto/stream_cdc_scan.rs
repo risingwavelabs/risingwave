@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use risingwave_common::catalog::{CdcKeyComparison, Schema};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
@@ -72,7 +73,7 @@ fn decode_table_pk(
         // Int64 are indistinguishable until the reader checks upstream. Only Int64 PK columns
         // can need unsigned reinterpretation; other types (including Decimal) use native ordering.
         let mut needs_reader_comparisons = false;
-        if *table_type == ExternalCdcTableType::MySql {
+        if *table_type == ExternalCdcTableType::Mysql {
             for &idx in &indices {
                 if table_desc.columns[idx].get_column_type()?.get_type_name()? == TypeName::Int64 {
                     needs_reader_comparisons = true;
@@ -178,9 +179,11 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             );
             Ok((params.info, exec).into())
         } else {
-            let vnodes = params.vnode_bitmap.map(Arc::new);
-            // cdc backfill should be singleton, so vnodes must be None.
-            assert_eq!(None, vnodes);
+            assert!(
+                params.vnode_bitmap.is_singleton(),
+                "cdc backfill should be singleton"
+            );
+            let vnodes = Some(Arc::new(params.vnode_bitmap));
             let state_table = StateTableBuilder::new(node.get_state_table()?, state_store, vnodes)
                 .enable_preload_all_rows_by_config(&params.config)
                 .build()
@@ -232,7 +235,7 @@ mod tests {
     #[test]
     fn test_decode_legacy_mysql_int64_pk_comparisons_as_unknown() {
         let (order_types, comparisons, indices) =
-            decode_table_pk(&legacy_desc(DataType::Int64), &ExternalCdcTableType::MySql).unwrap();
+            decode_table_pk(&legacy_desc(DataType::Int64), &ExternalCdcTableType::Mysql).unwrap();
 
         assert_eq!(
             order_types,
@@ -254,7 +257,7 @@ mod tests {
             DataType::Varchar,
         ] {
             let (order_types, comparisons, indices) =
-                decode_table_pk(&legacy_desc(pk_type), &ExternalCdcTableType::MySql).unwrap();
+                decode_table_pk(&legacy_desc(pk_type), &ExternalCdcTableType::Mysql).unwrap();
             assert_eq!(
                 order_types,
                 vec![OrderType::descending(), OrderType::ascending()]
@@ -302,7 +305,7 @@ mod tests {
         };
 
         let (order_types, comparisons, indices) =
-            decode_table_pk(&desc, &ExternalCdcTableType::MySql).unwrap();
+            decode_table_pk(&desc, &ExternalCdcTableType::Mysql).unwrap();
         assert_eq!(
             order_types,
             vec![OrderType::ascending(), OrderType::ascending()]

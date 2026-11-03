@@ -17,7 +17,9 @@ use risingwave_common::catalog::max_column_id;
 use risingwave_connector::source::{SourceEncode, SourceStruct, extract_source_struct};
 use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
 
-use super::create_source::{generate_stream_graph_for_source, reject_variant_columns};
+use super::create_source::{
+    generate_stream_graph_for_source, reject_variant_columns, uses_pulsar_schema,
+};
 use super::create_table::bind_sql_columns;
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
@@ -77,7 +79,13 @@ pub async fn handle_alter_source_column(
             )
             .into());
         }
-        SourceEncode::Json if catalog.info.use_schema_registry => {
+        SourceEncode::Json
+            if catalog.info.use_schema_registry
+                || uses_pulsar_schema(
+                    &catalog.info.format_encode_options,
+                    &catalog.info.format_encode_secret_refs,
+                ) =>
+        {
             return Err(ErrorCode::NotSupported(
                 "alter source with schema registry".to_owned(),
                 "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),

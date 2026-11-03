@@ -25,7 +25,7 @@ use super::UNNAMED_COLUMN;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{CorrelatedId, Depth, align_types};
+use crate::expr::{CorrelatedId, ScopeId, align_types};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
 /// `BoundSetExpr`(s) via set operators (e.g., union).
@@ -104,13 +104,13 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_scope(&self, scope: ScopeId) -> bool {
         match self {
-            BoundSetExpr::Select(s) => s.is_correlated_by_depth(depth),
-            BoundSetExpr::Values(v) => v.is_correlated_by_depth(depth),
-            BoundSetExpr::Query(q) => q.is_correlated_by_depth(depth),
+            BoundSetExpr::Select(s) => s.is_correlated_by_scope(scope),
+            BoundSetExpr::Values(v) => v.is_correlated_by_scope(scope),
+            BoundSetExpr::Query(q) => q.is_correlated_by_scope(scope),
             BoundSetExpr::SetOperation { left, right, .. } => {
-                left.is_correlated_by_depth(depth) || right.is_correlated_by_depth(depth)
+                left.is_correlated_by_scope(scope) || right.is_correlated_by_scope(scope)
             }
         }
     }
@@ -127,28 +127,28 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn collect_correlated_indices_by_depth_and_assign_id(
+    pub fn collect_correlated_indices_by_scope_and_assign_id(
         &mut self,
-        depth: Depth,
+        scope: ScopeId,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         match self {
             BoundSetExpr::Select(s) => {
-                s.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+                s.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id)
             }
             BoundSetExpr::Values(v) => {
-                v.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+                v.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id)
             }
             BoundSetExpr::Query(q) => {
-                q.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+                q.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id)
             }
             BoundSetExpr::SetOperation { left, right, .. } => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
-                    left.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    left.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                 );
                 correlated_indices.extend(
-                    right.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    right.collect_correlated_indices_by_scope_and_assign_id(scope, correlated_id),
                 );
                 correlated_indices
             }
@@ -339,6 +339,7 @@ impl Binder {
                             .clone_from(&new_context.cte_to_relation);
                         self.context.disable_security_invoker =
                             new_context.disable_security_invoker;
+                        self.context.scope = self.next_scope();
                         let mut right = self.bind_set_expr(right)?;
 
                         let corresponding_col_indices = if corresponding.is_corresponding() {
@@ -364,6 +365,7 @@ impl Binder {
                         // error.
                         self.context = BindContext::default();
                         self.context.cte_to_relation = new_context.cte_to_relation;
+                        self.context.scope = self.next_scope();
                         Ok(BoundSetExpr::SetOperation {
                             op: (*op).into(),
                             all: *all,

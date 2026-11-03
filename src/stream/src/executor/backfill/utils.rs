@@ -297,6 +297,9 @@ impl BackfillProgressPerVnode {
     }
 }
 
+/// Mark CDC rows that are safe to emit downstream as visible and all other rows as invisible
+///
+/// A row is safe when it's offset is `>= last_cdc_offset` and it's PK is `<= current_pos`
 pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
