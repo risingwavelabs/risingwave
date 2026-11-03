@@ -310,12 +310,12 @@ macro_rules! impl_split_small_range {
                 pub fn split_small_range(&self, max_gap: u64) -> Option<Vec<Self>> {
                     if self.eq_conds.is_empty() {
                         if let (Bound::Included(left),Bound::Included(right)) = (&self.range.0, &self.range.1){
-                            match (left.get(0),right.get(0)) {
+                            match (left.as_slice(), right.as_slice()) {
                                 $(
                                     // Compute the gap in i128 so that it cannot overflow.
                                     (
-                                        Some(Some(ScalarImpl::$type_name(left))),
-                                        Some(Some(ScalarImpl::$type_name(right))),
+                                        [Some(ScalarImpl::$type_name(left))],
+                                        [Some(ScalarImpl::$type_name(right))],
                                     ) if (0..i128::from(max_gap))
                                         .contains(&(i128::from(*right) - i128::from(*left))) =>
                                     {
