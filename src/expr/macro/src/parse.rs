@@ -54,7 +54,17 @@ impl Parse for FunctionAttr {
             return Ok(parsed);
         }
 
-        let metas = input.parse_terminated(syn::Meta::parse, Token![,])?;
+        let metas = input.parse_terminated(
+            |input| {
+                if input.peek(Token![async]) {
+                    let token: Token![async] = input.parse()?;
+                    Ok(syn::Meta::Path(syn::Ident::new("async", token.span).into()))
+                } else {
+                    syn::Meta::parse(input)
+                }
+            },
+            Token![,],
+        )?;
         for meta in metas {
             let get_value = || {
                 let kv = meta.require_name_value()?;
@@ -78,8 +88,8 @@ impl Parse for FunctionAttr {
                 parsed.type_infer = Some(get_value()?);
             } else if meta.path().is_ident("generic") {
                 parsed.generic = Some(get_value()?);
-            } else if meta.path().is_ident("always_async") {
-                parsed.always_async = true;
+            } else if meta.path().is_ident("async") {
+                parsed.async_ = true;
             } else if meta.path().is_ident("volatile") {
                 parsed.volatile = true;
             } else if meta.path().is_ident("deprecated") || meta.path().is_ident("internal") {
