@@ -735,9 +735,7 @@ mod tests {
             .generate_complete_query()
             .await
             .unwrap();
-        let mut stream = local_execute(session, query, false, shutdown_rx)
-            .await
-            .unwrap();
+        let mut stream = local_execute(session, query, false, shutdown_rx).unwrap();
         let first_chunk = tokio::time::timeout(Duration::from_secs(5), stream.next())
             .await
             .expect("the local executor must produce its first chunk")

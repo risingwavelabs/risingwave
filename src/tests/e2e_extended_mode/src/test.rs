@@ -81,12 +81,22 @@ impl TestSuite {
         self.max_row().await?;
         self.multiple_on_going_portal().await?;
         self.create_with_parameter().await?;
-        self.simple_cancel(false).await?;
-        self.simple_cancel(true).await?;
-        self.complex_cancel(false).await?;
-        self.complex_cancel(true).await?;
-        self.subscription_fetch_cancel(false).await?;
-        self.subscription_fetch_cancel(true).await?;
+        for is_distributed in [false, true] {
+            self.simple_cancel(is_distributed).await?;
+            self.complex_cancel(is_distributed).await?;
+            for is_binary_format in [false, true] {
+                self.query_cursor_interruptions(is_distributed, is_binary_format)
+                    .await?;
+                for is_full in [false, true] {
+                    self.subscription_cursor_interruptions(
+                        is_distributed,
+                        is_binary_format,
+                        is_full,
+                    )
+                    .await?;
+                }
+            }
+        }
         self.subquery_with_param().await?;
         self.create_mview_with_parameter().await?;
         Ok(())
@@ -587,53 +597,275 @@ impl TestSuite {
         Ok(())
     }
 
-    async fn subscription_fetch_cancel(&self, is_distributed: bool) -> anyhow::Result<()> {
-        let client = self.create_client(is_distributed).await?;
-        let suffix = if is_distributed { "dist" } else { "local" };
-        let table_name = format!("sub_cancel_t_{suffix}");
-        let subscription_name = format!("sub_cancel_{suffix}");
-
-        client
-            .execute(&format!("create table {table_name}(v int)"), &[])
-            .await?;
-        client
-            .execute(
-                &format!("create subscription {subscription_name} from {table_name} with(retention = '1D')"),
-                &[],
-            )
-            .await?;
-        client
-            .execute(
-                &format!("declare cur subscription cursor for {subscription_name} since now()"),
-                &[],
-            )
-            .await?;
-
-        let cancel_token = client.cancel_token();
-        let fetch_handle = tokio::spawn(async move {
-            client
-                .query("fetch 1 from cur with (timeout = '60s')", &[])
-                .await
-        });
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        cancel_token.cancel_query(NoTls).await?;
-
-        let result = tokio::time::timeout(Duration::from_secs(10), fetch_handle).await??;
-        if result.is_ok() {
-            return Err(anyhow!(
-                "subscription cursor fetch should be cancelled by CancelRequest"
-            ));
+    /// Runs the same assertions through simple/text and extended/binary query protocols.
+    /// Only the scalar types used by these cursor fixtures are supported.
+    async fn cursor_rows(
+        client: &Client,
+        sql: &str,
+        is_binary_format: bool,
+    ) -> anyhow::Result<Vec<Vec<Option<String>>>> {
+        if !is_binary_format {
+            return Ok(client
+                .simple_query(sql)
+                .await?
+                .into_iter()
+                .filter_map(|message| match message {
+                    tokio_postgres::SimpleQueryMessage::Row(row) => Some(
+                        (0..row.len())
+                            .map(|index| row.get(index).map(str::to_owned))
+                            .collect(),
+                    ),
+                    _ => None,
+                })
+                .collect());
         }
+        client
+            .query(sql, &[])
+            .await?
+            .into_iter()
+            .map(|row| {
+                row.columns()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, column)| {
+                        Ok(match *column.type_() {
+                            Type::INT4 => {
+                                row.try_get::<_, Option<i32>>(index)?.map(|v| v.to_string())
+                            }
+                            Type::INT8 => {
+                                row.try_get::<_, Option<i64>>(index)?.map(|v| v.to_string())
+                            }
+                            Type::VARCHAR | Type::TEXT => {
+                                row.try_get::<_, Option<String>>(index)?
+                            }
+                            Type::VOID => None,
+                            ref other => anyhow::bail!("unexpected cursor fixture type: {other}"),
+                        })
+                    })
+                    .collect()
+            })
+            .collect()
+    }
 
-        let cleanup_client = self.create_client(is_distributed).await?;
-        cleanup_client
-            .execute(&format!("drop subscription {subscription_name}"), &[])
-            .await?;
-        cleanup_client
-            .execute(&format!("drop table {table_name}"), &[])
-            .await?;
+    /// Sends real `CancelRequest` packets while a request is pending, requiring a cancellation
+    /// error rather than treating any error or a successful completion as cancellation.
+    async fn cancel_pending_request(
+        client: &Client,
+        sql: &str,
+        is_binary_format: bool,
+    ) -> anyhow::Result<()> {
+        let request = Self::cursor_rows(client, sql, is_binary_format);
+        tokio::pin!(request);
+        anyhow::ensure!(
+            tokio::time::timeout(Duration::from_millis(250), request.as_mut())
+                .await
+                .is_err(),
+            "request completed before cancellation: {sql}"
+        );
+        let token = client.cancel_token();
+        // Repeat to tolerate dispatch latency: CancelRequest itself has no acknowledgement.
+        // Stop before submitting another SQL command on this connection.
+        let result = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                token.cancel_query(NoTls).await?;
+                tokio::select! {
+                    biased;
+                    result = request.as_mut() => return result,
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+                }
+            }
+        })
+        .await?;
+        let error = result.expect_err("pending request must be cancelled");
+        let database_error = error
+            .downcast_ref::<tokio_postgres::Error>()
+            .and_then(tokio_postgres::Error::as_db_error);
+        anyhow::ensure!(
+            database_error
+                .is_some_and(|error| error.message().to_ascii_lowercase().contains("cancelled")),
+            "expected a server cancellation error, got: {error:#}"
+        );
         Ok(())
+    }
+
+    /// Checks actual executor output survives a FETCH timeout, FETCH cancellation, and ordinary
+    /// query cancellation. No row is consumed by the interrupted FETCH: this does not test replay.
+    async fn query_cursor_interruptions(
+        &self,
+        is_distributed: bool,
+        is_binary_format: bool,
+    ) -> anyhow::Result<()> {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            tracing::info!(
+                is_distributed,
+                is_binary_format,
+                "query cursor interruption acceptance"
+            );
+            let client = self.create_client(is_distributed).await?;
+            client
+                .simple_query("declare cur cursor for select 7::int as v, pg_sleep(4)")
+                .await?;
+            let started = tokio::time::Instant::now();
+            let rows = Self::cursor_rows(
+                &client,
+                "fetch 1 from cur with (timeout = '1s')",
+                is_binary_format,
+            )
+            .await?;
+            anyhow::ensure!(rows.is_empty(), "slow cursor returned before FETCH timeout");
+            anyhow::ensure!(started.elapsed() >= Duration::from_secs(1));
+            Self::cancel_pending_request(&client, "fetch 1 from cur", is_binary_format).await?;
+            Self::cancel_pending_request(&client, "select pg_sleep(60)", is_binary_format).await?;
+            let rows = Self::cursor_rows(&client, "fetch 1 from cur", is_binary_format).await?;
+            test_eq!(rows.len(), 1);
+            test_eq!(rows[0][0].as_deref(), Some("7"));
+            anyhow::ensure!(
+                Self::cursor_rows(&client, "fetch 1 from cur", is_binary_format)
+                    .await?
+                    .is_empty()
+            );
+            client.simple_query("close cur").await?;
+            // CLOSE must not wait for the sleeping executor to finish.
+            client
+                .simple_query("declare closing cursor for select pg_sleep(60)")
+                .await?;
+            tokio::time::timeout(Duration::from_secs(5), client.simple_query("close closing"))
+                .await??;
+            let rows = Self::cursor_rows(&client, "select 1::int", is_binary_format).await?;
+            test_eq!(rows[0][0].as_deref(), Some("1"));
+            Ok(())
+        })
+        .await?
+    }
+
+    /// Checks FULL snapshot selection, SINCE exclusion of old rows, idle timeout/cancellation,
+    /// continuation, another cursor's isolation, and binary FETCH followed by EXPLAIN FETCH.
+    async fn subscription_cursor_interruptions(
+        &self,
+        is_distributed: bool,
+        is_binary_format: bool,
+        is_full: bool,
+    ) -> anyhow::Result<()> {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            tracing::info!(
+                is_distributed,
+                is_binary_format,
+                is_full,
+                "subscription cursor interruption acceptance"
+            );
+            let client = self.create_client(is_distributed).await?;
+            let suffix = format!(
+                "{}_{}_{}",
+                if is_distributed { "dist" } else { "local" },
+                if is_binary_format { "binary" } else { "text" },
+                if is_full { "full" } else { "since" }
+            );
+            let table = format!("cursor_interrupt_t_{suffix}");
+            let subscription = format!("cursor_interrupt_s_{suffix}");
+            client
+                .simple_query(&format!("drop table if exists {table} cascade"))
+                .await?;
+            client
+                .simple_query(&format!(
+                    "create table {table}(a int, b int, primary key(b, a))"
+                ))
+                .await?;
+            client
+                .simple_query(&format!(
+                    "create subscription {subscription} from {table} with(retention = '1D')"
+                ))
+                .await?;
+            client
+                .simple_query(&format!("insert into {table} values(7, 42); flush"))
+                .await?;
+            let start = if is_full { "full" } else { "since now()" };
+            client
+                .simple_query(&format!(
+                    "declare cur subscription cursor for {subscription} {start}"
+                ))
+                .await?;
+            client
+                .simple_query("declare other_cursor cursor for select 99::int")
+                .await?;
+            // Close the epoch that began before SINCE NOW, so the next insert's epoch is newer
+            // than the declaration timestamp. No wall-clock sleep is needed.
+            client.simple_query("flush").await?;
+            // This commit occurs after DECLARE but before the first FETCH.
+            client
+                .simple_query(&format!("insert into {table} values(8, 43); flush"))
+                .await?;
+            if is_full {
+                let rows = Self::cursor_rows(&client, "fetch 1 from cur", is_binary_format).await?;
+                test_eq!(
+                    rows,
+                    vec![vec![
+                        Some("7".to_owned()),
+                        Some("42".to_owned()),
+                        Some("Insert".to_owned()),
+                        None
+                    ]]
+                );
+                // The last PK is typed even when the prior FETCH requested binary output.
+                client.simple_query("explain fetch 1 from cur").await?;
+            }
+            let rows = Self::cursor_rows(
+                &client,
+                "fetch 1 from cur with (timeout = '5s')",
+                is_binary_format,
+            )
+            .await?;
+            test_eq!(rows.len(), 1);
+            test_eq!(rows[0][0].as_deref(), Some("8"));
+            test_eq!(rows[0][1].as_deref(), Some("43"));
+            test_eq!(rows[0][2].as_deref(), Some("Insert"));
+            anyhow::ensure!(
+                rows[0][3].is_some(),
+                "post-DECLARE row must come from the log store, not FULL snapshot"
+            );
+            client.simple_query("explain fetch 1 from cur").await?;
+            let started = tokio::time::Instant::now();
+            anyhow::ensure!(
+                Self::cursor_rows(
+                    &client,
+                    "fetch 1 from cur with (timeout = '1s')",
+                    is_binary_format
+                )
+                .await?
+                .is_empty()
+            );
+            anyhow::ensure!(started.elapsed() >= Duration::from_secs(1));
+            Self::cancel_pending_request(
+                &client,
+                "fetch 1 from cur with (timeout = '60s')",
+                is_binary_format,
+            )
+            .await?;
+            let rows =
+                Self::cursor_rows(&client, "fetch 1 from other_cursor", is_binary_format).await?;
+            test_eq!(rows[0][0].as_deref(), Some("99"));
+            client
+                .simple_query(&format!("insert into {table} values(9, 44); flush"))
+                .await?;
+            let rows = Self::cursor_rows(
+                &client,
+                "fetch 1 from cur with (timeout = '5s')",
+                is_binary_format,
+            )
+            .await?;
+            test_eq!(rows.len(), 1);
+            test_eq!(rows[0][0].as_deref(), Some("9"));
+            client.simple_query("close all").await?;
+            anyhow::ensure!(
+                Self::cursor_rows(&client, "fetch 1 from cur", is_binary_format)
+                    .await
+                    .is_err()
+            );
+            client
+                .simple_query(&format!("drop table {table} cascade"))
+                .await?;
+            Ok(())
+        })
+        .await?
     }
 
     async fn subquery_with_param(&self) -> anyhow::Result<()> {
