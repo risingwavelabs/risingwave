@@ -26,9 +26,9 @@ use risingwave_connector::source::kafka::private_link::{
 use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::plan_common::SourceRefreshMode;
-use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
+use risingwave_pb::plan_common::SourceIngestMode;
+use risingwave_pb::plan_common::source_ingest_mode::{
+    IngestMode, SourceIngestModeFullReload, SourceIngestModeStreaming,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
@@ -431,9 +431,9 @@ fn resolve_secret_refs_inner(
     Ok(resolved_secret_refs)
 }
 
-pub(crate) fn resolve_source_refresh_mode_in_with_option(
+pub(crate) fn resolve_source_ingest_mode_in_with_option(
     with_options: &mut WithOptions,
-) -> RwResult<Option<SourceRefreshMode>> {
+) -> RwResult<Option<SourceIngestMode>> {
     let source_refresh_interval_sec =
         {
             if let Some(maybe_int) = with_options.remove(SOURCE_REFRESH_INTERVAL_SEC_KEY) {
@@ -456,9 +456,9 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
         };
 
     let mut is_full_reload = false;
-    let source_refresh_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
-    let source_refresh_mode = if let Some(source_refresh_mode_str) = &source_refresh_mode_str {
-        Some(match source_refresh_mode_str.to_uppercase().as_str() {
+    let source_ingest_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
+    let source_ingest_mode = if let Some(source_ingest_mode_str) = &source_ingest_mode_str {
+        Some(match source_ingest_mode_str.to_uppercase().as_str() {
             "STREAMING" => {
                 if source_refresh_interval_sec.is_some() {
                     return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
@@ -466,14 +466,14 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
                         SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
                     ))));
                 }
-                SourceRefreshMode {
-                    refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+                SourceIngestMode {
+                    ingest_mode: Some(IngestMode::Streaming(SourceIngestModeStreaming {})),
                 }
             }
             "FULL_RELOAD" => {
                 is_full_reload = true;
-                SourceRefreshMode {
-                    refresh_mode: Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
+                SourceIngestMode {
+                    ingest_mode: Some(IngestMode::FullReload(SourceIngestModeFullReload {
                         refresh_interval_sec: source_refresh_interval_sec,
                     })),
                 }
@@ -481,7 +481,7 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             _ => {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
                     "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
-                    SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
+                    SOURCE_REFRESH_MODE_KEY, source_ingest_mode_str
                 ))));
             }
         })
@@ -511,7 +511,7 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
                 .unwrap_or_else(|| "<missing>".to_owned()),
         ))));
     }
-    Ok(source_refresh_mode)
+    Ok(source_ingest_mode)
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

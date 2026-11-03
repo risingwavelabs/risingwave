@@ -688,6 +688,10 @@ for_all_wrapped_id_fields! (
             fragment_id: FragmentId,
             worker_id: WorkerId,
         }
+        ListBoundedJobsResponse.BoundedJob {
+            job_id: JobId,
+            source_id: SourceId,
+        }
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
@@ -841,6 +845,9 @@ for_all_wrapped_id_fields! (
         LoadFinishMutation {
             associated_source_id: SourceId,
         }
+        LoadId {
+            source_id: SourceId,
+        }
         LookupNode {
             table_id: TableId,
             index_id: TableId,
@@ -974,6 +981,9 @@ for_all_wrapped_id_fields! (
             reporter_actor_id: ActorId,
             table_id: TableId,
             associated_source_id: SourceId,
+        }
+        BarrierCompleteResponse.LoadProgress {
+            reporter_actor_id: ActorId,
         }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,

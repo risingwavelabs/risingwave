@@ -31,8 +31,9 @@ use iceberg::table::Table;
 pub use parquet_file_handler::*;
 use phf::{Set, phf_set};
 pub use planner::{
-    IcebergIncrementalScan, IcebergScanMetricsLabels, IcebergScanPlan, IcebergScanPlanner,
-    IcebergScanProjection, IcebergScanTaskBatchMode, IcebergScanTaskPlanner, PersistedFileScanTask,
+    IcebergBoundedScan, IcebergIncrementalScan, IcebergScanMetricsLabels, IcebergScanPlan,
+    IcebergScanPlanner, IcebergScanProjection, IcebergScanTaskBatchMode, IcebergScanTaskPlanner,
+    PersistedFileScanTask,
 };
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{

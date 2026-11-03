@@ -461,8 +461,8 @@ derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 derive_from_blob!(
-    SourceRefreshMode,
-    risingwave_pb::plan_common::PbSourceRefreshMode
+    SourceIngestMode,
+    risingwave_pb::plan_common::PbSourceIngestMode
 );
 
 derive_from_blob!(

@@ -94,6 +94,8 @@ message BarrierCompleteResponse {
   uint64 epoch = 9;
   reserved 10;
   reserved "database_id";
+  // Deprecated: replaced by `LoadProgress`. Removed later in this stack, once executors and
+  // meta use it.
   // Used for refreshable batch source.
   // SourceExecutor reports the source load is finished, and then
   // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
@@ -110,6 +112,8 @@ message BarrierCompleteResponse {
   repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
   reserved 14, 15;
   reserved "truncate_tables", "refresh_finished_tables";
+  // Deprecated: replaced by `LoadProgress`. Removed later in this stack, once executors and
+  // meta use it.
   // SourceExecutor reports the source list is finished, and then
   // meta will issue a ListFinish barrier to notify the source to start loading.
   message ListFinishedSource {
@@ -121,6 +125,23 @@ message BarrierCompleteResponse {
     uint32 associated_source_id = 3;
   }
   repeated ListFinishedSource list_finished_sources = 16;
+  // Progress of a finite load, reported by its actors.
+  message LoadProgress {
+    // Lister only: all input has been assigned to the readers.
+    message ListFinished {}
+    // Reader only: all input assigned to this actor has been read.
+    message ReaderDone {}
+    message Failed {}
+
+    uint32 reporter_actor_id = 1;
+    stream_plan.LoadId load_id = 2;
+    oneof progress {
+      ListFinished list_finished = 3;
+      ReaderDone reader_done = 4;
+      Failed failed = 5;
+    }
+  }
+  repeated LoadProgress load_progress = 21;
   // SourceExecutor reports that CDC source has updated offset at least once.
   // Meta will mark the CDC source as created only after receiving this notification.
   message CdcSourceOffsetUpdated {
