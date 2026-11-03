@@ -391,14 +391,44 @@ impl Binder {
                         })),
                     );
                 }
-                CteInner::ChangeLog { from, key } => {
+                CteInner::ChangeLog {
+                    from,
+                    key,
+                    distributed_by,
+                } => {
                     self.push_context();
                     let from_table_relation = self.bind_relation_by_name(from, None, None, true)?;
                     let key_indices = key
                         .as_ref()
-                        .map(|key| self.bind_changelog_key(key))
+                        .map(|key| self.bind_changelog_columns(key, "key"))
                         .transpose()?;
 
+                    let distribution_key_indices = distributed_by
+                        .as_ref()
+                        .map(|columns| self.bind_changelog_columns(columns, "distribution"))
+                        .transpose()?;
+                    if let (Some(key), Some(distribution_key)) =
+                        (&key_indices, &distribution_key_indices)
+                    {
+                        let invalid_columns = distribution_key
+                            .iter()
+                            .filter(|index| !key.contains(index))
+                            .map(|&index| {
+                                Ident::with_quote_unchecked(
+                                    '"',
+                                    self.context.columns[index].field.name.clone(),
+                                )
+                                .to_string()
+                            })
+                            .collect::<Vec<_>>();
+                        if !invalid_columns.is_empty() {
+                            return Err(ErrorCode::BindError(format!(
+                                "Changelog DISTRIBUTED BY columns {} are not included in KEY",
+                                invalid_columns.join(", "),
+                            ))
+                            .into());
+                        }
+                    }
                     self.pop_context()?;
                     self.context.cte_to_relation.insert(
                         table_name,
@@ -407,6 +437,7 @@ impl Binder {
                             state: BindingCteState::ChangeLog {
                                 table: from_table_relation,
                                 key_indices,
+                                distribution_key_indices,
                             },
                             alias: alias.clone(),
                         })),
@@ -417,10 +448,11 @@ impl Binder {
         Ok(())
     }
 
-    fn bind_changelog_key(&self, key: &[Ident]) -> Result<Vec<usize>> {
+    fn bind_changelog_columns(&self, columns: &[Ident], kind: &str) -> Result<Vec<usize>> {
         let mut seen = HashSet::new();
 
-        key.iter()
+        columns
+            .iter()
             .map(|ident| {
                 let name = ident.real_value();
                 let index = self.context.get_column_binding_index(&None, &None, &name)?;
@@ -428,14 +460,14 @@ impl Binder {
 
                 if column.is_hidden {
                     return Err(ErrorCode::BindError(format!(
-                        "Changelog key column \"{name}\" must not be hidden"
+                        "Changelog {kind} column \"{name}\" must not be hidden"
                     ))
                     .into());
                 }
 
                 if !seen.insert(column.index) {
                     return Err(ErrorCode::BindError(format!(
-                        "Changelog key column \"{name}\" specified more than once"
+                        "Changelog {kind} column \"{name}\" specified more than once"
                     ))
                     .into());
                 }
