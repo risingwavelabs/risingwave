@@ -632,7 +632,7 @@ where
 {
     /// Reads a column from the event image or its Debezium source metadata.
     ///
-    /// MongoDB deletes obtain `_id` from the key and namespace columns from the
+    /// `MongoDB` deletes obtain `_id` from the key and namespace columns from the
     /// source envelope, so composite keys do not require a document pre-image.
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult<DatumCow<'_>> {
         match self.op()? {
