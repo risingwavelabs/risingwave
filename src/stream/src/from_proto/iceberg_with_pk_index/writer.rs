@@ -16,8 +16,10 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::types::DataType;
 use risingwave_connector::sink::iceberg::{
-    ICEBERG_SINK, IcebergConfig, create_and_validate_table_impl,
+    ICEBERG_SINK, IcebergConfig, LEGACY_PK_INDEX_FILE_PATH, PkIndexDataFileLocator,
+    create_and_validate_table_impl,
 };
 use risingwave_connector::sink::{SinkMetaClient, SinkWriterParam};
 use risingwave_expr::bail;
@@ -101,6 +103,27 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             streaming_config: params.config.as_ref().clone(),
             time_zone: params.actor_context.time_zone,
         };
+        let data_file_locator = if config.pk_index_stores_file_uuid() {
+            Some(
+                PkIndexDataFileLocator::new(table.metadata())
+                    .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?,
+            )
+        } else {
+            None
+        };
+        let data_types = pk_index_state_table.get_data_types();
+        let expected_data_file_type = match data_file_locator {
+            Some(_) => DataType::Bytea,
+            None => DataType::Varchar,
+        };
+        if data_types.len() < 2 || data_types[data_types.len() - 2] != expected_data_file_type {
+            bail!(
+                "iceberg pk-index state table {:?} does not match `{}` of sink {}",
+                data_types,
+                LEGACY_PK_INDEX_FILE_PATH,
+                sink_id
+            );
+        }
         let writer = IcebergWriterImpl::build(&config, table, &writer_param)?;
 
         let exec = WriterExecutor::new(
@@ -110,6 +133,7 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             pk_indices,
             pk_index_state_table,
             writer,
+            data_file_locator,
             params.config.developer.chunk_size,
             params
                 .config

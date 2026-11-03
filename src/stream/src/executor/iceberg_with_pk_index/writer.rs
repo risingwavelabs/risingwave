@@ -25,11 +25,13 @@ use risingwave_common::row::{Project, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::sink::iceberg::PkIndexDataFileLocator;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::IcebergCompactionTaskId;
 use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::Phase;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
+use uuid::Uuid;
 
 use crate::common::change_buffer::output_kind;
 use crate::common::compact_chunk::{InconsistencyBehavior, StreamChunkCompactor};
@@ -103,11 +105,15 @@ where
     resolver_input: Option<Executor>,
     /// Column indices of the primary key in the input schema.
     pk_indices: Vec<usize>,
-    /// State table storing the PK index: `pk_columns` -> (`file_path`, `position`).
-    /// Schema: [`pk_col_0`, ..., `pk_col_n`, `file_path`: Varchar, `position`: Int64]
+    /// State table storing the PK index: `pk_columns` -> (data file, `position`).
+    /// Schema: [`pk_col_0`, ..., `pk_col_n`, data file, `position`: Int64], where the data file
+    /// column is `file_path`: Varchar in the legacy layout, or `file_uuid`: Bytea otherwise.
     pk_index_state_table: StateTable<S>,
     /// The Iceberg data file writer.
     writer: W,
+    /// Rebuilds data file paths from the uuids stored in the PK index. `None` for the legacy
+    /// layout, where the PK index stores full paths.
+    data_file_locator: Option<PkIndexDataFileLocator>,
     /// Buffer for accumulating delete position messages before the next barrier flush.
     delete_position_buffer: Option<DataChunkBuilder>,
     mode: WriterInputMode,
@@ -133,6 +139,7 @@ where
         pk_indices: Vec<usize>,
         pk_index_state_table: StateTable<S>,
         writer: W,
+        data_file_locator: Option<PkIndexDataFileLocator>,
         chunk_size: usize,
         lookup_concurrency: usize,
         max_batch_rows: usize,
@@ -146,6 +153,7 @@ where
             pk_indices,
             pk_index_state_table,
             writer,
+            data_file_locator,
             delete_position_buffer: None,
             mode: WriterInputMode::Normal,
             chunk_size,
@@ -163,15 +171,22 @@ where
         delete_position_buffer: &mut DataChunkBuilder,
     ) -> StreamExecutorResult<Option<DataChunk>> {
         let num_cols = index_row.len();
-        let file_path = index_row
+        let data_file = index_row
             .datum_at(num_cols - 2)
-            .context("file_path should not be null")?
-            .into_utf8();
+            .context("data file should not be null")?;
         let position = index_row
             .datum_at(num_cols - 1)
             .context("position should not be null")?
             .into_int64();
-        let chunk = append_row(delete_position_buffer, file_path, position);
+        let chunk = match &self.data_file_locator {
+            None => append_row(delete_position_buffer, data_file.into_utf8(), position),
+            Some(locator) => {
+                let file_path = locator
+                    .file_path_from_bytes(data_file.into_bytea())
+                    .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
+                append_row(delete_position_buffer, &file_path, position)
+            }
+        };
         self.pk_index_state_table.delete(index_row);
         Ok(chunk)
     }
@@ -262,12 +277,29 @@ where
             let write_chunk = insert_chunk.finish();
             let positions = self.writer.write_chunk(write_chunk).await?;
 
-            for (pk, pos) in insert_pks.into_iter().zip_eq_fast(positions) {
+            // Rows of one write mostly land in the same data file, so reuse the last parsed uuid.
+            let mut last_file: Option<(&str, Uuid)> = None;
+            for (pk, pos) in insert_pks.into_iter().zip_eq_fast(positions.iter()) {
                 let mut index_row_data = Vec::with_capacity(pk_indices.len() + 2);
                 for datum in pk.iter() {
                     index_row_data.push(datum);
                 }
-                index_row_data.push(Some(ScalarRefImpl::Utf8(&pos.path)));
+                let file_uuid = match (&self.data_file_locator, last_file) {
+                    (None, _) => None,
+                    (Some(_), Some((path, uuid))) if path == &*pos.path => Some(uuid),
+                    (Some(locator), _) => {
+                        let uuid = locator
+                            .file_uuid(&pos.path)
+                            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
+                        last_file = Some((&*pos.path, uuid));
+                        Some(uuid)
+                    }
+                };
+                let data_file = match &file_uuid {
+                    None => ScalarRefImpl::Utf8(&pos.path),
+                    Some(uuid) => ScalarRefImpl::Bytea(uuid.as_bytes()),
+                };
+                index_row_data.push(Some(data_file));
                 index_row_data.push(Some(ScalarRefImpl::Int64(pos.pos)));
                 self.pk_index_state_table.insert(index_row_data.as_slice());
             }
