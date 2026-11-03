@@ -13601,6 +13601,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "thiserror-ext",
+ "tikv-jemallocator",
  "tokio-retry",
  "tracing",
  "uuid",
