@@ -14,14 +14,37 @@
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::{DataType, JsonbVal};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
+/// The fields of `(a, b)` or `ROW(a, b)`, also inside parentheses. A cast of one is a struct value.
+pub(super) fn row_constructor_fields(expr: &Expr) -> Option<&[Expr]> {
+    match expr {
+        Expr::Row(fields) => Some(fields),
+        Expr::Nested(expr) => row_constructor_fields(expr),
+        _ => None,
+    }
+}
+
 impl Binder {
     pub(super) fn bind_binary_op(
+        &mut self,
+        left: &Expr,
+        op: &BinaryOperator,
+        right: &Expr,
+    ) -> Result<ExprImpl> {
+        if let Some(expr) = self.try_bind_row_comparison(left, op, right)? {
+            return Ok(expr);
+        }
+        self.bind_binary_op_on_values(left, op, right)
+    }
+
+    /// Binds a binary operator on two values, so a row constructor is a struct value here.
+    pub(super) fn bind_binary_op_on_values(
         &mut self,
         left: &Expr,
         op: &BinaryOperator,
@@ -74,6 +97,65 @@ impl Binder {
         )?);
 
         FunctionCall::new_binary_op_func(func_types, vec![bound_left, bound_right])
+    }
+
+    /// Binds a comparison of two row constructors, which is different from comparing struct values.
+    ///
+    /// As in Postgres, `=` and `<>` are the AND and OR of the comparisons of each pair of fields, and
+    /// the others compare up to the first pair that decides the result. If that pair has a NULL, the
+    /// result is NULL. Struct values, including a row constructor compared with one, are compared as
+    /// a whole, where NULL is the largest field value.
+    ///
+    /// Returns `None` if this is not a comparison of two row constructors.
+    fn try_bind_row_comparison(
+        &mut self,
+        left: &Expr,
+        op: &BinaryOperator,
+        right: &Expr,
+    ) -> Result<Option<ExprImpl>> {
+        let (Some(left), Some(right)) =
+            (row_constructor_fields(left), row_constructor_fields(right))
+        else {
+            return Ok(None);
+        };
+        let row_func_type = match op {
+            BinaryOperator::Eq | BinaryOperator::NotEq => None,
+            BinaryOperator::Lt => Some(ExprType::RowLessThan),
+            BinaryOperator::LtEq => Some(ExprType::RowLessThanOrEqual),
+            BinaryOperator::Gt => Some(ExprType::RowGreaterThan),
+            BinaryOperator::GtEq => Some(ExprType::RowGreaterThanOrEqual),
+            _ => return Ok(None),
+        };
+        if left.len() != right.len() {
+            return Err(ErrorCode::BindError(
+                "unequal number of entries in row expressions".to_owned(),
+            )
+            .into());
+        }
+        if left.is_empty() {
+            return Err(
+                ErrorCode::BindError("cannot compare rows of zero length".to_owned()).into(),
+            );
+        }
+
+        if let Some(row_func_type) = row_func_type {
+            let inputs = vec![self.bind_row(left)?, self.bind_row(right)?];
+            return Ok(Some(FunctionCall::new(row_func_type, inputs)?.into()));
+        }
+
+        let field_func_type = match op {
+            BinaryOperator::Eq => ExprType::Equal,
+            _ => ExprType::NotEqual,
+        };
+        let mut field_comparisons = Vec::with_capacity(left.len());
+        for (left, right) in left.iter().zip_eq_fast(right) {
+            let inputs = vec![self.bind_expr_inner(left)?, self.bind_expr_inner(right)?];
+            field_comparisons.push(FunctionCall::new(field_func_type, inputs)?.into());
+        }
+        Ok(Some(match op {
+            BinaryOperator::Eq => ExprImpl::and(field_comparisons),
+            _ => ExprImpl::or(field_comparisons),
+        }))
     }
 
     fn resolve_binary_operator(
