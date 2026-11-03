@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::array::StructValue;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -420,138 +421,46 @@ impl Condition {
         }
     }
 
+    /// A scan range for a single `(v1, v2, ...) > literal` or `<` on a pk prefix. The filter stays,
+    /// because the comparison is not true for some rows inside the range: `(1, NULL)` comes after
+    /// `(1, 5)` in pk order, but `(1, NULL) > (1, 5)` is NULL.
     fn split_row_cmp_to_scan_ranges(
         &self,
         table: &TableCatalog,
     ) -> Result<Option<(Vec<ScanRange>, Self)>> {
-        let (mut row_conjunctions, row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
-            self.conjunctions.clone().into_iter().partition(|expr| {
-                if let Some(f) = expr.as_function_call() {
-                    if let Some(left_input) = f.inputs().get(0)
-                        && let Some(left_input) = left_input.as_function_call()
-                        && matches!(left_input.func_type(), ExprType::Row)
-                        && left_input.inputs().iter().all(|x| x.is_input_ref())
-                        && let Some(right_input) = f.inputs().get(1)
-                        && right_input.is_literal()
-                    {
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
+        let row_cmps = self
+            .conjunctions
+            .iter()
+            .filter_map(|expr| {
+                let call = expr.as_function_call()?;
+                let is_greater = match call.func_type() {
+                    ExprType::RowGreaterThan => true,
+                    ExprType::RowLessThan => false,
+                    _ => return None,
+                };
+                let row = call.inputs()[0].as_function_call()?;
+                if row.func_type() != ExprType::Row
+                    || !row.inputs().iter().all(|input| input.is_input_ref())
+                {
+                    return None;
                 }
-            });
-        // optimize for single row conjunctions. More optimisations may come later
-        // For example, (v1,v2,v3) > (1, 2, 3) means all data from (1, 2, 3).
-        // Suppose v1 v2 v3 are both pk, we can push (v1,v2,v3）> (1,2,3) down to scan
-        // Suppose v1 v2 are both pk, we can push (v1,v2）> (1,2) down to scan and add (v1,v2,v3) > (1,2,3) in filter, it is still possible to reduce the value of scan
-        if row_conjunctions.len() == 1 {
-            let row_conjunction = row_conjunctions.pop().unwrap();
-            let row_left_inputs = row_conjunction
-                .as_function_call()
-                .unwrap()
-                .inputs()
-                .get(0)
-                .unwrap()
-                .as_function_call()
-                .unwrap()
-                .inputs();
-            let row_right_literal = row_conjunction
-                .as_function_call()
-                .unwrap()
-                .inputs()
-                .get(1)
-                .unwrap()
-                .as_literal()
-                .unwrap();
-            if !matches!(row_right_literal.get_data(), Some(ScalarImpl::Struct(_))) {
-                return Ok(None);
-            }
-            let row_right_literal_data = row_right_literal.get_data().clone().unwrap();
-            let right_iter = row_right_literal_data.as_struct().fields();
-            let func_type = row_conjunction.as_function_call().unwrap().func_type();
-            if row_left_inputs.len() > 1
-                && (matches!(func_type, ExprType::LessThan)
-                    || matches!(func_type, ExprType::GreaterThan))
-            {
-                let mut pk_struct = vec![];
-                let mut order_type = None;
-                let mut all_added = true;
-                let mut iter = row_left_inputs.iter().zip_eq_fast(right_iter);
-                for column_order in &table.pk {
-                    if let Some((left_expr, right_expr)) = iter.next() {
-                        if left_expr.as_input_ref().unwrap().index != column_order.column_index {
-                            all_added = false;
-                            break;
-                        }
-                        // A NULL field has no position in the pk, so the range stops before it.
-                        if right_expr.is_none() {
-                            all_added = false;
-                            break;
-                        }
-                        match order_type {
-                            Some(o) => {
-                                if o != column_order.order_type {
-                                    all_added = false;
-                                    break;
-                                }
-                            }
-                            None => order_type = Some(column_order.order_type),
-                        }
-                        pk_struct.push(right_expr.clone());
-                    }
-                }
-                // The row is longer than the pk, so the scan range only bounds a prefix of it.
-                if pk_struct.len() < row_left_inputs.len() {
-                    all_added = false;
-                }
-
-                // Here it is necessary to determine whether all of row is included in the `ScanRanges`, if so, the data for eq is not needed
-                if !pk_struct.is_empty() {
-                    if !all_added {
-                        let scan_range = ScanRange {
-                            eq_conds: vec![],
-                            range: match func_type {
-                                ExprType::GreaterThan => {
-                                    (Bound::Included(pk_struct), Bound::Unbounded)
-                                }
-                                ExprType::LessThan => {
-                                    (Bound::Unbounded, Bound::Included(pk_struct))
-                                }
-                                _ => unreachable!(),
-                            },
-                        };
-                        return Ok(Some((
-                            vec![scan_range],
-                            Condition {
-                                conjunctions: self.conjunctions.clone(),
-                            },
-                        )));
-                    } else {
-                        let scan_range = ScanRange {
-                            eq_conds: vec![],
-                            range: match func_type {
-                                ExprType::GreaterThan => {
-                                    (Bound::Excluded(pk_struct), Bound::Unbounded)
-                                }
-                                ExprType::LessThan => {
-                                    (Bound::Unbounded, Bound::Excluded(pk_struct))
-                                }
-                                _ => unreachable!(),
-                            },
-                        };
-                        return Ok(Some((
-                            vec![scan_range],
-                            Condition {
-                                conjunctions: row_conjunctions_without_struct,
-                            },
-                        )));
-                    }
-                }
-            }
-        }
-        Ok(None)
+                let literal = call.inputs()[1].as_literal()?.get_data().as_ref()?;
+                Some((row.inputs(), literal.as_struct(), is_greater))
+            })
+            .collect_vec();
+        let [(row, literal, is_greater)] = row_cmps[..] else {
+            return Ok(None);
+        };
+        Ok(
+            row_cmp_scan_range(table, row, literal, is_greater).map(|(scan_range, _)| {
+                (
+                    vec![scan_range],
+                    Condition {
+                        conjunctions: self.conjunctions.clone(),
+                    },
+                )
+            }),
+        )
     }
 
     /// x = 1 AND y = 2 AND z = 3 => [x, y, z]
@@ -1125,6 +1034,55 @@ impl Condition {
 pub struct ConditionDisplay<'a> {
     pub condition: &'a Condition,
     pub input_schema: &'a Schema,
+}
+
+/// The scan range for `(v1, v2, ...) > literal`, or `<` if `is_greater` is false, following pk order.
+/// It bounds the longest prefix of the row that runs along the pk in one direction, and the returned
+/// flag tells whether that is the whole row. Returns `None` if no prefix can be bounded.
+pub fn row_cmp_scan_range(
+    table: &TableCatalog,
+    row: &[ExprImpl],
+    literal: &StructValue,
+    is_greater: bool,
+) -> Option<(ScanRange, bool)> {
+    if row.len() <= 1 {
+        return None;
+    }
+    let mut prefix = vec![];
+    let mut order_type = None;
+    // The row can be longer or shorter than the pk.
+    #[expect(clippy::disallowed_methods)]
+    for ((input, value), column_order) in row.iter().zip_eq_fast(literal.fields()).zip(&table.pk) {
+        // A NULL field has no position in the pk, so the range stops before it.
+        if input.as_input_ref().unwrap().index != column_order.column_index
+            || value.is_none()
+            || *order_type.get_or_insert(column_order.order_type) != column_order.order_type
+        {
+            break;
+        }
+        prefix.push(value.clone());
+    }
+    if prefix.is_empty() {
+        return None;
+    }
+    let whole_row = prefix.len() == row.len();
+    let bound = if whole_row {
+        Bound::Excluded(prefix)
+    } else {
+        Bound::Included(prefix)
+    };
+    let range = if is_greater {
+        (bound, Bound::Unbounded)
+    } else {
+        (Bound::Unbounded, bound)
+    };
+    Some((
+        ScanRange {
+            eq_conds: vec![],
+            range,
+        },
+        whole_row,
+    ))
 }
 
 impl ConditionDisplay<'_> {

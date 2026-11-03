@@ -51,7 +51,7 @@ use crate::optimizer::PlanRoot;
 use crate::optimizer::plan_node::{BatchFilter, BatchLogSeqScan, BatchSeqScan, generic};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot, SchedulerError};
-use crate::utils::Condition;
+use crate::utils::{Condition, row_cmp_scan_range};
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
 
 pub enum CursorDataChunkStream {
@@ -942,7 +942,6 @@ impl SubscriptionCursor {
                 }
             })
             .collect::<Vec<_>>();
-        let max_split_range_gap = context.session_ctx().config().max_split_range_gap() as u64;
         let pks = table_catalog.pk();
         let pks = pks
             .iter()
@@ -978,21 +977,22 @@ impl SubscriptionCursor {
                     pk_rows.into_iter().map(|pk| pk.into()).collect(),
                     right_type.clone(),
                 );
+                let seek_range =
+                    row_cmp_scan_range(&table_catalog, left.inputs(), right_data.as_struct(), true);
                 let right = Literal::new(Some(right_data), right_type);
-                let (scan, predicate) = Condition {
+                // Rows after the seek position in pk order, so a struct comparison, where NULL is
+                // the largest field value, and not a row constructor comparison.
+                let predicate = Condition {
                     conjunctions: vec![
                         FunctionCall::new(ExprType::GreaterThan, vec![left.into(), right.into()])?
                             .into(),
                     ],
+                };
+                match seek_range {
+                    Some((scan, true)) => (Some(scan), None),
+                    Some((scan, false)) => (Some(scan), Some(predicate)),
+                    None => (None, Some(predicate)),
                 }
-                .split_to_scan_ranges(&table_catalog, max_split_range_gap)?;
-                if scan.len() > 1 {
-                    return Err(ErrorCode::InternalError(
-                        "Seek pk row should only generate one scan range".to_owned(),
-                    )
-                    .into());
-                }
-                (scan.first().cloned(), Some(predicate))
             }
         } else {
             (None, None)

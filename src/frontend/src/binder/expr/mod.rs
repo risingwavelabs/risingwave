@@ -268,6 +268,20 @@ impl Binder {
         list: &[Expr],
         negated: bool,
     ) -> Result<ExprImpl> {
+        if binary_op::row_constructor_fields(expr).is_some() {
+            let mut any_equal = Vec::with_capacity(list.len());
+            for elem in list {
+                any_equal.push(self.bind_binary_op(expr, &BinaryOperator::Eq, elem)?);
+            }
+            let any_equal = ExprImpl::or(any_equal);
+            return Ok(if negated {
+                FunctionCall::new_unchecked(ExprType::Not, vec![any_equal], DataType::Boolean)
+                    .into()
+            } else {
+                any_equal
+            });
+        }
+
         let left = self.bind_expr_inner(expr)?;
         let mut in_list_exprs = vec![left.clone()];
         let mut non_const_exprs = vec![];
@@ -523,17 +537,13 @@ impl Binder {
         low: &Expr,
         high: &Expr,
     ) -> Result<ExprImpl> {
-        let expr = self.bind_expr_inner(expr)?;
-        let low = self.bind_expr_inner(low)?;
-        let high = self.bind_expr_inner(high)?;
-
         let func_call = if negated {
             // negated = true: expr < low or expr > high
             FunctionCall::new_unchecked(
                 ExprType::Or,
                 vec![
-                    FunctionCall::new(ExprType::LessThan, vec![expr.clone(), low])?.into(),
-                    FunctionCall::new(ExprType::GreaterThan, vec![expr, high])?.into(),
+                    self.bind_binary_op(expr, &BinaryOperator::Lt, low)?,
+                    self.bind_binary_op(expr, &BinaryOperator::Gt, high)?,
                 ],
                 DataType::Boolean,
             )
@@ -542,9 +552,8 @@ impl Binder {
             FunctionCall::new_unchecked(
                 ExprType::And,
                 vec![
-                    FunctionCall::new(ExprType::GreaterThanOrEqual, vec![expr.clone(), low])?
-                        .into(),
-                    FunctionCall::new(ExprType::LessThanOrEqual, vec![expr, high])?.into(),
+                    self.bind_binary_op(expr, &BinaryOperator::GtEq, low)?,
+                    self.bind_binary_op(expr, &BinaryOperator::LtEq, high)?,
                 ],
                 DataType::Boolean,
             )
@@ -931,19 +940,14 @@ impl Binder {
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
-            let condition = condition.clone();
+            // As in Postgres, the operand is compared as a value, even if it is a row constructor.
             let condition = match operand {
-                Some(t) => Expr::BinaryOp {
-                    left: t.clone().into(),
-                    op: BinaryOperator::Eq,
-                    right: Box::new(condition),
-                },
-                None => condition,
+                Some(operand) => {
+                    self.bind_binary_op_on_values(operand, &BinaryOperator::Eq, condition)
+                }
+                None => self.bind_expr_inner(condition),
             };
-            inputs.push(
-                self.bind_expr_inner(&condition)
-                    .and_then(|expr| expr.enforce_bool_clause("CASE WHEN"))?,
-            );
+            inputs.push(condition.and_then(|expr| expr.enforce_bool_clause("CASE WHEN"))?);
             inputs.push(result);
         }
 

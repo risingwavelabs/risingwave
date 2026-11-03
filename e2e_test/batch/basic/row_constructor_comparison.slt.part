@@ -1,0 +1,858 @@
+# Expected results below match PostgreSQL. Row constructors compare field by field, and the result is
+# NULL when the deciding pair of fields has a NULL.
+
+query TTTT
+select (1, null::int) > (1, 5), (null::int, 1) > (1, 5), (1, null::int) < (1, 5), (null::int, 1) < (1, 5);
+----
+NULL NULL NULL NULL
+
+query TTTT
+select (1, null::int) >= (1, 5), (1, null::int) <= (1, 5), (1, 5) >= (1, 5), (1, 5) <= (1, 5);
+----
+NULL NULL t t
+
+# An earlier pair decides, so the NULL is not examined.
+query TT
+select (2, null::int) > (1, 5), (1, 2, null::int) < (1, 3, 0);
+----
+t t
+
+query TTTT
+select (1, null::int) = (1, 5), (1, null::int) = (2, 5), (1, null::int) = (1, null::int), (1, 5) = (1, 5);
+----
+NULL f NULL t
+
+query TTT
+select (1, null::int) <> (1, 5), (1, null::int) <> (2, 5), (1, 5) <> (1, 5);
+----
+NULL t f
+
+query TTTT
+select (1, null::int) in ((1, 5)), (1, null::int) in ((2, 5)), (1, null::int) in ((2, 5), (1, null::int)), (1, 5) in ((2, 5), (1, 5));
+----
+NULL f NULL t
+
+query TTT
+select (1, null::int) not in ((1, 5)), (1, null::int) not in ((2, 5)), (1, 5) not in ((1, 5));
+----
+NULL t f
+
+query TTT
+select (1, null::int) between (1, 0) and (2, 2), (1, 5) between (1, 0) and (2, 2), (1, 5) not between (1, 0) and (2, 2);
+----
+NULL t f
+
+# Both spellings are row constructors, also in parentheses.
+query TT
+select row(1, null::int) > row(1, 5), ((1, null::int)) > ((1, 5));
+----
+NULL NULL
+
+# Fields are coerced pair by pair.
+query TT
+select (1, 2) < (1, 2.5), (1, '2') = (1, 2);
+----
+t t
+
+# A field that is itself a row is a value inside the comparison, so it compares as a struct.
+query TT
+select ((1, null::int), 2) = ((1, null::int), 2), ((1, null::int), 2) > ((1, null::int), 1);
+----
+t t
+
+statement error unequal number of entries in row expressions
+select (1, 2) = (1, 2, 3);
+
+statement error unequal number of entries in row expressions
+select (1, 2) < (1, 2, 3);
+
+# Struct values keep comparing as a whole, where NULL is the largest field value.
+query TTT
+select (1, null::int)::struct<x int, y int> > (1, 5)::struct<x int, y int>, (1, null::int) > '(1,5)'::struct<x int, y int>, (1, null::int)::struct<x int, y int> = (1, null::int)::struct<x int, y int>;
+----
+t t t
+
+query T
+select case (1, null::int) when (1, null::int) then 'match' else 'no match' end;
+----
+match
+
+query TT
+select (1, null::int) is distinct from (1, 5), (1, null::int) is not distinct from (1, null::int);
+----
+t t
+
+statement ok
+create table row_cmp_n(a int, b int);
+
+statement ok
+insert into row_cmp_n values (1,3),(1,5),(1,6),(2,0),(null,1),(1,null),(2,null),(null,null);
+
+statement ok
+create table row_cmp_pk(a int, b int, primary key(a, b));
+
+statement ok
+insert into row_cmp_pk values (1,3),(1,5),(1,6),(2,0),(null,1),(1,null),(2,null),(null,null);
+
+statement ok
+create table row_cmp_short_pk(k int primary key, a int, b int);
+
+statement ok
+insert into row_cmp_short_pk select row_number, a, b from (select row_number() over (order by a, b) as row_number, a, b from row_cmp_n) t;
+
+statement ok
+flush;
+
+statement ok
+create materialized view row_cmp_nulls_first as select a, b from row_cmp_n order by a nulls first, b nulls first;
+
+statement ok
+create materialized view row_cmp_desc as select a, b from row_cmp_n order by a desc, b desc;
+
+statement ok
+create materialized view row_cmp_mixed as select a, b from row_cmp_n order by a, b desc;
+
+statement ok
+create table row_cmp_l(a int, b int);
+
+statement ok
+insert into row_cmp_l values (1,null),(null,1),(1,2),(null,null);
+
+statement ok
+create table row_cmp_r(x int, y int);
+
+statement ok
+insert into row_cmp_r values (1,null),(null,1),(1,2),(null,null);
+
+statement ok
+flush;
+
+# Over row_cmp_n.
+query II rowsort
+select a, b from row_cmp_n where (a, b) > (1, 5);
+----
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) >= (1, 5);
+----
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) < (1, 5);
+----
+1 3
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) <= (1, 5);
+----
+1 3
+1 5
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) = (1, 5);
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) <> (1, 5);
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) in ((1, 5), (1, null::int));
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) not in ((1, 5));
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) between (1, 0) and (2, 2);
+----
+1 3
+1 5
+1 6
+2 0
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) > (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) < (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) > (1, null::int);
+----
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) < (1, null::int);
+----
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) > (1, 5) or a = 1;
+----
+1 3
+1 5
+1 6
+1 NULL
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_n where (a = 1 and b < 6) or (a, b) > (1, 5);
+----
+1 3
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_n where (a, b) > (1, 5) or a is null;
+----
+1 6
+2 0
+2 NULL
+NULL 1
+NULL NULL
+
+# Over row_cmp_pk.
+query II rowsort
+select a, b from row_cmp_pk where (a, b) > (1, 5);
+----
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) >= (1, 5);
+----
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) < (1, 5);
+----
+1 3
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) <= (1, 5);
+----
+1 3
+1 5
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) = (1, 5);
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) <> (1, 5);
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) in ((1, 5), (1, null::int));
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) not in ((1, 5));
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) between (1, 0) and (2, 2);
+----
+1 3
+1 5
+1 6
+2 0
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) > (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) < (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) > (1, null::int);
+----
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) < (1, null::int);
+----
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) > (1, 5) or a = 1;
+----
+1 3
+1 5
+1 6
+1 NULL
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_pk where (a = 1 and b < 6) or (a, b) > (1, 5);
+----
+1 3
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_pk where (a, b) > (1, 5) or a is null;
+----
+1 6
+2 0
+2 NULL
+NULL 1
+NULL NULL
+
+# Over row_cmp_short_pk.
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) > (1, 5);
+----
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) >= (1, 5);
+----
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) < (1, 5);
+----
+1 3
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) <= (1, 5);
+----
+1 3
+1 5
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) = (1, 5);
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) <> (1, 5);
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) in ((1, 5), (1, null::int));
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) not in ((1, 5));
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) between (1, 0) and (2, 2);
+----
+1 3
+1 5
+1 6
+2 0
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) > (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) < (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) > (1, null::int);
+----
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) < (1, null::int);
+----
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) > (1, 5) or a = 1;
+----
+1 3
+1 5
+1 6
+1 NULL
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a = 1 and b < 6) or (a, b) > (1, 5);
+----
+1 3
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_short_pk where (a, b) > (1, 5) or a is null;
+----
+1 6
+2 0
+2 NULL
+NULL 1
+NULL NULL
+
+# Over row_cmp_nulls_first.
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) > (1, 5);
+----
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) >= (1, 5);
+----
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) < (1, 5);
+----
+1 3
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) <= (1, 5);
+----
+1 3
+1 5
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) = (1, 5);
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) <> (1, 5);
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) in ((1, 5), (1, null::int));
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) not in ((1, 5));
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) between (1, 0) and (2, 2);
+----
+1 3
+1 5
+1 6
+2 0
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) > (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) < (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) > (1, null::int);
+----
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) < (1, null::int);
+----
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) > (1, 5) or a = 1;
+----
+1 3
+1 5
+1 6
+1 NULL
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a = 1 and b < 6) or (a, b) > (1, 5);
+----
+1 3
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_nulls_first where (a, b) > (1, 5) or a is null;
+----
+1 6
+2 0
+2 NULL
+NULL 1
+NULL NULL
+
+# Over row_cmp_desc.
+query II rowsort
+select a, b from row_cmp_desc where (a, b) > (1, 5);
+----
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) >= (1, 5);
+----
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) < (1, 5);
+----
+1 3
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) <= (1, 5);
+----
+1 3
+1 5
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) = (1, 5);
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) <> (1, 5);
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) in ((1, 5), (1, null::int));
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) not in ((1, 5));
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) between (1, 0) and (2, 2);
+----
+1 3
+1 5
+1 6
+2 0
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) > (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) < (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) > (1, null::int);
+----
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) < (1, null::int);
+----
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) > (1, 5) or a = 1;
+----
+1 3
+1 5
+1 6
+1 NULL
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_desc where (a = 1 and b < 6) or (a, b) > (1, 5);
+----
+1 3
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_desc where (a, b) > (1, 5) or a is null;
+----
+1 6
+2 0
+2 NULL
+NULL 1
+NULL NULL
+
+# Over row_cmp_mixed.
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) > (1, 5);
+----
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) >= (1, 5);
+----
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) < (1, 5);
+----
+1 3
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) <= (1, 5);
+----
+1 3
+1 5
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) = (1, 5);
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) <> (1, 5);
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) in ((1, 5), (1, null::int));
+----
+1 5
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) not in ((1, 5));
+----
+1 3
+1 6
+2 0
+2 NULL
+NULL 1
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) between (1, 0) and (2, 2);
+----
+1 3
+1 5
+1 6
+2 0
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) > (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) < (null::int, 1);
+----
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) > (1, null::int);
+----
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) < (1, null::int);
+----
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) > (1, 5) or a = 1;
+----
+1 3
+1 5
+1 6
+1 NULL
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_mixed where (a = 1 and b < 6) or (a, b) > (1, 5);
+----
+1 3
+1 5
+1 6
+2 0
+2 NULL
+
+query II rowsort
+select a, b from row_cmp_mixed where (a, b) > (1, 5) or a is null;
+----
+1 6
+2 0
+2 NULL
+NULL 1
+NULL NULL
+
+query IIT rowsort
+select a, b, (a, b) > (1, 5) from row_cmp_n;
+----
+1 3 f
+1 5 f
+1 6 t
+1 NULL NULL
+2 0 t
+2 NULL t
+NULL 1 NULL
+NULL NULL NULL
+
+query I
+select count(*) filter (where (a, b) > (1, 5)) from row_cmp_n;
+----
+3
+
+query IIT rowsort
+select a, b, case when (a, b) > (1, 5) then 'y' else 'n' end from row_cmp_n;
+----
+1 3 n
+1 5 n
+1 6 y
+1 NULL n
+2 0 y
+2 NULL y
+NULL 1 n
+NULL NULL n
+
+query II rowsort
+select l.a, l.b from row_cmp_l l join row_cmp_r r on (l.a, l.b) = (r.x, r.y);
+----
+1 2
+
+query IIII rowsort
+select l.a, l.b, r.x, r.y from row_cmp_l l left join row_cmp_r r on (l.a, l.b) = (r.x, r.y);
+----
+1 2 1 2
+1 NULL NULL NULL
+NULL 1 NULL NULL
+NULL NULL NULL NULL
+
+query IIII rowsort
+select l.a, l.b, r.x, r.y from row_cmp_l l join row_cmp_r r on (l.a, l.b) < (r.x, r.y);
+----
+
+query IIII rowsort
+select l.a, l.b, r.x, r.y from row_cmp_l l join row_cmp_r r on (l.a, l.b) <> (r.x, r.y);
+----
+1 2 NULL 1
+NULL 1 1 2
+
+statement ok
+drop materialized view row_cmp_nulls_first;
+
+statement ok
+drop materialized view row_cmp_desc;
+
+statement ok
+drop materialized view row_cmp_mixed;
+
+statement ok
+drop table row_cmp_n;
+
+statement ok
+drop table row_cmp_pk;
+
+statement ok
+drop table row_cmp_short_pk;
+
+statement ok
+drop table row_cmp_l;
+
+statement ok
+drop table row_cmp_r;
