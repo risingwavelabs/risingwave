@@ -36,7 +36,6 @@ pub use plan_visitor::DataFusionExecuteCheckerExt;
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
-use risingwave_pb::plan_common::source_ingest_mode::IngestMode;
 
 pub mod backfill_order_strategy;
 mod logical_optimization;
@@ -1128,13 +1127,7 @@ impl LogicalPlanRoot {
             .as_ref()
             .map(|catalog| {
                 catalog.with_properties.supports_full_reload_refresh()
-                    && matches!(
-                        catalog
-                            .ingest_mode
-                            .as_ref()
-                            .map(|ingest_mode| ingest_mode.ingest_mode),
-                        Some(Some(IngestMode::FullReload(_)))
-                    )
+                    && catalog.ingest_mode.is_full_reload()
             })
             .unwrap_or(false);
 

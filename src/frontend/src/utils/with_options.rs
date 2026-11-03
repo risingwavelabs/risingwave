@@ -26,10 +26,6 @@ use risingwave_connector::source::kafka::private_link::{
 use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::plan_common::SourceIngestMode;
-use risingwave_pb::plan_common::source_ingest_mode::{
-    IngestMode, SourceIngestModeFullReload, SourceIngestModeStreaming,
-};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
@@ -431,87 +427,101 @@ fn resolve_secret_refs_inner(
     Ok(resolved_secret_refs)
 }
 
-pub(crate) fn resolve_source_ingest_mode_in_with_option(
-    with_options: &mut WithOptions,
-) -> RwResult<Option<SourceIngestMode>> {
-    let source_refresh_interval_sec =
-        {
-            if let Some(maybe_int) = with_options.remove(SOURCE_REFRESH_INTERVAL_SEC_KEY) {
-                let some_int = maybe_int.parse::<i64>().map_err(|e| {
-                RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "`{}` must be a positive integer and larger than 0, but got: {} (error: {})",
-                    SOURCE_REFRESH_INTERVAL_SEC_KEY, maybe_int, e.as_report()
-                )))
-            })?;
-                if some_int <= 0 {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "`{}` must be larger than 0, but got: {}",
-                        SOURCE_REFRESH_INTERVAL_SEC_KEY, some_int
-                    ))));
-                }
-                Some(some_int)
-            } else {
-                None
-            }
-        };
+/// How a table declares it is refreshed, through `refresh_mode` and `refresh_interval_sec`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshMode {
+    /// Ingests continuously.
+    Streaming,
+    /// Reloads the whole source on `REFRESH TABLE`, or every `interval_sec` if set.
+    FullReload { interval_sec: Option<i64> },
+}
 
-    let mut is_full_reload = false;
-    let source_ingest_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
-    let source_ingest_mode = if let Some(source_ingest_mode_str) = &source_ingest_mode_str {
-        Some(match source_ingest_mode_str.to_uppercase().as_str() {
-            "STREAMING" => {
-                if source_refresh_interval_sec.is_some() {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "`{}` is not allowed when `{}` is 'STREAMING'",
-                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
-                    ))));
-                }
-                SourceIngestMode {
-                    ingest_mode: Some(IngestMode::Streaming(SourceIngestModeStreaming {})),
-                }
-            }
-            "FULL_RELOAD" => {
-                is_full_reload = true;
-                SourceIngestMode {
-                    ingest_mode: Some(IngestMode::FullReload(SourceIngestModeFullReload {
-                        refresh_interval_sec: source_refresh_interval_sec,
-                    })),
-                }
-            }
-            _ => {
-                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
-                    SOURCE_REFRESH_MODE_KEY, source_ingest_mode_str
-                ))));
-            }
-        })
-    } else {
-        // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
-        if source_refresh_interval_sec.is_some() {
-            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                "`{}` is not allowed when `{}` is not 'FULL_RELOAD'",
-                SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
-            ))));
+impl RefreshMode {
+    const ALL: [Self; 2] = [Self::Streaming, Self::FullReload { interval_sec: None }];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Streaming => "STREAMING",
+            Self::FullReload { .. } => "FULL_RELOAD",
         }
-        None
-    };
+    }
 
-    // Batch connectors require FULL_RELOAD mode.
-    if with_options.is_batch_connector() && !is_full_reload {
-        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-            "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
-            with_options.get_connector().unwrap(),
-        ))));
+    fn is_full_reload(self) -> bool {
+        matches!(self, Self::FullReload { .. })
     }
-    if is_full_reload && !with_options.supports_full_reload_refresh() {
-        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-            "FULL_RELOAD refresh mode is only supported for connectors: s3, gcs, __for_testing_only_batch_posix_fs, iceberg, adbc_snowflake, but got: {}",
-            with_options
-                .get_connector()
-                .unwrap_or_else(|| "<missing>".to_owned()),
-        ))));
+}
+
+/// Resolves the `refresh_mode` option and the options it owns. Returns `None` if it is not set.
+pub(crate) fn resolve_source_refresh_mode_in_with_option(
+    with_options: &mut WithOptions,
+) -> RwResult<Option<RefreshMode>> {
+    let refresh_mode = with_options
+        .remove(SOURCE_REFRESH_MODE_KEY)
+        .map(|value| {
+            RefreshMode::ALL
+                .into_iter()
+                .find(|mode| mode.name().eq_ignore_ascii_case(&value))
+                .ok_or_else(|| {
+                    invalid_parameter(format!(
+                        "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
+                        SOURCE_REFRESH_MODE_KEY, value
+                    ))
+                })
+        })
+        .transpose()?;
+
+    let interval_sec = with_options
+        .remove(SOURCE_REFRESH_INTERVAL_SEC_KEY)
+        .map(|value| {
+            if !refresh_mode.is_some_and(RefreshMode::is_full_reload) {
+                return Err(invalid_parameter(format!(
+                    "`{}` is only allowed when `{}` is 'FULL_RELOAD'",
+                    SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                )));
+            }
+            value
+                .parse::<i64>()
+                .ok()
+                .filter(|interval_sec| *interval_sec > 0)
+                .ok_or_else(|| {
+                    invalid_parameter(format!(
+                        "`{}` must be a positive integer, but got: {}",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, value
+                    ))
+                })
+        })
+        .transpose()?;
+
+    let connector = with_options
+        .get_connector()
+        .unwrap_or_else(|| "<missing>".to_owned());
+    match refresh_mode {
+        Some(RefreshMode::FullReload { .. }) if !with_options.supports_full_reload_refresh() => {
+            return Err(invalid_parameter(format!(
+                "FULL_RELOAD refresh mode is only supported for connectors: s3, gcs, __for_testing_only_batch_posix_fs, iceberg, adbc_snowflake, but got: {}",
+                connector
+            )));
+        }
+        // Batch connectors require FULL_RELOAD mode.
+        mode if with_options.is_batch_connector()
+            && !mode.is_some_and(RefreshMode::is_full_reload) =>
+        {
+            return Err(invalid_parameter(format!(
+                "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
+                connector
+            )));
+        }
+        _ => {}
     }
-    Ok(source_ingest_mode)
+
+    Ok(refresh_mode.map(|mode| match mode {
+        RefreshMode::Streaming => RefreshMode::Streaming,
+        RefreshMode::FullReload { .. } => RefreshMode::FullReload { interval_sec },
+    }))
+}
+
+fn invalid_parameter(message: String) -> RwError {
+    RwError::from(ErrorCode::InvalidParameterValue(message))
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(
@@ -647,5 +657,52 @@ impl TryFrom<&Statement> for WithOptions {
 
             _ => Ok(Default::default()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_refresh_mode() {
+        assert_eq!(resolve(&[("connector", "kafka")]).unwrap(), None);
+        assert_eq!(
+            resolve(&[("connector", "kafka"), ("refresh_mode", "streaming")]).unwrap(),
+            Some(RefreshMode::Streaming)
+        );
+        assert_eq!(
+            resolve(&[
+                ("connector", "iceberg"),
+                ("refresh_mode", "FULL_RELOAD"),
+                ("refresh_interval_sec", "10"),
+            ])
+            .unwrap(),
+            Some(RefreshMode::FullReload {
+                interval_sec: Some(10)
+            })
+        );
+
+        for invalid in [
+            vec![("connector", "iceberg"), ("refresh_interval_sec", "10")],
+            vec![
+                ("connector", "iceberg"),
+                ("refresh_mode", "FULL_RELOAD"),
+                ("refresh_interval_sec", "0"),
+            ],
+            vec![("connector", "kafka"), ("refresh_mode", "FULL_RELOAD")],
+        ] {
+            assert!(resolve(&invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    fn resolve(options: &[(&str, &str)]) -> RwResult<Option<RefreshMode>> {
+        let mut with_options = WithOptions::new_with_options(
+            options
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
+        );
+        resolve_source_refresh_mode_in_with_option(&mut with_options)
     }
 }
