@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Exercise the real HTTP client and writer, including log consumption and replay.
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -47,6 +47,7 @@ struct ServerState {
     // Operation, occurrence, and whether the commit succeeds before losing its reply.
     fail: Option<(&'static str, usize, bool)>,
     block: Option<&'static str>,
+    rollback_fails: bool,
 }
 
 struct TestServer {
@@ -74,7 +75,7 @@ async fn handle(
     if operation == "load" && body.is_empty() {
         return Json(serde_json::json!({})).into_response();
     }
-    let (fail, block) = {
+    let (fail, block, rollback_failed) = {
         let mut state = state.lock().unwrap();
         state.events.push(Event {
             operation: operation.to_owned(),
@@ -90,7 +91,9 @@ async fn handle(
             .fail
             .filter(|(op, n, _)| *op == operation && *n == occurrence);
         let block = state.block == Some(operation);
-        if fail.is_none() || fail.is_some_and(|(_, _, committed)| committed) {
+        let rollback_failed = operation == "rollback"
+            && (state.rollback_fails || state.committed_labels.contains(&label));
+        if !rollback_failed && (fail.is_none() || fail.is_some_and(|(_, _, committed)| committed)) {
             match operation {
                 "load" => {
                     let rows = serde_json::Deserializer::from_slice(&body)
@@ -111,7 +114,7 @@ async fn handle(
                 _ => {}
             }
         }
-        (fail, block)
+        (fail, block, rollback_failed)
     };
     changed.notify_waiters();
     if block {
@@ -122,8 +125,8 @@ async fn handle(
         return (StatusCode::BAD_GATEWAY, "lost commit reply").into_response();
     }
     Json(serde_json::json!({
-        "Status": if fail.is_some() { "Fail" } else { "OK" },
-        "Message": if fail.is_some() { "injected failure" } else { "" },
+        "Status": if fail.is_some() || rollback_failed { "Fail" } else { "OK" },
+        "Message": if rollback_failed { "rollback rejected" } else if fail.is_some() { "injected failure" } else { "" },
         "Label": label,
     }))
     .into_response()
@@ -384,19 +387,48 @@ async fn oversized_row_does_not_commit_pending_data_or_begin_transaction() {
 
 #[derive(Default)]
 struct TestLog {
-    items: VecDeque<(u64, LogStoreReadItem)>,
+    items: Vec<(u64, LogStoreReadItem)>,
+    cursor: usize,
     truncated: Vec<TruncateOffset>,
 }
 
 impl SinkLogReader for &mut TestLog {
     async fn start_from(&mut self, _: Option<u64>) -> LogStoreResult<()> {
+        // Recreate a reader from the durable truncation boundary, retaining the
+        // original log entries so tests cannot accidentally omit replayed rows.
+        let epoch = self.truncated.last().map_or(0, TruncateOffset::epoch);
+        self.cursor = self
+            .items
+            .iter()
+            .position(|(e, _)| *e > epoch)
+            .unwrap_or(self.items.len());
         Ok(())
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        self.items
-            .pop_front()
-            .ok_or_else(|| anyhow!("end of test log"))
+        let (epoch, item) = self
+            .items
+            .get(self.cursor)
+            .ok_or_else(|| anyhow!("end of test log"))?;
+        let item = match item {
+            LogStoreReadItem::StreamChunk { chunk, chunk_id } => LogStoreReadItem::StreamChunk {
+                chunk: chunk.clone(),
+                chunk_id: *chunk_id,
+            },
+            LogStoreReadItem::Barrier {
+                is_checkpoint,
+                new_vnode_bitmap,
+                is_stop,
+                schema_change,
+            } => LogStoreReadItem::Barrier {
+                is_checkpoint: *is_checkpoint,
+                new_vnode_bitmap: new_vnode_bitmap.clone(),
+                is_stop: *is_stop,
+                schema_change: schema_change.clone(),
+            },
+        };
+        self.cursor += 1;
+        Ok((*epoch, item))
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
@@ -438,7 +470,7 @@ async fn consume(writer: StarrocksSinkWriter, log: &mut TestLog, interval: u64) 
     .consume_log_and_sink(log)
     .await
     .unwrap_err()
-    .to_string()
+    .to_report_string()
 }
 
 #[tokio::test]
@@ -456,11 +488,7 @@ async fn early_commits_keep_checkpoint_truncation_schedule() {
     assert_eq!(server.events("commit").len(), 2);
     assert!(log.truncated.is_empty());
     // Replay from the unchanged truncation boundary, then reach the interval.
-    log.items.extend([
-        TestLog::chunk(1, " I\n + 1\n + 2\n + 3"),
-        TestLog::checkpoint(1),
-        TestLog::checkpoint(2),
-    ]);
+    log.items.push(TestLog::checkpoint(2));
     assert_eq!(
         consume(server.writer(None, Some(8), true), &mut log, 2).await,
         "end of test log"
@@ -493,10 +521,7 @@ async fn failed_rollover_and_checkpoint_commits_do_not_truncate_and_can_replay()
             server.events("begin").len(),
             if occurrence == 1 { 1 } else { 2 }
         );
-        // Clear the failed attempt's unread items and replay all untruncated data.
-        log.items.clear();
-        log.items
-            .extend([TestLog::chunk(1, " I\n + 1\n + 2"), TestLog::checkpoint(1)]);
+        // Recreate the writer and read the same log from its truncation boundary.
         server.state.lock().unwrap().fail = None;
         assert_eq!(
             consume(server.writer(None, Some(8), true), &mut log, 1).await,
@@ -539,5 +564,65 @@ async fn cancellation_during_rollover_retains_label_for_drop_rollback() {
             server.events("begin")[0].label
         );
         assert_eq!(server.events("begin").len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn rollback_failure_preserves_the_original_commit_error() {
+    let server = TestServer::start().await;
+    {
+        let mut state = server.state.lock().unwrap();
+        state.fail = Some(("commit", 1, false));
+        state.rollback_fails = true;
+    }
+    let mut log = TestLog::default();
+    log.items
+        .extend([TestLog::chunk(1, " I\n + 1\n + 2"), TestLog::checkpoint(1)]);
+    let error = consume(server.writer(None, Some(8), true), &mut log, 1).await;
+    assert!(error.contains("injected failure"), "{error}");
+    assert!(!error.contains("rollback rejected"), "{error}");
+    assert!(log.truncated.is_empty());
+    assert_eq!(server.events("rollback").len(), 1);
+}
+
+#[tokio::test]
+async fn replay_skips_truncated_checkpoints_and_replays_only_the_untruncated_tail() {
+    for lost_reply in [false, true] {
+        let server = TestServer::start().await;
+        server.state.lock().unwrap().fail = Some(("commit", 3, lost_reply));
+        let mut log = TestLog::default();
+        log.items.extend([
+            TestLog::chunk(1, " I\n + 1\n + 2"),
+            TestLog::checkpoint(1),
+            TestLog::chunk(2, " I\n + 3\n + 4"),
+            TestLog::checkpoint(2),
+        ]);
+        let error = consume(server.writer(None, Some(8), true), &mut log, 1).await;
+        assert_ne!(error, "end of test log");
+        assert_eq!(log.truncated, [TruncateOffset::Barrier { epoch: 1 }]);
+        server.state.lock().unwrap().fail = None;
+        assert_eq!(
+            consume(server.writer(None, Some(8), true), &mut log, 1).await,
+            "end of test log"
+        );
+        assert_eq!(
+            log.truncated,
+            [
+                TruncateOffset::Barrier { epoch: 1 },
+                TruncateOffset::Barrier { epoch: 2 }
+            ]
+        );
+        let state = server.state.lock().unwrap();
+        for id in [1, 2, 3, 4] {
+            assert_eq!(
+                state
+                    .committed_rows
+                    .iter()
+                    .filter(|row| row["id"] == id)
+                    .count(),
+                1 + usize::from(id == 3 && lost_reply),
+                "id={id}, lost_reply={lost_reply}"
+            );
+        }
     }
 }
