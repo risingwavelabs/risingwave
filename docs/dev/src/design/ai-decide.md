@@ -193,9 +193,23 @@ not provide independent per-key scheduling.
 Ordinary streaming projection can evaluate multiple chunks with
 `streaming.developer.project_expr_concurrency` (default 1), still subject to the
 AI_DECIDE instance's shared request limit. The separately configured
-`project_expr_inflight_request_concurrency` limits chunk evaluations, not individual
-HTTP requests. `StreamMaterializedExprs` continues to evaluate chunks sequentially;
-the AI_DECIDE row-level concurrency works within each chunk.
+`project_expr_inflight_request_concurrency` budgets visible rows being evaluated,
+not individual HTTP requests. A whole chunk may cross the row budget once; even
+rows with NULL arguments count toward this budget although they make no request.
+Both settings use `0` for unlimited. The planner identifies AI_DECIDE as async
+and separates it from synchronous computations while preserving conditional
+evaluation and shared results.
+
+Set `streaming_project_expr_concurrency` and
+`streaming_project_expr_inflight_request_concurrency` before creating a job to
+capture per-job overrides, or use the existing `ALTER ... SET/RESET CONFIG`
+mechanism for existing jobs (effective after recovery). See
+[asynchronous projection](async-projection.md) for the limits and override rules.
+These settings do not change AI_DECIDE's fixed eight-request limit or apply to
+batch execution. `StreamMaterializedExprs` continues to evaluate chunks
+sequentially without these Project limits; AI_DECIDE's request limit still
+applies within each chunk. The row budget is not a replacement for request-level
+concurrency control.
 
 Each attempt has a 30-second timeout. Transport errors, HTTP 429, and HTTP 5xx
 responses retry up to three attempts total, using 100 ms then 200 ms delays.

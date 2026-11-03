@@ -71,6 +71,19 @@
   expected_outputs:
     - binder_error
 
+- name: mixed append-only projections isolate a shared conditional AI result
+  sql: |
+    CREATE TABLE contexts (id INT, state JSONB, enabled BOOLEAN) APPEND ONLY;
+    SELECT id + 1 AS next_id, (answer).q AS first_read, (answer).q AS second_read
+    FROM (
+      SELECT id, CASE WHEN enabled THEN ai_decide(state, 'http://127.0.0.1:1/evaluate',
+        'test-model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key') END AS answer
+      FROM contexts
+    ) e;
+  expected_outputs:
+    - stream_plan
+    - stream_dist_plan
+
 - name: wrong argument type is rejected
   sql: SELECT ai_decide(42, 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key');
   expected_outputs:

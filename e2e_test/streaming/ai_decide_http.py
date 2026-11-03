@@ -140,13 +140,27 @@ def exercise(server):
     assert server.count() == before + 1, "response contract failure must not retry"
 
     for append_only in [False, True]:
-        sql("CREATE TABLE ai_fields_input (id INT, payload JSONB)" + (" APPEND ONLY" if append_only else ""))
-        sql(f"CREATE MATERIALIZED VIEW ai_fields AS SELECT id, (result).signal AS signal, (result).team.choice AS team, (result).size.score AS size FROM (SELECT id, {analyze('payload')} AS result FROM ai_fields_input) e")
+        sql("CREATE TABLE ai_fields_input (id INT, payload JSONB, enabled BOOLEAN)" + (" APPEND ONLY" if append_only else ""))
+        # Keep the settings and DDL in one session so the job captures both overrides.
+        # A two-row input can exceed the row budget without preventing progress.
+        sql(f"SET streaming_project_expr_concurrency = 4; "
+            f"SET streaming_project_expr_inflight_request_concurrency = 1; "
+            f"CREATE MATERIALIZED VIEW ai_fields AS "
+            f"SELECT id, id + 1 AS next_id, (result).signal AS signal, "
+            f"(result).team.choice AS team, (result).size.score AS size "
+            f"FROM (SELECT id, CASE WHEN enabled THEN {analyze('payload')} END AS result "
+            f"FROM ai_fields_input) e")
+        assert sql("SELECT key, value FROM rw_streaming_job_config WHERE name = 'ai_fields' "
+                   "AND key LIKE 'streaming.developer.project_expr_%' ORDER BY key") == [
+            "streaming.developer.project_expr_concurrency|4",
+            "streaming.developer.project_expr_inflight_request_concurrency|1",
+        ]
         before = server.count()
-        sql("INSERT INTO ai_fields_input VALUES (1, '{\"message\":\"first\"}')")
-        wait_rows("SELECT signal FROM ai_fields", [0.1])
-        assert sql("SELECT team, size FROM ai_fields") == ["billing|1"]
-        assert server.count() == before + 1, "stream field projection duplicated inference"
+        sql("INSERT INTO ai_fields_input VALUES "
+            "(1, '{\"message\":\"first\"}', true), (2, '{\"malformed\":true}', false)")
+        wait_rows("SELECT jsonb_build_array(next_id, signal, team, size) FROM ai_fields ORDER BY id",
+                  [[2, 0.1, "billing", 1], [3, None, None, None]])
+        assert server.count() == before + 1, "projection duplicated inference or evaluated a false branch"
         if not append_only:
             sql("DELETE FROM ai_fields_input")
             wait_rows("SELECT signal FROM ai_fields", [])
@@ -171,9 +185,9 @@ def exercise(server):
     sql("DELETE FROM jev_input")
     wait_rows(states("jev_direct"), [])
     assert server.count() == calls, "deletion reevaluated the remote function"
-    # RisingWave's streaming float SUM produces zero after the last retraction.
-    actual = sql("SELECT n, generation_sum FROM jev_totals")
-    assert actual == ["0|0"], actual
+    # An empty SUM is NULL after all saved results have been retracted.
+    actual = sql("SELECT n, generation_sum IS NULL FROM jev_totals")
+    assert actual == ["0|t"], actual
     sql("DROP MATERIALIZED VIEW jev_totals")
     sql("DROP MATERIALIZED VIEW jev_direct")
 

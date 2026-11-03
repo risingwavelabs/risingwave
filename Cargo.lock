@@ -15007,7 +15007,7 @@ dependencies = [
  "prometheus",
  "rand 0.9.5",
  "regex",
- "reqwest 0.12.25",
+ "reqwest 0.13.4",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_expr",

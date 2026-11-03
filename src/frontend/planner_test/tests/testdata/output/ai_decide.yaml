@@ -142,6 +142,36 @@
 
     Caused by:
       Invalid input syntax: ai_decide expects exactly five arguments
+- name: mixed append-only projections isolate a shared conditional AI result
+  sql: |
+    CREATE TABLE contexts (id INT, state JSONB, enabled BOOLEAN) APPEND ONLY;
+    SELECT id + 1 AS next_id, (answer).q AS first_read, (answer).q AS second_read
+    FROM (
+      SELECT id, CASE WHEN enabled THEN ai_decide(state, 'http://127.0.0.1:1/evaluate',
+        'test-model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key') END AS answer
+      FROM contexts
+    ) e;
+  stream_plan: |-
+    StreamMaterialize { columns: [next_id, first_read, second_read, contexts._row_id(hidden)], stream_key: [contexts._row_id], pk_columns: [contexts._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [(contexts.id + 1:Int32) as $expr3, $expr2, $expr2, contexts._row_id] }
+      └─StreamProject { exprs: [contexts.id, $expr1, Field($expr1, 0:Int32) as $expr2, contexts._row_id] }
+        └─StreamProject { exprs: [contexts.id, Case(contexts.enabled, AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>")) as $expr1, contexts._row_id] }
+          └─StreamTableScan { table: contexts, columns: [contexts.id, contexts.state, contexts.enabled, contexts._row_id], stream_scan_type: SnapshotBackfill, stream_key: [contexts._row_id], pk: [_row_id], dist: UpstreamHashShard(contexts._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [next_id, first_read, second_read, contexts._row_id(hidden)], stream_key: [contexts._row_id], pk_columns: [contexts._row_id], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [(contexts.id + 1:Int32) as $expr3, $expr2, $expr2, contexts._row_id] }
+        └── StreamProject { exprs: [contexts.id, $expr1, Field($expr1, 0:Int32) as $expr2, contexts._row_id] }
+            └── StreamProject { exprs: [contexts.id, Case(contexts.enabled, AiDecide(contexts.state, 'http://127.0.0.1:1/evaluate':Varchar, 'test-model':Varchar, '{"q": {"instructions": "Resolved?", "type": "noul"}}':Jsonb, "<redacted>")) as $expr1, contexts._row_id] }
+                └── StreamTableScan { table: contexts, columns: [contexts.id, contexts.state, contexts.enabled, contexts._row_id], stream_scan_type: SnapshotBackfill, stream_key: [contexts._row_id], pk: [_row_id], dist: UpstreamHashShard(contexts._row_id) }
+                    ├── tables: [ StreamScan: 0 ]
+                    ├── Upstream
+                    └── BatchPlanNode
+
+    Table 0 { columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4294967294 { columns: [ next_id, first_read, second_read, contexts._row_id, _rw_timestamp ], primary key: [ $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 3 ], read pk prefix len hint: 1 }
+
 - name: wrong argument type is rejected
   sql: SELECT ai_decide(42, 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key');
   binder_error: |

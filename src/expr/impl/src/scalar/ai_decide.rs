@@ -64,6 +64,7 @@ impl std::fmt::Debug for AiDecide {
 #[build_function(
     "ai_decide(jsonb, varchar, varchar, jsonb, varchar) -> struct",
     volatile,
+    async,
     type_infer = "unreachable"
 )]
 fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
