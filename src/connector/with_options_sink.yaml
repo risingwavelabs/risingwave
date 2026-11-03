@@ -2092,6 +2092,16 @@ StarrocksConfig:
       Defaults to unlimited.
     required: false
     allow_alter_on_fly: true
+  - name: starrocks.max_transaction_size_bytes
+    field_type: u64
+    comments: |-
+      The maximum cumulative serialized payload bytes per writer/transaction.
+      Defaults to unlimited. Before the next row would exceed this limit, commit
+      the current transaction, even before `commit_checkpoint_interval` elapses.
+      A single oversized row is rejected. Early commits can increase data versions;
+      recovery can replay committed data under the sink's at-least-once contract.
+    required: false
+    allow_alter_on_fly: true
   - name: starrocks.ignore_json_size
     field_type: bool
     comments: |-
