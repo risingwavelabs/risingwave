@@ -71,3 +71,50 @@ Append-only input and upsert projections of non-key columns use regular scalar p
 The explicit unsafe option for unmaterialized impure expressions also uses regular projections.
 Cross-chunk concurrency for the stateful materialization path requires separate state-ordering
 work.
+
+## Executor mock tests and benchmark
+
+`executor::test_utils::async_project` runs the real `ProjectExecutor` with a test-only expression
+that models one batch RPC per chunk. Each batch specifies physical capacity, visible rows, and
+latency. It returns the input identifiers unchanged so the harness can verify every output chunk,
+visibility bitmap, and checkpoint barrier in order. The mock is available only in test builds or
+with the stream crate's `test` feature.
+
+Run the deterministic, virtual-time configuration regressions with:
+
+```sh
+cargo test --locked -p risingwave_stream --lib executor::test_utils::async_project::tests
+```
+
+They exercise both limits through the complete executor, including unlimited settings,
+single oversized admissions, invisible and zero-visible rows, release before ordered output,
+slow-head buffering, checkpoint order, and cancellation. Existing gated-expression tests also
+cover expression errors and watermarks. No wall-time performance threshold is asserted in CI.
+
+Run the wall-clock benchmark with:
+
+```sh
+PROJECT_BENCH_CHUNKS=64 PROJECT_BENCH_ROWS=128 PROJECT_BENCH_DELAY_MS=10 \
+PROJECT_BENCH_REPEATS=3 \
+cargo bench --locked -p risingwave_stream --bench async_project > async-project.jsonl
+```
+
+The environment variables above are optional and show their defaults. Each case warms up once
+and writes one JSON object per measured repetition. The benchmark scans chunk limits `1/2/4/8/16`
+with unlimited rows, then scans row limits with a chunk window of 16. Additional cases model
+deterministic latency jitter, varying batch sizes and visibility, a slow first request, and
+zero-latency scheduling. The unlimited-window baseline always uses finite input.
+
+Reported statistics include visible rows/s, total elapsed time, chunk output p50/p95/p99,
+evaluation p95, completed-to-output wait p95, checkpoint admission-to-output p95, and peak active
+chunks, active visible rows, window chunks, and completed-but-not-emitted chunks. Output latency
+starts when all finite input is queued, so it includes source backlog; checkpoint latency starts
+when the source hands a barrier to the executor. The completed-buffer count includes a completed
+result that is immediately ready for output. Peaks are counts rather than byte-memory estimates.
+
+Construction and result aggregation are outside the timed interval; instrumentation and output
+validation are inside it. Compare repetitions on the same host and use the zero-latency cases to
+identify instrumentation overhead. For a quick build using existing development artifacts,
+`cargo bench --profile dev` runs the same scenarios, but its numbers should be labeled as development
+measurements. This finite, single-executor latency model isolates scheduling effects; it does not
+predict external-service capacity, multi-actor resource contention, or cluster-wide throughput.

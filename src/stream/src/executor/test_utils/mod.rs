@@ -14,6 +14,7 @@
 
 // Re-export everything from submodules
 pub mod agg_executor;
+pub mod async_project;
 pub mod hash_join_executor;
 mod mock_source;
 pub mod top_n_executor;
