@@ -19,16 +19,10 @@ package com.risingwave.connector.source.common;
 import com.risingwave.java.binding.SingletonRow;
 import com.risingwave.proto.ConnectorServiceProto;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import oracle.ucp.jdbc.PoolDataSource;
 
 /** Byte-array JNI facade for {@link OracleExternalTable}. */
 public final class JniOracleExternalTable {
-    private static final AtomicLong NEXT_SESSION_ID = new AtomicLong(1);
-    private static final Map<Long, OracleExternalTable.Session> SESSIONS =
-            new ConcurrentHashMap<>();
-
     private JniOracleExternalTable() {}
 
     public static byte[] discover(byte[] propertiesBytes) {
@@ -40,26 +34,41 @@ public final class JniOracleExternalTable {
                                 .toByteArray());
     }
 
-    public static long openSession(byte[] propertiesBytes) {
+    public static Object openPool(byte[] propertiesBytes) {
         return invoke(
+                () ->
+                        OracleExternalTable.openPool(
+                                ConnectorServiceProto.OracleConnectionProperties.parseFrom(
+                                                propertiesBytes)
+                                        .getPropertiesMap()));
+    }
+
+    public static void closePool(Object pool) {
+        invoke(
                 () -> {
-                    var properties =
-                            ConnectorServiceProto.OracleConnectionProperties.parseFrom(
-                                    propertiesBytes);
-                    var sessionId = NEXT_SESSION_ID.getAndIncrement();
-                    SESSIONS.put(
-                            sessionId,
-                            OracleExternalTable.openSession(properties.getPropertiesMap()));
-                    return sessionId;
+                    OracleExternalTable.closePool((PoolDataSource) pool);
+                    return null;
                 });
     }
 
-    public static long currentScn(long sessionId) {
-        return invoke(() -> session(sessionId).currentScn());
+    public static long currentScn(Object pool, Object cancel) {
+        return invoke(
+                () ->
+                        OracleExternalTable.currentScn(
+                                (PoolDataSource) pool,
+                                (OracleExternalTable.OracleStatementCancel) cancel));
+    }
+
+    public static Object newStatementCancel(String table, String query) {
+        return new OracleExternalTable.OracleStatementCancel(table, query);
+    }
+
+    public static void cancelStatement(Object cancel) {
+        ((OracleExternalTable.OracleStatementCancel) cancel).cancel();
     }
 
     public static void snapshotRead(
-            long sessionId, byte[] requestBytes, long startPkPointer, long channelPtr) {
+            Object pool, byte[] requestBytes, long startPkPointer, long channelPtr, Object cancel) {
         invoke(
                 () -> {
                     var request =
@@ -78,24 +87,14 @@ public final class JniOracleExternalTable {
                             startPkPointer == 0
                                     ? List.<Object>of()
                                     : new SingletonRow(startPkPointer).getValues(pkTypes);
-                    session(sessionId).snapshotRead(request, startPk, channelPtr);
+                    OracleExternalTable.snapshotRead(
+                            (PoolDataSource) pool,
+                            request,
+                            startPk,
+                            channelPtr,
+                            (OracleExternalTable.OracleStatementCancel) cancel);
                     return null;
                 });
-    }
-
-    public static void closeSession(long sessionId) {
-        var session = SESSIONS.remove(sessionId);
-        if (session != null) {
-            session.close();
-        }
-    }
-
-    private static OracleExternalTable.Session session(long sessionId) {
-        var session = SESSIONS.get(sessionId);
-        if (session == null) {
-            throw new IllegalStateException("Oracle session " + sessionId + " is not open");
-        }
-        return session;
     }
 
     private static <T> T invoke(Operation<T> operation) {

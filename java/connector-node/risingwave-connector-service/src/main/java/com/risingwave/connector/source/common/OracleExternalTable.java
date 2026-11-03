@@ -26,19 +26,22 @@ import com.risingwave.proto.PlanCommon;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.SQLNonTransientConnectionException;
-import java.sql.SQLRecoverableException;
-import java.sql.SQLTransientConnectionException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.BooleanSupplier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import oracle.ucp.UniversalConnectionPoolAdapter;
+import oracle.ucp.UniversalConnectionPoolException;
+import oracle.ucp.admin.UniversalConnectionPoolManagerImpl;
+import oracle.ucp.jdbc.PoolDataSource;
+import oracle.ucp.jdbc.PoolDataSourceFactory;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.slf4j.Logger;
@@ -49,111 +52,110 @@ final class OracleExternalTable {
     private static final Logger LOG = LoggerFactory.getLogger(OracleExternalTable.class);
     private static final int BATCH_ROW_COUNT = 256;
     private static final BufferAllocator ROOT_ALLOCATOR = new RootAllocator();
+    private static final int MAX_POOL_SIZE = 2;
+    private static final int CONNECTION_WAIT_TIMEOUT_SECONDS = 60;
+    private static final int INACTIVE_CONNECTION_TIMEOUT_SECONDS = 300;
+    // Must be longer than the slowest legitimate single socket read, such as a query's first fetch.
+    private static final long READ_TIMEOUT_MILLIS = TimeUnit.MINUTES.toMillis(10);
+    private static final AtomicLong NEXT_POOL_ID = new AtomicLong(1);
 
     private OracleExternalTable() {}
 
-    static Session openSession(Map<String, String> properties) {
-        return new Session(properties);
+    static PoolDataSource openPool(Map<String, String> properties)
+            throws SQLException, UniversalConnectionPoolException {
+        var pdbName = pdbName(properties);
+        var pool = PoolDataSourceFactory.getPoolDataSource();
+        pool.setConnectionPoolName("risingwave-oracle-" + NEXT_POOL_ID.getAndIncrement());
+        pool.setConnectionFactoryClassName("oracle.jdbc.pool.OracleDataSource");
+        pool.setURL(jdbcUrl(properties));
+        pool.setUser(properties.get(DbzConnectorConfig.USER));
+        pool.setPassword(properties.get(DbzConnectorConfig.PASSWORD));
+        pool.setConnectionProperty("oracle.jdbc.ReadTimeout", String.valueOf(READ_TIMEOUT_MILLIS));
+        pool.setInitialPoolSize(0);
+        pool.setMinPoolSize(0);
+        pool.setMaxPoolSize(MAX_POOL_SIZE);
+        pool.setConnectionWaitTimeout(CONNECTION_WAIT_TIMEOUT_SECONDS);
+        pool.setInactiveConnectionTimeout(INACTIVE_CONNECTION_TIMEOUT_SECONDS);
+        pool.setValidateConnectionOnBorrow(true);
+        pool.registerConnectionInitializationCallback(
+                connection -> initializeSession(connection, pdbName));
+        UniversalConnectionPoolManagerImpl.getUniversalConnectionPoolManager()
+                .createConnectionPool((UniversalConnectionPoolAdapter) pool);
+        return pool;
+    }
+
+    static void closePool(PoolDataSource pool) throws UniversalConnectionPoolException {
+        UniversalConnectionPoolManagerImpl.getUniversalConnectionPoolManager()
+                .destroyConnectionPool(pool.getConnectionPoolName());
     }
 
     /**
-     * An Oracle connection shared by the current-SCN queries and snapshot pages of one Rust
-     * external table reader. The connection is opened lazily and reopened after a connection
-     * failure.
+     * Cancels the Oracle query of one JNI call from a Rust external table reader, such as {@link
+     * #snapshotRead} or {@link #currentScn}, terminating the call that runs it on a Tokio blocking
+     * thread. A cancel before the query starts makes the call return without running it.
      */
-    static final class Session implements AutoCloseable {
-        private final Map<String, String> properties;
-        private Connection connection;
+    static final class OracleStatementCancel {
+        private final String table;
+        private final String query;
+        private volatile boolean cancelled;
+        private Statement statement;
 
-        private Session(Map<String, String> properties) {
-            this.properties = Map.copyOf(properties);
+        OracleStatementCancel(String table, String query) {
+            this.table = table;
+            this.query = query;
         }
 
-        synchronized long currentScn() throws SQLException, IOException {
-            return execute(OracleExternalTable::currentScn, () -> true);
-        }
-
-        synchronized void snapshotRead(
-                ConnectorServiceProto.OracleSnapshotReadRequest request,
-                List<Object> startPk,
-                long channelPtr)
-                throws SQLException, IOException {
-            var delivered = new boolean[] {false};
-            execute(
-                    connection -> {
-                        OracleExternalTable.snapshotRead(
-                                connection, request, startPk, channelPtr, delivered);
-                        return null;
-                    },
-                    () -> !delivered[0]);
-        }
-
-        @Override
-        public synchronized void close() {
-            closeConnection();
-        }
-
-        private <T> T execute(ConnectionOperation<T> operation, BooleanSupplier canRetry)
-                throws SQLException, IOException {
-            try {
-                return operation.apply(connection());
-            } catch (SQLException error) {
-                if (!isConnectionFailure(error)) {
-                    throw error;
-                }
-                closeConnection();
-                if (!canRetry.getAsBoolean()) {
-                    throw error;
-                }
-                LOG.warn("Oracle connection failed; retrying once on a new connection", error);
-                try {
-                    return operation.apply(connection());
-                } catch (SQLException retryError) {
-                    if (isConnectionFailure(retryError)) {
-                        closeConnection();
-                    }
-                    throw retryError;
-                }
-            }
-        }
-
-        private Connection connection() throws SQLException {
-            if (connection == null || connection.isClosed()) {
-                connection = connect(properties);
-            }
-            return connection;
-        }
-
-        private void closeConnection() {
-            if (connection == null) {
+        void cancel() {
+            if (cancelled) {
                 return;
             }
-            try {
-                connection.close();
-            } catch (SQLException error) {
-                LOG.warn("Failed to close Oracle connection", error);
+            synchronized (this) {
+                if (cancelled) {
+                    return;
+                }
+                cancelled = true;
+                // Null: the call has not registered yet, or it already ended and ran unregister().
+                if (statement == null) {
+                    LOG.info(
+                            "Oracle {} of {}: cancel requested, no query is running", query, table);
+                    return;
+                }
+                LOG.info("Oracle {} of {}: cancel requested, interrupting the query", query, table);
+                try {
+                    statement.cancel();
+                    LOG.info("Oracle {} of {}: query interrupted", query, table);
+                } catch (SQLException error) {
+                    LOG.warn("Oracle {} of {}: failed to interrupt the query", query, table, error);
+                }
             }
-            connection = null;
         }
 
-        private static boolean isConnectionFailure(SQLException error) {
-            var state = error.getSQLState();
-            return error instanceof SQLRecoverableException
-                    || error instanceof SQLTransientConnectionException
-                    || error instanceof SQLNonTransientConnectionException
-                    || (state != null && state.startsWith("08"));
+        boolean isCancelled() {
+            return cancelled;
         }
-    }
 
-    @FunctionalInterface
-    private interface ConnectionOperation<T> {
-        T apply(Connection connection) throws SQLException, IOException;
+        private synchronized boolean register(Statement statement) {
+            if (cancelled) {
+                return false;
+            }
+            this.statement = statement;
+            return true;
+        }
+
+        private synchronized void unregister() {
+            statement = null;
+        }
     }
 
     static ConnectorServiceProto.TableSchema discover(
             ConnectorServiceProto.OracleConnectionProperties properties) throws SQLException {
         var propertiesMap = properties.getPropertiesMap();
-        try (var connection = connect(propertiesMap)) {
+        try (var connection =
+                DriverManager.getConnection(
+                        jdbcUrl(propertiesMap),
+                        propertiesMap.get(DbzConnectorConfig.USER),
+                        propertiesMap.get(DbzConnectorConfig.PASSWORD))) {
+            initializeSession(connection, pdbName(propertiesMap));
             var schemaName = propertiesMap.get(DbzConnectorConfig.ORACLE_SCHEMA_NAME);
             var tableName = propertiesMap.get(DbzConnectorConfig.TABLE_NAME);
             var columns = discoverColumns(connection, schemaName, tableName);
@@ -198,112 +200,156 @@ final class OracleExternalTable {
         }
     }
 
-    private static long currentScn(Connection connection) throws SQLException {
-        try (var statement = connection.createStatement();
-                var result = statement.executeQuery("SELECT CURRENT_SCN FROM V$DATABASE")) {
-            if (!result.next()) {
-                throw new SQLException(
-                        "Oracle returned no row for SELECT CURRENT_SCN FROM V$DATABASE");
+    static long currentScn(PoolDataSource pool, OracleStatementCancel cancel) throws SQLException {
+        if (cancel.isCancelled()) {
+            throw new SQLException("Oracle current SCN query was cancelled");
+        }
+        try (var connection = pool.getConnection();
+                var statement = connection.createStatement()) {
+            if (!cancel.register(statement)) {
+                throw new SQLException("Oracle current SCN query was cancelled");
             }
-            var scn = result.getLong(1);
-            if (scn <= 0) {
-                throw new SQLException("Oracle returned an invalid current SCN: " + scn);
+            try (var result = statement.executeQuery("SELECT CURRENT_SCN FROM V$DATABASE")) {
+                if (!result.next()) {
+                    throw new SQLException(
+                            "Oracle returned no row for SELECT CURRENT_SCN FROM V$DATABASE");
+                }
+                var scn = result.getLong(1);
+                if (scn <= 0) {
+                    throw new SQLException("Oracle returned an invalid current SCN: " + scn);
+                }
+                return scn;
+            } finally {
+                cancel.unregister();
             }
-            return scn;
         }
     }
 
-    private static void snapshotRead(
-            Connection connection,
+    static void snapshotRead(
+            PoolDataSource pool,
             ConnectorServiceProto.OracleSnapshotReadRequest request,
             List<Object> startPk,
             long channelPtr,
-            boolean[] delivered)
+            OracleStatementCancel cancel)
             throws SQLException, IOException {
+        if (cancel.isCancelled()) {
+            return;
+        }
         if (!request.hasTableSchema()) {
             throw new SQLException(
                     "Oracle snapshot request is missing its RisingWave table schema");
         }
-        if (request.getLimit() <= 0) {
-            throw new SQLException("Oracle snapshot request has an invalid limit");
-        }
-
         var schemaName = request.getSchemaName();
         var tableName = request.getTableName();
         var tableSchema = request.getTableSchema();
+        var primaryKeys = request.getPrimaryKeysList();
         validatePrimaryKeys(request, tableSchema, startPk);
-        var sql =
-                buildSnapshotSql(
-                        tableSchema.getColumnsList(),
-                        schemaName,
-                        tableName,
-                        request.getPrimaryKeysList(),
-                        !startPk.isEmpty(),
-                        request.getLimit());
 
-        try (var statement = connection.prepareStatement(sql);
+        try (var connection = pool.getConnection();
                 var allocator =
                         ROOT_ALLOCATOR.newChildAllocator("oracle-snapshot", 0, Long.MAX_VALUE);
                 var writer = new OracleArrowBatchWriter(allocator, tableSchema)) {
-            if (!startPk.isEmpty()) {
-                bindStartPrimaryKey(statement, startPk);
-            }
-            try (var result = statement.executeQuery()) {
-                while (result.next()) {
-                    writer.append(result);
-                    if (writer.rowCount() == BATCH_ROW_COUNT
-                            && !sendBatch(writer, channelPtr, delivered)) {
-                        return;
-                    }
+            var minBoundCount = startPk.isEmpty() ? 0 : 1;
+            for (int boundCount = startPk.size(); boundCount >= minBoundCount; boundCount--) {
+                var sql =
+                        buildSnapshotSql(
+                                tableSchema.getColumnsList(),
+                                schemaName,
+                                tableName,
+                                primaryKeys,
+                                boundCount);
+                if (!readKeyRange(
+                        connection,
+                        sql,
+                        startPk.subList(0, boundCount),
+                        writer,
+                        channelPtr,
+                        cancel)) {
+                    return;
                 }
             }
             if (writer.rowCount() > 0) {
-                sendBatch(writer, channelPtr, delivered);
+                sendBatch(writer, channelPtr);
             }
         }
     }
 
-    private static boolean sendBatch(
-            OracleArrowBatchWriter writer, long channelPtr, boolean[] delivered)
+    private static boolean readKeyRange(
+            Connection connection,
+            String sql,
+            List<Object> bounds,
+            OracleArrowBatchWriter writer,
+            long channelPtr,
+            OracleStatementCancel cancel)
+            throws SQLException, IOException {
+        try (var statement = connection.prepareStatement(sql)) {
+            if (!cancel.register(statement)) {
+                return false;
+            }
+            try {
+                statement.setFetchSize(BATCH_ROW_COUNT);
+                for (int i = 0; i < bounds.size(); i++) {
+                    statement.setObject(i + 1, bounds.get(i));
+                }
+                if (cancel.isCancelled()) {
+                    return false;
+                }
+                // A cancel landing after this check still ends the query: the first sendBatch()
+                // fails because the receiver is already gone.
+                try (var result = statement.executeQuery()) {
+                    while (result.next()) {
+                        writer.append(result);
+                        if (writer.rowCount() == BATCH_ROW_COUNT
+                                && !sendBatch(writer, channelPtr)) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            } catch (SQLException error) {
+                if (cancel.isCancelled()) {
+                    return false;
+                }
+                throw error;
+            } finally {
+                cancel.unregister();
+            }
+        }
+    }
+
+    private static boolean sendBatch(OracleArrowBatchWriter writer, long channelPtr)
             throws IOException {
         var response =
                 ConnectorServiceProto.OracleSnapshotReadResponse.newBuilder()
                         .setArrowIpc(ByteString.copyFrom(writer.finishBatch()))
                         .build();
-        delivered[0] = true;
         return Binding.sendOracleSnapshotResponseToChannel(channelPtr, response.toByteArray());
     }
 
-    private static Connection connect(Map<String, String> properties) throws SQLException {
-        var pdbName =
+    private static String pdbName(Map<String, String> properties) throws SQLException {
+        return OracleValidator.normalizeIdentifierInConfigOption(
+                DbzConnectorConfig.ORACLE_PDB_NAME,
+                properties.get(DbzConnectorConfig.ORACLE_PDB_NAME));
+    }
+
+    private static String jdbcUrl(Map<String, String> properties) throws SQLException {
+        return ValidatorUtils.getJdbcUrl(
+                SourceTypeE.ORACLE,
+                properties.get(DbzConnectorConfig.HOST),
+                properties.get(DbzConnectorConfig.PORT),
                 OracleValidator.normalizeIdentifierInConfigOption(
-                        DbzConnectorConfig.ORACLE_PDB_NAME,
-                        properties.get(DbzConnectorConfig.ORACLE_PDB_NAME));
-        var jdbcUrl =
-                ValidatorUtils.getJdbcUrl(
-                        SourceTypeE.ORACLE,
-                        properties.get(DbzConnectorConfig.HOST),
-                        properties.get(DbzConnectorConfig.PORT),
-                        OracleValidator.normalizeIdentifierInConfigOption(
-                                DbzConnectorConfig.DB_NAME,
-                                properties.get(DbzConnectorConfig.DB_NAME)));
-        var connection =
-                DriverManager.getConnection(
-                        jdbcUrl,
-                        properties.get(DbzConnectorConfig.USER),
-                        properties.get(DbzConnectorConfig.PASSWORD));
+                        DbzConnectorConfig.DB_NAME, properties.get(DbzConnectorConfig.DB_NAME)));
+    }
+
+    private static void initializeSession(Connection connection, String pdbName)
+            throws SQLException {
         try (var statement = connection.createStatement()) {
             statement.execute(
                     "ALTER SESSION SET CONTAINER = " + OracleValidator.quoteIdentifier(pdbName));
-            statement.execute("ALTER SESSION SET TIME_ZONE = 'UTC'");
             // Match RisingWave's native string ordering for keyset pagination.
-            statement.execute("ALTER SESSION SET NLS_SORT = BINARY");
-            statement.execute("ALTER SESSION SET NLS_COMP = BINARY");
-        } catch (SQLException error) {
-            connection.close();
-            throw error;
+            statement.execute(
+                    "ALTER SESSION SET TIME_ZONE = 'UTC' NLS_SORT = BINARY NLS_COMP = BINARY");
         }
-        return connection;
     }
 
     private static List<OracleColumn> discoverColumns(
@@ -345,9 +391,11 @@ final class OracleExternalTable {
                                 + "AND cons.CONSTRAINT_NAME = cols.CONSTRAINT_NAME "
                                 + "JOIN ALL_TAB_COLS tc ON tc.OWNER = cols.OWNER "
                                 + "AND tc.TABLE_NAME = cols.TABLE_NAME AND tc.COLUMN_NAME = cols.COLUMN_NAME "
+                                + "JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = cons.INDEX_OWNER "
+                                + "AND ic.INDEX_NAME = cons.INDEX_NAME AND ic.COLUMN_NAME = cols.COLUMN_NAME "
                                 + "WHERE cons.OWNER = ? AND cons.TABLE_NAME = ? "
                                 + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED' "
-                                + "ORDER BY cols.POSITION")) {
+                                + "ORDER BY ic.COLUMN_POSITION")) {
             statement.setString(1, schemaName);
             statement.setString(2, tableName);
             try (var result = statement.executeQuery()) {
@@ -362,8 +410,8 @@ final class OracleExternalTable {
 
     /**
      * Checks that an Oracle primary-key column can be decoded and compared without changing its
-     * ordering during PK-ordered snapshot pagination. Otherwise, the page frontier could skip or
-     * repeat rows.
+     * ordering during PK-ordered snapshot reads. Otherwise, a read resumed from the last emitted
+     * key could skip or repeat rows.
      *
      * <p>Accepts NUMBER with declared precision, scale, and integer width each fitting within
      * RisingWave's 28-digit decimal; RAW; DATE; TIMESTAMP with fractional precision at most 6; and
@@ -494,14 +542,10 @@ final class OracleExternalTable {
             String schemaName,
             String tableName,
             List<String> primaryKeys,
-            boolean hasStartPrimaryKey,
-            int limit)
+            int boundCount)
             throws SQLException {
         if (columns.isEmpty() || primaryKeys.isEmpty()) {
             throw new SQLException("Oracle snapshot query requires columns and primary keys");
-        }
-        if (limit <= 0) {
-            throw new SQLException("Oracle snapshot query has an invalid limit");
         }
         var fields =
                 columns.stream()
@@ -515,35 +559,38 @@ final class OracleExternalTable {
                                 })
                         .toList();
         var keys = primaryKeys.stream().map(OracleValidator::quoteIdentifier).toList();
+        // FIRST_ROWS makes Oracle prefer a plan that reads rows through the PK index, which is kept
+        // in PK order, so rows are produced only as fast as Rust consumes them. Without it, the
+        // default ALL_ROWS goal can pick a full table scan, which reads blocks in physical order
+        // rather than PK order
+        // (https://docs.oracle.com/en/database/oracle/oracle-database/23/tgsql/optimizer-access-paths.html#GUID-461E7071-2229-4F60-82E6-BC4F6FC8D23B),
+        // and then sorts the rest of the table by PK before returning the first row. Rust consumes
+        // this query under back pressure and cancels it at the next snapshot stream rebuild, so
+        // most of that sort would be wasted, and every rebuild would repeat it, which makes the
+        // performance very bad. INDEX_ASC pins the PK index, and the key range predicate below
+        // has no OR, so the index range scan starts exactly at the resume key and each read costs
+        // the same however far the snapshot has progressed.
         var sql =
-                new StringBuilder("SELECT ")
+                new StringBuilder("SELECT /*+ FIRST_ROWS(")
+                        .append(BATCH_ROW_COUNT)
+                        .append(") INDEX_ASC(t (")
+                        .append(String.join(" ", keys))
+                        .append(")) */ ")
                         .append(String.join(",", fields))
                         .append(" FROM ")
                         .append(OracleValidator.quoteIdentifier(schemaName))
                         .append(".")
-                        .append(OracleValidator.quoteIdentifier(tableName));
-        if (hasStartPrimaryKey) {
-            sql.append(" WHERE ").append(buildPrimaryKeyFilter(keys));
-        }
-        return sql.append(" ORDER BY ")
-                .append(String.join(",", keys))
-                .append(" FETCH FIRST ")
-                .append(limit)
-                .append(" ROWS ONLY")
-                .toString();
-    }
-
-    private static String buildPrimaryKeyFilter(List<String> quotedPrimaryKeys) {
-        var disjunction = new ArrayList<String>();
-        for (int greaterIndex = 0; greaterIndex < quotedPrimaryKeys.size(); greaterIndex++) {
-            var conjunction = new ArrayList<String>();
-            for (int equalIndex = 0; equalIndex < greaterIndex; equalIndex++) {
-                conjunction.add(quotedPrimaryKeys.get(equalIndex) + " = ?");
+                        .append(OracleValidator.quoteIdentifier(tableName))
+                        .append(" t");
+        if (boundCount > 0) {
+            var conditions = new ArrayList<String>();
+            for (int i = 0; i < boundCount - 1; i++) {
+                conditions.add(keys.get(i) + " = ?");
             }
-            conjunction.add(quotedPrimaryKeys.get(greaterIndex) + " > ?");
-            disjunction.add("(" + String.join(" AND ", conjunction) + ")");
+            conditions.add(keys.get(boundCount - 1) + " > ?");
+            sql.append(" WHERE ").append(String.join(" AND ", conditions));
         }
-        return String.join(" OR ", disjunction);
+        return sql.append(" ORDER BY ").append(String.join(",", keys)).toString();
     }
 
     private static void validatePrimaryKeys(
@@ -573,16 +620,6 @@ final class OracleExternalTable {
                         String.format(
                                 "Oracle snapshot primary key '%s' does not match schema column '%s'",
                                 request.getPrimaryKeys(i), schemaName));
-            }
-        }
-    }
-
-    private static void bindStartPrimaryKey(PreparedStatement statement, List<Object> startPk)
-            throws SQLException {
-        var parameterIndex = 1;
-        for (int greaterIndex = 0; greaterIndex < startPk.size(); greaterIndex++) {
-            for (int keyIndex = 0; keyIndex <= greaterIndex; keyIndex++) {
-                statement.setObject(parameterIndex++, startPk.get(keyIndex));
             }
         }
     }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::io::Cursor;
 use std::ops::Deref;
 
@@ -21,6 +22,7 @@ use arrow_58_ipc::reader::StreamReader;
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use futures_async_stream::try_stream;
+use jni::objects::GlobalRef;
 use jni::sys::jlong;
 use prost::Message;
 use risingwave_common::array::DataChunk;
@@ -58,6 +60,14 @@ pub struct OracleExternalTable {
 }
 
 impl OracleExternalTable {
+    /// Discovers the table schema through JNI on a Tokio blocking thread, so the caller's async
+    /// runtime is never blocked.
+    ///
+    /// Cancellation safe: every call opens its own Oracle connection, so calls are independent. If
+    /// the future is dropped, the discovery keeps running in the detached blocking task, but it
+    /// shares no connection with any later call and cannot block it. It then closes its
+    /// connection, and the discovered schema is discarded. Discovery only runs two short catalog
+    /// queries, so the abandoned task also finishes quickly.
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         let properties = config.oracle_connection_properties()?;
         let table_schema = tokio::task::spawn_blocking(move || invoke_jni_discover(&properties))
@@ -111,29 +121,45 @@ pub struct OracleExternalTableReader {
     rw_schema: Schema,
     pk_indices: Vec<usize>,
     table_schema: TableSchema,
-    session: OnceCell<OracleSession>,
+    table: String,
+    pool: OnceCell<OraclePool>,
 }
 
 impl ExternalTableReader for OracleExternalTableReader {
+    /// Queries the current SCN through JNI on a Tokio blocking thread, so the caller's async
+    /// runtime is never blocked.
+    ///
+    /// Cancellation safe: dropping the future cancels the in-flight Oracle query, so its
+    /// connection returns to the pool promptly instead of being held for later calls.
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
-        let session_id = self.session_id().await?;
-        let scn = tokio::task::spawn_blocking(move || invoke_jni_current_scn(session_id))
-            .await
-            .context("failed to join Oracle SCN query task")??;
+        let pool = self.pool().await?;
+        let cancel = invoke_jni_new_statement_cancel(&self.table, "current SCN query")?;
+        let cancel_on_drop =
+            cancel_statement_on_drop(cancel.clone(), self.table.clone(), "current SCN query");
+        let result =
+            tokio::task::spawn_blocking(move || invoke_jni_current_scn(&pool, &cancel)).await;
+        cancel_on_drop.disarm();
+        let scn = result.context("failed to join Oracle SCN query task")??;
         if scn <= 0 {
             bail!("Oracle returned an invalid current SCN: {scn}");
         }
         Ok(CdcOffset::Oracle(OracleOffset { scn: scn as u64 }))
     }
 
+    /// Streams the table from `start_pk` to its end with a single Oracle query, ignoring `limit`.
+    /// The query runs through JNI on a Tokio blocking thread and hands rows over through a bounded
+    /// channel, so the caller's async runtime is never blocked and back pressure reaches Oracle.
+    ///
+    /// Cancellation safe: dropping the stream cancels the in-flight Oracle query, so its
+    /// connection returns to the pool promptly and the rebuilt stream's query does not wait on it.
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
-        limit: u32,
+        _limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys)
     }
 
     fn get_parallel_cdc_splits(
@@ -203,23 +229,29 @@ impl OracleExternalTableReader {
             rw_schema,
             pk_indices,
             table_schema,
-            session: OnceCell::new(),
+            table: format!("{}.{}", config.schema, config.table),
+            pool: OnceCell::new(),
         })
     }
 
-    async fn session_id(&self) -> ConnectorResult<i64> {
-        let session = self
-            .session
+    /// Returns the reader's connection pool, opening it through JNI on a Tokio blocking thread on
+    /// first use, so the caller's async runtime is never blocked.
+    ///
+    /// Cancellation safe: if the caller stops waiting, the pool the blocking task opens is closed
+    /// when the task's result is dropped, and the next call opens a new one.
+    async fn pool(&self) -> ConnectorResult<JavaRef> {
+        let pool = self
+            .pool
             .get_or_try_init(|| async {
                 let properties = self.connection_properties.clone();
-                tokio::task::spawn_blocking(move || {
-                    invoke_jni_open_session(&properties).map(OracleSession)
-                })
-                .await
-                .context("failed to join Oracle session open task")?
+                let table = self.table.clone();
+                tokio::task::spawn_blocking(move || OraclePool::open(&properties, table))
+                    .await
+                    .context("failed to join Oracle connection pool open task")?
+                    .map_err(ConnectorError::from)
             })
             .await?;
-        Ok(session.0)
+        Ok(pool.pool.clone())
     }
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
@@ -228,11 +260,7 @@ impl OracleExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
-        limit: u32,
     ) {
-        if limit == 0 {
-            Err(anyhow!("Oracle snapshot read has an invalid limit"))?;
-        }
         if primary_keys.len() != self.pk_indices.len() {
             Err(anyhow!(
                 "Oracle snapshot read received {} primary-key columns but there are actually {} primary-key columns",
@@ -245,17 +273,19 @@ impl OracleExternalTableReader {
             validate_start_pk(start_pk, self.pk_indices.len())?;
         }
 
-        let session_id = self.session_id().await?;
+        let pool = self.pool().await?;
+        let cancel = invoke_jni_new_statement_cancel(&self.table, "snapshot read")?;
+        let cancel_on_drop =
+            cancel_statement_on_drop(cancel.clone(), self.table.clone(), "snapshot read");
         let request = OracleSnapshotReadRequest {
             schema_name: table_name.schema_name,
             table_name: table_name.table_name,
             table_schema: Some(self.table_schema.clone()),
             primary_keys,
-            limit,
         };
         let (sender, mut receiver) = mpsc::channel(ORACLE_SNAPSHOT_CHANNEL_SIZE);
         let read_task = tokio::task::spawn_blocking(move || {
-            invoke_jni_snapshot_read(session_id, &request, start_pk, &sender)
+            invoke_jni_snapshot_read(&pool, &request, start_pk, &sender, &cancel)
         });
 
         while let Some(response) = receiver.recv().await {
@@ -279,33 +309,113 @@ impl OracleExternalTableReader {
                 yield row.into_owned_row();
             }
         }
-        read_task
-            .await
-            .context("failed to join Oracle snapshot query task")??;
+        let result = read_task.await;
+        cancel_on_drop.disarm();
+        result.context("failed to join Oracle snapshot query task")??;
     }
 }
 
-/// The ID of a session registered in the Java `JniOracleExternalTable` session map.
-#[derive(Debug)]
-struct OracleSession(i64);
+/// A global reference to a Java object that is deleted on a thread attached to the JVM, so
+/// dropping it does not log the detached-thread warning of [`GlobalRef`].
+#[derive(Debug, Clone)]
+struct JavaRef(Option<GlobalRef>);
 
-impl Drop for OracleSession {
+impl JavaRef {
+    fn as_obj(&self) -> &jni::objects::JObject<'static> {
+        self.0
+            .as_ref()
+            .expect("Java reference is present until dropped")
+    }
+}
+
+impl Drop for JavaRef {
     fn drop(&mut self) {
-        let session_id = self.0;
-        let close = move || {
-            if let Err(error) = invoke_jni_close_session(session_id) {
-                tracing::warn!(
-                    session_id,
-                    error = %error.as_report(),
-                    "failed to close Oracle session"
-                );
-            }
+        let Some(object) = self.0.take() else {
+            return;
         };
+        let attached = Jvm::get_or_init()
+            .ok()
+            .and_then(|jvm| jvm.0.attach_current_thread().ok());
+        drop(object);
+        drop(attached);
+    }
+}
+
+/// Runs a release action once when dropped, on a blocking thread when inside a Tokio runtime.
+struct ReleaseOnDrop(Option<Box<dyn FnOnce() + Send + Sync>>);
+
+impl ReleaseOnDrop {
+    fn new(release: impl FnOnce() + Send + Sync + 'static) -> Self {
+        Self(Some(Box::new(release)))
+    }
+
+    fn disarm(mut self) {
+        self.0 = None;
+    }
+}
+
+impl fmt::Debug for ReleaseOnDrop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ReleaseOnDrop")
+            .field(&self.0.is_some())
+            .finish()
+    }
+}
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        let Some(release) = self.0.take() else {
+            return;
+        };
+        let span = tracing::Span::current();
+        let release = move || span.in_scope(release);
         match tokio::runtime::Handle::try_current() {
-            Ok(handle) => drop(handle.spawn_blocking(close)),
-            Err(_) => close(),
+            Ok(handle) => drop(handle.spawn_blocking(release)),
+            Err(_) => release(),
         }
     }
+}
+
+/// A UCP connection pool owned by one [`OracleExternalTableReader`] and closed when dropped.
+#[derive(Debug)]
+struct OraclePool {
+    pool: JavaRef,
+    _close_on_drop: ReleaseOnDrop,
+}
+
+impl OraclePool {
+    fn open(properties: &OracleConnectionProperties, table: String) -> anyhow::Result<Self> {
+        let pool = invoke_jni_open_pool(properties)?;
+        let closing = pool.clone();
+        Ok(Self {
+            pool,
+            _close_on_drop: ReleaseOnDrop::new(move || {
+                tracing::info!(table, "closing Oracle connection pool");
+                match invoke_jni_close_pool(&closing) {
+                    Ok(()) => tracing::info!(table, "closed Oracle connection pool"),
+                    Err(error) => tracing::warn!(
+                        table,
+                        error = %error.as_report(),
+                        "failed to close Oracle connection pool"
+                    ),
+                }
+            }),
+        })
+    }
+}
+
+/// Cancels the Oracle query watched by `cancel` when dropped, unless disarmed first.
+fn cancel_statement_on_drop(cancel: JavaRef, table: String, query: &'static str) -> ReleaseOnDrop {
+    ReleaseOnDrop::new(move || {
+        if let Err(error) = invoke_jni_cancel_statement(&cancel) {
+            tracing::warn!(
+                table,
+                query,
+                error = %error.as_report(),
+                "failed to cancel Oracle query"
+            );
+        }
+    })
 }
 
 impl ExternalTableConfig {
@@ -382,51 +492,82 @@ fn invoke_jni_discover(properties: &OracleConnectionProperties) -> anyhow::Resul
     })
 }
 
-fn invoke_jni_open_session(properties: &OracleConnectionProperties) -> anyhow::Result<i64> {
+fn invoke_jni_open_pool(properties: &OracleConnectionProperties) -> anyhow::Result<JavaRef> {
     let jvm = Jvm::get_or_init()?;
     execute_with_jni_env(jvm, |env| {
         let properties_bytes = env.byte_array_from_slice(&properties.encode_to_vec())?;
-        let session_id = call_static_method!(
+        let pool = call_static_method!(
             env,
             {com.risingwave.connector.source.common.JniOracleExternalTable},
-            {long openSession(byte[] propertiesBytes)},
+            {Object openPool(byte[] propertiesBytes)},
             &properties_bytes
         )?;
-        Ok(session_id)
+        Ok(JavaRef(Some(env.new_global_ref(pool)?)))
     })
 }
 
-fn invoke_jni_close_session(session_id: i64) -> anyhow::Result<()> {
+fn invoke_jni_close_pool(pool: &JavaRef) -> anyhow::Result<()> {
     let jvm = Jvm::get_or_init()?;
     execute_with_jni_env(jvm, |env| {
         call_static_method!(
             env,
             {com.risingwave.connector.source.common.JniOracleExternalTable},
-            {void closeSession(long sessionId)},
-            session_id
+            {void closePool(Object)},
+            pool.as_obj()
         )?;
         Ok(())
     })
 }
 
-fn invoke_jni_current_scn(session_id: i64) -> anyhow::Result<i64> {
+fn invoke_jni_current_scn(pool: &JavaRef, cancel: &JavaRef) -> anyhow::Result<i64> {
     let jvm = Jvm::get_or_init()?;
     execute_with_jni_env(jvm, |env| {
         let scn = call_static_method!(
             env,
             {com.risingwave.connector.source.common.JniOracleExternalTable},
-            {long currentScn(long sessionId)},
-            session_id
+            {long currentScn(Object, Object)},
+            pool.as_obj(),
+            cancel.as_obj()
         )?;
         Ok(scn)
     })
 }
 
+fn invoke_jni_new_statement_cancel(table: &str, query: &str) -> anyhow::Result<JavaRef> {
+    let jvm = Jvm::get_or_init()?;
+    execute_with_jni_env(jvm, |env| {
+        let table = env.new_string(table)?;
+        let query = env.new_string(query)?;
+        let cancel = call_static_method!(
+            env,
+            {com.risingwave.connector.source.common.JniOracleExternalTable},
+            {Object newStatementCancel(String, String)},
+            &table,
+            &query
+        )?;
+        Ok(JavaRef(Some(env.new_global_ref(cancel)?)))
+    })
+}
+
+fn invoke_jni_cancel_statement(cancel: &JavaRef) -> anyhow::Result<()> {
+    let jvm = Jvm::get_or_init()?;
+    execute_with_jni_env(jvm, |env| {
+        call_static_method!(
+            env,
+            {com.risingwave.connector.source.common.JniOracleExternalTable},
+            {void cancelStatement(Object)},
+            cancel.as_obj()
+        )?;
+        Ok(())
+    })
+}
+
 fn invoke_jni_snapshot_read(
-    session_id: i64,
+    pool: &JavaRef,
     request: &OracleSnapshotReadRequest,
     start_pk: Option<OwnedRow>,
     sender: &JniSenderType<OracleSnapshotReadResponse>,
+    cancel: &JavaRef,
 ) -> anyhow::Result<()> {
     let start_pk = start_pk.map(JavaBindingIterator::new_singleton_row);
     let start_pk_pointer = start_pk
@@ -439,11 +580,12 @@ fn invoke_jni_snapshot_read(
         call_static_method!(
             env,
             {com.risingwave.connector.source.common.JniOracleExternalTable},
-            {void snapshotRead(long sessionId, byte[] requestBytes, long startPkPointer, long channelPtr)},
-            session_id,
+            {void snapshotRead(Object, byte[] requestBytes, long startPkPointer, long channelPtr, Object)},
+            pool.as_obj(),
             &request_bytes,
             start_pk_pointer,
-            channel_pointer
+            channel_pointer,
+            cancel.as_obj()
         )?;
         Ok(())
     })

@@ -21,7 +21,9 @@ import com.risingwave.connector.api.source.SourceTypeE;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -246,26 +248,45 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     }
 
     private void validateTablePrimaryKey() throws SQLException {
-        var pkFields = new HashSet<String>();
+        var pkFields = new ArrayList<String>();
+        String indexName = null;
+        var indexUsable = true;
         try (var stmt =
                 jdbcConnection.prepareStatement(
-                        "SELECT cols.COLUMN_NAME FROM ALL_CONSTRAINTS cons "
+                        "SELECT cols.COLUMN_NAME, ix.INDEX_NAME, ix.STATUS, ix.VISIBILITY "
+                                + "FROM ALL_CONSTRAINTS cons "
                                 + "JOIN ALL_CONS_COLUMNS cols ON cons.OWNER = cols.OWNER "
                                 + "AND cons.CONSTRAINT_NAME = cols.CONSTRAINT_NAME "
+                                + "JOIN ALL_INDEXES ix ON ix.OWNER = cons.INDEX_OWNER "
+                                + "AND ix.INDEX_NAME = cons.INDEX_NAME "
+                                + "JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = ix.OWNER "
+                                + "AND ic.INDEX_NAME = ix.INDEX_NAME AND ic.COLUMN_NAME = cols.COLUMN_NAME "
                                 + "WHERE cons.OWNER = ? AND cons.TABLE_NAME = ? "
-                                + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED'")) {
+                                + "AND cons.CONSTRAINT_TYPE = 'P' AND cons.STATUS = 'ENABLED' "
+                                + "ORDER BY ic.COLUMN_POSITION")) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             try (var result = stmt.executeQuery()) {
                 while (result.next()) {
                     pkFields.add(result.getString("COLUMN_NAME"));
+                    indexName = result.getString("INDEX_NAME");
+                    var status = result.getString("STATUS");
+                    indexUsable &=
+                            ("VALID".equals(status) || "N/A".equals(status))
+                                    && "VISIBLE".equals(result.getString("VISIBILITY"));
                 }
             }
         }
         primaryKeyCheck(tableSchema, pkFields);
+        if (!indexUsable) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "The index '%s' enforcing the primary key of Oracle table '%s.%s' must be valid and visible, so CDC backfill can read the table in primary-key order through it.",
+                            indexName, schemaName, tableName));
+        }
     }
 
-    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields) {
+    private static void primaryKeyCheck(TableSchema sourceSchema, List<String> pkFields) {
         if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
             throw ValidatorUtils.invalidArgument(
                     "Primary key mismatch: the SQL schema defines "
@@ -281,6 +302,14 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                                 + colName
                                 + "'.\nHint: Oracle stores unquoted column names in uppercase. Use double quotes (\") in RisingWave to preserve the upstream column name.");
             }
+        }
+        if (!sourceSchema.getPrimaryKeys().equals(pkFields)) {
+            throw ValidatorUtils.invalidArgument(
+                    "Primary key order mismatch: the SQL schema declares the primary key as "
+                            + sourceSchema.getPrimaryKeys()
+                            + ", but the index enforcing the Oracle primary key orders it as "
+                            + pkFields
+                            + ". Declare the primary key columns in that order, so CDC backfill can read the table in primary-key order through the index.");
         }
     }
 

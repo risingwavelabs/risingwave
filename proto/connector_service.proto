@@ -232,11 +232,10 @@ message OracleSnapshotReadRequest {
   string table_name = 2;
   TableSchema table_schema = 3;
   repeated string primary_keys = 4;
-  uint32 limit = 5;
 }
 
 message OracleSnapshotReadResponse {
-  // A complete Arrow IPC stream holding the schema and one record batch of the page.
+  // A complete Arrow IPC stream holding the schema and one record batch of the snapshot.
   bytes arrow_ipc = 1;
 }
 
@@ -247,8 +246,9 @@ service ConnectorService {
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
   // Served over JNI by the embedded JVM. Besides the request, Java receives process-local handles as
-  // separate JNI arguments: the session id, the start-key row pointer (0 for the first page; otherwise
-  // the exclusive lower bound, read through `SingletonRow`), and the response channel pointer.
+  // separate JNI arguments: the connection pool, the start-key row pointer (0 to read from the start
+  // of the table; otherwise the exclusive lower bound, read through `SingletonRow`), the response
+  // channel pointer, and the cancel handle. The read runs until the end of the table or a cancel.
   rpc OracleSnapshotRead(OracleSnapshotReadRequest) returns (stream OracleSnapshotReadResponse);
 }
 
