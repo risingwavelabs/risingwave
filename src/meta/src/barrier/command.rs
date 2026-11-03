@@ -369,6 +369,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: ExtendedFragmentBackfillOrder,
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
+    pub bounded_load_source: Option<SourceId>,
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.

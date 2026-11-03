@@ -29,15 +29,16 @@ use risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedA
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
+use crate::barrier::bounded_progress::BoundedLoadAction;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
 use crate::barrier::load_progress::LoadReport;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, IndependentStreamingJobType,
-    RecoveryReason, Scheduled, SnapshotBackfillInfo,
+    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
+    CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
+    IndependentStreamingJobType, RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::iceberg_pk_index_sink::{
@@ -126,6 +127,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         job: TrackingJob,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
+    fn apply_bounded_load_action(
+        &self,
+        action: BoundedLoadAction,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
     fn finish_cdc_table_backfill(
         &self,
         job_id: JobId,
@@ -200,6 +206,8 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     pub(super) refresh_manager: GlobalRefreshManagerRef,
 
+    barrier_scheduler: BarrierScheduler,
+
     sink_manager: SinkCoordinatorManager,
 
     pub(super) iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
@@ -217,6 +225,7 @@ impl GlobalBarrierWorkerContextImpl {
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
         refresh_manager: GlobalRefreshManagerRef,
+        barrier_scheduler: BarrierScheduler,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
@@ -230,6 +239,7 @@ impl GlobalBarrierWorkerContextImpl {
             _scale_controller: scale_controller,
             env,
             refresh_manager,
+            barrier_scheduler,
             sink_manager,
             iceberg_pk_index_sink_manager,
         }

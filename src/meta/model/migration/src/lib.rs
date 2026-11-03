@@ -77,6 +77,7 @@ mod m20260705_000000_subscription_dependent_object_fk;
 mod m20260804_000000_worker_property_resource;
 mod m20260805_000000_object_belong_to_oid;
 mod m20261013_000000_backfill_iceberg_writer_fragment_flag;
+mod m20261021_000000_bounded_jobs;
 mod utils;
 
 pub struct Migrator;
@@ -192,6 +193,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260804_000000_worker_property_resource::Migration),
             Box::new(m20260805_000000_object_belong_to_oid::Migration),
             Box::new(m20261013_000000_backfill_iceberg_writer_fragment_flag::Migration),
+            Box::new(m20261021_000000_bounded_jobs::Migration),
         ]
     }
 }
