@@ -5,6 +5,9 @@ statement ok
 DROP TABLE IF EXISTS bounded_src_sink_target;
 
 statement ok
+DROP MATERIALIZED VIEW IF EXISTS bounded_src_table_join_mv;
+
+statement ok
 DROP MATERIALIZED VIEW IF EXISTS bounded_src_join_mv;
 
 statement ok
@@ -181,6 +184,27 @@ SELECT id, first_v, latest_v FROM bounded_src_join_mv ORDER BY id;
 4 NULL d
 5 NULL e
 
+statement ok
+SET streaming_use_snapshot_backfill = true;
+
+statement ok
+CREATE MATERIALIZED VIEW bounded_src_table_join_mv AS
+SELECT f.id, f.v AS bounded_v, t.v AS table_v
+FROM bounded_src f JOIN bounded_src_upstream t ON f.id = t.id;
+
+query T retry 30 backoff 1s
+SELECT status FROM rw_bounded_jobs
+WHERE job_id = (SELECT id FROM rw_materialized_views WHERE name = 'bounded_src_table_join_mv');
+----
+COMPLETED
+
+query ITT
+SELECT id, bounded_v, table_v FROM bounded_src_table_join_mv ORDER BY id;
+----
+1 a a
+2 b b
+3 c c
+
 # ==== sinks
 
 statement ok
@@ -214,6 +238,9 @@ DROP SINK bounded_src_sink;
 
 statement ok
 DROP TABLE bounded_src_sink_target;
+
+statement ok
+DROP MATERIALIZED VIEW bounded_src_table_join_mv;
 
 statement ok
 DROP MATERIALIZED VIEW bounded_src_join_mv;

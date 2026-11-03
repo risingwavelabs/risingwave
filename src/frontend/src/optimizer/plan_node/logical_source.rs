@@ -204,12 +204,6 @@ impl LogicalSource {
             .is_some_and(|catalog| catalog.ingest_mode.is_full_reload())
     }
 
-    fn is_bounded(core: &generic::Source) -> bool {
-        core.catalog
-            .as_ref()
-            .is_some_and(|catalog| catalog.is_bounded())
-    }
-
     /// `StreamSource` (list) -> shuffle -> (optional) `StreamDedup`
     fn create_list_plan(core: generic::Source, dedup: bool) -> Result<StreamPlanRef> {
         let downstream_columns = core.column_catalog.clone();
@@ -355,6 +349,10 @@ impl LogicalSource {
         // The value does not affect the behavior of `CREATE MATERIALIZED VIEW` here.
         self.source_catalog().is_some_and(|c| c.info.is_shared())
     }
+
+    pub fn is_bounded_source(&self) -> bool {
+        self.source_catalog().is_some_and(|c| c.is_bounded())
+    }
 }
 
 impl_plan_tree_node_for_leaf! { Logical, LogicalSource}
@@ -383,7 +381,7 @@ impl ColPrunable for LogicalSource {
         // For refreshable and bounded iceberg tables, we do not expose iceberg hidden columns to the user.
         if self.core.is_iceberg_connector()
             && !Self::is_full_reload_refresh(&self.core)
-            && !Self::is_bounded(&self.core)
+            && !self.is_bounded_source()
         {
             self.prune_col_for_iceberg_source(required_cols)
         } else {
