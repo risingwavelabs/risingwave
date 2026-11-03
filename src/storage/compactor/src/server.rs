@@ -317,7 +317,11 @@ pub async fn compactor_serve(
     }
 
     let compactor_srv = CompactorServiceImpl::default();
-    let monitor_srv = MonitorServiceImpl::new(await_tree_reg, config.server.clone());
+    let monitor_srv = MonitorServiceImpl::new(
+        await_tree_reg,
+        config.server.clone(),
+        format!("worker-{}@{advertise_addr}", meta_client.worker_id()),
+    );
     let server = tonic::transport::Server::builder()
         .add_service(CompactorServiceServer::new(compactor_srv))
         .add_service(MonitorServiceServer::new(monitor_srv))
@@ -381,7 +385,14 @@ pub async fn shared_compactor_serve(
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 
-    let monitor_srv = MonitorServiceImpl::new(await_tree_reg.clone(), config.server.clone());
+    let monitor_srv = MonitorServiceImpl::new(
+        await_tree_reg.clone(),
+        config.server.clone(),
+        format!(
+            "shared@{}",
+            opts.advertise_addr.as_deref().unwrap_or(&opts.listen_addr)
+        ),
+    );
 
     // Run a background heap profiler
     heap_profiler.start();

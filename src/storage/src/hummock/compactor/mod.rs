@@ -34,6 +34,8 @@ use tonic::Request;
 
 pub mod compactor_runner;
 mod context;
+pub(super) mod diagnostics;
+pub use diagnostics::report as compaction_diagnostic_report;
 pub mod fast_compactor_runner;
 mod iterator;
 mod shared_buffer_compact;

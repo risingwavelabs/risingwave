@@ -16,11 +16,14 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use await_tree::InstrumentAwait;
 use bytes::{Bytes, BytesMut};
 use fail::fail_point;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
 use super::{Block, BlockMeta};
+use crate::hummock::compactor::diagnostics::{self, Operation};
 use crate::hummock::{BlockHolder, HummockResult};
 
 #[async_trait::async_trait]
@@ -51,6 +54,7 @@ impl Drop for MemoryUsageTracker {
 
 /// An iterator that reads the blocks of an SST step by step from a given stream of bytes.
 pub struct BlockDataStream {
+    object_id: HummockSstableObjectId,
     buf_reader: MonitoredStreamingReader,
 
     /// The index of the next block. Note that `block_idx` is relative to the start index of the
@@ -82,8 +86,10 @@ impl BlockDataStream {
         byte_stream: MonitoredStreamingReader,
         // Meta data of the SST that is streamed.
         block_metas: Vec<BlockMeta>,
+        object_id: HummockSstableObjectId,
     ) -> Self {
         Self {
+            object_id,
             buf_reader: byte_stream,
             block_idx: 0,
             block_metas,
@@ -117,6 +123,7 @@ impl BlockDataStream {
         };
 
         self.block_idx += 1;
+        diagnostics::record_block();
         Ok(Some((data, uncompressed_size)))
     }
 
@@ -130,11 +137,26 @@ impl BlockDataStream {
         };
         let mut rest = read_size - start_pos;
         while rest > 0 {
-            let next_packet = self
-                .buf_reader
-                .read_bytes()
+            let read = async {
+                self.buf_reader
+                    .read_bytes()
+                    .await
+                    .unwrap_or_else(|| Err(ObjectError::internal("read unexpected EOF")))
+            };
+            let next_packet = if diagnostics::is_tracing() {
+                diagnostics::observe(
+                    Operation::ReadStream,
+                    Some(self.object_id),
+                    read.instrument_await(format!("read_stream block_index={}", self.block_idx)),
+                    |bytes| bytes.len() as u64,
+                )
                 .await
-                .unwrap_or_else(|| Err(ObjectError::internal("read unexpected EOF")))?;
+            } else {
+                diagnostics::observe(Operation::ReadStream, Some(self.object_id), read, |bytes| {
+                    bytes.len() as u64
+                })
+                .await
+            }?;
             let read_len = std::cmp::min(next_packet.len(), rest);
             read_buf.extend_from_slice(&next_packet[..read_len]);
             rest -= read_len;

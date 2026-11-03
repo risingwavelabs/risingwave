@@ -369,27 +369,31 @@ fn try_update_failure_metric<T>(
 
 /// `MonitoredStreamingUploader` will report the following metrics.
 /// - `write_bytes`: The number of bytes uploaded from the uploader's creation to finish.
-/// - `operation_size`:
-///   - `streaming_upload_write_bytes`: The number of bytes written for each call to `write_bytes`.
-///   - `streaming_upload`: Same as `write_bytes`.
+/// - `operation_size`: `streaming_upload` for each write; `streaming_upload_finish` for total size.
 /// - `operation_latency`:
-///   - `streaming_upload_start`: The time spent creating the uploader.
-///   - `streaming_upload_write_bytes`: The time spent on each call to `write_bytes`.
+///   - `streaming_upload_init`: The time spent creating the uploader (recorded by the store).
+///   - `streaming_upload`: Backend part-upload task durations.
 ///   - `streaming_upload_finish`: The time spent calling `finish`.
-/// - `failure_count`: `streaming_upload_start`, `streaming_upload_write_bytes`,
+/// - `failure_count`: `streaming_upload_init`, `streaming_upload`,
 ///   `streaming_upload_finish`
 pub struct MonitoredStreamingUploader<U: StreamingUploader> {
     inner: U,
     object_store_metrics: Arc<ObjectStoreMetrics>,
+    media_type: &'static str,
     /// Length of data uploaded with this uploader.
     operation_size: usize,
 }
 
 impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
-    pub fn new(handle: U, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub fn new(
+        handle: U,
+        object_store_metrics: Arc<ObjectStoreMetrics>,
+        media_type: &'static str,
+    ) -> Self {
         Self {
             inner: handle,
             object_store_metrics,
+            media_type,
             operation_size: 0,
         }
     }
@@ -427,6 +431,12 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
     async fn finish(self) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUploadFinish;
         let operation_type_str = operation_type.as_str();
+        // Time the whole finish call: remaining buffered data, pending parts and writer close.
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[self.media_type, operation_type_str])
+            .start_timer();
 
         let res =
             // TODO: we should avoid this special case after fully migrating to opeandal for s3.
@@ -437,7 +447,7 @@ impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
-        // duration metrics is collected and reported inside the specific implementation of the streaming uploader.
+        // Record total object size separately from the part/chunk sizes.
         self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type_str])
@@ -645,6 +655,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         Ok(MonitoredStreamingUploader::new(
             res?,
             self.object_store_metrics.clone(),
+            media_type,
         ))
     }
 
@@ -1149,6 +1160,65 @@ mod tests {
     use tokio::io::AsyncReadExt;
 
     use super::{Bytes, ObjectDataStreamReader, ObjectError};
+
+    struct ControlledUploader {
+        result: tokio::sync::oneshot::Receiver<super::ObjectResult<()>>,
+    }
+
+    impl super::StreamingUploader for ControlledUploader {
+        async fn write_bytes(&mut self, _: Bytes) -> super::ObjectResult<()> {
+            Ok(())
+        }
+
+        async fn finish(self) -> super::ObjectResult<()> {
+            self.result.await.unwrap()
+        }
+
+        fn get_memory_usage(&self) -> u64 {
+            0
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streaming_upload_finish_latency_success_and_error() {
+        use std::sync::Arc;
+
+        use futures::poll;
+
+        use super::{MonitoredStreamingUploader, ObjectStoreMetrics};
+
+        for fail in [false, true] {
+            let metrics = Arc::new(ObjectStoreMetrics::new(&prometheus::Registry::new()));
+            let histogram = metrics
+                .operation_latency
+                .with_label_values(&["minio", "streaming_upload_finish"]);
+            let (result, receiver) = tokio::sync::oneshot::channel();
+            let uploader = MonitoredStreamingUploader::new(
+                ControlledUploader { result: receiver },
+                metrics.clone(),
+                "minio",
+            );
+            let mut finish = Box::pin(uploader.finish());
+            assert!(poll!(finish.as_mut()).is_pending());
+            assert_eq!(histogram.get_sample_count(), 0);
+            result
+                .send(if fail {
+                    Err(ObjectError::internal("finish failed"))
+                } else {
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(finish.await.is_err(), fail);
+            assert_eq!(histogram.get_sample_count(), 1);
+            assert_eq!(
+                metrics
+                    .failure_count
+                    .with_label_values(&["streaming_upload_finish"])
+                    .get(),
+                u64::from(fail)
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_object_data_stream_reader_reads_across_chunks() {

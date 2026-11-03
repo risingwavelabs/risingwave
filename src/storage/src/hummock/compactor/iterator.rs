@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
+use super::diagnostics;
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
@@ -238,6 +239,7 @@ impl SstableStreamIterator {
                         }
                         self.block_stream.take();
                         self.io_retry_times += 1;
+                        diagnostics::record_retry();
                         fail_point!("create_stream_err");
 
                         tracing::warn!(

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::config::ServerConfig;
+use risingwave_common::util::COMPACTION_DIAGNOSTICS_PREFIX;
 use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
 use risingwave_pb::compactor::{
@@ -26,8 +27,10 @@ use risingwave_pb::monitor_service::{
     ProfilingResponse, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
     TieredCacheTracingResponse,
 };
-use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::compactor::{
+    CompactionAwaitTreeRegRef, compaction_diagnostic_report,
+};
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
@@ -74,16 +77,19 @@ impl CompactorService for CompactorServiceImpl {
 pub struct MonitorServiceImpl {
     await_tree_reg: Option<CompactionAwaitTreeRegRef>,
     profile_service: ProfileServiceImpl,
+    diagnostic_node: String,
 }
 
 impl MonitorServiceImpl {
     pub fn new(
         await_tree_reg: Option<CompactionAwaitTreeRegRef>,
         server_config: ServerConfig,
+        diagnostic_node: String,
     ) -> Self {
         Self {
             await_tree_reg,
             profile_service: ProfileServiceImpl::new(server_config),
+            diagnostic_node,
         }
     }
 }
@@ -94,14 +100,21 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
-        let compaction_task_traces = match &self.await_tree_reg {
-            None => Default::default(),
-            Some(await_tree_reg) => await_tree_reg
-                .collect::<Compaction>()
-                .into_iter()
-                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
-                .collect(),
-        };
+        let mut compaction_task_traces: std::collections::BTreeMap<_, _> =
+            match &self.await_tree_reg {
+                None => Default::default(),
+                Some(await_tree_reg) => await_tree_reg
+                    .collect::<Compaction>()
+                    .into_iter()
+                    .map(|(k, v)| (format!("{k:?}"), v.to_string()))
+                    .collect(),
+            };
+        // Independently maintained diagnostics travel in a reserved string-map entry, even
+        // with await-tree disabled. Node identity prevents collisions during cluster merging.
+        compaction_task_traces.insert(
+            format!("{COMPACTION_DIAGNOSTICS_PREFIX}{}", self.diagnostic_node),
+            compaction_diagnostic_report(),
+        );
         Ok(Response::new(StackTraceResponse {
             compaction_task_traces,
             ..Default::default()
@@ -161,5 +174,30 @@ impl MonitorService for MonitorServiceImpl {
         Err(Status::unimplemented(
             "Get Profile Stats unimplemented in compactor",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_diagnostic_report_is_returned_with_await_tree_disabled() {
+        let service = MonitorServiceImpl::new(
+            None,
+            ServerConfig::default(),
+            "worker-42@127.0.0.1:6660".to_owned(),
+        );
+        let response = service
+            .stack_trace(Request::new(StackTraceRequest::default()))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(response.compaction_task_traces.len(), 1);
+        let key = format!("{COMPACTION_DIAGNOSTICS_PREFIX}worker-42@127.0.0.1:6660");
+        let report = &response.compaction_task_traces[&key];
+        assert!(report.contains("Compactor diagnostics v1"));
+        assert!(report.contains("Running tasks:"));
+        assert!(report.contains("Recent slow/failed tasks"));
     }
 }
