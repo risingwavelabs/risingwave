@@ -54,7 +54,7 @@ SELECT * FROM t_realtime;
 ----
 
 statement ok
-RESET batch_read_latest_committed;
+SET batch_read_latest_committed TO DEFAULT;
 
 statement ok
 SET visibility_mode = all;
@@ -64,10 +64,10 @@ SELECT * FROM t_realtime;
 ----
 
 statement ok
-RESET visibility_mode;
+SET visibility_mode TO DEFAULT;
 
 statement ok
-RESET query_mode;
+SET query_mode TO DEFAULT;
 
 # Frontend-pinned reads still include the pending row.
 query IT
