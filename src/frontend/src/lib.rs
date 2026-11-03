@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![feature(allocator_api)]
 #![feature(map_try_insert)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
