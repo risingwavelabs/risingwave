@@ -341,6 +341,15 @@ impl StreamingUploader for S3StreamingUploader {
     /// `CreateMultipartUpload` and `CompleteMultipartUpload` requests. Otherwise flush the
     /// remaining data of the buffer to S3 as a new part.
     async fn finish(mut self) -> ObjectResult<()> {
+        // The legacy AWS SDK uploader bypasses MonitoredStreamingUploader.
+        let _timer = self
+            .metrics
+            .operation_latency
+            .with_label_values(&[
+                Self::MEDIA_TYPE,
+                OperationType::StreamingUploadFinish.as_str(),
+            ])
+            .start_timer();
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));

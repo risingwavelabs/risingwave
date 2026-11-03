@@ -20,6 +20,10 @@ use risingwave_pb::batch_plan;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use tracing::warn;
 
+/// Reserved string-map entries carrying the temporary Compactor diagnosis report.
+/// This avoids changing the `StackTrace` protobuf for the diagnostic patch.
+pub const COMPACTION_DIAGNOSTICS_PREFIX: &str = "__compactor_diagnostics_v1__/";
+
 pub trait TypeUrl {
     fn type_url() -> &'static str;
 }
@@ -63,9 +67,26 @@ impl Display for StackTraceResponseOutput<'_> {
                 writeln!(s, "{trace}")?;
             }
         }
-        if !self.compaction_task_traces.is_empty() {
+        let (mut diagnostics, traces): (Vec<_>, Vec<_>) = self
+            .compaction_task_traces
+            .iter()
+            .partition(|(name, _)| name.starts_with(COMPACTION_DIAGNOSTICS_PREFIX));
+        if !diagnostics.is_empty() {
+            diagnostics.sort_unstable_by_key(|(name, _)| *name);
+            writeln!(s, "--- Compactor Diagnostics ---")?;
+            for (name, report) in diagnostics {
+                writeln!(
+                    s,
+                    ">> {}",
+                    name.strip_prefix(COMPACTION_DIAGNOSTICS_PREFIX)
+                        .unwrap_or(name)
+                )?;
+                writeln!(s, "{report}")?;
+            }
+        }
+        if !traces.is_empty() {
             writeln!(s, "--- Compactor Traces ---")?;
-            for (name, trace) in &self.compaction_task_traces {
+            for (name, trace) in traces {
                 writeln!(s, ">> Compaction Task {name}")?;
                 writeln!(s, "{trace}")?;
             }
@@ -155,5 +176,56 @@ impl StackTraceResponse {
 
     pub fn output(&self) -> StackTraceResponseOutput<'_> {
         StackTraceResponseOutput(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compactor_reports_merge_without_collision_and_render_separately() {
+        let mut all = StackTraceResponse::default();
+        for id in [1, 2] {
+            let mut worker = StackTraceResponse::default();
+            worker.compaction_task_traces.insert(
+                format!("{COMPACTION_DIAGNOSTICS_PREFIX}worker-{id}"),
+                format!("report for worker {id}"),
+            );
+            worker.compaction_task_traces.insert(
+                format!("CompactRunner task={id}"),
+                format!("tree for task {id}"),
+            );
+            all.merge_other(worker);
+        }
+        let output = all.output().to_string();
+        let sections = output.split("--- Compactor Traces ---").collect::<Vec<_>>();
+        assert_eq!(sections.len(), 2);
+        assert!(sections[0].contains("--- Compactor Diagnostics ---"));
+        for id in [1, 2] {
+            assert!(sections[0].contains(&format!("report for worker {id}")));
+            assert!(!sections[1].contains(&format!("report for worker {id}")));
+            assert!(sections[1].contains(&format!("tree for task {id}")));
+        }
+        assert!(!output.contains(COMPACTION_DIAGNOSTICS_PREFIX));
+    }
+
+    #[test]
+    fn test_report_without_await_tree_and_legacy_tree_without_report() {
+        let mut response = StackTraceResponse::default();
+        response.compaction_task_traces.insert(
+            format!("{COMPACTION_DIAGNOSTICS_PREFIX}worker-1"),
+            "Running tasks: 0".to_owned(),
+        );
+        let output = response.output().to_string();
+        assert!(output.contains("--- Compactor Diagnostics ---"));
+        assert!(!output.contains("--- Compactor Traces ---"));
+        response.compaction_task_traces.clear();
+        response
+            .compaction_task_traces
+            .insert("CompactRunner".to_owned(), "legacy tree".to_owned());
+        let output = response.output().to_string();
+        assert!(!output.contains("--- Compactor Diagnostics ---"));
+        assert!(output.contains("legacy tree"));
     }
 }

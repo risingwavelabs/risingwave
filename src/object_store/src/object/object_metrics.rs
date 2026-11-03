@@ -36,7 +36,7 @@ pub struct ObjectStoreMetrics {
 }
 
 impl ObjectStoreMetrics {
-    fn new(registry: &Registry) -> Self {
+    pub(super) fn new(registry: &Registry) -> Self {
         let read_bytes = register_int_counter_with_registry!(
             "object_store_read_bytes",
             "Total bytes of requests read from object store",

@@ -50,6 +50,7 @@ use super::{
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
 };
+use crate::hummock::compactor::diagnostics::{self, Operation};
 use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
 use crate::hummock::vector::monitor::VectorStoreCacheStats;
@@ -736,10 +737,14 @@ impl SstableStore {
         });
 
         stats.cache_meta_block_total += 1;
-        let entry = fetch
-            .instrument_await("fetch_meta".verbose())
-            .await
-            .map_err(HummockError::foyer_error);
+        let entry = diagnostics::observe(
+            Operation::FetchSstMeta,
+            Some(object_id),
+            fetch.instrument_await("fetch_meta".verbose()),
+            |_| 0,
+        )
+        .await
+        .map_err(HummockError::foyer_error);
         if let Ok(ref entry) = entry
             && entry.source() == foyer::Source::Outer
         {
@@ -808,19 +813,24 @@ impl SstableStore {
         let end_pos = metas.iter().map(|meta| meta.len as usize).sum::<usize>() + start_pos;
         let range = start_pos..end_pos;
         // spawn to tokio pool because the object-storage sdk may not be safe to cancel.
-        let ret = tokio::spawn(async move { store.streaming_read(&data_path, range).await }).await;
-
-        let reader = match ret {
-            Ok(Ok(reader)) => reader,
-            Ok(Err(e)) => return Err(HummockError::from(e)),
-            Err(e) => {
-                return Err(HummockError::other(format!(
-                    "failed to get result, this read request may be canceled: {}",
-                    e.as_report()
-                )));
-            }
-        };
-        Ok(BlockDataStream::new(reader, metas.to_vec()))
+        let reader = diagnostics::observe(
+            Operation::OpenReadStream,
+            Some(object_id),
+            async move {
+                match tokio::spawn(async move { store.streaming_read(&data_path, range).await })
+                    .await
+                {
+                    Ok(result) => result.map_err(HummockError::from),
+                    Err(error) => Err(HummockError::other(format!(
+                        "failed to get result, this read request may be canceled: {}",
+                        error.as_report()
+                    ))),
+                }
+            },
+            |_| 0,
+        )
+        .await?;
+        Ok(BlockDataStream::new(reader, metas.to_vec(), object_id))
     }
 
     pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, Box<Sstable>> {

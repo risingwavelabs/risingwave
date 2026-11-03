@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
 use risingwave_pb::hummock::BloomFilterType;
 
+use super::diagnostics;
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
@@ -162,6 +163,7 @@ impl BlockStreamIterator {
 
                     self.block_stream.take();
                     self.io_retry_times += 1;
+                    diagnostics::record_retry();
                     fail_point!("create_stream_err");
 
                     tracing::warn!(

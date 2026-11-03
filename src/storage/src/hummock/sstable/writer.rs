@@ -24,6 +24,7 @@ use zstd::zstd_safe::WriteBuf;
 
 use super::multi_builder::UploadJoinHandle;
 use super::{Block, BlockMeta};
+use crate::hummock::compactor::diagnostics::{self, Operation};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
     CachePolicy, HummockResult, RecentFilterTrait, SstableBlockIndex, SstableBuilderOptions,
@@ -198,7 +199,7 @@ impl SstableWriter for BatchUploadWriter {
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
         fail_point!("data_upload_err");
-        let join_handle = tokio::spawn(async move {
+        let join_handle = diagnostics::spawn_upload(self.object_id, async move {
             meta.encode_to(&mut self.buf);
             let data = Bytes::from(self.buf);
             let _tracker = self.tracker.map(|mut t| {
@@ -210,10 +211,13 @@ impl SstableWriter for BatchUploadWriter {
             });
 
             // Upload data to object store.
-            self.sstable_store
-                .clone()
-                .put_sst_data(self.object_id, data)
-                .await?;
+            diagnostics::observe(
+                Operation::FinishUpload,
+                Some(self.object_id),
+                self.sstable_store.put_sst_data(self.object_id, data),
+                |_| 0,
+            )
+            .await?;
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
             // Only update recent filter with sst obj id is okay here, for l0 is only filter by sst obj id with recent filter.
@@ -278,6 +282,10 @@ impl StreamingUploadWriter {
 }
 
 #[async_trait::async_trait]
+#[allow(
+    clippy::large_futures,
+    reason = "async_trait boxes the writer futures and Tokio boxes the upload task; keep SDK futures inline within those heap allocations"
+)]
 impl SstableWriter for StreamingUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
@@ -288,10 +296,15 @@ impl SstableWriter for StreamingUploadWriter {
             let block = Block::decode(block_data.clone(), meta.uncompressed_size as usize)?;
             self.blocks.push(block);
         }
-        self.object_uploader
-            .write_bytes(block_data)
-            .await
-            .map_err(Into::into)
+        let submitted_bytes = block_data.len() as u64;
+        diagnostics::observe(
+            Operation::WriteUpload,
+            Some(self.object_id),
+            self.object_uploader.write_bytes(block_data),
+            |_| submitted_bytes,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
@@ -300,17 +313,29 @@ impl SstableWriter for StreamingUploadWriter {
             let block = Block::decode(block.clone(), meta.uncompressed_size as usize)?;
             self.blocks.push(block);
         }
-        self.object_uploader
-            .write_bytes(block)
-            .await
-            .map_err(Into::into)
+        let submitted_bytes = block.len() as u64;
+        diagnostics::observe(
+            Operation::WriteUpload,
+            Some(self.object_id),
+            self.object_uploader.write_bytes(block),
+            |_| submitted_bytes,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
         let metadata = Bytes::from(meta.encode_to_bytes());
 
-        self.object_uploader.write_bytes(metadata).await?;
-        let join_handle = tokio::spawn(async move {
+        let submitted_bytes = metadata.len() as u64;
+        diagnostics::observe(
+            Operation::WriteUpload,
+            Some(self.object_id),
+            self.object_uploader.write_bytes(metadata),
+            |_| submitted_bytes,
+        )
+        .await?;
+        let join_handle = diagnostics::spawn_upload(self.object_id, async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {
                     if !t.try_increase_memory(uploader_memory_usage) {
@@ -323,7 +348,13 @@ impl SstableWriter for StreamingUploadWriter {
             assert!(!meta.block_metas.is_empty());
 
             // Upload data to object store.
-            self.object_uploader.finish().await?;
+            diagnostics::observe(
+                Operation::FinishUpload,
+                Some(self.object_id),
+                self.object_uploader.finish(),
+                |_| 0,
+            )
+            .await?;
             // Add meta cache.
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
@@ -373,7 +404,13 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
     ) -> HummockResult<Self::Writer> {
         let object_id = object_id.into();
         let path = self.sstable_store.get_sst_data_path(object_id);
-        let uploader = self.sstable_store.create_streaming_uploader(&path).await?;
+        let uploader = diagnostics::observe(
+            Operation::OpenUploader,
+            Some(object_id),
+            self.sstable_store.create_streaming_uploader(&path),
+            |_| 0,
+        )
+        .await?;
         Ok(StreamingUploadWriter::new(
             object_id,
             self.sstable_store.clone(),

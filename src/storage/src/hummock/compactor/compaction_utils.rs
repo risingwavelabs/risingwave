@@ -33,6 +33,7 @@ use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbTableSchema};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
+use super::diagnostics::{self, Operation};
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::compactor::{
     ConcatSstableIterator, MultiCompactionFilter, TaskProgress, TtlCompactionFilter,
@@ -68,7 +69,13 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
 
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>> {
         let timer = Instant::now();
-        let table_id = self.object_id_getter.get_new_sst_object_id().await?;
+        let table_id = diagnostics::observe(
+            Operation::AllocateSstId,
+            None,
+            self.object_id_getter.get_new_sst_object_id(),
+            |_| 0,
+        )
+        .await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let writer_options = SstableWriterOptions {

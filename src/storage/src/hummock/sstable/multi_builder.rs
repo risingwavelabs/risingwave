@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 
-use await_tree::SpanExt;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -29,6 +29,7 @@ use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use tokio::task::JoinHandle;
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
+use crate::hummock::compactor::diagnostics::{self, Operation};
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -303,7 +304,6 @@ where
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
     pub async fn seal_current(&mut self) -> HummockResult<()> {
-        use await_tree::InstrumentAwait;
         if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish().await?;
             {
@@ -322,12 +322,21 @@ where
             if let Some(concurrent_uploading_sst_count) = self.concurrent_uploading_sst_count
                 && self.concurrent_upload_join_handle.len() >= concurrent_uploading_sst_count
             {
-                self.concurrent_upload_join_handle
-                    .next()
-                    .instrument_await("upload".verbose())
-                    .await
-                    .unwrap()
-                    .map_err(HummockError::sstable_upload_error)??;
+                diagnostics::observe(
+                    Operation::WaitUploads,
+                    None,
+                    async {
+                        self.concurrent_upload_join_handle
+                            .next()
+                            .instrument_await("upload".verbose())
+                            .await
+                            .unwrap()
+                            .map_err(HummockError::sstable_upload_error)??;
+                        Ok::<_, HummockError>(())
+                    },
+                    |_| 0,
+                )
+                .await?;
             }
         }
         Ok(())
@@ -337,11 +346,22 @@ where
     pub async fn finish(mut self) -> HummockResult<Vec<LocalSstableInfo>> {
         use futures::future::try_join_all;
         self.seal_current().await?;
-        try_join_all(self.concurrent_upload_join_handle.into_iter())
-            .await
-            .map_err(HummockError::sstable_upload_error)?
-            .into_iter()
-            .collect::<HummockResult<Vec<()>>>()?;
+        let pending_uploads = self.concurrent_upload_join_handle.len();
+        diagnostics::observe(
+            Operation::WaitUploads,
+            None,
+            async {
+                try_join_all(self.concurrent_upload_join_handle.into_iter())
+                    .instrument_await(format!("wait_all_uploads count={pending_uploads}"))
+                    .await
+                    .map_err(HummockError::sstable_upload_error)?
+                    .into_iter()
+                    .collect::<HummockResult<Vec<()>>>()?;
+                Ok::<_, HummockError>(())
+            },
+            |_| 0,
+        )
+        .await?;
 
         Ok(self.sst_outputs)
     }

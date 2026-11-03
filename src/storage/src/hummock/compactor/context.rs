@@ -31,10 +31,26 @@ pub mod await_tree_key {
     /// Await-tree key type for compaction tasks.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Compaction {
-        CompactRunner { task_id: u64, split_index: usize },
-        CompactSharedBuffer { id: usize },
-        SpawnUploadTask { id: usize },
-        MergingTask { id: usize },
+        CompactTask {
+            task_id: u64,
+        },
+        CompactUpload {
+            task_id: u64,
+            object_id: risingwave_hummock_sdk::HummockSstableObjectId,
+        },
+        CompactRunner {
+            task_id: u64,
+            split_index: usize,
+        },
+        CompactSharedBuffer {
+            id: usize,
+        },
+        SpawnUploadTask {
+            id: usize,
+        },
+        MergingTask {
+            id: usize,
+        },
     }
 
     pub use Compaction::*;

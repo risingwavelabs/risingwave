@@ -47,8 +47,8 @@ use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
     metrics_report_for_task, optimize_by_copy_block,
 };
+use crate::hummock::compactor::diagnostics::{self, Operation};
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
-use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, await_tree_key,
     fast_compactor_runner,
@@ -314,6 +314,32 @@ pub fn partition_overlapping_sstable_infos(
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact_with_agent(
     compactor_context: CompactorContext,
+    compact_task: CompactTask,
+    shutdown_rx: Receiver<()>,
+    object_id_getter: Arc<dyn GetObjectId>,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+) -> (
+    (
+        CompactTask,
+        HashMap<TableId, TableStats>,
+        HashMap<HummockSstableObjectId, u64>,
+    ),
+    Option<MemoryTracker>,
+) {
+    let info = diagnostics::TaskInfo::from(&compact_task);
+    let context = compactor_context.clone();
+    let future = compact_with_agent_inner(
+        compactor_context,
+        compact_task,
+        shutdown_rx,
+        object_id_getter,
+        compaction_catalog_agent_ref,
+    );
+    diagnostics::instrument_task(info, &context, future).await
+}
+
+async fn compact_with_agent_inner(
+    compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Arc<dyn GetObjectId>,
@@ -343,10 +369,18 @@ pub async fn compact_with_agent(
     let mut task_status = TaskStatus::Success;
     let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
 
-    if let Err(e) =
-        generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block).await
+    diagnostics::set_phase("generate_splits");
+    if let Err(e) = diagnostics::observe(
+        Operation::GenerateSplits,
+        None,
+        generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block),
+        |_| 0,
+    )
+    .await
     {
-        tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
+        tracing::warn!(
+            error = %e.as_report(), "Failed to generate_splits"
+        );
         task_status = TaskStatus::ExecuteFailed;
         return (
             compact_done(compact_task, context.clone(), vec![], task_status),
@@ -361,8 +395,12 @@ pub async fn compact_with_agent(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let mut abort_handles = vec![];
-    let task_progress_guard =
-        TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
+    let task_progress = context
+        .task_progress_manager
+        .lock()
+        .get(&compact_task.task_id)
+        .cloned()
+        .expect("registered compaction task");
 
     let capacity = estimate_task_output_capacity(context.clone(), &compact_task);
 
@@ -423,13 +461,18 @@ pub async fn compact_with_agent(
                 .sub(parallelism as _);
         });
 
+    diagnostics::set_phase(if optimize_by_copy_block {
+        "execute_fast"
+    } else {
+        "execute_normal"
+    });
     if optimize_by_copy_block {
         let runner = fast_compactor_runner::CompactorRunner::new(
             context.clone(),
             compact_task.clone(),
             compaction_catalog_agent_ref.clone(),
             object_id_getter.clone(),
-            task_progress_guard.progress.clone(),
+            task_progress.clone(),
             multi_filter,
         );
 
@@ -439,7 +482,7 @@ pub async fn compact_with_agent(
                 task_status = TaskStatus::ManualCanceled;
             },
 
-            ret = runner.run() => {
+            ret = diagnostics::instrument_split(0, runner.run().instrument_await("fast_compaction")) => {
                 match ret {
                     Ok((ssts, statistics)) => {
                         output_ssts.push((0, ssts, statistics));
@@ -479,12 +522,13 @@ pub async fn compact_with_agent(
             compact_task.clone(),
             object_id_getter.clone(),
         );
-        let task_progress = task_progress_guard.progress.clone();
+        let task_progress = task_progress.clone();
         let runner = async move {
             compactor_runner
                 .run(filter, compaction_catalog_agent_ref, task_progress)
                 .await
         };
+        let runner = diagnostics::instrument_split(split_index, runner);
         let traced = match context.await_tree_reg.as_ref() {
             None => runner.right_future(),
             Some(await_tree_reg) => await_tree_reg
@@ -514,7 +558,9 @@ pub async fn compact_with_agent(
                 task_status = TaskStatus::ManualCanceled;
                 break;
             }
-            future_result = buffered.next() => {
+            future_result = buffered.next().instrument_await(format!(
+                "wait_splits completed={} total={parallelism}", output_ssts.len()
+            )) => {
                 match future_result {
                     Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
                         output_ssts.push((split_index, ssts, compact_stat));
@@ -611,29 +657,61 @@ pub async fn compact(
     ),
     Option<MemoryTracker>,
 ) {
-    let read_table_ids = compact_task.get_table_ids_from_input_ssts().collect_vec();
-    let compaction_catalog_agent_ref =
-        match acquire_complete_catalog_agent(&compaction_catalog_manager_ref, read_table_ids).await
-        {
-            Ok(compaction_catalog_agent_ref) => compaction_catalog_agent_ref,
-            Err(e) => {
-                tracing::warn!(
-                    error = %e.as_report(),
-                    "Failed to acquire complete compaction catalog agent"
-                );
-                return (
-                    compact_done(
-                        compact_task,
-                        compactor_context.clone(),
-                        vec![],
-                        TaskStatus::ExecuteFailed,
-                    ),
-                    None,
-                );
-            }
-        };
+    let info = diagnostics::TaskInfo::from(&compact_task);
+    let context = compactor_context.clone();
+    let future = compact_inner(
+        compactor_context,
+        compact_task,
+        shutdown_rx,
+        object_id_getter,
+        compaction_catalog_manager_ref,
+    );
+    diagnostics::instrument_task(info, &context, future).await
+}
 
-    compact_with_agent(
+async fn compact_inner(
+    compactor_context: CompactorContext,
+    compact_task: CompactTask,
+    shutdown_rx: Receiver<()>,
+    object_id_getter: Arc<dyn GetObjectId>,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
+) -> (
+    (
+        CompactTask,
+        HashMap<TableId, TableStats>,
+        HashMap<HummockSstableObjectId, u64>,
+    ),
+    Option<MemoryTracker>,
+) {
+    diagnostics::set_phase("acquire_catalog");
+    let read_table_ids = compact_task.get_table_ids_from_input_ssts().collect_vec();
+    let compaction_catalog_agent_ref = match diagnostics::observe(
+        Operation::AcquireCatalog,
+        None,
+        acquire_complete_catalog_agent(&compaction_catalog_manager_ref, read_table_ids),
+        |_| 0,
+    )
+    .await
+    {
+        Ok(compaction_catalog_agent_ref) => compaction_catalog_agent_ref,
+        Err(e) => {
+            tracing::warn!(
+                error = %e.as_report(),
+                "Failed to acquire complete compaction catalog agent"
+            );
+            return (
+                compact_done(
+                    compact_task,
+                    compactor_context.clone(),
+                    vec![],
+                    TaskStatus::ExecuteFailed,
+                ),
+                None,
+            );
+        }
+    };
+
+    compact_with_agent_inner(
         compactor_context,
         compact_task,
         shutdown_rx,
@@ -654,6 +732,7 @@ pub(crate) fn compact_done(
     HashMap<TableId, TableStats>,
     HashMap<HummockSstableObjectId, u64>,
 ) {
+    diagnostics::set_result(task_status);
     let mut table_stats_map = TableStatsMap::default();
     let mut object_timestamps = HashMap::default();
     compact_task.task_status = task_status;
