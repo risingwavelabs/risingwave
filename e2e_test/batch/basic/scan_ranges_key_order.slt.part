@@ -1,0 +1,978 @@
+# Expected results below match PostgreSQL. A scan of several ranges provides key order, so these
+# plans have no sort, and the order of the rows is what is checked.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table key_order_table(a int, b int, primary key(a, b));
+
+statement ok
+insert into key_order_table values (1,1),(1,2),(1,3),(1,null),(2,1),(2,2),(2,null),(3,1),(3,2),(4,5),(null,1),(null,2),(null,null);
+
+statement ok
+create materialized view key_order_asc as select a, b from key_order_table order by a, b limit 100;
+
+statement ok
+create materialized view key_order_desc as select a, b from key_order_table order by a desc, b desc limit 100;
+
+statement ok
+create materialized view key_order_nulls_first as select a, b from key_order_table order by a nulls first, b nulls first limit 100;
+
+statement ok
+create materialized view key_order_mixed as select a, b from key_order_table order by a, b desc limit 100;
+
+# Over key_order_table.
+query II
+select a, b from key_order_table where a = 1 or a = 3 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+3 1
+3 2
+
+query II
+select a, b from key_order_table where a = 1 or a >= 3 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_table where a < 2 or a > 3 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+4 5
+
+query II
+select a, b from key_order_table where a in (3, 1, 2) order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+2 1
+2 2
+2 NULL
+3 1
+3 2
+
+query II
+select a, b from key_order_table where a between 1 and 3 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+2 1
+2 2
+2 NULL
+3 1
+3 2
+
+query II
+select a, b from key_order_table where a is null or a = 1 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+NULL 1
+NULL 2
+NULL NULL
+
+query II
+select a, b from key_order_table where a is null or a > 2 order by a, b;
+----
+3 1
+3 2
+4 5
+NULL 1
+NULL 2
+NULL NULL
+
+query II
+select a, b from key_order_table where (a, b) > (1, 1) order by a, b;
+----
+1 2
+1 3
+2 1
+2 2
+2 NULL
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_table where (a, b) >= (2, 2) or a = 1 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+2 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_table where (a = 1 and b = 2) or a > 2 order by a, b;
+----
+1 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_table where a > 2 or (a = 1 and b = 2) order by a, b;
+----
+1 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_table where (a = 1 and b = 1) or a = 2 or (a = 3 and b = 2) order by a, b;
+----
+1 1
+2 1
+2 2
+2 NULL
+3 2
+
+query II
+select a, b from key_order_table where a in (1, 2) and b in (2, 1) order by a, b;
+----
+1 1
+1 2
+2 1
+2 2
+
+query II
+select a, b from key_order_table where a = 1 or a = 3 order by a, b limit 2;
+----
+1 1
+1 2
+
+query II
+select a, b from key_order_table where a = 1 or a >= 3 order by a, b limit 2;
+----
+1 1
+1 2
+
+query II
+select a, b from key_order_table where a < 2 or a > 3 order by a, b limit 2;
+----
+1 1
+1 2
+
+query II
+select a, b from key_order_table where (a, b) > (1, 1) order by a, b limit 2;
+----
+1 2
+1 3
+
+query II
+select a, b from key_order_table where (a, b) >= (2, 2) or a = 1 order by a, b limit 2;
+----
+1 1
+1 2
+
+query II
+select a, b from key_order_table where (a = 1 and b = 2) or a > 2 order by a, b limit 2;
+----
+1 2
+3 1
+
+query II
+select a, b from key_order_table where a = 1 and (b < 2 or b > 2) order by b;
+----
+1 1
+1 3
+
+query II
+select a, b from key_order_table where a = 1 and (b < 2 or b > 2) order by b limit 1;
+----
+1 1
+
+query II
+select a, b from key_order_table where a = 1 and b in (3, 1) order by b;
+----
+1 1
+1 3
+
+# Over key_order_asc.
+query II
+select a, b from key_order_asc where a = 1 or a = 3 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+3 1
+3 2
+
+query II
+select a, b from key_order_asc where a = 1 or a >= 3 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_asc where a < 2 or a > 3 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+4 5
+
+query II
+select a, b from key_order_asc where a in (3, 1, 2) order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+2 1
+2 2
+2 NULL
+3 1
+3 2
+
+query II
+select a, b from key_order_asc where a between 1 and 3 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+2 1
+2 2
+2 NULL
+3 1
+3 2
+
+query II
+select a, b from key_order_asc where a is null or a = 1 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+NULL 1
+NULL 2
+NULL NULL
+
+query II
+select a, b from key_order_asc where a is null or a > 2 order by a, b;
+----
+3 1
+3 2
+4 5
+NULL 1
+NULL 2
+NULL NULL
+
+query II
+select a, b from key_order_asc where (a, b) > (1, 1) order by a, b;
+----
+1 2
+1 3
+2 1
+2 2
+2 NULL
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_asc where (a, b) >= (2, 2) or a = 1 order by a, b;
+----
+1 1
+1 2
+1 3
+1 NULL
+2 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_asc where (a = 1 and b = 2) or a > 2 order by a, b;
+----
+1 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_asc where a > 2 or (a = 1 and b = 2) order by a, b;
+----
+1 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_asc where (a = 1 and b = 1) or a = 2 or (a = 3 and b = 2) order by a, b;
+----
+1 1
+2 1
+2 2
+2 NULL
+3 2
+
+query II
+select a, b from key_order_asc where a in (1, 2) and b in (2, 1) order by a, b;
+----
+1 1
+1 2
+2 1
+2 2
+
+query II
+select a, b from key_order_asc where a = 1 or a = 3 order by a, b limit 2;
+----
+1 1
+1 2
+
+query II
+select a, b from key_order_asc where a = 1 or a >= 3 order by a, b limit 2;
+----
+1 1
+1 2
+
+query II
+select a, b from key_order_asc where a < 2 or a > 3 order by a, b limit 2;
+----
+1 1
+1 2
+
+query II
+select a, b from key_order_asc where (a, b) > (1, 1) order by a, b limit 2;
+----
+1 2
+1 3
+
+query II
+select a, b from key_order_asc where (a, b) >= (2, 2) or a = 1 order by a, b limit 2;
+----
+1 1
+1 2
+
+query II
+select a, b from key_order_asc where (a = 1 and b = 2) or a > 2 order by a, b limit 2;
+----
+1 2
+3 1
+
+query II
+select a, b from key_order_asc where a = 1 and (b < 2 or b > 2) order by b;
+----
+1 1
+1 3
+
+query II
+select a, b from key_order_asc where a = 1 and (b < 2 or b > 2) order by b limit 1;
+----
+1 1
+
+query II
+select a, b from key_order_asc where a = 1 and b in (3, 1) order by b;
+----
+1 1
+1 3
+
+# Over key_order_desc.
+query II
+select a, b from key_order_desc where a = 1 or a = 3 order by a desc, b desc;
+----
+3 2
+3 1
+1 NULL
+1 3
+1 2
+1 1
+
+query II
+select a, b from key_order_desc where a = 1 or a >= 3 order by a desc, b desc;
+----
+4 5
+3 2
+3 1
+1 NULL
+1 3
+1 2
+1 1
+
+query II
+select a, b from key_order_desc where a < 2 or a > 3 order by a desc, b desc;
+----
+4 5
+1 NULL
+1 3
+1 2
+1 1
+
+query II
+select a, b from key_order_desc where a in (3, 1, 2) order by a desc, b desc;
+----
+3 2
+3 1
+2 NULL
+2 2
+2 1
+1 NULL
+1 3
+1 2
+1 1
+
+query II
+select a, b from key_order_desc where a between 1 and 3 order by a desc, b desc;
+----
+3 2
+3 1
+2 NULL
+2 2
+2 1
+1 NULL
+1 3
+1 2
+1 1
+
+query II
+select a, b from key_order_desc where a is null or a = 1 order by a desc, b desc;
+----
+NULL NULL
+NULL 2
+NULL 1
+1 NULL
+1 3
+1 2
+1 1
+
+query II
+select a, b from key_order_desc where a is null or a > 2 order by a desc, b desc;
+----
+NULL NULL
+NULL 2
+NULL 1
+4 5
+3 2
+3 1
+
+query II
+select a, b from key_order_desc where (a, b) > (1, 1) order by a desc, b desc;
+----
+4 5
+3 2
+3 1
+2 NULL
+2 2
+2 1
+1 3
+1 2
+
+query II
+select a, b from key_order_desc where (a, b) >= (2, 2) or a = 1 order by a desc, b desc;
+----
+4 5
+3 2
+3 1
+2 2
+1 NULL
+1 3
+1 2
+1 1
+
+query II
+select a, b from key_order_desc where (a = 1 and b = 2) or a > 2 order by a desc, b desc;
+----
+4 5
+3 2
+3 1
+1 2
+
+query II
+select a, b from key_order_desc where a > 2 or (a = 1 and b = 2) order by a desc, b desc;
+----
+4 5
+3 2
+3 1
+1 2
+
+query II
+select a, b from key_order_desc where (a = 1 and b = 1) or a = 2 or (a = 3 and b = 2) order by a desc, b desc;
+----
+3 2
+2 NULL
+2 2
+2 1
+1 1
+
+query II
+select a, b from key_order_desc where a in (1, 2) and b in (2, 1) order by a desc, b desc;
+----
+2 2
+2 1
+1 2
+1 1
+
+query II
+select a, b from key_order_desc where a = 1 or a = 3 order by a desc, b desc limit 2;
+----
+3 2
+3 1
+
+query II
+select a, b from key_order_desc where a = 1 or a >= 3 order by a desc, b desc limit 2;
+----
+4 5
+3 2
+
+query II
+select a, b from key_order_desc where a < 2 or a > 3 order by a desc, b desc limit 2;
+----
+4 5
+1 NULL
+
+query II
+select a, b from key_order_desc where (a, b) > (1, 1) order by a desc, b desc limit 2;
+----
+4 5
+3 2
+
+query II
+select a, b from key_order_desc where (a, b) >= (2, 2) or a = 1 order by a desc, b desc limit 2;
+----
+4 5
+3 2
+
+query II
+select a, b from key_order_desc where (a = 1 and b = 2) or a > 2 order by a desc, b desc limit 2;
+----
+4 5
+3 2
+
+query II
+select a, b from key_order_desc where a = 1 and (b < 2 or b > 2) order by b desc;
+----
+1 3
+1 1
+
+query II
+select a, b from key_order_desc where a = 1 and (b < 2 or b > 2) order by b desc limit 1;
+----
+1 3
+
+query II
+select a, b from key_order_desc where a = 1 and b in (3, 1) order by b desc;
+----
+1 3
+1 1
+
+# Over key_order_nulls_first.
+query II
+select a, b from key_order_nulls_first where a = 1 or a = 3 order by a nulls first, b nulls first;
+----
+1 NULL
+1 1
+1 2
+1 3
+3 1
+3 2
+
+query II
+select a, b from key_order_nulls_first where a = 1 or a >= 3 order by a nulls first, b nulls first;
+----
+1 NULL
+1 1
+1 2
+1 3
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_nulls_first where a < 2 or a > 3 order by a nulls first, b nulls first;
+----
+1 NULL
+1 1
+1 2
+1 3
+4 5
+
+query II
+select a, b from key_order_nulls_first where a in (3, 1, 2) order by a nulls first, b nulls first;
+----
+1 NULL
+1 1
+1 2
+1 3
+2 NULL
+2 1
+2 2
+3 1
+3 2
+
+query II
+select a, b from key_order_nulls_first where a between 1 and 3 order by a nulls first, b nulls first;
+----
+1 NULL
+1 1
+1 2
+1 3
+2 NULL
+2 1
+2 2
+3 1
+3 2
+
+query II
+select a, b from key_order_nulls_first where a is null or a = 1 order by a nulls first, b nulls first;
+----
+NULL NULL
+NULL 1
+NULL 2
+1 NULL
+1 1
+1 2
+1 3
+
+query II
+select a, b from key_order_nulls_first where a is null or a > 2 order by a nulls first, b nulls first;
+----
+NULL NULL
+NULL 1
+NULL 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_nulls_first where (a, b) > (1, 1) order by a nulls first, b nulls first;
+----
+1 2
+1 3
+2 NULL
+2 1
+2 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_nulls_first where (a, b) >= (2, 2) or a = 1 order by a nulls first, b nulls first;
+----
+1 NULL
+1 1
+1 2
+1 3
+2 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_nulls_first where (a = 1 and b = 2) or a > 2 order by a nulls first, b nulls first;
+----
+1 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_nulls_first where a > 2 or (a = 1 and b = 2) order by a nulls first, b nulls first;
+----
+1 2
+3 1
+3 2
+4 5
+
+query II
+select a, b from key_order_nulls_first where (a = 1 and b = 1) or a = 2 or (a = 3 and b = 2) order by a nulls first, b nulls first;
+----
+1 1
+2 NULL
+2 1
+2 2
+3 2
+
+query II
+select a, b from key_order_nulls_first where a in (1, 2) and b in (2, 1) order by a nulls first, b nulls first;
+----
+1 1
+1 2
+2 1
+2 2
+
+query II
+select a, b from key_order_nulls_first where a = 1 or a = 3 order by a nulls first, b nulls first limit 2;
+----
+1 NULL
+1 1
+
+query II
+select a, b from key_order_nulls_first where a = 1 or a >= 3 order by a nulls first, b nulls first limit 2;
+----
+1 NULL
+1 1
+
+query II
+select a, b from key_order_nulls_first where a < 2 or a > 3 order by a nulls first, b nulls first limit 2;
+----
+1 NULL
+1 1
+
+query II
+select a, b from key_order_nulls_first where (a, b) > (1, 1) order by a nulls first, b nulls first limit 2;
+----
+1 2
+1 3
+
+query II
+select a, b from key_order_nulls_first where (a, b) >= (2, 2) or a = 1 order by a nulls first, b nulls first limit 2;
+----
+1 NULL
+1 1
+
+query II
+select a, b from key_order_nulls_first where (a = 1 and b = 2) or a > 2 order by a nulls first, b nulls first limit 2;
+----
+1 2
+3 1
+
+query II
+select a, b from key_order_nulls_first where a = 1 and (b < 2 or b > 2) order by b nulls first;
+----
+1 1
+1 3
+
+query II
+select a, b from key_order_nulls_first where a = 1 and (b < 2 or b > 2) order by b nulls first limit 1;
+----
+1 1
+
+query II
+select a, b from key_order_nulls_first where a = 1 and b in (3, 1) order by b nulls first;
+----
+1 1
+1 3
+
+# Over key_order_mixed.
+query II
+select a, b from key_order_mixed where a = 1 or a = 3 order by a, b desc;
+----
+1 NULL
+1 3
+1 2
+1 1
+3 2
+3 1
+
+query II
+select a, b from key_order_mixed where a = 1 or a >= 3 order by a, b desc;
+----
+1 NULL
+1 3
+1 2
+1 1
+3 2
+3 1
+4 5
+
+query II
+select a, b from key_order_mixed where a < 2 or a > 3 order by a, b desc;
+----
+1 NULL
+1 3
+1 2
+1 1
+4 5
+
+query II
+select a, b from key_order_mixed where a in (3, 1, 2) order by a, b desc;
+----
+1 NULL
+1 3
+1 2
+1 1
+2 NULL
+2 2
+2 1
+3 2
+3 1
+
+query II
+select a, b from key_order_mixed where a between 1 and 3 order by a, b desc;
+----
+1 NULL
+1 3
+1 2
+1 1
+2 NULL
+2 2
+2 1
+3 2
+3 1
+
+query II
+select a, b from key_order_mixed where a is null or a = 1 order by a, b desc;
+----
+1 NULL
+1 3
+1 2
+1 1
+NULL NULL
+NULL 2
+NULL 1
+
+query II
+select a, b from key_order_mixed where a is null or a > 2 order by a, b desc;
+----
+3 2
+3 1
+4 5
+NULL NULL
+NULL 2
+NULL 1
+
+query II
+select a, b from key_order_mixed where (a, b) > (1, 1) order by a, b desc;
+----
+1 3
+1 2
+2 NULL
+2 2
+2 1
+3 2
+3 1
+4 5
+
+query II
+select a, b from key_order_mixed where (a, b) >= (2, 2) or a = 1 order by a, b desc;
+----
+1 NULL
+1 3
+1 2
+1 1
+2 2
+3 2
+3 1
+4 5
+
+query II
+select a, b from key_order_mixed where (a = 1 and b = 2) or a > 2 order by a, b desc;
+----
+1 2
+3 2
+3 1
+4 5
+
+query II
+select a, b from key_order_mixed where a > 2 or (a = 1 and b = 2) order by a, b desc;
+----
+1 2
+3 2
+3 1
+4 5
+
+query II
+select a, b from key_order_mixed where (a = 1 and b = 1) or a = 2 or (a = 3 and b = 2) order by a, b desc;
+----
+1 1
+2 NULL
+2 2
+2 1
+3 2
+
+query II
+select a, b from key_order_mixed where a in (1, 2) and b in (2, 1) order by a, b desc;
+----
+1 2
+1 1
+2 2
+2 1
+
+query II
+select a, b from key_order_mixed where a = 1 or a = 3 order by a, b desc limit 2;
+----
+1 NULL
+1 3
+
+query II
+select a, b from key_order_mixed where a = 1 or a >= 3 order by a, b desc limit 2;
+----
+1 NULL
+1 3
+
+query II
+select a, b from key_order_mixed where a < 2 or a > 3 order by a, b desc limit 2;
+----
+1 NULL
+1 3
+
+query II
+select a, b from key_order_mixed where (a, b) > (1, 1) order by a, b desc limit 2;
+----
+1 3
+1 2
+
+query II
+select a, b from key_order_mixed where (a, b) >= (2, 2) or a = 1 order by a, b desc limit 2;
+----
+1 NULL
+1 3
+
+query II
+select a, b from key_order_mixed where (a = 1 and b = 2) or a > 2 order by a, b desc limit 2;
+----
+1 2
+3 2
+
+query II
+select a, b from key_order_mixed where a = 1 and (b < 2 or b > 2) order by b desc;
+----
+1 3
+1 1
+
+query II
+select a, b from key_order_mixed where a = 1 and (b < 2 or b > 2) order by b desc limit 1;
+----
+1 3
+
+query II
+select a, b from key_order_mixed where a = 1 and b in (3, 1) order by b desc;
+----
+1 3
+1 1
+
+statement ok
+drop materialized view key_order_mixed;
+
+statement ok
+drop materialized view key_order_nulls_first;
+
+statement ok
+drop materialized view key_order_desc;
+
+statement ok
+drop materialized view key_order_asc;
+
+statement ok
+drop table key_order_table;

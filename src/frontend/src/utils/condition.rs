@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::ops::Bound;
@@ -19,21 +20,23 @@ use std::sync::LazyLock;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::array::StructValue;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::scan_range::{ScanRange, is_full_range};
+use risingwave_common::util::key_set::KeySet;
+use risingwave_common::util::scan_range::ScanRange;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use crate::TableCatalog;
-use crate::error::Result;
 use crate::expr::{
-    ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall,
-    InequalityInputPair, InputRef, collect_input_refs, column_self_eq_eliminate,
+    Expr, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall,
+    InequalityInputPair, InputRef, Literal, collect_input_refs, column_self_eq_eliminate,
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant,
 };
-use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
+use crate::utils::condition::cast_compare::{
+    ResultForCmp, ResultForEq, cast_compare_for_cmp, cast_compare_for_eq,
+};
+use crate::{OptimizerContext, TableCatalog};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Condition {
@@ -316,153 +319,6 @@ impl Condition {
         .unwrap()
     }
 
-    /// Generate range scans from each arm of `OR` clause and merge them.
-    /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
-    fn disjunctions_to_scan_ranges(
-        table: &TableCatalog,
-        max_split_range_gap: u64,
-        disjunctions: Vec<ExprImpl>,
-    ) -> Result<Option<(Vec<ScanRange>, bool)>> {
-        let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> = disjunctions
-            .into_iter()
-            .map(|x| {
-                Condition {
-                    conjunctions: to_conjunctions(x),
-                }
-                .split_to_scan_ranges(table, max_split_range_gap)
-            })
-            .collect();
-
-        // If any arm of `OR` clause fails, bail out.
-        let disjunctions_result = disjunctions_result?;
-
-        // If all arms of `OR` clause scan ranges are simply equal condition type, merge all
-        // of them.
-        let all_equal = disjunctions_result
-            .iter()
-            .all(|(scan_ranges, other_condition)| {
-                other_condition.always_true()
-                    && scan_ranges
-                        .iter()
-                        .all(|x| !x.eq_conds.is_empty() && is_full_range(&x.range))
-            });
-
-        if all_equal {
-            // Think about the case (a = 1) or (a = 1 and b = 2).
-            // We should only keep the large one range scan a = 1, because a = 1 overlaps with
-            // (a = 1 and b = 2).
-            let scan_ranges = disjunctions_result
-                .into_iter()
-                .flat_map(|(scan_ranges, _)| scan_ranges)
-                // sort, large one first
-                .sorted_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()))
-                .collect_vec();
-            // Make sure each range never overlaps with others, that's what scan range mean.
-            let mut non_overlap_scan_ranges: Vec<ScanRange> = vec![];
-            for s1 in &scan_ranges {
-                let overlap = non_overlap_scan_ranges.iter().any(|s2| {
-                    #[expect(clippy::disallowed_methods)]
-                    s1.eq_conds
-                        .iter()
-                        .zip(s2.eq_conds.iter())
-                        .all(|(a, b)| a == b)
-                });
-                // If overlap happens, keep the large one and large one always in
-                // `non_overlap_scan_ranges`.
-                // Otherwise, put s1 into `non_overlap_scan_ranges`.
-                if !overlap {
-                    non_overlap_scan_ranges.push(s1.clone());
-                }
-            }
-
-            Ok(Some((non_overlap_scan_ranges, false)))
-        } else {
-            let mut scan_ranges = vec![];
-            for (scan_ranges_chunk, _) in disjunctions_result {
-                if scan_ranges_chunk.is_empty() {
-                    // full scan range
-                    return Ok(None);
-                }
-
-                scan_ranges.extend(scan_ranges_chunk);
-            }
-
-            let order_types = table
-                .pk
-                .iter()
-                .cloned()
-                .map(|x| {
-                    if x.order_type.is_descending() {
-                        x.order_type.reverse()
-                    } else {
-                        x.order_type
-                    }
-                })
-                .collect_vec();
-            scan_ranges.sort_by(|left, right| ScanRange::cmp_start(left, right, &order_types));
-
-            // Merge overlapping ranges so that no row is scanned twice. A merged range may start
-            // earlier than the last one, so check it against the previous ones again.
-            let mut output_scan_ranges: Vec<ScanRange> = vec![];
-            for mut scan_range in scan_ranges {
-                while let Some(last) = output_scan_ranges.last()
-                    && ScanRange::is_overlap(last, &scan_range, &order_types)
-                {
-                    let last = output_scan_ranges.pop().unwrap();
-                    scan_range = last.union(scan_range, &order_types);
-                }
-                if scan_range.is_full_table_scan() {
-                    return Ok(None);
-                }
-                output_scan_ranges.push(scan_range);
-            }
-
-            Ok(Some((output_scan_ranges, true)))
-        }
-    }
-
-    /// A scan range for a single `(v1, v2, ...) > literal` or `<` on a pk prefix. The filter stays,
-    /// because the comparison is not true for some rows inside the range: `(1, NULL)` comes after
-    /// `(1, 5)` in pk order, but `(1, NULL) > (1, 5)` is NULL.
-    fn split_row_cmp_to_scan_ranges(
-        &self,
-        table: &TableCatalog,
-    ) -> Result<Option<(Vec<ScanRange>, Self)>> {
-        let row_cmps = self
-            .conjunctions
-            .iter()
-            .filter_map(|expr| {
-                let call = expr.as_function_call()?;
-                let is_greater = match call.func_type() {
-                    ExprType::RowGreaterThan => true,
-                    ExprType::RowLessThan => false,
-                    _ => return None,
-                };
-                let row = call.inputs()[0].as_function_call()?;
-                if row.func_type() != ExprType::Row
-                    || !row.inputs().iter().all(|input| input.is_input_ref())
-                {
-                    return None;
-                }
-                let literal = call.inputs()[1].as_literal()?.get_data().as_ref()?;
-                Some((row.inputs(), literal.as_struct(), is_greater))
-            })
-            .collect_vec();
-        let [(row, literal, is_greater)] = row_cmps[..] else {
-            return Ok(None);
-        };
-        Ok(
-            row_cmp_scan_range(table, row, literal, is_greater).map(|(scan_range, _)| {
-                (
-                    vec![scan_range],
-                    Condition {
-                        conjunctions: self.conjunctions.clone(),
-                    },
-                )
-            }),
-        )
-    }
-
     /// x = 1 AND y = 2 AND z = 3 => [x, y, z]
     pub fn get_eq_const_input_refs(&self) -> Vec<InputRef> {
         self.conjunctions
@@ -471,460 +327,58 @@ impl Condition {
             .collect()
     }
 
-    /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
+    /// Splits the condition into the scan ranges of `table` it can select from, in key order, and
+    /// what is left to filter. An empty list of scan ranges means the whole table, unless what is
+    /// left is false.
     pub fn split_to_scan_ranges(
         self,
         table: &TableCatalog,
-        max_split_range_gap: u64,
-    ) -> Result<(Vec<ScanRange>, Self)> {
-        fn false_cond() -> (Vec<ScanRange>, Condition) {
-            (vec![], Condition::false_cond())
+        ctx: &OptimizerContext,
+    ) -> (Vec<ScanRange>, Self) {
+        let extractor = KeySetExtractor::new(&table.pk, ctx);
+        let (keys, tight) = extractor.extract(&self.conjunctions);
+        if keys.is_empty() {
+            return (vec![], Condition::false_cond());
         }
-
-        // It's an OR.
-        if self.conjunctions.len() == 1
-            && let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions()
-        {
-            if let Some((scan_ranges, maintaining_condition)) =
-                Self::disjunctions_to_scan_ranges(table, max_split_range_gap, disjunctions)?
-            {
-                if maintaining_condition {
-                    return Ok((scan_ranges, self));
-                } else {
-                    return Ok((scan_ranges, Condition::true_cond()));
-                }
-            } else {
-                return Ok((vec![], self));
-            }
-        }
-        if let Some((scan_ranges, other_condition)) = self.split_row_cmp_to_scan_ranges(table)? {
-            return Ok((scan_ranges, other_condition));
-        }
-
-        let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, table);
-        let mut other_conds = groups.pop().unwrap();
-
-        // Analyze each group and use result to update scan range.
-        let mut scan_range = ScanRange::full_table_scan();
-        for i in 0..table.pk.len() {
-            let group = std::mem::take(&mut groups[i]);
-            if group.is_empty() {
-                groups.push(other_conds);
-                return Ok((
-                    if scan_range.is_full_table_scan() {
-                        vec![]
-                    } else {
-                        vec![scan_range]
-                    },
-                    Self {
-                        conjunctions: groups[i + 1..].concat(),
-                    },
-                ));
-            }
-
-            let Some((
-                lower_bound_conjunctions,
-                upper_bound_conjunctions,
-                eq_conds,
-                part_of_other_conds,
-            )) = Self::analyze_group(group)?
-            else {
-                return Ok(false_cond());
-            };
-            other_conds.extend(part_of_other_conds);
-
-            let lower_bound = Self::merge_lower_bound_conjunctions(lower_bound_conjunctions);
-            let upper_bound = Self::merge_upper_bound_conjunctions(upper_bound_conjunctions);
-
-            if Self::is_invalid_range(&lower_bound, &upper_bound) {
-                return Ok(false_cond());
-            }
-
-            // update scan_range
-            match eq_conds.len() {
-                1 => {
-                    let eq_conds =
-                        Self::extract_eq_conds_within_range(eq_conds, &upper_bound, &lower_bound);
-                    if eq_conds.is_empty() {
-                        return Ok(false_cond());
-                    }
-                    scan_range.eq_conds.extend(eq_conds);
-                }
-                0 => {
-                    let convert = |bound| match bound {
-                        Bound::Included(l) => Bound::Included(vec![Some(l)]),
-                        Bound::Excluded(l) => Bound::Excluded(vec![Some(l)]),
-                        Bound::Unbounded => Bound::Unbounded,
-                    };
-                    scan_range.range = (convert(lower_bound), convert(upper_bound));
-                    other_conds.extend(groups[i + 1..].iter().flatten().cloned());
-                    break;
-                }
-                _ => {
-                    // currently we will split IN list to multiple scan ranges immediately
-                    // i.e., a = 1 AND b in (1,2) is handled
-                    // TODO:
-                    // a in (1,2) AND b = 1
-                    // a in (1,2) AND b in (1,2)
-                    // a in (1,2) AND b > 1
-                    let eq_conds =
-                        Self::extract_eq_conds_within_range(eq_conds, &upper_bound, &lower_bound);
-                    if eq_conds.is_empty() {
-                        return Ok(false_cond());
-                    }
-                    other_conds.extend(groups[i + 1..].iter().flatten().cloned());
-                    let scan_ranges = eq_conds
-                        .into_iter()
-                        .map(|lit| {
-                            let mut scan_range = scan_range.clone();
-                            scan_range.eq_conds.push(lit);
-                            scan_range
-                        })
-                        .collect();
-                    return Ok((
-                        scan_ranges,
-                        Self {
-                            conjunctions: other_conds,
-                        },
-                    ));
-                }
-            }
-        }
-
-        Ok((
-            if scan_range.is_full_table_scan() {
-                vec![]
-            } else if table.columns[table.pk[0].column_index].data_type.is_int() {
-                match scan_range.split_small_range(max_split_range_gap) {
-                    Some(scan_ranges) => scan_ranges,
-                    None => vec![scan_range],
-                }
-            } else {
-                vec![scan_range]
-            },
-            Self {
-                conjunctions: other_conds,
-            },
-        ))
+        let max_split_range_gap = ctx.session_ctx().config().max_split_range_gap() as u64;
+        let scan_ranges = keys.into_scan_ranges(&extractor.order, max_split_range_gap);
+        (scan_ranges, self.without_tight(tight))
     }
 
-    /// classify conjunctions into groups:
-    /// The i-th group has exprs that only reference the i-th PK column.
-    /// The last group contains all the other exprs.
-    fn classify_conjunctions_by_pk(
-        conjunctions: Vec<ExprImpl>,
+    /// The one scan range of `table` with all the rows the condition can select, for a reader of a
+    /// single range. It can also have other rows, so the condition still has to be evaluated.
+    pub fn covering_scan_range(
+        &self,
         table: &TableCatalog,
-    ) -> Vec<Vec<ExprImpl>> {
-        let pk_cols_num = table.pk.len();
-        let cols_num = table.columns.len();
-
-        let mut col_idx_to_pk_idx = vec![None; cols_num];
-        table
-            .order_column_indices()
-            .enumerate()
-            .for_each(|(idx, pk_idx)| {
-                col_idx_to_pk_idx[pk_idx] = Some(idx);
-            });
-
-        let mut groups = vec![vec![]; pk_cols_num + 1];
-        for (key, group) in &conjunctions.into_iter().chunk_by(|expr| {
-            let input_bits = expr.collect_input_refs(cols_num);
-            if input_bits.count_ones(..) == 1 {
-                let col_idx = input_bits.ones().next().unwrap();
-                col_idx_to_pk_idx[col_idx].unwrap_or(pk_cols_num)
-            } else {
-                pk_cols_num
-            }
-        }) {
-            groups[key].extend(group);
-        }
-
-        groups
+        ctx: &OptimizerContext,
+    ) -> Option<ScanRange> {
+        let extractor = KeySetExtractor::new(&table.pk, ctx);
+        let (keys, _) = extractor.extract(&self.conjunctions);
+        keys.covering_scan_range(&extractor.order)
     }
 
-    /// Extract the following information in a group of conjunctions:
-    /// 1. lower bound conjunctions
-    /// 2. upper bound conjunctions
-    /// 3. eq conditions
-    /// 4. other conditions
-    ///
-    /// return None indicates that this conjunctions is always false
-    #[expect(clippy::type_complexity)]
-    fn analyze_group(
-        group: Vec<ExprImpl>,
-    ) -> Result<
-        Option<(
-            Vec<Bound<ScalarImpl>>,
-            Vec<Bound<ScalarImpl>>,
-            Vec<Option<ScalarImpl>>,
-            Vec<ExprImpl>,
-        )>,
-    > {
-        let mut lower_bound_conjunctions = vec![];
-        let mut upper_bound_conjunctions = vec![];
-        // values in eq_cond are OR'ed
-        let mut eq_conds = vec![];
-        let mut other_conds = vec![];
-
-        // analyze exprs in the group. scan_range is not updated
-        'group_loop: for expr in group {
-            if let Some((input_ref, const_expr)) = expr.as_eq_const() {
-                let new_expr = if let Ok(expr) =
-                    const_expr.clone().cast_implicit(&input_ref.data_type)
-                {
-                    expr
-                } else {
-                    match self::cast_compare::cast_compare_for_eq(const_expr, input_ref.data_type) {
-                        Ok(ResultForEq::Success(expr)) => expr,
-                        Ok(ResultForEq::NeverEqual) => {
-                            return Ok(None);
-                        }
-                        Err(_) => {
-                            other_conds.push(expr);
-                            continue;
-                        }
-                    }
-                };
-
-                let Some(new_cond) = new_expr.fold_const()? else {
-                    // column = NULL, the result is always NULL.
-                    return Ok(None);
-                };
-                if Self::mutual_exclusive_with_eq_conds(&new_cond, &eq_conds) {
-                    return Ok(None);
-                }
-                eq_conds = vec![Some(new_cond)];
-            } else if expr.as_is_null().is_some() {
-                if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l.is_some()) {
-                    return Ok(None);
-                }
-                eq_conds = vec![None];
-            } else if let Some((input_ref, in_const_list)) = expr
-                .as_in_const_list()
-                .or_else(|| expr.as_some_eq_const_list())
-            {
-                let mut scalars = HashSet::new();
-                for const_expr in in_const_list {
-                    let new_expr =
-                        if let Ok(expr) = const_expr.clone().cast_implicit(&input_ref.data_type) {
-                            expr
-                        } else {
-                            match self::cast_compare::cast_compare_for_eq(
-                                const_expr,
-                                input_ref.data_type.clone(),
-                            ) {
-                                Ok(ResultForEq::Success(expr)) => expr,
-                                Ok(ResultForEq::NeverEqual) => {
-                                    continue;
-                                }
-                                Err(_) => {
-                                    other_conds.push(expr);
-                                    continue 'group_loop;
-                                }
-                            }
-                        };
-
-                    let value = new_expr.fold_const()?;
-                    let Some(value) = value else {
-                        continue;
-                    };
-                    scalars.insert(Some(value));
-                }
-                if scalars.is_empty() {
-                    // There're only NULLs in the in-list
-                    return Ok(None);
-                }
-                if !eq_conds.is_empty() {
-                    scalars = scalars
-                        .intersection(&HashSet::from_iter(eq_conds))
-                        .cloned()
-                        .collect();
-                    if scalars.is_empty() {
-                        return Ok(None);
-                    }
-                }
-                // Sort to ensure a deterministic result for planner test.
-                eq_conds = scalars
-                    .into_iter()
-                    .sorted_by(DefaultOrd::default_cmp)
-                    .collect();
-            } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
-                let new_expr =
-                    if let Ok(expr) = const_expr.clone().cast_implicit(&input_ref.data_type) {
-                        expr
-                    } else {
-                        match self::cast_compare::cast_compare_for_cmp(
-                            const_expr,
-                            input_ref.data_type,
-                            op,
-                        ) {
-                            Ok(ResultForCmp::Success(expr)) => expr,
-                            _ => {
-                                other_conds.push(expr);
-                                continue;
-                            }
-                        }
-                    };
-                let Some(value) = new_expr.fold_const()? else {
-                    // column compare with NULL, the result is always  NULL.
-                    return Ok(None);
-                };
-                match op {
-                    ExprType::LessThan => {
-                        upper_bound_conjunctions.push(Bound::Excluded(value));
-                    }
-                    ExprType::LessThanOrEqual => {
-                        upper_bound_conjunctions.push(Bound::Included(value));
-                    }
-                    ExprType::GreaterThan => {
-                        lower_bound_conjunctions.push(Bound::Excluded(value));
-                    }
-                    ExprType::GreaterThanOrEqual => {
-                        lower_bound_conjunctions.push(Bound::Included(value));
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                other_conds.push(expr);
-            }
-        }
-        Ok(Some((
-            lower_bound_conjunctions,
-            upper_bound_conjunctions,
-            eq_conds,
-            other_conds,
-        )))
+    /// If equalities and lists such as `a IN (1, 2)` narrow the pk of `table` to several values,
+    /// returns them and what is left to filter.
+    pub fn split_to_pk_values(
+        &self,
+        table: &TableCatalog,
+        ctx: &OptimizerContext,
+    ) -> Option<(Vec<Vec<Datum>>, Self)> {
+        let extractor = KeySetExtractor::values_only(&table.pk, ctx);
+        let (keys, tight) = extractor.extract(&self.conjunctions);
+        let values = keys.as_values()?;
+        (values.len() > 1 && tight.iter().any(|tight| *tight))
+            .then(|| (values, self.clone().without_tight(tight)))
     }
 
-    fn mutual_exclusive_with_eq_conds(
-        new_conds: &ScalarImpl,
-        eq_conds: &[Option<ScalarImpl>],
-    ) -> bool {
-        !eq_conds.is_empty()
-            && eq_conds.iter().all(|l| {
-                if let Some(l) = l {
-                    l != new_conds
-                } else {
-                    true
-                }
-            })
-    }
-
-    fn merge_lower_bound_conjunctions(lb: Vec<Bound<ScalarImpl>>) -> Bound<ScalarImpl> {
-        lb.into_iter()
-            .max_by(|a, b| {
-                // For lower bound, Unbounded means -inf
-                match (a, b) {
-                    (Bound::Included(_), Bound::Unbounded) => std::cmp::Ordering::Greater,
-                    (Bound::Excluded(_), Bound::Unbounded) => std::cmp::Ordering::Greater,
-                    (Bound::Unbounded, Bound::Included(_)) => std::cmp::Ordering::Less,
-                    (Bound::Unbounded, Bound::Excluded(_)) => std::cmp::Ordering::Less,
-                    (Bound::Unbounded, Bound::Unbounded) => std::cmp::Ordering::Equal,
-                    (Bound::Included(a), Bound::Included(b)) => a.default_cmp(b),
-                    (Bound::Excluded(a), Bound::Excluded(b)) => a.default_cmp(b),
-                    // excluded bound is strict than included bound so we assume it more greater.
-                    (Bound::Included(a), Bound::Excluded(b)) => match a.default_cmp(b) {
-                        std::cmp::Ordering::Equal => std::cmp::Ordering::Less,
-                        other => other,
-                    },
-                    (Bound::Excluded(a), Bound::Included(b)) => match a.default_cmp(b) {
-                        std::cmp::Ordering::Equal => std::cmp::Ordering::Greater,
-                        other => other,
-                    },
-                }
-            })
-            .unwrap_or(Bound::Unbounded)
-    }
-
-    fn merge_upper_bound_conjunctions(ub: Vec<Bound<ScalarImpl>>) -> Bound<ScalarImpl> {
-        ub.into_iter()
-            .min_by(|a, b| {
-                // For upper bound, Unbounded means +inf
-                match (a, b) {
-                    (Bound::Included(_), Bound::Unbounded) => std::cmp::Ordering::Less,
-                    (Bound::Excluded(_), Bound::Unbounded) => std::cmp::Ordering::Less,
-                    (Bound::Unbounded, Bound::Included(_)) => std::cmp::Ordering::Greater,
-                    (Bound::Unbounded, Bound::Excluded(_)) => std::cmp::Ordering::Greater,
-                    (Bound::Unbounded, Bound::Unbounded) => std::cmp::Ordering::Equal,
-                    (Bound::Included(a), Bound::Included(b)) => a.default_cmp(b),
-                    (Bound::Excluded(a), Bound::Excluded(b)) => a.default_cmp(b),
-                    // excluded bound is strict than included bound so we assume it more greater.
-                    (Bound::Included(a), Bound::Excluded(b)) => match a.default_cmp(b) {
-                        std::cmp::Ordering::Equal => std::cmp::Ordering::Greater,
-                        other => other,
-                    },
-                    (Bound::Excluded(a), Bound::Included(b)) => match a.default_cmp(b) {
-                        std::cmp::Ordering::Equal => std::cmp::Ordering::Less,
-                        other => other,
-                    },
-                }
-            })
-            .unwrap_or(Bound::Unbounded)
-    }
-
-    fn is_invalid_range(lower_bound: &Bound<ScalarImpl>, upper_bound: &Bound<ScalarImpl>) -> bool {
-        match (lower_bound, upper_bound) {
-            (Bound::Included(l), Bound::Included(u)) => l.default_cmp(u).is_gt(), // l > u
-            (Bound::Included(l), Bound::Excluded(u)) => l.default_cmp(u).is_ge(), // l >= u
-            (Bound::Excluded(l), Bound::Included(u)) => l.default_cmp(u).is_ge(), // l >= u
-            (Bound::Excluded(l), Bound::Excluded(u)) => l.default_cmp(u).is_ge(), // l >= u
-            _ => false,
-        }
-    }
-
-    fn extract_eq_conds_within_range(
-        eq_conds: Vec<Option<ScalarImpl>>,
-        upper_bound: &Bound<ScalarImpl>,
-        lower_bound: &Bound<ScalarImpl>,
-    ) -> Vec<Option<ScalarImpl>> {
-        // defensive programming: for now we will guarantee that the range is valid before calling
-        // this function
-        if Self::is_invalid_range(lower_bound, upper_bound) {
-            return vec![];
-        }
-
-        let is_extract_null = upper_bound == &Bound::Unbounded && lower_bound == &Bound::Unbounded;
-
-        eq_conds
+    fn without_tight(self, tight: Vec<bool>) -> Self {
+        let conjunctions = self
+            .conjunctions
             .into_iter()
-            .filter(|cond| {
-                if let Some(cond) = cond {
-                    match lower_bound {
-                        Bound::Included(val) => {
-                            if cond.default_cmp(val).is_lt() {
-                                // cond < val
-                                return false;
-                            }
-                        }
-                        Bound::Excluded(val) => {
-                            if cond.default_cmp(val).is_le() {
-                                // cond <= val
-                                return false;
-                            }
-                        }
-                        Bound::Unbounded => {}
-                    }
-                    match upper_bound {
-                        Bound::Included(val) => {
-                            if cond.default_cmp(val).is_gt() {
-                                // cond > val
-                                return false;
-                            }
-                        }
-                        Bound::Excluded(val) => {
-                            if cond.default_cmp(val).is_ge() {
-                                // cond >= val
-                                return false;
-                            }
-                        }
-                        Bound::Unbounded => {}
-                    }
-                    true
-                } else {
-                    is_extract_null
-                }
-            })
-            .collect()
+            .zip_eq_fast(tight)
+            .filter_map(|(expr, tight)| (!tight).then_some(expr))
+            .collect();
+        Self { conjunctions }
     }
 
     /// Split the condition expressions into `N` groups.
@@ -1031,58 +485,339 @@ impl Condition {
     }
 }
 
+/// The most ranges to get by narrowing several values of one pk column with the next columns, as in
+/// `a IN (...) AND b IN (...)`. Beyond it, the later conditions stay as a filter.
+const MAX_REFINED_RANGES: usize = 1024;
+
+/// A predicate in the form [`KeySetExtractor`] works on: row comparisons are expanded and constants
+/// are folded.
+struct KeyPredicate {
+    kind: KeyPredicateKind,
+    /// The keys of this predicate over the pk columns starting at each offset, and whether they are
+    /// tight. A nested predicate that cannot be narrowed is asked again for each later pk column, so
+    /// without this the work grows exponentially with the nesting.
+    extracted: Vec<OnceCell<(KeySet, bool)>>,
+}
+
+enum KeyPredicateKind {
+    And(Vec<KeyPredicate>),
+    Or(Vec<KeyPredicate>),
+    /// NULL is a value here, for `IS NULL`. With no values, this is never true.
+    Values {
+        column_index: usize,
+        values: Vec<Datum>,
+    },
+    Between {
+        column_index: usize,
+        lower: Bound<ScalarImpl>,
+        upper: Bound<ScalarImpl>,
+    },
+    Unknown,
+}
+
+/// Derives the keys a predicate can select, in one recursion over the expression like `CockroachDB`'s
+/// `idxconstraint`. Two properties hold for every result:
+/// - If the predicate is true for a row, the key of the row is in the set.
+/// - If the result is tight, the converse also holds, so the predicate need not be evaluated again.
+///
+/// This is only an optimization, so anything it cannot understand gives the full set, not tight, and
+/// the predicate stays as a filter. It works on copies of the expressions and does not depend on the
+/// optimization phase of the caller.
+struct KeySetExtractor<'a> {
+    pk: &'a [ColumnOrder],
+    order: Vec<OrderType>,
+    ctx: &'a OptimizerContext,
+    /// Only understand equalities and lists, so that the keys are all values of the pk.
+    values_only: bool,
+}
+
+/// How a constant compares with a value of a column of another type.
+enum ComparedValue {
+    Value(ScalarImpl),
+    /// Equal to no value of the column, or NULL, so the comparison is never true.
+    Never,
+    /// Cannot tell, so the comparison stays as a filter.
+    Unknown,
+}
+
+impl<'a> KeySetExtractor<'a> {
+    fn new(pk: &'a [ColumnOrder], ctx: &'a OptimizerContext) -> Self {
+        Self {
+            pk,
+            order: pk.iter().map(|column| column.order_type).collect(),
+            ctx,
+            values_only: false,
+        }
+    }
+
+    fn values_only(pk: &'a [ColumnOrder], ctx: &'a OptimizerContext) -> Self {
+        Self {
+            values_only: true,
+            ..Self::new(pk, ctx)
+        }
+    }
+
+    /// Returns the keys for the conjunction of `conjunctions`, and whether each of them is tight.
+    fn extract(&self, conjunctions: &[ExprImpl]) -> (KeySet, Vec<bool>) {
+        if self.pk.is_empty() {
+            return (KeySet::full(), vec![false; conjunctions.len()]);
+        }
+        let predicates = conjunctions
+            .iter()
+            .map(|expr| self.build(expr))
+            .collect_vec();
+        self.extract_and(&predicates.iter().collect_vec(), 0)
+    }
+
+    fn build(&self, expr: &ExprImpl) -> KeyPredicate {
+        let build_all = |exprs: &[ExprImpl]| exprs.iter().map(|expr| self.build(expr)).collect();
+        let conjunctions = to_conjunctions(expr.clone());
+        let kind = if let Some(disjunctions) = expr.as_or_disjunctions() {
+            KeyPredicateKind::Or(build_all(&disjunctions))
+        } else if conjunctions.len() > 1 {
+            KeyPredicateKind::And(build_all(&conjunctions))
+        } else if let Some(definition) = self.row_comparison_definition(expr) {
+            return self.build(&definition);
+        } else {
+            self.build_leaf(expr)
+        };
+        KeyPredicate {
+            kind,
+            extracted: vec![OnceCell::new(); self.pk.len()],
+        }
+    }
+
+    /// `(a, b) > (1, 5)` by definition: `a > 1 OR (a = 1 AND b > 5)`. A plan cannot use this form,
+    /// because it evaluates the fields more than once, but it is exact for deriving keys, whatever
+    /// the order of the pk columns and wherever the NULLs are.
+    fn row_comparison_definition(&self, expr: &ExprImpl) -> Option<ExprImpl> {
+        let call = expr.as_function_call()?;
+        let (strict, last) = match call.func_type() {
+            ExprType::RowLessThan => (ExprType::LessThan, ExprType::LessThan),
+            ExprType::RowLessThanOrEqual => (ExprType::LessThan, ExprType::LessThanOrEqual),
+            ExprType::RowGreaterThan => (ExprType::GreaterThan, ExprType::GreaterThan),
+            ExprType::RowGreaterThanOrEqual => {
+                (ExprType::GreaterThan, ExprType::GreaterThanOrEqual)
+            }
+            _ => return None,
+        };
+        let [left, right] = call.inputs() else {
+            return None;
+        };
+        let left = left.as_function_call()?;
+        if left.func_type() != ExprType::Row || !right.is_const() {
+            return None;
+        }
+        let right_type = right.return_type();
+        let right = self.fold(right.clone())??;
+        let fields = left.inputs();
+        let values = right.as_struct().fields();
+        let field_types = right_type.as_struct().types().collect_vec();
+
+        let compare = |func_type, i: usize| -> ExprImpl {
+            let value = Literal::new(values[i].clone(), field_types[i].clone());
+            FunctionCall::new_unchecked(
+                func_type,
+                vec![fields[i].clone(), value.into()],
+                DataType::Boolean,
+            )
+            .into()
+        };
+        Some(ExprImpl::or((0..fields.len()).map(|i| {
+            let func_type = if i + 1 == fields.len() { last } else { strict };
+            ExprImpl::and(
+                (0..i)
+                    .map(|j| compare(ExprType::Equal, j))
+                    .chain(std::iter::once(compare(func_type, i))),
+            )
+        })))
+    }
+
+    fn build_leaf(&self, expr: &ExprImpl) -> KeyPredicateKind {
+        let on_pk = |input_ref: &InputRef| {
+            self.pk
+                .iter()
+                .any(|column| column.column_index == input_ref.index)
+        };
+        let values_of = |input_ref: &InputRef, values| KeyPredicateKind::Values {
+            column_index: input_ref.index,
+            values,
+        };
+
+        if let Some((input_ref, value)) = expr.as_eq_const() {
+            if !on_pk(&input_ref) {
+                return KeyPredicateKind::Unknown;
+            }
+            match self.equal_value(value, &input_ref.data_type) {
+                ComparedValue::Value(value) => values_of(&input_ref, vec![Some(value)]),
+                ComparedValue::Never => values_of(&input_ref, vec![]),
+                ComparedValue::Unknown => KeyPredicateKind::Unknown,
+            }
+        } else if let Some(input_ref) = expr.as_is_null() {
+            values_of(&input_ref, vec![None])
+        } else if let Some((input_ref, list)) = expr
+            .as_in_const_list()
+            .or_else(|| expr.as_some_eq_const_list())
+        {
+            if !on_pk(&input_ref) {
+                return KeyPredicateKind::Unknown;
+            }
+            let mut values = Vec::with_capacity(list.len());
+            for value in list {
+                match self.equal_value(value, &input_ref.data_type) {
+                    ComparedValue::Value(value) => values.push(Some(value)),
+                    ComparedValue::Never => {}
+                    ComparedValue::Unknown => return KeyPredicateKind::Unknown,
+                }
+            }
+            values_of(&input_ref, values)
+        } else if let Some((input_ref, func_type, value)) = expr.as_comparison_const() {
+            if self.values_only || !on_pk(&input_ref) {
+                return KeyPredicateKind::Unknown;
+            }
+            let value = match value.clone().cast_implicit(&input_ref.data_type) {
+                Ok(value) => value,
+                Err(_) => {
+                    match cast_compare_for_cmp(value, input_ref.data_type.clone(), func_type) {
+                        Ok(ResultForCmp::Success(value)) => value,
+                        _ => return KeyPredicateKind::Unknown,
+                    }
+                }
+            };
+            let Some(value) = self.fold(value) else {
+                return KeyPredicateKind::Unknown;
+            };
+            let Some(value) = value else {
+                return values_of(&input_ref, vec![]);
+            };
+            let (lower, upper) = match func_type {
+                ExprType::LessThan => (Bound::Unbounded, Bound::Excluded(value)),
+                ExprType::LessThanOrEqual => (Bound::Unbounded, Bound::Included(value)),
+                ExprType::GreaterThan => (Bound::Excluded(value), Bound::Unbounded),
+                ExprType::GreaterThanOrEqual => (Bound::Included(value), Bound::Unbounded),
+                _ => unreachable!(),
+            };
+            KeyPredicateKind::Between {
+                column_index: input_ref.index,
+                lower,
+                upper,
+            }
+        } else {
+            KeyPredicateKind::Unknown
+        }
+    }
+
+    fn equal_value(&self, value: ExprImpl, data_type: &DataType) -> ComparedValue {
+        let value = match value.clone().cast_implicit(data_type) {
+            Ok(value) => value,
+            Err(_) => match cast_compare_for_eq(value, data_type.clone()) {
+                Ok(ResultForEq::Success(value)) => value,
+                Ok(ResultForEq::NeverEqual) => return ComparedValue::Never,
+                Err(_) => return ComparedValue::Unknown,
+            },
+        };
+        match self.fold(value) {
+            Some(Some(value)) => ComparedValue::Value(value),
+            Some(None) => ComparedValue::Never,
+            None => ComparedValue::Unknown,
+        }
+    }
+
+    /// Folds a constant on a copy, with the session timezone inlined, so that it also works before
+    /// that optimization phase. Returns `None` if it cannot be evaluated here.
+    fn fold(&self, expr: ExprImpl) -> Option<Datum> {
+        self.ctx
+            .session_timezone()
+            .rewrite_expr(expr)
+            .fold_const()
+            .ok()
+    }
+
+    /// Extracts over the pk columns starting at `offset`, for the conjunction of `predicates`.
+    /// Returns whether each of them is tight.
+    fn extract_and(&self, predicates: &[&KeyPredicate], offset: usize) -> (KeySet, Vec<bool>) {
+        let order = &self.order[offset..];
+        let mut keys = KeySet::full();
+        let mut tight = Vec::with_capacity(predicates.len());
+        for predicate in predicates {
+            let (predicate_keys, predicate_tight) = self.extract_predicate(predicate, offset);
+            keys = keys.intersect(predicate_keys, order);
+            tight.push(*predicate_tight);
+        }
+
+        if !keys.is_empty() && offset + 1 < self.pk.len() && keys.is_single_values() {
+            let pending = (0..predicates.len()).filter(|&i| !tight[i]).collect_vec();
+            if !pending.is_empty() {
+                let next = pending.iter().map(|&i| predicates[i]).collect_vec();
+                let (rest, rest_tight) = self.extract_and(&next, offset + 1);
+                if !rest.is_full()
+                    && (keys.len() == 1 || keys.len() * rest.len() <= MAX_REFINED_RANGES)
+                {
+                    keys = keys.refine(&rest);
+                    for (i, rest_tight) in pending.into_iter().zip_eq_fast(rest_tight) {
+                        tight[i] = rest_tight;
+                    }
+                }
+            }
+        }
+
+        if keys.is_empty() {
+            tight.fill(true);
+        }
+        (keys, tight)
+    }
+
+    fn extract_or(&self, predicates: &[KeyPredicate], offset: usize) -> (KeySet, bool) {
+        let mut sets = Vec::with_capacity(predicates.len());
+        let mut tight = true;
+        for predicate in predicates {
+            let (keys, predicate_tight) = self.extract_predicate(predicate, offset);
+            if keys.is_full() {
+                return (KeySet::full(), false);
+            }
+            sets.push(keys.clone());
+            tight &= predicate_tight;
+        }
+        (KeySet::union_all(sets, &self.order[offset..]), tight)
+    }
+
+    fn extract_predicate<'p>(
+        &self,
+        predicate: &'p KeyPredicate,
+        offset: usize,
+    ) -> &'p (KeySet, bool) {
+        predicate.extracted[offset].get_or_init(|| {
+            let column = &self.pk[offset];
+            match &predicate.kind {
+                KeyPredicateKind::And(predicates) => {
+                    let (keys, tight) = self.extract_and(&predicates.iter().collect_vec(), offset);
+                    (keys, tight.into_iter().all(|tight| tight))
+                }
+                KeyPredicateKind::Or(predicates) => self.extract_or(predicates, offset),
+                KeyPredicateKind::Values {
+                    column_index,
+                    values,
+                } if *column_index == column.column_index => (
+                    KeySet::any_of(values.iter().cloned(), column.order_type),
+                    true,
+                ),
+                KeyPredicateKind::Between {
+                    column_index,
+                    lower,
+                    upper,
+                } if *column_index == column.column_index => (
+                    KeySet::between(lower.clone(), upper.clone(), column.order_type),
+                    true,
+                ),
+                _ => (KeySet::full(), false),
+            }
+        })
+    }
+}
+
 pub struct ConditionDisplay<'a> {
     pub condition: &'a Condition,
     pub input_schema: &'a Schema,
-}
-
-/// The scan range for `(v1, v2, ...) > literal`, or `<` if `is_greater` is false, following pk order.
-/// It bounds the longest prefix of the row that runs along the pk in one direction, and the returned
-/// flag tells whether that is the whole row. Returns `None` if no prefix can be bounded.
-pub fn row_cmp_scan_range(
-    table: &TableCatalog,
-    row: &[ExprImpl],
-    literal: &StructValue,
-    is_greater: bool,
-) -> Option<(ScanRange, bool)> {
-    if row.len() <= 1 {
-        return None;
-    }
-    let mut prefix = vec![];
-    let mut order_type = None;
-    // The row can be longer or shorter than the pk.
-    #[expect(clippy::disallowed_methods)]
-    for ((input, value), column_order) in row.iter().zip_eq_fast(literal.fields()).zip(&table.pk) {
-        // A NULL field has no position in the pk, so the range stops before it.
-        if input.as_input_ref().unwrap().index != column_order.column_index
-            || value.is_none()
-            || *order_type.get_or_insert(column_order.order_type) != column_order.order_type
-        {
-            break;
-        }
-        prefix.push(value.clone());
-    }
-    if prefix.is_empty() {
-        return None;
-    }
-    let whole_row = prefix.len() == row.len();
-    let bound = if whole_row {
-        Bound::Excluded(prefix)
-    } else {
-        Bound::Included(prefix)
-    };
-    let range = if is_greater {
-        (bound, Bound::Unbounded)
-    } else {
-        (Bound::Unbounded, bound)
-    };
-    Some((
-        ScanRange {
-            eq_conds: vec![],
-            range,
-        },
-        whole_row,
-    ))
 }
 
 impl ConditionDisplay<'_> {
@@ -1332,5 +1067,250 @@ mod tests {
         assert_eq!(res.0.conjunctions, vec![left_res]);
         assert_eq!(res.1.conjunctions, vec![right]);
         assert_eq!(res.2.conjunctions, vec![other]);
+    }
+}
+
+#[cfg(test)]
+mod key_set_extractor_tests {
+    use std::time::{Duration, Instant};
+
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{Interval, StructType};
+    use risingwave_common::util::sort_util::ColumnOrder;
+    use risingwave_expr::expr::build_from_prost;
+
+    use super::*;
+    use crate::expr::Expr;
+
+    const COLUMNS: usize = 3;
+
+    fn column(index: usize) -> ExprImpl {
+        InputRef::new(index, DataType::Int32).into()
+    }
+
+    fn literal(value: Option<i32>) -> ExprImpl {
+        Literal::new(value.map(ScalarImpl::Int32), DataType::Int32).into()
+    }
+
+    fn call(func_type: ExprType, inputs: Vec<ExprImpl>) -> ExprImpl {
+        FunctionCall::new(func_type, inputs).unwrap().into()
+    }
+
+    fn row(fields: Vec<ExprImpl>) -> ExprImpl {
+        let struct_type = StructType::row_expr_type(fields.iter().map(|f| f.return_type()));
+        FunctionCall::new_unchecked(ExprType::Row, fields, DataType::Struct(struct_type)).into()
+    }
+
+    fn random_value(rng: &mut StdRng) -> Option<i32> {
+        if rng.random_bool(0.15) {
+            None
+        } else {
+            Some(rng.random_range(0..4))
+        }
+    }
+
+    fn random_leaf(rng: &mut StdRng) -> ExprImpl {
+        let col = rng.random_range(0..COLUMNS);
+        match rng.random_range(0..7) {
+            0..=2 => {
+                let func_type = [
+                    ExprType::Equal,
+                    ExprType::NotEqual,
+                    ExprType::LessThan,
+                    ExprType::LessThanOrEqual,
+                    ExprType::GreaterThan,
+                    ExprType::GreaterThanOrEqual,
+                ][rng.random_range(0..6)];
+                call(func_type, vec![column(col), literal(random_value(rng))])
+            }
+            3 => call(ExprType::IsNull, vec![column(col)]),
+            4 => {
+                let mut inputs = vec![column(col)];
+                inputs.extend((0..rng.random_range(1..4)).map(|_| literal(random_value(rng))));
+                call(ExprType::In, inputs)
+            }
+            5 => {
+                let func_type = [
+                    ExprType::RowLessThan,
+                    ExprType::RowLessThanOrEqual,
+                    ExprType::RowGreaterThan,
+                    ExprType::RowGreaterThanOrEqual,
+                ][rng.random_range(0..4)];
+                let len = rng.random_range(1..=COLUMNS);
+                let fields = (0..len).map(|_| column(rng.random_range(0..COLUMNS)));
+                let fields = row(fields.collect());
+                let values = row((0..len).map(|_| literal(random_value(rng))).collect());
+                call(func_type, vec![fields, values])
+            }
+            _ => call(
+                ExprType::LessThan,
+                vec![column(col), column(rng.random_range(0..COLUMNS))],
+            ),
+        }
+    }
+
+    fn random_expr(rng: &mut StdRng, depth: usize) -> ExprImpl {
+        if depth == 0 || rng.random_bool(0.3) {
+            return random_leaf(rng);
+        }
+        let children = (0..rng.random_range(2..4)).map(|_| random_expr(rng, depth - 1));
+        let children = children.collect_vec();
+        if rng.random_bool(0.5) {
+            ExprImpl::and(children)
+        } else {
+            ExprImpl::or(children)
+        }
+    }
+
+    fn all_rows() -> Vec<OwnedRow> {
+        let values = [None, Some(0), Some(1), Some(2), Some(3)];
+        let mut rows = vec![];
+        for a in values {
+            for b in values {
+                for c in values {
+                    rows.push(OwnedRow::new(
+                        [a, b, c]
+                            .into_iter()
+                            .map(|v| v.map(ScalarImpl::Int32))
+                            .collect(),
+                    ));
+                }
+            }
+        }
+        rows
+    }
+
+    /// Checks what [`KeySetExtractor`] promises, using the real evaluator: if the predicate is true
+    /// for a row, its key is in the set, and if the result is tight, only then.
+    #[tokio::test]
+    async fn test_key_set_matches_the_evaluator() {
+        let rows = all_rows();
+        let orders = OrderType::all();
+        let mut rng = StdRng::seed_from_u64(27783);
+        let ctx = OptimizerContext::mock();
+        for _ in 0..3000 {
+            let pk_len = rng.random_range(1..=2);
+            let pk = (0..pk_len)
+                .map(|i| ColumnOrder::new(i, orders[rng.random_range(0..orders.len())]))
+                .collect_vec();
+            let order = pk.iter().map(|column| column.order_type).collect_vec();
+
+            let conjunctions = to_conjunctions(random_expr(&mut rng, 3));
+            let (keys, tight) = KeySetExtractor::new(&pk, &ctx).extract(&conjunctions);
+            let predicate = ExprImpl::and(conjunctions.clone());
+            let residual = ExprImpl::and(
+                conjunctions
+                    .iter()
+                    .zip_eq_fast(&tight)
+                    .filter(|(_, tight)| !**tight)
+                    .map(|(expr, _)| expr.clone()),
+            );
+            let predicate_eval = build_from_prost(&predicate.to_expr_proto()).unwrap();
+            let residual_eval = build_from_prost(&residual.to_expr_proto()).unwrap();
+
+            for row in &rows {
+                let key = row.as_inner()[..pk_len].to_vec();
+                let in_keys = keys.contains(&key, &order);
+                let is_true = |datum: Datum| datum == Some(ScalarImpl::Bool(true));
+                let selected = is_true(predicate_eval.eval_row(row).await.unwrap());
+                let kept = in_keys && is_true(residual_eval.eval_row(row).await.unwrap());
+                assert!(
+                    !selected || in_keys,
+                    "{predicate:?} {pk:?} {row:?} {keys:?}"
+                );
+                assert_eq!(
+                    selected, kept,
+                    "{predicate:?} {tight:?} {pk:?} {row:?} {keys:?}"
+                );
+            }
+        }
+    }
+
+    /// The limit on refined ranges is for the product of several values, and a list is as long as
+    /// it is anyway.
+    #[tokio::test]
+    async fn test_one_value_is_narrowed_by_a_long_list() {
+        let pk = (0..2)
+            .map(|i| ColumnOrder::new(i, OrderType::ascending()))
+            .collect_vec();
+        let list = [column(1)]
+            .into_iter()
+            .chain((0..2000).map(|value| literal(Some(value))))
+            .collect();
+        let conjunctions = vec![
+            call(ExprType::Equal, vec![column(0), literal(Some(1))]),
+            call(ExprType::In, list),
+        ];
+        let ctx = OptimizerContext::mock();
+        let (keys, tight) = KeySetExtractor::new(&pk, &ctx).extract(&conjunctions);
+        assert_eq!(keys.len(), 2000);
+        assert_eq!(tight, vec![true, true]);
+    }
+
+    /// Constants that compare equal can still give different results, so a predicate is not known
+    /// by its value.
+    #[tokio::test]
+    async fn test_predicates_with_equal_constants_are_different() {
+        let pk = [ColumnOrder::new(0, OrderType::ascending())];
+        let column: ExprImpl = InputRef::new(0, DataType::Varchar).into();
+        let equal_to_text_of = |months, days| {
+            let interval = Interval::from_month_day_usec(months, days, 0);
+            let interval = Literal::new(Some(ScalarImpl::Interval(interval)), DataType::Interval);
+            let text = ExprImpl::from(interval)
+                .cast_explicit(&DataType::Varchar)
+                .unwrap();
+            call(ExprType::Equal, vec![column.clone(), text])
+        };
+        let (one_month, thirty_days) = (equal_to_text_of(1, 0), equal_to_text_of(0, 30));
+        assert_eq!(one_month, thirty_days);
+        let predicate = ExprImpl::or([one_month, thirty_days]);
+        let ctx = OptimizerContext::mock();
+        let (keys, _) = KeySetExtractor::new(&pk, &ctx).extract(&[predicate]);
+        for text in ["1 mon", "30 days"] {
+            let key = [Some(ScalarImpl::Utf8(text.into()))];
+            assert!(keys.contains(&key, &[pk[0].order_type]), "{text} {keys:?}");
+        }
+    }
+
+    /// Takes minutes if a predicate is extracted once per path to it, instead of once per pk column.
+    #[tokio::test]
+    async fn test_nested_predicate_is_extracted_once_per_column() {
+        const PK_LEN: usize = 10;
+
+        fn nested(rng: &mut StdRng, depth: usize) -> ExprImpl {
+            let mut conjunctions = (0..PK_LEN)
+                .map(|i| {
+                    let values = [Some(1), Some(rng.random())].map(literal);
+                    call(
+                        ExprType::In,
+                        [column(i)].into_iter().chain(values).collect(),
+                    )
+                })
+                .collect_vec();
+            let not_on_pk = call(
+                ExprType::GreaterThan,
+                vec![column(PK_LEN), literal(Some(rng.random()))],
+            );
+            conjunctions.push(if depth == 0 {
+                not_on_pk
+            } else {
+                // The last arm makes this the full set at every offset, so nothing gets narrowed.
+                ExprImpl::or([nested(rng, depth - 1), nested(rng, depth - 1), not_on_pk])
+            });
+            ExprImpl::and(conjunctions)
+        }
+
+        let pk = (0..PK_LEN)
+            .map(|i| ColumnOrder::new(i, OrderType::ascending()))
+            .collect_vec();
+        let conjunctions = to_conjunctions(nested(&mut StdRng::seed_from_u64(27783), 8));
+        let ctx = OptimizerContext::mock();
+        let start = Instant::now();
+        let (keys, tight) = KeySetExtractor::new(&pk, &ctx).extract(&conjunctions);
+        assert!(start.elapsed() < Duration::from_secs(20));
+        assert!(!keys.is_empty());
+        assert!(!tight.iter().all(|tight| *tight));
     }
 }

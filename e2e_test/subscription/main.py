@@ -567,13 +567,13 @@ def test_explain_cursor():
     execute_query("fetch next from cur",conn)
     plan = execute_query("explain fetch next from cur",conn)
     assert plan[0][0] == "BatchExchange { order: [t5.v1 ASC, t5.v2 ASC], dist: Single }"
-    assert plan[1][0] == "└─BatchScan { table: t5, columns: [v1, v2, v3, v4], scan_ranges: [(v1, v2) > (Int32(1), Int32(1))] }"
+    assert plan[1][0] == "└─BatchScan { table: t5, columns: [v1, v2, v3, v4], scan_ranges: [(v1, v2) > (Int32(1), Int32(1)) AND v1 <= null] }"
     execute_query("fetch next from cur",conn)
     execute_query("fetch next from cur",conn)
     plan = execute_query("explain fetch next from cur",conn)
     assert plan[0][0] == "BatchExchange { order: [t5.v1 ASC, t5.v2 ASC], dist: Single }"
     assert "└─BatchLogSeqScan { table: t5, columns: [v1, v2, v3, v4, op]" in plan[1][0]
-    assert "scan_range: [(v1, v2) > (Int32(3), Int32(3))] }" in plan[1][0]
+    assert "scan_range: [(v1, v2) > (Int32(3), Int32(3)) AND v1 <= null] }" in plan[1][0]
     execute_query("fetch next from cur",conn)
     drop_table_subscription()
 

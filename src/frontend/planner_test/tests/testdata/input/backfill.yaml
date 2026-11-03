@@ -180,7 +180,7 @@
     select * from t where a is null or a = 1;
   expected_outputs:
     - stream_plan
-- name: snapshot backfill merged eq ranges produce an IS NULL branch
+- name: snapshot backfill reads one range when an arm is not just values of the pk
   sql: |
     create table t(a int, b int, c int, d int, primary key(a, b, c));
     select * from t where a is null or a = 1 or (a is null and b = 2 and c > 3);
@@ -245,3 +245,44 @@
   expected_outputs:
     - stream_plan
     - backfill_order_plan
+- name: A row comparison is pushed down into backfill, and the filter stays for later changes.
+  sql: |
+    create table t(a int, b int, primary key(a, b));
+    select * from t where (a, b) > (1, 5);
+  expected_outputs:
+  - stream_plan
+- name: Each value of an IN list becomes a branch with the range on the next column.
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a in (1, 2) and b > 5;
+  expected_outputs:
+  - stream_plan
+- name: Disjoint ranges are read as one range that covers them, and the filter stays.
+  sql: |
+    create table t(a int primary key, b int);
+    select * from t where a = 1 or a > 5;
+  expected_outputs:
+  - stream_plan
+- name: A constant that needs the session timezone still gives a range.
+  sql: |
+    create table t(a timestamptz primary key, b int);
+    select * from t where a > '2024-01-01 12:00:00';
+  expected_outputs:
+  - stream_plan
+- name: Each value of an IN list is a branch, whatever the rest of the condition is.
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b, c));
+    select * from t where a in (1, 2) and (b, c) > (1, 5);
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t(a int, b int, c int, primary key(a, b, c));
+    select * from t where a in (1, 2) and (b > 5 or b is null);
+  expected_outputs:
+    - stream_plan
+- name: A small range is one scan, not a branch for each value.
+  sql: |
+    create table t(a int primary key, b int);
+    select * from t where a between 1 and 3;
+  expected_outputs:
+    - stream_plan
