@@ -126,6 +126,14 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: async projection with literals does not need a separate synchronous layer
+  before:
+    - create_append_only_table
+  sql: |
+    select id, pg_sleep(id::double precision) as waited, 'tag' as tag, null::int as empty
+    from t;
+  expected_outputs:
+    - stream_plan
 - name: separate synchronous computation from nested async projection
   before:
     - create_append_only_table

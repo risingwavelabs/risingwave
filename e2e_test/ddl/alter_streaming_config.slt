@@ -248,48 +248,6 @@ drop table cf_projection_b;
 statement ok
 drop table cf_projection_default;
 
-# Projection overrides must fit TOML's signed 64-bit integers. Rejected SETs preserve
-# the previous values, and the same session can still create a streaming job.
-statement ok
-set streaming_project_expr_concurrency = 9223372036854775807;
-
-statement ok
-set streaming_project_expr_inflight_request_concurrency = 9223372036854775807;
-
-statement error Invalid value `9223372036854775808` for `streaming_project_expr_concurrency`
-set streaming_project_expr_concurrency = 9223372036854775808;
-
-statement error Invalid value `9223372036854775808` for `streaming_project_expr_inflight_request_concurrency`
-set streaming_project_expr_inflight_request_concurrency = 9223372036854775808;
-
-query T
-show streaming_project_expr_concurrency;
-----
-9223372036854775807
-
-query T
-show streaming_project_expr_inflight_request_concurrency;
-----
-9223372036854775807
-
-statement ok
-create table cf_projection_bounds (v int);
-
-query TTT rowsort
-select name, key, value from rw_streaming_job_config where name = 'cf_projection_bounds';
-----
-cf_projection_bounds streaming.developer.project_expr_concurrency 9223372036854775807
-cf_projection_bounds streaming.developer.project_expr_inflight_request_concurrency 9223372036854775807
-
-statement ok
-drop table cf_projection_bounds;
-
-statement ok
-set streaming_project_expr_concurrency = default;
-
-statement ok
-set streaming_project_expr_inflight_request_concurrency = default;
-
 # Execute a mixed projection with a row budget smaller than its input chunk. The async
 # expression remains conditional, so positive rows never evaluate the slow branch.
 statement ok

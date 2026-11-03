@@ -17,8 +17,9 @@ use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanTreeNodeUnary, StreamProject, generic};
 
-/// Separate synchronous computations from asynchronous expressions. Column references are allowed
-/// in both layers to preserve stream keys, distribution, watermarks and the final output order.
+/// Separate synchronous computations from asynchronous expressions. Column references and literals
+/// do not require a separate synchronous layer. Column references are allowed in both layers to
+/// preserve stream keys, distribution, watermarks and the final output order.
 pub struct StreamProjectSplitRule;
 
 impl Rule<Stream> for StreamProjectSplitRule {
@@ -67,9 +68,9 @@ impl Rule<Stream> for StreamProjectSplitRule {
 
 pub(super) fn has_mixed_computations(exprs: &[ExprImpl]) -> bool {
     exprs.iter().any(ExprImpl::is_async)
-        && exprs
-            .iter()
-            .any(|expr| !matches!(expr, ExprImpl::InputRef(_)) && !expr.is_async())
+        && exprs.iter().any(|expr| {
+            !matches!(expr, ExprImpl::InputRef(_) | ExprImpl::Literal(_)) && !expr.is_async()
+        })
 }
 
 impl StreamProjectSplitRule {
@@ -119,7 +120,12 @@ mod tests {
         .into();
         let exprs = vec![
             conditional.clone(),
-            ExprImpl::literal_int(7),
+            FunctionCall::new_unchecked(
+                ExprType::IsNull,
+                vec![InputRef::new(0, DataType::Float64).into()],
+                DataType::Boolean,
+            )
+            .into(),
             InputRef::new(0, DataType::Float64).into(),
         ];
         let original: PlanRef = StreamProject::new(generic::Project::new(exprs, input)).into();
