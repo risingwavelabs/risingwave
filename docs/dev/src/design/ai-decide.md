@@ -177,22 +177,21 @@ the ordinary asynchronous projection path. Existing restrictions on volatile
 expressions in other SQL positions still apply; put the call in a SELECT
 projection. Leave `streaming_unsafe_allow_unmaterialized_impure_expr` disabled.
 
-Each expression instance reuses an HTTP client and shares a fixed limit of eight
-requests across overlapping chunk and single-row evaluations. A permit covers the
-whole logical request, including retries and backoff. This is an instance-local
-concurrency limit, not an endpoint-wide or cluster-wide QPS limit. Multiple
-actors or expressions each have their own limit.
+Each expression instance reuses an HTTP client and evaluates all eligible rows in
+a chunk concurrently. There is no AI_DECIDE-specific per-chunk or shared request
+limit. Each visible row with non-NULL arguments makes one logical request, with
+its retries performed sequentially. Overlapping chunks and multiple actors can
+therefore increase the total number of concurrent HTTP requests.
 
-Completed requests immediately free scheduling slots for later rows. Results are
-collected by input row index and returned in their original positions, including
+Requests complete independently of row order. Results are collected by input row
+index and returned in their original positions, including
 NULL and invisible rows. The expression still waits for the entire chunk before
 returning its array. Watermarks and barriers wait for preceding results. One slow
 request can therefore delay the chunk and checkpoint progress; this version does
 not provide independent per-key scheduling.
 
 Ordinary streaming projection can evaluate multiple chunks with
-`streaming.developer.project_expr_concurrency` (default 1), still subject to the
-AI_DECIDE instance's shared request limit. The separately configured
+`streaming.developer.project_expr_concurrency` (default 1). The separately configured
 `project_expr_inflight_request_concurrency` budgets visible rows being evaluated,
 not individual HTTP requests. A whole chunk may cross the row budget once; even
 rows with NULL arguments count toward this budget although they make no request.
@@ -205,11 +204,11 @@ Set `streaming_project_expr_concurrency` and
 capture per-job overrides, or use the existing `ALTER ... SET/RESET CONFIG`
 mechanism for existing jobs (effective after recovery). See
 [asynchronous projection](async-projection.md) for the limits and override rules.
-These settings do not change AI_DECIDE's fixed eight-request limit or apply to
-batch execution. `StreamMaterializedExprs` continues to evaluate chunks
-sequentially without these Project limits; AI_DECIDE's request limit still
-applies within each chunk. The row budget is not a replacement for request-level
-concurrency control.
+These settings do not apply to batch execution. `StreamMaterializedExprs` continues
+to evaluate chunks sequentially without these Project limits, while AI_DECIDE
+evaluates eligible rows within each chunk concurrently. The row budget is not an
+exact HTTP-request limit: a budget of eight still admits a whole 1,024-row chunk,
+which can issue up to 1,024 concurrent requests for one AI_DECIDE call per row.
 
 Each attempt has a 30-second timeout. Transport errors, HTTP 429, and HTTP 5xx
 responses retry up to three attempts total, using 100 ms then 200 ms delays.
@@ -225,9 +224,9 @@ cost or return a different answer. After local retries are exhausted, streaming
 recovery may attempt the same input again. Persistent service or configuration
 errors therefore prevent progress until resolved.
 
-On evaluation failure, other local futures for that chunk are dropped and their
-permits are released. Requests already received by the service may continue
-running. Releasing local permits does not guarantee remote cancellation.
+On evaluation failure, other local futures for that chunk are dropped. Requests
+already received by the service may continue running; dropping local futures does
+not guarantee remote cancellation.
 
 ## Tuning
 
@@ -243,8 +242,9 @@ response is limited to 16 MiB. There is no separate aggregate byte budget.
 
 - Schema tests: named mixed result types and invalid question definitions.
 - Mock HTTP tests: request shape, response decoding and contract failures,
-  retries/timeouts, NULL and invisible rows, ordered results, shared concurrency,
-  slot refill behind a blocked first row, and cancellation.
+  retries/timeouts, NULL and invisible rows, empty chunks, concurrent requests
+  across chunks, ordered results despite a blocked first row, and prompt errors
+  from later rows.
 - Project tests: saved results across updates, deletes and recovery; fatal errors
   and barrier/watermark ordering.
 - Planner fixture `ai_decide`: fixed definitions, constructors, typed field

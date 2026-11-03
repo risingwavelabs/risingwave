@@ -14,7 +14,8 @@
 
 use std::time::Duration;
 
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::TryStreamExt;
+use futures::stream::FuturesUnordered;
 use reqwest::{Client, StatusCode};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
@@ -28,14 +29,12 @@ use risingwave_expr::expr::{
 use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Serialize;
-use tokio::sync::Semaphore;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ATTEMPTS: usize = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(100);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_CONCURRENCY: usize = 8;
 
 /// One state is one request. An array in `state` is context, not an HTTP batch.
 #[derive(Serialize)]
@@ -49,9 +48,6 @@ struct AiDecide {
     children: [BoxedExpression; 5],
     schema: QuestionSchema,
     client: Client,
-    // Shared by concurrent eval calls on this expression, including overlapping chunks.
-    permits: Semaphore,
-    max_concurrency: usize,
 }
 
 impl std::fmt::Debug for AiDecide {
@@ -95,8 +91,6 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
         children,
         schema,
         client,
-        permits: Semaphore::new(MAX_CONCURRENCY),
-        max_concurrency: MAX_CONCURRENCY,
     }
     .boxed())
 }
@@ -236,12 +230,6 @@ impl AiDecide {
             })
             .build()
             .map_err(|_| request_error("could not build HTTP request"))?;
-        let _permit = self
-            .permits
-            .acquire()
-            .await
-            .expect("semaphore is not closed");
-
         for attempt in 0..MAX_ATTEMPTS {
             let mut delay = RETRY_DELAY * (1 << attempt);
             let result = match self
@@ -357,7 +345,7 @@ impl AsyncExpression for AiDecide {
         for child in &self.children {
             arrays.push(child.eval(input).await?);
         }
-        let mut results = stream::iter(0..input.capacity())
+        let mut results = (0..input.capacity())
             .map(|index| {
                 let arrays = &arrays;
                 async move {
@@ -370,9 +358,9 @@ impl AsyncExpression for AiDecide {
                     Ok::<_, ExprError>((index, value))
                 }
             })
-            .buffer_unordered(self.max_concurrency);
-        // Refill HTTP slots as soon as requests finish, independently of row order.
-        // The expression still returns one ordered array only after the whole chunk finishes.
+            .collect::<FuturesUnordered<_>>();
+        // Evaluate all rows concurrently and observe failures without waiting for earlier rows.
+        // Return one ordered array only after the whole chunk finishes.
         let mut ordered_results = vec![None; input.capacity()];
         while let Some((index, result)) = results.try_next().await? {
             ordered_results[index] = result;
@@ -413,6 +401,7 @@ mod tests {
     };
     use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
+    use tokio::sync::{Barrier, Semaphore};
 
     use super::*;
 
@@ -435,10 +424,6 @@ mod tests {
     }
 
     fn expression(timeout: Duration) -> AiDecide {
-        expression_with_concurrency(timeout, MAX_CONCURRENCY)
-    }
-
-    fn expression_with_concurrency(timeout: Duration, max_concurrency: usize) -> AiDecide {
         AiDecide {
             schema: test_schema(),
             children: std::array::from_fn(|i| {
@@ -459,8 +444,6 @@ mod tests {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap(),
-            permits: Semaphore::new(max_concurrency),
-            max_concurrency,
         }
     }
 
@@ -686,32 +669,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preserves_order_skips_null_and_invisible_rows_and_bounds_concurrency() {
-        let active = Arc::new(AtomicUsize::new(0));
-        let maximum = Arc::new(AtomicUsize::new(0));
+    async fn registered_expression_evaluates_all_visible_rows_across_chunks() {
+        // Each chunk has 20 rows, minus one NULL and one invisible row. Hold every request
+        // until all 36 have arrived: neither a per-chunk nor a shared limit may block them.
+        let ready = Arc::new(Barrier::new(36));
         let requests = Arc::new(AtomicUsize::new(0));
-        let (a, m, r) = (active.clone(), maximum.clone(), requests.clone());
+        let seen = requests.clone();
         let server = server(Router::new().route(
             "/evaluate",
             post(move |Json(body): Json<Value>| {
-                let (a, m, r) = (a.clone(), m.clone(), r.clone());
+                let (ready, seen) = (ready.clone(), seen.clone());
                 async move {
-                    r.fetch_add(1, Ordering::SeqCst);
-                    let inflight = a.fetch_add(1, Ordering::SeqCst) + 1;
-                    m.fetch_max(inflight, Ordering::SeqCst);
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    ready.wait().await;
                     let index = body["state"]["index"].as_u64().unwrap();
-                    tokio::time::sleep(Duration::from_millis(if index == 0 { 80 } else { 5 }))
-                        .await;
-                    a.fetch_sub(1, Ordering::SeqCst);
                     Json(json!({"answers": {"q": {"type": "noul", "noul": index as f64 / 100.0}}}))
                 }
             }),
         ))
         .await;
-        let expr = expression_with_concurrency(REQUEST_TIMEOUT, 3);
+        let children = expression(REQUEST_TIMEOUT).children.into_iter().collect();
+        let expr = build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap();
         let input = chunk(&server.url, 20);
-        // The semaphore bounds overlapping eval calls as well as a single chunk.
-        let (left, right) = tokio::join!(expr.eval(&input), expr.eval(&input));
+        let (left, right) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(expr.eval(&input), expr.eval(&input))
+        })
+        .await
+        .expect("all eligible rows in both chunks must start without an internal limit");
         for output in [left.unwrap(), right.unwrap()] {
             for i in 0..20 {
                 assert_eq!(
@@ -721,8 +705,10 @@ mod tests {
             }
         }
         assert_eq!(requests.load(Ordering::SeqCst), 36);
-        assert_eq!(maximum.load(Ordering::SeqCst), 3);
-        assert_eq!(expr.permits.available_permits(), 3);
+
+        let empty = expr.eval(&chunk(&server.url, 0)).await.unwrap();
+        assert_eq!(empty.len(), 0);
+        assert_eq!(requests.load(Ordering::SeqCst), 36);
     }
 
     #[tokio::test]
@@ -742,145 +728,84 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refills_slots_behind_a_blocked_first_row_and_restores_order() {
-        for max_concurrency in [2, 8, 16] {
-            let first = Arc::new(Semaphore::new(0));
-            let gate = first.clone();
-            let completed = Arc::new(AtomicUsize::new(0));
-            let seen = completed.clone();
-            let server = server(Router::new().route(
-                "/evaluate",
-                post(move |Json(body): Json<Value>| {
-                    let gate = gate.clone();
-                    let seen = seen.clone();
-                    async move {
-                        let index = body["state"]["index"].as_u64().unwrap();
-                        if index == 0 {
-                            gate.acquire().await.unwrap().forget();
-                        }
-                        seen.fetch_add(1, Ordering::SeqCst);
-                        Json(json!({"answers": {"q": {"type": "noul", "noul": index as f64 / 100.0}}}))
-                    }
-                }),
-            ))
-            .await;
-            let expr = expression_with_concurrency(REQUEST_TIMEOUT, max_concurrency);
-            let input = chunk(&server.url, 30);
-            let evaluation = expr.eval(&input);
-            futures::pin_mut!(evaluation);
-            tokio::select! {
-                result = &mut evaluation => panic!("first row was not released: {result:?}"),
-                _ = async {
-                    tokio::time::timeout(Duration::from_secs(5), async {
-                        // 30 rows minus SQL NULL, invisible row and the blocked first row.
-                        while completed.load(Ordering::SeqCst) != 27 {
-                            tokio::time::sleep(Duration::from_millis(1)).await;
-                        }
-                    }).await.expect("completed rows must release scheduling slots");
-                } => {}
-            }
-            first.add_permits(1);
-            let output = evaluation.await.unwrap();
-            for i in 0..30 {
-                assert_eq!(
-                    score_at(&output, i),
-                    (![1, 2].contains(&i)).then_some(i as f64 / 100.0)
-                );
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn failure_cancels_pending_rows_and_releases_permits() {
+    async fn completes_later_rows_while_first_is_blocked_and_restores_order() {
+        let first = Arc::new(Semaphore::new(0));
+        let gate = first.clone();
+        let completed = Arc::new(AtomicUsize::new(0));
+        let seen = completed.clone();
         let server = server(Router::new().route(
             "/evaluate",
-            post(|Json(body): Json<Value>| async move {
-                match body["state"]["index"].as_u64().unwrap() {
-                    0 => futures::future::pending().await,
-                    3 => (
-                        StatusCode::OK,
-                        Json(json!({"answers":{"q":{"type":"noul","noul":0.03}}})),
-                    ),
-                    4 => (StatusCode::UNAUTHORIZED, Json(json!({}))),
-                    _ => unreachable!(),
+            post(move |Json(body): Json<Value>| {
+                let gate = gate.clone();
+                let seen = seen.clone();
+                async move {
+                    let index = body["state"]["index"].as_u64().unwrap();
+                    if index == 0 {
+                        gate.acquire().await.unwrap().forget();
+                    }
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    Json(json!({"answers": {"q": {"type": "noul", "noul": index as f64 / 100.0}}}))
                 }
             }),
         ))
         .await;
-        let expr = expression_with_concurrency(REQUEST_TIMEOUT, 2);
-        let input = chunk(&server.url, 5);
+        let expr = expression(REQUEST_TIMEOUT);
+        let input = chunk(&server.url, 30);
+        let evaluation = expr.eval(&input);
+        futures::pin_mut!(evaluation);
+        tokio::select! {
+            result = &mut evaluation => panic!("first row was not released: {result:?}"),
+            _ = async {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    // 30 rows minus SQL NULL, invisible row and the blocked first row.
+                    while completed.load(Ordering::SeqCst) != 27 {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                }).await.expect("later rows must complete independently of the first row");
+            } => {}
+        }
+        first.add_permits(1);
+        let output = evaluation.await.unwrap();
+        for i in 0..30 {
+            assert_eq!(
+                score_at(&output, i),
+                (![1, 2].contains(&i)).then_some(i as f64 / 100.0)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn failure_does_not_wait_for_blocked_rows() {
+        let started = Arc::new(Semaphore::new(0));
+        let server = server(Router::new().route(
+            "/evaluate",
+            post(move |Json(body): Json<Value>| {
+                let started = started.clone();
+                async move {
+                    match body["state"]["index"].as_u64().unwrap() {
+                        0 => {
+                            started.add_permits(1);
+                            futures::future::pending().await
+                        }
+                        49 => {
+                            started.acquire().await.unwrap().forget();
+                            (StatusCode::UNAUTHORIZED, Json(json!({})))
+                        }
+                        _ => (
+                            StatusCode::OK,
+                            Json(json!({"answers":{"q":{"type":"noul","noul":0.5}}})),
+                        ),
+                    }
+                }
+            }),
+        ))
+        .await;
+        let expr = expression(REQUEST_TIMEOUT);
+        let input = chunk(&server.url, 50);
         let error = tokio::time::timeout(Duration::from_secs(5), expr.eval(&input))
             .await
             .expect("later failures must not wait for the blocked first row")
             .unwrap_err();
         assert!(error.to_string().contains("401"));
-        assert_eq!(expr.permits.available_permits(), 2);
-    }
-
-    #[tokio::test]
-    async fn cancellation_cleans_up_waiters_across_overlapping_evaluations() {
-        let started = Arc::new(Semaphore::new(0));
-        let seen = started.clone();
-        let server = server(Router::new().route(
-            "/evaluate",
-            post(move || {
-                seen.add_permits(1);
-                async { futures::future::pending::<Json<Value>>().await }
-            }),
-        ))
-        .await;
-        let expr = expression_with_concurrency(REQUEST_TIMEOUT, 1);
-        {
-            let requests =
-                async { tokio::join!(call(&expr, &server.url), call(&expr, &server.url)) };
-            futures::pin_mut!(requests);
-            tokio::select! {
-                _ = &mut requests => panic!("server never completes"),
-                _ = async {
-                    tokio::time::timeout(Duration::from_secs(5), started.acquire())
-                        .await.unwrap().unwrap().forget();
-                } => {}
-            }
-            // Drop both request futures, including the semaphore waiter.
-        }
-        assert_eq!(expr.permits.available_permits(), 1);
-    }
-
-    #[tokio::test]
-    async fn registered_expression_shares_the_fixed_limit() {
-        let active = Arc::new(AtomicUsize::new(0));
-        let maximum = Arc::new(AtomicUsize::new(0));
-        let started = Arc::new(AtomicUsize::new(0));
-        let gate = Arc::new(Semaphore::new(0));
-        let (a, m) = (active.clone(), maximum.clone());
-        let server = server(Router::new().route(
-            "/evaluate",
-            post(move |Json(body): Json<Value>| {
-                let (a, m, started, gate) =
-                    (a.clone(), m.clone(), started.clone(), gate.clone());
-                async move {
-                    let inflight = a.fetch_add(1, Ordering::SeqCst) + 1;
-                    m.fetch_max(inflight, Ordering::SeqCst);
-                    if started.fetch_add(1, Ordering::SeqCst) + 1 == MAX_CONCURRENCY {
-                        gate.add_permits(36);
-                    }
-                    gate.acquire().await.unwrap().forget();
-                    tokio::task::yield_now().await;
-                    a.fetch_sub(1, Ordering::SeqCst);
-                    Json(json!({"answers":{"q":{"type":"noul","noul":body["state"]["index"].as_f64().unwrap()/100.0}}}))
-                }
-            }),
-        ))
-        .await;
-        let children = expression(REQUEST_TIMEOUT).children.into_iter().collect();
-        let expr = build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap();
-        let input = chunk(&server.url, 20);
-        let (left, right) = tokio::time::timeout(Duration::from_secs(5), async {
-            tokio::join!(expr.eval(&input), expr.eval(&input))
-        })
-        .await
-        .expect("the fixed limit must allow the initial request group to start");
-        assert!(left.is_ok() && right.is_ok());
-        assert_eq!(maximum.load(Ordering::SeqCst), MAX_CONCURRENCY);
     }
 }
