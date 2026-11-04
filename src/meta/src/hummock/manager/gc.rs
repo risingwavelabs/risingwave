@@ -532,8 +532,13 @@ impl HummockManager {
         else {
             return Ok(());
         };
+        // Changelog truncation can enqueue still-live SSTs. Protect them while a backup
+        // takes over their references between the manifest scan and the version check.
+        let _safe_point = self.register_gc_safe_point().await;
         // Objects pinned by either meta backup or time travel should be filtered out.
         let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids().await;
+        #[cfg(test)]
+        tests::pause_gc_retention_handoff(self).await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
         let version_pinned = {
             let versioning = self
@@ -640,15 +645,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_gc_preserves_new_backup() {
-        gc_retention_handoff(true).await;
+        gc_retention_handoff(GcRetentionHandoff::FullBackup).await;
     }
 
     #[tokio::test]
     async fn test_full_gc_preserves_new_time_travel_snapshot() {
-        gc_retention_handoff(false).await;
+        gc_retention_handoff(GcRetentionHandoff::FullTimeTravel).await;
     }
 
-    async fn gc_retention_handoff(retain_by_backup: bool) {
+    #[tokio::test]
+    async fn test_minor_gc_preserves_new_backup() {
+        gc_retention_handoff(GcRetentionHandoff::MinorBackup).await;
+    }
+
+    #[derive(Clone, Copy)]
+    enum GcRetentionHandoff {
+        FullBackup,
+        FullTimeTravel,
+        MinorBackup,
+    }
+
+    async fn gc_retention_handoff(scenario: GcRetentionHandoff) {
         use risingwave_common::hash::VirtualNode;
         use risingwave_common::util::epoch::test_epoch;
         use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
@@ -656,10 +673,13 @@ mod tests {
         use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
         use risingwave_hummock_sdk::{SyncResult, get_object_data_path};
 
+        use crate::controller::streaming_job::TableChangeLogTruncateInfo;
         use crate::hummock::test_utils::{
             get_sst_ids, register_table_ids_to_compaction_group, to_local_sstable_info,
         };
 
+        let minor_gc = matches!(scenario, GcRetentionHandoff::MinorBackup);
+        let retain_by_backup = !matches!(scenario, GcRetentionHandoff::FullTimeTravel);
         let mut opts = crate::manager::MetaOpts::test(false);
         opts.min_sst_retention_time_sec = 0;
         let (env, manager, _, worker_id) =
@@ -726,56 +746,89 @@ mod tests {
         txn.commit().await.unwrap();
         let group_id = StaticCompactionGroupId::StateDefault;
         register_table_ids_to_compaction_group(&manager, &[table_id], group_id).await;
-        let sst_id = get_sst_ids(&manager, 1).await[0];
-        let object_id = HummockObjectId::Sstable(sst_id.into());
         let epoch = test_epoch(1);
-        let sst = SstableInfoInner {
-            object_id: sst_id.into(),
-            sst_id: sst_id.into(),
-            key_range: KeyRange::new(
-                FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "a"), epoch)
+        // Fill the real minor GC batch using the change log. New-value SSTs also belong to
+        // the current version, while an old-value SST is referenced only by the change log.
+        let sst_count = if minor_gc { 1000 } else { 1 };
+        let mut ssts = get_sst_ids(&manager, sst_count)
+            .await
+            .into_iter()
+            .enumerate()
+            .map(|(idx, sst_id)| {
+                let key = |suffix| {
+                    FullKey::new(
+                        table_id,
+                        gen_key_from_str(VirtualNode::ZERO, &format!("{idx:04}{suffix}")),
+                        epoch,
+                    )
                     .encode()
-                    .into(),
-                FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "z"), epoch)
-                    .encode()
-                    .into(),
-            ),
-            table_ids: vec![table_id],
-            file_size: 128,
-            sst_size: 128,
-            uncompressed_file_size: 128,
-            total_key_count: 1,
-            min_epoch: epoch,
-            max_epoch: epoch,
-            ..Default::default()
+                    .into()
+                };
+                SstableInfoInner {
+                    object_id: sst_id.into(),
+                    sst_id: sst_id.into(),
+                    key_range: KeyRange::new(key('a'), key('z')),
+                    table_ids: vec![table_id],
+                    file_size: 128,
+                    sst_size: 128,
+                    uncompressed_file_size: 128,
+                    total_key_count: 1,
+                    min_epoch: epoch,
+                    max_epoch: epoch,
+                    ..Default::default()
+                }
+                .into()
+            })
+            .collect::<Vec<risingwave_hummock_sdk::sstable_info::SstableInfo>>();
+        let gc = &manager.gc_manager;
+        let object_path = |object_id: HummockObjectId| {
+            let prefix = gc.store.get_object_prefix(
+                object_id.as_raw().as_raw_id(),
+                gc.use_new_object_prefix_strategy,
+            );
+            get_object_data_path(&prefix, &gc.path_prefix, object_id)
+        };
+        // Probe contents are irrelevant to ownership filtering; this test does not decode SSTs.
+        for sst in &ssts {
+            gc.store
+                .upload(
+                    &object_path(HummockObjectId::Sstable(sst.object_id)),
+                    bytes::Bytes::from_static(&[0; 128]),
+                )
+                .await
+                .unwrap();
         }
-        .into();
+        let object_id = HummockObjectId::Sstable(ssts[0].object_id);
+        let path = object_path(object_id);
+        let old_value = minor_gc.then(|| ssts.pop().unwrap());
         client
-            .commit_epoch(
+            .commit_epoch_with_change_log(
                 epoch,
                 SyncResult {
-                    uncommitted_ssts: to_local_sstable_info(&[sst]),
+                    uncommitted_ssts: to_local_sstable_info(&ssts),
+                    old_value_ssts: to_local_sstable_info(old_value.as_slice()),
                     ..Default::default()
                 },
+                minor_gc.then_some(vec![epoch]),
             )
             .await
             .unwrap();
-        let gc = &manager.gc_manager;
-        let prefix = gc.store.get_object_prefix(
-            object_id.as_raw().as_raw_id(),
-            gc.use_new_object_prefix_strategy,
-        );
-        let path = get_object_data_path(&prefix, &gc.path_prefix, object_id);
-        // Probe contents are irrelevant to ownership filtering; this test does not decode SSTs.
-        gc.store
-            .upload(&path, bytes::Bytes::from(vec![0; 128]))
-            .await
-            .unwrap();
+        if minor_gc {
+            manager
+                .truncate_table_change_log(TableChangeLogTruncateInfo {
+                    subscription_retention_seconds: [(table_id, 60)].into(),
+                    committed_epoch_truncate_jobs: vec![],
+                    progress_table_subscribers: vec![],
+                })
+                .await
+                .unwrap();
+        } else {
+            // Age the probe past the full GC clock. Channels force the race itself.
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
         let backup = Arc::new(
             crate::backup_restore::BackupManager::for_test(env.clone(), manager.clone()).await,
         );
-        // Age the probe past the real GC clock; explicit channels force the race itself.
-        tokio::time::sleep(Duration::from_secs(2)).await;
 
         let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
         let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
@@ -786,18 +839,23 @@ mod tests {
         let gc_manager = manager.clone();
         let gc_backup = backup.clone();
         let gc_task = tokio::spawn(async move {
-            gc_manager
-                .start_full_gc(Duration::ZERO, None, Some(gc_backup))
-                .await
+            if minor_gc {
+                gc_manager.try_start_minor_gc(gc_backup).await
+            } else {
+                gc_manager
+                    .start_full_gc(Duration::ZERO, None, Some(gc_backup))
+                    .await
+            }
         });
         tokio::time::timeout(Duration::from_secs(10), entered_rx)
             .await
-            .expect("GC did not finish scanning retained references")
+            .expect("GC did not reach the retention handoff")
             .unwrap();
 
         let snapshot_epoch = test_epoch(2);
         if retain_by_backup {
             use risingwave_pb::backup_service::BackupJobStatus;
+            let existing_safe_points = manager.context_info.read().await.version_safe_points.len();
             let job_id = backup.start_backup_job(None).await.unwrap();
             tokio::time::timeout(Duration::from_secs(10), async {
                 loop {
@@ -808,8 +866,10 @@ mod tests {
                         _ => tokio::task::yield_now().await,
                     }
                 }
-                // The backup releases its own pin; only the GC lease should remain.
-                while manager.context_info.read().await.version_safe_points.len() > 1 {
+                // Wait for the backup to release its own pin before creating the checkpoint.
+                while manager.context_info.read().await.version_safe_points.len()
+                    > existing_safe_points
+                {
                     tokio::task::yield_now().await;
                 }
             })
@@ -875,6 +935,13 @@ mod tests {
             gc.store.metadata(&path).await.is_ok(),
             "GC deleted a retained object"
         );
+        if let Some(old_value) = old_value {
+            let old_path = object_path(HummockObjectId::Sstable(old_value.object_id));
+            assert!(
+                gc.store.metadata(&old_path).await.is_err(),
+                "minor GC did not reclaim an unretained old-value SST"
+            );
+        }
         // Releasing the batch lease must eventually allow ordinary GC to reclaim the object.
         tokio::time::timeout(Duration::from_secs(10), async {
             while manager.get_min_pinned_version_id().await
@@ -885,7 +952,7 @@ mod tests {
         })
         .await
         .unwrap();
-        if retain_by_backup {
+        if matches!(scenario, GcRetentionHandoff::FullBackup) {
             let backup_ids = backup
                 .manifest()
                 .await
