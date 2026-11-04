@@ -3373,6 +3373,31 @@ impl fmt::Display for SqlOption {
     }
 }
 
+/// The `WITH` option of a CDC table created with `(*)` to leave out some upstream columns.
+pub const CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY: &str = "column.exclude.list";
+
+/// Parse the value of `column.exclude.list`, e.g. `'a, b'`.
+pub fn parse_cdc_table_excluded_columns(list: &str) -> HashSet<String> {
+    list.split(',')
+        .map(|c| c.trim().to_owned())
+        .filter(|c| !c.is_empty())
+        .collect()
+}
+
+/// Columns excluded by the `column.exclude.list` option among the given `WITH` options.
+pub fn cdc_table_excluded_columns(with_options: &[SqlOption]) -> HashSet<String> {
+    with_options
+        .iter()
+        .find(|o| o.name.real_value() == CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY)
+        .and_then(|o| match &o.value {
+            SqlOptionValue::Value(Value::SingleQuotedString(s)) => {
+                Some(parse_cdc_table_excluded_columns(s))
+            }
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 impl TryFrom<(&String, &String)> for SqlOption {
     type Error = ParserError;
 
@@ -4062,6 +4087,12 @@ impl Statement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_cdc_table_excluded_columns() {
+        let cols = parse_cdc_table_excluded_columns(" a, b ,,c");
+        assert_eq!(cols, ["a", "b", "c"].map(String::from).into());
+    }
 
     #[test]
     fn test_sql_option_redaction_preserves_primary_key() {

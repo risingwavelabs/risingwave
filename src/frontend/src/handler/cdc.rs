@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use anyhow::{Context, anyhow};
 use fancy_regex::Regex;
 use itertools::Itertools;
@@ -25,7 +27,9 @@ use risingwave_connector::source::cdc::external::{
 use risingwave_connector::source::cdc::{
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
 };
-use risingwave_sqlparser::ast::{ColumnDef, ColumnOption, SourceWatermark, TableConstraint};
+use risingwave_sqlparser::ast::{
+    CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY, ColumnDef, ColumnOption, SourceWatermark, TableConstraint,
+};
 use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result, RwError};
@@ -466,6 +470,30 @@ pub(crate) async fn bind_cdc_table_schema_externally(
     ))
 }
 
+/// Remove columns listed in `column.exclude.list` from a schema derived with `(*)`.
+pub(crate) fn exclude_cdc_table_columns(
+    columns: &mut Vec<ColumnCatalog>,
+    pk_names: &[String],
+    excluded_columns: &HashSet<String>,
+) -> Result<()> {
+    for name in excluded_columns {
+        if !columns.iter().any(|c| c.name() == name) {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "column `{name}` in `{CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY}` does not exist in the upstream table"
+            ))
+            .into());
+        }
+        if pk_names.contains(name) {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "primary key column `{name}` cannot be excluded by `{CDC_TABLE_COLUMN_EXCLUDE_LIST_KEY}`"
+            ))
+            .into());
+        }
+    }
+    columns.retain(|c| !excluded_columns.contains(c.name()));
+    Ok(())
+}
+
 pub(crate) async fn bind_cdc_pk_comparisons_externally(
     cdc_with_options: WithOptionsSecResolved,
     pk_names: &[String],
@@ -494,7 +522,39 @@ pub(crate) fn bind_cdc_table_schema(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+
     use super::*;
+
+    #[test]
+    fn test_exclude_cdc_table_columns() {
+        let columns = || {
+            ["id", "name", "payload"]
+                .into_iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    ColumnCatalog::visible(ColumnDesc::named(
+                        n,
+                        ColumnId::new(i as _),
+                        DataType::Varchar,
+                    ))
+                })
+                .collect_vec()
+        };
+        let pk = ["id".to_owned()];
+        let excluded = |names: &[&str]| names.iter().map(|n| n.to_string()).collect();
+
+        let mut cols = columns();
+        exclude_cdc_table_columns(&mut cols, &pk, &excluded(&["payload"])).unwrap();
+        assert_eq!(cols.iter().map(|c| c.name()).collect_vec(), ["id", "name"]);
+
+        let err = exclude_cdc_table_columns(&mut columns(), &pk, &excluded(&["id"])).unwrap_err();
+        assert!(err.to_string().contains("primary key column `id`"));
+
+        let err = exclude_cdc_table_columns(&mut columns(), &pk, &excluded(&["nope"])).unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
 
     fn test_schema_table_name() -> SchemaTableName {
         SchemaTableName {

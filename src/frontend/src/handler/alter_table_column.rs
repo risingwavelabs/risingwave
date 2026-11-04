@@ -24,6 +24,7 @@ use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, ColumnOption, ObjectName, Statement,
+    cdc_table_excluded_columns,
 };
 
 use super::create_source::SqlColumnStrategy;
@@ -53,10 +54,11 @@ pub async fn get_new_table_definition_for_cdc_table(
 
     // Clear the original columns field, so that we'll follow `new_columns` to generate a
     // purified definition.
-    {
+    let excluded_columns = {
         let Statement::CreateTable {
             columns,
             constraints,
+            with_options,
             ..
         } = &mut definition
         else {
@@ -65,11 +67,17 @@ pub async fn get_new_table_definition_for_cdc_table(
 
         columns.clear();
         constraints.clear();
-    }
+        cdc_table_excluded_columns(with_options)
+    };
+    let new_columns = new_columns
+        .iter()
+        .filter(|c| !excluded_columns.contains(c.name()))
+        .cloned()
+        .collect_vec();
 
     let new_definition = try_purify_table_source_create_sql_ast(
         definition,
-        new_columns,
+        &new_columns,
         None,
         // The IDs of `new_columns` may not be consistently maintained at this point.
         // So we use the column names to identify the primary key columns.
