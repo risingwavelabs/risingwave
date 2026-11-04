@@ -576,7 +576,7 @@ services:
       - 9201:9200
 
   clickhouse-server:
-    image: clickhouse/clickhouse-server:25.5
+    image: clickhouse/clickhouse-server:26.9
     ports:
       - "8123:8123"
       - "9000:9000"
