@@ -662,6 +662,16 @@ async fn test_hummock_compaction_task() {
         .unwrap();
     assert_eq!(compact_task.input_ssts.first().unwrap().level_idx, 0);
     assert_eq!(compact_task.task_id, 2);
+    assert_eq!(compact_task.sst_footer_size_limit_bytes, None);
+
+    let footer_limit = 16 * 1024 * 1024;
+    hummock_manager
+        .update_compaction_config(
+            &[compaction_group_id],
+            &[MutableConfig::SstFooterSizeLimitBytes(footer_limit)],
+        )
+        .await
+        .unwrap();
 
     // Cancel the task and succeed.
     assert!(
@@ -678,6 +688,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
     assert_eq!(compact_task.task_id, 3);
+    assert_eq!(compact_task.sst_footer_size_limit_bytes, Some(footer_limit));
     // Finish the task and succeed.
 
     assert!(

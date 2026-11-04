@@ -90,6 +90,7 @@ impl CompactionConfigBuilder {
                 vnode_aligned_level_size_threshold: None,
                 max_kv_count_for_xor16: compaction_config::blocked_xor_filter_kv_count_threshold(),
                 max_vnode_key_range_bytes: compaction_config::max_vnode_key_range_bytes(),
+                sst_footer_size_limit_bytes: None,
             },
         }
     }

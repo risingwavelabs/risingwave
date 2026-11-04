@@ -58,8 +58,8 @@ pub const MIN_BLOCK_SIZE: usize = 8 * 1024;
 pub struct SstableBuilderOptions {
     /// Approximate sstable capacity.
     pub capacity: usize,
-    /// Also use the SST capacity as a separate threshold for encoded block metadata.
-    pub limit_block_meta_size: bool,
+    /// Independent soft limit on the encoded footer.
+    pub footer_size_limit: Option<usize>,
     /// Approximate block capacity.
     pub block_capacity: usize,
     /// Restart point interval.
@@ -84,7 +84,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
         let capacity: usize = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,
-            limit_block_meta_size: false,
+            footer_size_limit: None,
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
@@ -102,7 +102,7 @@ impl Default for SstableBuilderOptions {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_SSTABLE_SIZE,
-            limit_block_meta_size: false,
+            footer_size_limit: None,
             block_capacity: DEFAULT_BLOCK_SIZE,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
@@ -729,9 +729,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 
     pub fn approximate_len(&self) -> usize {
-        self.writer.data_len()
-            + self.block_builder.approximate_len()
-            + self.filter_builder.approximate_len()
+        self.approximate_data_len() + self.filter_builder.approximate_len()
+    }
+
+    fn approximate_data_len(&self) -> usize {
+        self.writer.data_len() + self.block_builder.approximate_len()
     }
 
     pub async fn build_block(&mut self) -> HummockResult<()> {
@@ -790,7 +792,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 
     fn add_block_meta(&mut self, meta: BlockMeta) {
-        if self.options.limit_block_meta_size {
+        if self.options.footer_size_limit.is_some() {
             self.block_meta_size += meta.encoded_size();
         }
         self.block_metas.push(meta);
@@ -798,8 +800,18 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
-        self.approximate_len() >= self.options.capacity
-            || (self.options.limit_block_meta_size && self.block_meta_size >= self.options.capacity)
+        let filter_size = self.filter_builder.approximate_len();
+        self.approximate_data_len() + filter_size >= self.options.capacity
+            || self.options.footer_size_limit.is_some_and(|limit| {
+                let smallest_key_size =
+                    self.block_metas.first().map_or(0, |m| m.smallest_key.len());
+                SstableMeta::encoded_size_from_parts(
+                    self.block_meta_size,
+                    filter_size,
+                    smallest_key_size,
+                    self.last_full_key.len(),
+                ) >= limit
+            })
     }
 
     fn finalize_last_table_stats(&mut self) {

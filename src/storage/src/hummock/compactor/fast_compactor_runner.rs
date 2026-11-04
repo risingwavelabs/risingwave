@@ -307,7 +307,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = task.compression_algorithm.into();
         options.capacity = task.target_file_size as usize;
-        options.limit_block_meta_size = true;
+        options.footer_size_limit = task.sst_footer_size_limit();
         let estimated_output_key_count =
             estimate_output_key_count_for_task(&task, options.capacity);
         options.estimated_output_key_count = Some(estimated_output_key_count);
@@ -845,8 +845,11 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::InputLevel;
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_pb::hummock::compact_task::TaskType;
-    use risingwave_pb::hummock::{LevelType, PbSstableFilterLayout, PbSstableFilterType};
+    use risingwave_pb::hummock::{
+        LevelType, PbCompactTask, PbSstableFilterLayout, PbSstableFilterType,
+    };
 
     use super::CompactorRunner;
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
@@ -854,6 +857,8 @@ mod tests {
         check_compaction_result, optimize_by_copy_block,
     };
     use crate::hummock::compactor::compactor_runner::CompactorRunner as NormalCompactorRunner;
+    use crate::hummock::compactor::iterator::ConcatSstableIterator;
+    use crate::hummock::compactor::shared_buffer_compact::SharedBufferCompactRunner;
     use crate::hummock::compactor::task_progress::TaskProgress;
     use crate::hummock::compactor::{CompactorContext, MultiCompactionFilter};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -865,7 +870,7 @@ mod tests {
         BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm,
         SharedComapctorObjectIdManager, SstableBuilderOptions, Xor16FilterBuilder,
     };
-    use crate::monitor::CompactorMetrics;
+    use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
     fn test_key(table_id: u32, idx: usize) -> FullKey<Vec<u8>> {
         let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
@@ -875,34 +880,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_splits_large_block_metadata() {
-        const TARGET_SIZE: u64 = 40 * 1024;
-        const KEYS_PER_INPUT: usize = 3;
+        check_footer_budget(6 * 1024, 3, 52 * 1024).await;
+    }
+
+    #[tokio::test]
+    async fn test_compaction_splits_large_filter() {
+        check_footer_budget(0, 1000, 8 * 1024).await;
+    }
+
+    async fn check_footer_budget(
+        key_prefix_len: usize,
+        keys_per_input: usize,
+        footer_limit: usize,
+    ) {
+        const TARGET_SIZE: u64 = 256 * 1024 * 1024;
         const INPUTS_PER_LEVEL: usize = 3;
         let sstable_store = mock_sstable_store().await;
         let mut storage_opts = default_opts_for_test();
-        storage_opts.block_size_kb = 1;
+        storage_opts.sstable_size_mb = 256;
+        storage_opts.block_size_kb = if key_prefix_len == 0 { 16 } else { 1 };
         storage_opts.shorten_block_meta_key_threshold = None;
         storage_opts.enable_fast_compaction = true;
         storage_opts.compactor_fast_max_compact_task_size = u64::MAX;
         storage_opts.compactor_fast_max_compact_delete_ratio = 100;
-        let metrics = Arc::new(CompactorMetrics {
-            compact_fast_runner_bytes: prometheus::IntCounter::new(
-                "test_compact_fast_runner_bytes",
-                "Bytes copied by the fast compaction under test",
-            )
-            .unwrap(),
-            ..CompactorMetrics::unused()
-        });
-        let context = CompactorContext::new_local_compact_context(
-            Arc::new(storage_opts),
-            sstable_store.clone(),
-            metrics.clone(),
-            None,
-        );
-        let catalog = CompactionCatalogAgent::for_test(vec![1]);
         let input_options = SstableBuilderOptions {
             compression_algorithm: CompressionAlgorithm::Zstd,
-            block_capacity: 1024,
+            block_capacity: storage_opts.block_size_kb as usize * 1024,
             ..default_builder_opt_for_test()
         };
         let mut input_ssts = Vec::new();
@@ -910,15 +913,14 @@ mod tests {
             let first_input = (level_idx as usize - 1) * INPUTS_PER_LEVEL;
             let mut table_infos = Vec::new();
             for input in first_input..first_input + INPUTS_PER_LEVEL {
-                let start = input * KEYS_PER_INPUT;
-                let rows = (start..start + KEYS_PER_INPUT).flat_map(|idx| {
-                    // Each version occupies a block. Zstd compresses the prefix in the block body,
-                    // while BlockMeta stores it verbatim.
+                let start = input * keys_per_input;
+                let rows = (start..start + keys_per_input).flat_map(|idx| {
                     let mut key = VirtualNode::ZERO.to_be_bytes().to_vec();
-                    key.extend(std::iter::repeat_n(b'x', 6 * 1024));
+                    key.extend(std::iter::repeat_n(b'x', key_prefix_len));
                     key.extend_from_slice(&idx.to_be_bytes());
-                    // The first key after seven raw blocks has versions in separate blocks.
-                    let latest_epoch = if idx == 7 { 2 } else { 1 };
+                    // In the small long-key case, the first decoded group after seven
+                    // copied blocks has two versions in separate blocks.
+                    let latest_epoch = if key_prefix_len > 0 && idx == 7 { 2 } else { 1 };
                     (1..=latest_epoch).rev().map(move |epoch| {
                         (
                             FullKey::for_test(TableId::new(1), key.clone(), test_epoch(epoch)),
@@ -936,8 +938,6 @@ mod tests {
                     HashMap::from([(1, None)]),
                 )
                 .await;
-                assert!(sst.meta_offset < TARGET_SIZE / 16);
-                assert!(sst.file_size - sst.meta_offset < TARGET_SIZE);
                 table_infos.push(sst);
             }
             input_ssts.push(InputLevel {
@@ -946,7 +946,7 @@ mod tests {
                 table_infos,
             });
         }
-        let mut task = CompactTask {
+        let task = CompactTask {
             input_ssts,
             splits: vec![KeyRange::inf()],
             target_level: 2,
@@ -959,44 +959,114 @@ mod tests {
             ..Default::default()
         };
         let object_ids = SharedComapctorObjectIdManager::for_test((100..200).collect());
-        let (_, normal_outputs, _) =
-            NormalCompactorRunner::new(0, context.clone(), task.clone(), object_ids.clone())
-                .run(
-                    MultiCompactionFilter::default(),
-                    catalog.clone(),
-                    Arc::new(TaskProgress::default()),
+        let catalog = CompactionCatalogAgent::for_test(vec![1]);
+
+        for footer_size_limit in [None, Some(footer_limit)] {
+            let task = CompactTask::from(PbCompactTask::from(CompactTask {
+                sst_footer_size_limit_bytes: footer_size_limit.map(|limit| limit as u64),
+                ..task.clone()
+            }));
+            let metrics = Arc::new(CompactorMetrics {
+                compact_fast_runner_bytes: prometheus::IntCounter::new(
+                    "test_compact_fast_runner_bytes",
+                    "Bytes copied by the fast compaction under test",
                 )
+                .unwrap(),
+                ..CompactorMetrics::unused()
+            });
+            let context = CompactorContext::new_local_compact_context(
+                Arc::new(storage_opts.clone()),
+                sstable_store.clone(),
+                metrics.clone(),
+                None,
+            );
+            let (_, normal_outputs, _) =
+                NormalCompactorRunner::new(0, context.clone(), task.clone(), object_ids.clone())
+                    .run(
+                        MultiCompactionFilter::default(),
+                        catalog.clone(),
+                        Arc::new(TaskProgress::default()),
+                    )
+                    .await
+                    .unwrap();
+
+            assert!(optimize_by_copy_block(&task, &context));
+            let (fast_outputs, _) = CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
+                context.clone(),
+                task.clone(),
+                catalog.clone(),
+                object_ids.clone(),
+                Arc::new(TaskProgress::default()),
+                MultiCompactionFilter::default(),
+            )
+            .run()
+            .await
+            .unwrap();
+            assert!(metrics.compact_fast_runner_bytes.get() > 0);
+
+            if key_prefix_len == 0 && footer_size_limit.is_some() {
+                let input = ConcatSstableIterator::new(
+                    task.read_input_ssts().cloned().collect(),
+                    KeyRange::inf(),
+                    sstable_store.clone(),
+                    Arc::new(TaskProgress::default()),
+                    storage_opts.compactor_iter_max_io_retry_times,
+                );
+                let (_, flush_outputs, _) = SharedBufferCompactRunner::new(
+                    0,
+                    KeyRange::inf(),
+                    context.clone(),
+                    TARGET_SIZE as usize,
+                    keys_per_input * INPUTS_PER_LEVEL * 2,
+                    Default::default(),
+                    PbSstableFilterLayout::Blocked,
+                    object_ids.clone(),
+                )
+                .run(input, catalog.clone())
                 .await
                 .unwrap();
-
-        assert!(optimize_by_copy_block(&task, &context));
-        let (fast_outputs, _) = CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
-            context.clone(),
-            task.clone(),
-            catalog.clone(),
-            object_ids,
-            Arc::new(TaskProgress::default()),
-            MultiCompactionFilter::default(),
-        )
-        .run()
-        .await
-        .unwrap();
-        assert!(metrics.compact_fast_runner_bytes.get() > 0);
-
-        for (path, outputs) in [("normal", normal_outputs), ("fast", fast_outputs)] {
-            task.sorted_output_ssts = outputs.into_iter().map(|output| output.sst_info).collect();
-            assert!(task.sorted_output_ssts.len() > 1, "{path}");
-            assert!(can_concat(&task.sorted_output_ssts), "{path}");
-            for sst in &task.sorted_output_ssts {
-                let footer_size = sst.file_size - sst.meta_offset;
-                assert!(footer_size < 2 * TARGET_SIZE, "{path}: {footer_size}");
+                assert_eq!(flush_outputs.len(), 1);
+                let flushed = &flush_outputs[0].sst_info;
+                assert!(flushed.file_size - flushed.meta_offset > footer_limit as u64);
             }
-            assert!(
-                check_compaction_result(&task, context.clone(), catalog.clone())
-                    .await
-                    .unwrap(),
-                "{path}",
-            );
+
+            for (path, outputs) in [("normal", normal_outputs), ("fast", fast_outputs)] {
+                let mut task = task.clone();
+                task.sorted_output_ssts =
+                    outputs.into_iter().map(|output| output.sst_info).collect();
+                let ssts = &task.sorted_output_ssts;
+                let footer_size = |sst: &SstableInfo| sst.file_size - sst.meta_offset;
+                let largest_footer = ssts.iter().map(footer_size).max().unwrap();
+                if footer_size_limit.is_some() {
+                    assert!(ssts.len() > 1, "{path}");
+                    assert!(
+                        largest_footer < 2 * footer_limit as u64,
+                        "{path}: {largest_footer}"
+                    );
+                } else {
+                    assert_eq!(ssts.len(), 1, "{path}");
+                    assert!(
+                        largest_footer > footer_limit as u64,
+                        "{path}: {largest_footer}"
+                    );
+                    if key_prefix_len == 0 {
+                        let sst = sstable_store
+                            .sstable(&ssts[0], &mut StoreLocalStatistic::default())
+                            .await
+                            .unwrap();
+                        let filter_size = sst.filter_reader.encode_to_bytes().len() as u64;
+                        assert!(filter_size > footer_limit as u64, "{path}: {filter_size}");
+                        assert!(largest_footer - filter_size < footer_limit as u64, "{path}");
+                    }
+                }
+                assert!(can_concat(ssts), "{path}");
+                assert!(
+                    check_compaction_result(&task, context.clone(), catalog.clone())
+                        .await
+                        .unwrap(),
+                    "{path}",
+                );
+            }
         }
     }
 
