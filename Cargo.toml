@@ -485,6 +485,8 @@ sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "d43f1f28c0a2ec281
 bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.15.0-json-no-preserve_order" }
 # patch to revert `Hash for StringRef` for compatibility with `&str` in vnode
 jsonbb = { git = "https://github.com/risingwavelabs/jsonbb.git", rev = "f618cd8c9bc517f35dec192d4e7553650894a011" }
+# patch to print positive exponents as `e` instead of `e+`, matching ryu
+zmij = { git = "https://github.com/risingwavelabs/zmij.git", tag = "1.0.23-ryu" }
 
 # patch to make zstd version compatible:
 # desired v4.9.0+2.10.0 requires: zstd-sys >= 2.0.15
