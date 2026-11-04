@@ -24,6 +24,7 @@ pub async fn extract_protobuf_table_schema(
 ) -> Result<Vec<ColumnCatalog>> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
     try_consume_schema_registry_config_from_options(format_encode_options);
+    try_consume_pulsar_schema_config_from_options(format_encode_options);
     try_consume_string_from_options(format_encode_options, PROTOBUF_MESSAGES_AS_JSONB);
     consume_aws_config_from_options(format_encode_options);
 
