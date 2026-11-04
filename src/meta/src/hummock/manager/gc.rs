@@ -684,6 +684,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut opts = MetaOpts::test(false);
         opts.full_gc_object_limit = 2;
+        opts.object_store_config.req_concurrency_limit = 1;
         let env = MetaSrvEnv::for_test_opts(opts, |params| {
             params.state_store = Some(format!("hummock+fs://{}", dir.path().display()));
         })
@@ -741,6 +742,57 @@ mod tests {
             .unwrap();
             assert_eq!(manager.metrics.total_object_count.get(), 4);
             assert_eq!(manager.metrics.total_object_size.get(), 16);
+        }
+        for id in 1..=4 {
+            manager
+                .object_store
+                .metadata(&format!("{prefix}/{id}.data"))
+                .await
+                .unwrap();
+        }
+
+        // Stale objects use the canonical paths so complete_gc_batch really deletes them.
+        // Multiple batches must release the sole operation permit before deletion.
+        let mut stale_paths = Vec::new();
+        for id in 100..106 {
+            let object_id = HummockObjectId::Sstable(id.into());
+            let object_prefix = manager
+                .object_store
+                .get_object_prefix(id, manager.gc_manager.use_new_object_prefix_strategy);
+            let path = risingwave_hummock_sdk::get_object_data_path(
+                &object_prefix,
+                &manager.gc_manager.path_prefix,
+                object_id,
+            );
+            manager
+                .object_store
+                .upload(&path, Bytes::from_static(b"data"))
+                .await
+                .unwrap();
+            std::fs::File::open(dir.path().join(&path))
+                .unwrap()
+                .set_modified(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap();
+            stale_paths.push(path);
+        }
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            manager.start_full_gc(Duration::ZERO, None, None),
+        )
+        .await
+        .expect("full GC must delete batches with req_concurrency_limit = 1")
+        .unwrap();
+        assert_eq!(manager.metrics.total_object_count.get(), 10);
+        assert_eq!(manager.metrics.total_object_size.get(), 40);
+        for path in stale_paths {
+            assert!(
+                manager
+                    .object_store
+                    .metadata(&path)
+                    .await
+                    .unwrap_err()
+                    .is_object_not_found_error()
+            );
         }
         for id in 1..=4 {
             manager

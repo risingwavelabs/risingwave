@@ -581,6 +581,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_list_allows_stat_and_delete_with_concurrency_limit() {
+        let mut store = OpendalObjectStore::test_new_memory_engine().unwrap();
+        let config = ObjectStoreConfig {
+            req_concurrency_limit: 1,
+            ..Default::default()
+        };
+        store.op = super::super::new_operator(&config, store.op);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for id in 0..4 {
+                store
+                    .upload(&format!("prefix/{id}.data"), Bytes::from_static(b"data"))
+                    .await
+                    .unwrap();
+            }
+            let mut objects = store.list("prefix/", None, None).await.unwrap();
+            let mut seen = std::collections::HashSet::new();
+            while let Some(object) = objects.next().await {
+                // Memory listing needs the adapter's stat fallback to get metadata.
+                let object = object.unwrap();
+                assert_eq!(object.total_size, 4);
+                assert!(seen.insert(object.key.clone()));
+                store.metadata(&object.key).await.unwrap();
+                store.delete_objects(&[object.key]).await.unwrap();
+            }
+            assert_eq!(seen.len(), 4);
+            // Even an exhausted but still-live lister must not hold the permit.
+            assert!(list_all("prefix/", &store).await.is_empty());
+            drop(objects);
+        })
+        .await
+        .expect("listing, stat, and deletion must share a single permit without deadlock");
+    }
+
+    #[tokio::test]
     async fn test_memory_upload() {
         let block = Bytes::from("123456");
         let store = OpendalObjectStore::test_new_memory_engine().unwrap();
