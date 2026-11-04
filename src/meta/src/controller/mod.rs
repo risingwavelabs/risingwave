@@ -116,16 +116,46 @@ impl SqlMetaStore {
                     .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
                     .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
 
-                if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                let conn = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
                     if endpoint.contains(":memory:") || endpoint.contains("mode=memory") {
                         bail!(
                             "use the `mem` backend instead of specifying a URL of in-memory SQLite"
                         );
                     }
                     options.sqlite_common();
-                }
 
-                let conn = sea_orm::Database::connect(options).await?;
+                    // Under rollback journal mode (DELETE), synchronous=EXTRA guarantees that SQLite
+                    // fsyncs the parent directory after unlinking the rollback journal during commit,
+                    // ensuring commits are durable across power losses.
+                    let mut sqlite_opts: sea_orm::sqlx::sqlite::SqliteConnectOptions = endpoint
+                        .parse()
+                        .map_err(|e: sea_orm::sqlx::Error| anyhow!(e))?;
+                    sqlite_opts =
+                        sqlite_opts.synchronous(sea_orm::sqlx::sqlite::SqliteSynchronous::Extra);
+
+                    use sea_orm::sqlx::ConnectOptions as _;
+                    if !options.get_sqlx_logging() {
+                        sqlite_opts = sqlite_opts.disable_statement_logging();
+                    } else {
+                        sqlite_opts = sqlite_opts.log_statements(options.get_sqlx_logging_level());
+                        let (slow_level, slow_threshold) =
+                            options.get_sqlx_slow_statements_logging_settings();
+                        if slow_level.to_level().is_some() {
+                            sqlite_opts =
+                                sqlite_opts.log_slow_statements(slow_level, slow_threshold);
+                        }
+                    }
+
+                    let pool: sea_orm::sqlx::SqlitePool = options
+                        .sqlx_pool_options::<sea_orm::sqlx::Sqlite>()
+                        .connect_with(sqlite_opts)
+                        .await
+                        .map_err(|e: sea_orm::sqlx::Error| anyhow!(e))?;
+                    DatabaseConnection::from(pool)
+                } else {
+                    sea_orm::Database::connect(options).await?
+                };
+
                 Self { conn, endpoint }
             }
         })
@@ -527,5 +557,146 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             ),
             created_at_cluster_version: value.1.created_at_cluster_version,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::config::MetaStoreConfig;
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_sqlite_metastore_durability_configuration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("single_node_test.db");
+        let endpoint = format!("sqlite://{}?mode=rwc", db_path.display());
+
+        let meta_store = SqlMetaStore::connect(MetaStoreBackend::Sql {
+            endpoint: endpoint.clone(),
+            config: MetaStoreConfig::default(),
+        })
+        .await
+        .unwrap();
+
+        // Check journal mode (should be rollback journal: DELETE)
+        let row = meta_store
+            .conn
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "PRAGMA journal_mode;".to_owned(),
+            ))
+            .await
+            .unwrap()
+            .expect("query_one result for journal_mode");
+        let journal_mode: String = row.try_get_by_index(0).unwrap();
+        assert_eq!(journal_mode.to_lowercase(), "delete");
+
+        // Check synchronous mode
+        let row = meta_store
+            .conn
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "PRAGMA synchronous;".to_owned(),
+            ))
+            .await
+            .unwrap()
+            .expect("query_one result for synchronous");
+        let sync_mode: i32 = row.try_get_by_index(0).unwrap();
+        // 0 = OFF, 1 = NORMAL, 2 = FULL, 3 = EXTRA
+        assert_eq!(
+            sync_mode, 3,
+            "persistent sqlite metastore must use synchronous=EXTRA (3) to guarantee power-loss durability"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_metastore_reopen_and_migrations() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("single_node_reopen_test.db");
+        let endpoint = format!("sqlite://{}?mode=rwc", db_path.display());
+
+        // First launch: apply migrations
+        {
+            let meta_store = SqlMetaStore::connect(MetaStoreBackend::Sql {
+                endpoint: endpoint.clone(),
+                config: MetaStoreConfig::default(),
+            })
+            .await
+            .unwrap();
+
+            let first_launch = meta_store.up().await.unwrap();
+            assert!(first_launch, "first launch should apply initial migrations");
+
+            let row = meta_store
+                .conn
+                .query_one(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA synchronous;".to_owned(),
+                ))
+                .await
+                .unwrap()
+                .expect("query_one result for synchronous");
+            let sync_mode: i32 = row.try_get_by_index(0).unwrap();
+            assert_eq!(sync_mode, 3);
+        }
+
+        // Reopen existing database: verify synchronous setting and migration idempotency
+        {
+            let meta_store = SqlMetaStore::connect(MetaStoreBackend::Sql {
+                endpoint: endpoint.clone(),
+                config: MetaStoreConfig::default(),
+            })
+            .await
+            .unwrap();
+
+            let first_launch = meta_store.up().await.unwrap();
+            assert!(!first_launch, "reopened cluster should not be first launch");
+
+            let row = meta_store
+                .conn
+                .query_one(Statement::from_string(
+                    DbBackend::Sqlite,
+                    "PRAGMA synchronous;".to_owned(),
+                ))
+                .await
+                .unwrap()
+                .expect("query_one result for synchronous");
+            let sync_mode: i32 = row.try_get_by_index(0).unwrap();
+            assert_eq!(sync_mode, 3);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_sqlite_backend_isolation() {
+        // MetaStoreBackend::Mem must remain isolated from persistent EXTRA requirement
+        let meta_store = SqlMetaStore::connect(MetaStoreBackend::Mem).await.unwrap();
+        let row = meta_store
+            .conn
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "PRAGMA synchronous;".to_owned(),
+            ))
+            .await
+            .unwrap()
+            .expect("query_one result for synchronous");
+        let sync_mode: i32 = row.try_get_by_index(0).unwrap();
+        // In-memory SQLite uses SQLite default (FULL = 2) or OFF (0), but NOT EXTRA (3)
+        assert_ne!(
+            sync_mode, 3,
+            "in-memory sqlite should not enforce synchronous=EXTRA"
+        );
+
+        // Explicit in-memory URL via MetaStoreBackend::Sql should be rejected
+        let result = SqlMetaStore::connect(MetaStoreBackend::Sql {
+            endpoint: "sqlite::memory:".to_owned(),
+            config: MetaStoreConfig::default(),
+        })
+        .await;
+        let Err(err) = result else {
+            panic!("expected in-memory endpoint to be rejected");
+        };
+        assert!(err.to_string().contains("use the `mem` backend"));
     }
 }
