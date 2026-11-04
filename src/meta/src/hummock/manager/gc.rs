@@ -520,6 +520,12 @@ impl HummockManager {
 
     /// Minor GC attempts to delete objects that were part of Hummock version but are no longer in use.
     pub async fn try_start_minor_gc(&self, backup_manager: BackupManagerRef) -> Result<()> {
+        if self.env.opts.enable_hummock_data_archive {
+            // Full GC applies the retention window used by debug archives.
+            // Discard the queued candidates so they do not accumulate.
+            let _ = self.gc_manager.try_take_may_delete_object_ids(1);
+            return Ok(());
+        }
         const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
         let Some(object_ids) = self
             .gc_manager
@@ -682,5 +688,103 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_minor_gc_preserves_debug_archive_ssts() {
+        check_minor_gc_with_debug_archive(true).await;
+    }
+
+    #[tokio::test]
+    async fn test_minor_gc_reclaims_ssts_without_debug_archive() {
+        check_minor_gc_with_debug_archive(false).await;
+    }
+
+    async fn check_minor_gc_with_debug_archive(enable_archive: bool) {
+        use prost::Message;
+        use risingwave_common::catalog::TableId;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_hummock_sdk::version::HummockVersion;
+        use risingwave_hummock_sdk::{SyncResult, get_object_data_path};
+        use risingwave_pb::hummock::PbHummockVersionArchive;
+
+        use crate::backup_restore::BackupManager;
+        use crate::hummock::manager::tests::setup_compute_env_with_meta_opts;
+        use crate::hummock::test_utils::{
+            generate_test_sstables_with_table_id, get_sst_ids,
+            register_table_ids_to_compaction_group, to_local_sstable_info,
+        };
+
+        let mut opts = crate::manager::MetaOpts::test(false);
+        opts.enable_hummock_data_archive = enable_archive;
+        let (env, manager, _, worker_id) = setup_compute_env_with_meta_opts(80, opts).await;
+        let client = MockHummockMetaClient::new(manager.clone(), worker_id as _);
+        let table_id = TableId::new(1);
+        register_table_ids_to_compaction_group(
+            &manager,
+            &[table_id],
+            StaticCompactionGroupId::StateDefault,
+        )
+        .await;
+
+        let epoch = test_epoch(1);
+        // Use the real minor GC threshold and enqueue through checkpointing.
+        let ssts = generate_test_sstables_with_table_id(
+            epoch,
+            table_id,
+            get_sst_ids(&manager, 1000).await,
+        );
+        let gc = &manager.gc_manager;
+        let object_path = |object_id: HummockObjectId| {
+            let prefix = gc.store.get_object_prefix(
+                object_id.as_raw().as_raw_id(),
+                gc.use_new_object_prefix_strategy,
+            );
+            get_object_data_path(&prefix, &gc.path_prefix, object_id)
+        };
+        for sst in &ssts {
+            gc.store
+                .upload(
+                    &object_path(HummockObjectId::Sstable(sst.object_id)),
+                    bytes::Bytes::from_static(&[0; 2]),
+                )
+                .await
+                .unwrap();
+        }
+        client
+            .commit_epoch(
+                epoch,
+                SyncResult {
+                    uncommitted_ssts: to_local_sstable_info(&ssts),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        manager.create_version_checkpoint(1).await.unwrap();
+        let archive_id = manager.get_current_version().await.id;
+        manager.unregister_table_ids([table_id]).await.unwrap();
+        manager.create_version_checkpoint(1).await.unwrap();
+
+        let object_id = HummockObjectId::Sstable(ssts[0].object_id);
+        let path = object_path(object_id);
+        let archive_path = format!("{}/{archive_id}", manager.version_archive_dir);
+        if enable_archive {
+            let bytes = gc.store.read(&archive_path, ..).await.unwrap();
+            let archive = PbHummockVersionArchive::decode(bytes).unwrap();
+            let version = HummockVersion::from_persisted_protobuf_owned(archive.version.unwrap());
+            assert!(version.get_object_ids().any(|id| id == object_id));
+        }
+        assert!(gc.store.metadata(&path).await.is_ok());
+
+        let backup = Arc::new(BackupManager::for_test(env, manager.clone()).await);
+        manager.try_start_minor_gc(backup).await.unwrap();
+        let metadata = gc.store.metadata(&path).await;
+        if enable_archive {
+            assert!(gc.store.metadata(&archive_path).await.is_ok());
+            assert!(metadata.is_ok(), "minor GC deleted a debug-archive SST");
+        } else {
+            assert!(metadata.unwrap_err().is_object_not_found_error());
+        }
     }
 }
