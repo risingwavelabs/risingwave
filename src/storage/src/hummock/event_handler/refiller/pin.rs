@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_pb::id::TableId;
+use thiserror_ext::AsReport;
 use tokio::sync::{Notify, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 
@@ -156,7 +157,7 @@ impl PinCacheRefiller {
                 {
                     Ok(prepared) => prepared,
                     Err(error) => {
-                        tracing::warn!(version_id = %target_id, error = %error,
+                        tracing::warn!(version_id = %target_id, error = %error.as_report(),
                             "Pin metadata preparation failed; using remote fallback");
                         return Err(());
                     }
