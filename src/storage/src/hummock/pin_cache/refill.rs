@@ -311,6 +311,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
     #[tokio::test]
     async fn test_live_fs_upload_is_protected_and_failed_copy_does_not_block_refill() {
         for cancel in [false, true] {

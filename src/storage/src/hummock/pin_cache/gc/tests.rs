@@ -73,6 +73,7 @@ async fn test_selection_protects_files_and_can_be_abandoned() {
     assert!(cache.storage.lock().files.is_empty());
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_failed_deletion_stays_tracked_and_full_gc_retries() {
     let (dir, store) = local_object_store().await;
@@ -167,6 +168,7 @@ async fn test_full_gc_preserves_objects_but_reclaims_stale_temporary_files() {
     );
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_partial_batch_releases_only_deleted_objects() {
     let (dir, store) = local_object_store().await;

@@ -162,6 +162,7 @@ async fn test_completed_invalid_fs_upload_is_collected() {
     assert!(files.iter().all(|file| file.key.ends_with('/')));
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_disk_space_rejection_precedes_local_io() {
     let (_dir, store) = local_object_store().await;
@@ -461,6 +462,7 @@ async fn test_gc_waits_for_readers_and_preserves_shutdown_files() {
     assert!(recovered.get(1001.into()).is_some());
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_recovery_rejects_failed_short_download() {
     let (_dir, local) = local_object_store().await;
@@ -509,6 +511,7 @@ async fn test_recovery_rejects_failed_short_download() {
     );
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_disk_space_query_failure_does_not_start_local_io() {
     let (dir, local) = local_object_store().await;
