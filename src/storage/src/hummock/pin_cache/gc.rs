@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Minor/full file selection and batched deletion. Storage owns file lifetimes and capacity.
+//! Minor/full file selection and batched deletion. Storage owns physical file lifetimes.
 //! No timer, wakeup policy or background task lives here. Run passes only after recovery.
 
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ mod tests;
 const DELETE_BATCH_SIZE: usize = 1000;
 
 /// One lease per physical path. Unknown garbage is owned only by this selection; dropping it
-/// leaves cleanup to the next scan. Accounted objects stay in the keeper until deletion succeeds.
+/// leaves cleanup to the next scan. Tracked objects stay in the keeper until deletion succeeds.
 pub(super) struct PinCacheGcSelection {
     // Keep the storage state and read index alive for the entire selection and deletion.
     cache: Arc<PinCache>,
@@ -40,7 +40,7 @@ pub(super) struct PinCacheGcSelection {
 }
 
 impl PinCacheGcSelection {
-    /// Delete either selection in batches, releasing capacity after each successful batch.
+    /// Delete either selection in batches, forgetting each confirmed batch.
     pub(super) async fn delete(self) -> ObjectResult<()> {
         let mut paths = Vec::with_capacity(DELETE_BATCH_SIZE);
         for batch in self.files.chunks(DELETE_BATCH_SIZE) {
@@ -53,7 +53,7 @@ impl PinCacheGcSelection {
                     GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
                 })?;
             // Acknowledge this batch before the next await so cancellation cannot lose its
-            // capacity release. Failed or unconfirmed batches remain accounted for a later pass.
+            // file removal. Failed or unconfirmed batches stay tracked for a later pass.
             {
                 let mut state = self.cache.storage.lock();
                 for path in &paths {
@@ -88,7 +88,7 @@ impl PinCache {
     }
 
     /// LIST physical files, exclude live objects and uploads, then apply the retention watermark.
-    /// Claim unreferenced objects before LIST so missing ones can safely release their accounting;
+    /// Claim unreferenced objects before LIST so missing ones can safely leave the index;
     /// objects created or abandoned during the scan must not be mistaken for missing files.
     pub(super) async fn select_full(
         self: &Arc<Self>,
@@ -133,8 +133,8 @@ impl PinCache {
                 continue;
             }
             let state = self.storage.lock();
-            if state.uploads.contains_key(&path)
-                || upload_target(&path).is_some_and(|target| state.uploads.contains_key(target))
+            if state.uploads.contains(&path)
+                || upload_target(&path).is_some_and(|target| state.uploads.contains(target))
             {
                 continue;
             }

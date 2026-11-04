@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use futures::TryStreamExt;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadataIter, ObjectResult};
@@ -34,7 +36,7 @@ impl PinCache {
         object_id.parse::<u64>().ok().map(Into::into)
     }
 
-    /// Restores local routes matching the initial membership and accounts their actual sizes.
+    /// Restores routes matching initial membership and the version's physical SST sizes.
     /// Reads validate content lazily and invalidate a failed publication before falling back.
     /// The cache remains private until the complete inventory succeeds. Rejected files stay
     /// on disk for GC; failure or cancellation drops the private index without deleting files.
@@ -42,6 +44,7 @@ impl PinCache {
     pub(super) async fn recover_local_files(
         &mut self,
         objects: ObjectResult<ObjectMetadataIter>,
+        expected_sizes: &HashMap<HummockSstableObjectId, u64>,
     ) -> ObjectResult<RecoveryStats> {
         let mut stats = RecoveryStats::default();
         let mut objects = objects?;
@@ -56,13 +59,14 @@ impl PinCache {
                 tracing::warn!(path = %metadata.key, "skipping pin cache file with invalid name during recovery");
                 continue;
             };
-            let entry = self.account_existing(metadata.key, metadata.total_size as u64);
+            let entry = self.track_file(metadata.key, metadata.total_size as u64);
             let shard_index = Self::shard_index(object_id, self.shards.len());
             let state = self.shards[shard_index].get_mut();
             let Some(object) = state.objects.get_mut(&object_id) else {
                 continue;
             };
-            if object.published.is_some() {
+            // A short failed download must not become a readable object after restart.
+            if object.published.is_some() || expected_sizes.get(&object_id) != Some(&entry.size) {
                 continue;
             }
             stats.objects += 1;

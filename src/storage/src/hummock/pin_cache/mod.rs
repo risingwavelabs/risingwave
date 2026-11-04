@@ -25,7 +25,7 @@
 //! Unregistering an object prevents new lookups; existing read handles retain their file.
 //! Reads use `get` and never create refill work. Recovery completes before sharing the cache.
 //! GC reclaims withdrawn files after their last reader releases them.
-//! `storage` owns file registration and capacity; `gc` selects and deletes files using that state.
+//! `storage` owns file and active-upload registration; `gc` selects and deletes files using that state.
 //! They share one storage lock, separate from the shard locks used by the read index.
 
 use std::collections::HashMap;
@@ -135,9 +135,8 @@ pub(crate) struct PinCache {
     // Hold only one shard lock at a time. Release it before I/O or taking the storage lock.
     // Construction finishes before this cache is shared.
     shards: Box<[RwLock<PinCacheShard>]>,
-    capacity: u64,
     // Leaf lock: never acquire a shard lock or perform I/O while holding it.
-    // Upload protection and capacity accounting change together under this lock.
+    // Upload protection and physical file ownership share this lock.
     storage: Mutex<PinCacheStorageState>,
     next_path_id: AtomicU64,
 }
@@ -204,35 +203,30 @@ impl PinCache {
     /// An incomplete inventory fails initialization; no partially recovered cache is returned.
     pub(crate) async fn new(
         store: ObjectStoreRef,
-        capacity: u64,
         shard_num: usize,
-        objects: impl IntoIterator<Item = HummockSstableObjectId>,
+        objects: impl IntoIterator<Item = (HummockSstableObjectId, u64)>,
     ) -> ObjectResult<Arc<Self>> {
         assert!(
             shard_num > 0,
             "pin cache shard count must be greater than zero"
         );
-        GLOBAL_PIN_CACHE_METRICS
-            .capacity_bytes
-            .set(metric_bytes(capacity));
-        GLOBAL_PIN_CACHE_METRICS.accounted_bytes.set(0);
         let mut pin_cache = Self {
             store,
-            capacity,
             storage: Mutex::default(),
             shards: (0..shard_num)
                 .map(|_| RwLock::new(PinCacheShard::default()))
                 .collect(),
             next_path_id: AtomicU64::new(rand::random()),
         };
-        for id in objects {
+        let expected_sizes: HashMap<_, _> = objects.into_iter().collect();
+        for &id in expected_sizes.keys() {
             let state = pin_cache.shards[Self::shard_index(id, shard_num)].get_mut();
             state.register_object(id);
         }
         let metrics = &*GLOBAL_PIN_CACHE_METRICS;
         let objects = pin_cache.store.list("", None, None).await;
         let recovered = pin_cache
-            .recover_local_files(objects)
+            .recover_local_files(objects, &expected_sizes)
             .await
             .inspect_err(|_| {
                 metrics.recovery_failures.inc();

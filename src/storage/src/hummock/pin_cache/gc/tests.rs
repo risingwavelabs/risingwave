@@ -18,18 +18,18 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 
 use super::super::test_utils::{in_memory_object_store, local_object_store};
-use super::{DELETE_BATCH_SIZE, PinCache, PinCacheFile, PinCacheGcSelection};
+use super::{DELETE_BATCH_SIZE, PinCache, PinCacheGcSelection};
 
 #[tokio::test]
 async fn test_selection_protects_files_and_can_be_abandoned() {
     let store = in_memory_object_store();
-    let cache = PinCache::new(store.clone(), 16, 1, []).await.unwrap();
-    let file = cache.account_existing("1001-1.sst".into(), 8);
+    let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
+    let file = cache.track_file("1001-1.sst".into(), 8);
     store
         .upload(&file.path, Bytes::from_static(b"complete"))
         .await
         .unwrap();
-    let abandoned = cache.account_existing("1002-2.sst".into(), 8);
+    let abandoned = cache.track_file("1002-2.sst".into(), 8);
     store
         .upload(&abandoned.path, Bytes::from_static(b"complete"))
         .await
@@ -51,18 +51,10 @@ async fn test_selection_protects_files_and_can_be_abandoned() {
     assert_eq!(full.files.len(), 1);
     assert_eq!(full.files[0].path, "1002-2.sst");
     drop(full);
-    assert!(
-        cache
-            .try_reserve(&PinCacheFile {
-                path: "1003-3.sst".into(),
-                size: 1,
-            })
-            .is_err()
-    );
     drop(selected);
-    assert_eq!(cache.storage.lock().accounted_bytes, 16);
+    assert_eq!(cache.storage.lock().files.len(), 2);
     cache.select_minor().delete().await.unwrap();
-    assert_eq!(cache.storage.lock().accounted_bytes, 8);
+    assert_eq!(cache.storage.lock().files.len(), 1);
     assert!(
         store
             .metadata("1001-1.sst")
@@ -78,24 +70,24 @@ async fn test_selection_protects_files_and_can_be_abandoned() {
         .delete()
         .await
         .unwrap();
-    assert_eq!(cache.storage.lock().accounted_bytes, 0);
+    assert!(cache.storage.lock().files.is_empty());
 }
 
 #[tokio::test]
-async fn test_failed_deletion_keeps_capacity_and_full_gc_retries() {
+async fn test_failed_deletion_stays_tracked_and_full_gc_retries() {
     let (dir, store) = local_object_store().await;
-    let cache = PinCache::new(store.clone(), 8, 1, []).await.unwrap();
+    let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
     let path = "1001-42.sst";
     // A nonempty directory makes deletion fail even when the test runs as root.
     std::fs::create_dir(dir.path().join(path)).unwrap();
     std::fs::write(dir.path().join(path).join("child"), b"complete").unwrap();
-    cache.enqueue_delete(cache.account_existing(path.into(), 8));
+    cache.enqueue_delete(cache.track_file(path.into(), 8));
     assert!(cache.select_minor().delete().await.is_err());
-    assert_eq!(cache.storage.lock().accounted_bytes, 8);
+    assert!(cache.storage.lock().files.contains_key(path));
     assert_eq!(cache.select_minor().files.len(), 1);
     std::fs::remove_file(dir.path().join(path).join("child")).unwrap();
     std::fs::remove_dir(dir.path().join(path)).unwrap();
-    // Missing files are idempotent deletes, and the reservation is released only once.
+    // A full pass forgets a tracked file that has already been removed.
     cache
         .select_full(SystemTime::now() + Duration::from_secs(1))
         .await
@@ -103,15 +95,14 @@ async fn test_failed_deletion_keeps_capacity_and_full_gc_retries() {
         .delete()
         .await
         .unwrap();
-    assert_eq!(cache.storage.lock().accounted_bytes, 0);
-    cache.select_minor().delete().await.unwrap();
-    assert_eq!(cache.storage.lock().accounted_bytes, 0);
+    assert!(cache.storage.lock().files.is_empty());
+    assert!(cache.select_minor().files.is_empty());
 }
 
 #[tokio::test]
 async fn test_full_gc_respects_retention_and_discovers_zombies() {
     let store = in_memory_object_store();
-    let cache = PinCache::new(store.clone(), 8, 1, []).await.unwrap();
+    let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
     store
         .upload("orphan.tmp", Bytes::from_static(b"orphan"))
         .await
@@ -129,9 +120,9 @@ async fn test_full_gc_respects_retention_and_discovers_zombies() {
         .await
         .unwrap();
     assert_eq!(selection.files.len(), 1);
-    assert_eq!(cache.storage.lock().accounted_bytes, 0);
+    assert!(cache.storage.lock().files.is_empty());
     selection.delete().await.unwrap();
-    assert_eq!(cache.storage.lock().accounted_bytes, 0);
+    assert!(cache.storage.lock().files.is_empty());
     assert!(
         store
             .metadata("orphan.tmp")
@@ -144,7 +135,7 @@ async fn test_full_gc_respects_retention_and_discovers_zombies() {
 #[tokio::test]
 async fn test_full_gc_preserves_objects_but_reclaims_stale_temporary_files() {
     let store = in_memory_object_store();
-    let cache = PinCache::new(store.clone(), 8, 1, []).await.unwrap();
+    let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
     let final_path = "1001-1.sst";
     let temporary_path = "atomic_write_dir/1001-1.sst.12345678";
     store
@@ -155,7 +146,7 @@ async fn test_full_gc_preserves_objects_but_reclaims_stale_temporary_files() {
         .upload(temporary_path, Bytes::from_static(b"temp"))
         .await
         .unwrap();
-    let published = cache.account_existing(final_path.into(), 8);
+    let published = cache.track_file(final_path.into(), 8);
 
     // A completed object protects only its own path, not temporary residue from an old upload.
     cache
@@ -165,7 +156,7 @@ async fn test_full_gc_preserves_objects_but_reclaims_stale_temporary_files() {
         .delete()
         .await
         .unwrap();
-    assert_eq!(cache.storage.lock().accounted_bytes, 8);
+    assert!(cache.storage.lock().files.contains_key(final_path));
     assert!(store.metadata(&published.path).await.is_ok());
     assert!(
         store
@@ -179,21 +170,20 @@ async fn test_full_gc_preserves_objects_but_reclaims_stale_temporary_files() {
 #[tokio::test]
 async fn test_partial_batch_releases_only_deleted_objects() {
     let (dir, store) = local_object_store().await;
-    let cache = PinCache::new(store.clone(), u64::MAX, 1, []).await.unwrap();
+    let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
     let mut files: Vec<_> = (0..DELETE_BATCH_SIZE)
-        .map(|id| cache.account_existing(format!("missing-{id}.sst"), 1))
+        .map(|id| cache.track_file(format!("missing-{id}.sst"), 1))
         .collect();
     let failed = "failed.sst";
     std::fs::create_dir(dir.path().join(failed)).unwrap();
     std::fs::write(dir.path().join(failed).join("child"), b"x").unwrap();
-    files.push(cache.account_existing(failed.into(), 1));
-    // The first batch succeeds; the second fails. Only acknowledged paths release capacity.
+    files.push(cache.track_file(failed.into(), 1));
+    // The first batch succeeds; the second fails. Only acknowledged paths leave the index.
     let selection = PinCacheGcSelection {
         cache: cache.clone(),
         files,
     };
     assert!(selection.delete().await.is_err());
-    assert_eq!(cache.storage.lock().accounted_bytes, 1);
     let state = cache.storage.lock();
     assert_eq!(state.files.len(), 1);
     assert!(state.files.contains_key(failed));
@@ -203,11 +193,11 @@ async fn test_partial_batch_releases_only_deleted_objects() {
 async fn test_cancelled_gc_keeps_completed_batches_released() {
     for full in [false, true] {
         let store = in_memory_object_store();
-        let cache = PinCache::new(store.clone(), u64::MAX, 1, []).await.unwrap();
+        let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
         for id in 0..=DELETE_BATCH_SIZE {
             let path = format!("1001-{id}.sst");
             store.upload(&path, Bytes::from_static(b"x")).await.unwrap();
-            let file = cache.account_existing(path, 1);
+            let file = cache.track_file(path, 1);
             if !full {
                 cache.enqueue_delete(file);
             }
@@ -234,10 +224,9 @@ async fn test_cancelled_gc_keeps_completed_batches_released() {
             .await
             .unwrap();
         assert_eq!(remaining.len(), 1);
-        assert_eq!(cache.storage.lock().accounted_bytes, 1);
         assert_eq!(cache.storage.lock().files.len(), 1);
 
-        // A later pass collects the remainder without refunding the completed batch twice.
+        // A later pass collects the tracked remainder.
         cache
             .select_full(SystemTime::now() + Duration::from_secs(1))
             .await
@@ -245,7 +234,7 @@ async fn test_cancelled_gc_keeps_completed_batches_released() {
             .delete()
             .await
             .unwrap();
-        assert_eq!(cache.storage.lock().accounted_bytes, 0);
+        assert!(cache.storage.lock().files.is_empty());
         assert!(
             store
                 .metadata(&remaining[0].key)

@@ -146,6 +146,22 @@ impl ObjectStore for OpendalObjectStore {
         }
     }
 
+    async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        if !matches!(self.media_type, MediaType::Fs) {
+            return Ok(None);
+        }
+        let root = self.op.info().root();
+        tokio::task::spawn_blocking(move || fs4::available_space(root))
+            .await
+            .map_err(|error| {
+                ObjectError::internal(format!("filesystem space query failed: {error}"))
+            })?
+            .map(Some)
+            .map_err(|error| {
+                ObjectError::internal(format!("filesystem space query failed: {error}"))
+            })
+    }
+
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let data = if range.is_full() {
             self.op.read(path).await?

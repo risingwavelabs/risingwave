@@ -28,13 +28,12 @@ fn metadata(id: HummockSstableObjectId, path_id: usize, size: usize) -> ObjectMe
     }
 }
 
-async fn cache(shard_num: usize, ids: &[HummockSstableObjectId]) -> PinCache {
+async fn cache(shard_num: usize, ids: &[HummockSstableObjectId], size: u64) -> PinCache {
     Arc::try_unwrap(
         PinCache::new(
             in_memory_object_store(),
-            u64::MAX,
             shard_num,
-            ids.iter().copied(),
+            ids.iter().map(|&id| (id, size)),
         )
         .await
         .unwrap(),
@@ -48,7 +47,7 @@ async fn test_recovery_reclaims_rejected_files_across_shards() {
     use bytes::Bytes;
 
     let ids = [object_in_shard(0, 3), object_in_shard(2, 3)];
-    let mut cache = cache(3, &ids).await;
+    let mut cache = cache(3, &ids, 4).await;
     let mut files = Vec::new();
     let mut retained = Vec::new();
     for id in ids {
@@ -71,16 +70,18 @@ async fn test_recovery_reclaims_rejected_files_across_shards() {
             .unwrap();
     }
     let paths: Vec<_> = files.iter().map(|file| file.key.clone()).collect();
+    let expected_sizes = ids.into_iter().map(|id| (id, 4)).collect();
     let stats = cache
-        .recover_local_files(Ok(stream::iter(files.into_iter().map(Ok)).boxed()))
+        .recover_local_files(
+            Ok(stream::iter(files.into_iter().map(Ok)).boxed()),
+            &expected_sizes,
+        )
         .await
         .unwrap();
     assert_eq!(stats.objects, 2);
     assert_eq!(stats.bytes, 8);
     let cache = Arc::new(cache);
-    // Startup rejects have no explicit deletion intent; only full GC selects them.
-    cache.select_minor().delete().await.unwrap();
-    assert_eq!(cache.storage.lock().accounted_bytes, 32);
+    // Startup full GC reclaims rejected final files and unknown temporary paths.
     cache
         .select_full(std::time::SystemTime::now() + std::time::Duration::from_secs(1))
         .await
@@ -88,7 +89,7 @@ async fn test_recovery_reclaims_rejected_files_across_shards() {
         .delete()
         .await
         .unwrap();
-    assert_eq!(cache.storage.lock().accounted_bytes, 8);
+
     for path in paths {
         if retained.contains(&path) {
             assert_eq!(
@@ -119,12 +120,12 @@ async fn test_recovery_reclaims_rejected_files_across_shards() {
 }
 
 #[tokio::test]
-async fn test_incomplete_recovery_preserves_files_and_accounting() {
+async fn test_incomplete_recovery_preserves_files() {
     use bytes::Bytes;
 
     for cancel in [false, true] {
         let ids = [object_in_shard(0, 3), object_in_shard(2, 3)];
-        let mut cache = cache(3, &ids).await;
+        let mut cache = cache(3, &ids, 8).await;
         let files = [
             metadata(ids[0], 1, 8),
             metadata(ids[1], 1, 8),
@@ -143,11 +144,12 @@ async fn test_incomplete_recovery_preserves_files_and_accounting() {
                 .await
                 .unwrap();
         }
+        let expected_sizes = ids.into_iter().map(|id| (id, 8)).collect();
         let prefix = stream::iter(files.into_iter().map(Ok));
         if cancel {
             let objects = prefix.chain(stream::pending()).boxed();
             tokio::task::yield_now().await;
-            let mut recovery = Box::pin(cache.recover_local_files(Ok(objects)));
+            let mut recovery = Box::pin(cache.recover_local_files(Ok(objects), &expected_sizes));
             assert!(futures::poll!(&mut recovery).is_pending());
             drop(recovery);
         } else {
@@ -156,11 +158,14 @@ async fn test_incomplete_recovery_preserves_files_and_accounting() {
                     Err(ObjectError::internal("injected scan error"))
                 }))
                 .boxed();
-            let error = cache.recover_local_files(Ok(objects)).await.unwrap_err();
+            let error = cache
+                .recover_local_files(Ok(objects), &expected_sizes)
+                .await
+                .unwrap_err();
             assert!(error.to_string().contains("injected scan error"));
         }
         tokio::task::yield_now().await;
-        assert_eq!(cache.storage.lock().accounted_bytes, 24);
+
         for path in paths {
             assert_eq!(
                 cache.store.read(&path, ..).await.unwrap(),
