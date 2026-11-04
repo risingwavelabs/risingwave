@@ -979,8 +979,9 @@ impl StateStoreImpl {
                         .await
                         .map_err(|error| {
                             HummockError::other(format!(
-                                "failed to create pin cache directory {}: {error}",
-                                pin_cache_root.display()
+                                "failed to create pin cache directory {}: {}",
+                                pin_cache_root.display(),
+                                error.as_report()
                             ))
                         })?;
                     let pin_cache_url = format!("fs://{}", pin_cache_root.display());
