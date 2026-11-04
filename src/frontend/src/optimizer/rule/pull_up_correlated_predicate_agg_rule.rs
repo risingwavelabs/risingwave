@@ -73,6 +73,15 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         let (apply_left, apply_right, apply_on, join_type, correlated_id, _, _) =
             apply.clone().decompose();
 
+        // An ungrouped aggregate produces a row even when the input is empty.
+        // A grouped join can lose that row and change EXISTS / NOT EXISTS.
+        if matches!(
+            join_type,
+            JoinType::LeftSemi | JoinType::LeftAnti | JoinType::RightSemi | JoinType::RightAnti
+        ) {
+            return None;
+        }
+
         let top_project = if let Some(project) = apply_right.as_logical_project() {
             project.clone()
         } else {
@@ -156,11 +165,14 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         // 1. The `group by + proj` returns null for empty input
         // 2. OR the top filter is null for empty input
         let top_filter_rejects_null = {
-            // When group input is empty, if the agg is not `count`, it would return null.
+            // Count and approximate distinct count return zero for empty input.
             let null_agg_pos = agg_calls
                 .iter()
                 .positions(|agg_call| {
-                    !matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Count))
+                    !matches!(
+                        agg_call.agg_type,
+                        AggType::Builtin(PbAggKind::Count | PbAggKind::ApproxCountDistinct)
+                    )
                 })
                 .collect_vec();
 
