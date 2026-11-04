@@ -586,6 +586,90 @@ async fn rollback_failure_preserves_the_original_commit_error() {
 }
 
 #[tokio::test]
+async fn begin_failures_preserve_the_original_error_and_can_replay() {
+    for occurrence in [1, 2] {
+        for rollback_fails in [false, true] {
+            let server = TestServer::start().await;
+            {
+                let mut state = server.state.lock().unwrap();
+                state.fail = Some(("begin", occurrence, false));
+                state.rollback_fails = rollback_fails;
+            }
+            let mut log = TestLog::default();
+            log.items
+                .extend([TestLog::chunk(1, " I\n + 1\n + 2"), TestLog::checkpoint(1)]);
+            let error = consume(server.writer(None, Some(8), true), &mut log, 1).await;
+            assert!(error.contains("injected failure"), "{error}");
+            assert!(!error.contains("rollback rejected"), "{error}");
+            assert!(log.truncated.is_empty());
+            assert_eq!(server.events("commit").len(), occurrence - 1);
+            let rollbacks = server.events("rollback");
+            assert_eq!(rollbacks.len(), 1);
+            assert_eq!(
+                rollbacks[0].label,
+                server.events("begin")[occurrence - 1].label
+            );
+
+            // Replay all untruncated rows, including any committed before the failed begin.
+            {
+                let mut state = server.state.lock().unwrap();
+                state.fail = None;
+                state.rollback_fails = false;
+            }
+            assert_eq!(
+                consume(server.writer(None, Some(8), true), &mut log, 1).await,
+                "end of test log"
+            );
+            assert_eq!(log.truncated, [TruncateOffset::Barrier { epoch: 1 }]);
+            let state = server.state.lock().unwrap();
+            assert_eq!(state.committed_rows.len(), 2 + occurrence - 1);
+            for id in [1, 2] {
+                assert!(state.committed_rows.iter().any(|row| row["id"] == id));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn cancellation_during_failure_cleanup_retains_label_for_drop_rollback() {
+    for operation in ["begin", "commit"] {
+        let server = TestServer::start().await;
+        let mut writer = server.writer(None, Some(8), true);
+        if operation == "commit" {
+            writer
+                .write_row_json(r#"{"id":1}"#.to_owned())
+                .await
+                .unwrap();
+        }
+        {
+            let mut state = server.state.lock().unwrap();
+            state.fail = Some((operation, 1, false));
+            state.block = Some("rollback");
+        }
+        let task =
+            tokio::spawn(async move { writer.write_row_json(r#"{"id":2}"#.to_owned()).await });
+        server.wait_for("rollback").await;
+        task.abort();
+        let _ = task.await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let notified = server.changed.notified();
+                if server.events("rollback").len() >= 2 {
+                    break;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .unwrap();
+        for rollback in server.events("rollback") {
+            assert_eq!(rollback.label, server.events("begin")[0].label);
+        }
+        assert_eq!(server.events("begin").len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn replay_skips_truncated_checkpoints_and_replays_only_the_untruncated_tail() {
     for lost_reply in [false, true] {
         let server = TestServer::start().await;
