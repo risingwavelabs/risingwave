@@ -14,7 +14,7 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
@@ -40,6 +40,8 @@ struct MockState {
     started: Semaphore,
     gate: Semaphore,
     fail: bool,
+    row_error_code: AtomicI32,
+    rpc_error_code: AtomicI32,
 }
 
 impl tonic::server::NamedService for MockService {
@@ -56,16 +58,34 @@ impl tonic::server::UnaryService<BatchWriteRequest> for MockService {
         Box::pin(async move {
             let request = request.into_inner();
             let count = request.writes.len();
+            let invalid = request
+                .writes
+                .iter()
+                .map(|write| write_document_path(write).ends_with("/bad"))
+                .collect::<Vec<_>>();
             state.requests.lock().unwrap().push(request);
             let active = state.active.fetch_add(1, Ordering::SeqCst) + 1;
             state.peak.fetch_max(active, Ordering::SeqCst);
             state.started.add_permits(1);
             state.gate.acquire().await.unwrap().forget();
             state.active.fetch_sub(1, Ordering::SeqCst);
+            let rpc_error = state.rpc_error_code.load(Ordering::SeqCst);
+            if rpc_error != 0 && invalid.iter().any(|bad| *bad) {
+                return Err(tonic::Status::new(
+                    tonic::Code::from_i32(rpc_error),
+                    "injected RPC error",
+                ));
+            }
             Ok(tonic::Response::new(BatchWriteResponse {
                 status: (0..count)
                     .map(|index| Status {
-                        code: if state.fail && index == 0 { 7 } else { 0 },
+                        code: if state.fail && index == 0 {
+                            7
+                        } else if invalid[index] {
+                            state.row_error_code.load(Ordering::SeqCst)
+                        } else {
+                            0
+                        },
                         ..Default::default()
                     })
                     .collect(),
@@ -120,6 +140,8 @@ impl MockServer {
             started: Semaphore::new(0),
             gate: Semaphore::new(0),
             fail,
+            row_error_code: AtomicI32::new(0),
+            rpc_error_code: AtomicI32::new(0),
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap().to_string();
@@ -144,6 +166,7 @@ impl MockServer {
             schema: test_schema(),
             pk_indices: vec![0],
             doc_id_col_idx: Some(0),
+            collection_path: parse_collection_path("sink-test", &test_schema()).unwrap(),
         };
         (Self { state, task }, writer)
     }
@@ -166,7 +189,7 @@ async fn wire_requests_obey_concurrency_and_drain_on_error() {
         let (server, writer) = MockServer::writer(fail).await;
         let operations = (0..5)
             .map(|id| FirestoreOperation::Delete {
-                doc_id: id.to_string(),
+                path: format!("sink-test/{id}"),
             })
             .collect();
         let task = tokio::spawn(async move { writer.write_operations(operations).await });
@@ -181,6 +204,145 @@ async fn wire_requests_obey_concurrency_and_drain_on_error() {
         assert_eq!(server.state.requests.lock().unwrap().len(), 5);
         assert_eq!(server.state.peak.load(Ordering::SeqCst), 2);
         assert_eq!(server.state.active.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn per_row_parent_paths_keep_same_ids_independent_and_move_documents() -> Result<()> {
+    let (server, mut writer) = MockServer::writer(false).await;
+    writer.schema = Schema::new(vec![
+        Field::with_name(DataType::Varchar, "id"),
+        Field::with_name(DataType::Varchar, "parent"),
+    ]);
+    writer.collection_path = parse_collection_path("parents/{parent}/children", &writer.schema)?;
+    writer.config.max_batch_size = 500;
+    let operations =
+        writer.write_chunk_inner(StreamChunk::from_pretty("T T\n+ child alice\n+ child bob"))?;
+    assert_eq!(operations.len(), 2);
+    server.state.gate.add_permits(10);
+    writer.write_operations(operations).await?;
+    let operations = writer.write_chunk_inner(StreamChunk::from_pretty(
+        "T T\nU- child alice\nU+ child charlie",
+    ))?;
+    writer.write_operations(operations).await?;
+    let requests = server.state.requests.lock().unwrap();
+    let writes = &requests[0].writes;
+    assert!(write_document_path(&writes[0]).ends_with("/parents/alice/children/child"));
+    assert!(write_document_path(&writes[1]).ends_with("/parents/bob/children/child"));
+    assert!(
+        matches!(&requests[1].writes[0].operation, Some(write::Operation::Delete(path)) if path.ends_with("/parents/alice/children/child"))
+    );
+    assert!(
+        write_document_path(&requests[1].writes[1]).ends_with("/parents/charlie/children/child")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn bad_local_rows_do_not_block_good_rows_or_later_deletes() -> Result<()> {
+    let (_server, mut writer) = MockServer::writer(false).await;
+    let chunk = StreamChunk::from_pretty(
+        "T I\n+ good 1\n+ a/b 2\n+ . 3\n+ __reserved__ 4\n+ (empty) 5\n+ later 6",
+    );
+    assert!(writer.write_chunk_inner(chunk.clone()).is_err());
+    writer.config.skip_invalid_rows = true;
+    let operations = writer.write_chunk_inner(chunk)?;
+    assert_eq!(operations.len(), 2);
+    assert_eq!(operations[0].document_path(), "sink-test/good");
+    assert_eq!(operations[1].document_path(), "sink-test/later");
+    assert!(validate_firestore_document_id("").is_err());
+    let operations =
+        writer.write_chunk_inner(StreamChunk::from_pretty("T I\n- a/b 2\n- . 5\n+ later 7"))?;
+    assert_eq!(operations.len(), 1);
+    writer.schema = Schema::new(vec![
+        Field::with_name(DataType::Varchar, "id"),
+        Field::with_name(DataType::Varchar, "value"),
+    ]);
+    let chunk = StreamChunk::from_pretty(&format!(
+        "T T\n+ huge {}\n+ good small",
+        "x".repeat(MAX_DOCUMENT_SIZE)
+    ));
+    assert_eq!(writer.write_chunk_inner(chunk.clone())?.len(), 1);
+    writer.config.skip_invalid_rows = false;
+    assert!(writer.write_chunk_inner(chunk).is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_remote_rows_advance_log_but_system_errors_do_not() {
+    for (rpc_error, row_error, succeeds) in [
+        (0, 3, true),
+        (0, 11, true),
+        (3, 0, true),
+        (0, 7, false),
+        (0, 14, false),
+        (14, 0, false),
+    ] {
+        let (server, mut writer) = MockServer::writer(false).await;
+        server
+            .state
+            .rpc_error_code
+            .store(rpc_error, Ordering::SeqCst);
+        server
+            .state
+            .row_error_code
+            .store(row_error, Ordering::SeqCst);
+        server.state.gate.add_permits(20);
+        writer.config.max_batch_size = 500;
+        writer.config.skip_invalid_rows = true;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let reader = TestReader {
+            chunks: VecDeque::from([
+                StreamChunk::from_pretty("T I\n+ bad 1\n+ good 2"),
+                StreamChunk::from_pretty("T I\n+ later 3"),
+            ]),
+            next_id: 0,
+            truncates: tx,
+        };
+        let task = tokio::spawn(writer.into_log_sinker(1).consume_log_and_sink(reader));
+        if succeeds {
+            timeout(Duration::from_secs(10), async {
+                loop {
+                    if rx.recv().await.unwrap()
+                        == (TruncateOffset::Chunk {
+                            epoch: 1,
+                            chunk_id: 1,
+                        })
+                    {
+                        break;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            let requests = server.state.requests.lock().unwrap();
+            assert!(
+                requests
+                    .last()
+                    .unwrap()
+                    .writes
+                    .iter()
+                    .any(|write| write_document_path(write).ends_with("/later"))
+            );
+            if rpc_error == 3 {
+                assert_eq!(
+                    requests.len(),
+                    4,
+                    "one rejected batch, two isolated rows, then next chunk"
+                );
+            }
+            task.abort();
+        } else {
+            assert!(
+                timeout(Duration::from_secs(10), task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .is_err()
+            );
+            assert!(rx.try_recv().is_err());
+            assert_eq!(server.state.requests.lock().unwrap().len(), 1);
+        }
     }
 }
 
@@ -359,7 +521,30 @@ async fn emulator_crud_replay_and_native_values() -> Result<()> {
         r#"{"a":[1,null,{"x":null}],"min":-9223372036854775808,"max":9223372036854775807}"#
             .parse()
             .unwrap();
+    let timestamp: risingwave_common::types::Timestamp =
+        "1969-12-31 23:59:59.123456789".parse().unwrap();
+    let timestamptz: risingwave_common::types::Timestamptz =
+        "1970-01-01 07:59:59.123456+08:00".parse().unwrap();
+    let decimal: risingwave_common::types::Decimal = "12.50".parse().unwrap();
     let data = HashMap::from([
+        (
+            "timestamp".to_owned(),
+            format_datum(
+                Some(ScalarRefImpl::Timestamp(timestamp)),
+                &DataType::Timestamp,
+            )?,
+        ),
+        (
+            "timestamptz".to_owned(),
+            format_datum(
+                Some(ScalarRefImpl::Timestamptz(timestamptz)),
+                &DataType::Timestamptz,
+            )?,
+        ),
+        (
+            "decimal".to_owned(),
+            format_datum(Some(ScalarRefImpl::Decimal(decimal)), &DataType::Decimal)?,
+        ),
         (
             "nan".to_owned(),
             format_datum(
@@ -384,7 +569,7 @@ async fn emulator_crud_replay_and_native_values() -> Result<()> {
     ]);
     writer
         .write_operations(vec![FirestoreOperation::Upsert {
-            doc_id: "types".to_owned(),
+            path: format!("{}/types", config.collection),
             data: data.clone(),
         }])
         .await?;
@@ -405,16 +590,121 @@ async fn emulator_crud_replay_and_native_values() -> Result<()> {
         Some(ValueType::DoubleValue(f64::INFINITY))
     );
     assert_eq!(doc.fields["json"], data["json"]);
+    for key in ["timestamp", "timestamptz", "decimal"] {
+        assert_eq!(doc.fields[key], data[key]);
+    }
 
     writer
         .write_operations(vec![
             FirestoreOperation::Delete {
-                doc_id: "new".to_owned(),
+                path: format!("{}/new", config.collection),
             },
             FirestoreOperation::Delete {
-                doc_id: "types".to_owned(),
+                path: format!("{}/types", config.collection),
             },
         ])
         .await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires FIRESTORE_EMULATOR_HOST; use integration_tests/firestore-sink/run-emulator-test.sh"]
+async fn emulator_per_row_paths_and_bad_row_progress() -> Result<()> {
+    let root = format!("rw-feedback-{}", uuid::Uuid::new_v4());
+    let mut config = test_config();
+    config.collection = format!("{root}/{{parent}}/children");
+    config.skip_invalid_rows = true;
+    config.max_batch_size = 500;
+    let schema = Schema::new(vec![
+        Field::with_name(DataType::Varchar, "id"),
+        Field::with_name(DataType::Varchar, "parent"),
+        Field::with_name(DataType::Varchar, "payload"),
+    ]);
+    let writer = FirestoreSinkWriter::new(config, schema, vec![0]).await?;
+    let chunk = StreamChunk::from_pretty(&format!(
+        "T T T\n+ child alice first\n+ child bob second\n+ a/b alice bad\n+ (empty) alice bad\n+ . alice bad\n+ child . bad\n+ child a/b bad\n+ huge alice {}\n+ good alice ok",
+        "x".repeat(MAX_DOCUMENT_SIZE)
+    ));
+    writer
+        .write_operations(writer.write_chunk_inner(chunk)?)
+        .await?;
+    for (parent, payload) in [("alice", "first"), ("bob", "second")] {
+        let response = writer
+            .client
+            .client()
+            .get()
+            .get_document(gcloud_sdk::google::firestore::v1::GetDocumentRequest {
+                name: format!(
+                    "{}/{root}/{parent}/children/child",
+                    writer.client.get_documents_path()
+                ),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            response.fields["payload"].value_type,
+            Some(ValueType::StringValue(payload.to_owned()))
+        );
+    }
+    writer.write_operations(writer.write_chunk_inner(StreamChunk::from_pretty(
+        "T T T\nU- child alice first\nU+ child charlie moved\n- a/b alice bad\n- . alice bad\n+ later alice works"
+    ))?).await?;
+    let error = writer
+        .client
+        .client()
+        .get()
+        .get_document(gcloud_sdk::google::firestore::v1::GetDocumentRequest {
+            name: format!(
+                "{}/{root}/alice/children/child",
+                writer.client.get_documents_path()
+            ),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::NotFound);
+    // Bypass local validation to exercise a real server rejection alongside a healthy row.
+    writer
+        .write_operations(vec![
+            FirestoreOperation::Upsert {
+                path: format!("{root}/alice/children/server-bad"),
+                data: HashMap::from([(
+                    "payload".to_owned(),
+                    Value {
+                        value_type: Some(ValueType::StringValue("x".repeat(MAX_DOCUMENT_SIZE))),
+                    },
+                )]),
+            },
+            FirestoreOperation::Upsert {
+                path: format!("{root}/alice/children/server-good"),
+                data: HashMap::from([(
+                    "payload".to_owned(),
+                    Value {
+                        value_type: Some(ValueType::StringValue("ok".to_owned())),
+                    },
+                )]),
+            },
+        ])
+        .await?;
+    for path in [
+        "bob/children/child",
+        "charlie/children/child",
+        "alice/children/good",
+        "alice/children/later",
+        "alice/children/server-good",
+    ] {
+        writer
+            .client
+            .client()
+            .get()
+            .get_document(gcloud_sdk::google::firestore::v1::GetDocumentRequest {
+                name: format!("{}/{root}/{path}", writer.client.get_documents_path()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+    }
     Ok(())
 }

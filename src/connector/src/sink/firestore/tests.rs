@@ -30,6 +30,7 @@ fn test_config() -> FirestoreConfig {
         collection: "sink-test".to_owned(),
         database_id: None,
         credentials: None,
+        skip_invalid_rows: false,
         document_id_column: Some("id".to_owned()),
         max_batch_size: 1,
         max_future_send_nums: 2,
@@ -159,9 +160,9 @@ fn partial_or_incomplete_batch_ack_is_an_error() {
         ..Default::default()
     };
     let document_ids = ["first".to_owned(), "second".to_owned()];
-    assert!(check_batch_statuses(&[ok.clone(), failed], &document_ids).is_err());
-    assert!(check_batch_statuses(std::slice::from_ref(&ok), &document_ids).is_err());
-    assert!(check_batch_statuses(&[ok], &document_ids[..1]).is_ok());
+    assert!(check_batch_statuses(&[ok.clone(), failed], &document_ids, false).is_err());
+    assert!(check_batch_statuses(std::slice::from_ref(&ok), &document_ids, false).is_err());
+    assert!(check_batch_statuses(&[ok], &document_ids[..1], false).is_ok());
 }
 
 #[test]
@@ -202,4 +203,204 @@ fn test_format_int64_as_integer_value() -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[test]
+fn timestamps_use_native_utc_microseconds_and_validate_range() -> Result<()> {
+    use risingwave_common::types::{Timestamp, Timestamptz};
+    for (timestamp, timestamptz, seconds, nanos) in [
+        ("1970-01-01 00:00:00", "1970-01-01 08:00:00+08:00", 0, 0),
+        (
+            "1969-12-31 23:59:59.123456789",
+            "1970-01-01 07:59:59.123456+08:00",
+            -1,
+            123456000,
+        ),
+        (
+            "9999-12-31 23:59:59.999999",
+            "9999-12-31 23:59:59.999999+00:00",
+            253402300799,
+            999999000,
+        ),
+    ] {
+        let expected = Some(ValueType::TimestampValue(prost_types::Timestamp {
+            seconds,
+            nanos,
+        }));
+        let timestamp: Timestamp = timestamp.parse().unwrap();
+        let timestamptz: Timestamptz = timestamptz.parse().unwrap();
+        assert_eq!(
+            format_datum(
+                Some(ScalarRefImpl::Timestamp(timestamp)),
+                &DataType::Timestamp
+            )?
+            .value_type,
+            expected
+        );
+        assert_eq!(
+            format_datum(
+                Some(ScalarRefImpl::Timestamptz(timestamptz)),
+                &DataType::Timestamptz
+            )?
+            .value_type,
+            expected
+        );
+    }
+    assert!(firestore_timestamp(-62_135_596_801, 0).is_err());
+    assert!(firestore_timestamp(253_402_300_800, 0).is_err());
+    assert!(firestore_timestamp(0, 1_000_000_000).is_err());
+    for ty in [
+        DataType::Timestamp,
+        DataType::Timestamptz,
+        DataType::Decimal,
+    ] {
+        assert_eq!(
+            format_datum(None, &ty)?.value_type,
+            Some(ValueType::NullValue(0))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn decimals_use_native_numbers_including_special_values() -> Result<()> {
+    use risingwave_common::types::Decimal;
+    for (text, expected) in [
+        ("12.50", 12.5),
+        ("-0.125", -0.125),
+        ("79228162514264337593543950335", 7.922816251426434e28),
+        ("Infinity", f64::INFINITY),
+        ("-Infinity", f64::NEG_INFINITY),
+        ("NaN", f64::NAN),
+    ] {
+        let value: Decimal = text.parse().unwrap();
+        let Some(ValueType::DoubleValue(actual)) =
+            format_datum(Some(ScalarRefImpl::Decimal(value)), &DataType::Decimal)?.value_type
+        else {
+            panic!("decimal changed to a nonnumeric type")
+        };
+        assert!(actual == expected || actual.is_nan() && expected.is_nan());
+    }
+    Ok(())
+}
+
+#[test]
+fn native_types_are_preserved_inside_structs_and_lists() -> Result<()> {
+    use risingwave_common::types::{
+        Decimal, ListValue, ScalarImpl, StructType, StructValue, Timestamp,
+    };
+    let time: Timestamp = "2026-11-04 12:34:56.123456".parse().unwrap();
+    let amount: Decimal = "12.5".parse().unwrap();
+    let amounts = ListValue::from_datum_iter(
+        &DataType::Decimal,
+        [Some(ScalarImpl::Decimal(amount)), None],
+    );
+    let row = StructValue::new(vec![
+        Some(ScalarImpl::Timestamp(time)),
+        Some(ScalarImpl::List(amounts)),
+    ]);
+    let ty = DataType::Struct(StructType::new(vec![
+        ("time", DataType::Timestamp),
+        ("amounts", DataType::list(DataType::Decimal)),
+    ]));
+    let Some(ValueType::MapValue(map)) =
+        format_datum(Some(ScalarRefImpl::Struct(row.as_scalar_ref())), &ty)?.value_type
+    else {
+        panic!()
+    };
+    assert!(matches!(
+        map.fields["time"].value_type,
+        Some(ValueType::TimestampValue(_))
+    ));
+    let Some(ValueType::ArrayValue(array)) = &map.fields["amounts"].value_type else {
+        panic!()
+    };
+    assert_eq!(
+        array.values[0].value_type,
+        Some(ValueType::DoubleValue(12.5))
+    );
+    assert_eq!(array.values[1].value_type, Some(ValueType::NullValue(0)));
+    Ok(())
+}
+
+#[test]
+fn collection_template_is_validated_before_connecting() {
+    let schema = test_schema();
+    for path in ["users/{id}/orders", "users/fixed/orders", "orders"] {
+        assert!(parse_collection_path(path, &schema).is_ok());
+    }
+    for path in [
+        "",
+        "users/",
+        "/users",
+        "users//orders",
+        "users/{missing}/orders",
+        "{id}",
+        "users/prefix-{id}/orders",
+        "users/{id",
+        "users/{id}/orders/",
+    ] {
+        assert!(parse_collection_path(path, &schema).is_err(), "{path}");
+    }
+    assert!(
+        !FirestoreConfig::from_btreemap(BTreeMap::from([
+            ("firestore.project_id".to_owned(), "p".to_owned()),
+            ("firestore.collection".to_owned(), "c".to_owned()),
+        ]))
+        .unwrap()
+        .skip_invalid_rows
+    );
+}
+
+#[test]
+fn only_invalid_row_statuses_can_be_skipped() {
+    let ids = vec!["bad".to_owned(), "good".to_owned()];
+    for code in [3, 11, 7, 8, 14, 16] {
+        let statuses = [
+            Status {
+                code,
+                ..Default::default()
+            },
+            Status::default(),
+        ];
+        assert!(check_batch_statuses(&statuses, &ids, false).is_err());
+        assert_eq!(
+            check_batch_statuses(&statuses, &ids, true).is_ok(),
+            matches!(code, 3 | 11)
+        );
+    }
+    assert!(check_batch_statuses(&[Status::default()], &ids, true).is_err());
+}
+
+#[test]
+fn document_and_request_size_limits_are_independent() {
+    let mut fields = HashMap::from([(
+        "value".to_owned(),
+        Value {
+            value_type: Some(ValueType::StringValue("x".repeat(MAX_DOCUMENT_SIZE))),
+        },
+    )]);
+    assert!(validate_document_size("collection/document", &fields).is_err());
+    fields.get_mut("value").unwrap().value_type = Some(ValueType::StringValue("x".repeat(900_000)));
+    assert!(validate_document_size("collection/document", &fields).is_ok());
+    let writes = (0..20)
+        .map(|id| Write {
+            operation: Some(write::Operation::Update(Document {
+                name: format!("collection/{id}"),
+                fields: fields.clone(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+        .collect();
+    let batches = split_write_batches(writes, 500);
+    assert!(batches.len() > 1);
+    assert_eq!(batches.iter().map(Vec::len).sum::<usize>(), 20);
+    assert!(batches.iter().all(|batch| {
+        batch
+            .iter()
+            .map(|write| write.encoded_len() + 5)
+            .sum::<usize>()
+            <= MAX_BATCH_WRITE_BYTES
+    }));
 }
