@@ -17,12 +17,14 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::TryStreamExt;
 use risingwave_object_store::object::{ObjectMetadata, ObjectResult};
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 use super::{PinCache, PinCacheFile};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
@@ -33,6 +35,8 @@ mod tests;
 // Match Hummock GC's maximum number of paths per delete request.
 const DELETE_BATCH_SIZE: usize = 1000;
 const MINOR_GC_INTERVAL: Duration = Duration::from_secs(1);
+const FULL_GC_COOLDOWN: Duration = Duration::from_secs(30);
+const FULL_GC_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 /// One lease per physical path. Unknown garbage is owned only by this selection; dropping it
 /// leaves cleanup to the next scan. Tracked objects stay in the keeper until deletion succeeds.
@@ -71,23 +75,15 @@ impl PinCacheGcSelection {
 }
 
 impl PinCache {
-    /// One full startup pass discovers inventory rejects and interrupted uploads. Minor
-    /// passes reclaim withdrawals once their final reader releases the file. The storage
-    /// shutdown guard owns cancellation and releases the worker's cache reference.
+    /// Discover startup and runtime garbage in one storage-owned worker.
+    /// Pressure hints can advance the next full scan after minor GC and a space recheck.
     pub(crate) fn start_gc(self: &Arc<Self>) -> JoinHandle<()> {
         let cache = self.clone();
         tokio::spawn(async move {
-            match cache.select_full(SystemTime::now()).await {
-                Ok(selection) => {
-                    if let Err(error) = selection.delete().await {
-                        tracing::warn!(error = %error.as_report(), "Pin cache startup GC failed");
-                    }
-                }
-                Err(error) => {
-                    GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
-                    tracing::warn!(error = %error.as_report(), "Pin cache startup GC listing failed");
-                }
-            }
+            cache.run_full_gc().await;
+            let now = Instant::now();
+            let mut next_pressure_check = now + FULL_GC_COOLDOWN;
+            let mut next_periodic_full = now + FULL_GC_INTERVAL;
             let mut interval = tokio::time::interval(MINOR_GC_INTERVAL);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
@@ -95,8 +91,66 @@ impl PinCache {
                 if let Err(error) = cache.select_minor().delete().await {
                     tracing::warn!(error = %error.as_report(), "Pin cache minor GC failed");
                 }
+
+                let now = Instant::now();
+                let periodic = now >= next_periodic_full;
+                if !periodic && now < next_pressure_check {
+                    continue;
+                }
+                // Take one batch before doing I/O so arrivals during a recheck or scan stay
+                // pending. This is a cleanup hint for attempts that have already ended.
+                let required_bytes = cache.gc_pressure_bytes.swap(0, Ordering::Relaxed);
+                if !periodic {
+                    if required_bytes == 0 {
+                        continue;
+                    }
+                    match cache.available_space().await {
+                        Ok(Some(available_bytes)) if available_bytes < required_bytes => {}
+                        Ok(_) => continue,
+                        Err(error) => {
+                            tracing::warn!(error = %error.as_report(), "Pin cache GC space check failed");
+                            next_pressure_check = Instant::now() + FULL_GC_COOLDOWN;
+                            continue;
+                        }
+                    }
+                }
+                cache.run_full_gc().await;
+                // Full attempts share the same cooldown, even on failure or zero reclaim.
+                let now = Instant::now();
+                next_pressure_check = now + FULL_GC_COOLDOWN;
+                next_periodic_full = now + FULL_GC_INTERVAL;
             }
         })
+    }
+
+    async fn run_full_gc(self: &Arc<Self>) {
+        // Fix the age cutoff before the asynchronous listing starts.
+        let selection = match self.select_full(SystemTime::now()).await {
+            Ok(selection) => selection,
+            Err(error) => {
+                GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
+                tracing::warn!(error = %error.as_report(), "Pin cache full GC listing failed");
+                return;
+            }
+        };
+        #[cfg(test)]
+        {
+            let observer = self.test_hooks.full_scan.lock().clone();
+            if let Some(observer) = observer {
+                let (resume, paused) = tokio::sync::oneshot::channel();
+                let paths = selection
+                    .files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect();
+                if observer.send((paths, resume)).is_ok() {
+                    let _ = paused.await;
+                }
+            }
+        }
+        if let Err(error) = selection.delete().await {
+            tracing::warn!(error = %error.as_report(), "Pin cache full GC failed");
+        }
     }
 
     /// Only inspect explicitly discarded files, without scanning all files or listing storage.

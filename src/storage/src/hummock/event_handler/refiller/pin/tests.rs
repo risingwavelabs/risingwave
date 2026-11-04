@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use risingwave_common::bitmap::Bitmap;
@@ -22,6 +23,9 @@ use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
+use risingwave_hummock_sdk::version::{
+    GroupDelta, GroupDeltas, HummockVersionDelta, IntraLevelDelta,
+};
 use risingwave_pb::id::TableId;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
@@ -33,8 +37,10 @@ use super::super::test_utils::{
 use super::super::{SstDeltaInfo, default_spawn_refill_task};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::pin_cache::PinCache;
-use crate::hummock::pin_cache::test_utils::in_memory_object_store;
+use crate::hummock::pin_cache::test_utils::{in_memory_object_store, local_object_store};
+use crate::hummock::sstable_store::CachePolicy;
 use crate::hummock::test_utils::gen_test_sstable_with_table_vnodes;
+use crate::monitor::StoreLocalStatistic;
 
 // With Pin-only inputs, the worker is the only metadata waiter. A failed try_acquire
 // after release proves the permit was handed to its already-polled preparation future.
@@ -501,6 +507,119 @@ async fn test_pin_changes_before_and_after_submission() {
             "{change:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn test_pin_capacity_rejection_releases_replacement_version_without_gc() {
+    let table = TableId::from(233);
+    let store = mock_sstable_store().await;
+    let (_, input) = gen_test_sst_with_object_id(table, store.clone(), 828).await;
+    let (output_sst, output) = gen_test_sst_with_object_id(table, store.clone(), 829).await;
+    let input_bytes = store
+        .store()
+        .read(&store.get_sst_data_path(input.object_id), ..)
+        .await
+        .unwrap();
+    let (_dir, local_store) = local_object_store().await;
+    let input_path = format!("{}-42.sst", input.object_id.as_raw_id());
+    local_store
+        .upload(&input_path, input_bytes.clone())
+        .await
+        .unwrap();
+    let cache = PinCache::new(local_store.clone(), 1, [(input.object_id, input.file_size)])
+        .await
+        .unwrap();
+    let space_checks = Arc::new(AtomicUsize::new(0));
+    cache.set_available_space_for_test({
+        let space_checks = space_checks.clone();
+        move || {
+            space_checks.fetch_add(1, Ordering::Relaxed);
+            Ok(Some(0))
+        }
+    });
+    let store = Arc::new(
+        Arc::into_inner(store)
+            .unwrap()
+            .with_pin_cache(cache.clone()),
+    );
+    let initial = pinned_version_with_ssts(&[table], std::slice::from_ref(&input));
+    let mut config = test_refill_config();
+    config.timeout = Duration::from_secs(60);
+    let mut refiller = RefillTest::new(
+        Role::Streaming,
+        CacheRefillPolicy::Pin,
+        config,
+        store.clone(),
+        default_spawn_refill_task(),
+        initial,
+    );
+    refiller.update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+    let output_id = output.object_id;
+    let mut compacted = HummockVersionDelta::default();
+    compacted.prev_id = 1.into();
+    compacted.id = 2.into();
+    compacted.group_deltas.insert(
+        1.into(),
+        GroupDeltas {
+            // Meta reports compaction input removal before target-level insertion.
+            group_deltas: vec![
+                GroupDelta::IntraLevel(IntraLevelDelta::new(
+                    0,
+                    0,
+                    [input.sst_id].into(),
+                    vec![],
+                    0,
+                    0,
+                )),
+                GroupDelta::IntraLevel(IntraLevelDelta::new(
+                    0,
+                    0,
+                    Default::default(),
+                    vec![output],
+                    0,
+                    0,
+                )),
+            ],
+        },
+    );
+    refiller.submit(vec![compacted]);
+
+    // The GC worker is absent. This deadline is shorter than the refill timeout, so
+    // a version waiting for GC cannot pass by falling back on that timeout.
+    let events = tokio::time::timeout(Duration::from_secs(5), refiller.versions().next_events())
+        .await
+        .expect("capacity rejection must release the replacement version without GC");
+    assert_eq!(events.len(), 1);
+    let version = &events[0].new_pinned_version;
+    assert_eq!(version.id(), 2);
+    assert!(
+        version
+            .get_sst_infos()
+            .map(|sst| sst.object_id)
+            .eq([output_id])
+    );
+    assert_eq!(
+        cache.get(input.object_id).unwrap().read(..).await.unwrap(),
+        input_bytes
+    );
+    assert!(cache.is_registered(output_id));
+    assert!(cache.get(output_id).is_none());
+
+    refiller.publish(&events);
+    assert!(!cache.is_registered(input.object_id));
+    assert!(local_store.metadata(&input_path).await.is_ok());
+    assert!(cache.get(output_id).is_none());
+    let block = store
+        .get(
+            &output_sst,
+            0,
+            CachePolicy::Disable,
+            &mut StoreLocalStatistic::default(),
+        )
+        .await
+        .unwrap();
+    assert!(!block.loaded_from_pin_cache);
+    assert_eq!(space_checks.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test]

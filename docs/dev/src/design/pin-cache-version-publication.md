@@ -193,10 +193,15 @@ a worker without a Pin backend rejects its refill work, rather than scheduling F
 Query reads remain independent: a missing or failed Pin read uses the ordinary
 Foyer/remote path without changing the table policy or refilling Pin on reads.
 
-After recovery, a storage-owned GC worker runs one full pass for startup garbage
-and periodic minor passes for discarded files whose readers have exited. Storage
-shutdown aborts this worker. This does not add ownership-driven scans of published
-files: unpin and version retirement still drive their withdrawal.
+After recovery, a storage-owned GC worker runs a full pass for startup garbage and
+minor passes every second for discarded files whose readers have exited. It runs a
+periodic full pass one hour after the previous full pass completes. A capacity
+rejection records the largest rejected SST size. After minor GC, the worker can
+run a full pass sooner if the filesystem still has less space than that size.
+Full passes share a 30-second cooldown. Rejected attempts end immediately, and
+version publication proceeds independently of the GC worker. Storage shutdown
+aborts the worker, and unpin and version retirement still withdraw published
+files.
 
 Before copying a whole SST, Pin checks available filesystem bytes at its root
 against the version's physical SST size. Insufficient space rejects the attempt

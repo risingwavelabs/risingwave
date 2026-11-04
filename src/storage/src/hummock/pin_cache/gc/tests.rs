@@ -296,3 +296,330 @@ async fn test_cancelled_gc_keeps_completed_batches_released() {
         );
     }
 }
+
+// Keep the paused Tokio clock under the test's control while real filesystem I/O runs.
+// Awaiting a timer-based timeout here could advance directly to a later periodic scan.
+async fn wait_for_gc(mut ready: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !ready() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "GC did not make progress"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+async fn next_full_scan(
+    scans: &mut tokio::sync::mpsc::UnboundedReceiver<super::super::test_utils::FullScan>,
+) -> super::super::test_utils::FullScan {
+    let mut scan = None;
+    wait_for_gc(|| {
+        scan = match scans.try_recv() {
+            Ok(scan) => Some(scan),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                panic!("GC worker stopped before the expected scan")
+            }
+        };
+        scan.is_some()
+    })
+    .await;
+    scan.unwrap()
+}
+
+// The selection owns one cache Arc until deletion has completed or failed.
+async fn finish_full_scan(
+    cache: &std::sync::Arc<PinCache>,
+    resume: tokio::sync::oneshot::Sender<()>,
+) {
+    let owners = std::sync::Arc::strong_count(cache);
+    resume.send(()).unwrap();
+    wait_for_gc(|| std::sync::Arc::strong_count(cache) < owners).await;
+    tokio::task::yield_now().await;
+}
+
+async fn advance_gc(duration: Duration) {
+    tokio::time::advance(duration).await;
+    tokio::task::yield_now().await;
+}
+
+async fn reject_copy(cache: &PinCache, size: u64) {
+    cache.register_objects([1003.into()]);
+    assert!(matches!(
+        cache
+            .download(
+                1003.into(),
+                size,
+                in_memory_object_store(),
+                "missing".into()
+            )
+            .await,
+        Err(super::super::PinCacheDownloadError::CapacityRejected)
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_gc_worker_coalesces_pressure_and_preserves_arrivals_during_full() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::{FULL_GC_COOLDOWN, MINOR_GC_INTERVAL};
+
+    let store = in_memory_object_store();
+    let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
+    let available = Arc::new(AtomicU64::new(0));
+    let probe = available.clone();
+    cache.set_available_space_for_test(move || Ok(Some(probe.load(Ordering::Relaxed))));
+    let mut scans = cache.watch_full_scans_for_test();
+    let _gc = scopeguard::guard(cache.start_gc(), |task| task.abort());
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert!(paths.is_empty());
+    finish_full_scan(&cache, resume).await;
+
+    store
+        .upload("first.tmp", Bytes::from_static(b"orphan"))
+        .await
+        .unwrap();
+    // The later, smaller rejection must not replace the larger physical requirement.
+    reject_copy(&cache, 200).await;
+    reject_copy(&cache, 100).await;
+    available.store(150, Ordering::Relaxed);
+    advance_gc(FULL_GC_COOLDOWN - MINOR_GC_INTERVAL).await;
+    assert!(
+        scans.try_recv().is_err(),
+        "pressure must respect the startup cooldown"
+    );
+    advance_gc(MINOR_GC_INTERVAL).await;
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert_eq!(paths, ["first.tmp"]);
+
+    // This copy is rejected after the worker took the earlier batch, while its real
+    // full selection is still alive. Its signal must survive completion of that scan.
+    available.store(0, Ordering::Relaxed);
+    reject_copy(&cache, 300).await;
+    available.store(250, Ordering::Relaxed);
+    store
+        .upload("second.tmp", Bytes::from_static(b"orphan"))
+        .await
+        .unwrap();
+    finish_full_scan(&cache, resume).await;
+    assert!(store.metadata("first.tmp").await.is_err());
+    assert!(store.metadata("second.tmp").await.is_ok());
+    advance_gc(FULL_GC_COOLDOWN - MINOR_GC_INTERVAL).await;
+    assert!(
+        scans.try_recv().is_err(),
+        "a new hint must not bypass full-scan cooldown"
+    );
+    advance_gc(MINOR_GC_INTERVAL).await;
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert_eq!(paths, ["second.tmp"]);
+    finish_full_scan(&cache, resume).await;
+    assert!(store.metadata("second.tmp").await.is_err());
+
+    // A scan that cannot reclaim anything still consumes this ended attempt's hint.
+    reject_copy(&cache, 400).await;
+    advance_gc(FULL_GC_COOLDOWN).await;
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert!(paths.is_empty());
+    finish_full_scan(&cache, resume).await;
+    advance_gc(FULL_GC_COOLDOWN * 2).await;
+    assert!(
+        scans.try_recv().is_err(),
+        "an unsatisfied old hint must not become retry debt"
+    );
+    assert!(cache.storage.lock().uploads.is_empty());
+    assert!(cache.get(1003.into()).is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_gc_worker_rechecks_space_after_minor_before_full() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    use super::{FULL_GC_COOLDOWN, MINOR_GC_INTERVAL};
+
+    let (dir, store) = local_object_store().await;
+    let cache = PinCache::new(store, 1, []).await.unwrap();
+    let pending = dir.path().join("1001-1.sst");
+    let queries = Arc::new(AtomicUsize::new(0));
+    let pending_when_checked = Arc::new(AtomicBool::new(false));
+    let probe_queries = queries.clone();
+    let probe_pending = pending_when_checked.clone();
+    let probe_path = pending.clone();
+    cache.set_available_space_for_test(move || {
+        let present = probe_path.exists();
+        probe_pending.store(present, Ordering::Relaxed);
+        probe_queries.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(if present { 0 } else { 128 }))
+    });
+    let mut scans = cache.watch_full_scans_for_test();
+    let _gc = scopeguard::guard(cache.start_gc(), |task| task.abort());
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert!(paths.is_empty());
+    finish_full_scan(&cache, resume).await;
+    // Let the last ineligible tick finish before creating either the file or pressure.
+    // The next tick must run minor before its eligible pressure recheck.
+    advance_gc(FULL_GC_COOLDOWN - MINOR_GC_INTERVAL).await;
+    std::fs::write(&pending, b"discarded").unwrap();
+    cache.enqueue_delete(cache.track_file("1001-1.sst".into(), 9));
+    reject_copy(&cache, 64).await;
+    assert_eq!(queries.load(Ordering::Relaxed), 1);
+    assert!(pending_when_checked.load(Ordering::Relaxed));
+    advance_gc(MINOR_GC_INTERVAL).await;
+    wait_for_gc(|| queries.load(Ordering::Relaxed) >= 2).await;
+    assert!(
+        !pending_when_checked.load(Ordering::Relaxed),
+        "the eligible pressure recheck must observe the preceding minor deletion"
+    );
+    assert!(!pending.exists());
+    assert!(!cache.storage.lock().files.contains_key("1001-1.sst"));
+    tokio::task::yield_now().await;
+    assert!(
+        scans.try_recv().is_err(),
+        "minor already made enough space for this hint"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_gc_worker_periodic_scan_protects_uploads_and_readers() {
+    use tokio::sync::mpsc::error::TryRecvError;
+
+    use super::super::PinCacheFile;
+    use super::MINOR_GC_INTERVAL;
+
+    let store = in_memory_object_store();
+    store
+        .upload("1001-1.sst", Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    let cache = PinCache::new(store.clone(), 1, [(1001.into(), 8)])
+        .await
+        .unwrap();
+    let reader = cache.get(1001.into()).unwrap();
+    cache.unregister_objects([1001.into()]);
+    let mut scans = cache.watch_full_scans_for_test();
+    let _gc = scopeguard::guard(cache.start_gc(), |task| task.abort());
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert!(paths.is_empty());
+    finish_full_scan(&cache, resume).await;
+
+    let upload = PinCacheFile {
+        path: "1002-1.sst".into(),
+        size: 8,
+    };
+    cache.start_upload(&upload);
+    let upload = scopeguard::guard(upload, |file| cache.finish_upload(&file.path));
+    let temporary = "atomic_write_dir/1002-1.sst.12345678";
+    store
+        .upload(&upload.path, Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    store
+        .upload(temporary, Bytes::from_static(b"partial"))
+        .await
+        .unwrap();
+    store
+        .upload("late.tmp", Bytes::from_static(b"orphan"))
+        .await
+        .unwrap();
+    // No download was rejected. Only the periodic trigger can discover this late orphan.
+    let previous_interval = Duration::from_secs(5 * 60);
+    let periodic_interval = Duration::from_secs(60 * 60);
+    advance_gc(previous_interval).await;
+    assert!(
+        matches!(scans.try_recv(), Err(TryRecvError::Empty)),
+        "unexpected full scan at five minutes"
+    );
+    advance_gc(periodic_interval - previous_interval - MINOR_GC_INTERVAL).await;
+    assert!(
+        matches!(scans.try_recv(), Err(TryRecvError::Empty)),
+        "unexpected full scan before one hour"
+    );
+    advance_gc(MINOR_GC_INTERVAL).await;
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert_eq!(paths, ["late.tmp"]);
+    store
+        .upload("after-scan.tmp", Bytes::from_static(b"newer"))
+        .await
+        .unwrap();
+    finish_full_scan(&cache, resume).await;
+    assert!(store.metadata("late.tmp").await.is_err());
+    assert!(store.metadata("after-scan.tmp").await.is_ok());
+    assert!(store.metadata(temporary).await.is_ok());
+    assert!(store.metadata(&upload.path).await.is_ok());
+    assert_eq!(
+        reader.read(..).await.unwrap(),
+        Bytes::from_static(b"complete")
+    );
+
+    drop(reader);
+    drop(upload);
+    advance_gc(periodic_interval).await;
+    let (mut paths, resume) = next_full_scan(&mut scans).await;
+    paths.sort();
+    assert_eq!(paths, ["1002-1.sst", "after-scan.tmp", temporary]);
+    // The reader's discarded final was eligible for minor before this full pass.
+    assert!(store.metadata("1001-1.sst").await.is_err());
+    finish_full_scan(&cache, resume).await;
+    assert!(
+        store
+            .list("", None, None)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_gc_worker_full_failure_keeps_file_for_next_periodic_pass() {
+    use risingwave_common::config::ObjectStoreConfig;
+
+    use super::super::test_utils::local_object_store_with_config;
+    use super::FULL_GC_INTERVAL;
+
+    // Observe the worker's handling of the delete error without backend retry timers.
+    let mut config = ObjectStoreConfig::default();
+    config.retry.delete_objects_retry_attempts = 0;
+    let (dir, store) = local_object_store_with_config(config).await;
+    let cache = PinCache::new(store, 1, []).await.unwrap();
+    let mut scans = cache.watch_full_scans_for_test();
+    let _gc = scopeguard::guard(cache.start_gc(), |task| task.abort());
+    let (_, resume) = next_full_scan(&mut scans).await;
+    finish_full_scan(&cache, resume).await;
+
+    let path = "1001-1.sst";
+    let local_path = dir.path().join(path);
+    let write_garbage = || {
+        std::fs::write(&local_path, b"garbage").unwrap();
+        std::fs::File::open(&local_path)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1))
+            .unwrap();
+    };
+    write_garbage();
+    drop(cache.track_file(path.into(), 7));
+    advance_gc(FULL_GC_INTERVAL).await;
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert_eq!(paths, [path]);
+    // Change only the selected target after LIST; real FS deletion must now fail.
+    std::fs::remove_file(&local_path).unwrap();
+    std::fs::create_dir(&local_path).unwrap();
+    std::fs::write(local_path.join("child"), b"blocked").unwrap();
+    finish_full_scan(&cache, resume).await;
+    assert!(local_path.join("child").exists());
+    assert!(cache.storage.lock().files.contains_key(path));
+
+    std::fs::remove_file(local_path.join("child")).unwrap();
+    std::fs::remove_dir(&local_path).unwrap();
+    write_garbage();
+    advance_gc(FULL_GC_INTERVAL).await;
+    let (paths, resume) = next_full_scan(&mut scans).await;
+    assert_eq!(paths, [path]);
+    finish_full_scan(&cache, resume).await;
+    wait_for_gc(|| !cache.storage.lock().files.contains_key(path)).await;
+    assert!(!local_path.exists());
+}

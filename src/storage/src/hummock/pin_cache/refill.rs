@@ -142,7 +142,6 @@ impl PinCache {
     ) -> Result<PinCacheDownload, PinCacheDownloadError> {
         // This advisory check does not reserve blocks against concurrent disk users.
         if let Some(available_bytes) = self
-            .store
             .available_space()
             .await
             .inspect_err(|_| record_io_failure("local_space"))?
@@ -159,6 +158,8 @@ impl PinCache {
                     "skipping pin cache refill because filesystem space is insufficient"
                 );
             }
+            self.gc_pressure_bytes
+                .fetch_max(object_size, Ordering::Relaxed);
             return Err(PinCacheDownloadError::CapacityRejected);
         }
         let reader = remote_store

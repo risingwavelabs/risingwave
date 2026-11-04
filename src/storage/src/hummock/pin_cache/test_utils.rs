@@ -16,15 +16,43 @@
 
 use std::sync::Arc;
 
+use parking_lot::Mutex;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
-    InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef, build_remote_object_store,
+    InMemObjectStore, ObjectResult, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
+    build_remote_object_store,
 };
+use tokio::sync::{mpsc, oneshot};
 
 use super::PinCache;
 use crate::hummock::SstableStoreRef;
 use crate::monitor::ObjectStoreMetrics;
+
+type SpaceProbe = Arc<dyn Fn() -> ObjectResult<Option<u64>> + Send + Sync>;
+pub(super) type FullScan = (Vec<String>, oneshot::Sender<()>);
+
+#[derive(Default)]
+pub(super) struct PinCacheTestHooks {
+    pub(super) space_probe: Mutex<Option<SpaceProbe>>,
+    pub(super) full_scan: Mutex<Option<mpsc::UnboundedSender<FullScan>>>,
+}
+
+impl PinCache {
+    pub(in crate::hummock) fn set_available_space_for_test(
+        &self,
+        probe: impl Fn() -> ObjectResult<Option<u64>> + Send + Sync + 'static,
+    ) {
+        *self.test_hooks.space_probe.lock() = Some(Arc::new(probe));
+    }
+
+    /// Observe the real full selection and pause the worker before deletion until released.
+    pub(super) fn watch_full_scans_for_test(&self) -> mpsc::UnboundedReceiver<FullScan> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.test_hooks.full_scan.lock() = Some(tx);
+        rx
+    }
+}
 
 pub(super) fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
     (1..)
@@ -77,12 +105,18 @@ pub(in crate::hummock) fn in_memory_object_store() -> ObjectStoreRef {
     ))
 }
 
-pub(super) async fn local_object_store() -> (tempfile::TempDir, ObjectStoreRef) {
-    let dir = tempfile::tempdir().unwrap();
-    let mut config = ObjectStoreConfig {
+pub(in crate::hummock) async fn local_object_store() -> (tempfile::TempDir, ObjectStoreRef) {
+    local_object_store_with_config(ObjectStoreConfig {
         upload_part_size: 1,
         ..Default::default()
-    };
+    })
+    .await
+}
+
+pub(super) async fn local_object_store_with_config(
+    mut config: ObjectStoreConfig,
+) -> (tempfile::TempDir, ObjectStoreRef) {
+    let dir = tempfile::tempdir().unwrap();
     config.set_atomic_write_dir();
     let store = Arc::new(
         build_remote_object_store(

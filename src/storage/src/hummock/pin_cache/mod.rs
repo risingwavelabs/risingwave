@@ -148,6 +148,10 @@ pub(crate) struct PinCache {
     // Upload protection and physical file ownership share this lock.
     storage: Mutex<PinCacheStorageState>,
     next_path_id: AtomicU64,
+    // Largest physical SST rejected since the worker last took the pressure hint.
+    gc_pressure_bytes: AtomicU64,
+    #[cfg(test)]
+    test_hooks: test_utils::PinCacheTestHooks,
 }
 
 /// Admission captured before queuing a refill. Its identity is private to the issuing cache.
@@ -193,6 +197,9 @@ impl PinCache {
             storage: Mutex::default(),
             shards: (0..shard_num).map(|_| PinCacheShard::default()).collect(),
             next_path_id: AtomicU64::new(rand::random()),
+            gc_pressure_bytes: AtomicU64::new(0),
+            #[cfg(test)]
+            test_hooks: test_utils::PinCacheTestHooks::default(),
         };
         let expected_sizes: HashMap<_, _> = objects.into_iter().collect();
         for &id in expected_sizes.keys() {
@@ -215,6 +222,17 @@ impl PinCache {
         metrics.published_bytes.set(metric_bytes(recovered.bytes));
         metrics.recovery_ready.set(1);
         Ok(Arc::new(pin_cache))
+    }
+
+    async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        #[cfg(test)]
+        {
+            let probe = self.test_hooks.space_probe.lock().clone();
+            if let Some(probe) = probe {
+                return probe();
+            }
+        }
+        self.store.available_space().await
     }
 
     pub(crate) fn get(
