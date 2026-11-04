@@ -2,7 +2,6 @@
 
 set -euo pipefail
 
-# The managed container always listens on 9042, regardless of the published port.
 if [[ -n "${CASSANDRA_CONTAINER:-}" ]]; then
   exec docker exec -i "${CASSANDRA_CONTAINER}" cqlsh \
     --connect-timeout=5 --request-timeout=20 "$@" 127.0.0.1 9042

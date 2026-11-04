@@ -38,7 +38,6 @@ apt-get install -y python3.11-venv
 python3.11 -m venv cqlsh_env
 source cqlsh_env/bin/activate
 
-# Keep cqlsh on this virtualenv's Python when the SLT helpers are added to PATH.
 export CQLSH_PYTHON="${VIRTUAL_ENV}/bin/python3.11"
 export CQLSH_HOST=cassandra-server
 export CQLSH_PORT=9042

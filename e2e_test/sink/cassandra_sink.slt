@@ -12,10 +12,9 @@ DROP TABLE IF EXISTS t6;
 statement ok
 DROP TABLE IF EXISTS t7;
 
-system ok retry 30 backoff 1s
+system ok retry 60 backoff 2s
 cassandra-cqlsh -e "SELECT release_version FROM system.local;"
 
-# Recreate only this test's keyspace so a failed run cannot leave stale rows.
 system ok
 cassandra-cqlsh -e "DROP KEYSPACE IF EXISTS risedev_cassandra_sink_test; CREATE KEYSPACE risedev_cassandra_sink_test WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}; USE risedev_cassandra_sink_test; CREATE TABLE demo_bhv_table(v1 int primary key,v2 smallint,v3 bigint,v4 float,v5 double,v6 text,v7 date,v8 timestamp,v9 boolean);"
 
@@ -62,7 +61,6 @@ INSERT INTO t7 VALUES (1, 1, 1);
 statement ok
 FLUSH;
 
-# COPY TO STDOUT works with both a container client and a host client, without shared files.
 system ok retry 30 backoff 1s
 cassandra-cqlsh -e "COPY risedev_cassandra_sink_test.demo_bhv_table TO STDOUT WITH HEADER = false AND ENCODING = 'UTF-8';"
 ----
