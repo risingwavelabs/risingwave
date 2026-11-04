@@ -172,6 +172,7 @@ fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableObjectId {
         .unwrap()
 }
 
+#[cfg(not(madsim))]
 #[tokio::test]
 async fn test_other_shard_does_not_block_object_operations() {
     let mut config = RwConfig::default();
