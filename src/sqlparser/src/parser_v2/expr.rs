@@ -40,6 +40,18 @@ where
     })
 }
 
+/// A `WHEN` condition. `CASE x WHEN ANY(...)` is not valid in Postgres, but stored definitions may
+/// have it, and they must still parse.
+fn expr_case_condition<S>(input: &mut S) -> ModalResult<Expr>
+where
+    S: TokenStream,
+{
+    trace("expr_case_condition", |input: &mut S| {
+        input.parse_v1(|parser| parser.parse_quantified_or_subexpr(Precedence::Zero))
+    })
+    .parse_next(input)
+}
+
 pub fn expr_case<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
@@ -50,7 +62,7 @@ where
             1..,
             (
                 Keyword::WHEN,
-                cut_err(expr_parse),
+                cut_err(expr_case_condition),
                 cut_err(Keyword::THEN),
                 cut_err(expr_parse),
             ),
