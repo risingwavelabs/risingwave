@@ -154,11 +154,17 @@ impl ObjectStore for OpendalObjectStore {
         tokio::task::spawn_blocking(move || fs4::available_space(root))
             .await
             .map_err(|error| {
-                ObjectError::internal(format!("filesystem space query failed: {error}"))
+                ObjectError::internal(format!(
+                    "filesystem space query failed: {}",
+                    error.as_report()
+                ))
             })?
             .map(Some)
             .map_err(|error| {
-                ObjectError::internal(format!("filesystem space query failed: {error}"))
+                ObjectError::internal(format!(
+                    "filesystem space query failed: {}",
+                    error.as_report()
+                ))
             })
     }
 
