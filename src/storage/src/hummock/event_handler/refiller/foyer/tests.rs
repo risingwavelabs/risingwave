@@ -44,6 +44,7 @@ use super::{
 use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
 use crate::hummock::recent_filter::simple::SimpleRecentFilter;
 use crate::hummock::sstable_store::{SstableStore, SstableStoreConfig};
+use crate::hummock::table_cache_metadata::TableCacheMetadata;
 use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_with_table_ids};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{RecentFilter, RecentFilterTrait, SstableStoreRef, TableHolder};
@@ -89,7 +90,7 @@ async fn mock_sstable_store_with_disk_cache(
     (sstable_store, cache_dir)
 }
 
-fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
+fn test_refill_config() -> CacheRefillConfig {
     CacheRefillConfig {
         timeout: Duration::from_secs(1),
         data_refill_levels: HashSet::new(),
@@ -99,7 +100,6 @@ fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
         threshold: 0.0,
         skip_recent_filter: true,
         skip_inheritance_filter: true,
-        table_cache_refill_default_policy: default_policy,
     }
 }
 
@@ -162,7 +162,7 @@ impl DataRefillGeneratorTestFixture {
         serving_vnode_bitmap: Option<Bitmap>,
         configure: impl FnOnce(&mut CacheRefillConfig),
     ) -> CacheRefillContext {
-        let mut config = test_refill_config(CacheRefillPolicy::Enabled);
+        let mut config = test_refill_config();
         config.data_refill_levels.insert(0);
         configure(&mut config);
         CacheRefillContext {
@@ -212,8 +212,8 @@ impl DataRefillGeneratorTestFixture {
     }
 }
 
-#[tokio::test]
-async fn test_table_cache_refill_contexts_by_role_and_policy() {
+#[test]
+fn test_table_cache_refill_contexts_by_role_and_policy() {
     struct Case {
         name: &'static str,
         role: Role,
@@ -302,28 +302,22 @@ async fn test_table_cache_refill_contexts_by_role_and_policy() {
     let table_id = TableId::from(233);
     let streaming_vnodes = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1, 3]);
     let serving_vnodes = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [2, 4]);
-    let sstable_store = mock_sstable_store().await;
     for case in cases {
-        let mut refiller = CacheRefiller::new(
-            case.role,
-            test_refill_config(case.default_policy),
-            sstable_store.clone(),
-        );
+        let mut metadata = TableCacheMetadata::new(case.role, case.default_policy);
+
         if let Some(policy) = case.policy {
-            refiller.replace_table_cache_refill_policies(HashMap::from([(table_id, policy)]));
+            metadata.table_cache_refill_policies = HashMap::from([(table_id, policy)]);
         }
         if case.has_streaming_vnodes {
-            refiller.update_streaming_table_vnodes(table_id, Some(streaming_vnodes.clone()));
+            metadata.update_streaming_table_vnodes(table_id, Some(streaming_vnodes.clone()));
         }
         if case.has_serving_vnodes {
-            refiller.replace_serving_table_vnode_mapping(HashMap::from([(
-                table_id,
-                serving_vnodes.clone(),
-            )]));
+            metadata.serving_table_vnode_mapping =
+                HashMap::from([(table_id, serving_vnodes.clone())]);
         }
 
         // Multiple SSTs in a delta may refer to the same table.
-        let contexts = refiller.table_cache_refill_contexts([table_id, table_id]);
+        let contexts = CacheRefiller::table_cache_refill_contexts(&metadata, [table_id, table_id]);
         assert_eq!(
             contexts.len(),
             usize::from(case.expected.is_some()),
@@ -359,31 +353,26 @@ async fn test_refill_task_captures_runtime_context_snapshot() {
         *captured_context_clone.lock() = Some(context);
         tokio::spawn(async {})
     });
-    let mut refiller = CacheRefiller::new(
-        Role::Serving,
-        test_refill_config(CacheRefillPolicy::Enabled),
-        mock_sstable_store().await,
-    )
-    .with_foyer_spawn_task(spawn_refill_task);
+    let refill_config = test_refill_config();
+    let mut metadata = TableCacheMetadata::new(Role::Serving, CacheRefillPolicy::Enabled);
+    let refiller = CacheRefiller::new(refill_config, mock_sstable_store().await)
+        .with_foyer_spawn_task(spawn_refill_task);
 
-    refiller.replace_table_cache_refill_policies(HashMap::from([(
-        table_id,
-        CacheRefillPolicy::Serving,
-    )]));
-    refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, old_vnodes.clone())]));
+    metadata.table_cache_refill_policies = HashMap::from([(table_id, CacheRefillPolicy::Serving)]);
+    metadata.serving_table_vnode_mapping = HashMap::from([(table_id, old_vnodes.clone())]);
 
-    let _handle = refiller.start_cache_refill(vec![SstDeltaInfo {
-        insert_sst_infos: vec![SstableInfo::from(SstableInfoInner {
-            table_ids: vec![table_id],
+    let _handle = refiller.start_cache_refill(
+        vec![SstDeltaInfo {
+            insert_sst_infos: vec![SstableInfo::from(SstableInfoInner {
+                table_ids: vec![table_id],
+                ..Default::default()
+            })],
             ..Default::default()
-        })],
-        ..Default::default()
-    }]);
-    refiller.replace_table_cache_refill_policies(HashMap::from([(
-        table_id,
-        CacheRefillPolicy::Disabled,
-    )]));
-    refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, new_vnodes)]));
+        }],
+        &metadata,
+    );
+    metadata.table_cache_refill_policies = HashMap::from([(table_id, CacheRefillPolicy::Disabled)]);
+    metadata.serving_table_vnode_mapping = HashMap::from([(table_id, new_vnodes)]);
 
     let captured_context = captured_context.lock();
     let context = captured_context
@@ -423,23 +412,19 @@ async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
             *captured_deltas_clone.lock() = Some(deltas);
             tokio::spawn(async {})
         });
-        let mut refiller = CacheRefiller::new(
-            role,
-            test_refill_config(default_policy),
-            sstable_store.clone(),
-        )
-        .with_foyer_spawn_task(spawn_refill_task);
-        refiller.replace_table_cache_refill_policies(policies);
+        let refill_config = test_refill_config();
+        let mut metadata = TableCacheMetadata::new(role, default_policy);
+        let refiller = CacheRefiller::new(refill_config, sstable_store.clone())
+            .with_foyer_spawn_task(spawn_refill_task);
+        metadata.table_cache_refill_policies = policies;
         for table_id in streaming_tables {
-            refiller.update_streaming_table_vnodes(*table_id, Some(owned_vnodes.clone()));
+            metadata.update_streaming_table_vnodes(*table_id, Some(owned_vnodes.clone()));
         }
-        refiller.replace_serving_table_vnode_mapping(
-            serving_tables
-                .iter()
-                .map(|table_id| (*table_id, owned_vnodes.clone()))
-                .collect(),
-        );
-        let _handle = refiller.start_cache_refill(vec![delta]);
+        metadata.serving_table_vnode_mapping = serving_tables
+            .iter()
+            .map(|table_id| (*table_id, owned_vnodes.clone()))
+            .collect();
+        let _handle = refiller.start_cache_refill(vec![delta], &metadata);
         captured_deltas
             .lock()
             .take()
@@ -847,15 +832,14 @@ async fn test_l0_refill_after_truncation_uses_serving_ownership() {
         },
     );
     let infos = version.build_sst_delta_infos(&raw);
-    let mut config = test_refill_config(CacheRefillPolicy::Serving);
+    let mut config = test_refill_config();
     config.data_refill_levels.insert(0);
-    let mut refiller = CacheRefiller::new(Role::Serving, config, fixture.sstable_store.clone());
-    refiller.replace_serving_table_vnode_mapping(HashMap::from([(
-        fixture.table_id,
-        Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
-    )]));
+    let mut metadata = TableCacheMetadata::new(Role::Serving, CacheRefillPolicy::Serving);
+    let refiller = CacheRefiller::new(config, fixture.sstable_store.clone());
+    metadata.serving_table_vnode_mapping =
+        HashMap::from([(fixture.table_id, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))]);
     fixture.sstable_store.clear_block_cache().await.unwrap();
-    let handle = refiller.start_cache_refill(infos.clone());
+    let handle = refiller.start_cache_refill(infos.clone(), &metadata);
     tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .unwrap()
@@ -1002,7 +986,7 @@ async fn test_refill_units_do_not_cross_table_projection_boundaries() {
             .collect::<TableCacheRefillContextMap>(),
     );
     let make_context = |unit| {
-        let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+        let mut config = test_refill_config();
         config.data_refill_levels.insert(0);
         config.unit = unit;
         CacheRefillContext {
@@ -1096,7 +1080,7 @@ async fn test_scoped_refill_handles_multi_table_vnode_boundary() {
         insert_sst_level: 0,
     };
     let generate = |streaming_vnodes| {
-        let mut config = test_refill_config(CacheRefillPolicy::Streaming);
+        let mut config = test_refill_config();
         config.data_refill_levels.insert(0);
         let context = CacheRefillContext {
             config: Arc::new(config),
