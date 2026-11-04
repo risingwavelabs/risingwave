@@ -181,7 +181,10 @@ Each expression instance reuses an HTTP client and evaluates all eligible rows i
 a chunk concurrently. There is no AI_DECIDE-specific per-chunk or shared request
 limit. Each visible row with non-NULL arguments makes one logical request, with
 its retries performed sequentially. Overlapping chunks and multiple actors can
-therefore increase the total number of concurrent HTTP requests.
+therefore increase the total number of concurrent HTTP requests. Fixed questions
+and the inferred result type are cached per expression. Other constant arguments
+keep their scalar representation instead of being expanded into per-row arrays.
+Each eligible request still serializes its own state and questions.
 
 Requests complete independently of row order. Results are collected by input row
 index and returned in their original positions, including
@@ -212,6 +215,8 @@ which can issue up to 1,024 concurrent requests for one AI_DECIDE call per row.
 
 Each attempt has a 30-second timeout. Transport errors, HTTP 429, and HTTP 5xx
 responses retry up to three attempts total, using 100 ms then 200 ms delays.
+This includes failures while reading response bytes, such as a truncated 200
+response; a complete response with invalid JSON or typed answers does not retry.
 A numeric `Retry-After` header overrides the delay, capped at five seconds.
 Other HTTP failures, redirects, invalid success JSON, and responses larger than
 16 MiB fail immediately. A failed request propagates an execution error even
@@ -242,7 +247,8 @@ response is limited to 16 MiB. There is no separate aggregate byte budget.
 
 - Schema tests: named mixed result types and invalid question definitions.
 - Mock HTTP tests: request shape, response decoding and contract failures,
-  retries/timeouts, NULL and invisible rows, empty chunks, concurrent requests
+  retries/timeouts and truncated bodies, known/chunked response size limits,
+  credential redaction, scalar arguments, NULL and invisible rows, empty chunks, concurrent requests
   across chunks, ordered results despite a blocked first row, and prompt errors
   from later rows.
 - Project tests: saved results across updates, deletes and recovery; fatal errors
@@ -253,3 +259,32 @@ response is limited to 16 MiB. There is no separate aggregate byte budget.
   service checks mixed answers, descriptions, single evaluation for multiple
   field reads, saved-result retractions, GROUP BY/OVER and emission modes.
   The external-service fixture is skipped under madsim.
+
+## Local synthetic performance checks
+
+`e2e_test/streaming/ai_decide_bench.py` runs an opt-in SQL-to-HTTP benchmark against
+an asyncio Jev mock. It requires an isolated local RisingWave instance, Python
+and `psql`; it does not contact a model service. For example:
+
+```sh
+python3 e2e_test/streaming/ai_decide_bench.py --port 4566 \
+  --output /tmp/ai-decide-bench.json --rounds 3 --faults
+```
+
+On Linux, add `--pid <standalone-pid>` to sample the whole RisingWave process's
+RSS and CPU time. Use `--only fast_64b,fast_64k` or `--rows 512` for a focused
+comparison. The script checks output values and exact request counts, marks
+one warmup per case for exclusion from analysis, and includes NULL inputs, large
+fixed questions, delayed/long-tail responses, a capacity-limited backend,
+streaming Project windows, saved-result deletions and optional body truncation.
+It creates uniquely named tables/views and drops them after each case.
+
+Compare identical builds and settings on the same host while other build/load
+jobs are idle. SQL timing includes client startup and, for streaming, INSERT,
+FLUSH and result visibility. Backend latency measures receipt-to-response time,
+not client-observed row latency. RSS is sampled every 5 ms and includes the whole
+standalone process. Debug builds, local mock parsing, in-memory storage and
+artificial delays cannot establish production model throughput. Large fanout can
+also hit local socket/ephemeral-port limits; this is separate from inference
+capacity. Batch Project currently admits up to 16 chunks concurrently, so rows
+across those chunks can all initiate requests.
