@@ -3,6 +3,7 @@
 """Check Pin publication and withdrawal in the real-process refill profile."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
@@ -11,6 +12,7 @@ import time
 import urllib.request
 
 import psycopg2
+from psycopg2 import sql
 import yaml
 
 
@@ -22,6 +24,7 @@ def worker_state(node, data_dir, pinned_ids):
     with urllib.request.urlopen(url, timeout=5) as response:
         lines = response.read().decode().splitlines()
     metrics = {}
+    read_counts = {}
     local_hits = 0
     for line in lines:
         if line.startswith("pin_cache_"):
@@ -31,6 +34,9 @@ def worker_state(node, data_dir, pinned_ids):
             table = re.search(r'table_id="(\d+)"', line)
             if table is None or int(table[1]) not in pinned_ids:
                 continue
+            kind = re.search(r'type="([^"]+)"', line)
+            if kind is not None:
+                read_counts.setdefault(table[1], {})[kind[1]] = int(line.rsplit(" ", 1)[1])
             if 'type="pin_data_hit"' in line:
                 local_hits += int(line.rsplit(" ", 1)[1])
             elif 'type="pin_data_memory_hit"' in line:
@@ -45,12 +51,13 @@ def worker_state(node, data_dir, pinned_ids):
         errors.append(f"{node['id']}: publication/file bytes differ")
     if any(path.is_file() for path in (directory / "atomic_write_dir").rglob("*")):
         errors.append(f"{node['id']}: atomic upload temporary files remain")
-    return objects, local_hits, errors
+    return objects, local_hits, errors, read_counts
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--previous-objects", help="SST object IDs observed before this write round")
+    parser.add_argument("--publication-only", action="store_true", help="Wait for files before the first cold query")
     parser.add_argument("pinned_tables", nargs="*")
     args = parser.parse_args()
     previous = (
@@ -97,9 +104,11 @@ def main():
             expected = {oid for oid, tables in objects.items() if tables & pinned_ids}
             owned = {"streaming": set(), "serving": set()}
             local_hits = 0
+            read_counts = {}
             for node in workers:
                 try:
-                    actual, hits, pending = worker_state(node, data_dir, pinned_ids)
+                    actual, hits, pending, counts = worker_state(node, data_dir, pinned_ids)
+                    read_counts[node["id"]] = counts
                     errors.extend(pending)
                     if actual - expected:
                         errors.append(f"{node['id']}: unexpected Pin objects {actual - expected}")
@@ -112,13 +121,22 @@ def main():
             for role, actual in owned.items():
                 if actual != expected:
                     errors.append(f"{role}: Pin objects {actual}, expected {expected}")
-            if expected and local_hits <= 0:
+            if expected and local_hits <= 0 and not args.publication_only:
+                if not errors:
+                    # Read counters are thread-local and flush after 32 reports. Scraping
+                    # alone cannot expose a cold read buffered on an otherwise idle thread.
+                    with conn.cursor() as cursor:
+                        cursor.execute("SET query_mode = 'distributed'")
+                        for table in args.pinned_tables:
+                            cursor.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(table)))
+                            cursor.fetchall()
                 errors.append("no Pin file reads observed")
             if not errors:
-                print("Pin cache state converged")
+                print("Pin cache publication converged" if args.publication_only else "Pin cache state converged")
                 return 0
             if time.monotonic() >= deadline:
                 print("\n".join(errors), file=sys.stderr)
+                print("Block read counters by worker/table: " + json.dumps(read_counts, sort_keys=True), file=sys.stderr)
                 return 1
             time.sleep(0.2)
 

@@ -47,6 +47,11 @@ insert into mt_ordinary select i, i*3, repeat(md5(i::varchar),4) from generate_s
 statement ok
 flush;
 
+# Publication is asynchronous. Wait before the first cold query, and read the Pin
+# tables before the ordinary table can warm blocks from a shared SST in memory.
+system ok
+python3 e2e_test/refill/check_pin_cache.py --publication-only --previous-objects "${previous_objects}" mt_pin_a mt_pin_b
+
 statement ok
 set query_mode = 'distributed';
 
@@ -54,13 +59,15 @@ query TIII
 select 'mt_pin_a', count(*), sum(v), sum(octet_length(payload)) from mt_pin_a
 union all
 select 'mt_pin_b', count(*), sum(v), sum(octet_length(payload)) from mt_pin_b
-union all
-select 'mt_ordinary', count(*), sum(v), sum(octet_length(payload)) from mt_ordinary
 order by 1;
 ----
-mt_ordinary 512 393984 65536
 mt_pin_a 512 131328 65536
 mt_pin_b 512 262656 65536
+
+query TIII
+select 'mt_ordinary', count(*), sum(v), sum(octet_length(payload)) from mt_ordinary;
+----
+mt_ordinary 512 393984 65536
 
 system ok
 python3 e2e_test/refill/check_pin_cache.py --previous-objects "${previous_objects}" mt_pin_a mt_pin_b
