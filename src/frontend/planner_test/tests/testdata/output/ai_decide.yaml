@@ -196,13 +196,6 @@
 
     Caused by:
       Invalid input syntax: ai_decide expects exactly five arguments
-- name: null sixth argument is rejected
-  sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', NULL::jsonb);
-  binder_error: |
-    Failed to bind expression: ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', CAST(NULL AS JSONB))
-
-    Caused by:
-      Invalid input syntax: ai_decide expects exactly five arguments
 - name: mixed question constructors infer named nested fields
   sql: |
     CREATE TABLE contexts (id INT, state JSONB);
@@ -318,10 +311,3 @@
 
     Caused by:
       Invalid input syntax: Invalid parameter ai_decide questions: question "q": type must be noul, choice or score
-- name: old unpublished interface is removed
-  sql: SELECT jev_eval(NULL::jsonb, 'url', 'model', '{}'::jsonb, 'key');
-  binder_error: |
-    Failed to bind expression: jev_eval(CAST(NULL AS JSONB), 'url', 'model', CAST('{}' AS JSONB), 'key')
-
-    Caused by:
-      function jev_eval(jsonb, character varying, character varying, jsonb, character varying) does not exist

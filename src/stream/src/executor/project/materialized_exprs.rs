@@ -269,7 +269,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     use multimap::MultiMap;
-    use risingwave_common::array::{Array, ArrayRef, DataChunk};
+    use risingwave_common::array::{ArrayRef, DataChunk};
     use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{
@@ -407,81 +407,49 @@ mod tests {
         (tx, stream)
     }
 
-    fn versions(chunk: &StreamChunk) -> Vec<Option<serde_json::Value>> {
-        chunk
-            .columns()
-            .last()
-            .unwrap()
-            .as_jsonb()
-            .iter()
-            .map(|value| value.map(|value| JsonbVal::from(value).take()))
-            .collect()
-    }
-
     #[tokio::test]
     async fn restores_results_for_update_and_delete_after_recovery() {
-        let store = MemoryStateStore::new();
-        let expr = RemoteExpression::default();
-        let (mut tx, mut stream) = executor(store.clone(), expr.clone(), true).await;
-        tx.push_barrier(test_epoch(1), false);
-        stream.expect_barrier().await;
-        tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
-        let chunk = stream.expect_chunk().await;
-        assert_eq!(versions(&chunk), vec![Some(json!({"version": 1}))]);
-        tx.push_chunk(StreamChunk::from_pretty("I I\nU- 1 10\nU+ 1 20"));
-        let chunk = stream.expect_chunk().await;
-        assert_eq!(
-            versions(&chunk),
-            vec![Some(json!({"version": 1})), Some(json!({"version": 2}))]
-        );
-        assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
-        tx.push_barrier(test_epoch(2), false);
-        stream.expect_barrier().await;
-        drop(stream);
+        for typed in [false, true] {
+            let store = MemoryStateStore::new();
+            let expr = RemoteExpression {
+                typed,
+                ..Default::default()
+            };
+            let (mut tx, mut stream) = executor(store.clone(), expr.clone(), true).await;
+            tx.push_barrier(test_epoch(1), false);
+            stream.expect_barrier().await;
+            tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
+            let chunk = stream.expect_chunk().await;
+            assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
+            tx.push_barrier(test_epoch(2), false);
+            stream.expect_barrier().await;
+            drop(stream);
 
-        // A fresh executor has an empty cache and a service that now fails. Deletion must still
-        // read the previously committed JSON value without making a request.
-        expr.fail.store(true, Ordering::SeqCst);
-        let (mut tx, mut recovered) = executor(store, expr.clone(), true).await;
-        tx.push_barrier(test_epoch(2), false);
-        recovered.expect_barrier().await;
-        tx.push_chunk(StreamChunk::from_pretty("I I\n- 1 20"));
-        let chunk = recovered.expect_chunk().await;
-        assert_eq!(chunk.ops(), &[Op::Delete]);
-        assert_eq!(versions(&chunk), vec![Some(json!({"version": 2}))]);
-        assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
-    }
+            // Cold UPDATE reads the saved value, then evaluates only the new row.
+            let (mut tx, mut recovered) = executor(store.clone(), expr.clone(), true).await;
+            tx.push_barrier(test_epoch(2), false);
+            recovered.expect_barrier().await;
+            tx.push_chunk(StreamChunk::from_pretty("I I\nU- 1 10\nU+ 1 20"));
+            let chunk = recovered.expect_chunk().await;
+            assert_eq!(chunk.ops(), &[Op::UpdateDelete, Op::UpdateInsert]);
+            assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
+            assert_eq!(chunk.columns()[2].datum_at(1), Some(expr.result(2)));
+            assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
+            tx.push_barrier(test_epoch(3), false);
+            recovered.expect_barrier().await;
+            drop(recovered);
 
-    #[tokio::test]
-    async fn restores_typed_struct_map_and_array_after_recovery() {
-        let store = MemoryStateStore::new();
-        let expr = RemoteExpression {
-            typed: true,
-            ..Default::default()
-        };
-        let (mut tx, mut stream) = executor(store.clone(), expr.clone(), true).await;
-        tx.push_barrier(test_epoch(1), false);
-        stream.expect_barrier().await;
-        tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
-        let chunk = stream.expect_chunk().await;
-        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
-        tx.push_barrier(test_epoch(2), false);
-        stream.expect_barrier().await;
-        drop(stream);
-
-        // A fresh executor must fetch the complete typed value from persisted state.
-        let (mut tx, mut recovered) = executor(store, expr.clone(), true).await;
-        tx.push_barrier(test_epoch(2), false);
-        recovered.expect_barrier().await;
-        tx.push_chunk(StreamChunk::from_pretty("I I\nU- 1 10\nU+ 1 20"));
-        let chunk = recovered.expect_chunk().await;
-        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(1)));
-        assert_eq!(chunk.columns()[2].datum_at(1), Some(expr.result(2)));
-        expr.fail.store(true, Ordering::SeqCst);
-        tx.push_chunk(StreamChunk::from_pretty("I I\n- 1 20"));
-        let chunk = recovered.expect_chunk().await;
-        assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(2)));
-        assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
+            // A second cold recovery must delete the updated value without the service.
+            expr.fail.store(true, Ordering::SeqCst);
+            let (mut tx, mut recovered) = executor(store, expr.clone(), true).await;
+            tx.push_barrier(test_epoch(3), false);
+            recovered.expect_barrier().await;
+            tx.push_chunk(StreamChunk::from_pretty("I I\n- 1 20"));
+            let chunk = recovered.expect_chunk().await;
+            assert_eq!(chunk.ops(), &[Op::Delete]);
+            assert_eq!(chunk.columns()[2].datum_at(0), Some(expr.result(2)));
+            assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
+        }
     }
 
     #[tokio::test]

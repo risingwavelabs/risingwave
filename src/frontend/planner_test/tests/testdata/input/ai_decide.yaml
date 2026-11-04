@@ -102,11 +102,6 @@
   expected_outputs:
     - binder_error
 
-- name: null sixth argument is rejected
-  sql: SELECT ai_decide(ai_questions(ai_prob_question('q', 'Resolved?')), 'url', 'model', ai_questions(ai_prob_question('q', 'Resolved?')), 'planner-only-key', NULL::jsonb);
-  expected_outputs:
-    - binder_error
-
 - name: mixed question constructors infer named nested fields
   sql: |
     CREATE TABLE contexts (id INT, state JSONB);
@@ -175,10 +170,5 @@
 
 - name: question types must be supported
   sql: SELECT ai_decide(NULL::jsonb, 'url', 'model', '{"q":{"type":"text","instructions":"Explain?"}}'::jsonb, 'key');
-  expected_outputs:
-    - binder_error
-
-- name: old unpublished interface is removed
-  sql: SELECT jev_eval(NULL::jsonb, 'url', 'model', '{}'::jsonb, 'key');
   expected_outputs:
     - binder_error

@@ -20,11 +20,11 @@ use reqwest::{Client, StatusCode};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Datum, DatumRef, F64, JsonbRef, JsonbVal, ListValue, MapValue, ScalarImpl,
-    StructValue,
+    DataType, Datum, DatumRef, F64, JsonbRef, JsonbVal, ListValue, MapValue, Scalar, ScalarImpl,
+    StructValue, ToDatumRef,
 };
 use risingwave_expr::expr::{
-    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo,
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, ValueImpl,
 };
 use risingwave_expr::scalar::ai_decide::{QuestionKind, QuestionSchema};
 use risingwave_expr::{ExprError, Result, build_function};
@@ -45,7 +45,9 @@ struct Request<'a> {
 }
 
 struct AiDecide {
-    children: [BoxedExpression; 5],
+    children: [BoxedExpression; 4],
+    questions: JsonbVal,
+    return_type: DataType,
     schema: QuestionSchema,
     client: Client,
 }
@@ -87,8 +89,11 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| request_error("could not initialize HTTP client"))?;
+    let [state, url, model, _, api_key] = children;
     Ok(AiDecide {
-        children,
+        children: [state, url, model, api_key],
+        questions,
+        return_type,
         schema,
         client,
     }
@@ -207,7 +212,6 @@ impl AiDecide {
         state: JsonbRef<'_>,
         url: &str,
         model: &str,
-        questions: JsonbRef<'_>,
         api_key: &str,
     ) -> Result<JsonbVal> {
         let url = reqwest::Url::parse(url).map_err(|_| request_error("invalid model_url"))?;
@@ -226,7 +230,7 @@ impl AiDecide {
             .json(&Request {
                 model,
                 state: state.into(),
-                questions: questions.into(),
+                questions: self.questions.as_scalar_ref().into(),
             })
             .build()
             .map_err(|_| request_error("could not build HTTP request"))?;
@@ -264,7 +268,10 @@ impl AiDecide {
                             }
                         }
                         if let Some(err) = read_error {
-                            Err(err)
+                            // Errors while reading HTTP bytes are retryable, including
+                            // reqwest Decode errors for truncated response bodies. JSON
+                            // and answer validation below remain non-retryable.
+                            Err((err, true))
                         } else {
                             // Decode the full JSON envelope before validating typed answers.
                             return jsonbb::Value::from_text(&bytes)
@@ -291,11 +298,14 @@ impl AiDecide {
                         Ok(())
                     }
                 }
-                Err(err) => Err(err),
+                Err(err) => Err((err, false)),
             };
-            if let Err(err) = result {
-                let transient =
-                    err.is_timeout() || err.is_connect() || err.is_body() || err.is_request();
+            if let Err((err, reading_body)) = result {
+                let transient = reading_body
+                    || err.is_timeout()
+                    || err.is_connect()
+                    || err.is_body()
+                    || err.is_request();
                 if !transient || attempt + 1 == MAX_ATTEMPTS {
                     return Err(request_error(if err.is_timeout() {
                         "HTTP request timed out"
@@ -309,22 +319,14 @@ impl AiDecide {
         unreachable!("last attempt always returns")
     }
 
-    async fn evaluate(&self, args: [DatumRef<'_>; 5]) -> Result<Option<StructValue>> {
-        let [
-            Some(state),
-            Some(url),
-            Some(model),
-            Some(questions),
-            Some(api_key),
-        ] = args
-        else {
+    async fn evaluate(&self, args: [DatumRef<'_>; 4]) -> Result<Option<StructValue>> {
+        let [Some(state), Some(url), Some(model), Some(api_key)] = args else {
             return Ok(None);
         };
         self.request(
             state.into_jsonb(),
             url.into_utf8(),
             model.into_utf8(),
-            questions.into_jsonb(),
             api_key.into_utf8(),
         )
         .await
@@ -335,25 +337,28 @@ impl AiDecide {
 
 impl ExpressionInfo for AiDecide {
     fn return_type(&self) -> DataType {
-        self.schema.return_type()
+        self.return_type.clone()
     }
 }
 
 impl AsyncExpression for AiDecide {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut arrays = Vec::with_capacity(5);
+        let mut values = Vec::with_capacity(4);
         for child in &self.children {
-            arrays.push(child.eval(input).await?);
+            values.push(child.eval_v2(input).await?);
         }
         let mut results = (0..input.capacity())
             .map(|index| {
-                let arrays = &arrays;
+                let values = &values;
                 async move {
                     if !input.visibility().is_set(index) {
                         return Ok((index, None));
                     }
                     let value = self
-                        .evaluate(std::array::from_fn(|i| arrays[i].value_at(index)))
+                        .evaluate(std::array::from_fn(|i| match &values[i] {
+                            ValueImpl::Array(array) => array.value_at(index),
+                            ValueImpl::Scalar { value, .. } => value.to_datum_ref(),
+                        }))
                         .await?;
                     Ok::<_, ExprError>((index, value))
                 }
@@ -373,7 +378,7 @@ impl AsyncExpression for AiDecide {
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let mut args = Vec::with_capacity(5);
+        let mut args = Vec::with_capacity(4);
         for child in &self.children {
             args.push(child.eval_row(input).await?);
         }
@@ -395,12 +400,12 @@ mod tests {
     use axum::routing::post;
     use axum::{Json, Router};
     use risingwave_common::array::{Array, ArrayBuilder, JsonbArrayBuilder, Utf8Array};
-    use risingwave_common::types::Scalar;
     use risingwave_expr::expr::{
         InputRefExpression, LiteralExpression, SyncExpressionBoxExt, build_func,
     };
     use risingwave_pb::expr::expr_node::Type as ExprType;
     use serde_json::{Value, json};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::{Barrier, Semaphore};
 
     use super::*;
@@ -426,17 +431,15 @@ mod tests {
     fn expression(timeout: Duration) -> AiDecide {
         AiDecide {
             schema: test_schema(),
-            children: std::array::from_fn(|i| {
-                let ty = if i == 0 || i == 3 {
+            questions: test_questions(),
+            return_type: test_schema().return_type(),
+            children: [0, 1, 2, 4].map(|i| {
+                let ty = if i == 0 {
                     DataType::Jsonb
                 } else {
                     DataType::Varchar
                 };
-                if i == 3 {
-                    LiteralExpression::new(DataType::Jsonb, Some(test_questions().into())).boxed()
-                } else {
-                    InputRefExpression::new(ty, i).boxed()
-                }
+                InputRefExpression::new(ty, i).boxed()
             }),
             client: Client::builder()
                 .timeout(timeout)
@@ -537,31 +540,44 @@ mod tests {
             JsonbVal::from(json!({"messages": ["收到退款了"]})).as_scalar_ref(),
             url,
             "test-model",
-            JsonbVal::from(json!({"resolved": {"type": "noul", "instructions": "已解决？"}}))
-                .as_scalar_ref(),
             "test-only-key",
         )
         .await
     }
 
     #[tokio::test]
-    async fn request_and_full_response() {
+    async fn scalar_arguments_and_request_contract() {
         let server = server(Router::new().route("/evaluate", post(|headers: HeaderMap, Json(body): Json<Value>| async move {
             assert_eq!(headers["authorization"], "Bearer test-only-key");
             assert_eq!(body["model"], "test-model");
             assert_eq!(body["state"]["messages"][0], "收到退款了");
-            assert_eq!(body["questions"]["resolved"]["type"], "noul");
-            Json(json!({"answers": {"resolved": {"type": "noul", "noul": 0.99}}, "unknown_metadata": [1, null, true]}))
+            assert_eq!(body["questions"]["q"]["instructions"], "已解决？");
+            Json(json!({"answers": {"q": {"type": "noul", "noul": 0.99}}, "unknown_metadata": [1, null, true]}))
         }))).await;
-        let expr = expression(REQUEST_TIMEOUT);
-        assert_eq!(
-            call(&expr, &server.url).await.unwrap().take(),
-            json!({
-                "answers": {"resolved": {"type": "noul", "noul": 0.99}},
-                "unknown_metadata": [1, null, true],
-            })
-        );
+        let mut expr = expression(REQUEST_TIMEOUT);
+        expr.questions = JsonbVal::from(json!({"q": {"type": "noul", "instructions": "已解决？"}}));
+        expr.children = [
+            LiteralExpression::new(
+                DataType::Jsonb,
+                Some(JsonbVal::from(json!({"messages": ["收到退款了"]})).into()),
+            )
+            .boxed(),
+            LiteralExpression::new(DataType::Varchar, Some(server.url.clone().into())).boxed(),
+            LiteralExpression::new(DataType::Varchar, Some("test-model".into())).boxed(),
+            LiteralExpression::new(DataType::Varchar, Some("test-only-key".into())).boxed(),
+        ];
+        // The credential is actually present in a child, so formatting the children
+        // would make this assertion fail.
+        assert!(format!("{:?}", expr.children[3]).contains("test-only-key"));
         assert!(!format!("{expr:?}").contains("test-only-key"));
+        let output = expr.eval(&DataChunk::new_dummy(3)).await.unwrap();
+        for i in 0..3 {
+            assert_eq!(score_at(&output, i), Some(0.99));
+        }
+        assert_eq!(
+            expr.eval_row(&OwnedRow::empty()).await.unwrap(),
+            output.datum_at(0)
+        );
     }
 
     #[tokio::test]
@@ -621,6 +637,104 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(!format!("{err:?}").contains("test-only-key"));
+            assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    // Raw HTTP permits deliberately truncated and chunked responses that an HTTP
+    // framework would repair or reject before sending.
+    async fn raw_server(responses: Vec<Vec<u8>>, attempts: Arc<AtomicUsize>) -> Server {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/evaluate", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            let mut first_body = None;
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let header_end = loop {
+                    let byte = socket.read_u8().await.unwrap();
+                    request.push(byte);
+                    if request.ends_with(b"\r\n\r\n") {
+                        break request.len();
+                    }
+                };
+                let headers = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                let length: usize = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length: "))
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                request.resize(header_end + length, 0);
+                socket.read_exact(&mut request[header_end..]).await.unwrap();
+                let body = request[header_end..].to_vec();
+                if let Some(first) = &first_body {
+                    assert_eq!(&body, first, "retries must preserve the request body");
+                } else {
+                    first_body = Some(body);
+                }
+                let index = attempts.fetch_add(1, Ordering::SeqCst);
+                let response = &responses[index.min(responses.len() - 1)];
+                // A size-limit rejection may close the socket before all bytes are sent.
+                let _ = socket.write_all(response).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        Server { url, task }
+    }
+
+    #[tokio::test]
+    async fn truncated_response_bodies_are_retried_with_a_limit() {
+        let truncated =
+            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{\"answers\":"
+                .to_vec();
+        let body = r#"{"answers":{"q":{"type":"noul","noul":0.5}}}"#;
+        let complete = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes();
+        for (responses, expected_calls, succeeds) in [
+            (vec![truncated.clone(), complete], 2, true),
+            (vec![truncated], MAX_ATTEMPTS, false),
+        ] {
+            let attempts = Arc::new(AtomicUsize::new(0));
+            let server = raw_server(responses, attempts.clone()).await;
+            let result = call(&expression(REQUEST_TIMEOUT), &server.url).await;
+            if succeeds {
+                let typed = decode_response(result.unwrap(), &test_schema()).unwrap();
+                assert_eq!(typed.fields()[0], Some(ScalarImpl::Float64(0.5.into())));
+            } else {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("HTTP transport failed")
+                );
+            }
+            assert_eq!(attempts.load(Ordering::SeqCst), expected_calls);
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_responses_are_not_retried() {
+        let size = MAX_RESPONSE_BYTES + 1;
+        let known =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n")
+                .into_bytes();
+        let mut chunked = format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{size:x}\r\n"
+        )
+        .into_bytes();
+        chunked.resize(chunked.len() + size, b' ');
+        chunked.extend_from_slice(b"\r\n0\r\n\r\n");
+        for response in [known, chunked] {
+            let attempts = Arc::new(AtomicUsize::new(0));
+            let server = raw_server(vec![response], attempts.clone()).await;
+            let error = call(&expression(REQUEST_TIMEOUT), &server.url)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("response exceeds 16 MiB"));
             assert_eq!(attempts.load(Ordering::SeqCst), 1);
         }
     }
@@ -688,7 +802,11 @@ mod tests {
             }),
         ))
         .await;
-        let children = expression(REQUEST_TIMEOUT).children.into_iter().collect();
+        let mut children: Vec<_> = expression(REQUEST_TIMEOUT).children.into_iter().collect();
+        children.insert(
+            3,
+            LiteralExpression::new(DataType::Jsonb, Some(test_questions().into())).boxed(),
+        );
         let expr = build_func(ExprType::AiDecide, test_schema().return_type(), children).unwrap();
         let input = chunk(&server.url, 20);
         let (left, right) = tokio::time::timeout(Duration::from_secs(5), async {
