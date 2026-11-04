@@ -41,3 +41,66 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+
+- id: changelog_cdc_source
+  sql: |
+    create source shared_cdc with (
+      connector = 'postgres-cdc',
+      hostname = 'localhost',
+      port = '5432',
+      username = 'postgres',
+      password = '',
+      database.name = 'db'
+    ) format plain encode json;
+    create source orders (tenant int, id int, email varchar, primary key (tenant, id))
+      with (snapshot = 'false') from shared_cdc table 'public.orders';
+  expected_outputs: []
+
+- name: upsert changelog with equal key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (tenant, id) select * from c;
+  expected_outputs:
+  - stream_dist_plan
+
+- name: upsert changelog with subset key and pruned stream key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (tenant) select email, changelog_op from c;
+  expected_outputs:
+  - stream_dist_plan
+
+- name: reject upsert changelog with non-stream key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (email) select * from c;
+  expected_outputs:
+  - stream_error
+
+- name: reject upsert changelog with mixed key and pruned stream key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (tenant, email) select changelog_op from c;
+  expected_outputs:
+  - stream_error
+
+- name: reject upsert changelog with superset key
+  before:
+  - changelog_cdc_source
+  sql: |
+    with c as changelog from orders key (tenant, id, email) select * from c;
+  expected_outputs:
+  - stream_error
+
+- name: materialized CDC changelog permits non-stream key
+  before:
+  - changelog_cdc_source
+  sql: |
+    create materialized view orders_mv as select * from orders;
+    with c as changelog from orders_mv key (email) select * from c;
+  expected_outputs:
+  - stream_dist_plan

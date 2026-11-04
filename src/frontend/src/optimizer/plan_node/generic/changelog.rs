@@ -28,7 +28,10 @@ pub const _CHANGELOG_ROW_ID: &str = "_changelog_row_id";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChangeLog<PlanRef> {
     pub input: PlanRef,
-    /// Declared key column indices in the input schema.
+    /// Declared key column indices in the input schema. Changes sharing this key are
+    /// co-located, with deletes emitted before inserts within each epoch. Distinct stream
+    /// keys remain separate changes; this does not compact to one final change per declared key.
+    /// For upsert input, these columns must be a subset of the input stream key.
     pub key_indices: Option<Vec<usize>>,
     // If there is no op in the output result, it is false, example 'create materialized view mv1 as with sub as changelog from t1 select v1 from sub;'
     pub need_op: bool,

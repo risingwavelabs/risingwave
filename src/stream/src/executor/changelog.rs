@@ -135,7 +135,8 @@ impl ChangeLogExecutor {
     async fn execute_keyed(mut self) {
         let input_kind = self.input.stream_kind();
         let compaction_keys = if input_kind == StreamKind::Upsert {
-            // Upsert deletes only guarantee the stream key columns.
+            // Upsert deletes only guarantee the stream key columns. The planner requires
+            // the declared KEY to be a subset of these columns before repartitioning.
             self.stream_keys.clone()
         } else {
             self.stream_keys
@@ -331,6 +332,90 @@ mod tests {
                 ])],
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn test_keyed_changelog_upsert_subset_key_preserves_distinct_changes() {
+        use crate::executor::ExecutorInfo;
+
+        // The stream key is (tenant, id), while KEY(tenant) co-locates different rows.
+        let source = Executor::new(
+            ExecutorInfo {
+                stream_kind: StreamKind::Upsert,
+                ..ExecutorInfo::for_test(
+                    Schema::new(vec![Field::unnamed(DataType::Int64); 3]),
+                    vec![0, 1],
+                    "MockSource".to_owned(),
+                    0,
+                )
+            },
+            MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n+ 1 10 100")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n+ 1 20 200\n+ 1 10 101")),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n- 1 10 .")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Chunk(StreamChunk::from_pretty("I I I\n- 1 20 .")),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
+            ])
+            .stop_on_finish(false)
+            .boxed(),
+        );
+        let mut output = ChangeLogExecutor::new(
+            ActorContext::for_test(1),
+            source,
+            true,
+            VirtualNode::COUNT_FOR_TEST,
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            ChangeLogMode::Keyed,
+            vec![0],
+            vec![0, 1],
+        )
+        .boxed()
+        .execute();
+
+        let mut epochs = Vec::new();
+        let mut events = Vec::new();
+        let mut previous_id = None;
+        while let Some(message) = output.next().await {
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        assert_eq!(op, Op::Insert);
+                        let Some(ScalarRefImpl::Serial(id)) = row.datum_at(4) else {
+                            panic!("expected a non-null changelog event ID");
+                        };
+                        if let Some(previous_id) = previous_id {
+                            assert!(previous_id < id);
+                        }
+                        previous_id = Some(id);
+                        events.push(row.project(&[0, 1, 2, 3]).into_owned_row());
+                    }
+                }
+                Message::Barrier(_) => epochs.push(std::mem::take(&mut events)),
+                Message::Watermark(_) => panic!("unexpected watermark"),
+            }
+        }
+
+        // Both stream identities survive even though they share the declared KEY. The
+        // terminal delete is retained and precedes the insert, including in event-ID order.
+        let expected = [
+            "I I I",
+            "I I I\n+ 1 10 100",
+            "I I I\n- 1 10 .\n+ 1 20 200",
+            "I I I\n- 1 20 .",
+        ]
+        .map(|chunk| {
+            StreamChunk::from_pretty(chunk)
+                .rows()
+                .map(|(op, row)| {
+                    row.chain(OwnedRow::new(vec![Some(op.to_i16().into())]))
+                        .into_owned_row()
+                })
+                .collect_vec()
+        });
+        assert_eq!(epochs, expected);
     }
 
     #[tokio::test]
