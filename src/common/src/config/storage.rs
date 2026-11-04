@@ -238,7 +238,8 @@ pub struct StorageConfig {
     )]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 
-    /// The ratio of iceberg compaction max parallelism to the number of CPU cores
+    /// The ratio of iceberg compaction max parallelism to the number of CPU cores.
+    /// Capped at `worker_num` * `compactor_max_task_multiplier`, the most a compactor can run.
     #[serde(default = "default::storage::iceberg_compaction_task_parallelism_ratio")]
     pub iceberg_compaction_task_parallelism_ratio: f32,
     /// Whether to enable heuristic output parallelism in iceberg compaction.
