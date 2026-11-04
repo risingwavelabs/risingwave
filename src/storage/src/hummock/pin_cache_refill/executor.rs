@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::id::TableId;
+use thiserror_ext::AsReport;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 
 use self::PinCacheRefillAttemptOutcome::{CapacityRejected, Obsolete, Published};
@@ -251,7 +252,7 @@ impl PinCacheRefillExecutor {
                         Ok(Err(error)) => {
                             tracing::warn!(
                                 object_id = object.as_raw_id(),
-                                error = %format_args!("{error:#}"),
+                                error = %error.as_report(),
                                 "pin refill failed; using remote fallback"
                             );
                             false
