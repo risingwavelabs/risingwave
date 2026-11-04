@@ -732,4 +732,78 @@ mod tests {
 
         Ok(())
     }
+    #[tokio::test]
+    async fn test_sync_log_store_read_rate_limit_persistence() -> MetaResult<()> {
+        use risingwave_pb::common::ThrottleType;
+        use risingwave_pb::stream_plan::stream_node::NodeBody;
+        use risingwave_pb::stream_plan::{DmlNode, SyncLogStoreNode};
+
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let fragment_id = FragmentId::new(42);
+        insert_dirty_creating_job_with_fragment(&mgr, fragment_id, 1).await?;
+        let plan = risingwave_pb::stream_plan::StreamNode {
+            node_body: Some(NodeBody::SyncLogStore(Box::default())),
+            input: vec![risingwave_pb::stream_plan::StreamNode {
+                node_body: Some(NodeBody::Dml(Box::new(DmlNode {
+                    rate_limit: Some(7),
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        Fragment::update(fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            stream_node: Set(StreamNode::from(&plan)),
+            ..Default::default()
+        })
+        .exec(&mgr.inner.read().await.db)
+        .await?;
+        assert!(mgr.list_rate_limits().await?.is_empty());
+        for rate in [Some(10), Some(20), None] {
+            let resolved = mgr
+                .update_fragment_rate_limit_by_fragment_id(
+                    fragment_id,
+                    rate,
+                    ThrottleType::Backfill,
+                )
+                .await?;
+            assert_eq!(resolved, ThrottleType::SyncLogStoreRead);
+            // Read the persisted plan used to recover actors, not an in-memory copy.
+            let stored = Fragment::find_by_id(fragment_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .unwrap();
+            let stored = stored.stream_node.to_protobuf();
+            let NodeBody::SyncLogStore(sync) = stored.node_body.unwrap() else {
+                panic!()
+            };
+            assert_eq!(sync.read_rate_limit, rate);
+            let NodeBody::Dml(dml) = stored.input[0].node_body.as_ref().unwrap() else {
+                panic!()
+            };
+            assert_eq!(dml.rate_limit, Some(7));
+            let listed = mgr.list_rate_limits().await?;
+            if let Some(rate) = rate {
+                assert_eq!(listed.len(), 1);
+                assert_eq!(listed[0].node_name, "SYNC_LOG_STORE_READ");
+                assert_eq!(listed[0].rate_limit, rate);
+            } else {
+                assert!(listed.is_empty());
+            }
+            let error = mgr
+                .update_fragment_rate_limit_by_fragment_id(
+                    fragment_id,
+                    Some(0),
+                    ThrottleType::Backfill,
+                )
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("must be greater than 0"));
+            assert_eq!(mgr.list_rate_limits().await?, listed);
+        }
+        // Old plans with no optional field retain unlimited behavior.
+        assert_eq!(SyncLogStoreNode::default().read_rate_limit, None);
+        Ok(())
+    }
 }
