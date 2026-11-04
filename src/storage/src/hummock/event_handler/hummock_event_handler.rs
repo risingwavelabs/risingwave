@@ -1515,7 +1515,7 @@ pub(super) mod tests {
         let (_, output) =
             gen_test_sstable_with_table_vnodes(&store, 881, &[(table, 0), (ordinary_table, 0)])
                 .await;
-        let cache = PinCache::new(in_memory_object_store(), u64::MAX, 1, [])
+        let cache = PinCache::new(in_memory_object_store(), 1, [])
             .await
             .unwrap();
         let store = Arc::new(

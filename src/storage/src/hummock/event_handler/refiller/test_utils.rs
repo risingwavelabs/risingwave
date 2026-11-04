@@ -147,7 +147,7 @@ pub(super) async fn apply_next_events(refiller: &mut RefillTest) -> Vec<VersionU
 }
 
 pub(super) async fn pin_cache_for_test() -> Arc<PinCache> {
-    PinCache::new(in_memory_object_store(), u64::MAX, 1, [])
+    PinCache::new(in_memory_object_store(), 1, [])
         .await
         .unwrap()
 }
