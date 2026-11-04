@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 use std::path::Path;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail, ensure};
 use itertools::Itertools;
 use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
@@ -211,7 +212,25 @@ impl ConfigExpander {
                     "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),
                     "pulsar" => ServiceConfig::Pulsar(serde_yaml::from_str(&out_str)?),
                     "redis" => ServiceConfig::Redis(serde_yaml::from_str(&out_str)?),
-                    "cassandra" => ServiceConfig::Cassandra(serde_yaml::from_str(&out_str)?),
+                    "cassandra" => {
+                        let mut config: crate::CassandraConfig = serde_yaml::from_str(&out_str)?;
+                        ensure!(
+                            !config.address.contains(':'),
+                            "cassandra sink does not support IPv6 addresses; use an IPv4 address or hostname, got {:?}",
+                            config.address
+                        );
+                        if !config.user_managed {
+                            if config.address == "localhost" {
+                                config.address = Ipv4Addr::LOCALHOST.to_string();
+                            }
+                            ensure!(
+                                config.address.parse::<Ipv4Addr>().is_ok(),
+                                "Managed Cassandra address must be an IPv4 address or localhost, got {:?}",
+                                config.address
+                            );
+                        }
+                        ServiceConfig::Cassandra(config)
+                    }
                     "clickhouse" => ServiceConfig::ClickHouse(serde_yaml::from_str(&out_str)?),
                     "doris" => ServiceConfig::Doris(serde_yaml::from_str(&out_str)?),
                     "starrocks" => ServiceConfig::Starrocks(serde_yaml::from_str(&out_str)?),
