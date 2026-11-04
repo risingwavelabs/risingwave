@@ -1,0 +1,250 @@
+- id: create_tables_and_indexes
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar, metadata jsonb);
+    create index logs_message_fts on logs using fulltext (message);
+    create index logs_metadata_fts on logs using fulltext (metadata);
+    create index logs_error_fts on logs using fulltext ((metadata -> 'error' ->> 'message')) with (analyzer = 'simple');
+    create index logs_spans_fts on logs using fulltext (jsonb_path_query_array(metadata, '$.spans[*].error'));
+  expected_outputs: []
+- id: explain_create_index_on_table
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar, metadata jsonb);
+    explain create index logs_message_fts on logs using fulltext (message) with (analyzer = 'simple');
+  expected_outputs:
+    - explain_output
+- id: explain_create_index_on_jsonb_expression
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar, metadata jsonb);
+    explain create index logs_error_fts on logs using fulltext ((metadata -> 'error' ->> 'message'));
+  expected_outputs:
+    - explain_output
+- id: explain_create_index_on_table_without_pk
+  sql: |
+    create table t (doc varchar) append only;
+    explain create index t_doc_fts on t using fulltext (doc);
+  expected_outputs:
+    - explain_output
+- id: explain_create_index_on_pk_column
+  sql: |
+    create table t (doc varchar primary key);
+    explain create index t_doc_fts on t using fulltext (doc);
+  expected_outputs:
+    - explain_output
+- id: explain_create_index_on_mv
+  sql: |
+    create table t (k int, doc varchar);
+    create materialized view mv as select k, string_agg(doc, ' ') as docs from t group by k;
+    explain create index mv_docs_fts on mv using fulltext (docs);
+  expected_outputs:
+    - explain_output
+- id: create_index_wrong_type
+  sql: |
+    create table logs (id bigint primary key, message varchar);
+    explain create index bad on logs using fulltext (id);
+  expected_outputs:
+    - planner_error
+- id: create_index_multiple_columns
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar);
+    explain create index bad on logs using fulltext (service, message);
+  expected_outputs:
+    - planner_error
+- id: create_index_with_include
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar);
+    explain create index bad on logs using fulltext (message) include (service);
+  expected_outputs:
+    - planner_error
+- id: create_index_with_distributed_by
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar);
+    explain create index bad on logs using fulltext (message) distributed by (message);
+  expected_outputs:
+    - planner_error
+- id: create_index_with_order
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar);
+    explain create index bad on logs using fulltext (message desc);
+  expected_outputs:
+    - planner_error
+- id: create_index_unknown_analyzer
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar);
+    explain create index bad on logs using fulltext (message) with (analyzer = 'jieba');
+  expected_outputs:
+    - planner_error
+- id: create_index_unknown_option
+  sql: |
+    create table logs (id bigint primary key, service varchar, message varchar);
+    explain create index bad on logs using fulltext (message) with (distance_type = 'l2');
+  expected_outputs:
+    - planner_error
+- id: search_with_other_filter
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id, message from logs where keyword_match(message, 'Connection timeout') and service = 'api';
+  expected_outputs:
+    - batch_plan
+- id: search_with_limit
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id, message from logs where keyword_match(message, 'connection timeout') limit 100;
+  expected_outputs:
+    - batch_plan
+- id: search_with_order_by_limit
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id, service from logs where keyword_match(message, 'timeout') order by id desc limit 10;
+  expected_outputs:
+    - batch_plan
+- id: search_count
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select count(*) from logs where keyword_match(message, 'timeout');
+  expected_outputs:
+    - batch_plan
+- id: search_with_explicit_analyzer
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select * from logs where keyword_match(message, 'timeout', 'simple');
+  expected_outputs:
+    - batch_plan
+- id: search_jsonb_document
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id, metadata from logs where keyword_match(metadata, 'database timeout') limit 100;
+  expected_outputs:
+    - batch_plan
+- id: search_jsonb_field
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(metadata -> 'error' ->> 'message', 'database timeout');
+  expected_outputs:
+    - batch_plan
+- id: search_jsonb_path
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(jsonb_path_query_array(metadata, '$.spans[*].error'), 'timeout');
+  expected_outputs:
+    - batch_plan
+- id: search_in_local_mode
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id, message from logs where keyword_match(message, 'timeout') and service = 'api';
+  expected_outputs:
+    - batch_local_plan
+- id: no_index_for_non_constant_query
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(message, service);
+  expected_outputs:
+    - batch_plan
+- id: no_index_for_different_expression
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(metadata -> 'error' -> 'message', 'timeout');
+  expected_outputs:
+    - batch_plan
+- id: no_index_for_unindexed_column
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(service, 'api');
+  expected_outputs:
+    - batch_plan
+- id: no_index_for_different_analyzer
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(message, 'timeout', 'other');
+  expected_outputs:
+    - batch_plan
+- id: no_index_for_or_predicate
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(message, 'timeout') or service = 'api';
+  expected_outputs:
+    - batch_plan
+- id: no_index_for_query_without_tokens
+  before:
+    - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(message, '!!!');
+  expected_outputs:
+    - batch_plan
+- id: search_mv_index
+  sql: |
+    create table t (k int, doc varchar);
+    create materialized view mv as select k, string_agg(doc, ' ') as docs from t group by k;
+    create index mv_docs_fts on mv using fulltext (docs);
+    select k from mv where keyword_match(docs, 'hello world');
+  expected_outputs:
+    - batch_plan
+- id: search_table_without_pk
+  sql: |
+    create table t (v int, doc varchar) append only;
+    create index t_doc_fts on t using fulltext (doc);
+    select v, doc from t where keyword_match(doc, 'hello') limit 5;
+  expected_outputs:
+    - batch_plan
+- id: vector_index_still_works_with_full_text_index
+  sql: |
+    create table items (id int primary key, name varchar, embedding vector(3)) append only;
+    create index items_name_fts on items using fulltext (name);
+    create index items_vector on items using flat (embedding) include (name) with (distance_type = 'l2');
+    select id, name from items order by embedding <-> '[1, 2, 3]' limit 5;
+  expected_outputs:
+    - batch_plan
+- id: limit_not_pushed_with_other_filter
+  before:
+  - create_tables_and_indexes
+  sql: |
+    select id from logs where keyword_match(message, 'timeout') and service = 'api' limit 10;
+  expected_outputs:
+    - batch_plan
+- id: limit_with_offset_pushed
+  before:
+  - create_tables_and_indexes
+  sql: |
+    select id, message from logs where keyword_match(message, 'timeout') limit 10 offset 5;
+  expected_outputs:
+    - batch_plan
+- id: limit_not_pushed_with_retention
+  sql: |
+    create table t (id bigint primary key, doc varchar) append only with (retention_seconds = 60);
+    create index t_doc_fts on t using fulltext (doc);
+    select id, doc from t where keyword_match(doc, 'timeout') limit 10;
+  expected_outputs:
+    - batch_plan
+- id: limit_not_pushed_with_ttl_watermark
+  sql: |
+    create table t (
+      id bigint primary key,
+      ts timestamp,
+      doc varchar,
+      watermark for ts as ts - interval '1 minute' with ttl
+    );
+    create index t_doc_fts on t using fulltext (doc);
+    select id, doc from t where keyword_match(doc, 'timeout') limit 10;
+  expected_outputs:
+    - batch_plan
+- id: limit_not_pushed_through_join_with_other_table
+  before:
+  - create_tables_and_indexes
+  sql: |
+    create table services (id bigint primary key, name varchar);
+    select s.name from (select id from logs where keyword_match(message, 'timeout')) l join services s on l.id = s.id limit 10;
+  expected_outputs:
+    - batch_plan

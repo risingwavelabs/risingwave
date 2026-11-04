@@ -1356,6 +1356,19 @@ impl HummockVersionReader {
             }
         }
     }
+
+    pub async fn full_text_search(
+        &self,
+        version: PinnedVersion,
+        table_id: TableId,
+        tokens: Vec<String>,
+        limit: Option<usize>,
+    ) -> HummockResult<Vec<Bytes>> {
+        let Some(index) = version.full_text_indexes.get(&table_id) else {
+            return Ok(vec![]);
+        };
+        crate::hummock::full_text::objects::search(&self.sstable_store, index, tokens, limit).await
+    }
 }
 
 #[cfg(test)]
@@ -1574,6 +1587,7 @@ mod tests {
                 },
             )]),
             vector_indexes: HashMap::new(),
+            full_text_indexes: HashMap::new(),
         };
 
         let version = HummockVersion::from(&pb_version);
@@ -1644,6 +1658,7 @@ mod tests {
                 },
             )]),
             vector_indexes: HashMap::new(),
+            full_text_indexes: HashMap::new(),
         };
 
         let version = HummockVersion::from(&pb_version);

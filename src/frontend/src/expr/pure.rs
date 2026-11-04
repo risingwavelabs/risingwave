@@ -362,6 +362,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::L2Norm
             | Type::L2Normalize
             | Type::Subvector
+            | Type::KeywordMatch
             // TODO: `rw_vnode` is more like STABLE instead of IMMUTABLE, because even its result is
             // deterministic, it needs to read the total vnode count from the context, which means that
             // it cannot be evaluated during constant folding. We have to treat it pure here so it can be used

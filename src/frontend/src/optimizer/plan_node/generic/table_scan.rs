@@ -26,7 +26,7 @@ use risingwave_sqlparser::ast::AsOf;
 use super::GenericPlanNode;
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
-use crate::catalog::index_catalog::{TableIndex, VectorIndex};
+use crate::catalog::index_catalog::{FullTextIndex, TableIndex, VectorIndex};
 use crate::catalog::table_catalog::TableType;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -51,6 +51,7 @@ pub struct TableScan {
     /// Descriptors of all indexes on this table
     pub table_indexes: Vec<Arc<TableIndex>>,
     pub vector_indexes: Vec<Arc<VectorIndex>>,
+    pub full_text_indexes: Vec<Arc<FullTextIndex>>,
     /// Table column indices used as the stream key of this scan operator.
     table_scan_stream_key: Option<Vec<usize>>,
     /// The pushed down predicates. It refers to column indexes of the table.
@@ -351,11 +352,20 @@ impl TableScan {
             table_catalog,
             table_indexes,
             vector_indexes,
+            full_text_indexes: vec![],
             table_scan_stream_key,
             predicate,
             as_of,
             ctx,
         }
+    }
+
+    pub(crate) fn with_full_text_indexes(
+        mut self,
+        full_text_indexes: Vec<Arc<FullTextIndex>>,
+    ) -> Self {
+        self.full_text_indexes = full_text_indexes;
+        self
     }
 
     pub(crate) fn columns_pretty<'a>(&self, verbose: bool) -> Pretty<'a> {

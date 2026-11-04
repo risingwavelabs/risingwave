@@ -116,6 +116,7 @@ impl Strong {
             | ExprType::L2Norm
             | ExprType::L2Normalize
             | ExprType::Subvector
+            | ExprType::KeywordMatch
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
             // ALL: This kind of expression is null if and only if all of its arguments are null.

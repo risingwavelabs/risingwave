@@ -303,6 +303,7 @@ impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
+    type FullTextWriter = S::FullTextWriter;
     type Local = TracedStateStore<S::Local, TableSnapshot>;
     type ReadSnapshot = TracedStateStore<S::ReadSnapshot, TableSnapshot>;
     type VectorWriter = S::VectorWriter;
@@ -349,6 +350,13 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
     ) -> impl Future<Output = Self::VectorWriter> + Send + '_ {
         self.inner.new_vector_writer(options)
     }
+
+    fn new_full_text_writer(
+        &self,
+        options: NewFullTextWriterOptions,
+    ) -> impl Future<Output = Self::FullTextWriter> + Send + '_ {
+        self.inner.new_full_text_writer(options)
+    }
 }
 
 impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, TableSnapshot> {
@@ -359,6 +367,16 @@ impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, Table
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> impl StorageFuture<'a, Vec<O>> {
         self.inner.nearest(vec, options, on_nearest_item_fn)
+    }
+}
+
+impl<S: StateStoreReadFullText> StateStoreReadFullText for TracedStateStore<S, TableSnapshot> {
+    fn full_text_search(
+        &self,
+        tokens: Vec<String>,
+        limit: Option<usize>,
+    ) -> impl StorageFuture<'_, Vec<Bytes>> {
+        self.inner.full_text_search(tokens, limit)
     }
 }
 

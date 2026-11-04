@@ -400,6 +400,22 @@ for_all_wrapped_id_fields! (
             parent_id: CompactionGroupId,
             member_table_ids: TableId,
         }
+        FullTextDeleteFileInfo {
+            object_id: HummockFullTextDeleteFileId,
+        }
+        FullTextDeletionVectorInfo {
+            object_id: HummockFullTextDeletionVectorId,
+        }
+        FullTextDeletionVectorUpdate {
+            segment_object_id: HummockFullTextSegmentId,
+        }
+        FullTextIndexAdd {
+            removed_segments: HummockFullTextSegmentId,
+            consumed_delete_files: HummockFullTextDeleteFileId,
+        }
+        FullTextSegmentInfo {
+            object_id: HummockFullTextSegmentId,
+        }
         GetCompactionScoreRequest {
             compaction_group_id: CompactionGroupId,
         }
@@ -441,6 +457,7 @@ for_all_wrapped_id_fields! (
             table_change_logs: TableId,
             state_table_info: TableId,
             vector_indexes: TableId,
+            full_text_indexes: TableId,
             levels: CompactionGroupId,
         }
         HummockVersion.Levels {
@@ -461,6 +478,7 @@ for_all_wrapped_id_fields! (
             change_log_delta: TableId,
             state_table_info_delta: TableId,
             vector_index_delta: TableId,
+            full_text_index_delta: TableId,
             group_deltas: CompactionGroupId,
         }
         HummockVersionStats {
@@ -482,6 +500,9 @@ for_all_wrapped_id_fields! (
         MergeCompactionGroupRequest {
             left_group_id: CompactionGroupId,
             right_group_id: CompactionGroupId,
+        }
+        ObjectIndexFile {
+            id: HummockRawObjectId,
         }
         PinVersionRequest {
             context_id: WorkerId,
@@ -551,9 +572,6 @@ for_all_wrapped_id_fields! (
         }
         VectorFileInfo {
             object_id: HummockVectorFileId,
-        }
-        VectorIndexObject {
-            id: HummockRawObjectId,
         }
         WriteLimits {
             write_limits: CompactionGroupId,
@@ -944,6 +962,7 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse {
             table_watermarks: TableId,
             vector_index_adds: TableId,
+            full_text_index_adds: TableId,
             worker_id: WorkerId,
             list_finished_source_ids: SourceId,
             load_finished_source_ids: SourceId,
@@ -1245,6 +1264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.sync_log_store")
         .boxed(".stream_plan.StreamNode.node_body.materialized_exprs")
         .boxed(".stream_plan.StreamNode.node_body.vector_index_write")
+        .boxed(".stream_plan.StreamNode.node_body.full_text_index_write")
         .boxed(".stream_plan.StreamNode.node_body.locality_provider")
         .boxed(".stream_plan.StreamNode.node_body.eowc_gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.gap_fill")

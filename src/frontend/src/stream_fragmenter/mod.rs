@@ -620,6 +620,12 @@ fn build_fragment(
                     .add(FragmentTypeFlag::VectorIndexWrite);
             }
 
+            NodeBody::FullTextIndexWrite(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::FullTextIndexWrite);
+            }
+
             NodeBody::IcebergWithPkIndexWriter(_) => {
                 current_fragment
                     .fragment_type_mask

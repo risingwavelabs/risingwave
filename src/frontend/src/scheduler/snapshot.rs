@@ -98,6 +98,10 @@ impl ReadSnapshot {
                     &mut vector_index_read.query_epoch,
                     vector_index_read.reader_desc.as_ref().unwrap().table_id,
                 ),
+                NodeBody::FullTextSearch(full_text_search) => (
+                    &mut full_text_search.query_epoch,
+                    TableId::new(full_text_search.table_id),
+                ),
                 _ => {
                     return;
                 }

@@ -55,6 +55,7 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                 let (index_table, index_columns_len) = match &index.index_type {
                     IndexType::Table(index) => (&index.index_table, index.index_columns_len),
                     IndexType::Vector(index) => (&index.index_table, 1),
+                    IndexType::FullText(index) => (&index.index_table, 1),
                 };
                 RwIndex {
                     id: index.id,

@@ -460,6 +460,18 @@ message VectorIndexNearestNode {
   common.BatchQueryEpoch query_epoch = 8;
 }
 
+message FullTextSearchNode {
+  // The table id of the full-text index to search.
+  uint32 table_id = 1;
+  // Analyzed query tokens. A document matches when it contains all of them.
+  repeated string tokens = 2;
+  // Data types of the base relation's stream key, in the order they are encoded in the index.
+  repeated data.DataType key_types = 3;
+  common.BatchQueryEpoch query_epoch = 4;
+  // Output at most this many keys.
+  optional uint64 limit = 5;
+}
+
 message GetChannelDeltaStatsNode {
   // Optional timestamp to get channel stats at a specific time
   optional uint64 at_time = 1;
@@ -511,6 +523,7 @@ message PlanNode {
     GetChannelDeltaStatsNode get_channel_delta_stats = 45;
     IcebergMetadataScanNode iceberg_metadata_scan = 46;
     MssqlQueryNode mssql_query = 47;
+    FullTextSearchNode full_text_search = 48;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

@@ -28,6 +28,7 @@ use tracing::warn;
 
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
+use crate::full_text_index::{FullTextIndex, FullTextIndexDelta};
 use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
@@ -230,6 +231,7 @@ pub struct HummockVersionCommon<T> {
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub state_table_info: HummockVersionStateTableInfo,
     pub vector_indexes: HashMap<TableId, VectorIndex>,
+    pub full_text_indexes: HashMap<TableId, FullTextIndex>,
 }
 
 pub type HummockVersion = HummockVersionCommon<SstableInfo>;
@@ -320,6 +322,11 @@ where
                 .iter()
                 .map(|(table_id, index)| (*table_id, index.clone().into()))
                 .collect(),
+            full_text_indexes: pb_version
+                .full_text_indexes
+                .iter()
+                .map(|(table_id, index)| (*table_id, index.clone().into()))
+                .collect(),
         }
     }
 }
@@ -353,6 +360,11 @@ where
                 .into_iter()
                 .map(|(table_id, index)| (table_id, index.into()))
                 .collect(),
+            full_text_indexes: pb_version
+                .full_text_indexes
+                .into_iter()
+                .map(|(table_id, index)| (table_id, index.into()))
+                .collect(),
         }
     }
 }
@@ -380,6 +392,11 @@ where
             state_table_info: version.state_table_info.state_table_info.clone(),
             vector_indexes: version
                 .vector_indexes
+                .iter()
+                .map(|(table_id, index)| (*table_id, index.clone().into()))
+                .collect(),
+            full_text_indexes: version
+                .full_text_indexes
                 .iter()
                 .map(|(table_id, index)| (*table_id, index.clone().into()))
                 .collect(),
@@ -411,6 +428,11 @@ where
             state_table_info: version.state_table_info.state_table_info.clone(),
             vector_indexes: version
                 .vector_indexes
+                .into_iter()
+                .map(|(table_id, index)| (table_id, index.into()))
+                .collect(),
+            full_text_indexes: version
+                .full_text_indexes
                 .into_iter()
                 .map(|(table_id, index)| (table_id, index.into()))
                 .collect(),
@@ -469,6 +491,7 @@ impl HummockVersion {
             table_watermarks: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
             vector_indexes: Default::default(),
+            full_text_indexes: Default::default(),
         };
         for group_id in [
             StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -494,6 +517,7 @@ impl HummockVersion {
             removed_table_ids: HashSet::new(),
             state_table_info_delta: Default::default(),
             vector_index_delta: Default::default(),
+            full_text_index_delta: Default::default(),
         }
     }
 }
@@ -519,6 +543,7 @@ pub struct HummockVersionDeltaCommon<T> {
     pub removed_table_ids: HashSet<TableId>,
     pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
     pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
+    pub full_text_index_delta: HashMap<TableId, FullTextIndexDelta>,
 }
 
 pub type HummockVersionDelta = HummockVersionDeltaCommon<SstableInfo>;
@@ -599,6 +624,9 @@ where
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
             HummockObjectId::HnswGraphFile(_) => {}
+            HummockObjectId::FullTextSegment(_) => {}
+            HummockObjectId::FullTextDeleteFile(_) => {}
+            HummockObjectId::FullTextDeletionVector(_) => {}
         };
         self.newly_added_sst_infos()
             .map(|sst| HummockObjectId::Sstable(sst.object_id()))
@@ -610,6 +638,11 @@ where
                             .newly_added_objects()
                             .map(|(object_id, _)| object_id)
                     }),
+            )
+            .chain(
+                self.full_text_index_delta
+                    .values()
+                    .flat_map(|delta| delta.newly_added_objects().map(|(object_id, _)| object_id)),
             )
             .collect()
     }
@@ -681,6 +714,11 @@ where
                 .iter()
                 .map(|(table_id, delta)| (*table_id, delta.clone().into()))
                 .collect(),
+            full_text_index_delta: pb_version_delta
+                .full_text_index_delta
+                .iter()
+                .map(|(table_id, delta)| (*table_id, delta.clone().into()))
+                .collect(),
         }
     }
 }
@@ -711,6 +749,11 @@ where
             state_table_info_delta: version_delta.state_table_info_delta.clone(),
             vector_index_delta: version_delta
                 .vector_index_delta
+                .iter()
+                .map(|(table_id, delta)| (*table_id, delta.clone().into()))
+                .collect(),
+            full_text_index_delta: version_delta
+                .full_text_index_delta
                 .iter()
                 .map(|(table_id, delta)| (*table_id, delta.clone().into()))
                 .collect(),
@@ -747,6 +790,11 @@ where
                 .into_iter()
                 .map(|(table_id, delta)| (table_id, delta.into()))
                 .collect(),
+            full_text_index_delta: version_delta
+                .full_text_index_delta
+                .into_iter()
+                .map(|(table_id, delta)| (table_id, delta.into()))
+                .collect(),
         }
     }
 }
@@ -776,6 +824,11 @@ where
             state_table_info_delta: pb_version_delta.state_table_info_delta,
             vector_index_delta: pb_version_delta
                 .vector_index_delta
+                .into_iter()
+                .map(|(table_id, delta)| (table_id, delta.into()))
+                .collect(),
+            full_text_index_delta: pb_version_delta
+                .full_text_index_delta
                 .into_iter()
                 .map(|(table_id, delta)| (table_id, delta.into()))
                 .collect(),

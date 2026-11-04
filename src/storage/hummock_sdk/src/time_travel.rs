@@ -88,6 +88,7 @@ impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersio
             table_watermarks: version.table_watermarks.clone(),
             state_table_info: version.state_table_info.clone(),
             vector_indexes: version.vector_indexes.clone(),
+            full_text_indexes: version.full_text_indexes.clone(),
         }
     }
 }
@@ -145,6 +146,7 @@ impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockV
             removed_table_ids: delta.removed_table_ids.clone(),
             state_table_info_delta: delta.state_table_info_delta.clone(),
             vector_index_delta: delta.vector_index_delta.clone(),
+            full_text_index_delta: delta.full_text_index_delta.clone(),
         }
     }
 }

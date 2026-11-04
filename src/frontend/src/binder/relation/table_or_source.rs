@@ -708,7 +708,7 @@ impl Binder {
         let table_name = &table.name;
         match table.table_type() {
             TableType::Table => {}
-            TableType::Index | TableType::VectorIndex => {
+            TableType::Index | TableType::VectorIndex | TableType::FullTextIndex => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change index \"{table_name}\""
                 ))

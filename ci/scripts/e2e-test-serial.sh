@@ -152,6 +152,9 @@ sleep 3
 risedev slt -p 4566 -d dev './e2e_test/vector_search/**/*.slt'
 kill $MOCKED_EMBEDDING_SERVICE_PID
 
+echo "--- e2e, $mode, full-text search"
+risedev slt -p 4566 -d dev './e2e_test/full_text_search/**/*.slt'
+
 
 echo "--- Kill cluster"
 cluster_stop

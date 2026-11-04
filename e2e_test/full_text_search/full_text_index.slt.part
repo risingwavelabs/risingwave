@@ -1,0 +1,245 @@
+statement ok
+create table ft_docs (id int primary key, body varchar, meta jsonb);
+
+statement ok
+insert into ft_docs values
+  (1, 'Connection timeout while reading the response', '{"title": "Network error", "tags": ["net", "timeout"], "level": 3}'),
+  (2, 'Runtime panic in the query planner', '{"title": "Planner panic", "tags": ["planner"], "level": 5}'),
+  (3, 'Disk full: compaction stalled', '{"title": "Storage stall", "tags": ["disk", "compaction"], "level": 4}');
+
+statement ok
+create index ft_body on ft_docs using fulltext (body);
+
+statement ok
+create index ft_title on ft_docs using fulltext ((meta->>'title')) with (analyzer = 'simple');
+
+statement ok
+create index ft_meta on ft_docs using fulltext (meta);
+
+statement error
+create index ft_bad_type on ft_docs using fulltext (id);
+
+statement error
+create index ft_bad_analyzer on ft_docs using fulltext (body) with (analyzer = 'jieba');
+
+statement ok
+insert into ft_docs values
+  (4, 'Read timeout on sink connection', '{"title": "Sink timeout", "tags": ["sink"], "level": 2}');
+
+statement ok
+flush;
+
+query I rowsort
+select id from ft_docs where keyword_match(body, 'timeout');
+----
+1
+4
+
+# Token match, not substring match.
+query I rowsort
+select id from ft_docs where keyword_match(body, 'time');
+----
+
+# All query tokens must match.
+query I rowsort
+select id from ft_docs where keyword_match(body, 'TIMEOUT connection');
+----
+1
+4
+
+query I rowsort
+select id from ft_docs where keyword_match(body, 'timeout response');
+----
+1
+
+# Other predicates are applied after the search.
+query I rowsort
+select id from ft_docs where keyword_match(body, 'timeout') and (meta->>'level')::int > 2;
+----
+1
+
+query I
+select id from ft_docs where keyword_match(body, 'timeout') order by id limit 1;
+----
+1
+
+# Expression index on a JSONB field.
+query I rowsort
+select id from ft_docs where keyword_match(meta->>'title', 'panic');
+----
+2
+
+# Whole-column JSONB index: keys and non-string values are ignored.
+query I rowsort
+select id from ft_docs where keyword_match(meta, 'compaction');
+----
+3
+
+query I rowsort
+select id from ft_docs where keyword_match(meta, 'title');
+----
+
+query I rowsort
+select id from ft_docs where keyword_match(meta, '5');
+----
+
+# Updates and deletes.
+statement ok
+update ft_docs set body = 'Connection refused by the server' where id = 1;
+
+statement ok
+delete from ft_docs where id = 4;
+
+statement ok
+flush;
+
+query I rowsort
+select id from ft_docs where keyword_match(body, 'timeout');
+----
+
+query I rowsort
+select id from ft_docs where keyword_match(body, 'connection');
+----
+1
+
+# Delete and re-insert the same key.
+statement ok
+delete from ft_docs where id = 2;
+
+statement ok
+insert into ft_docs values (2, 'Planner rewrite produces wrong plan', '{"title": "Planner bug"}');
+
+statement ok
+flush;
+
+query I rowsort
+select id from ft_docs where keyword_match(body, 'planner');
+----
+2
+
+query I rowsort
+select id from ft_docs where keyword_match(body, 'panic');
+----
+
+# Many small epochs to exercise segment merging and delete resolution.
+statement ok
+insert into ft_docs select g, 'bulk row number ' || g::varchar || case when g % 10 = 0 then ' tenth' else '' end, null::jsonb from generate_series(100, 199) g;
+
+statement ok
+flush;
+
+statement ok
+insert into ft_docs select g, 'bulk row number ' || g::varchar || case when g % 10 = 0 then ' tenth' else '' end, null::jsonb from generate_series(200, 299) g;
+
+statement ok
+flush;
+
+statement ok
+delete from ft_docs where id between 150 and 249;
+
+statement ok
+flush;
+
+statement ok
+insert into ft_docs select g, 'bulk row number ' || g::varchar || case when g % 10 = 0 then ' tenth' else '' end, null::jsonb from generate_series(300, 399) g;
+
+statement ok
+flush;
+
+statement ok
+update ft_docs set body = body || ' tenth' where id between 301 and 305;
+
+statement ok
+flush;
+
+statement ok
+insert into ft_docs values (400, 'bulk', null);
+
+statement ok
+flush;
+
+statement ok
+insert into ft_docs values (401, 'bulk', null);
+
+statement ok
+flush;
+
+statement ok
+insert into ft_docs values (402, 'bulk', null);
+
+statement ok
+flush;
+
+statement ok
+insert into ft_docs values (403, 'bulk', null);
+
+statement ok
+flush;
+
+statement ok
+insert into ft_docs values (404, 'bulk tenth', null);
+
+statement ok
+flush;
+
+query I
+select count(*) from ft_docs where keyword_match(body, 'bulk');
+----
+205
+
+query I
+select count(*) from ft_docs where keyword_match(body, 'bulk tenth');
+----
+26
+
+query I
+select count(*) from ft_docs where keyword_match(body, 'bulk') and id between 150 and 249;
+----
+0
+
+# LIMIT is pushed down to the index search.
+query I
+select count(*) from (select id from ft_docs where keyword_match(body, 'bulk') limit 7);
+----
+7
+
+query I
+select count(*) from (select id from ft_docs where keyword_match(body, 'bulk tenth') limit 100);
+----
+26
+
+# The result must agree with a scan that does not use the index.
+query I
+select count(*) from ft_docs where keyword_match(body || '', 'bulk tenth');
+----
+26
+
+# Index on a materialized view.
+statement ok
+create materialized view ft_mv as select id, upper(body) as body from ft_docs where id < 100;
+
+statement ok
+create index ft_mv_body on ft_mv using fulltext (body);
+
+statement ok
+flush;
+
+query I rowsort
+select id from ft_mv where keyword_match(body, 'refused');
+----
+1
+
+statement ok
+drop materialized view ft_mv;
+
+statement ok
+drop index ft_body;
+
+statement ok
+drop index ft_title;
+
+statement ok
+drop index ft_meta;
+
+statement ok
+drop table ft_docs;

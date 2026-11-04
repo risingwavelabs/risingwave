@@ -228,8 +228,13 @@ impl BuildingFragment {
                     table_desc.table_id = job_id.as_mv_table_id();
                 }
             }
-            NodeBody::VectorIndexWrite(node) => {
-                let table = node.table.as_mut().unwrap();
+            node_body @ (NodeBody::VectorIndexWrite(_) | NodeBody::FullTextIndexWrite(_)) => {
+                let table = match node_body {
+                    NodeBody::VectorIndexWrite(node) => node.table.as_mut(),
+                    NodeBody::FullTextIndexWrite(node) => node.table.as_mut(),
+                    _ => unreachable!(),
+                }
+                .unwrap();
                 table.id = job_id.as_mv_table_id();
                 table.database_id = job.database_id();
                 table.schema_id = job.schema_id();
@@ -2274,18 +2279,21 @@ impl CompleteStreamFragmentGraph {
                 None
             };
 
-        let vector_index_fragment_id =
-            if inner.fragment_type_mask & FragmentTypeFlag::VectorIndexWrite as u32 != 0 {
-                job_id.map(JobId::as_mv_table_id)
-            } else {
-                None
-            };
+        let object_index_fragment_id = if inner.fragment_type_mask
+            & (FragmentTypeFlag::VectorIndexWrite as u32
+                | FragmentTypeFlag::FullTextIndexWrite as u32)
+            != 0
+        {
+            job_id.map(JobId::as_mv_table_id)
+        } else {
+            None
+        };
 
         let state_table_ids = internal_tables
             .iter()
             .map(|t| t.id)
             .chain(materialized_fragment_id)
-            .chain(vector_index_fragment_id)
+            .chain(object_index_fragment_id)
             .collect();
 
         Fragment {

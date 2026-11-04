@@ -40,6 +40,7 @@ mod eowc_gap_fill;
 mod eowc_over_window;
 mod expand;
 mod filter;
+mod full_text_index_write;
 mod gap_fill;
 mod group_top_n;
 mod hash_agg;

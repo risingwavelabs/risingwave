@@ -239,14 +239,19 @@ message StateTableInfoDelta {
   uint64 compaction_group_id = 3;
 }
 
-enum VectorIndexObjectType {
-  VECTOR_INDEX_OBJECT_UNSPECIFIED = 0;
-  VECTOR_INDEX_OBJECT_VECTOR = 1;
-  VECTOR_INDEX_OBJECT_HNSW_GRAPH = 2;
+// Type of a file of an object index, i.e. an index whose data is stored in its own objects
+// instead of SSTs (vector index or full-text index).
+enum ObjectIndexFileType {
+  OBJECT_INDEX_FILE_TYPE_UNSPECIFIED = 0;
+  OBJECT_INDEX_FILE_TYPE_VECTOR = 1;
+  OBJECT_INDEX_FILE_TYPE_HNSW_GRAPH = 2;
+  OBJECT_INDEX_FILE_TYPE_FULL_TEXT_SEGMENT = 3;
+  OBJECT_INDEX_FILE_TYPE_FULL_TEXT_DELETE_FILE = 4;
+  OBJECT_INDEX_FILE_TYPE_FULL_TEXT_DELETION_VECTOR = 5;
 }
-message VectorIndexObject {
+message ObjectIndexFile {
   uint64 id = 1;
-  VectorIndexObjectType object_type = 2;
+  ObjectIndexFileType file_type = 2;
 }
 
 message VectorFileInfo {
@@ -304,6 +309,74 @@ message HnswFlatIndexAdd {
   HnswGraphFileInfo graph_file = 3;
 }
 
+message FullTextDeletionVectorInfo {
+  uint64 object_id = 1;
+  uint64 file_size = 2;
+  // Number of documents in the segment marked as deleted by this vector.
+  uint64 num_deleted = 3;
+}
+
+message FullTextSegmentInfo {
+  uint64 object_id = 1;
+  uint64 file_size = 2;
+  // Opaque metadata needed to open the segment, encoded by the storage full-text module.
+  bytes segment_meta = 3;
+  uint64 num_docs = 4;
+  uint64 min_epoch = 5;
+  uint64 max_epoch = 6;
+  // Memcomparable-encoded stream key range of the documents in the segment.
+  bytes min_key = 7;
+  bytes max_key = 8;
+  optional FullTextDeletionVectorInfo deletion_vector = 9;
+}
+
+message FullTextDeleteFileInfo {
+  uint64 object_id = 1;
+  uint64 file_size = 2;
+  // Markers in this file delete documents written before this epoch.
+  uint64 epoch = 3;
+  uint64 num_keys = 4;
+  bytes min_key = 5;
+  bytes max_key = 6;
+}
+
+message FullTextIndex {
+  catalog.FullTextIndexInfo info = 1;
+  repeated FullTextSegmentInfo segments = 2;
+  // Delete files whose markers have not been resolved into deletion vectors yet.
+  repeated FullTextDeleteFileInfo pending_delete_files = 3;
+}
+
+message FullTextDeletionVectorUpdate {
+  uint64 segment_object_id = 1;
+  FullTextDeletionVectorInfo deletion_vector = 2;
+}
+
+// Changes are applied in field order: removed segments, added segments,
+// deletion vector updates, consumed delete files, and finally the added delete files.
+message FullTextIndexAdd {
+  repeated uint64 removed_segments = 1;
+  repeated FullTextSegmentInfo added_segments = 2;
+  repeated FullTextDeletionVectorUpdate deletion_vector_updates = 3;
+  repeated uint64 consumed_delete_files = 4;
+  repeated FullTextDeleteFileInfo added_delete_files = 5;
+}
+
+message FullTextIndexDelta {
+  message FullTextIndexInit {
+    catalog.FullTextIndexInfo info = 1;
+  }
+
+  message FullTextIndexAdds {
+    repeated FullTextIndexAdd adds = 1;
+  }
+
+  oneof delta {
+    FullTextIndexInit init = 1;
+    FullTextIndexAdds adds = 2;
+  }
+}
+
 message VectorIndex {
   uint32 dimension = 1;
   common.DistanceType distance_type = 2;
@@ -356,6 +429,7 @@ message HummockVersion {
   map<uint32, TableChangeLog> table_change_logs = 6 [deprecated = true];
   map<uint32, StateTableInfo> state_table_info = 7;
   map<uint32, VectorIndex> vector_indexes = 8;
+  map<uint32, FullTextIndex> full_text_indexes = 9;
 }
 
 message HummockVersionDelta {
@@ -382,6 +456,7 @@ message HummockVersionDelta {
   map<uint32, ChangeLogDelta> change_log_delta = 10 [deprecated = true];
   map<uint32, StateTableInfoDelta> state_table_info_delta = 11;
   map<uint32, VectorIndexDelta> vector_index_delta = 12;
+  map<uint32, FullTextIndexDelta> full_text_index_delta = 13;
 }
 
 message HummockVersionDeltas {
@@ -392,7 +467,7 @@ message HummockVersionCheckpoint {
   message StaleObjects {
     repeated uint64 id = 1;
     uint64 total_file_size = 2;
-    repeated VectorIndexObject vector_files = 3;
+    repeated ObjectIndexFile object_index_files = 3;
   }
   HummockVersion version = 1;
   map<uint64, StaleObjects> stale_objects = 2;

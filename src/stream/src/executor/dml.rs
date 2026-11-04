@@ -460,6 +460,7 @@ mod tests {
     }
 
     impl StateStore for MockWaitEpochStateStore {
+        type FullTextWriter = PanicStateStore;
         type Local = PanicStateStore;
         type ReadSnapshot = PanicStateStore;
         type VectorWriter = PanicStateStore;
@@ -491,6 +492,13 @@ mod tests {
 
         async fn new_vector_writer(&self, _options: NewVectorWriterOptions) -> Self::VectorWriter {
             panic!("should not create vector writer from MockWaitEpochStateStore")
+        }
+
+        async fn new_full_text_writer(
+            &self,
+            _options: NewFullTextWriterOptions,
+        ) -> Self::FullTextWriter {
+            panic!("should not create full-text writer from MockWaitEpochStateStore")
         }
     }
 

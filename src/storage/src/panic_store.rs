@@ -152,6 +152,16 @@ impl StateStoreWriteVector for PanicStateStore {
     }
 }
 
+impl StateStoreWriteFullText for PanicStateStore {
+    fn insert_document(&mut self, _key: Bytes, _tokens: &[String]) -> StorageResult<()> {
+        panic!()
+    }
+
+    fn delete_document(&mut self, _key: Bytes) -> StorageResult<()> {
+        panic!()
+    }
+}
+
 impl StateStoreReadVector for PanicStateStore {
     async fn nearest<'a, O: Send + 'a>(
         &'a self,
@@ -163,7 +173,18 @@ impl StateStoreReadVector for PanicStateStore {
     }
 }
 
+impl StateStoreReadFullText for PanicStateStore {
+    async fn full_text_search(
+        &self,
+        _tokens: Vec<String>,
+        _limit: Option<usize>,
+    ) -> StorageResult<Vec<Bytes>> {
+        panic!()
+    }
+}
+
 impl StateStore for PanicStateStore {
+    type FullTextWriter = PanicStateStore;
     type Local = Self;
     type ReadSnapshot = Self;
     type VectorWriter = PanicStateStore;
@@ -189,6 +210,13 @@ impl StateStore for PanicStateStore {
     }
 
     async fn new_vector_writer(&self, _options: NewVectorWriterOptions) -> Self::VectorWriter {
+        panic!()
+    }
+
+    async fn new_full_text_writer(
+        &self,
+        _options: NewFullTextWriterOptions,
+    ) -> Self::FullTextWriter {
         panic!()
     }
 }

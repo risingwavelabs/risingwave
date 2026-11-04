@@ -344,7 +344,8 @@ macro_rules! for_all_fragment_type_flags {
                 VectorIndexWrite,
                 UpstreamSinkUnion,
                 LocalityProvider,
-                IcebergWithPkIndexWriter
+                IcebergWithPkIndexWriter,
+                FullTextIndexWrite
             },
             {},
             0
@@ -614,6 +615,11 @@ mod tests {
                     IcebergWithPkIndexWriter,
                     262144,
                     "ICEBERG_WITH_PK_INDEX_WRITER",
+                ),
+                (
+                    FullTextIndexWrite,
+                    524288,
+                    "FULL_TEXT_INDEX_WRITE",
                 ),
             ]
         "#]]

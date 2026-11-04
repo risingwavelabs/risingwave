@@ -239,6 +239,17 @@ impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<
     }
 }
 
+impl<S: StateStoreReadFullText> StateStoreReadFullText for MonitoredTableStateStore<S> {
+    fn full_text_search(
+        &self,
+        tokens: Vec<String>,
+        limit: Option<usize>,
+    ) -> impl StorageFuture<'_, Vec<Bytes>> {
+        // TODO: monitor
+        self.inner.full_text_search(tokens, limit)
+    }
+}
+
 impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
     type FlushedSnapshotReader = MonitoredTableStateStore<S::FlushedSnapshotReader>;
 
@@ -327,7 +338,19 @@ impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStor
     }
 }
 
+impl<S: StateStoreWriteFullText> StateStoreWriteFullText for MonitoredTableStateStore<S> {
+    fn insert_document(&mut self, key: Bytes, tokens: &[String]) -> StorageResult<()> {
+        // TODO: monitor
+        self.inner.insert_document(key, tokens)
+    }
+
+    fn delete_document(&mut self, key: Bytes) -> StorageResult<()> {
+        self.inner.delete_document(key)
+    }
+}
+
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
+    type FullTextWriter = MonitoredTableStateStore<S::FullTextWriter>;
     type Local = MonitoredTableStateStore<S::Local>;
     type ReadSnapshot = MonitoredTableStateStore<S::ReadSnapshot>;
     type VectorWriter = MonitoredTableStateStore<S::VectorWriter>;
@@ -378,6 +401,18 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         let table_id = options.table_id;
         MonitoredTableStateStore::new(
             self.inner.new_vector_writer(options).await,
+            self.storage_metrics.clone(),
+            table_id,
+        )
+    }
+
+    async fn new_full_text_writer(
+        &self,
+        options: NewFullTextWriterOptions,
+    ) -> Self::FullTextWriter {
+        let table_id = options.table_id;
+        MonitoredTableStateStore::new(
+            self.inner.new_full_text_writer(options).await,
             self.storage_metrics.clone(),
             table_id,
         )

@@ -30,7 +30,8 @@ use risingwave_pb::catalog::table::{
     CdcTableType as PbCdcTableType, PbEngine, PbTableType, PbTableVersion,
 };
 use risingwave_pb::catalog::{
-    PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
+    PbCreateType, PbFullTextIndexInfo, PbStreamJobStatus, PbTable, PbVectorIndexInfo,
+    PbWebhookSourceInfo,
 };
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::DefaultColumnDesc;
@@ -209,6 +210,8 @@ pub struct TableCatalog {
 
     pub vector_index_info: Option<PbVectorIndexInfo>,
 
+    pub full_text_index_info: Option<PbFullTextIndexInfo>,
+
     pub cdc_table_type: Option<ExternalCdcTableType>,
 }
 
@@ -224,6 +227,7 @@ pub enum TableType {
     /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
     VectorIndex,
+    FullTextIndex,
     /// Internal tables for executors.
     Internal,
 }
@@ -236,6 +240,7 @@ impl TableType {
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
             PbTableType::VectorIndex => Self::VectorIndex,
+            PbTableType::FullTextIndex => Self::FullTextIndex,
             PbTableType::Unspecified => unreachable!(),
         }
     }
@@ -246,6 +251,7 @@ impl TableType {
             Self::MaterializedView => PbTableType::MaterializedView,
             Self::Index => PbTableType::Index,
             Self::VectorIndex => PbTableType::VectorIndex,
+            Self::FullTextIndex => PbTableType::FullTextIndex,
             Self::Internal => PbTableType::Internal,
         }
     }
@@ -391,7 +397,9 @@ impl TableCatalog {
             TableType::MaterializedView => {
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
             }
-            TableType::Index | TableType::VectorIndex => "Use `DROP INDEX` to drop an index.",
+            TableType::Index | TableType::VectorIndex | TableType::FullTextIndex => {
+                "Use `DROP INDEX` to drop an index."
+            }
             TableType::Table => "Use `DROP TABLE` to drop a table.",
             TableType::Internal => "Internal tables cannot be dropped.",
         };
@@ -623,6 +631,7 @@ impl TableCatalog {
                 .collect(),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
+            full_text_index_info: self.full_text_index_info.clone(),
             cdc_table_type: self
                 .cdc_table_type
                 .clone()
@@ -891,6 +900,7 @@ impl From<PbTable> for TableCatalog {
 
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
+            full_text_index_info: tb.full_text_index_info,
             cdc_table_type: tb
                 .cdc_table_type
                 .and_then(|t| PbCdcTableType::try_from(t).ok())
@@ -992,6 +1002,7 @@ mod tests {
 
             refreshable: false,
             vector_index_info: None,
+            full_text_index_info: None,
             cdc_table_type: None,
         }
         .into();
@@ -1063,6 +1074,7 @@ mod tests {
 
                 refreshable: false,
                 vector_index_info: None,
+                full_text_index_info: None,
                 cdc_table_type: None,
             }
         );

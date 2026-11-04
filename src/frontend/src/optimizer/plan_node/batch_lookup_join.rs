@@ -123,6 +123,13 @@ impl BatchLookupJoin {
     pub fn lookup_prefix_len(&self) -> usize {
         self.lookup_prefix_len
     }
+
+    /// Whether this is an inner join with equality conditions only.
+    pub fn is_inner_eq_join(&self) -> bool {
+        self.core.join_type == risingwave_pb::plan_common::JoinType::Inner
+            && !self.eq_join_predicate().has_non_eq()
+            && self.asof_desc.is_none()
+    }
 }
 
 impl Distill for BatchLookupJoin {

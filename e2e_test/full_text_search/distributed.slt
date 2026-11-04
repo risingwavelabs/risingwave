@@ -1,0 +1,4 @@
+statement ok
+set query_mode = distributed;
+
+include full_text_index.slt.part

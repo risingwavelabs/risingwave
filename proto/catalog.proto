@@ -395,6 +395,16 @@ message VectorIndexInfo {
   }
 }
 
+message FullTextIndexInfo {
+  // Name of the analyzer used to tokenize documents and queries.
+  string analyzer = 1;
+  uint32 analyzer_version = 2;
+  // Whether the indexed expression is JSONB. Otherwise it is TEXT.
+  bool is_jsonb = 3;
+  // Version of the on-disk segment format.
+  uint32 format_version = 4;
+}
+
 // Includes full information about a table.
 //
 // Here `Table` is an internal concept, corresponding to _a table in storage_, all of which can be `SELECT`ed.
@@ -409,6 +419,7 @@ message Table {
     INDEX = 3;
     INTERNAL = 4;
     VECTOR_INDEX = 5;
+    FULL_TEXT_INDEX = 6;
   }
 
   message TableVersion {
@@ -576,6 +587,9 @@ message Table {
   // This replaces clean_watermark_index_in_pk but is kept for backward compatibility.
   // When set, this takes precedence over clean_watermark_index_in_pk.
   repeated uint32 clean_watermark_indices = 49;
+
+  // only exist when table_type is FULL_TEXT_INDEX.
+  optional FullTextIndexInfo full_text_index_info = 50;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for

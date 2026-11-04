@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
@@ -26,12 +26,13 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::change_log::{TableChangeLogs, build_table_change_log_delta};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::full_text_index::FullTextIndexDelta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo,
-    ObjectIdRange, SyncResult,
+    ObjectIdRange, ObjectIndexAdd, SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
@@ -185,6 +186,20 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, self.context_id))
             .collect();
         let new_table_watermark = sync_result.table_watermarks;
+        let mut vector_index_adds: HashMap<_, Vec<_>> = HashMap::new();
+        let mut full_text_index_adds: HashMap<_, Vec<_>> = HashMap::new();
+        for (table_id, adds) in sync_result.object_index_adds {
+            for add in adds {
+                match add {
+                    ObjectIndexAdd::Vector(add) => {
+                        vector_index_adds.entry(table_id).or_default().push(add)
+                    }
+                    ObjectIndexAdd::FullText(add) => {
+                        full_text_index_adds.entry(table_id).or_default().push(add)
+                    }
+                }
+            }
+        }
         let table_change_log = match change_log_info {
             Some(epochs) => {
                 assert_eq!(*epochs.last().expect("non-empty"), epoch);
@@ -208,10 +223,13 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sst_to_context,
                 new_table_fragment_infos,
                 change_log_delta: table_change_log,
-                vector_index_delta: sync_result
-                    .vector_index_adds
+                vector_index_delta: vector_index_adds
                     .into_iter()
                     .map(|(table_id, adds)| (table_id, VectorIndexDelta::Adds(adds)))
+                    .collect(),
+                full_text_index_delta: full_text_index_adds
+                    .into_iter()
+                    .map(|(table_id, adds)| (table_id, FullTextIndexDelta::Adds(adds)))
                     .collect(),
                 tables_to_commit: commit_table_ids
                     .iter()

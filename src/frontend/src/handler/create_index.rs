@@ -21,17 +21,19 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableId};
+use risingwave_common::fulltext::{Analyzer, DEFAULT_ANALYZER};
 use risingwave_common::types::DataType;
 use risingwave_common::util::recursive::{Recurse, tracker};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{
-    CreateType, PbFlatIndexConfig, PbHnswFlatIndexConfig, PbIndex, PbIndexColumnProperties,
-    PbStreamJobStatus, PbVectorIndexInfo,
+    CreateType, PbFlatIndexConfig, PbFullTextIndexInfo, PbHnswFlatIndexConfig, PbIndex,
+    PbIndexColumnProperties, PbStreamJobStatus, PbVectorIndexInfo,
 };
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
+use risingwave_storage::hummock::full_text::FULL_TEXT_FORMAT_VERSION;
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
@@ -59,6 +61,8 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
+
+const FULL_TEXT_ANALYZER_OPTION: &str = "analyzer";
 
 pub(crate) fn resolve_index_schema(
     session: &SessionImpl,
@@ -174,6 +178,21 @@ pub(crate) fn gen_create_index_plan(
             table.name
         ))
         .into());
+    }
+
+    if let Some(method) = &method
+        && method.real_value().eq_ignore_ascii_case("fulltext")
+    {
+        return gen_create_full_text_index_plan(
+            session,
+            context,
+            schema_name,
+            table,
+            index_table_name,
+            columns,
+            include,
+            distributed_by,
+        );
     }
 
     let vector_index_config = if let Some(method) = method {
@@ -518,6 +537,193 @@ pub(crate) fn gen_create_index_plan(
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
+        ctx.trace("Create Index:");
+        ctx.trace(plan.explain_to_string());
+    }
+
+    Ok((plan, index_table, index_prost))
+}
+
+/// Plans `CREATE INDEX ... USING fulltext (expr) [WITH (analyzer = '...')]`.
+///
+/// The index table is a [`TableType::FullTextIndex`](crate::catalog::table_catalog::TableType)
+/// whose columns are `[indexed document, stream key of the primary table...]`, as expected by
+/// the full-text index writer.
+fn gen_create_full_text_index_plan(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    schema_name: String,
+    table: Arc<TableCatalog>,
+    index_table_name: String,
+    columns: Vec<OrderByExpr>,
+    include: Vec<Ident>,
+    distributed_by: Vec<ast::Expr>,
+) -> Result<(PlanRef, TableCatalog, PbIndex)> {
+    if !include.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "full-text index cannot define INCLUDE".to_owned(),
+        )
+        .into());
+    }
+    if !distributed_by.is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "full-text index cannot define DISTRIBUTED BY".to_owned(),
+        )
+        .into());
+    }
+    let [column]: [OrderByExpr; 1] = columns.try_into().map_err(|columns: Vec<_>| {
+        ErrorCode::InvalidInputSyntax(format!(
+            "full-text index must be defined on exactly 1 column or expression, but got {}",
+            columns.len()
+        ))
+    })?;
+    if column.asc.is_some() || column.nulls_first.is_some() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "full-text index cannot specify order".to_owned(),
+        )
+        .into());
+    }
+
+    let with_options = context.with_options();
+    if let Some(key) = with_options
+        .keys()
+        .find(|key| key.as_str() != FULL_TEXT_ANALYZER_OPTION)
+    {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "unsupported option \"{}\" for full-text index, only \"{}\" is supported",
+            key, FULL_TEXT_ANALYZER_OPTION
+        ))
+        .into());
+    }
+    let analyzer_name = with_options
+        .get(FULL_TEXT_ANALYZER_OPTION)
+        .map(String::as_str)
+        .unwrap_or(DEFAULT_ANALYZER);
+    let analyzer = Analyzer::from_name(analyzer_name).ok_or_else(|| {
+        ErrorCode::InvalidInputSyntax(format!("unknown full-text analyzer \"{}\"", analyzer_name))
+    })?;
+
+    let mut binder = Binder::new_for_stream(session);
+    binder.bind_table(Some(&schema_name), &table.name)?;
+    let expr = binder.bind_expr(&column.expr)?;
+    // Normalize the expression in the same way as batch queries do, so that a query can match it.
+    let mut const_eval = ConstEvalRewriter { error: None };
+    let expr = const_eval.rewrite_expr(expr);
+    let expr = context.session_timezone().rewrite_expr(expr);
+    IndexColumnExprValidator::validate(&expr, false)?;
+    let is_jsonb = match expr.return_type() {
+        DataType::Varchar => false,
+        DataType::Jsonb => true,
+        other => {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "full-text index must be defined on a column or expression of type varchar or jsonb, but got {}",
+                other
+            ))
+            .into());
+        }
+    };
+
+    let (index_database_id, index_schema_id) =
+        session.get_database_and_schema_id_for_create(Some(schema_name))?;
+
+    // The writer identifies documents by the stream key of the primary table.
+    let key_exprs = table
+        .stream_key()
+        .into_iter()
+        .map(|idx| {
+            ExprImpl::InputRef(InputRef::new(idx, table.columns()[idx].data_type().clone()).into())
+        })
+        .collect_vec();
+    let key_names = table
+        .stream_key()
+        .into_iter()
+        .map(|idx| table.columns()[idx].name().to_owned())
+        .collect_vec();
+    let doc_name = {
+        let base_name = match &expr {
+            ExprImpl::InputRef(input_ref) => table.columns()[input_ref.index].name().to_owned(),
+            ExprImpl::FunctionCall(func) => func.func_type().as_str_name().to_lowercase(),
+            _ => unreachable!(),
+        };
+        let mut name = base_name.clone();
+        let mut count = 0;
+        while key_names.contains(&name) {
+            count += 1;
+            name = format!("{}{}", base_name, count);
+        }
+        name
+    };
+
+    let exprs = std::iter::once(expr)
+        .chain(key_exprs.iter().cloned())
+        .collect_vec();
+    let index_item = exprs.iter().map(|expr| expr.to_expr_proto()).collect_vec();
+    let logical_scan = LogicalScan::create(table.clone(), context.clone(), None);
+    let logical_project = LogicalProject::create(logical_scan.into(), exprs);
+    let mut out_fields = FixedBitSet::with_capacity(logical_project.schema().len());
+    out_fields.toggle_range(..);
+    let out_names = std::iter::once(doc_name).chain(key_names).collect_vec();
+    let root = PlanRoot::new_with_logical_plan(
+        logical_project,
+        RequiredDist::PhysicalDist(Distribution::Single),
+        Order::any(),
+        out_fields,
+        out_names,
+    );
+
+    let definition = context.normalized_sql().to_owned();
+    let retention_seconds = table.retention_seconds.and_then(NonZeroU32::new);
+    let index_write = root.gen_full_text_index_plan(
+        index_table_name.clone(),
+        index_database_id,
+        index_schema_id,
+        definition,
+        retention_seconds,
+        PbFullTextIndexInfo {
+            analyzer: analyzer.name().to_owned(),
+            analyzer_version: analyzer.version(),
+            is_jsonb,
+            format_version: FULL_TEXT_FORMAT_VERSION,
+        },
+    )?;
+    let mut index_table = index_write.table().clone();
+    assert_eq!(index_table.columns.len(), index_item.len());
+    let plan: PlanRef = ensure_sync_log_store_fragment_root(index_write.into());
+
+    index_table.retention_seconds = table.retention_seconds;
+    index_table.owner = table.owner;
+
+    let create_type =
+        if context.session_ctx().config().background_ddl() && plan_can_use_background_ddl(&plan) {
+            CreateType::Background
+        } else {
+            CreateType::Foreground
+        };
+
+    let index_prost = PbIndex {
+        id: IndexId::placeholder(),
+        schema_id: index_schema_id,
+        database_id: index_database_id,
+        name: index_table_name,
+        owner: index_table.owner,
+        index_table_id: TableId::placeholder(),
+        primary_table_id: table.id,
+        index_item,
+        index_column_properties: vec![PbIndexColumnProperties {
+            is_desc: false,
+            nulls_first: false,
+        }],
+        index_columns_len: 1,
+        initialized_at_epoch: None,
+        created_at_epoch: None,
+        stream_job_status: PbStreamJobStatus::Creating.into(),
+        initialized_at_cluster_version: None,
+        created_at_cluster_version: None,
+        create_type: create_type.into(),
+    };
+
+    let ctx = plan.ctx();
+    if ctx.is_explain_trace() {
         ctx.trace("Create Index:");
         ctx.trace(plan.explain_to_string());
     }

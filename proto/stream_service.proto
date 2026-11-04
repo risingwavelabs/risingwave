@@ -155,6 +155,7 @@ message BarrierCompleteResponse {
     common.Buffer vnode_bitmap = 5;
   }
   repeated TableChangeLogProgress table_change_log_progress = 20;
+  map<uint32, hummock.FullTextIndexDelta.FullTextIndexAdds> full_text_index_adds = 21;
 }
 
 message StreamingControlStreamRequest {
