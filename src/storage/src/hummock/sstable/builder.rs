@@ -58,6 +58,8 @@ pub const MIN_BLOCK_SIZE: usize = 8 * 1024;
 pub struct SstableBuilderOptions {
     /// Approximate sstable capacity.
     pub capacity: usize,
+    /// Also use the SST capacity as a separate threshold for encoded block metadata.
+    pub limit_block_meta_size: bool,
     /// Approximate block capacity.
     pub block_capacity: usize,
     /// Restart point interval.
@@ -82,6 +84,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
         let capacity: usize = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,
+            limit_block_meta_size: false,
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
@@ -99,6 +102,7 @@ impl Default for SstableBuilderOptions {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_SSTABLE_SIZE,
+            limit_block_meta_size: false,
             block_capacity: DEFAULT_BLOCK_SIZE,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
@@ -144,6 +148,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
+    block_meta_size: usize,
 
     /// `table_id` of added keys.
     table_ids: BTreeSet<TableId>,
@@ -228,6 +233,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }),
             filter_builder,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
+            block_meta_size: 0,
             table_ids: BTreeSet::new(),
             last_table_id: None,
             raw_key: Vec::new(),
@@ -327,7 +333,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         );
         meta.offset = self.writer.data_len() as u32;
         let block_len = buf.len();
-        self.block_metas.push(meta);
+        self.add_block_meta(meta);
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer
@@ -435,7 +441,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 full_key.encode()
             };
 
-            self.block_metas.push(BlockMeta {
+            self.add_block_meta(BlockMeta {
                 offset: utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
                     panic!(
                         "WARN overflow can't convert writer_data_len {} into u32 sst_id {} block_idx {} tables {:?}",
@@ -783,9 +789,17 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.writer.data_len() > 0
     }
 
+    fn add_block_meta(&mut self, meta: BlockMeta) {
+        if self.options.limit_block_meta_size {
+            self.block_meta_size += meta.encoded_size();
+        }
+        self.block_metas.push(meta);
+    }
+
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity
+            || (self.options.limit_block_meta_size && self.block_meta_size >= self.options.capacity)
     }
 
     fn finalize_last_table_stats(&mut self) {

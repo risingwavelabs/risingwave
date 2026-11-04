@@ -307,6 +307,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = task.compression_algorithm.into();
         options.capacity = task.target_file_size as usize;
+        options.limit_block_meta_size = true;
         let estimated_output_key_count =
             estimate_output_key_count_for_task(&task, options.capacity);
         options.estimated_output_key_count = Some(estimated_output_key_count);
@@ -839,15 +840,20 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::key::FullKey;
+    use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::InputLevel;
     use risingwave_pb::hummock::compact_task::TaskType;
     use risingwave_pb::hummock::{LevelType, PbSstableFilterLayout, PbSstableFilterType};
 
     use super::CompactorRunner;
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
-    use crate::hummock::compactor::compaction_utils::optimize_by_copy_block;
+    use crate::hummock::compactor::compaction_utils::{
+        check_compaction_result, optimize_by_copy_block,
+    };
+    use crate::hummock::compactor::compactor_runner::CompactorRunner as NormalCompactorRunner;
     use crate::hummock::compactor::task_progress::TaskProgress;
     use crate::hummock::compactor::{CompactorContext, MultiCompactionFilter};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -856,7 +862,8 @@ mod tests {
     };
     use crate::hummock::value::HummockValue;
     use crate::hummock::{
-        BlockedXor16FilterBuilder, CachePolicy, SharedComapctorObjectIdManager, Xor16FilterBuilder,
+        BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm,
+        SharedComapctorObjectIdManager, SstableBuilderOptions, Xor16FilterBuilder,
     };
     use crate::monitor::CompactorMetrics;
 
@@ -864,6 +871,133 @@ mod tests {
         let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
         table_key.extend_from_slice(format!("key_test_{idx:05}").as_bytes());
         FullKey::for_test(TableId::new(table_id), table_key, test_epoch(1))
+    }
+
+    #[tokio::test]
+    async fn test_compaction_splits_large_block_metadata() {
+        const TARGET_SIZE: u64 = 40 * 1024;
+        const KEYS_PER_INPUT: usize = 3;
+        const INPUTS_PER_LEVEL: usize = 3;
+        let sstable_store = mock_sstable_store().await;
+        let mut storage_opts = default_opts_for_test();
+        storage_opts.block_size_kb = 1;
+        storage_opts.shorten_block_meta_key_threshold = None;
+        storage_opts.enable_fast_compaction = true;
+        storage_opts.compactor_fast_max_compact_task_size = u64::MAX;
+        storage_opts.compactor_fast_max_compact_delete_ratio = 100;
+        let metrics = Arc::new(CompactorMetrics {
+            compact_fast_runner_bytes: prometheus::IntCounter::new(
+                "test_compact_fast_runner_bytes",
+                "Bytes copied by the fast compaction under test",
+            )
+            .unwrap(),
+            ..CompactorMetrics::unused()
+        });
+        let context = CompactorContext::new_local_compact_context(
+            Arc::new(storage_opts),
+            sstable_store.clone(),
+            metrics.clone(),
+            None,
+        );
+        let catalog = CompactionCatalogAgent::for_test(vec![1]);
+        let input_options = SstableBuilderOptions {
+            compression_algorithm: CompressionAlgorithm::Zstd,
+            block_capacity: 1024,
+            ..default_builder_opt_for_test()
+        };
+        let mut input_ssts = Vec::new();
+        for level_idx in 1..=2 {
+            let first_input = (level_idx as usize - 1) * INPUTS_PER_LEVEL;
+            let mut table_infos = Vec::new();
+            for input in first_input..first_input + INPUTS_PER_LEVEL {
+                let start = input * KEYS_PER_INPUT;
+                let rows = (start..start + KEYS_PER_INPUT).flat_map(|idx| {
+                    // Each version occupies a block. Zstd compresses the prefix in the block body,
+                    // while BlockMeta stores it verbatim.
+                    let mut key = VirtualNode::ZERO.to_be_bytes().to_vec();
+                    key.extend(std::iter::repeat_n(b'x', 6 * 1024));
+                    key.extend_from_slice(&idx.to_be_bytes());
+                    // The first key after seven raw blocks has versions in separate blocks.
+                    let latest_epoch = if idx == 7 { 2 } else { 1 };
+                    (1..=latest_epoch).rev().map(move |epoch| {
+                        (
+                            FullKey::for_test(TableId::new(1), key.clone(), test_epoch(epoch)),
+                            HummockValue::put(test_value_of(idx + epoch as usize)),
+                        )
+                    })
+                });
+                let sst = gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
+                    input_options.clone(),
+                    input as u64 + 1,
+                    rows,
+                    sstable_store.clone(),
+                    CachePolicy::NotFill,
+                    HashMap::from([(1, VirtualNode::COUNT_FOR_TEST)]),
+                    HashMap::from([(1, None)]),
+                )
+                .await;
+                assert!(sst.meta_offset < TARGET_SIZE / 16);
+                assert!(sst.file_size - sst.meta_offset < TARGET_SIZE);
+                table_infos.push(sst);
+            }
+            input_ssts.push(InputLevel {
+                level_idx,
+                level_type: LevelType::Nonoverlapping,
+                table_infos,
+            });
+        }
+        let mut task = CompactTask {
+            input_ssts,
+            splits: vec![KeyRange::inf()],
+            target_level: 2,
+            existing_table_ids: vec![TableId::new(1)],
+            target_file_size: TARGET_SIZE,
+            compression_algorithm: 2, // Zstd
+            task_type: TaskType::Dynamic,
+            blocked_xor_filter_kv_count_threshold: Some(0),
+            sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
+            ..Default::default()
+        };
+        let object_ids = SharedComapctorObjectIdManager::for_test((100..200).collect());
+        let (_, normal_outputs, _) =
+            NormalCompactorRunner::new(0, context.clone(), task.clone(), object_ids.clone())
+                .run(
+                    MultiCompactionFilter::default(),
+                    catalog.clone(),
+                    Arc::new(TaskProgress::default()),
+                )
+                .await
+                .unwrap();
+
+        assert!(optimize_by_copy_block(&task, &context));
+        let (fast_outputs, _) = CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
+            context.clone(),
+            task.clone(),
+            catalog.clone(),
+            object_ids,
+            Arc::new(TaskProgress::default()),
+            MultiCompactionFilter::default(),
+        )
+        .run()
+        .await
+        .unwrap();
+        assert!(metrics.compact_fast_runner_bytes.get() > 0);
+
+        for (path, outputs) in [("normal", normal_outputs), ("fast", fast_outputs)] {
+            task.sorted_output_ssts = outputs.into_iter().map(|output| output.sst_info).collect();
+            assert!(task.sorted_output_ssts.len() > 1, "{path}");
+            assert!(can_concat(&task.sorted_output_ssts), "{path}");
+            for sst in &task.sorted_output_ssts {
+                let footer_size = sst.file_size - sst.meta_offset;
+                assert!(footer_size < 2 * TARGET_SIZE, "{path}: {footer_size}");
+            }
+            assert!(
+                check_compaction_result(&task, context.clone(), catalog.clone())
+                    .await
+                    .unwrap(),
+                "{path}",
+            );
+        }
     }
 
     #[tokio::test]
