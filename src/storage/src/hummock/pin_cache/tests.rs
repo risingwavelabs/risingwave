@@ -310,6 +310,7 @@ async fn test_recovery_rejects_inventory_initialization_error() {
     assert!(local_store.metadata("1001-42.sst").await.is_ok());
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_recovery_returns_ready_routes_across_shards() {
     let (_dir, local) = local_object_store().await;
