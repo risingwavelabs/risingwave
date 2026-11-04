@@ -20,7 +20,7 @@ easy-ext = "1"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
-num-bigint = "0.4"
+num-bigint = "0.5"
 panic-message = "0.3"
 prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { workspace = true }
