@@ -20,6 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_hummock_sdk::full_text_index::{FullTextIndexAdd, FullTextIndexDelta};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
@@ -41,7 +42,7 @@ use crate::barrier::CreateStreamingJobCommandInfo;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::complete_task::CompleteBarrierTask;
 use crate::barrier::partial_graph::PartialGraphBarrierInfo;
-use crate::hummock::{CommittedTableChangeLogProgress, NewTableFragmentInfo};
+use crate::hummock::{CommitEpochInfo, CommittedTableChangeLogProgress, NewTableFragmentInfo};
 
 #[expect(clippy::type_complexity)]
 pub(super) fn collect_resp_info(
@@ -51,7 +52,7 @@ pub(super) fn collect_resp_info(
     Vec<LocalSstableInfo>,
     HashMap<TableId, TableWatermarks>,
     Vec<SstableInfo>,
-    HashMap<TableId, Vec<VectorIndexAdd>>,
+    ObjectIndexAdds,
     Vec<IcebergPkIndexSinkMetadata>,
     Vec<CommittedTableChangeLogProgress>,
 ) {
@@ -59,7 +60,7 @@ pub(super) fn collect_resp_info(
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
-    let mut vector_index_adds = HashMap::new();
+    let mut object_index_adds = ObjectIndexAdds::default();
     let mut iceberg_pk_index_sink_metadata = Vec::new();
     type SubscriberKey = (FragmentId, TableId, TableId);
     struct TableChangeLogProgressAggregate {
@@ -70,7 +71,8 @@ pub(super) fn collect_resp_info(
         HashMap::<SubscriberKey, TableChangeLogProgressAggregate>::new();
     let mut invalid_table_change_log_subscribers = HashSet::new();
 
-    for resp in resps {
+    for mut resp in resps {
+        object_index_adds.extend_from_resp(&mut resp);
         let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
             let sst_info = local_sst.sst.expect("field not None");
             sst_to_worker.insert(sst_info.object_id, resp.worker_id);
@@ -83,18 +85,6 @@ pub(super) fn collect_resp_info(
         synced_ssts.extend(ssts_iter);
         table_watermarks.push(resp.table_watermarks);
         old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
-        for (table_id, vector_index_add) in resp.vector_index_adds {
-            vector_index_adds
-                .try_insert(
-                    table_id,
-                    vector_index_add
-                        .adds
-                        .into_iter()
-                        .map(VectorIndexAdd::from)
-                        .collect(),
-                )
-                .expect("non-duplicate");
-        }
         iceberg_pk_index_sink_metadata.extend(resp.iceberg_pk_index_sink_metadata);
         for report in resp.table_change_log_progress {
             let PbTableChangeLogProgress {
@@ -199,32 +189,104 @@ pub(super) fn collect_resp_info(
                 .collect_vec(),
         ),
         old_value_ssts,
-        vector_index_adds,
+        object_index_adds,
         iceberg_pk_index_sink_metadata,
         table_change_log_progress,
     )
 }
 
-pub(super) fn collect_new_vector_index_info(
-    info: &CreateStreamingJobCommandInfo,
-) -> Option<&PbTable> {
-    let mut vector_index_table = None;
-    {
-        for fragment in info.stream_job_fragments.fragments.values() {
-            visit_stream_node_cont(&fragment.nodes, |node| {
-                match node.node_body.as_ref().unwrap() {
-                    NodeBody::VectorIndexWrite(vector_index_write) => {
-                        let index_table = vector_index_write.table.as_ref().unwrap();
-                        assert_eq!(index_table.table_type, PbTableType::VectorIndex as i32);
-                        vector_index_table = Some(index_table);
-                        false
-                    }
-                    _ => true,
-                }
-            })
+/// Changes of object-backed indexes (vector and full-text) reported by the writers in one barrier.
+#[derive(Default)]
+pub(super) struct ObjectIndexAdds {
+    vector: HashMap<TableId, Vec<VectorIndexAdd>>,
+    full_text: HashMap<TableId, Vec<FullTextIndexAdd>>,
+}
+
+impl ObjectIndexAdds {
+    fn extend_from_resp(&mut self, resp: &mut BarrierCompleteResponse) {
+        for (table_id, adds) in resp.vector_index_adds.drain() {
+            self.vector
+                .try_insert(table_id, adds.adds.into_iter().map(Into::into).collect())
+                .expect("non-duplicate");
         }
-        vector_index_table
+        for (table_id, adds) in resp.full_text_index_adds.drain() {
+            self.full_text
+                .try_insert(table_id, adds.adds.into_iter().map(Into::into).collect())
+                .expect("non-duplicate");
+        }
     }
+
+    /// Adds the reported changes to `commit_info`. If `new_job` creates an object-backed index,
+    /// also initializes the index in the same version delta.
+    pub(super) fn commit(
+        self,
+        commit_info: &mut CommitEpochInfo,
+        new_job: Option<&CreateStreamingJobCommandInfo>,
+    ) {
+        for (table_id, adds) in self.vector {
+            commit_info
+                .vector_index_delta
+                .try_insert(table_id, VectorIndexDelta::Adds(adds))
+                .expect("non-duplicate");
+        }
+        for (table_id, adds) in self.full_text {
+            commit_info
+                .full_text_index_delta
+                .try_insert(table_id, FullTextIndexDelta::Adds(adds))
+                .expect("non-duplicate");
+        }
+        let Some(index_table) = new_job.and_then(collect_new_object_index_table) else {
+            return;
+        };
+        match index_table.table_type() {
+            PbTableType::VectorIndex => {
+                commit_info
+                    .vector_index_delta
+                    .try_insert(
+                        index_table.id,
+                        VectorIndexDelta::Init(PbVectorIndexInit {
+                            info: Some(index_table.vector_index_info.unwrap()),
+                        }),
+                    )
+                    .expect("non-duplicate");
+            }
+            PbTableType::FullTextIndex => {
+                commit_info
+                    .full_text_index_delta
+                    .try_insert(
+                        index_table.id,
+                        FullTextIndexDelta::Init(index_table.full_text_index_info.clone().unwrap()),
+                    )
+                    .expect("non-duplicate");
+            }
+            table_type => unreachable!("unexpected object index table type {:?}", table_type),
+        }
+    }
+}
+
+/// Returns the index table written by a vector or full-text index writer in the new job.
+fn collect_new_object_index_table(info: &CreateStreamingJobCommandInfo) -> Option<&PbTable> {
+    let mut index_table = None;
+    for fragment in info.stream_job_fragments.fragments.values() {
+        visit_stream_node_cont(&fragment.nodes, |node| {
+            match node.node_body.as_ref().unwrap() {
+                NodeBody::VectorIndexWrite(write) => {
+                    let table = write.table.as_ref().unwrap();
+                    assert_eq!(table.table_type(), PbTableType::VectorIndex);
+                    index_table = Some(table);
+                    false
+                }
+                NodeBody::FullTextIndexWrite(write) => {
+                    let table = write.table.as_ref().unwrap();
+                    assert_eq!(table.table_type(), PbTableType::FullTextIndex);
+                    index_table = Some(table);
+                    false
+                }
+                _ => true,
+            }
+        })
+    }
+    index_table
 }
 
 pub(super) fn collect_independent_job_commit_epoch_info(
@@ -238,7 +300,7 @@ pub(super) fn collect_independent_job_commit_epoch_info(
         sstables,
         new_table_watermarks,
         old_value_sst,
-        vector_index_adds,
+        object_index_adds,
         iceberg_pk_index_sink_metadata,
         table_change_log_progress,
     ) = collect_resp_info(resps);
@@ -249,12 +311,6 @@ pub(super) fn collect_independent_job_commit_epoch_info(
     commit_info
         .new_table_watermarks
         .extend(new_table_watermarks);
-    for (table_id, vector_index_adds) in vector_index_adds {
-        commit_info
-            .vector_index_delta
-            .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
-            .expect("non-duplicate");
-    }
     barrier_info
         .table_ids_to_commit
         .iter()
@@ -271,18 +327,10 @@ pub(super) fn collect_independent_job_commit_epoch_info(
             .push(NewTableFragmentInfo {
                 table_ids: barrier_info.table_ids_to_commit.clone(),
             });
-        if let Some(index_table) = collect_new_vector_index_info(info) {
-            commit_info
-                .vector_index_delta
-                .try_insert(
-                    index_table.id,
-                    VectorIndexDelta::Init(PbVectorIndexInit {
-                        info: Some(index_table.vector_index_info.unwrap()),
-                    }),
-                )
-                .expect("non-duplicate");
-        }
-    };
+        object_index_adds.commit(commit_info, Some(info));
+    } else {
+        object_index_adds.commit(commit_info, None);
+    }
     task.iceberg_pk_index_pre_commit_metadata
         .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
     commit_info

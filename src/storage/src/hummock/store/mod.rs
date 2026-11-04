@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod full_text_writer;
 pub mod hummock_storage;
 pub mod local_hummock_storage;
+pub(crate) mod object_index_writer;
 pub(crate) mod table_change_log_manager;
 mod vector_writer;
 pub mod version;

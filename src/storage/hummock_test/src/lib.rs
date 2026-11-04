@@ -14,6 +14,7 @@
 
 #![feature(proc_macro_hygiene)]
 #![feature(custom_test_frameworks)]
+#![recursion_limit = "256"]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
 #[cfg(test)]
@@ -37,6 +38,9 @@ mod hummock_storage_tests;
 
 #[cfg(test)]
 mod hummock_vector_tests;
+
+#[cfg(test)]
+mod hummock_full_text_tests;
 
 mod mock_notification_client;
 #[cfg(all(test, feature = "sync_point"))]

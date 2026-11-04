@@ -45,6 +45,7 @@ impl FrontendHummockVersion {
             table_change_logs: Default::default(),
             state_table_info: self.state_table_info.info().clone(),
             vector_indexes: Default::default(),
+            full_text_indexes: Default::default(),
         }
     }
 
@@ -95,6 +96,7 @@ impl FrontendHummockVersionDelta {
             change_log_delta: Default::default(),
             state_table_info_delta: self.state_table_info_delta.clone(),
             vector_index_delta: Default::default(),
+            full_text_index_delta: Default::default(),
         }
     }
 

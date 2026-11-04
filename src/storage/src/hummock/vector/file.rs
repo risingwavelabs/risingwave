@@ -23,8 +23,9 @@ use risingwave_hummock_sdk::HummockVectorFileId;
 use risingwave_hummock_sdk::vector_index::{HnswFlatIndex, VectorFileInfo};
 use risingwave_object_store::object::ObjectStreamingUploader;
 
+use crate::hummock::store::object_index_writer::ObjectIndexFileIdManagerRef;
 use crate::hummock::vector::monitor::VectorStoreCacheStats;
-use crate::hummock::vector::writer::{VectorObjectIdManagerRef, new_vector_file_builder};
+use crate::hummock::vector::writer::new_vector_file_builder;
 use crate::hummock::vector::{EnumVectorAccessor, get_vector_block, search_vector};
 use crate::hummock::{
     HummockError, HummockResult, SstableStoreRef, xxhash64_checksum, xxhash64_verify,
@@ -523,7 +524,7 @@ impl FileVectorStore {
         index: &HnswFlatIndex,
         dimension: usize,
         sstable_store: SstableStoreRef,
-        object_id_manager: VectorObjectIdManagerRef,
+        object_id_manager: ObjectIndexFileIdManagerRef,
         storage_opts: &StorageOpts,
     ) -> Self {
         let next_vector_id = index.vector_store_info.next_vector_id;

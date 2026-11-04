@@ -990,6 +990,7 @@ mod predicate_pushdown;
 pub use predicate_pushdown::*;
 mod merge_eq_nodes;
 pub use merge_eq_nodes::*;
+mod object_index_write;
 
 pub mod batch;
 pub mod generic;
@@ -1120,12 +1121,14 @@ mod logical_iceberg_metadata_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
+mod batch_full_text_search;
 mod batch_vector_search;
 mod logical_mssql_query;
 mod logical_mysql_query;
 mod logical_vector_search;
 mod logical_vector_search_lookup_join;
 mod stream_cdc_table_scan;
+mod stream_full_text_index_write;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_upstream_sink_union;
@@ -1138,6 +1141,7 @@ pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
 pub use batch_file_scan::BatchFileScan;
 pub use batch_filter::BatchFilter;
+pub use batch_full_text_search::BatchFullTextSearch;
 pub use batch_get_channel_delta_stats::BatchGetChannelDeltaStats;
 pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
@@ -1228,6 +1232,7 @@ pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_fs_fetch::StreamFsFetch;
+pub use stream_full_text_index_write::StreamFullTextIndexWrite;
 pub use stream_gap_fill::StreamGapFill;
 pub use stream_global_approx_percentile::StreamGlobalApproxPercentile;
 pub use stream_group_topn::StreamGroupTopN;
@@ -1372,6 +1377,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, MssqlQuery }
             , { Batch, GetChannelDeltaStats }
             , { Batch, VectorSearch }
+            , { Batch, FullTextSearch }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1414,6 +1420,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
             , { Stream, VectorIndexWrite }
+            , { Stream, FullTextIndexWrite }
             , { Stream, VectorIndexLookupJoin }
             , { Stream, UpstreamSinkUnion }
             , { Stream, LocalityProvider }

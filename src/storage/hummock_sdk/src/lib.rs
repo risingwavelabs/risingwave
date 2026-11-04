@@ -35,6 +35,7 @@ pub mod compact;
 pub mod compact_task;
 pub mod compaction_group;
 pub mod filter_utils;
+pub mod full_text_index;
 pub mod key;
 pub mod key_range;
 pub mod level;
@@ -51,13 +52,15 @@ pub mod vector_index;
 
 pub use compact::*;
 use risingwave_common::catalog::TableId;
+use risingwave_pb::hummock::PbObjectIndexFileType;
 use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
-use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 pub use risingwave_pb::id::{
-    CompactionGroupId, HummockHnswGraphFileId, HummockRawObjectId, HummockSstableId,
+    CompactionGroupId, HummockFullTextDeleteFileId, HummockFullTextDeletionVectorId,
+    HummockFullTextSegmentId, HummockHnswGraphFileId, HummockRawObjectId, HummockSstableId,
     HummockSstableObjectId, HummockVectorFileId, HummockVersionId,
 };
 
+use crate::full_text_index::FullTextIndexAdd;
 use crate::table_watermark::TableWatermarks;
 use crate::vector_index::VectorIndexAdd;
 
@@ -83,7 +86,7 @@ macro_rules! for_all_object_suffix {
             )+
         }
 
-        pub const VALID_OBJECT_ID_SUFFIXES: [&str; 3] = [$(
+        pub const VALID_OBJECT_ID_SUFFIXES: [&str; 6] = [$(
                 $suffix
             ),+];
 
@@ -140,6 +143,9 @@ macro_rules! for_all_object_suffix {
             {Sstable, HummockSstableObjectId, SST_OBJECT_SUFFIX},
             {VectorFile, HummockVectorFileId, VECTOR_FILE_OBJECT_SUFFIX},
             {HnswGraphFile, HummockHnswGraphFileId, "hnsw_graph"},
+            {FullTextSegment, HummockFullTextSegmentId, "ft_segment"},
+            {FullTextDeleteFile, HummockFullTextDeleteFileId, "ft_delete"},
+            {FullTextDeletionVector, HummockFullTextDeletionVectorId, "ft_dv"},
         }
     };
 }
@@ -156,24 +162,32 @@ pub fn get_stale_object_ids(
         HummockObjectId::Sstable(_) => {}
         HummockObjectId::VectorFile(_) => {}
         HummockObjectId::HnswGraphFile(_) => {}
+        HummockObjectId::FullTextSegment(_) => {}
+        HummockObjectId::FullTextDeleteFile(_) => {}
+        HummockObjectId::FullTextDeletionVector(_) => {}
     };
     stale_objects
         .id
         .iter()
         .map(|sst_id| HummockObjectId::Sstable(*sst_id))
-        .chain(stale_objects.vector_files.iter().map(
-            |file| match file.get_object_type().unwrap() {
-                PbVectorIndexObjectType::VectorIndexObjectUnspecified => {
+        .chain(stale_objects.object_index_files.iter().map(|file| {
+            match file.get_file_type().unwrap() {
+                PbObjectIndexFileType::Unspecified => {
                     unreachable!()
                 }
-                VectorIndexObjectType::VectorIndexObjectVector => {
-                    HummockObjectId::VectorFile(file.id.into())
+                PbObjectIndexFileType::Vector => HummockObjectId::VectorFile(file.id.into()),
+                PbObjectIndexFileType::HnswGraph => HummockObjectId::HnswGraphFile(file.id.into()),
+                PbObjectIndexFileType::FullTextSegment => {
+                    HummockObjectId::FullTextSegment(file.id.into())
                 }
-                VectorIndexObjectType::VectorIndexObjectHnswGraph => {
-                    HummockObjectId::HnswGraphFile(file.id.into())
+                PbObjectIndexFileType::FullTextDeleteFile => {
+                    HummockObjectId::FullTextDeleteFile(file.id.into())
                 }
-            },
-        ))
+                PbObjectIndexFileType::FullTextDeletionVector => {
+                    HummockObjectId::FullTextDeletionVector(file.id.into())
+                }
+            }
+        }))
 }
 
 #[macro_export]
@@ -212,7 +226,15 @@ pub struct SyncResult {
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
     /// Sstable that holds the uncommitted old value
     pub old_value_ssts: Vec<LocalSstableInfo>,
-    pub vector_index_adds: HashMap<TableId, Vec<VectorIndexAdd>>,
+    /// Changes of the indexes whose data lives in their own objects instead of SSTs.
+    pub object_index_adds: HashMap<TableId, Vec<ObjectIndexAdd>>,
+}
+
+/// Changes that the writer of an object-backed index (vector or full-text) commits in one epoch.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ObjectIndexAdd {
+    Vector(VectorIndexAdd),
+    FullText(FullTextIndexAdd),
 }
 
 #[derive(Debug, Clone)]

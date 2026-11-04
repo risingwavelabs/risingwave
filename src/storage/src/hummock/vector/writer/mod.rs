@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod hnsw;
+use std::future::Future;
 use std::mem::take;
 use std::sync::Arc;
 
@@ -26,32 +27,22 @@ use risingwave_hummock_sdk::vector_index::{
     FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl,
     VectorStoreInfoDelta,
 };
-use risingwave_hummock_sdk::{HummockObjectId, HummockRawObjectId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockObjectId, ObjectIndexAdd};
 
+use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::store::object_index_writer::{
+    ObjectIndexFileIdManagerRef, ObjectIndexWriterContext, ObjectIndexWriterImpl,
+};
 use crate::hummock::vector::file::VectorFileBuilder;
-use crate::hummock::{HummockResult, ObjectIdManager, SstableStoreRef};
+use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
-
-#[async_trait::async_trait]
-pub trait VectorObjectIdManager: Send + Sync {
-    async fn get_new_vector_object_id(&self) -> HummockResult<HummockRawObjectId>;
-}
-
-pub type VectorObjectIdManagerRef = Arc<dyn VectorObjectIdManager>;
-
-#[async_trait::async_trait]
-impl VectorObjectIdManager for ObjectIdManager {
-    async fn get_new_vector_object_id(&self) -> HummockResult<HummockRawObjectId> {
-        self.get_new_object_id().await
-    }
-}
 
 pub(crate) fn new_vector_file_builder(
     dimension: usize,
     next_vector_id: usize,
     sstable_store: SstableStoreRef,
-    object_id_manager: VectorObjectIdManagerRef,
+    object_id_manager: ObjectIndexFileIdManagerRef,
     storage_opts: &StorageOpts,
 ) -> VectorFileBuilder {
     VectorFileBuilder::new(
@@ -60,7 +51,7 @@ pub(crate) fn new_vector_file_builder(
             let object_id_manager = object_id_manager.clone();
             let sstable_store = sstable_store.clone();
             async move {
-                let object_id = object_id_manager.get_new_vector_object_id().await?.into();
+                let object_id = object_id_manager.get_new_file_object_id().await?.into();
                 let path =
                     sstable_store.get_object_data_path(HummockObjectId::VectorFile(object_id));
                 let uploader = sstable_store.create_streaming_uploader(&path).await?;
@@ -83,7 +74,7 @@ impl VectorWriterImpl {
         table_id: TableId,
         index: &VectorIndex,
         sstable_store: SstableStoreRef,
-        object_id_manager: VectorObjectIdManagerRef,
+        object_id_manager: ObjectIndexFileIdManagerRef,
         stats: Arc<HummockStateStoreMetrics>,
         storage_opts: &StorageOpts,
     ) -> HummockResult<Self> {
@@ -142,6 +133,39 @@ impl VectorWriterImpl {
     }
 }
 
+impl ObjectIndexWriterImpl for VectorWriterImpl {
+    async fn create(
+        ctx: &ObjectIndexWriterContext,
+        version: &PinnedVersion,
+        _init_epoch: HummockEpoch,
+    ) -> HummockResult<Self> {
+        let index = version.vector_indexes.get(&ctx.table_id).ok_or_else(|| {
+            HummockError::other(format!("vector index not found: {}", ctx.table_id))
+        })?;
+        Self::new(
+            ctx.table_id,
+            index,
+            ctx.sstable_store.clone(),
+            ctx.object_id_manager.clone(),
+            ctx.stats.clone(),
+            &ctx.storage_opts,
+        )
+        .await
+    }
+
+    fn seal_current_epoch(&mut self, _next_epoch: HummockEpoch) -> Option<ObjectIndexAdd> {
+        VectorWriterImpl::seal_current_epoch(self).map(ObjectIndexAdd::Vector)
+    }
+
+    fn flush(&mut self) -> impl Future<Output = HummockResult<usize>> + Send + '_ {
+        VectorWriterImpl::flush(self)
+    }
+
+    fn try_flush(&mut self) -> impl Future<Output = HummockResult<()>> + Send + '_ {
+        VectorWriterImpl::try_flush(self)
+    }
+}
+
 pub(crate) struct FlatIndexWriter {
     flushed_vector_files: Vec<VectorFileInfo>,
     sstable_store: SstableStoreRef,
@@ -153,7 +177,7 @@ impl FlatIndexWriter {
         index: &FlatIndex,
         dimension: usize,
         sstable_store: SstableStoreRef,
-        object_id_manager: VectorObjectIdManagerRef,
+        object_id_manager: ObjectIndexFileIdManagerRef,
         storage_opts: &StorageOpts,
     ) -> Self {
         Self {

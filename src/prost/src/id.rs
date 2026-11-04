@@ -380,6 +380,9 @@ declare_id_types!(
     HummockSstableId,
     HummockVectorFileId,
     HummockHnswGraphFileId,
+    HummockFullTextSegmentId,
+    HummockFullTextDeleteFileId,
+    HummockFullTextDeletionVectorId,
     HummockVersionId,
     CompactionGroupId,
     IcebergCompactionTaskId
@@ -625,3 +628,6 @@ macro_rules! impl_hummock_object_id {
 impl_hummock_object_id!(HummockSstableObjectId);
 impl_hummock_object_id!(HummockVectorFileId);
 impl_hummock_object_id!(HummockHnswGraphFileId);
+impl_hummock_object_id!(HummockFullTextSegmentId);
+impl_hummock_object_id!(HummockFullTextDeleteFileId);
+impl_hummock_object_id!(HummockFullTextDeletionVectorId);

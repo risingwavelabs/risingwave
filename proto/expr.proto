@@ -343,6 +343,9 @@ message ExprNode {
     L2_NORMALIZE = 756;
     SUBVECTOR = 757;
 
+    // Full-text search functions
+    KEYWORD_MATCH = 770;
+
     // Internal function for schema change
     COMPOSITE_CAST = 800;
 

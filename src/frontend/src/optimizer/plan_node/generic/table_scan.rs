@@ -26,7 +26,7 @@ use risingwave_sqlparser::ast::AsOf;
 use super::GenericPlanNode;
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
-use crate::catalog::index_catalog::{TableIndex, VectorIndex};
+use crate::catalog::index_catalog::{FullTextIndex, TableIndex, VectorIndex};
 use crate::catalog::table_catalog::TableType;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -51,6 +51,7 @@ pub struct TableScan {
     /// Descriptors of all indexes on this table
     pub table_indexes: Vec<Arc<TableIndex>>,
     pub vector_indexes: Vec<Arc<VectorIndex>>,
+    pub full_text_indexes: Vec<Arc<FullTextIndex>>,
     /// Table column indices used as the stream key of this scan operator.
     table_scan_stream_key: Option<Vec<usize>>,
     /// The pushed down predicates. It refers to column indexes of the table.
@@ -288,6 +289,7 @@ impl TableScan {
             index_table_catalog,
             vec![],
             vec![],
+            vec![],
             self.ctx.clone(),
             new_predicate,
             self.as_of.clone(),
@@ -301,6 +303,7 @@ impl TableScan {
         table_catalog: Arc<TableCatalog>,
         table_indexes: Vec<Arc<TableIndex>>,
         vector_indexes: Vec<Arc<VectorIndex>>,
+        full_text_indexes: Vec<Arc<FullTextIndex>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
@@ -312,6 +315,7 @@ impl TableScan {
             table_catalog,
             table_indexes,
             vector_indexes,
+            full_text_indexes,
             ctx,
             predicate,
             as_of,
@@ -324,6 +328,7 @@ impl TableScan {
         table_catalog: Arc<TableCatalog>,
         table_indexes: Vec<Arc<TableIndex>>,
         vector_indexes: Vec<Arc<VectorIndex>>,
+        full_text_indexes: Vec<Arc<FullTextIndex>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
@@ -351,6 +356,7 @@ impl TableScan {
             table_catalog,
             table_indexes,
             vector_indexes,
+            full_text_indexes,
             table_scan_stream_key,
             predicate,
             as_of,

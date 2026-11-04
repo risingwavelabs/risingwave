@@ -25,8 +25,8 @@ use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
     CheckpointCompressionAlgorithm, PbHummockVersion, PbHummockVersionArchive,
-    PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope, PbVectorIndexObject,
-    PbVectorIndexObjectType,
+    PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope, PbObjectIndexFile,
+    PbObjectIndexFileType,
 };
 use thiserror_ext::AsReport;
 use tracing::warn;
@@ -478,6 +478,9 @@ impl HummockManager {
                 HummockObjectId::Sstable(_) => {}
                 HummockObjectId::VectorFile(_) => {}
                 HummockObjectId::HnswGraphFile(_) => {}
+                HummockObjectId::FullTextSegment(_) => {}
+                HummockObjectId::FullTextDeleteFile(_) => {}
+                HummockObjectId::FullTextDeletionVector(_) => {}
             };
             for (object_id, file_size) in version_delta
                 .newly_added_sst_infos()
@@ -485,6 +488,12 @@ impl HummockManager {
                 .chain(
                     version_delta
                         .vector_index_delta
+                        .values()
+                        .flat_map(|delta| delta.newly_added_objects()),
+                )
+                .chain(
+                    version_delta
+                        .full_text_index_delta
                         .values()
                         .flat_map(|delta| delta.newly_added_objects()),
                 )
@@ -510,29 +519,37 @@ impl HummockManager {
         stale_objects.insert(current_version.id, {
             let mut total_file_size = 0;
             let mut sst_ids = vec![];
-            let mut vector_files = vec![];
+            let mut object_index_files = vec![];
             for (object_id, file_size) in removed_objects {
                 total_file_size += file_size;
-                match object_id {
-                    HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id),
-                    HummockObjectId::VectorFile(vector_file_id) => {
-                        vector_files.push(PbVectorIndexObject {
-                            id: vector_file_id.as_raw(),
-                            object_type: PbVectorIndexObjectType::VectorIndexObjectVector as _,
-                        })
+                let (id, file_type) = match object_id {
+                    HummockObjectId::Sstable(sst_id) => {
+                        sst_ids.push(sst_id);
+                        continue;
                     }
-                    HummockObjectId::HnswGraphFile(graph_file_id) => {
-                        vector_files.push(PbVectorIndexObject {
-                            id: graph_file_id.as_raw(),
-                            object_type: PbVectorIndexObjectType::VectorIndexObjectHnswGraph as _,
-                        });
+                    HummockObjectId::VectorFile(id) => (id.as_raw(), PbObjectIndexFileType::Vector),
+                    HummockObjectId::HnswGraphFile(id) => {
+                        (id.as_raw(), PbObjectIndexFileType::HnswGraph)
                     }
-                }
+                    HummockObjectId::FullTextSegment(id) => {
+                        (id.as_raw(), PbObjectIndexFileType::FullTextSegment)
+                    }
+                    HummockObjectId::FullTextDeleteFile(id) => {
+                        (id.as_raw(), PbObjectIndexFileType::FullTextDeleteFile)
+                    }
+                    HummockObjectId::FullTextDeletionVector(id) => {
+                        (id.as_raw(), PbObjectIndexFileType::FullTextDeletionVector)
+                    }
+                };
+                object_index_files.push(PbObjectIndexFile {
+                    id,
+                    file_type: file_type as _,
+                });
             }
             StaleObjects {
                 id: sst_ids,
                 total_file_size,
-                vector_files,
+                object_index_files,
             }
         });
         if self.env.opts.enable_hummock_data_archive {
@@ -658,6 +675,7 @@ mod tests {
             table_change_logs: Default::default(),
             state_table_info: Default::default(),
             vector_indexes: Default::default(),
+            full_text_indexes: Default::default(),
         }
     }
 
@@ -665,7 +683,7 @@ mod tests {
         let stale = StaleObjects {
             id: vec![1u64.into(), 2u64.into(), 3u64.into()],
             total_file_size: 123,
-            vector_files: vec![],
+            object_index_files: vec![],
         };
 
         PbHummockVersionCheckpoint {

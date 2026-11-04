@@ -16,7 +16,9 @@ use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
 use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, PbEngine, PbTableType};
-use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable, PbVectorIndexInfo};
+use risingwave_pb::catalog::{
+    PbFullTextIndexInfo, PbHandleConflictBehavior, PbTable, PbVectorIndexInfo,
+};
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
 use sea_orm::entity::prelude::*;
@@ -42,6 +44,8 @@ pub enum TableType {
     Internal,
     #[sea_orm(string_value = "VECTOR_INDEX")]
     VectorIndex,
+    #[sea_orm(string_value = "FULL_TEXT_INDEX")]
+    FullTextIndex,
 }
 
 impl From<TableType> for PbTableType {
@@ -52,6 +56,7 @@ impl From<TableType> for PbTableType {
             TableType::Index => Self::Index,
             TableType::Internal => Self::Internal,
             TableType::VectorIndex => Self::VectorIndex,
+            TableType::FullTextIndex => Self::FullTextIndex,
         }
     }
 }
@@ -64,6 +69,7 @@ impl From<PbTableType> for TableType {
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
             PbTableType::VectorIndex => Self::VectorIndex,
+            PbTableType::FullTextIndex => Self::FullTextIndex,
             PbTableType::Unspecified => unreachable!("Unspecified table type"),
         }
     }
@@ -177,6 +183,7 @@ impl From<PbCdcTableType> for CdcTableType {
 }
 
 crate::derive_from_blob!(VectorIndexInfo, PbVectorIndexInfo);
+crate::derive_from_blob!(FullTextIndexInfo, PbFullTextIndexInfo);
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
@@ -217,6 +224,7 @@ pub struct Model {
     pub refreshable: bool,
     pub vector_index_info: Option<VectorIndexInfo>,
     pub cdc_table_type: Option<CdcTableType>,
+    pub full_text_index_info: Option<FullTextIndexInfo>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -383,6 +391,10 @@ impl From<PbTable> for ActiveModel {
                 .vector_index_info
                 .as_ref()
                 .map(VectorIndexInfo::from)),
+            full_text_index_info: Set(pb_table
+                .full_text_index_info
+                .as_ref()
+                .map(FullTextIndexInfo::from)),
             cdc_table_type: Set(pb_table.cdc_table_type.map(|cdc_table_type| {
                 match cdc_table_type {
                     0 => CdcTableType::Postgres, // Map Unspecified to Postgres as default

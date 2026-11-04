@@ -971,20 +971,22 @@ impl HummockEventHandler {
                         error!("unable to send table cache refill monitor snapshot result");
                     });
             }
-            HummockEvent::RegisterVectorWriter {
+            HummockEvent::RegisterObjectIndexWriter {
                 table_id,
                 init_epoch,
-            } => self.uploader.register_vector_writer(table_id, init_epoch),
-            HummockEvent::VectorWriterSealEpoch {
+            } => self
+                .uploader
+                .register_object_index_writer(table_id, init_epoch),
+            HummockEvent::ObjectIndexWriterSealEpoch {
                 table_id,
                 next_epoch,
                 add,
             } => {
                 self.uploader
-                    .vector_writer_seal_epoch(table_id, next_epoch, add);
+                    .object_index_writer_seal_epoch(table_id, next_epoch, add);
             }
-            HummockEvent::DropVectorWriter { table_id } => {
-                self.uploader.drop_vector_writer(table_id);
+            HummockEvent::DropObjectIndexWriter { table_id } => {
+                self.uploader.drop_object_index_writer(table_id);
             }
         }
     }
@@ -1037,7 +1039,7 @@ impl SyncedData {
             let SyncedData {
                 uploaded_ssts,
                 table_watermarks,
-                vector_index_adds,
+                object_index_adds,
             } = self;
             let mut sync_size = 0;
             let mut uncommitted_ssts = Vec::new();
@@ -1054,7 +1056,7 @@ impl SyncedData {
                 uncommitted_ssts,
                 table_watermarks,
                 old_value_ssts,
-                vector_index_adds,
+                object_index_adds,
             }
         }
     }

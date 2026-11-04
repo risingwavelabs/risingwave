@@ -23,6 +23,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::id::WorkerId;
 use risingwave_common_service::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::full_text_index::FullTextIndexDelta;
 use risingwave_hummock_sdk::key::TableKey;
 pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
@@ -34,7 +35,7 @@ use risingwave_meta::hummock::{
     CommitEpochInfo, HummockManagerRef, MockHummockMetaClient, NewTableFragmentInfo,
 };
 use risingwave_meta::manager::MetaSrvEnv;
-use risingwave_pb::catalog::{PbTable, Table};
+use risingwave_pb::catalog::{PbFullTextIndexInfo, PbTable, Table};
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::compaction_catalog_manager::{
@@ -246,6 +247,37 @@ impl HummockTestEnv {
         init_epoch: u64,
         init_config: PbVectorIndexInit,
     ) {
+        self.register_object_index(
+            table_id,
+            init_epoch,
+            HashMap::from_iter([(table_id, VectorIndexDelta::Init(init_config))]),
+            Default::default(),
+        )
+        .await;
+    }
+
+    pub async fn register_full_text_index(
+        &self,
+        table_id: TableId,
+        init_epoch: u64,
+        info: PbFullTextIndexInfo,
+    ) {
+        self.register_object_index(
+            table_id,
+            init_epoch,
+            Default::default(),
+            HashMap::from_iter([(table_id, FullTextIndexDelta::Init(info))]),
+        )
+        .await;
+    }
+
+    async fn register_object_index(
+        &self,
+        table_id: TableId,
+        init_epoch: u64,
+        vector_index_delta: HashMap<TableId, VectorIndexDelta>,
+        full_text_index_delta: HashMap<TableId, FullTextIndexDelta>,
+    ) {
         self.manager
             .commit_epoch(CommitEpochInfo {
                 sstables: vec![],
@@ -255,10 +287,8 @@ impl HummockTestEnv {
                     table_ids: HashSet::from_iter([table_id]),
                 }],
                 change_log_delta: Default::default(),
-                vector_index_delta: HashMap::from_iter([(
-                    table_id,
-                    VectorIndexDelta::Init(init_config),
-                )]),
+                vector_index_delta,
+                full_text_index_delta,
                 tables_to_commit: HashMap::from_iter([(table_id, init_epoch)]),
                 table_change_log_progress: Default::default(),
                 truncate_tables: HashSet::new(),

@@ -162,6 +162,8 @@ mod index_selection_rule;
 pub use index_selection_rule::*;
 mod streaming_index_selection_rule;
 pub use streaming_index_selection_rule::StreamingIndexSelectionRule;
+mod full_text_search_rule;
+pub use full_text_search_rule::FullTextSearchRule;
 mod push_calculation_of_join_rule;
 pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;

@@ -23,7 +23,8 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{
-    PbCreateType, PbIndex, PbIndexColumnProperties, PbVectorIndexInfo, vector_index_info,
+    PbCreateType, PbFullTextIndexInfo, PbIndex, PbIndexColumnProperties, PbVectorIndexInfo,
+    vector_index_info,
 };
 
 use crate::catalog::table_catalog::TableType;
@@ -92,10 +93,51 @@ impl VectorIndex {
     }
 }
 
+/// A full-text index, whose index table is a [`TableType::FullTextIndex`].
+///
+/// The columns of the index table are `[indexed document, stream key of the primary table...]`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FullTextIndex {
+    pub index_table: Arc<TableCatalog>,
+    /// The indexed expression, referring to the columns of the primary table. A query can use the
+    /// index only if its `keyword_match` document is exactly this expression.
+    pub indexed_expr: ExprImpl,
+    /// Columns of the primary table stored in the index table columns `1..`, i.e. the stream key
+    /// of the primary table.
+    pub key_columns: Vec<usize>,
+    pub info: PbFullTextIndexInfo,
+}
+
+impl FullTextIndex {
+    /// Positions of the primary table's primary key columns in `key_columns`.
+    ///
+    /// `None` if some primary key column is not stored in the index, e.g. the order key of an
+    /// `ORDER BY` materialized view, in which case the index cannot be used to look up rows.
+    pub fn primary_key_idx_in_key_columns(
+        &self,
+        primary_table: &TableCatalog,
+    ) -> Option<Vec<usize>> {
+        primary_table
+            .pk()
+            .iter()
+            .map(|order| {
+                self.key_columns
+                    .iter()
+                    .position(|col| *col == order.column_index)
+            })
+            .collect()
+    }
+
+    pub fn analyzer(&self) -> &str {
+        &self.info.analyzer
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum IndexType {
     Table(Arc<TableIndex>),
     Vector(Arc<VectorIndex>),
+    FullText(Arc<FullTextIndex>),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -180,6 +222,30 @@ impl IndexCatalog {
                     primary_to_secondary_mapping,
                     secondary_to_primary_mapping,
                     function_mapping,
+                }))
+            }
+            TableType::FullTextIndex => {
+                assert_eq!(index_prost.index_columns_len, 1);
+                let key_columns = index_item[1..]
+                    .iter()
+                    .map(|item| {
+                        let ExprImpl::InputRef(input) = item else {
+                            panic!(
+                                "full-text index key columns must be input refs, but got: {:?}",
+                                item
+                            );
+                        };
+                        input.index
+                    })
+                    .collect_vec();
+                IndexType::FullText(Arc::new(FullTextIndex {
+                    index_table: index_table.clone(),
+                    indexed_expr: index_item[0].clone(),
+                    key_columns,
+                    info: index_table
+                        .full_text_index_info
+                        .clone()
+                        .expect("should exist for full-text index"),
                 }))
             }
             TableType::VectorIndex => {
@@ -294,6 +360,7 @@ impl IndexCatalog {
         match &self.index_type {
             IndexType::Table(index) => &index.index_table,
             IndexType::Vector(index) => &index.index_table,
+            IndexType::FullText(index) => &index.index_table,
         }
     }
 
@@ -301,7 +368,7 @@ impl IndexCatalog {
     pub fn get_column_properties(&self, column_idx: usize) -> Option<PbIndexColumnProperties> {
         match &self.index_type {
             IndexType::Table(index) => index.index_column_properties.get(column_idx).cloned(),
-            IndexType::Vector { .. } => {
+            IndexType::Vector { .. } | IndexType::FullText { .. } => {
                 if column_idx == 0 {
                     // return with the default value defined in [https://www.postgresql.org/docs/current/sql-createindex.html]
                     Some(PbIndexColumnProperties {
@@ -338,6 +405,19 @@ impl IndexCatalog {
 
     pub fn display(&self) -> IndexDisplay {
         let index_table = self.index_table().clone();
+        if let IndexType::FullText(index) = &self.index_type {
+            // The key columns of a full-text index only locate rows of the primary table, so show
+            // the indexed document and the analyzer instead.
+            return IndexDisplay {
+                index_columns_with_ordering: vec![format!(
+                    "{} USING fulltext (analyzer = '{}')",
+                    index_table.columns[0].name(),
+                    index.analyzer()
+                )],
+                include_columns: vec![],
+                distributed_by_columns: vec![],
+            };
+        }
         let index_columns_with_ordering = index_table
             .pk
             .iter()

@@ -14,23 +14,18 @@
 
 use std::num::NonZeroU32;
 
-use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Engine, StreamJobStatus, TableId,
-};
-use risingwave_common::hash::VnodeCount;
-use risingwave_common::id::FragmentId;
+use risingwave_common::catalog::CreateType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbVectorIndexInfo;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::object_index_write::{ObjectIndexTableInfo, derive_object_index_table_catalog};
 use crate::TableCatalog;
-use crate::catalog::table_catalog::TableType;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::ErrorCode;
 use crate::optimizer::StreamOptimizedLogicalPlanRoot;
-use crate::optimizer::plan_node::derive::{derive_columns, derive_pk};
+use crate::optimizer::plan_node::derive::derive_columns;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
@@ -39,7 +34,7 @@ use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanNodeMeta, PlanTreeNodeUnary, Stream, StreamNode,
     StreamPlanRef as PlanRef, reorganize_elements_id,
 };
-use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist, StreamKind};
+use crate::optimizer::property::{Cardinality, Distribution, RequiredDist, StreamKind};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -104,7 +99,7 @@ impl StreamVectorIndexWrite {
             CreateType::Foreground
         };
 
-        let table = Self::derive_table_catalog(
+        let table = derive_object_index_table_catalog(
             input.clone(),
             name,
             database_id,
@@ -116,90 +111,10 @@ impl StreamVectorIndexWrite {
             cardinality,
             retention_seconds,
             create_type,
-            vector_index_info,
+            ObjectIndexTableInfo::Vector(vector_index_info),
         )?;
 
         Self::new(input, table)
-    }
-
-    #[expect(clippy::too_many_arguments)]
-    fn derive_table_catalog(
-        rewritten_input: PlanRef,
-        name: String,
-        database_id: DatabaseId,
-        schema_id: SchemaId,
-        user_distributed_by: RequiredDist,
-        user_order_by: Order,
-        columns: Vec<ColumnCatalog>,
-        definition: String,
-        cardinality: Cardinality,
-        retention_seconds: Option<NonZeroU32>,
-        create_type: CreateType,
-        vector_index_info: PbVectorIndexInfo,
-    ) -> crate::error::Result<TableCatalog> {
-        let input = rewritten_input;
-
-        let value_indices = (0..columns.len()).collect_vec();
-        assert_eq!(input.distribution(), &Distribution::Single);
-        let distribution_key = vec![];
-        let append_only = input.append_only();
-        // TODO(rc): In `TableCatalog` we still use `FixedBitSet` for watermark columns, ignoring the watermark group information.
-        // We will record the watermark group information in `TableCatalog` in the future. For now, let's flatten the watermark columns.
-        let watermark_columns = input.watermark_columns().indices().collect();
-
-        let (table_pk, stream_key) = derive_pk(input, user_distributed_by, user_order_by, &columns);
-        // assert: `stream_key` is a subset of `table_pk`
-
-        // Vector index writes go through vector writer APIs instead of StateTable
-        // get/prefix-iter reads, so prefix SST filters are not consumed.
-        let read_prefix_len_hint = 0;
-        // We don't need to fill in table id for table in frontend. The id will be generated on
-        // meta catalog service.
-        Ok(TableCatalog {
-            id: TableId::placeholder(),
-            schema_id,
-            database_id,
-            associated_source_id: None,
-            name,
-            columns,
-            pk: table_pk,
-            stream_key,
-            distribution_key,
-            table_type: TableType::VectorIndex,
-            append_only,
-            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            fragment_id: FragmentId::placeholder(),
-            dml_fragment_id: None,
-            vnode_col_index: None,
-            row_id_index: None,
-            value_indices,
-            definition,
-            conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_indices: vec![],
-            read_prefix_len_hint,
-            version: None,
-            watermark_columns,
-            dist_key_in_pk: vec![],
-            cardinality,
-            created_at_epoch: None,
-            initialized_at_epoch: None,
-            create_type,
-            stream_job_status: StreamJobStatus::Creating,
-            description: None,
-            initialized_at_cluster_version: None,
-            created_at_cluster_version: None,
-            retention_seconds: retention_seconds.map(|i| i.into()),
-            cdc_table_id: None,
-            vnode_count: VnodeCount::Singleton, // will be filled in by the meta service later
-            webhook_info: None,
-            job_id: None,
-            engine: Engine::Hummock,
-            clean_watermark_index_in_pk: None,
-            clean_watermark_indices: vec![],
-            refreshable: false,
-            vector_index_info: Some(vector_index_info),
-            cdc_table_type: None,
-        })
     }
 
     pub(crate) fn table(&self) -> &TableCatalog {

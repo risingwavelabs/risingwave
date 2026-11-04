@@ -31,7 +31,7 @@ use super::{
 use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
 use crate::catalog::ColumnId;
-use crate::catalog::index_catalog::{IndexType, TableIndex, VectorIndex};
+use crate::catalog::index_catalog::{FullTextIndex, IndexType, TableIndex, VectorIndex};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::ApplyResult;
@@ -43,7 +43,7 @@ use crate::optimizer::plan_node::{
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
-use crate::optimizer::rule::{IndexSelectionRule, StreamingIndexSelectionRule};
+use crate::optimizer::rule::{FullTextSearchRule, IndexSelectionRule, StreamingIndexSelectionRule};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -101,6 +101,7 @@ impl LogicalScan {
             table_catalog,
             vec![],
             vec![],
+            vec![],
             ctx,
             Condition::true_cond(),
             as_of,
@@ -117,10 +118,12 @@ impl LogicalScan {
         let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
         let mut table_indexes = vec![];
         let mut vector_indexes = vec![];
+        let mut full_text_indexes = vec![];
         for index in &base_table.table_indexes {
             match &index.index_type {
                 IndexType::Table(index) => table_indexes.push(index.clone()),
                 IndexType::Vector(index) => vector_indexes.push(index.clone()),
+                IndexType::FullText(index) => full_text_indexes.push(index.clone()),
             }
         }
         generic::TableScan::new(
@@ -128,6 +131,7 @@ impl LogicalScan {
             table_catalog,
             table_indexes,
             vector_indexes,
+            full_text_indexes,
             ctx,
             Condition::true_cond(),
             as_of,
@@ -170,6 +174,11 @@ impl LogicalScan {
     /// Get all vector indexes on this table
     pub fn vector_indexes(&self) -> &[Arc<VectorIndex>] {
         &self.core.vector_indexes
+    }
+
+    /// Get all full-text indexes on this table
+    pub fn full_text_indexes(&self) -> &[Arc<FullTextIndex>] {
+        &self.core.full_text_indexes
     }
 
     /// Get the logical scan's filter predicate
@@ -331,6 +340,7 @@ impl LogicalScan {
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
+            self.full_text_indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
             self.as_of(),
@@ -349,6 +359,7 @@ impl LogicalScan {
             self.table().clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
+            self.full_text_indexes().to_vec(),
             self.base.ctx(),
             predicate,
             self.as_of(),
@@ -363,6 +374,7 @@ impl LogicalScan {
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
+            self.full_text_indexes().to_vec(),
             self.base.ctx(),
             self.predicate().clone(),
             self.as_of(),
@@ -582,6 +594,18 @@ impl ToBatch for LogicalScan {
         required_order: &Order,
     ) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new = self.clone_with_predicate(self.predicate().clone());
+
+        if !new.full_text_indexes().is_empty()
+            && self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .enable_index_selection()
+            && let Some(plan) = FullTextSearchRule::to_batch(&new)?
+        {
+            return required_order.enforce_if_not_satisfies(plan);
+        }
 
         if !new.table_indexes().is_empty()
             && self

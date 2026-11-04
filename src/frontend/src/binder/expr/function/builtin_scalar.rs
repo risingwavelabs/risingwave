@@ -440,6 +440,8 @@ impl Binder {
                 ("map_delete", raw_call(ExprType::MapDelete)),
                 ("map_insert", raw_call(ExprType::MapInsert)),
                 ("map_length", raw_call(ExprType::MapLength)),
+                // full-text search
+                ("keyword_match", raw_call(ExprType::KeywordMatch)),
                 // vector
                 ("l2_distance", raw_call(ExprType::L2Distance)),
                 ("cosine_distance", raw_call(ExprType::CosineDistance)),

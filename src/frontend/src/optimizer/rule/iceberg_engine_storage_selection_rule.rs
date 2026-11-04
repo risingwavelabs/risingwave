@@ -86,6 +86,7 @@ fn rewrite_to_table_scan(
         table.clone(),
         vec![],
         vec![],
+        vec![],
         scan.ctx(),
         scan.hummock_rewrite.origin_condition.clone(),
         scan.core.as_of.clone(),

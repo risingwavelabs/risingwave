@@ -1158,6 +1158,10 @@ message VectorIndexWriteNode {
   catalog.Table table = 1;
 }
 
+message FullTextIndexWriteNode {
+  catalog.Table table = 1;
+}
+
 message VectorIndexLookupJoinNode {
   plan_common.VectorIndexReaderDesc reader_desc = 1;
   uint32 vector_column_idx = 2;
@@ -1465,6 +1469,7 @@ message StreamNode {
     IcebergWithPkIndexPositionDeleteMergerNode iceberg_with_pk_index_position_delete_merger = 157;
     MatchRecognizeNode match_recognize = 158;
     CompactionResolverNode compaction_resolver = 159;
+    FullTextIndexWriteNode full_text_index_write = 160;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

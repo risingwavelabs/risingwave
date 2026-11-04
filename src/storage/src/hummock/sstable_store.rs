@@ -48,6 +48,7 @@ use super::{
     SstableWriterOptions,
 };
 use crate::hummock::block_stream::{BlockDataStream, MemoryUsageTracker, PrefetchBlockStream};
+use crate::hummock::full_text::objects::{CachedFullTextSegmentRef, DecodedDeleteFileRef};
 use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
 use crate::hummock::vector::monitor::VectorStoreCacheStats;
@@ -108,6 +109,24 @@ impl<T> Deref for VectorMetaFileHolder<T> {
         // SAFETY: VectorFileHolder is exposed only as immutable, and `VectorFileMeta` is pinned via box
         unsafe { &*self.ptr }
     }
+}
+
+// TODO: make it configurable.
+const FULL_TEXT_SEGMENT_CACHE_CAPACITY: usize = 256 << 20;
+
+fn new_full_text_segment_cache() -> Cache<HummockRawObjectId, CachedFullTextSegmentRef> {
+    CacheBuilder::new(FULL_TEXT_SEGMENT_CACHE_CAPACITY)
+        .with_weighter(|_: &HummockRawObjectId, value: &CachedFullTextSegmentRef| value.memory_size)
+        .build()
+}
+
+// TODO: make it configurable.
+const FULL_TEXT_DELETE_FILE_CACHE_CAPACITY: usize = 64 << 20;
+
+fn new_full_text_delete_file_cache() -> Cache<HummockRawObjectId, DecodedDeleteFileRef> {
+    CacheBuilder::new(FULL_TEXT_DELETE_FILE_CACHE_CAPACITY)
+        .with_weighter(|_: &HummockRawObjectId, value: &DecodedDeleteFileRef| value.memory_size)
+        .build()
 }
 
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
@@ -211,6 +230,11 @@ pub struct SstableStore {
     block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
+    /// Opened full-text segments, keyed by the object id of the deletion vector if any, or of the
+    /// segment otherwise.
+    pub full_text_segment_cache: Cache<HummockRawObjectId, CachedFullTextSegmentRef>,
+    /// Decoded full-text delete files, keyed by object id.
+    pub full_text_delete_file_cache: Cache<HummockRawObjectId, DecodedDeleteFileRef>,
 
     /// Recent filter for `(sst_obj_id, blk_idx)`.
     ///
@@ -248,6 +272,8 @@ impl SstableStore {
             block_cache: config.block_cache,
             vector_meta_cache: config.vector_meta_cache,
             vector_block_cache: config.vector_block_cache,
+            full_text_segment_cache: new_full_text_segment_cache(),
+            full_text_delete_file_cache: new_full_text_delete_file_cache(),
 
             recent_filter: config.recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
@@ -306,6 +332,8 @@ impl SstableStore {
             block_cache,
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),
             vector_block_cache: CacheBuilder::new(1 << 10).build(),
+            full_text_segment_cache: new_full_text_segment_cache(),
+            full_text_delete_file_cache: new_full_text_delete_file_cache(),
         })
     }
 

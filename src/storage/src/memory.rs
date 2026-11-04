@@ -728,6 +728,20 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
     }
 }
 
+impl<R: RangeKv> StateStoreReadFullText for RangeKvStateStoreReadSnapshot<R> {
+    async fn full_text_search(
+        &self,
+        _tokens: Vec<String>,
+        _limit: Option<usize>,
+    ) -> StorageResult<Vec<Bytes>> {
+        Err(full_text_unsupported().into())
+    }
+}
+
+fn full_text_unsupported() -> HummockError {
+    HummockError::other("full-text index is not supported by the in-memory state store")
+}
+
 impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
     async fn nearest<'a, O: Send + 'a>(
         &'a self,
@@ -935,6 +949,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
+    type FullTextWriter = RangeKvLocalStateStore<R>;
     type Local = RangeKvLocalStateStore<R>;
     type ReadSnapshot = RangeKvStateStoreReadSnapshot<R>;
     type VectorWriter = RangeKvLocalStateStore<R>;
@@ -961,10 +976,23 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     }
 
     async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
+        self.new_index_writer(options.table_id)
+    }
+
+    async fn new_full_text_writer(
+        &self,
+        options: NewFullTextWriterOptions,
+    ) -> Self::FullTextWriter {
+        self.new_index_writer(options.table_id)
+    }
+}
+
+impl<R: RangeKv> RangeKvStateStore<R> {
+    fn new_index_writer(&self, table_id: TableId) -> RangeKvLocalStateStore<R> {
         RangeKvLocalStateStore::new(
             self.clone(),
             NewLocalOptions {
-                table_id: options.table_id,
+                table_id,
                 fragment_id: FragmentId::default(),
                 op_consistency_level: Default::default(),
                 table_option: Default::default(),
@@ -1285,6 +1313,16 @@ impl<R: RangeKv> StateStoreWriteVector for RangeKvLocalStateStore<R> {
     fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
         self.vectors.push((vec.to_owned_scalar(), info));
         Ok(())
+    }
+}
+
+impl<R: RangeKv> StateStoreWriteFullText for RangeKvLocalStateStore<R> {
+    fn insert_document(&mut self, _key: Bytes, _tokens: &[String]) -> StorageResult<()> {
+        Err(full_text_unsupported().into())
+    }
+
+    fn delete_document(&mut self, _key: Bytes) -> StorageResult<()> {
+        Err(full_text_unsupported().into())
     }
 }
 

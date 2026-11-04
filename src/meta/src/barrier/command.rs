@@ -25,11 +25,9 @@ use risingwave_common::must_match;
 use risingwave_connector::sink::iceberg::IcebergCommitResult;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
-use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation, streaming_job};
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
-use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, PbField};
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplits,
@@ -58,7 +56,7 @@ use crate::barrier::complete_task::CompleteBarrierTask;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::partial_graph::PartialGraphBarrierInfo;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
-use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
+use crate::barrier::utils::collect_resp_info;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::LoadedFragmentContext;
 use crate::controller::utils::StreamingJobExtraInfo;
@@ -909,7 +907,7 @@ impl Command {
             synced_ssts,
             new_table_watermarks,
             old_value_ssts,
-            vector_index_adds,
+            object_index_adds,
             iceberg_pk_index_sink_metadata,
             table_change_log_progress,
         ) = collect_resp_info(resps);
@@ -958,24 +956,11 @@ impl Command {
         info.new_table_fragment_infos
             .extend(new_table_fragment_infos);
         info.change_log_delta.extend(table_new_change_log);
-        for (table_id, vector_index_adds) in vector_index_adds {
-            info.vector_index_delta
-                .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
-                .expect("non-duplicate");
-        }
-        if let PostCollectCommand::CreateStreamingJob { info: job_info, .. } =
-            &barrier_info.post_collect_command
-            && let Some(index_table) = collect_new_vector_index_info(job_info)
-        {
-            info.vector_index_delta
-                .try_insert(
-                    index_table.id,
-                    VectorIndexDelta::Init(PbVectorIndexInit {
-                        info: Some(index_table.vector_index_info.unwrap()),
-                    }),
-                )
-                .expect("non-duplicate");
-        }
+        let new_job = match &barrier_info.post_collect_command {
+            PostCollectCommand::CreateStreamingJob { info: job_info, .. } => Some(job_info),
+            _ => None,
+        };
+        object_index_adds.commit(info, new_job);
         if let PostCollectCommand::RefreshStarted {
             table_id,
             staging_table_id,

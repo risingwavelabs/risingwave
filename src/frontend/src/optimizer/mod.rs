@@ -16,7 +16,7 @@ use std::num::NonZeroU32;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use risingwave_pb::catalog::PbVectorIndexInfo;
+use risingwave_pb::catalog::{PbFullTextIndexInfo, PbVectorIndexInfo};
 
 pub mod plan_node;
 
@@ -90,8 +90,9 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BackfillType, Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker,
-    PlanTreeNode, RewriteStreamContext, Stream, StreamExchange, StreamPlanRef, StreamUnion,
-    StreamUpstreamSinkUnion, StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
+    PlanTreeNode, RewriteStreamContext, Stream, StreamExchange, StreamFullTextIndexWrite,
+    StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion, StreamVectorIndexWrite, ToStream,
+    VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{
     LocalityBackfillScanEstimator, LocalityProviderCounter, RwTimestampValidator,
@@ -1243,6 +1244,31 @@ impl LogicalPlanRoot {
         )
     }
 
+    pub fn gen_full_text_index_plan(
+        self,
+        index_name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        definition: String,
+        retention_seconds: Option<NonZeroU32>,
+        full_text_index_info: PbFullTextIndexInfo,
+    ) -> Result<StreamFullTextIndexWrite> {
+        let cardinality = self.compute_cardinality();
+        let backfill_type = self.derive_backfill_type(false);
+        let stream_plan = self.gen_optimized_stream_plan(false, backfill_type)?;
+
+        StreamFullTextIndexWrite::create(
+            stream_plan,
+            index_name,
+            database_id,
+            schema_id,
+            definition,
+            cardinality,
+            retention_seconds,
+            full_text_index_info,
+        )
+    }
+
     /// Optimize and generate a create sink plan.
     #[expect(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
@@ -1502,6 +1528,7 @@ impl BatchPlanRef {
         self.node_type() == BatchPlanNodeType::BatchSeqScan
             || self.node_type() == BatchPlanNodeType::BatchLogSeqScan
             || self.node_type() == BatchPlanNodeType::BatchVectorSearch
+            || self.node_type() == BatchPlanNodeType::BatchFullTextSearch
     }
 
     fn is_source_scan(&self) -> bool {

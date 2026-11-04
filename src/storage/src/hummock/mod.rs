@@ -30,6 +30,7 @@ pub use sstable::*;
 
 pub mod compactor;
 mod error;
+pub mod full_text;
 pub mod hummock_meta_client;
 pub mod iterator;
 pub mod shared_buffer;

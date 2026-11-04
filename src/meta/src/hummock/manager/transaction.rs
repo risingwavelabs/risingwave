@@ -20,6 +20,7 @@ use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::full_text_index::FullTextIndexDelta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
@@ -170,12 +171,14 @@ impl<'a> HummockVersionTransaction<'a> {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, EpochNewChangeLog>,
         vector_index_delta: HashMap<TableId, VectorIndexDelta>,
+        full_text_index_delta: HashMap<TableId, FullTextIndexDelta>,
         group_id_to_truncate_tables: HashMap<CompactionGroupId, HashSet<TableId>>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.set_change_log_delta(change_log_delta);
         new_version_delta.vector_index_delta = vector_index_delta;
+        new_version_delta.full_text_index_delta = full_text_index_delta;
 
         for compaction_group in &new_compaction_groups {
             let group_deltas = &mut new_version_delta

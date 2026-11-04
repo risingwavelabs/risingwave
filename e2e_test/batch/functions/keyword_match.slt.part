@@ -1,0 +1,152 @@
+# keyword_match(doc, query [, analyzer]) returns true iff every query token appears in the document.
+
+query BBB
+select
+    keyword_match('Database connection timeout', 'database timeout'),
+    keyword_match('Request timeout while connecting to database', 'database timeout'),
+    keyword_match('Database query completed', 'database timeout');
+----
+t t f
+
+# Case-insensitive on both sides.
+query BBB
+select
+    keyword_match('ERROR: Connection TIMEOUT', 'timeout'),
+    keyword_match('error: connection timeout', 'TIMEOUT Connection'),
+    keyword_match('Ünïcode Straße', 'ünïcode STRASSE');
+----
+t t f
+
+# Matching is by token, not by substring.
+query BBBB
+select
+    keyword_match('runtime error', 'timeout'),
+    keyword_match('runtime error', 'time'),
+    keyword_match('databases timed out', 'database timeout'),
+    keyword_match('db.conn-timeout(code=504)', 'timeout 504 conn');
+----
+f f f t
+
+# AND semantics: every query token must be present, in any order; duplicates do not matter.
+query BBBB
+select
+    keyword_match('a b c', 'c a'),
+    keyword_match('a b c', 'a d'),
+    keyword_match('a b c', 'b b B'),
+    keyword_match('', 'a');
+----
+t f t f
+
+# Explicit analyzer argument.
+query BB
+select
+    keyword_match('Database connection timeout', 'TIMEOUT database', 'simple'),
+    keyword_match('Database connection timeout', 'timeouts', 'simple');
+----
+t f
+
+# NULL handling.
+query BBBBB
+select
+    keyword_match(NULL::varchar, 'timeout'),
+    keyword_match(NULL::jsonb, 'timeout'),
+    keyword_match('timeout'::varchar, NULL::varchar),
+    keyword_match('timeout'::varchar, 'timeout', NULL::varchar),
+    keyword_match(NULL::varchar, 'timeout', 'simple');
+----
+NULL NULL NULL NULL NULL
+
+# A query that produces no tokens is an error.
+query error keyword_match query must contain at least one token
+select keyword_match('Database connection timeout', '');
+
+query error keyword_match query must contain at least one token
+select keyword_match('Database connection timeout', ' ,.-! ');
+
+query error keyword_match query must contain at least one token
+select keyword_match('{"a": "b"}'::jsonb, '()', 'simple');
+
+# Unknown analyzer.
+query error unknown full-text analyzer
+select keyword_match('Database connection timeout', 'timeout', 'english');
+
+query error unknown full-text analyzer
+select keyword_match('Database connection timeout', 'timeout', 'SIMPLE');
+
+# JSONB: all string values in nested objects and arrays are searched.
+# Object keys and non-string values (numbers, booleans, null) are ignored.
+query BBBBBBB
+select
+    keyword_match(j, 'database timeout'),
+    keyword_match(j, 'retry span'),
+    keyword_match(j, 'warning'),
+    keyword_match(j, 'error'),
+    keyword_match(j, 'message'),
+    keyword_match(j, '504'),
+    keyword_match(j, 'true')
+from (values ('{"error": {"message": "Database timeout", "code": 504}, "spans": [{"name": "retry span", "ok": true}, ["nested", ["WARNING"]]], "n": null}'::jsonb)) as v(j);
+----
+t t t f f f f
+
+query BBB
+select
+    keyword_match('"just a string"'::jsonb, 'string just'),
+    keyword_match('[1, 2.5, false, null]'::jsonb, '1'),
+    keyword_match('{}'::jsonb, 'a', 'simple');
+----
+t f f
+
+# Table-based evaluation, with constant and per-row queries.
+statement ok
+create table keyword_match_docs (id int primary key, msg varchar, payload jsonb, q varchar);
+
+statement ok
+insert into keyword_match_docs values
+    (1, 'Database connection timeout', '{"error": {"message": "Database connection timeout"}}', 'database timeout'),
+    (2, 'Request timeout while connecting to database', '{"spans": [{"error": "Request timeout"}, "database"]}', 'connecting'),
+    (3, 'Database query completed', '{"status": "Database query completed", "timeout": 30}', 'timeout'),
+    (4, 'runtime error', '["runtime", "error", 42]', 'RUNTIME'),
+    (5, NULL, NULL, 'x');
+
+statement ok
+flush;
+
+query I
+select id from keyword_match_docs where keyword_match(msg, 'database timeout') order by id;
+----
+1
+2
+
+query I
+select id from keyword_match_docs where keyword_match(payload, 'database timeout') order by id;
+----
+1
+2
+
+query I
+select id from keyword_match_docs where keyword_match(payload, 'timeout', 'simple') order by id;
+----
+1
+2
+
+query IBB
+select id, keyword_match(msg, q), keyword_match(payload, q, 'simple') from keyword_match_docs order by id;
+----
+1 t t
+2 t f
+3 f f
+4 t t
+5 NULL NULL
+
+# A per-row query that produces no tokens is also an error.
+statement ok
+insert into keyword_match_docs values (6, 'some message', NULL, '...');
+
+statement ok
+flush;
+
+query error keyword_match query must contain at least one token
+select id, keyword_match(msg, q) from keyword_match_docs order by id;
+
+statement ok
+drop table keyword_match_docs;

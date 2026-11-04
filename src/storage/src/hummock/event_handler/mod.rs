@@ -19,7 +19,7 @@ use itertools::Itertools;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{HummockEpoch, HummockRawObjectId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockRawObjectId, ObjectIndexAdd};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
@@ -34,7 +34,6 @@ pub mod uploader;
 mod version_update;
 
 pub(crate) use hummock_event_handler::HummockEventHandler;
-use risingwave_hummock_sdk::vector_index::VectorIndexAdd;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::meta::PbTableRefillRuntimeConfig;
 use risingwave_pb::meta::subscribe_response::Operation;
@@ -118,18 +117,18 @@ pub enum HummockEvent {
         instance_id: LocalInstanceId,
     },
 
-    RegisterVectorWriter {
+    RegisterObjectIndexWriter {
         table_id: TableId,
         init_epoch: HummockEpoch,
     },
 
-    VectorWriterSealEpoch {
+    ObjectIndexWriterSealEpoch {
         table_id: TableId,
         next_epoch: HummockEpoch,
-        add: Option<VectorIndexAdd>,
+        add: Option<ObjectIndexAdd>,
     },
 
-    DropVectorWriter {
+    DropObjectIndexWriter {
         table_id: TableId,
     },
 
@@ -210,9 +209,13 @@ impl HummockEvent {
             HummockEvent::GetTableCacheRefillMonitorSnapshot { .. } => {
                 "GetTableCacheRefillMonitorSnapshot".to_owned()
             }
-            HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter".to_owned(),
-            HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch".to_owned(),
-            HummockEvent::DropVectorWriter { .. } => "DropVectorWriter".to_owned(),
+            HummockEvent::RegisterObjectIndexWriter { .. } => {
+                "RegisterObjectIndexWriter".to_owned()
+            }
+            HummockEvent::ObjectIndexWriterSealEpoch { .. } => {
+                "ObjectIndexWriterSealEpoch".to_owned()
+            }
+            HummockEvent::DropObjectIndexWriter { .. } => "DropObjectIndexWriter".to_owned(),
         }
     }
 
@@ -230,9 +233,9 @@ impl HummockEvent {
             HummockEvent::FlushEvent(_) => "FlushEvent",
             HummockEvent::RegisterReadVersion { .. } => "RegisterReadVersion",
             HummockEvent::DestroyReadVersion { .. } => "DestroyReadVersion",
-            HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter",
-            HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch",
-            HummockEvent::DropVectorWriter { .. } => "DropVectorWriter",
+            HummockEvent::RegisterObjectIndexWriter { .. } => "RegisterObjectIndexWriter",
+            HummockEvent::ObjectIndexWriterSealEpoch { .. } => "ObjectIndexWriterSealEpoch",
+            HummockEvent::DropObjectIndexWriter { .. } => "DropObjectIndexWriter",
             HummockEvent::GetMinUncommittedObjectId { .. } => "GetMinUncommittedObjectId",
             HummockEvent::GetTableCacheRefillMonitorSnapshot { .. } => {
                 "GetTableCacheRefillMonitorSnapshot"

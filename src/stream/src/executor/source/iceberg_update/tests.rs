@@ -75,6 +75,7 @@ impl StateStoreReadLog for GatedStore {
 }
 
 impl StateStore for GatedStore {
+    type FullTextWriter = <MemoryStateStore as StateStore>::FullTextWriter;
     type Local = <MemoryStateStore as StateStore>::Local;
     type ReadSnapshot = <MemoryStateStore as StateStore>::ReadSnapshot;
     type VectorWriter = <MemoryStateStore as StateStore>::VectorWriter;
@@ -117,6 +118,13 @@ impl StateStore for GatedStore {
 
     async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
         self.inner.new_vector_writer(options).await
+    }
+
+    async fn new_full_text_writer(
+        &self,
+        options: NewFullTextWriterOptions,
+    ) -> Self::FullTextWriter {
+        self.inner.new_full_text_writer(options).await
     }
 }
 

@@ -1017,6 +1017,7 @@ impl SubscriptionCursor {
                 table_catalog.clone(),
                 vec![],
                 vec![],
+                vec![],
                 context,
                 Condition {
                     conjunctions: vec![],

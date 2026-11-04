@@ -550,6 +550,7 @@ impl ToBatch for LogicalVectorSearch {
                         scan.table().clone(),
                         vec![],
                         vec![],
+                        vec![],
                         self.core.input.ctx(),
                         Condition::true_cond(),
                         scan.as_of(),
