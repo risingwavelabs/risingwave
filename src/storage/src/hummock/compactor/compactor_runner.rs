@@ -44,7 +44,7 @@ use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_utils::{
-    CompactionPlan, build_multi_compaction_filter, generate_splits_for_task,
+    CompactionPlan, VersionGcAction, build_multi_compaction_filter, generate_splits_for_task,
     metrics_report_for_task, normal_output_options,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
@@ -817,9 +817,6 @@ where
         compaction_statistics.iter_total_key_counts += 1;
 
         let is_new_user_key = full_key_tracker.observe(iter.key());
-        let mut drop = false;
-
-        // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
         let value = iter.value();
         let ValueMeta {
             object_id,
@@ -843,23 +840,9 @@ where
             last_table_id = Some(iter_key.user_key.table_id);
         }
 
-        // Among keys with same user key, only keep the latest key unless retain_multiple_version is true.
-        // In our design, frontend avoid to access keys which had be deleted, so we don't
-        // need to consider the epoch when the compaction_filter match (it
-        // means that mv had drop)
-        // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
-        // Do not assume that "the epoch of keys behind must be smaller than the current key."
-        if (!task_config.retain_multiple_version && task_config.gc_delete_keys && value.is_delete())
-            || (!task_config.retain_multiple_version && !is_new_user_key)
+        if task_config.version_gc_action(value, is_new_user_key) != VersionGcAction::Keep
+            || compaction_filter.should_delete(iter_key)
         {
-            drop = true;
-        }
-
-        if !drop && compaction_filter.should_delete(iter_key) {
-            drop = true;
-        }
-
-        if drop {
             compaction_statistics.iter_drop_key_counts += 1;
 
             last_table_stats.total_key_count -= 1;

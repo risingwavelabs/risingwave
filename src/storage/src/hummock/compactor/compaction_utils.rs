@@ -47,6 +47,7 @@ use crate::hummock::iterator::{
     UserIterator,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
+use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableWriterFactory, SstableWriterOptions,
@@ -111,6 +112,13 @@ pub struct CompactionStatistics {
     pub iter_drop_key_counts: u64,
 }
 
+#[derive(PartialEq, Eq)]
+pub(super) enum VersionGcAction {
+    Keep,
+    DropOlderVersion,
+    DropTombstone,
+}
+
 #[derive(Clone, Default)]
 pub struct TaskConfig {
     pub(crate) key_range: KeyRange,
@@ -131,6 +139,27 @@ pub struct TaskConfig {
 }
 
 impl TaskConfig {
+    /// Decide version GC for one decoded row before applying compaction filters.
+    #[inline]
+    pub(super) fn version_gc_action(
+        &self,
+        value: HummockValue<&[u8]>,
+        is_first_observed_version: bool,
+    ) -> VersionGcAction {
+        if self.retain_multiple_version {
+            return VersionGcAction::Keep;
+        }
+        // Memtable spill can give a PUT and DELETE the same pure epoch.
+        // The caller uses full-key order to identify the first observed version.
+        if self.gc_delete_keys && value.is_delete() {
+            VersionGcAction::DropTombstone
+        } else if !is_first_observed_version {
+            VersionGcAction::DropOlderVersion
+        } else {
+            VersionGcAction::Keep
+        }
+    }
+
     /// Construct a compact task config for tests and benchmarks.
     pub fn for_test(
         key_range: KeyRange,
