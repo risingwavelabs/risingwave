@@ -44,14 +44,14 @@ use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_utils::{
-    CompactionPlan, CompactionRows, RowAction, build_multi_compaction_filter,
-    generate_splits_for_task, metrics_report_for_task, normal_output_options,
+    CompactionPlan, build_multi_compaction_filter, generate_splits_for_task,
+    metrics_report_for_task, normal_output_options,
 };
-use crate::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, await_tree_key,
+    fast_compactor_runner,
 };
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
@@ -448,22 +448,23 @@ async fn compact_with_plan(
                 .sub(parallelism as _);
         });
 
-    {
-        let results = if plan.copy_blocks {
+    if plan.copy_blocks {
+        let fast_compaction = {
             let context = context.clone();
             let task = compact_task.clone();
-            let catalog = compaction_catalog_agent_ref.clone();
+            let compaction_catalog_agent_ref = compaction_catalog_agent_ref.clone();
             let object_id_getter = object_id_getter.clone();
-            let progress = task_progress_guard.progress.clone();
-            stream::once(async move {
-                let result = match task.sstable_filter_type {
+            let task_progress = task_progress_guard.progress.clone();
+
+            async move {
+                match task.sstable_filter_type {
                     PbSstableFilterType::SstableFilterXor8 => {
-                        FastCompactorRunner::<BlockedXor8FilterBuilder, _>::with_output(
+                        fast_compactor_runner::CompactorRunner::<BlockedXor8FilterBuilder, _>::with_output(
                             context,
                             task,
-                            catalog,
+                            compaction_catalog_agent_ref,
                             object_id_getter,
-                            progress,
+                            task_progress,
                             multi_filter,
                             plan.output_options,
                         )
@@ -471,12 +472,12 @@ async fn compact_with_plan(
                         .await
                     }
                     PbSstableFilterType::SstableFilterXor16 => {
-                        FastCompactorRunner::<BlockedXor16FilterBuilder, _>::with_output(
+                        fast_compactor_runner::CompactorRunner::<BlockedXor16FilterBuilder, _>::with_output(
                             context,
                             task,
-                            catalog,
+                            compaction_catalog_agent_ref,
                             object_id_getter,
-                            progress,
+                            task_progress,
                             multi_filter,
                             plan.output_options,
                         )
@@ -487,82 +488,117 @@ async fn compact_with_plan(
                         "fast compaction only supports blocked xor filters, got {:?}",
                         filter_type
                     ))),
-                };
-                Ok(result.map(|(ssts, statistics)| (0, ssts, statistics)))
-            })
-            .left_stream()
-        } else {
-            for (split_index, _) in compact_task.splits.iter().enumerate() {
-                let filter = multi_filter.clone();
-                let compaction_catalog_agent_ref = compaction_catalog_agent_ref.clone();
-                let compactor_runner = CompactorRunner::with_output(
-                    split_index,
-                    compactor_context.clone(),
-                    compact_task.clone(),
-                    object_id_getter.clone(),
-                    plan.output_options.clone(),
-                    plan.output_filter_layout,
-                );
-                let task_progress = task_progress_guard.progress.clone();
-                let runner = async move {
-                    compactor_runner
-                        .run(filter, compaction_catalog_agent_ref, task_progress)
-                        .await
-                };
-                let traced = match context.await_tree_reg.as_ref() {
-                    None => runner.right_future(),
-                    Some(await_tree_reg) => await_tree_reg
-                        .register(
-                            await_tree_key::CompactRunner {
-                                task_id: compact_task.task_id,
-                                split_index,
-                            },
-                            format!(
-                                "Compaction Task {} Split {} ",
-                                compact_task.task_id, split_index
-                            ),
-                        )
-                        .instrument(runner)
-                        .left_future(),
-                };
-                let handle = tokio::spawn(traced);
-                abort_handles.push(handle.abort_handle());
-                compaction_futures.push(handle);
-            }
-
-            stream::iter(compaction_futures)
-                .buffer_unordered(parallelism)
-                .right_stream()
-        };
-        futures::pin_mut!(results);
-        loop {
-            tokio::select! {
-                _ = &mut shutdown_rx => {
-                    tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-                    task_status = TaskStatus::ManualCanceled;
-                    break;
                 }
-                result = results.next() => {
-                    task_status = match result {
-                        Some(Ok(Ok(output))) => {
-                            output_ssts.push(output);
-                            // The inline fast task has finished. Do not poll cancellation again.
-                            if plan.copy_blocks {
-                                break;
-                            }
-                            continue;
-                        }
-                        Some(Ok(Err(e))) => {
-                            tracing::warn!(error = %e.as_report(), task_id = %compact_task.task_id, "Compaction task failed");
-                            TaskStatus::ExecuteFailed
-                        }
-                        Some(Err(e)) => {
-                            tracing::warn!(error = %e.as_report(), task_id = %compact_task.task_id, "Compaction runner join failed");
-                            TaskStatus::JoinHandleFailed
-                        }
-                        None => break,
-                    };
-                    break;
+            }
+        };
+
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
+                task_status = TaskStatus::ManualCanceled;
+            },
+
+            ret = fast_compaction => {
+                match ret {
+                    Ok((ssts, statistics)) => {
+                        output_ssts.push((0, ssts, statistics));
+                    }
+                    Err(e) => {
+                        task_status = TaskStatus::ExecuteFailed;
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            "Compaction task {} failed with error",
+                            compact_task.task_id,
+                        );
+                    }
+                }
+            }
+        }
+
+        // After a compaction is done, mutate the compaction task.
+        let (compact_task, table_stats, object_timestamps) =
+            compact_done(compact_task, context.clone(), output_ssts, task_status);
+        let cost_time = timer.stop_and_record() * 1000.0;
+        tracing::info!(
+            "Finished fast compaction task in {:?}ms: {}",
+            cost_time,
+            compact_task_to_string(&compact_task)
+        );
+        return (
+            (compact_task, table_stats, object_timestamps),
+            memory_detector,
+        );
+    }
+    for (split_index, _) in compact_task.splits.iter().enumerate() {
+        let filter = multi_filter.clone();
+        let compaction_catalog_agent_ref = compaction_catalog_agent_ref.clone();
+        let compactor_runner = CompactorRunner::with_output(
+            split_index,
+            compactor_context.clone(),
+            compact_task.clone(),
+            object_id_getter.clone(),
+            plan.output_options.clone(),
+            plan.output_filter_layout,
+        );
+        let task_progress = task_progress_guard.progress.clone();
+        let runner = async move {
+            compactor_runner
+                .run(filter, compaction_catalog_agent_ref, task_progress)
+                .await
+        };
+        let traced = match context.await_tree_reg.as_ref() {
+            None => runner.right_future(),
+            Some(await_tree_reg) => await_tree_reg
+                .register(
+                    await_tree_key::CompactRunner {
+                        task_id: compact_task.task_id,
+                        split_index,
+                    },
+                    format!(
+                        "Compaction Task {} Split {} ",
+                        compact_task.task_id, split_index
+                    ),
+                )
+                .instrument(runner)
+                .left_future(),
+        };
+        let handle = tokio::spawn(traced);
+        abort_handles.push(handle.abort_handle());
+        compaction_futures.push(handle);
+    }
+
+    let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
+    loop {
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
+                task_status = TaskStatus::ManualCanceled;
+                break;
+            }
+            future_result = buffered.next() => {
+                match future_result {
+                    Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
+                        output_ssts.push((split_index, ssts, compact_stat));
+                    }
+                    Some(Ok(Err(e))) => {
+                        task_status = TaskStatus::ExecuteFailed;
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            "Compaction task {} failed with error",
+                            compact_task.task_id,
+                        );
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        task_status = TaskStatus::JoinHandleFailed;
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            "Compaction task {} failed with join handle error",
+                            compact_task.task_id,
+                        );
+                        break;
+                    }
+                    None => break,
                 }
             }
         }
@@ -574,16 +610,18 @@ async fn compact_with_plan(
         }
         output_ssts.clear();
     }
-    output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+    // Sort by split/key range index.
+    if !output_ssts.is_empty() {
+        output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+    }
 
     // After a compaction is done, mutate the compaction task.
     let (compact_task, table_stats, object_timestamps) =
         compact_done(compact_task, context.clone(), output_ssts, task_status);
     let cost_time = timer.stop_and_record() * 1000.0;
     tracing::info!(
-        "Finished compaction task in {:?}ms (fast: {}): {}",
+        "Finished compaction task in {:?}ms: {}",
         cost_time,
-        plan.copy_blocks,
         compact_task_output_to_string(&compact_task)
     );
     (
@@ -738,7 +776,7 @@ pub async fn compact_and_build_sst<F>(
     task_config: &TaskConfig,
     compactor_metrics: Arc<CompactorMetrics>,
     mut iter: impl HummockIterator<Direction = Forward>,
-    compaction_filter: impl CompactionFilter,
+    mut compaction_filter: impl CompactionFilter,
 ) -> HummockResult<CompactionStatistics>
 where
     F: TableBuilderFactory,
@@ -762,11 +800,11 @@ where
     let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
     let mut local_stats = StoreLocalStatistic::default();
 
-    let mut rows = CompactionRows::new(
-        compaction_filter,
-        task_config.gc_delete_keys,
-        task_config.retain_multiple_version,
-    );
+    // Keep table stats changes due to dropping KV.
+    let mut table_stats_drop = TableStatsMap::default();
+    let mut last_table_stats = TableStats::default();
+    let mut last_table_id = None;
+    let mut compaction_statistics = CompactionStatistics::default();
     // object id -> block id. For an object id, block id is updated in a monotonically increasing manner.
     let mut skip_schema_check: HashMap<HummockSstableObjectId, u64> = HashMap::default();
     let schemas: HashMap<TableId, HashSet<i32>> = task_config
@@ -776,10 +814,12 @@ where
         .collect();
     while iter.is_valid() {
         let iter_key = iter.key();
-        rows.statistics.iter_total_key_counts += 1;
+        compaction_statistics.iter_total_key_counts += 1;
 
         let is_new_user_key = full_key_tracker.observe(iter.key());
+        let mut drop = false;
 
+        // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
         let value = iter.value();
         let ValueMeta {
             object_id,
@@ -796,9 +836,35 @@ where
             local_stats.skip_multi_version_key_count += 1;
         }
 
-        let dropped = rows.action(iter_key, value, is_new_user_key) != RowAction::Keep;
-        rows.record(iter_key, value, dropped);
-        if dropped {
+        if last_table_id != Some(iter_key.user_key.table_id) {
+            if let Some(last_table_id) = last_table_id.take() {
+                table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
+            }
+            last_table_id = Some(iter_key.user_key.table_id);
+        }
+
+        // Among keys with same user key, only keep the latest key unless retain_multiple_version is true.
+        // In our design, frontend avoid to access keys which had be deleted, so we don't
+        // need to consider the epoch when the compaction_filter match (it
+        // means that mv had drop)
+        // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
+        // Do not assume that "the epoch of keys behind must be smaller than the current key."
+        if (!task_config.retain_multiple_version && task_config.gc_delete_keys && value.is_delete())
+            || (!task_config.retain_multiple_version && !is_new_user_key)
+        {
+            drop = true;
+        }
+
+        if !drop && compaction_filter.should_delete(iter_key) {
+            drop = true;
+        }
+
+        if drop {
+            compaction_statistics.iter_drop_key_counts += 1;
+
+            last_table_stats.total_key_count -= 1;
+            last_table_stats.total_key_size -= iter_key.encoded_len() as i64;
+            last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
             iter.next()
                 .instrument_await("iter_next_in_drop".verbose())
                 .await?;
@@ -838,7 +904,7 @@ where
                         .await?;
                     let value_size_change = value_size as i64 - new_value.len() as i64;
                     assert!(value_size_change >= 0);
-                    rows.table_stats.total_value_size -= value_size_change;
+                    last_table_stats.total_value_size -= value_size_change;
                 }
             }
         }
@@ -854,13 +920,16 @@ where
         iter.next().instrument_await("iter_next".verbose()).await?;
     }
 
-    let mut compaction_statistics = rows.finish();
+    if let Some(last_table_id) = last_table_id.take() {
+        table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
+    }
     iter.collect_local_statistic(&mut local_stats);
     add_table_stats_map(
-        &mut compaction_statistics.delta_drop_stat,
+        &mut table_stats_drop,
         &local_stats.skipped_by_watermark_table_stats,
     );
     local_stats.report_compactor(compactor_metrics.as_ref());
+    compaction_statistics.delta_drop_stat = table_stats_drop;
 
     Ok(compaction_statistics)
 }
