@@ -57,6 +57,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
+use crate::scheduler::ReadSnapshot;
 use crate::utils::{ColIndexMapping, Condition};
 
 const ERROR_WINDOW_SIZE_ARG: &str =
@@ -333,11 +334,15 @@ impl Planner {
         // Pin Hummock before loading the latest Iceberg snapshot. If a sink commit races with
         // planning, this ordering guarantees that the Iceberg snapshot plus the filtered log
         // store still represents a coherent prefix of the table.
-        let read_pending_log_store =
-            matches!(self.plan_for(), PlanFor::BatchDql) && is_append_only && as_of.is_none();
-        if read_pending_log_store {
-            drop(self.ctx().session_ctx().pinned_snapshot());
-        }
+        // Unpinned reads can resolve after the sink has committed and truncated the log store,
+        // leaving a gap after the Iceberg snapshot. Use Iceberg alone for those reads.
+        let read_pending_log_store = matches!(self.plan_for(), PlanFor::BatchDql)
+            && is_append_only
+            && as_of.is_none()
+            && matches!(
+                self.ctx().session_ctx().pinned_snapshot(),
+                ReadSnapshot::FrontendPinned { .. }
+            );
 
         let mut logical_iceberg_intermediate_scan = self.plan_iceberg_intermediate_scan(
             &logical_source,

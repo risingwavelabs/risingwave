@@ -1495,7 +1495,12 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInnerIterLogInner<S, SD> {
             .await?;
         let iter = store
             .iter_log(
-                (start_epoch, end_epoch.get_epoch()),
+                (
+                    start_epoch,
+                    end_epoch
+                        .get_epoch()
+                        .expect("change-log reads require an explicit epoch"),
+                ),
                 table_key_range,
                 read_options,
             )

@@ -177,6 +177,9 @@ for_all_wrapped_id_fields! (
         BatchQueryCommittedEpoch {
             hummock_version_id: HummockVersionId,
         }
+        BatchQueryLatestCommittedEpoch {
+            hummock_version_id: HummockVersionId,
+        }
         WorkerNode {
             id: WorkerId,
         }
