@@ -643,6 +643,9 @@ async fn test_pin_timeout_during_preparation_or_submitted_copy() {
         )]);
         if !preparing {
             wait_for_pin_downloads(&refiller, &[info.object_id]).await;
+            #[cfg(madsim)]
+            tokio::time::advance(timeout);
+            #[cfg(not(madsim))]
             tokio::time::advance(timeout).await;
         }
         // In the preparation case, paused time advances to the Pin timeout while its
