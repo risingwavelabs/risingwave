@@ -280,3 +280,119 @@
 
     Table 4294967294 { columns: [ tenant, id, email, changelog_op, _changelog_row_id, _rw_timestamp ], primary key: [ $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
+- name: keyed changelog with a distribution subset
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (tenant)
+    select payload from c;
+  logical_plan: |-
+    LogicalProject { exprs: [t.payload] }
+    └─LogicalShare { id: 2 }
+      └─LogicalChangeLog { key: [t.tenant, t.id], distribution_key: [t.tenant] }
+        └─LogicalScan { table: t, columns: [t.id, t.tenant, t.payload, t._rw_timestamp] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [t.payload] }
+    └─LogicalChangeLog { key: [t.tenant, t.id], distribution_key: [t.tenant] }
+      └─LogicalScan { table: t, columns: [t.payload, t.id, t.tenant] }
+  stream_plan: |-
+    StreamMaterialize { columns: [payload, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.payload, _changelog_row_id] }
+      └─StreamChangeLog { key: [t.tenant, t.id], distribution_key: [t.tenant] }
+        └─StreamExchange { dist: HashShard(t.tenant) }
+          └─StreamTableScan { table: t, columns: [t.payload, t.id, t.tenant], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [payload, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [t.payload, _changelog_row_id] }
+        └── StreamChangeLog { key: [t.tenant, t.id], distribution_key: [t.tenant] }
+            └── StreamExchange Hash([2]) from 1
+
+    Fragment 1
+    StreamTableScan { table: t, columns: [t.payload, t.id, t.tenant], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+    ├── tables: [ StreamScan: 0 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ payload, _changelog_row_id, _rw_timestamp ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
+
+- name: keyed changelog with reordered equal distribution keys
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (id, TENANT)
+    select payload from c;
+  stream_plan: |-
+    StreamMaterialize { columns: [payload, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.payload, _changelog_row_id] }
+      └─StreamChangeLog { key: [t.tenant, t.id], distribution_key: [t.id, t.tenant] }
+        └─StreamExchange { dist: HashShard(t.id, t.tenant) }
+          └─StreamTableScan { table: t, columns: [t.payload, t.id, t.tenant], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [payload, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [t.payload, _changelog_row_id] }
+        └── StreamChangeLog { key: [t.tenant, t.id], distribution_key: [t.id, t.tenant] }
+            └── StreamExchange Hash([1, 2]) from 1
+
+    Fragment 1
+    StreamTableScan { table: t, columns: [t.payload, t.id, t.tenant], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+    ├── tables: [ StreamScan: 0 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ payload, _changelog_row_id, _rw_timestamp ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
+
+- name: keyed changelog with a quoted distribution column
+  sql: |
+    create table t (id int primary key, "Tenant" int, payload varchar);
+    with c as changelog from t key (id, "Tenant") distributed by ("Tenant")
+    select payload from c;
+  stream_plan: |-
+    StreamMaterialize { columns: [payload, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.payload, _changelog_row_id] }
+      └─StreamChangeLog { key: [t.id, t.Tenant], distribution_key: [t.Tenant] }
+        └─StreamExchange { dist: HashShard(t.Tenant) }
+          └─StreamTableScan { table: t, columns: [t.payload, t.id, t.Tenant], stream_scan_type: SnapshotBackfill, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }
+- name: keyed changelog rejects distribution outside declared key
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (payload)
+    select * from c;
+  binder_error: 'Bind error: Changelog DISTRIBUTED BY columns "payload" are not included in KEY'
+- name: keyed changelog rejects a distribution superset
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant) distributed by (tenant, id)
+    select * from c;
+  binder_error: 'Bind error: Changelog DISTRIBUTED BY columns "id" are not included in KEY'
+- name: keyed changelog reports all invalid distribution columns
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar, "Region" int);
+    with c as changelog from t key (tenant, id) distributed by (tenant, payload, "Region")
+    select * from c;
+  binder_error: 'Bind error: Changelog DISTRIBUTED BY columns "payload", "Region" are not included in KEY'

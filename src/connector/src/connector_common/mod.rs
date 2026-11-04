@@ -34,6 +34,8 @@ pub use connection::{
     KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level, validate_connection,
 };
 pub use iceberg::compaction::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
+#[cfg(any(test, feature = "test"))]
+pub use iceberg::mock_catalog;
 
 mod iceberg;
 #[cfg(not(madsim))]
