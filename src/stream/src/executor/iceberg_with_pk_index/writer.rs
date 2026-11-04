@@ -207,6 +207,9 @@ where
         // (Insert / Update::new), and `records()` yields at most `capacity` records per chunk.
         let insert_capacity = chunks.iter().map(|c| c.capacity()).sum::<usize>() + 1;
 
+        // `StreamSink::sink_type_in_prop` maps Iceberg's `type='upsert'` to a retract sink,
+        // and `derive_sink_type` rejects upsert input. Only retract or append-only input can
+        // reach this writer, so inserts cannot replace existing Iceberg rows.
         let chunks =
             StreamChunkCompactor::new(self.pk_indices.clone(), chunks, StreamKind::Retract)
                 .into_compacted_chunks_inline::<{ output_kind::RETRACT }>(
