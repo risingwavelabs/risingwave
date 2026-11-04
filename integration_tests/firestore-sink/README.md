@@ -13,7 +13,9 @@ preservation of nested NULLs, rejection of unsigned JSONB integers above i64::MA
 unsupported nesting, configuration validation, bounded request concurrency,
 draining concurrent requests on error, per-document ordering, and acknowledgement
 before log truncation. Explicit batch failure and missing status entries are
-errors; a failed first chunk cannot truncate the log or send the following chunk.
+errors by default; a failed first chunk cannot truncate the log or send the following chunk.
+With `firestore.skip_invalid_rows=true`, only invalid data is skipped. Permission,
+quota, unavailable-service, and incomplete-ACK errors still prevent log truncation.
 
 Encoding and validation tests also run in deterministic simulation:
 
@@ -42,7 +44,7 @@ yourself and run:
 
 ```sh
 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 cargo test -p risingwave_connector --lib --no-default-features \
-  sink::firestore::tests::grpc::emulator_crud_replay_and_native_values -- --ignored --nocapture
+  sink::firestore::tests::grpc::emulator_ -- --ignored --nocapture
 ```
 
 The connector honors the standard `FIRESTORE_EMULATOR_HOST=host:port` variable.
@@ -68,3 +70,63 @@ outcomes across recovery; these changes do not provide exactly-once delivery.
 
 References: [Firestore emulator](https://firebase.google.com/docs/emulator-suite/connect_firestore),
 [Firestore limits](https://firebase.google.com/docs/firestore/quotas).
+
+## Native types and subcollections
+
+`TIMESTAMPTZ` is written as a native Firestore timestamp. `TIMESTAMP` is interpreted
+as UTC, independent of the session or process time zone. Submicrosecond precision
+is truncated; years outside 0001–9999 are invalid rows. NULL remains native NULL,
+including in lists and structs.
+
+`DECIMAL` is written as a native double, including NaN and infinities. This uses
+64-bit floating point and can round high-precision decimal values. If exact text
+is required, explicitly cast the column to `VARCHAR` in the sink query.
+
+Parent document segments in `firestore.collection` may reference sink columns:
+
+```sql
+CREATE SINK child_sink FROM child_view WITH (
+    connector = 'firestore',
+    type = 'upsert',
+    primary_key = 'parent_id,child_id',
+    firestore.project_id = 'my-project',
+    firestore.collection = 'parents/{parent_id}/children',
+    firestore.document_id_column = 'child_id',
+    firestore.skip_invalid_rows = 'true'
+);
+```
+
+Each row writes to `parents/<parent_id>/children/<child_id>`. Placeholders must
+occupy a whole parent document segment and reference a column in the sink schema.
+Multiple levels are supported, for example
+`tenants/{tenant_id}/parents/{parent_id}/children`. Values must be non-NULL, valid
+single Firestore IDs; `/` cannot inject another path segment. Static nested paths
+continue to work. Include the parent columns in the sink primary key so that
+children with the same ID under different parents remain independent. A parent
+change uses the old row to delete the old path and the new row to insert the new
+path in upsert mode. Append-only mode retains the old document.
+
+## Invalid row policy
+
+`firestore.skip_invalid_rows` defaults to `false`, preserving failure/replay.
+Opting in permanently skips invalid mutations and logs a warning. It covers
+invalid/empty/NULL document or parent IDs, unsupported row values, excessive
+nesting, out-of-range timestamps, oversized documents, and per-write
+`INVALID_ARGUMENT`/`OUT_OF_RANGE` responses. If an entire RPC is rejected for
+invalid data, the sink isolates the writes and preserves healthy documents.
+Requests are limited by both write count and bytes to stay below the 10 MiB RPC
+limit.
+
+Authentication, permission, quota, transport, and transient errors are never
+skipped. Neither are missing or inconsistent batch statuses. Healthy writes must
+still be acknowledged before log truncation. Skipped updates can leave an older
+valid document in Firestore; this mode favors continued progress over a complete
+mirror and has no dead-letter queue. Once skipped data is corrected, a new source
+mutation delivers it normally. Deleting a row with an unusable ID is also skipped.
+
+The emulator suite additionally reads back native timestamps and decimal numbers,
+writes the same child ID under two parents, moves a child, mixes healthy rows with
+NULL/empty/invalid IDs and a document over 1 MiB, and checks continued delivery.
+It also sends a deliberately oversized write directly to exercise server rejection
+and isolation alongside a healthy write. These tests do not replace the user's
+full 48-check SQL/crash-recovery comparison against the Python connector.

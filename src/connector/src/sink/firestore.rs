@@ -17,10 +17,13 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::anyhow;
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use firestore::{FirestoreBatchWriter, FirestoreDb, FirestoreDbOptions};
+use firestore::{FirestoreDb, FirestoreDbOptions};
 use futures::StreamExt;
 use gcloud_sdk::google::firestore::v1::value::ValueType;
-use gcloud_sdk::google::firestore::v1::{ArrayValue, Document, MapValue, Value, Write, write};
+use gcloud_sdk::google::firestore::v1::{
+    ArrayValue, BatchWriteRequest, Document, MapValue, Value, Write, write,
+};
+use prost::Message as _;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
@@ -42,6 +45,9 @@ pub const FIRESTORE_SINK: &str = "firestore";
 
 const DEFAULT_MAX_BATCH_SIZE: usize = 500; // Firestore batch limit
 const DEFAULT_MAX_FUTURE_SEND_NUMS: usize = 256;
+const MAX_DOCUMENT_SIZE: usize = 1_048_576;
+// Leave room for the database name and protobuf framing below the 10 MiB RPC limit.
+const MAX_BATCH_WRITE_BYTES: usize = 9 * 1024 * 1024;
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -50,7 +56,7 @@ pub struct FirestoreConfig {
     #[serde(rename = "firestore.project_id")]
     pub project_id: String,
 
-    /// Firestore collection name
+    /// Collection path. A parent document segment may reference a column, e.g. `users/{user_id}/orders`.
     #[serde(rename = "firestore.collection")]
     pub collection: String,
 
@@ -64,10 +70,16 @@ pub struct FirestoreConfig {
     pub credentials: Option<String>,
 
     /// Column whose value is used as the Firestore document ID. Values must be unique and valid
-    /// Firestore document IDs. Duplicate values intentionally map multiple rows to the same
-    /// Firestore document.
+    /// Firestore document IDs. Duplicate values in the same resolved collection intentionally
+    /// map multiple rows to the same Firestore document.
     #[serde(rename = "firestore.document_id_column")]
     pub document_id_column: Option<String>,
+
+    /// Skip invalid rows and document-level `INVALID_ARGUMENT/OUT_OF_RANGE` rejections (default: false).
+    /// Skipped mutations are not delivered; authentication and transient failures still fail the chunk.
+    #[serde(rename = "firestore.skip_invalid_rows", default)]
+    #[serde_as(as = "DisplayFromStr")]
+    pub skip_invalid_rows: bool,
 
     /// Maximum batch size for batch writes (default: 500)
     #[serde(
@@ -157,6 +169,18 @@ impl FirestoreConfig {
     }
 
     fn validate_schema(&self, schema: &Schema, pk_indices: &[usize]) -> Result<Option<usize>> {
+        parse_collection_path(&self.collection, schema)?;
+        for (name, value) in [
+            ("project_id", Some(&self.project_id)),
+            ("database_id", self.database_id.as_ref()),
+        ] {
+            if value.is_some_and(|value| value.is_empty() || value.contains('/')) {
+                return Err(SinkError::Config(anyhow!(
+                    "firestore.{} must be a nonempty resource ID without '/'",
+                    name
+                )));
+            }
+        }
         if !(1..=DEFAULT_MAX_BATCH_SIZE).contains(&self.max_batch_size) {
             return Err(SinkError::Config(anyhow!(
                 "firestore.max_batch_size must be between 1 and {}",
@@ -257,6 +281,7 @@ pub struct FirestoreSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     doc_id_col_idx: Option<usize>,
+    collection_path: Vec<CollectionPathSegment>,
 }
 
 impl FirestoreSinkWriter {
@@ -266,6 +291,7 @@ impl FirestoreSinkWriter {
         pk_indices: Vec<usize>,
     ) -> Result<Self> {
         let doc_id_col_idx = config.validate_schema(&schema, &pk_indices)?;
+        let collection_path = parse_collection_path(&config.collection, &schema)?;
         let client = config.build_client().await?;
 
         Ok(Self {
@@ -274,6 +300,7 @@ impl FirestoreSinkWriter {
             schema,
             pk_indices,
             doc_id_col_idx,
+            collection_path,
         })
     }
 
@@ -317,23 +344,56 @@ impl FirestoreSinkWriter {
         Ok(map)
     }
 
+    fn get_document_path(&self, row: RowRef<'_>) -> Result<String> {
+        let mut segments = Vec::with_capacity(self.collection_path.len() + 1);
+        for segment in &self.collection_path {
+            segments.push(match segment {
+                CollectionPathSegment::Literal(value) => value.clone(),
+                CollectionPathSegment::Column(index) => {
+                    let value = row
+                        .datum_at(*index)
+                        .ok_or_else(|| {
+                            SinkError::Firestore(anyhow!("Firestore parent document ID is null"))
+                        })?
+                        .to_text();
+                    validate_firestore_document_id(&value)?;
+                    value
+                }
+            });
+        }
+        segments.push(self.get_document_id(row)?);
+        let path = segments.join("/");
+        if self.client.get_documents_path().len() + 1 + path.len() > 6 * 1024 {
+            return Err(SinkError::Firestore(anyhow!(
+                "Firestore document name exceeds 6 KiB"
+            )));
+        }
+        Ok(path)
+    }
+
     fn write_chunk_inner(&self, chunk: StreamChunk) -> Result<Vec<FirestoreOperation>> {
         let mut operations = BTreeMap::new();
 
         for (op, row) in chunk.rows() {
-            let doc_id = self.get_document_id(row)?;
-
-            match op {
-                Op::Insert | Op::UpdateInsert => {
-                    let data = self.format_row(row)?;
-                    operations.insert(doc_id.clone(), FirestoreOperation::Upsert { doc_id, data });
+            let operation = (|| {
+                let path = self.get_document_path(row)?;
+                Ok(match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let data = self.format_row(row)?;
+                        validate_document_size(&path, &data)?;
+                        FirestoreOperation::Upsert { path, data }
+                    }
+                    Op::Delete | Op::UpdateDelete => FirestoreOperation::Delete { path },
+                })
+            })();
+            match operation {
+                Ok(operation) => {
+                    operations.insert(operation.document_path().to_owned(), operation);
                 }
-                Op::Delete => {
-                    operations.insert(doc_id.clone(), FirestoreOperation::Delete { doc_id });
+                Err(error) if self.config.skip_invalid_rows => {
+                    tracing::warn!(error = %error, "skipping invalid Firestore row");
                 }
-                Op::UpdateDelete => {
-                    operations.insert(doc_id.clone(), FirestoreOperation::Delete { doc_id });
-                }
+                Err(error) => return Err(error),
             }
         }
 
@@ -341,53 +401,30 @@ impl FirestoreSinkWriter {
     }
 
     async fn write_operations(&self, operations: Vec<FirestoreOperation>) -> Result<()> {
-        let requests = operations.chunks(self.config.max_batch_size).map(|chunk| {
-            let client = self.client.clone();
-            let collection = self.config.collection.clone();
-            let chunk = chunk.to_vec();
-            async move {
-                let document_ids = chunk
-                    .iter()
-                    .map(|op| op.document_id().to_owned())
-                    .collect::<Vec<_>>();
-                let writes = chunk
-                    .into_iter()
-                    .map(|op| {
-                        let name = format!(
-                            "{}/{}/{}",
-                            client.get_documents_path(),
-                            collection,
-                            op.document_id()
-                        );
-                        let operation = match op {
-                            FirestoreOperation::Upsert { data, .. } => {
-                                write::Operation::Update(Document {
-                                    name,
-                                    fields: data,
-                                    ..Default::default()
-                                })
-                            }
-                            FirestoreOperation::Delete { .. } => write::Operation::Delete(name),
-                        };
-                        Write {
-                            operation: Some(operation),
-                            ..Default::default()
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let writer = client.create_simple_batch_writer().await.map_err(|e| {
-                    SinkError::Firestore(
-                        anyhow!(e).context("failed to create Firestore batch writer"),
-                    )
-                })?;
-                let response = writer.write(writes).await.map_err(|e| {
-                    SinkError::Firestore(
-                        anyhow!(e).context("failed to execute Firestore batch write"),
-                    )
-                })?;
-                check_batch_statuses(&response.statuses, &document_ids)
-            }
-        });
+        let writes = operations
+            .into_iter()
+            .map(|op| {
+                let name = format!(
+                    "{}/{}",
+                    self.client.get_documents_path(),
+                    op.document_path()
+                );
+                let operation = match op {
+                    FirestoreOperation::Upsert { data, .. } => write::Operation::Update(Document {
+                        name,
+                        fields: data,
+                        ..Default::default()
+                    }),
+                    FirestoreOperation::Delete { .. } => write::Operation::Delete(name),
+                };
+                Write {
+                    operation: Some(operation),
+                    ..Default::default()
+                }
+            })
+            .collect::<Vec<_>>();
+        let batches = split_write_batches(writes, self.config.max_batch_size);
+        let requests = batches.into_iter().map(|writes| self.write_batch(writes));
 
         // Each document occurs at most once per chunk. Only these independent requests may
         // run concurrently. Drain requests even on failure before allowing rewind/replay.
@@ -396,11 +433,192 @@ impl FirestoreSinkWriter {
             .fold(Ok(()), |result, next| async move { result.and(next) })
             .await
     }
+
+    async fn write_batch(&self, writes: Vec<Write>) -> Result<()> {
+        let request = BatchWriteRequest {
+            database: self.client.get_database_path().clone(),
+            writes,
+            ..Default::default()
+        };
+        let response = self
+            .client
+            .client()
+            .get()
+            .batch_write(request.clone())
+            .await;
+        match response {
+            Ok(response) => {
+                let paths = request
+                    .writes
+                    .iter()
+                    .map(write_document_path)
+                    .collect::<Vec<_>>();
+                check_batch_statuses(
+                    &response.into_inner().status,
+                    &paths,
+                    self.config.skip_invalid_rows,
+                )
+            }
+            Err(error)
+                if self.config.skip_invalid_rows && is_invalid_row_code(error.code() as i32) =>
+            {
+                // Some servers reject the whole RPC for one invalid document. Isolate it;
+                // never discard the other writes in that batch or ignore transport failures.
+                for write in request.writes {
+                    let path = write_document_path(&write);
+                    let response = self
+                        .client
+                        .client()
+                        .get()
+                        .batch_write(BatchWriteRequest {
+                            database: request.database.clone(),
+                            writes: vec![write],
+                            ..Default::default()
+                        })
+                        .await;
+                    match response {
+                        Ok(response) => {
+                            check_batch_statuses(&response.into_inner().status, &[path], true)?
+                        }
+                        Err(error) if is_invalid_row_code(error.code() as i32) => {
+                            tracing::warn!(document = %path, error = %error, "skipping rejected Firestore row");
+                        }
+                        Err(error) => return Err(SinkError::Firestore(anyhow!(error))),
+                    }
+                }
+                Ok(())
+            }
+            Err(error) => Err(SinkError::Firestore(
+                anyhow!(error).context("failed to execute Firestore batch write"),
+            )),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum CollectionPathSegment {
+    Literal(String),
+    Column(usize),
+}
+
+fn parse_collection_path(path: &str, schema: &Schema) -> Result<Vec<CollectionPathSegment>> {
+    let segments = path.split('/').collect::<Vec<_>>();
+    if segments.len() % 2 != 1 || segments.len() > 201 {
+        return Err(SinkError::Config(anyhow!(
+            "firestore.collection must be a collection path with at most 100 subcollections"
+        )));
+    }
+    segments
+        .into_iter()
+        .enumerate()
+        .map(|(position, segment)| {
+            if let Some(column) = segment.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                if position % 2 == 0 {
+                    return Err(SinkError::Config(anyhow!(
+                        "collection placeholders must be parent document segments"
+                    )));
+                }
+                let index = schema
+                    .fields()
+                    .iter()
+                    .position(|f| f.name == column)
+                    .ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "collection path column '{}' not found in schema",
+                            column
+                        ))
+                    })?;
+                Ok(CollectionPathSegment::Column(index))
+            } else {
+                if segment.contains(['{', '}']) {
+                    return Err(SinkError::Config(anyhow!(
+                        "collection placeholders must occupy a complete path segment"
+                    )));
+                }
+                validate_firestore_document_id(segment)
+                    .map_err(|error| SinkError::Config(anyhow!(error)))?;
+                Ok(CollectionPathSegment::Literal(segment.to_owned()))
+            }
+        })
+        .collect()
+}
+
+fn is_invalid_row_code(code: i32) -> bool {
+    matches!(code, 3 | 11) // INVALID_ARGUMENT and OUT_OF_RANGE only.
+}
+
+fn write_document_path(write: &Write) -> String {
+    match write
+        .operation
+        .as_ref()
+        .expect("Firestore write has an operation")
+    {
+        write::Operation::Update(document) => document.name.clone(),
+        write::Operation::Delete(path) => path.clone(),
+        write::Operation::Transform(_) => unreachable!("sink only emits upserts and deletes"),
+    }
+}
+
+fn split_write_batches(writes: Vec<Write>, max_count: usize) -> Vec<Vec<Write>> {
+    let mut batches = Vec::new();
+    let mut batch = Vec::new();
+    let mut bytes = 0;
+    for write in writes {
+        let size = write.encoded_len() + 5;
+        if !batch.is_empty() && (batch.len() >= max_count || bytes + size > MAX_BATCH_WRITE_BYTES) {
+            batches.push(std::mem::take(&mut batch));
+            bytes = 0;
+        }
+        bytes += size;
+        batch.push(write);
+    }
+    if !batch.is_empty() {
+        batches.push(batch);
+    }
+    batches
+}
+
+// Firestore storage size differs from protobuf size. See:
+// https://firebase.google.com/docs/firestore/storage-size
+fn firestore_fields_size(fields: &HashMap<String, Value>) -> usize {
+    fields
+        .iter()
+        .map(|(name, value)| name.len() + 1 + firestore_value_size(value))
+        .sum()
+}
+
+fn firestore_value_size(value: &Value) -> usize {
+    match value.value_type.as_ref().expect("encoded Firestore value") {
+        ValueType::NullValue(_) | ValueType::BooleanValue(_) => 1,
+        ValueType::IntegerValue(_) | ValueType::DoubleValue(_) | ValueType::TimestampValue(_) => 8,
+        ValueType::StringValue(value) => value.len() + 1,
+        ValueType::BytesValue(value) => value.len(),
+        ValueType::ArrayValue(value) => value.values.iter().map(firestore_value_size).sum(),
+        ValueType::MapValue(value) => firestore_fields_size(&value.fields) + 32,
+        ValueType::GeoPointValue(_) => 16,
+        ValueType::ReferenceValue(value) => value.len() + 16,
+        ValueType::FieldReferenceValue(_)
+        | ValueType::FunctionValue(_)
+        | ValueType::PipelineValue(_) => {
+            unreachable!("query-only Firestore values are never emitted by the row encoder")
+        }
+    }
+}
+
+fn validate_document_size(path: &str, fields: &HashMap<String, Value>) -> Result<()> {
+    let name_size = path.split('/').map(|part| part.len() + 1).sum::<usize>() + 16;
+    if name_size + firestore_fields_size(fields) + 32 > MAX_DOCUMENT_SIZE {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore document exceeds 1 MiB"
+        )));
+    }
+    Ok(())
 }
 
 fn check_batch_statuses(
     statuses: &[gcloud_sdk::google::rpc::Status],
     document_ids: &[String],
+    skip_invalid_rows: bool,
 ) -> Result<()> {
     if statuses.len() != document_ids.len() {
         return Err(SinkError::Firestore(anyhow!(
@@ -411,6 +629,10 @@ fn check_batch_statuses(
     }
     for (status, document_id) in statuses.iter().zip_eq_debug(document_ids) {
         if status.code != 0 {
+            if skip_invalid_rows && is_invalid_row_code(status.code) {
+                tracing::warn!(document = %document_id, code = status.code, message = %status.message, "skipping rejected Firestore row");
+                continue;
+            }
             return Err(SinkError::Firestore(anyhow!(
                 "Firestore batch write failed for document '{}': code={}, message={}",
                 document_id,
@@ -425,18 +647,18 @@ fn check_batch_statuses(
 #[derive(Clone)]
 enum FirestoreOperation {
     Upsert {
-        doc_id: String,
+        path: String,
         data: HashMap<String, Value>,
     },
     Delete {
-        doc_id: String,
+        path: String,
     },
 }
 
 impl FirestoreOperation {
-    fn document_id(&self) -> &str {
+    fn document_path(&self) -> &str {
         match self {
-            Self::Upsert { doc_id, .. } | Self::Delete { doc_id } => doc_id,
+            Self::Upsert { path, .. } | Self::Delete { path } => path,
         }
     }
 }
@@ -485,14 +707,25 @@ fn format_datum_at_depth(
         DataType::Int64 => ValueType::IntegerValue(scalar.into_int64()),
         DataType::Float32 => ValueType::DoubleValue(scalar.into_float32().0.into()),
         DataType::Float64 => ValueType::DoubleValue(scalar.into_float64().0),
-        DataType::Decimal
-        | DataType::Int256
+        DataType::Decimal => ValueType::DoubleValue(
+            f64::try_from(scalar.into_decimal())
+                .map_err(|error| SinkError::Firestore(anyhow!(error)))?,
+        ),
+        DataType::Timestamp => {
+            // A timestamp without a time zone is interpreted as UTC, independently of
+            // the session/process time zone. Firestore stores microsecond precision.
+            let time = scalar.into_timestamp().0.and_utc();
+            firestore_timestamp(time.timestamp(), time.timestamp_subsec_nanos())?
+        }
+        DataType::Timestamptz => {
+            let time = scalar.into_timestamptz();
+            firestore_timestamp(time.timestamp(), time.timestamp_subsec_nanos())?
+        }
+        DataType::Int256
         | DataType::Serial
         | DataType::Interval
         | DataType::Date
-        | DataType::Time
-        | DataType::Timestamp
-        | DataType::Timestamptz => ValueType::StringValue(scalar.to_text_with_type(data_type)),
+        | DataType::Time => ValueType::StringValue(scalar.to_text_with_type(data_type)),
         DataType::Varchar => ValueType::StringValue(scalar.into_utf8().to_owned()),
         DataType::Bytea => ValueType::StringValue(STANDARD.encode(scalar.into_bytea())),
         DataType::Jsonb => return format_jsonb(scalar.into_jsonb().into(), depth),
@@ -530,6 +763,18 @@ fn format_datum_at_depth(
     Ok(Value {
         value_type: Some(value_type),
     })
+}
+
+fn firestore_timestamp(seconds: i64, nanos: u32) -> Result<ValueType> {
+    if !(-62_135_596_800..=253_402_300_799).contains(&seconds) || nanos >= 1_000_000_000 {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore timestamp must be between years 0001 and 9999"
+        )));
+    }
+    Ok(ValueType::TimestampValue(prost_types::Timestamp {
+        seconds,
+        nanos: (nanos / 1000 * 1000) as i32,
+    }))
 }
 
 fn format_jsonb(value: jsonbb::ValueRef<'_>, depth: usize) -> Result<Value> {
