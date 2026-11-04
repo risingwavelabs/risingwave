@@ -1198,10 +1198,6 @@ async fn test_scoped_refill_handles_multi_table_vnode_boundary() {
 
 #[tokio::test]
 async fn test_without_pin_backend_preserves_foyer_task_lifecycle() {
-    use std::panic::AssertUnwindSafe;
-
-    use risingwave_common::util::panic::FutureCatchUnwindExt;
-
     let gate = Arc::new(Semaphore::new(0));
     let worker_gate = gate.clone();
     let completed = Arc::new(tokio::sync::Notify::new());
@@ -1235,10 +1231,18 @@ async fn test_without_pin_backend_preserves_foyer_task_lifecycle() {
         .await
         .expect("dropping the condition must not abort legacy Foyer work");
 
-    refiller.foyer.spawn_refill_task = Some(Arc::new(|_, _| {
-        tokio::spawn(async { panic!("simulated Foyer task failure") })
-    }));
-    let condition =
-        refiller.start_cache_refill(vec![], &version, Some(&[]), &cache_metadata.read());
-    assert!(AssertUnwindSafe(condition).rw_catch_unwind().await.is_err());
+    // Madsim propagates a task panic to the simulation instead of returning a JoinError.
+    #[cfg(not(madsim))]
+    {
+        use std::panic::AssertUnwindSafe;
+
+        use risingwave_common::util::panic::FutureCatchUnwindExt;
+
+        refiller.foyer.spawn_refill_task = Some(Arc::new(|_, _| {
+            tokio::spawn(async { panic!("simulated Foyer task failure") })
+        }));
+        let condition =
+            refiller.start_cache_refill(vec![], &version, Some(&[]), &cache_metadata.read());
+        assert!(AssertUnwindSafe(condition).rw_catch_unwind().await.is_err());
+    }
 }
