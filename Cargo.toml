@@ -218,7 +218,7 @@ opentelemetry_sdk = { version = "0.31", default-features = false, features = [
     "trace",
 ] }
 otlp-embedded = "0.0.2"
-parking_lot = { version = "0.12", features = [
+parking_lot = { version = "0.13", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
