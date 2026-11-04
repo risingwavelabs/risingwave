@@ -340,6 +340,9 @@ async fn finish_full_scan(
 }
 
 async fn advance_gc(duration: Duration) {
+    #[cfg(madsim)]
+    tokio::time::advance(duration);
+    #[cfg(not(madsim))]
     tokio::time::advance(duration).await;
     tokio::task::yield_now().await;
 }
