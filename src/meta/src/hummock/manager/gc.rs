@@ -338,10 +338,6 @@ impl HummockManager {
         // Retained owners are read asynchronously. Keep version references alive across
         // their publication/cleanup handoff without holding a metadata lock across I/O.
         let _safe_point = self.register_gc_safe_point().await;
-        let pinned_by_metadata_backup = match backup_manager.as_ref() {
-            Some(b) => b.list_pinned_object_ids().await,
-            None => HashSet::default(),
-        };
         // It's crucial to collect_min_uncommitted_object_id (i.e. `min_object_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_object_id`, new compute nodes may join and generate new uncommitted objects that are not covered by `min_sst_id`.
         // By getting `min_object_id` after `object_ids`, it's ensured `object_ids` won't include any objects from those new compute nodes.
@@ -355,12 +351,6 @@ impl HummockManager {
         metrics
             .full_gc_candidate_object_count
             .observe(candidate_object_number as _);
-        // filter by metadata backup
-        let object_ids = object_ids
-            .into_iter()
-            .filter(|s| !pinned_by_metadata_backup.contains(&s.as_raw()))
-            .collect_vec();
-        let after_metadata_backup = object_ids.len();
         // filter by time travel archive
         let filter_by_time_travel_start_time = Instant::now();
         let object_ids = self
@@ -376,6 +366,24 @@ impl HummockManager {
             .filter(|id| id.as_raw() < min_object_id)
             .collect_vec();
         let after_min_object_id = object_ids.len();
+        // Recheck the published manifest under the backup job lock before writing GC history.
+        // A running backup may hold changelog objects outside the version safe point.
+        let _backup_guard = if let Some(backup_manager) = &backup_manager {
+            let Some(guard) = backup_manager.try_lock_for_gc() else {
+                tracing::debug!("Skip full GC batch while backup is active");
+                return Ok(0);
+            };
+            Some(guard)
+        } else {
+            None
+        };
+        let backup_pinned = match &backup_manager {
+            Some(backup_manager) => backup_manager.list_pinned_object_ids().await,
+            None => HashSet::default(),
+        };
+        let mut object_ids = object_ids;
+        object_ids.retain(|id| !backup_pinned.contains(&id.as_raw()));
+        let after_metadata_backup = object_ids.len();
         // filter by version
         let after_version = self
             .finalize_objects_to_delete(object_ids.into_iter())
@@ -386,9 +394,9 @@ impl HummockManager {
             .observe(after_version_count as _);
         tracing::info!(
             candidate_object_number,
-            after_metadata_backup,
             after_time_travel,
             after_min_object_id,
+            after_metadata_backup,
             after_version_count,
             "complete gc batch"
         );
@@ -532,11 +540,6 @@ impl HummockManager {
         else {
             return Ok(());
         };
-        // Changelog truncation can enqueue still-live SSTs. Protect them while a backup
-        // takes over their references between the manifest scan and the version check.
-        let _safe_point = self.register_gc_safe_point().await;
-        // Objects pinned by either meta backup or time travel should be filtered out.
-        let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids().await;
         #[cfg(test)]
         tests::pause_gc_retention_handoff(self).await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
@@ -554,13 +557,24 @@ impl HummockManager {
         };
         let object_ids = object_ids
             .into_iter()
-            .filter(|s| !version_pinned.contains(s) && !backup_pinned.contains(&s.as_raw()));
+            .filter(|s| !version_pinned.contains(s));
         let filter_by_time_travel_start_time = Instant::now();
         let object_ids = self.filter_out_objects_by_time_travel(object_ids).await?;
         tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in minor GC");
+        let Some(_backup_guard) = backup_manager.try_lock_for_gc() else {
+            self.gc_manager
+                .add_may_delete_object_ids(object_ids.into_iter());
+            return Ok(());
+        };
+        let backup_pinned = backup_manager.list_pinned_object_ids().await;
         // Retry is not necessary. Full GC will handle these objects eventually.
-        self.delete_objects(object_ids.into_iter().collect())
-            .await?;
+        self.delete_objects(
+            object_ids
+                .into_iter()
+                .filter(|id| !backup_pinned.contains(&id.as_raw()))
+                .collect(),
+        )
+        .await?;
         Ok(())
     }
 }
@@ -658,11 +672,39 @@ mod tests {
         gc_retention_handoff(GcRetentionHandoff::MinorBackup).await;
     }
 
+    #[tokio::test]
+    async fn test_minor_gc_preserves_old_value_during_backup() {
+        gc_retention_handoff(GcRetentionHandoff::OldValueBackup {
+            minor: true,
+            publish_first: false,
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_full_gc_preserves_old_value_during_backup() {
+        gc_retention_handoff(GcRetentionHandoff::OldValueBackup {
+            minor: false,
+            publish_first: false,
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_minor_gc_preserves_published_backup_old_value() {
+        gc_retention_handoff(GcRetentionHandoff::OldValueBackup {
+            minor: true,
+            publish_first: true,
+        })
+        .await;
+    }
+
     #[derive(Clone, Copy)]
     enum GcRetentionHandoff {
         FullBackup,
         FullTimeTravel,
         MinorBackup,
+        OldValueBackup { minor: bool, publish_first: bool },
     }
 
     async fn gc_retention_handoff(scenario: GcRetentionHandoff) {
@@ -678,7 +720,13 @@ mod tests {
             get_sst_ids, register_table_ids_to_compaction_group, to_local_sstable_info,
         };
 
-        let minor_gc = matches!(scenario, GcRetentionHandoff::MinorBackup);
+        let minor_gc = matches!(
+            scenario,
+            GcRetentionHandoff::MinorBackup
+                | GcRetentionHandoff::OldValueBackup { minor: true, .. }
+        );
+        let capture_old_value = matches!(scenario, GcRetentionHandoff::OldValueBackup { .. });
+        let has_change_log = minor_gc || capture_old_value;
         let retain_by_backup = !matches!(scenario, GcRetentionHandoff::FullTimeTravel);
         let mut opts = crate::manager::MetaOpts::test(false);
         opts.min_sst_retention_time_sec = 0;
@@ -749,7 +797,13 @@ mod tests {
         let epoch = test_epoch(1);
         // Fill the real minor GC batch using the change log. New-value SSTs also belong to
         // the current version, while an old-value SST is referenced only by the change log.
-        let sst_count = if minor_gc { 1000 } else { 1 };
+        let sst_count = if minor_gc {
+            1000
+        } else if capture_old_value {
+            2
+        } else {
+            1
+        };
         let mut ssts = get_sst_ids(&manager, sst_count)
             .await
             .into_iter()
@@ -800,7 +854,7 @@ mod tests {
         }
         let object_id = HummockObjectId::Sstable(ssts[0].object_id);
         let path = object_path(object_id);
-        let old_value = minor_gc.then(|| ssts.pop().unwrap());
+        let old_value = has_change_log.then(|| ssts.pop().unwrap());
         client
             .commit_epoch_with_change_log(
                 epoch,
@@ -809,26 +863,105 @@ mod tests {
                     old_value_ssts: to_local_sstable_info(old_value.as_slice()),
                     ..Default::default()
                 },
-                minor_gc.then_some(vec![epoch]),
+                has_change_log.then_some(vec![epoch]),
             )
             .await
             .unwrap();
-        if minor_gc {
-            manager
-                .truncate_table_change_log(TableChangeLogTruncateInfo {
-                    subscription_retention_seconds: [(table_id, 60)].into(),
-                    committed_epoch_truncate_jobs: vec![],
-                    progress_table_subscribers: vec![],
-                })
-                .await
-                .unwrap();
-        } else {
+        let truncate_change_log = || {
+            manager.truncate_table_change_log(TableChangeLogTruncateInfo {
+                subscription_retention_seconds: [(table_id, 60)].into(),
+                committed_epoch_truncate_jobs: vec![],
+                progress_table_subscribers: vec![],
+            })
+        };
+        if minor_gc && !capture_old_value {
+            truncate_change_log().await.unwrap();
+        } else if !minor_gc {
             // Age the probe past the full GC clock. Channels force the race itself.
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
         let backup = Arc::new(
             crate::backup_restore::BackupManager::for_test(env.clone(), manager.clone()).await,
         );
+        if let GcRetentionHandoff::OldValueBackup {
+            minor,
+            publish_first,
+        } = scenario
+        {
+            use risingwave_pb::backup_service::BackupJobStatus;
+            let old_id = HummockObjectId::Sstable(old_value.unwrap().object_id);
+            let old_path = object_path(old_id);
+            assert!(gc.store.metadata(&old_path).await.is_ok());
+            assert!(
+                !manager
+                    .get_current_version()
+                    .await
+                    .get_object_ids()
+                    .any(|id| id == old_id)
+            );
+            let (captured_tx, captured_rx) = tokio::sync::oneshot::channel();
+            let (publish_tx, publish_rx) = tokio::sync::oneshot::channel();
+            *backup.snapshot_captured.lock().await = Some((captured_tx, publish_rx));
+            let job = backup.start_backup_job(None).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(10), captured_rx)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                !backup
+                    .list_pinned_object_ids()
+                    .await
+                    .contains(&old_id.as_raw())
+            );
+            truncate_change_log().await.unwrap();
+            let wait_for_publish = || async {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        let (status, message) = backup.get_backup_job_status(job);
+                        match status {
+                            BackupJobStatus::Succeeded => break,
+                            BackupJobStatus::Failed => panic!("backup failed: {message}"),
+                            _ => tokio::task::yield_now().await,
+                        }
+                    }
+                })
+                .await
+                .unwrap();
+            };
+            let mut publish_tx = Some(publish_tx);
+            if publish_first {
+                publish_tx.take().unwrap().send(()).unwrap();
+                wait_for_publish().await;
+            }
+            if minor {
+                manager.try_start_minor_gc(backup.clone()).await.unwrap();
+            } else {
+                manager
+                    .start_full_gc(Duration::ZERO, None, Some(backup.clone()))
+                    .await
+                    .unwrap();
+            }
+            if let Some(publish_tx) = publish_tx {
+                publish_tx.send(()).unwrap();
+                wait_for_publish().await;
+            }
+            assert!(
+                backup
+                    .list_pinned_object_ids()
+                    .await
+                    .contains(&old_id.as_raw())
+            );
+            let metadata = gc.store.metadata(&old_path).await;
+            eprintln!(
+                "backup=Succeeded manifest_contains_old_value=true minor={minor} publish_first={publish_first} object_exists={}",
+                metadata.is_ok()
+            );
+            assert!(
+                metadata.is_ok(),
+                "successful backup references a deleted old-value SST"
+            );
+            return;
+        }
 
         let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
         let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
