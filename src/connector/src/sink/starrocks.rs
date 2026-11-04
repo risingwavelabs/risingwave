@@ -504,6 +504,7 @@ pub struct StarrocksSinkWriter {
     client: Option<StarrocksClient>,
     txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
+    // Retain the cleanup label across RPC awaits. Failed or cancelled writers are discarded.
     curr_txn_label: Option<String>,
     max_batch_size_bytes: Option<u64>,
     current_batch_size_bytes: u64,
@@ -729,52 +730,59 @@ impl StarrocksSinkWriter {
     }
 
     async fn ensure_transaction(&mut self) -> Result<()> {
-        if self.curr_txn_label.is_none() {
-            let txn_label = self.new_txn_label();
-            tracing::debug!(?txn_label, "begin transaction");
-            // Retain the label if begin is cancelled or its response is lost.
-            self.curr_txn_label = Some(txn_label.clone());
-            let begin_result =
-                self.txn_client
-                    .begin(txn_label.clone())
-                    .await
-                    .and_then(|txn_label_res| {
-                        if txn_label != txn_label_res {
-                            Err(SinkError::Starrocks(format!(
-                                "label {} returned from StarRocks {} differs from generated one",
-                                txn_label, txn_label_res
-                            )))
-                        } else {
-                            Ok(())
-                        }
-                    });
-            if let Err(err) = begin_result {
-                self.rollback_after_failure(txn_label).await;
-                return Err(err);
+        if self.curr_txn_label.is_some() {
+            return Ok(());
+        }
+        let txn_label = self.new_txn_label();
+        tracing::debug!(?txn_label, "begin transaction");
+        // Retain the label if begin is cancelled or its response is lost.
+        self.curr_txn_label = Some(txn_label.clone());
+        let result = async {
+            let txn_label_res = self.txn_client.begin(txn_label.clone()).await?;
+            if txn_label != txn_label_res {
+                return Err(SinkError::Starrocks(format!(
+                    "label {} returned from StarRocks {} differs from generated one",
+                    txn_label, txn_label_res
+                )));
             }
+            Ok(())
+        }
+        .await;
+        if let Err(err) = result {
+            self.rollback_after_failure().await;
+            return Err(err);
         }
         Ok(())
     }
 
     async fn commit_current_transaction(&mut self) -> Result<()> {
-        self.finish_load_request().await?;
-        if let Some(txn_label) = self.curr_txn_label.clone() {
-            // Keep the label in the writer across awaits so cancellation can
-            // still roll back through Drop (for example during ALTER/rebuild).
-            if let Err(err) = self.prepare_and_commit(txn_label.clone()).await {
-                self.rollback_after_failure(txn_label).await;
-                return Err(err);
+        let result = async {
+            self.finish_load_request().await?;
+            if let Some(txn_label) = self.curr_txn_label.clone() {
+                // Keep the label across awaits for cancellation cleanup through Drop.
+                self.prepare_and_commit(txn_label).await?;
             }
-            self.curr_txn_label = None;
-            self.current_transaction_size_bytes = 0;
+            Ok(())
         }
+        .await;
+        if let Err(err) = result {
+            self.rollback_after_failure().await;
+            return Err(err);
+        }
+        self.curr_txn_label = None;
+        self.current_transaction_size_bytes = 0;
         Ok(())
     }
 
-    async fn rollback_after_failure(&mut self, txn_label: String) {
+    /// Best-effort cleanup before discarding the writer; callers retain the original error.
+    async fn rollback_after_failure(&mut self) {
+        let Some(txn_label) = self.curr_txn_label.clone() else {
+            return;
+        };
+        tracing::debug!(?txn_label, "rollback transaction");
         let rollback_result = self.txn_client.rollback(txn_label.clone()).await;
         // This failed writer is discarded. Cleanup has already been attempted;
-        // avoid a second abort replacing the original begin or commit error. Keep
+        // avoid a second abort replacing the original operation error. Keep
         // the label until the await completes so cancellation can still clean up.
         self.curr_txn_label = None;
         if let Err(rollback_err) = rollback_result {
@@ -846,10 +854,8 @@ impl SinkWriter for StarrocksSinkWriter {
     }
 
     async fn abort(&mut self) -> Result<()> {
-        if let Some(txn_label) = self.curr_txn_label.take() {
-            tracing::debug!(?txn_label, "rollback transaction");
-            self.txn_client.rollback(txn_label).await?;
-        }
+        // Cleanup failure must not replace the write error held by the log sinker.
+        self.rollback_after_failure().await;
         Ok(())
     }
 }

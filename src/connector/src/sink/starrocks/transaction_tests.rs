@@ -568,21 +568,85 @@ async fn cancellation_during_rollover_retains_label_for_drop_rollback() {
 }
 
 #[tokio::test]
-async fn rollback_failure_preserves_the_original_commit_error() {
-    let server = TestServer::start().await;
-    {
-        let mut state = server.state.lock().unwrap();
-        state.fail = Some(("commit", 1, false));
-        state.rollback_fails = true;
+async fn rollback_failure_preserves_the_original_prepare_or_commit_error() {
+    for operation in ["prepare", "commit"] {
+        for occurrence in [1, 2] {
+            let server = TestServer::start().await;
+            {
+                let mut state = server.state.lock().unwrap();
+                state.fail = Some((operation, occurrence, false));
+                state.rollback_fails = true;
+            }
+            let mut log = TestLog::default();
+            log.items
+                .extend([TestLog::chunk(1, " I\n + 1\n + 2"), TestLog::checkpoint(1)]);
+            let error = consume(server.writer(None, Some(8), true), &mut log, 1).await;
+            assert!(error.contains("injected failure"), "{error}");
+            assert!(!error.contains("rollback rejected"), "{error}");
+            assert!(log.truncated.is_empty());
+            assert_eq!(server.events("rollback").len(), 1);
+        }
     }
-    let mut log = TestLog::default();
-    log.items
-        .extend([TestLog::chunk(1, " I\n + 1\n + 2"), TestLog::checkpoint(1)]);
-    let error = consume(server.writer(None, Some(8), true), &mut log, 1).await;
-    assert!(error.contains("injected failure"), "{error}");
-    assert!(!error.contains("rollback rejected"), "{error}");
-    assert!(log.truncated.is_empty());
-    assert_eq!(server.events("rollback").len(), 1);
+}
+
+#[tokio::test]
+async fn load_failures_preserve_the_original_error_and_can_replay() {
+    for (case, batch, transaction, interval, occurrence) in [
+        ("transaction rollover", None, Some(8), 1, 1),
+        ("checkpoint after rollover", None, Some(8), 1, 2),
+        ("HTTP request split", Some(8), None, 1, 1),
+        ("checkpoint commit", None, None, 1, 1),
+        ("non-commit barrier", None, None, 2, 1),
+    ] {
+        for rollback_fails in [false, true] {
+            let server = TestServer::start().await;
+            {
+                let mut state = server.state.lock().unwrap();
+                state.fail = Some(("load", occurrence, false));
+                state.rollback_fails = rollback_fails;
+            }
+            let mut log = TestLog::default();
+            log.items
+                .extend([TestLog::chunk(1, " I\n + 1\n + 2"), TestLog::checkpoint(1)]);
+            if interval == 2 {
+                log.items.push(TestLog::checkpoint(2));
+            }
+            let error = consume(server.writer(batch, transaction, true), &mut log, interval).await;
+            assert!(
+                error.contains("injected failure"),
+                "{case}/rollback_fails={rollback_fails}: {error}"
+            );
+            assert!(!error.contains("rollback rejected"), "{case}: {error}");
+            assert!(log.truncated.is_empty(), "{case}");
+            // A non-commit barrier relies on Drop for cleanup rather than explicit abort.
+            server.wait_for("rollback").await;
+            let rollbacks = server.events("rollback");
+            assert_eq!(rollbacks.len(), 1, "{case}");
+            assert_eq!(
+                rollbacks[0].label,
+                server.events("load")[occurrence - 1].label,
+                "{case}"
+            );
+            assert_eq!(server.events("commit").len(), occurrence - 1, "{case}");
+
+            {
+                let mut state = server.state.lock().unwrap();
+                state.fail = None;
+                state.rollback_fails = false;
+            }
+            assert_eq!(
+                consume(server.writer(batch, transaction, true), &mut log, interval).await,
+                "end of test log",
+                "{case}"
+            );
+            assert_eq!(log.truncated, [TruncateOffset::Barrier { epoch: interval }]);
+            let state = server.state.lock().unwrap();
+            assert_eq!(state.committed_rows.len(), 2 + occurrence - 1, "{case}");
+            for id in [1, 2] {
+                assert!(state.committed_rows.iter().any(|row| row["id"] == id));
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -632,10 +696,10 @@ async fn begin_failures_preserve_the_original_error_and_can_replay() {
 
 #[tokio::test]
 async fn cancellation_during_failure_cleanup_retains_label_for_drop_rollback() {
-    for operation in ["begin", "commit"] {
+    for operation in ["begin", "load", "prepare", "commit"] {
         let server = TestServer::start().await;
         let mut writer = server.writer(None, Some(8), true);
-        if operation == "commit" {
+        if operation != "begin" {
             writer
                 .write_row_json(r#"{"id":1}"#.to_owned())
                 .await
