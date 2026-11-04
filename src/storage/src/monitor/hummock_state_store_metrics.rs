@@ -311,7 +311,7 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
         let vector_hnsw_graph_level_node_count = RelabeledGuardedIntGaugeVec::with_metric_level(
-            MetricLevel::Info,
+            MetricLevel::Critical,
             vector_hnsw_graph_level_node_count,
             metric_level,
         );
@@ -324,7 +324,7 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
         let vector_index_file_count = RelabeledGuardedIntGaugeVec::with_metric_level(
-            MetricLevel::Info,
+            MetricLevel::Critical,
             vector_index_file_count,
             metric_level,
         );
@@ -337,7 +337,7 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
         let vector_index_file_size = RelabeledGuardedIntGaugeVec::with_metric_level(
-            MetricLevel::Info,
+            MetricLevel::Critical,
             vector_index_file_size,
             metric_level,
         );
