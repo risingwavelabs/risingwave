@@ -41,10 +41,10 @@ def worker_state(node, data_dir, pinned_ids):
     errors = []
     if metrics.get("pin_cache_published_objects") != len(files):
         errors.append(f"{node['id']}: publication/file counts differ")
-    if metrics.get('pin_cache_capacity_bytes{state="accounted"}') != sum(
-        path.stat().st_size for path in files
-    ):
-        errors.append(f"{node['id']}: physical reclamation has not finished")
+    if metrics.get("pin_cache_published_bytes") != sum(path.stat().st_size for path in files):
+        errors.append(f"{node['id']}: publication/file bytes differ")
+    if any(path.is_file() for path in (directory / "atomic_write_dir").rglob("*")):
+        errors.append(f"{node['id']}: atomic upload temporary files remain")
     return objects, local_hits, errors
 
 

@@ -244,7 +244,6 @@ impl HummockStorage {
                 .collect();
             let cache = PinCache::new(
                 store,
-                (options.pin_cache_capacity_mb as u64).saturating_mul(1 << 20),
                 options.pin_cache_shard_num,
                 PinCacheMembershipIndex::pinned_ssts(&pinned_version, |table| {
                     policies
@@ -253,7 +252,7 @@ impl HummockStorage {
                         .unwrap_or(options.cache_refill_table_cache_refill_default_policy)
                         == CacheRefillPolicy::Pin
                 })
-                .map(|sst| sst.object_id),
+                .map(|sst| (sst.object_id, sst.file_size)),
             )
             .await
             .map_err(HummockError::from)?;

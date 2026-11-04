@@ -528,9 +528,11 @@ async fn test_pin_recovery_keeps_local_files_without_remote_backfill() {
     let store = mock_sstable_store().await;
     let cache = PinCache::new(
         local_store,
-        u64::MAX,
         1,
-        [recovered.object_id, missing.object_id],
+        [
+            (recovered.object_id, recovered.file_size),
+            (missing.object_id, missing.file_size),
+        ],
     )
     .await
     .unwrap();

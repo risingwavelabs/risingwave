@@ -123,10 +123,6 @@ pub struct StorageConfig {
     #[serde(default)]
     pub pin_cache_dir: String,
 
-    /// Maximum disk space in MB accounted to complete and deleting pin-cache objects.
-    #[serde(default = "default::storage::pin_cache_capacity_mb")]
-    pub pin_cache_capacity_mb: usize,
-
     #[serde(default)]
     #[config_doc(nested)]
     pub meta_file_cache: FileCacheConfig,
@@ -1044,10 +1040,6 @@ pub mod default {
 
         pub fn meta_cache_capacity_mb() -> usize {
             128
-        }
-
-        pub fn pin_cache_capacity_mb() -> usize {
-            1024
         }
 
         pub fn disable_remote_compactor() -> bool {

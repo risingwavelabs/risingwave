@@ -159,8 +159,9 @@ No read-through refill or automatic retry is introduced.
 
 The activation layer enables the backend only with a configured local directory.
 Startup consumes the version and table policies from the same Meta snapshot before
-constructing the cache and starting event processing. Recovery restores files by
-version membership without remote data or metadata reads, and does not backfill
+constructing the cache and starting event processing. Recovery restores only final
+files whose version membership and length match the initial snapshot's object IDs
+and physical SST sizes, without remote data or metadata reads. It does not backfill
 missing objects. Subsequent delta insertions use the shared admission path above.
 
 Cache policy can be changed online on a table, materialized view, index, shared
@@ -193,6 +194,21 @@ Query reads remain independent: a missing or failed Pin read uses the ordinary
 Foyer/remote path without changing the table policy or refilling Pin on reads.
 
 After recovery, a storage-owned GC worker runs one full pass for startup garbage
-and periodic minor passes for withdrawn files whose readers have exited. Storage
+and periodic minor passes for discarded files whose readers have exited. Storage
 shutdown aborts this worker. This does not add ownership-driven scans of published
 files: unpin and version retirement still drive their withdrawal.
+
+Before copying a whole SST, Pin checks available filesystem bytes at its root
+against the version's physical SST size. Insufficient space rejects the attempt
+before local writes; a space-query failure fails the attempt. This advisory guard
+has no independent Pin quota and does not reserve filesystem blocks. Concurrent
+Pin copies and other disk users can consume space after the check. A later local
+I/O failure, including a full disk, fails the refill without publishing it.
+
+Filesystem availability continues to reflect allocations retained by failed
+uploads, temporary files and open descriptors. There is no software reservation to
+refund or exact physical-usage counter. Published bytes describe readable SST file
+lengths. Existing streaming part concurrency, buffering, retries and timeouts remain
+in place. Recovery inventories all files, and leaves temporary, mismatched and
+unreferenced files to the existing GC lifecycle without a quota-driven startup
+cleanup barrier.
