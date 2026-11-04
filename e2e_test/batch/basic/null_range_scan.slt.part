@@ -82,3 +82,61 @@ select * from rev_t where v > 15;
 
 statement ok
 drop table t cascade;
+
+# An excluded DESC empty-string bound has no encoded successor (#16219).
+statement ok
+create table t_16219 (a varchar);
+
+statement ok
+create materialized view mv_16219 as select * from t_16219 order by a desc;
+
+query T
+select * from mv_16219 where a < '';
+----
+
+statement ok
+insert into t_16219 values (null), (''), ('a'), ('b');
+
+query T
+select * from mv_16219 where a < '';
+----
+
+query I
+select count(*) from mv_16219 where a <= '';
+----
+1
+
+query I
+select count(*) from mv_16219 where a > '';
+----
+2
+
+query I
+select count(*) from mv_16219 where a < 'b';
+----
+2
+
+statement ok
+drop table t_16219 cascade;
+
+# The strict bound must also exclude rows with the same prefix and a later PK column.
+statement ok
+create table t_16219_multi (a varchar, b int);
+
+statement ok
+create materialized view mv_16219_multi as select * from t_16219_multi order by a desc, b;
+
+statement ok
+insert into t_16219_multi values ('', 1), ('', 2), ('a', 3);
+
+query TI
+select * from mv_16219_multi where a < '';
+----
+
+query I
+select count(*) from mv_16219_multi where a <= '';
+----
+2
+
+statement ok
+drop table t_16219_multi cascade;
