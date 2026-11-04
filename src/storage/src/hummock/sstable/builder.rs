@@ -56,9 +56,10 @@ pub const MIN_BLOCK_SIZE: usize = 8 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
-    /// Approximate sstable capacity.
+    /// Size target in bytes for the data blocks and filter.
     pub capacity: usize,
-    /// Independent soft limit on the encoded footer.
+    /// Separate soft limit in bytes for the full encoded footer, including
+    /// block metadata, the filter, SST boundary keys, and fixed overhead.
     pub footer_size_limit: Option<usize>,
     /// Approximate block capacity.
     pub block_capacity: usize,
@@ -798,7 +799,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_metas.push(meta);
     }
 
-    /// Returns true if we roughly reached capacity
+    /// Checks whether the estimated size reaches either configured threshold.
     pub fn reach_capacity(&self) -> bool {
         let filter_size = self.filter_builder.approximate_len();
         self.approximate_data_len() + filter_size >= self.options.capacity
