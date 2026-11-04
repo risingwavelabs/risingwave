@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, atomic};
 use std::time::Instant;
@@ -25,31 +24,28 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
 use risingwave_pb::hummock::PbSstableFilterLayout;
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::compactor::block_stream::SstableBlockStream;
-use crate::hummock::compactor::compaction_utils::fast_output_options;
+use crate::hummock::compactor::compaction_utils::{
+    CompactionRows, RowAction, StreamingTableBuilder, fast_output_options, new_output_builder,
+};
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionFilter, CompactionStatistics, Compactor, CompactorContext, MultiCompactionFilter,
-    RemoteBuilderFactory, TaskConfig,
 };
 use crate::hummock::iterator::{
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkState, SkipWatermarkState,
     ValueSkipWatermarkState,
 };
-use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder, CachePolicy,
-    FilterBuilder, GetObjectId, HummockResult, SstableBuilderOptions,
-    StreamingSstableWriterFactory, TableHolder,
+    FilterBuilder, GetObjectId, HummockResult, SstableBuilderOptions, TableHolder,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -289,7 +285,7 @@ pub struct CompactorRunner<
     left: Box<ConcatSstableIterator>,
     right: Box<ConcatSstableIterator>,
     task_id: u64,
-    executor: CompactTaskExecutor<RemoteBuilderFactory<StreamingSstableWriterFactory, B>, C>,
+    executor: CompactTaskExecutor<B, C>,
     metrics: Arc<CompactorMetrics>,
 }
 
@@ -323,43 +319,16 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         compaction_filter: C,
         options: SstableBuilderOptions,
     ) -> Self {
-        let get_id_time = Arc::new(AtomicU64::new(0));
-
-        let key_range = KeyRange::inf();
         let read_table_ids = HashSet::from_iter(task.get_table_ids_from_input_ssts());
-
-        let task_config = TaskConfig {
-            key_range,
-            cache_policy: CachePolicy::NotFill,
-            gc_delete_keys: task.gc_delete_keys,
-            retain_multiple_version: false,
-            table_vnode_partition: task.table_vnode_partition.clone(),
-            sstable_filter_layout: PbSstableFilterLayout::Blocked,
-            sstable_filter_type: task.sstable_filter_type,
-            table_schemas: Default::default(),
-            disable_drop_column_optimization: false,
-        };
-        let factory = StreamingSstableWriterFactory::new(context.sstable_store.clone());
-
-        let builder_factory = RemoteBuilderFactory::<_, B> {
+        let sst_builder = new_output_builder(
+            &context,
             object_id_getter,
-            limiter: context.memory_limiter.clone(),
             options,
-            policy: task_config.cache_policy,
-            remote_rpc_cost: get_id_time,
-            compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
-            sstable_writer_factory: factory,
-            _phantom: PhantomData,
-        };
-        let sst_builder = CapacitySplitTableBuilder::new(
-            builder_factory,
-            context.compactor_metrics.clone(),
-            Some(task_progress.clone()),
-            task_config.table_vnode_partition.clone(),
-            context
-                .storage_opts
-                .compactor_concurrent_uploading_sst_count,
+            CachePolicy::NotFill,
+            Arc::new(AtomicU64::new(0)),
             compaction_catalog_agent_ref.clone(),
+            Some(task_progress.clone()),
+            task.table_vnode_partition.clone(),
         );
         assert_eq!(
             task.input_ssts.len(),
@@ -414,12 +383,11 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         Self {
             executor: CompactTaskExecutor::new(
                 sst_builder,
-                task_config,
+                CompactionRows::new(compaction_filter, task.gc_delete_keys, false),
                 task_progress,
                 pk_prefix_state,
                 non_pk_prefix_state,
                 value_skip_watermark_state,
-                compaction_filter,
                 read_table_ids,
             ),
             left,
@@ -451,7 +419,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             self.executor.skip_raw_block_size * 100 / total_read_bytes,
         );
 
-        let statistic = self.executor.take_statistics();
+        let statistic = self.executor.rows.finish();
         let output_ssts = self.executor.builder.finish().await?;
         Compactor::report_progress(
             self.metrics.clone(),
@@ -565,13 +533,10 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
     }
 }
 
-struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
+struct CompactTaskExecutor<B: FilterBuilder, C: CompactionFilter> {
     last_key: FullKey<Vec<u8>>,
-    compaction_statistics: CompactionStatistics,
-    last_table_id: Option<TableId>,
-    last_table_stats: TableStats,
-    builder: CapacitySplitTableBuilder<F>,
-    task_config: TaskConfig,
+    rows: CompactionRows<C>,
+    builder: StreamingTableBuilder<B>,
     task_progress: Arc<TaskProgress>,
     pk_prefix_skip_watermark_state: PkPrefixSkipWatermarkState,
     last_key_is_delete: bool,
@@ -580,29 +545,24 @@ struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     skip_raw_block_size: u64,
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
     value_skip_watermark_state: ValueSkipWatermarkState,
-    compaction_filter: C,
     read_table_ids: HashSet<TableId>,
 }
 
-impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
+impl<B: FilterBuilder, C: CompactionFilter> CompactTaskExecutor<B, C> {
     fn new(
-        builder: CapacitySplitTableBuilder<F>,
-        task_config: TaskConfig,
+        builder: StreamingTableBuilder<B>,
+        rows: CompactionRows<C>,
         task_progress: Arc<TaskProgress>,
         pk_prefix_skip_watermark_state: PkPrefixSkipWatermarkState,
         non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
         value_skip_watermark_state: ValueSkipWatermarkState,
-        compaction_filter: C,
         read_table_ids: HashSet<TableId>,
     ) -> Self {
         Self {
             builder,
-            task_config,
+            rows,
             last_key: FullKey::default(),
             last_key_is_delete: false,
-            compaction_statistics: CompactionStatistics::default(),
-            last_table_id: None,
-            last_table_stats: TableStats::default(),
             task_progress,
             pk_prefix_skip_watermark_state,
             progress_key_num: 0,
@@ -610,18 +570,8 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             skip_raw_block_size: 0,
             non_pk_prefix_skip_watermark_state,
             value_skip_watermark_state,
-            compaction_filter,
             read_table_ids,
         }
-    }
-
-    fn take_statistics(&mut self) -> CompactionStatistics {
-        if let Some(last_table_id) = self.last_table_id.take() {
-            self.compaction_statistics
-                .delta_drop_stat
-                .insert(last_table_id, std::mem::take(&mut self.last_table_stats));
-        }
-        std::mem::take(&mut self.compaction_statistics)
     }
 
     /// Read and append the next block after the caller has checked raw-copy eligibility.
@@ -715,61 +665,35 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         }
 
         while iter.is_valid() && iter.key().le(&target_key) {
+            let key = iter.key();
             let is_new_user_key =
-                !self.last_key.is_empty() && iter.key().user_key != self.last_key.user_key.as_ref();
-            self.compaction_statistics.iter_total_key_counts += 1;
+                !self.last_key.is_empty() && key.user_key != self.last_key.user_key.as_ref();
+            self.rows.statistics.iter_total_key_counts += 1;
             self.may_report_process_key(1);
 
-            let mut drop = false;
             let value = HummockValue::from_slice(iter.value()).unwrap();
             let is_first_or_new_user_key = is_new_user_key || self.last_key.is_empty();
             if is_first_or_new_user_key {
-                self.last_key.set(iter.key());
+                self.last_key.set(key);
                 self.last_key_is_delete = false;
             }
 
-            // See note in `compactor_runner.rs`.
-            if !self.task_config.retain_multiple_version
-                && self.task_config.gc_delete_keys
-                && value.is_delete()
-            {
-                drop = true;
-                self.last_key_is_delete = true;
-            } else if !self.task_config.retain_multiple_version && !is_first_or_new_user_key {
-                drop = true;
-            }
-
-            if !drop && self.compaction_filter.should_delete(iter.key()) {
-                drop = true;
-            }
-
-            if !drop && self.watermark_should_delete(&iter.key(), value) {
-                drop = true;
-                self.last_key_is_delete = true;
-            }
-
-            if self.last_table_id != Some(self.last_key.user_key.table_id) {
-                if let Some(last_table_id) = self.last_table_id.take() {
-                    self.compaction_statistics
-                        .delta_drop_stat
-                        .insert(last_table_id, std::mem::take(&mut self.last_table_stats));
+            let action = self.rows.action(key, value, is_first_or_new_user_key);
+            let dropped = match action {
+                RowAction::Keep if !self.watermark_should_delete(&key, value) => false,
+                RowAction::Keep | RowAction::DropTombstone => {
+                    self.last_key_is_delete = true;
+                    true
                 }
-                self.last_table_id = Some(self.last_key.user_key.table_id);
+                RowAction::Drop => true,
+            };
+            self.rows.record(key, value, dropped);
+            if !dropped {
+                self.builder
+                    .add_full_key(key, value, is_new_user_key)
+                    .instrument_await("fast_add_full_key".verbose())
+                    .await?;
             }
-
-            if drop {
-                self.compaction_statistics.iter_drop_key_counts += 1;
-
-                self.last_table_stats.total_key_count -= 1;
-                self.last_table_stats.total_key_size -= self.last_key.encoded_len() as i64;
-                self.last_table_stats.total_value_size -= value.encoded_len() as i64;
-                iter.next();
-                continue;
-            }
-            self.builder
-                .add_full_key(iter.key(), value, is_new_user_key)
-                .instrument_await("fast_add_full_key".verbose())
-                .await?;
             iter.next();
         }
         Ok(())
@@ -792,7 +716,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         }
 
         // Check compaction filter
-        if self.compaction_filter.should_delete(*smallest_key) {
+        if self.rows.filter.should_delete(*smallest_key) {
             return false;
         }
 

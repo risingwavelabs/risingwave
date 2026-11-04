@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_stats::TableStatsMap;
+use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, can_concat};
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::{
@@ -39,17 +39,20 @@ use tokio::time::Instant;
 pub use super::context::CompactorContext;
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::compactor::{
-    ConcatSstableIterator, MultiCompactionFilter, TaskProgress, TtlCompactionFilter,
+    CompactionFilter, ConcatSstableIterator, MultiCompactionFilter, TaskProgress,
+    TtlCompactionFilter,
 };
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
     UserIterator,
 };
-use crate::hummock::multi_builder::TableBuilderFactory;
+use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
+use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableWriterFactory, SstableWriterOptions,
+    StreamingSstableWriterFactory,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -62,6 +65,42 @@ pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     pub sstable_writer_factory: W,
     pub _phantom: PhantomData<F>,
+}
+
+pub(super) type StreamingTableBuilder<B> =
+    CapacitySplitTableBuilder<RemoteBuilderFactory<StreamingSstableWriterFactory, B>>;
+
+pub(super) fn new_output_builder<B: FilterBuilder>(
+    context: &CompactorContext,
+    object_id_getter: Arc<dyn GetObjectId>,
+    options: SstableBuilderOptions,
+    policy: CachePolicy,
+    remote_rpc_cost: Arc<AtomicU64>,
+    catalog: CompactionCatalogAgentRef,
+    task_progress: Option<Arc<TaskProgress>>,
+    table_vnode_partition: BTreeMap<TableId, u32>,
+) -> StreamingTableBuilder<B> {
+    CapacitySplitTableBuilder::new(
+        RemoteBuilderFactory {
+            object_id_getter,
+            limiter: context.memory_limiter.clone(),
+            options,
+            policy,
+            remote_rpc_cost,
+            compaction_catalog_agent_ref: catalog.clone(),
+            sstable_writer_factory: StreamingSstableWriterFactory::new(
+                context.sstable_store.clone(),
+            ),
+            _phantom: PhantomData,
+        },
+        context.compactor_metrics.clone(),
+        task_progress,
+        table_vnode_partition,
+        context
+            .storage_opts
+            .compactor_concurrent_uploading_sst_count,
+        catalog,
+    )
 }
 
 #[async_trait::async_trait]
@@ -109,6 +148,94 @@ pub struct CompactionStatistics {
     // to calculate delete ratio
     pub iter_total_key_counts: u64,
     pub iter_drop_key_counts: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RowAction {
+    Keep,
+    Drop,
+    DropTombstone,
+}
+
+/// Policy and accounting for decoded rows. Callers own key tracking, watermark ordering
+/// and the decision to copy a physical block.
+pub(super) struct CompactionRows<C> {
+    pub(super) filter: C,
+    gc_delete_keys: bool,
+    retain_multiple_version: bool,
+    pub(super) statistics: CompactionStatistics,
+    last_table_id: Option<TableId>,
+    pub(super) table_stats: TableStats,
+}
+
+impl<C: CompactionFilter> CompactionRows<C> {
+    pub(super) fn new(filter: C, gc_delete_keys: bool, retain_multiple_version: bool) -> Self {
+        Self {
+            filter,
+            gc_delete_keys,
+            retain_multiple_version,
+            statistics: CompactionStatistics::default(),
+            last_table_id: None,
+            table_stats: TableStats::default(),
+        }
+    }
+
+    #[inline]
+    pub(super) fn action(
+        &mut self,
+        key: FullKey<&[u8]>,
+        value: HummockValue<&[u8]>,
+        first_version: bool,
+    ) -> RowAction {
+        // Memtable spill can give a PUT and DELETE the same pure epoch.
+        // The caller identifies the first version using the full key order.
+        if !self.retain_multiple_version {
+            if self.gc_delete_keys && value.is_delete() {
+                return RowAction::DropTombstone;
+            }
+            if !first_version {
+                return RowAction::Drop;
+            }
+        }
+        if self.filter.should_delete(key) {
+            RowAction::Drop
+        } else {
+            RowAction::Keep
+        }
+    }
+
+    #[inline]
+    pub(super) fn record(
+        &mut self,
+        key: FullKey<&[u8]>,
+        value: HummockValue<&[u8]>,
+        dropped: bool,
+    ) {
+        let table_id = key.user_key.table_id;
+        if self.last_table_id != Some(table_id) {
+            self.flush_table_stats();
+            self.last_table_id = Some(table_id);
+        }
+        if dropped {
+            self.statistics.iter_drop_key_counts += 1;
+            self.table_stats.total_key_count -= 1;
+            self.table_stats.total_key_size -= key.encoded_len() as i64;
+            self.table_stats.total_value_size -= value.encoded_len() as i64;
+        }
+    }
+
+    fn flush_table_stats(&mut self) {
+        if let Some(table_id) = self.last_table_id.take() {
+            self.statistics
+                .delta_drop_stat
+                .insert(table_id, std::mem::take(&mut self.table_stats));
+        }
+    }
+
+    pub(super) fn finish(mut self) -> CompactionStatistics {
+        self.flush_table_stats();
+        self.statistics
+    }
 }
 
 #[derive(Clone, Default)]

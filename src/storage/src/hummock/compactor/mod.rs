@@ -42,7 +42,6 @@ pub(super) mod task_progress;
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
-use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -95,7 +94,6 @@ pub use self::compaction_utils::{
     check_flush_result,
 };
 pub use self::task_progress::TaskProgress;
-use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     GetObjectId, HummockError, HummockErrorInner, HummockResult, ObjectIdManager,
     SstableBuilderOptions, Xor8FilterBuilder, Xor16FilterBuilder,
@@ -103,14 +101,13 @@ use super::{
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
 };
-use crate::hummock::compactor::compaction_utils::CompactionPlan;
+use crate::hummock::compactor::compaction_utils::{CompactionPlan, new_output_builder};
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::compactor::iceberg_compaction::TaskKey;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
     BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, FilterBuilder, NoneFilterBuilder,
-    SharedComapctorObjectIdManager, SstableWriterFactory, StreamingSstableWriterFactory,
-    validate_ssts,
+    SharedComapctorObjectIdManager, validate_ssts,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -219,78 +216,65 @@ impl Compactor {
                 .start_timer()
         };
 
-        let (split_table_outputs, table_stats_map) = {
-            let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
-            match (
-                self.task_config.sstable_filter_type,
-                self.task_config.sstable_filter_layout,
-            ) {
-                (PbSstableFilterType::SstableFilterNone, _) => {
-                    self.compact_key_range_impl::<_, NoneFilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        compaction_catalog_agent_ref,
-                        task_progress.clone(),
-                        self.object_id_getter.clone(),
-                    )
-                    .instrument_await("compact".verbose())
-                    .await?
-                }
-                (PbSstableFilterType::SstableFilterXor8, PbSstableFilterLayout::Blocked) => {
-                    self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        compaction_catalog_agent_ref,
-                        task_progress.clone(),
-                        self.object_id_getter.clone(),
-                    )
-                    .instrument_await("compact".verbose())
-                    .await?
-                }
-                (PbSstableFilterType::SstableFilterXor8, PbSstableFilterLayout::Plain) => {
-                    self.compact_key_range_impl::<_, Xor8FilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        compaction_catalog_agent_ref,
-                        task_progress.clone(),
-                        self.object_id_getter.clone(),
-                    )
-                    .instrument_await("compact".verbose())
-                    .await?
-                }
-                (PbSstableFilterType::SstableFilterXor16, PbSstableFilterLayout::Blocked) => {
-                    self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        compaction_catalog_agent_ref,
-                        task_progress.clone(),
-                        self.object_id_getter.clone(),
-                    )
-                    .instrument_await("compact".verbose())
-                    .await?
-                }
-                (PbSstableFilterType::SstableFilterXor16, PbSstableFilterLayout::Plain) => {
-                    self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                        factory,
-                        iter,
-                        compaction_filter,
-                        compaction_catalog_agent_ref,
-                        task_progress.clone(),
-                        self.object_id_getter.clone(),
-                    )
-                    .instrument_await("compact".verbose())
-                    .await?
-                }
-                (filter_type, layout) => {
-                    return Err(HummockError::compaction_executor(format!(
-                        "unresolved SST filter layout in task config: {:?}, {:?}",
-                        filter_type, layout
-                    )));
-                }
+        let (split_table_outputs, table_stats_map) = match (
+            self.task_config.sstable_filter_type,
+            self.task_config.sstable_filter_layout,
+        ) {
+            (PbSstableFilterType::SstableFilterNone, _) => {
+                self.compact_key_range_impl::<NoneFilterBuilder>(
+                    iter,
+                    compaction_filter,
+                    compaction_catalog_agent_ref,
+                    task_progress.clone(),
+                )
+                .instrument_await("compact".verbose())
+                .await?
+            }
+            (PbSstableFilterType::SstableFilterXor8, PbSstableFilterLayout::Blocked) => {
+                self.compact_key_range_impl::<BlockedXor8FilterBuilder>(
+                    iter,
+                    compaction_filter,
+                    compaction_catalog_agent_ref,
+                    task_progress.clone(),
+                )
+                .instrument_await("compact".verbose())
+                .await?
+            }
+            (PbSstableFilterType::SstableFilterXor8, PbSstableFilterLayout::Plain) => {
+                self.compact_key_range_impl::<Xor8FilterBuilder>(
+                    iter,
+                    compaction_filter,
+                    compaction_catalog_agent_ref,
+                    task_progress.clone(),
+                )
+                .instrument_await("compact".verbose())
+                .await?
+            }
+            (PbSstableFilterType::SstableFilterXor16, PbSstableFilterLayout::Blocked) => {
+                self.compact_key_range_impl::<BlockedXor16FilterBuilder>(
+                    iter,
+                    compaction_filter,
+                    compaction_catalog_agent_ref,
+                    task_progress.clone(),
+                )
+                .instrument_await("compact".verbose())
+                .await?
+            }
+            (PbSstableFilterType::SstableFilterXor16, PbSstableFilterLayout::Plain) => {
+                self.compact_key_range_impl::<Xor16FilterBuilder>(
+                    iter,
+                    compaction_filter,
+                    compaction_catalog_agent_ref,
+                    task_progress.clone(),
+                )
+                .instrument_await("compact".verbose())
+                .await?
+            }
+            (filter_type, layout) => {
+                return Err(HummockError::compaction_executor(format!(
+                    "unresolved SST filter layout in task config: {:?}, {:?}",
+                    filter_type, layout
+                )));
             }
         };
 
@@ -346,35 +330,22 @@ impl Compactor {
         }
     }
 
-    async fn compact_key_range_impl<F: SstableWriterFactory, B: FilterBuilder>(
+    async fn compact_key_range_impl<B: FilterBuilder>(
         &self,
-        writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Option<Arc<TaskProgress>>,
-        object_id_getter: Arc<dyn GetObjectId>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
-        let builder_factory = RemoteBuilderFactory::<F, B> {
-            object_id_getter,
-            limiter: self.context.memory_limiter.clone(),
-            options: self.options.clone(),
-            policy: self.task_config.cache_policy,
-            remote_rpc_cost: self.get_id_time.clone(),
-            compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
-            sstable_writer_factory: writer_factory,
-            _phantom: PhantomData,
-        };
-
-        let mut sst_builder = CapacitySplitTableBuilder::new(
-            builder_factory,
-            self.context.compactor_metrics.clone(),
-            task_progress.clone(),
+        let mut sst_builder = new_output_builder::<B>(
+            &self.context,
+            self.object_id_getter.clone(),
+            self.options.clone(),
+            self.task_config.cache_policy,
+            self.get_id_time.clone(),
+            compaction_catalog_agent_ref.clone(),
+            task_progress,
             self.task_config.table_vnode_partition.clone(),
-            self.context
-                .storage_opts
-                .compactor_concurrent_uploading_sst_count,
-            compaction_catalog_agent_ref,
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,
