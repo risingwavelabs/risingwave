@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use futures::StreamExt;
 use itertools::Itertools;
@@ -20,15 +21,17 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::util::retry::exponential_backoff;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxSourceReaderEventStream, CdcAutoSchemaChangeFailCallback, ConnectorState,
-    CreateSplitReaderResult, SourceContext, SourceCtrlOpts, SourceReaderEvent, SplitId, SplitImpl,
-    SplitMetaData, StreamChunkWithState,
+    CreateSplitReaderResult, SchemaChangeAck, SourceContext, SourceCtrlOpts, SourceReaderEvent,
+    SplitId, SplitImpl, SplitMetaData, StreamChunkWithState,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 use super::{
     apply_rate_limit_to_source_reader_event, get_infinite_backoff_strategy,
@@ -38,9 +41,17 @@ use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 
 type AutoSchemaChangeSetup = (
-    Option<mpsc::Sender<(SchemaChangeEnvelope, oneshot::Sender<()>)>>,
+    Option<mpsc::Sender<(SchemaChangeEnvelope, SchemaChangeAck)>>,
     Option<CdcAutoSchemaChangeFailCallback>,
 );
+
+/// Retries after the first attempt for a transient `auto_schema_change` RPC failure.
+const AUTO_SCHEMA_CHANGE_RETRIES: u32 = 3;
+
+/// Backoff between `auto_schema_change` RPC retries: 100 ms, 200 ms, 400 ms.
+fn auto_schema_change_backoff() -> impl Iterator<Item = Duration> + Clone {
+    exponential_backoff(Duration::from_millis(100), 2, Duration::from_millis(400))
+}
 
 #[derive(Debug)]
 pub(crate) enum SourceReaderEventWithState {
@@ -103,7 +114,7 @@ impl StreamReaderBuilder {
     fn setup_auto_schema_change(&self) -> AutoSchemaChangeSetup {
         if self.is_auto_schema_change_enable {
             let (schema_change_tx, mut schema_change_rx) =
-                mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
+                mpsc::channel::<(SchemaChangeEnvelope, SchemaChangeAck)>(16);
             let meta_client = self.actor_ctx.meta_client.clone();
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
@@ -112,25 +123,53 @@ impl StreamReaderBuilder {
                     tracing::info!(
                         target: "auto_schema_change",
                         "recv a schema change event for tables: {:?}", table_ids);
-                    // TODO: retry on rpc error
-                    if let Some(ref meta_client) = meta_client {
+                    let Some(ref meta_client) = meta_client else {
+                        // Auto schema change cannot be applied without a meta client. Report
+                        // the failure so the parser stops, instead of leaving the change
+                        // unapplied while later records are suppressed.
+                        let _ = finish_tx.send(Err(ConnectorError::from(anyhow::anyhow!(
+                            "auto schema change requires a meta client"
+                        ))));
+                        continue;
+                    };
+                    // Retry a transient RPC failure before giving up, so a blip does not
+                    // force a reader rebuild. The parser waits here, so schema-before-data
+                    // ordering holds; `auto_schema_change` is idempotent, so a repeat is safe.
+                    let mut backoff =
+                        auto_schema_change_backoff().take(AUTO_SCHEMA_CHANGE_RETRIES as usize);
+                    let mut attempt = 0;
+                    let result = loop {
+                        attempt += 1;
                         match meta_client
                             .auto_schema_change(schema_change.to_protobuf())
                             .await
                         {
-                            Ok(_) => {
-                                tracing::info!(
+                            Ok(()) => break Ok(()),
+                            Err(e) if attempt <= AUTO_SCHEMA_CHANGE_RETRIES => {
+                                tracing::warn!(
                                     target: "auto_schema_change",
-                                    "schema change success for tables: {:?}", table_ids);
-                                let _ = finish_tx.send(());
+                                    error = %e.as_report(),
+                                    attempt,
+                                    "schema change rpc failed, retrying");
+                                if let Some(delay) = backoff.next() {
+                                    tokio::time::sleep(delay).await;
+                                }
                             }
-                            Err(e) => {
-                                tracing::error!(
-                                    target: "auto_schema_change",
-                                    error = %e.as_report(), "schema change error");
-
-                                let _ = finish_tx.send(());
-                            }
+                            Err(e) => break Err(ConnectorError::from(anyhow::Error::from(e))),
+                        }
+                    };
+                    match result {
+                        Ok(()) => {
+                            tracing::info!(
+                                target: "auto_schema_change",
+                                "schema change success for tables: {:?}", table_ids);
+                            let _ = finish_tx.send(Ok(()));
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                target: "auto_schema_change",
+                                error = %e.as_report(), "schema change error");
+                            let _ = finish_tx.send(Err(e));
                         }
                     }
                 }
@@ -375,5 +414,25 @@ impl StreamReaderBuilder {
             tracing::info!("stream source reader error, retry in {delay:?}");
             tokio::time::sleep(delay).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The retry delays must stay sub-second, so a transient RPC failure does not
+    /// stall ingestion.
+    #[test]
+    fn auto_schema_change_backoff_is_short() {
+        let delays: Vec<Duration> = auto_schema_change_backoff().take(3).collect();
+        assert_eq!(
+            delays,
+            vec![
+                Duration::from_millis(100),
+                Duration::from_millis(200),
+                Duration::from_millis(400),
+            ]
+        );
     }
 }
