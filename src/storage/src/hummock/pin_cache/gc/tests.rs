@@ -435,6 +435,7 @@ async fn test_gc_worker_coalesces_pressure_and_preserves_arrivals_during_full() 
     assert!(cache.get(1003.into()).is_none());
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test(start_paused = true)]
 async fn test_gc_worker_rechecks_space_after_minor_before_full() {
     use std::sync::Arc;
@@ -577,6 +578,7 @@ async fn test_gc_worker_periodic_scan_protects_uploads_and_readers() {
     );
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test(start_paused = true)]
 async fn test_gc_worker_full_failure_keeps_file_for_next_periodic_pass() {
     use risingwave_common::config::ObjectStoreConfig;

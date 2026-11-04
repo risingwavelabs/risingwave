@@ -509,6 +509,7 @@ async fn test_pin_changes_before_and_after_submission() {
     }
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_pin_capacity_rejection_releases_replacement_version_without_gc() {
     let table = TableId::from(233);
