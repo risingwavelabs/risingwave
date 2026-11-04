@@ -193,7 +193,13 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
                 .conjunctions
                 .iter()
                 .any(|expr| Strong::is_null(expr, top_proj_null_bitset.clone()));
-            let can_apply = top_proj_all_null || top_filter_any_null;
+            let can_apply = match join_type {
+                JoinType::LeftSemi | JoinType::LeftAnti => apply_on
+                    .conjunctions
+                    .iter()
+                    .any(|expr| Strong::is_null(expr, top_proj_null_bitset.clone())),
+                _ => top_proj_all_null || top_filter_any_null,
+            };
 
             if !can_apply {
                 return None;
