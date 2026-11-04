@@ -339,6 +339,9 @@ async fn test_selected_batch_endpoint_on_timeout_or_revocation() {
         if revoke_ownership {
             refiller.update_streaming_table_vnodes(table, None);
         } else {
+            #[cfg(madsim)]
+            tokio::time::advance(Duration::from_secs(1));
+            #[cfg(not(madsim))]
             tokio::time::advance(Duration::from_secs(1)).await;
         }
         let endpoints =
