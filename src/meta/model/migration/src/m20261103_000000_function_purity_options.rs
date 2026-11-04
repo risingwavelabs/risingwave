@@ -3,7 +3,10 @@ use sea_orm_migration::prelude::{Table as MigrationTable, *};
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-const COLUMNS: [Function; 2] = [Function::UnsafeSkipMaterializingExprs, Function::IsImmutable];
+const COLUMNS: [Function; 2] = [
+    Function::UnsafeSkipMaterializingExprs,
+    Function::IsImmutable,
+];
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
