@@ -198,6 +198,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
     #[tokio::test]
     async fn test_interrupted_fs_upload_cannot_publish() {
         for cancel in [false, true] {

@@ -32,6 +32,7 @@ fn test_zero_shards_rejected() {
     PinCache::new(in_memory_object_store(), 0, []);
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_read_and_unregister_lifecycle() {
     let remote_store = in_memory_object_store();
@@ -117,6 +118,7 @@ async fn test_failed_download_can_be_retried() {
     assert!(pin_cache.get(object_id).is_some());
 }
 
+#[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
 #[tokio::test]
 async fn test_completed_invalid_fs_upload_cannot_publish() {
     let (_dir, local_store) = local_object_store().await;
