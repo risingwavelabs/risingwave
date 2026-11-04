@@ -333,8 +333,10 @@ impl BackupManager {
             .collect()
     }
 
-    /// Prevent a backup from capturing changelog SSTs during the final GC check and deletion.
-    /// A running backup may already have captured SSTs that are absent from version tracking.
+    /// Exclude new backup jobs until GC releases the guard.
+    ///
+    /// Returns `None` if the lock is busy or a running job may hold unpublished references.
+    /// Hold the guard from reading the published manifest through object deletion.
     pub(crate) fn try_lock_for_gc(&self) -> Option<impl Send + '_> {
         let guard = self.running_job_handle.try_lock().ok()?;
         if guard.is_some() {
