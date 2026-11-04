@@ -22,6 +22,7 @@ pub type ConcatIterator = ConcatIteratorInner<SstableIterator>;
 mod tests {
     use std::sync::Arc;
 
+    use bytes::Bytes;
     #[cfg(feature = "failpoints")]
     use foyer::Hint;
 
@@ -96,6 +97,43 @@ mod tests {
             val.into_user_value().unwrap(),
             iterator_test_value_of(0).as_slice()
         );
+    }
+
+    #[tokio::test]
+    async fn test_concat_logical_ssts_sharing_one_object() {
+        let sstable_store = mock_sstable_store().await;
+        let physical_sst = gen_iterator_test_sstable_info(
+            0,
+            default_builder_opt_for_test(),
+            |x| x,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let split_key = Bytes::from(iterator_test_key_of(TEST_KEYS_COUNT / 2).encode());
+
+        let mut left = physical_sst.get_inner();
+        left.sst_id = 100.into();
+        left.key_range.right = split_key.clone();
+        left.key_range.right_exclusive = true;
+        let mut right = physical_sst.get_inner();
+        right.sst_id = 101.into();
+        right.key_range.left = split_key;
+
+        let mut iter = ConcatIterator::new(
+            vec![left.into(), right.into()],
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
+        );
+        iter.rewind().await.unwrap();
+
+        let mut index = 0;
+        while iter.is_valid() {
+            assert_eq!(iter.key(), iterator_test_key_of(index).to_ref());
+            index += 1;
+            iter.next().await.unwrap();
+        }
+        assert_eq!(index, TEST_KEYS_COUNT);
     }
 
     #[tokio::test]
