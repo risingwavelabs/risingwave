@@ -30,6 +30,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: build
         working-directory: ./dashboard
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           echo "::group::pnpm install"
           pnpm install --frozen-lockfile

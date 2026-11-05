@@ -22,15 +22,19 @@ use risingwave_storage::hummock::sstable::{
 };
 use risingwave_storage::hummock::value::HummockValue;
 
-// Build actual SSTs outside timed iterations.
-pub async fn sstable_fixture_with_block_capacity<F: FilterBuilder>(
+// Build and native-decode an SST before any timed iterations. Shared-prefix keys keep
+// the fixture bounded while exercising actual block metadata and filter builders.
+pub async fn sstable_meta<F: FilterBuilder>(key_count: usize, key_len: usize) -> SstableMeta {
+    sstable_fixture::<F>(key_count, key_len).await.1
+}
+
+pub async fn sstable_fixture<F: FilterBuilder>(
     key_count: usize,
     key_len: usize,
-    block_capacity: usize,
 ) -> (bytes::Bytes, SstableMeta) {
     let options = SstableBuilderOptions {
         capacity: 128 << 20,
-        block_capacity,
+        block_capacity: 64 << 10,
         estimated_output_key_count: Some(key_count),
         ..Default::default()
     };

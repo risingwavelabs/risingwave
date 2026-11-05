@@ -293,6 +293,10 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
 
+    fn read_epoch(&self) -> Option<u64> {
+        Some(self.epoch)
+    }
+
     fn iter(
         &self,
         key_range: TableKeyRange,

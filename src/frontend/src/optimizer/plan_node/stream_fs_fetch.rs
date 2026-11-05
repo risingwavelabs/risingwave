@@ -106,9 +106,13 @@ impl StreamNode for StreamFsFetch {
                 source_id: source_catalog.id,
                 source_name: source_catalog.name.clone(),
                 state_table: Some(
-                    generic::Source::infer_internal_table_catalog(true)
-                        .with_id(state.gen_table_id_wrapped())
-                        .to_internal_table_prost(),
+                    if self.core.is_iceberg_update_source() {
+                        generic::Source::infer_iceberg_update_fetch_table_catalog()
+                    } else {
+                        generic::Source::infer_internal_table_catalog(true)
+                    }
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
                 ),
                 info: Some(source_catalog.info.clone()),
                 row_id_index: self.core.row_id_index.map(|index| index as _),

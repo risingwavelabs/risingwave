@@ -187,6 +187,21 @@ impl Sstable {
         }
     }
 
+    /// Restore an SST handle directly from native metadata bytes.
+    pub fn from_meta_bytes(
+        id: HummockSstableObjectId,
+        bytes: &[u8],
+        skip_bloom_filter_in_serde: bool,
+    ) -> HummockResult<Self> {
+        let (meta, filter_reader) = SstableMeta::decode_with_filter(bytes, XorFilterReader::new)?;
+        Ok(Self {
+            id,
+            meta,
+            filter_reader,
+            skip_bloom_filter_in_serde,
+        })
+    }
+
     #[inline(always)]
     pub fn has_filter(&self) -> bool {
         !self.filter_reader.is_empty()
@@ -225,6 +240,19 @@ impl Sstable {
         std::mem::size_of::<Self>()
             + self.meta.estimated_heap_size()
             + self.filter_reader.estimated_heap_size()
+    }
+
+    /// Size of the meta disk-cache value, without cloning metadata or encoding its filter.
+    pub(crate) fn serde_encoded_size(&self) -> usize {
+        // Bincode's default format encodes a struct like a tuple and uses a fixed-width
+        // length prefix for byte vectors. Replacing the bloom payload changes only its
+        // byte count. Keep sizing the other fields through serde as the format evolves.
+        let size = bincode::serialized_size(&(self.id, &self.meta)).unwrap() as usize;
+        if self.skip_bloom_filter_in_serde {
+            size
+        } else {
+            size - self.meta.bloom_filter.len() + self.filter_reader.serialized_len()
+        }
     }
 }
 
@@ -403,6 +431,15 @@ impl SstableMeta {
     }
 
     pub fn decode(buf: &[u8]) -> HummockResult<Self> {
+        let (mut meta, bloom_filter) = Self::decode_with_filter(buf, |data, _| data.to_vec())?;
+        meta.bloom_filter = bloom_filter;
+        Ok(meta)
+    }
+
+    fn decode_with_filter<F>(
+        buf: &[u8],
+        restore_filter: impl FnOnce(&[u8], &[BlockMeta]) -> F,
+    ) -> HummockResult<(Self, F)> {
         let mut cursor = buf.len();
 
         cursor -= 4;
@@ -434,7 +471,9 @@ impl SstableMeta {
             }
         }
 
-        let bloom_filter = get_length_prefixed_slice(buf);
+        let filter_len = buf.get_u32_le() as usize;
+        let filter_data = &buf[..filter_len];
+        buf.advance(filter_len);
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
@@ -457,10 +496,11 @@ impl SstableMeta {
                 "read non-empty range tombstones");
         }
 
+        let filter = restore_filter(filter_data, &block_metas);
         #[expect(deprecated)]
-        Ok(Self {
+        let meta = Self {
             block_metas,
-            bloom_filter,
+            bloom_filter: Vec::new(),
             estimated_size,
             key_count,
             smallest_key,
@@ -468,7 +508,8 @@ impl SstableMeta {
             meta_offset,
             monotonic_tombstone_events,
             version,
-        })
+        };
+        Ok((meta, filter))
     }
 
     #[inline]
@@ -629,6 +670,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_sstable_serde() {
+        use foyer::Code;
+
+        use crate::hummock::SstableMetaCacheValue;
+
         let (_, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
             (0..100).clone().map(|x| {
@@ -640,31 +685,59 @@ mod tests {
         )
         .await;
 
-        // skip sst serde
-        let sstable = Sstable::new(42.into(), meta.clone(), true);
+        for skip_filter in [false, true] {
+            let sstable = Sstable::new(42.into(), meta.clone(), skip_filter);
+            let legacy_bytes = bincode::serialize(&sstable).unwrap();
+            let value = SstableMetaCacheValue::from(sstable);
+            let mut bytes = Vec::new();
+            value.encode(&mut bytes).unwrap();
 
-        let buffer = bincode::serialize(&sstable).unwrap();
+            assert_eq!(bytes, legacy_bytes);
+            assert_eq!(value.estimated_size(), bytes.len());
 
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
+            let decoded = SstableMetaCacheValue::decode(&mut legacy_bytes.as_slice()).unwrap();
+            assert_eq!(decoded.id, value.id);
+            assert_eq!(decoded.meta, value.meta);
+            assert!(value.has_filter());
+            if skip_filter {
+                assert!(!decoded.has_filter());
+            } else {
+                assert_eq!(
+                    decoded.filter_reader.encode_to_bytes(),
+                    value.filter_reader.encode_to_bytes()
+                );
+            }
+        }
+    }
 
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert!(!sstable.filter_reader.is_empty());
-        // The table filter reader is empty because the SST filter is skipped in serde.
-        assert!(s.filter_reader.is_empty());
-
-        // enable sst serde
-        let sstable = Sstable::new(42.into(), meta, false);
-
-        let buffer = bincode::serialize(&sstable).unwrap();
-
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert_eq!(
-            s.filter_reader.encode_to_bytes(),
-            sstable.filter_reader.encode_to_bytes()
-        );
+    #[tokio::test]
+    async fn test_sstable_from_meta_bytes() {
+        let (_, meta) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            (0..100).map(|x| (iterator_test_key_of(x), HummockValue::put(vec![42]))),
+        )
+        .await;
+        let bytes = meta.encode_to_bytes();
+        for skip in [false, true] {
+            let expected = Sstable::new(42.into(), meta.clone(), skip);
+            let restored = {
+                let temporary = bytes.clone();
+                Sstable::from_meta_bytes(42.into(), &temporary, skip).unwrap()
+            };
+            assert_eq!(restored.id, expected.id);
+            assert_eq!(restored.meta, expected.meta);
+            assert_eq!(
+                restored.filter_reader.encode_to_bytes(),
+                expected.filter_reader.encode_to_bytes()
+            );
+            assert_eq!(
+                bincode::serialize(&restored).unwrap(),
+                bincode::serialize(&expected).unwrap()
+            );
+        }
+        let mut corrupt = bytes;
+        corrupt[0] ^= 1;
+        assert!(SstableMeta::decode(&corrupt).is_err());
+        assert!(Sstable::from_meta_bytes(42.into(), &corrupt, false).is_err());
     }
 }

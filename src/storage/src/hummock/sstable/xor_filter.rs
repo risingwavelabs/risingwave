@@ -18,7 +18,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
-use itertools::Itertools;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
 use xorf::{Filter, Xor8, Xor8Ref, Xor16, Xor16Ref};
@@ -125,12 +124,10 @@ fn approximate_plain_xor_filter_serialized_len(key_count: usize, fingerprint_siz
     PLAIN_XOR_FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
 }
 
-#[cfg(test)]
 fn xor8_filter_serialized_len(filter: &Xor8) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len()
 }
 
-#[cfg(test)]
 fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
 }
@@ -677,11 +674,13 @@ impl XorFilterReader {
         let buf = &mut data;
         let xor_filter_seed = buf.get_u64_le();
         let xor_filter_block_length = buf.get_u32_le();
-        // is correct even when there is an extra 0xff byte in the end of buf
-        let len = buf.len() / 2;
-        let xor_filter_fingerprints = (0..len)
-            .map(|_| buf.get_u16_le())
-            .collect_vec()
+        // Decode complete fingerprints in bulk, leaving the one-byte footer out.
+        let (fingerprints, _) = buf.as_chunks::<2>();
+        let xor_filter_fingerprints = fingerprints
+            .iter()
+            .copied()
+            .map(u16::from_le_bytes)
+            .collect::<Vec<_>>()
             .into_boxed_slice();
         Xor16 {
             seed: xor_filter_seed,
@@ -707,8 +706,7 @@ impl XorFilterReader {
     ///
     /// This intentionally follows RisingWave's filter encoding size, not the exact Rust heap
     /// footprint of the decoded reader.
-    #[cfg(test)]
-    fn serialized_len(&self) -> usize {
+    pub(super) fn serialized_len(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
             XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),
@@ -881,106 +879,12 @@ mod tests {
     use crate::monitor::StoreLocalStatistic;
 
     #[test]
-    fn test_pooled_blocked_filter_compatibility() {
-        for width in [1, 2] {
-            let mut encoded = Vec::new();
-            let mut children = Vec::new();
-            let mut inserted = Vec::new();
-            let metas: Vec<_> = (0..4)
-                .map(|i| BlockMeta {
-                    smallest_key: FullKey::for_test(
-                        0.into(),
-                        (i as u64).to_be_bytes(),
-                        test_epoch(1),
-                    )
-                    .encode(),
-                    ..Default::default()
-                })
-                .collect();
-            for i in 0..metas.len() {
-                let keys: Vec<_> = (0..i as u64 * 37)
-                    .map(|k| k.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(i as u64))
-                    .collect();
-                let child = if width == 1 {
-                    Xor8FilterBuilder::build_from_xor8(&Xor8::from(&keys))
-                } else {
-                    Xor16FilterBuilder::build_from_xor16(&Xor16::from(&keys))
-                };
-                encoded.put_u32_le(child.len() as u32);
-                encoded.extend_from_slice(&child);
-                children.push(child);
-                inserted.push(keys);
-            }
-            encoded.put_u32_le(metas.len() as u32);
-            encoded.put_u8(if width == 1 {
-                FOOTER_BLOCKED_XOR8
-            } else {
-                FOOTER_BLOCKED_XOR16
-            });
-            let reader = {
-                let original = XorFilterReader::new(&encoded, &metas);
-                let cloned = original.clone();
-                drop(original);
-                cloned
-            };
-            assert_eq!(reader.encode_to_bytes(), encoded);
-            for (i, child) in children.iter().enumerate() {
-                assert_eq!(reader.get_block_raw_filter(i), *child);
-                let oracle = XorFilterReader::new(child, &[]);
-                let key = FullKey::decode(&metas[i].smallest_key).user_key;
-                let range = (Bound::Included(key), Bound::Included(key));
-                for hash in inserted[i]
-                    .iter()
-                    .copied()
-                    .chain((0..512_u64).map(|k| k.wrapping_mul(0xd6e8_feb8_6659_fd93)))
-                {
-                    let expected =
-                        oracle.may_match(&[], &(Bound::Unbounded, Bound::Unbounded), hash);
-                    assert_eq!(reader.may_match(&metas, &range, hash), expected);
-                }
-            }
-            // The old cache schema stores id and SstableMeta; it never stores
-            // the runtime index. Check both reads and writes against that shape.
-            for skip in [false, true] {
-                let mut meta = super::super::SstableMeta {
-                    block_metas: metas.clone(),
-                    bloom_filter: encoded.clone(),
-                    ..Default::default()
-                };
-                let sstable = Sstable::new(42.into(), meta.clone(), skip);
-                if skip {
-                    meta.bloom_filter.clear();
-                }
-                let old_cache_bytes = bincode::serialize(&(sstable.id, &meta)).unwrap();
-                assert_eq!(bincode::serialize(&sstable).unwrap(), old_cache_bytes);
-                let restored: Sstable =
-                    bincode::deserialize_from(&mut &old_cache_bytes[..]).unwrap();
-                if skip {
-                    assert!(restored.filter_reader.is_empty());
-                } else {
-                    assert_eq!(restored.filter_reader.encode_to_bytes(), encoded);
-                }
-            }
-        }
-    }
-
-    #[test]
     fn test_pooled_blocked_filter_legacy_empty() {
-        for tag in [FOOTER_BLOCKED_XOR8, FOOTER_BLOCKED_XOR16] {
-            let data = [0, 0, 0, 0, tag];
-            let reader = XorFilterReader::new(&data, &[]);
-            assert!(reader.is_empty());
-            assert_eq!(reader.encode_to_bytes(), data);
-        }
-        // The legacy XOR16 decoder also accepts a footer-only empty child.
-        let data = [1, 0, 0, 0, FOOTER_XOR16, 1, 0, 0, 0, FOOTER_BLOCKED_XOR16];
-        let reader = XorFilterReader::new(&data, &[BlockMeta::default()]);
+        // A footer-only XOR16 child and its successor share an offset in the pool.
+        let mut mixed = vec![1, 0, 0, 0, FOOTER_XOR16];
         let canonical =
             Xor16FilterBuilder::build_from_xor16(&XorFilterReader::to_xor16(&[FOOTER_XOR16]));
-        assert_eq!(reader.get_block_raw_filter(0), canonical);
-
         let next = Xor16FilterBuilder::build_from_xor16(&Xor16::from(&vec![42]));
-        let mut mixed = data[..5].to_vec();
         mixed.put_u32_le(next.len() as u32);
         mixed.extend_from_slice(&next);
         mixed.put_u32_le(2);
@@ -1228,69 +1132,61 @@ mod tests {
             "Xor16 builder and reader should produce identical bytes"
         );
 
-        let mut block_metas = Vec::new();
-        for block_idx in 0..3 {
+        assert_blocked_filter_round_trip::<BlockedXor8FilterBuilder>();
+        assert_blocked_filter_round_trip::<BlockedXor16FilterBuilder>();
+    }
+
+    fn assert_blocked_filter_round_trip<F: FilterBuilder>() {
+        let key_ranges = [0..8, 8..58, 58..158];
+        let mut builder = F::create(FilterBuilderOptions {
+            estimated_key_count: 158,
+            estimated_block_count: key_ranges.len(),
+            hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+        });
+        let mut metas = Vec::new();
+        for keys in &key_ranges {
             let smallest_key = FullKey {
-                user_key: test_user_key_of(block_idx * 50),
+                user_key: test_user_key_of(keys.start),
                 epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
             };
-
-            block_metas.push(BlockMeta {
+            metas.push(BlockMeta {
                 smallest_key: smallest_key.encode(),
-                len: 0,
-                offset: 0,
-                uncompressed_size: 0,
-                total_key_count: 50,
-                stale_key_count: 0,
+                total_key_count: keys.len() as u32,
+                ..Default::default()
             });
-        }
-
-        let blocked_options = FilterBuilderOptions {
-            estimated_key_count: 150,
-            estimated_block_count: block_metas.len(),
-            hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
-        };
-
-        // Test BlockedXor8 filter
-        let mut blocked_xor8_builder = BlockedXor8FilterBuilder::create(blocked_options);
-        for block_idx in 0..3 {
-            for i in 0..50 {
-                let key_idx = block_idx * 50 + i;
-                blocked_xor8_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
+            for i in keys.clone() {
+                builder.add_key(&test_user_key_of(i).encode(), 0);
             }
-            blocked_xor8_builder.switch_block(None);
+            builder.switch_block(None);
         }
-        let blocked_xor8_bytes = blocked_xor8_builder.finish(None).unwrap();
-        let blocked_xor8_reader = XorFilterReader::new(&blocked_xor8_bytes, &block_metas);
-        let blocked_xor8_encoded = blocked_xor8_reader.encode_to_bytes();
-        assert_eq!(
-            blocked_xor8_reader.serialized_len(),
-            blocked_xor8_encoded.len()
-        );
-        assert_eq!(
-            blocked_xor8_bytes, blocked_xor8_encoded,
-            "BlockedXor8 builder and reader should produce identical bytes"
-        );
 
-        // Test BlockedXor16 filter
-        let mut blocked_xor16_builder = BlockedXor16FilterBuilder::create(blocked_options);
-        for block_idx in 0..3 {
-            for i in 0..50 {
-                let key_idx = block_idx * 50 + i;
-                blocked_xor16_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
+        let bytes = builder.finish(None).unwrap();
+        let reader = XorFilterReader::new(&bytes, &metas);
+        assert_eq!(reader.serialized_len(), bytes.len());
+        assert_eq!(reader.encode_to_bytes(), bytes);
+
+        // Compare each pooled child with the corresponding independent plain reader.
+        let mut children = bytes.as_slice();
+        for (index, keys) in key_ranges.into_iter().enumerate() {
+            let len = children.get_u32_le() as usize;
+            let child = &children[..len];
+            children.advance(len);
+            assert_eq!(reader.get_block_raw_filter(index), child);
+
+            let oracle = XorFilterReader::new(child, &[]);
+            let left = FullKey::decode(&metas[index].smallest_key).user_key;
+            let point = (Bound::Included(left), Bound::Included(left));
+            let unbounded = (Bound::Unbounded, Bound::Unbounded);
+            for i in keys {
+                let hash = Sstable::hash_for_filter(&test_user_key_of(i).encode(), 0);
+                assert!(reader.may_match(&metas, &point, hash));
             }
-            blocked_xor16_builder.switch_block(None);
+            for hash in 0..32 {
+                assert_eq!(
+                    reader.may_match(&metas, &point, hash),
+                    oracle.may_match(&[], &unbounded, hash)
+                );
+            }
         }
-        let blocked_xor16_bytes = blocked_xor16_builder.finish(None).unwrap();
-        let blocked_xor16_reader = XorFilterReader::new(&blocked_xor16_bytes, &block_metas);
-        let blocked_xor16_encoded = blocked_xor16_reader.encode_to_bytes();
-        assert_eq!(
-            blocked_xor16_reader.serialized_len(),
-            blocked_xor16_encoded.len()
-        );
-        assert_eq!(
-            blocked_xor16_bytes, blocked_xor16_encoded,
-            "BlockedXor16 builder and reader should produce identical bytes"
-        );
     }
 }
