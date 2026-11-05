@@ -49,7 +49,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::controller::utils::filter_workers_by_resource_group;
-use crate::manager::{LocalNotification, META_NODE_ID, MetaSrvEnv, WorkerKey};
+use crate::manager::{LocalNotification, META_NODE_ID, MetaSrvEnv, NotificationVersion, WorkerKey};
 use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 
@@ -119,6 +119,26 @@ impl ClusterController {
         self.inner.read().await
     }
 
+    /// The running compute nodes and frontends, and the version that a frontend compares worker
+    /// notifications with.
+    pub async fn get_worker_nodes_snapshot(
+        &self,
+    ) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
+        let inner = self.inner.read().await;
+        let compute_nodes = inner
+            .list_workers(Some(WorkerType::ComputeNode), Some(WorkerStatus::Running))
+            .await?;
+        let frontends = inner
+            .list_workers(Some(WorkerType::Frontend), Some(WorkerStatus::Running))
+            .await?;
+        let worker_nodes = compute_nodes.into_iter().chain(frontends).collect();
+        let version = self
+            .env
+            .notification_manager()
+            .current_notification_version();
+        Ok((worker_nodes, version))
+    }
+
     pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
         self.inner.read().await.count_worker_by_type().await
     }
@@ -135,7 +155,7 @@ impl ClusterController {
         // Update local license manager.
         LicenseManager::get().update_cluster_resource(resource);
         // Notify all other nodes.
-        self.env.notification_manager().notify_all_without_version(
+        self.env.notification_manager().notify_all(
             Operation::Update, // unused
             Info::ClusterResource(resource),
         );
@@ -183,7 +203,7 @@ impl ClusterController {
         {
             self.env
                 .notification_manager()
-                .notify_frontend_without_version(Operation::Add, Info::Node(worker.clone()));
+                .notify_frontend_non_catalog(Operation::Add, Info::Node(worker.clone()));
         }
         self.env
             .notification_manager()
@@ -193,14 +213,16 @@ impl ClusterController {
     }
 
     pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
-        let worker = self.inner.write().await.delete_worker(host_address).await?;
+        let mut inner = self.inner.write().await;
+        let worker = inner.delete_worker(host_address).await?;
 
         if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
         {
             self.env
                 .notification_manager()
-                .notify_frontend_without_version(Operation::Delete, Info::Node(worker.clone()));
+                .notify_frontend_non_catalog(Operation::Delete, Info::Node(worker.clone()));
         }
+        drop(inner);
 
         // Keep license manager in sync with the latest cluster resource.
         self.update_cluster_resource_for_license().await?;
@@ -974,7 +996,10 @@ impl ClusterControllerInner {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
+
     use super::*;
+    use crate::manager::Notification;
 
     fn mock_worker_hosts_for_test(count: usize) -> Vec<HostAddress> {
         (0..count)
@@ -983,6 +1008,68 @@ mod tests {
                 port: 5000 + i as i32,
             })
             .collect_vec()
+    }
+
+    async fn next_worker_notification(
+        rx: &mut UnboundedReceiver<Notification>,
+    ) -> SubscribeResponse {
+        loop {
+            let notification = rx.recv().await.unwrap().unwrap();
+            if matches!(notification.info, Some(Info::Node(_))) {
+                return notification;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_orders_worker_notifications() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let notification_manager = env.notification_manager_ref();
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        let host = mock_worker_hosts_for_test(1).remove(0);
+        let (tx, mut rx) = unbounded_channel();
+        notification_manager.insert_sender(SubscribeType::Frontend, WorkerKey(host.clone()), tx);
+        let catalog_version = notification_manager.current_catalog_version().await;
+
+        let (workers, before) = cluster_ctl.get_worker_nodes_snapshot().await?;
+        assert!(workers.is_empty());
+        let worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                AddNodeProperty {
+                    parallelism: 4,
+                    is_streaming: true,
+                    is_serving: true,
+                    ..Default::default()
+                },
+                PbResource::default(),
+            )
+            .await?;
+        cluster_ctl.activate_worker(worker_id).await?;
+        let (workers, after) = cluster_ctl.get_worker_nodes_snapshot().await?;
+        assert_eq!(workers.len(), 1);
+        let notification = next_worker_notification(&mut rx).await;
+        assert_eq!(notification.operation(), Operation::Add);
+        assert!(notification.version > before);
+        assert!(notification.version <= after);
+
+        let before = after;
+        cluster_ctl.delete_worker(host).await?;
+        let (workers, after) = cluster_ctl.get_worker_nodes_snapshot().await?;
+        assert!(workers.is_empty());
+        let notification = next_worker_notification(&mut rx).await;
+        assert_eq!(notification.operation(), Operation::Delete);
+        assert!(notification.version > before);
+        assert!(notification.version <= after);
+
+        assert_eq!(
+            notification_manager.current_catalog_version().await,
+            catalog_version
+        );
+
+        Ok(())
     }
 
     #[tokio::test]

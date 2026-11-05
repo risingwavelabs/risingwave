@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod catalog_version;
 pub mod diagnose;
 mod env;
 pub mod event_log;
@@ -22,7 +23,6 @@ mod idle;
 mod license;
 mod metadata;
 mod notification;
-mod notification_version;
 pub mod sink_coordination;
 mod streaming_job;
 

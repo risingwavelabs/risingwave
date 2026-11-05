@@ -18,7 +18,6 @@ use risingwave_meta_model::{FragmentId, WorkerId};
 use risingwave_pb::meta::{PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig};
 
 use crate::controller::fragment::FragmentServingInfo;
-use crate::manager::NotificationVersion;
 use crate::serving::{ServingVnodeMappingRef, to_pb_serving_table_vnode_mappings};
 
 pub fn build_hummock_table_refill_runtime_config(
@@ -26,7 +25,6 @@ pub fn build_hummock_table_refill_runtime_config(
     worker_id: WorkerId,
     table_cache_refill_policies: PbTableCacheRefillPolicies,
     fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
-    version: NotificationVersion,
 ) -> PbTableRefillRuntimeConfig {
     let table_vnode_mapping = serving_vnode_mapping
         .table_vnode_mappings_by_worker([worker_id], fragment_serving_infos)
@@ -38,7 +36,6 @@ pub fn build_hummock_table_refill_runtime_config(
         serving_table_vnode_mappings: Some(to_pb_serving_table_vnode_mappings(
             &table_vnode_mapping,
         )),
-        version,
     }
 }
 
@@ -110,10 +107,8 @@ mod tests {
             worker1.id,
             policies.clone(),
             &fragment_serving_infos,
-            42,
         );
 
-        assert_eq!(config.version, 42);
         assert_eq!(config.table_cache_refill_policies, Some(policies));
         let mappings = config.serving_table_vnode_mappings.unwrap().mappings;
         assert_eq!(mappings.len(), 1);

@@ -286,7 +286,7 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
                         version_deltas: pb_deltas,
                     }),
                 );
-                self.notification_manager.notify_frontend_without_version(
+                self.notification_manager.notify_frontend_non_catalog(
                     Operation::Update,
                     Info::HummockVersionDeltas(HummockVersionDeltas {
                         version_deltas: deltas
@@ -451,7 +451,7 @@ impl InMemValTransaction for HummockVersionStatsTransaction<'_> {
             let stats = self.stats.clone();
             self.stats.commit();
             self.notification_manager
-                .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats));
+                .notify_frontend_non_catalog(Operation::Update, Info::HummockStats(stats));
         }
     }
 }

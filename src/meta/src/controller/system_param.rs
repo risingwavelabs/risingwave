@@ -249,11 +249,11 @@ impl SystemParamsController {
     // TODO: add system params into snapshot to avoid periodically sync.
     fn notify_workers(&self, params: &PbSystemParams) {
         self.notification_manager
-            .notify_frontend_without_version(Operation::Update, Info::SystemParams(params.clone()));
+            .notify_frontend_non_catalog(Operation::Update, Info::SystemParams(params.clone()));
         self.notification_manager
-            .notify_compute_without_version(Operation::Update, Info::SystemParams(params.clone()));
+            .notify_compute(Operation::Update, Info::SystemParams(params.clone()));
         self.notification_manager
-            .notify_compute_without_version(Operation::Update, Info::SystemParams(params.clone()));
+            .notify_compute(Operation::Update, Info::SystemParams(params.clone()));
     }
 }
 

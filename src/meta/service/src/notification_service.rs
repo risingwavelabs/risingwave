@@ -24,8 +24,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model::{FragmentId, WorkerId};
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
+use risingwave_pb::common::ClusterResource;
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -97,7 +96,13 @@ impl NotificationServiceImpl {
             ),
             users,
         ) = catalog_guard.snapshot().await?;
-        let notification_version = self.env.notification_manager().current_version().await;
+        // Frontends also wait for this version, so it has to be the version of a catalog notification.
+        // It orders the notifications about this part as well, because they are all catalog ones.
+        let notification_version = self
+            .env
+            .notification_manager()
+            .current_catalog_version()
+            .await;
         Ok((
             (
                 databases,
@@ -127,7 +132,10 @@ impl NotificationServiceImpl {
             .get_inner_read_guard()
             .await;
         let secrets = catalog_guard.list_secrets().await?;
-        let notification_version = self.env.notification_manager().current_version().await;
+        let notification_version = self
+            .env
+            .notification_manager()
+            .current_notification_version();
 
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
@@ -158,18 +166,6 @@ impl NotificationServiceImpl {
         Ok(decrypted_secrets)
     }
 
-    async fn get_worker_slot_mapping_snapshot(
-        &self,
-    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
-        let mappings = self
-            .metadata_manager
-            .catalog_controller
-            .get_worker_slot_mappings();
-
-        let notification_version = self.env.notification_manager().current_version().await;
-        Ok((mappings, notification_version))
-    }
-
     fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
         self.serving_vnode_mapping
             .all()
@@ -181,23 +177,6 @@ impl NotificationServiceImpl {
             .collect()
     }
 
-    async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
-        let cluster_guard = self
-            .metadata_manager
-            .cluster_controller
-            .get_inner_read_guard()
-            .await;
-        let compute_nodes = cluster_guard
-            .list_workers(Some(WorkerType::ComputeNode.into()), Some(Running.into()))
-            .await?;
-        let frontends = cluster_guard
-            .list_workers(Some(WorkerType::Frontend.into()), Some(Running.into()))
-            .await?;
-        let worker_nodes = compute_nodes.into_iter().chain(frontends).collect();
-        let notification_version = self.env.notification_manager().current_version().await;
-        Ok((worker_nodes, notification_version))
-    }
-
     async fn get_tables_snapshot(&self) -> MetaResult<(Vec<Table>, NotificationVersion)> {
         let catalog_guard = self
             .metadata_manager
@@ -206,7 +185,10 @@ impl NotificationServiceImpl {
             .await;
         let mut tables = catalog_guard.list_all_state_tables().await?;
         tables.extend(catalog_guard.dropped_tables.values().cloned());
-        let notification_version = self.env.notification_manager().current_version().await;
+        let notification_version = self
+            .env
+            .notification_manager()
+            .current_notification_version();
         Ok((tables, notification_version))
     }
 
@@ -228,7 +210,10 @@ impl NotificationServiceImpl {
         let table_cache_refill_policies =
             catalog_guard.table_cache_refill_policies_snapshot().await?;
         let fragment_serving_infos = catalog_guard.fragment_serving_infos().await?;
-        let notification_version = self.env.notification_manager().current_version().await;
+        let notification_version = self
+            .env
+            .notification_manager()
+            .current_notification_version();
         Ok((
             tables,
             table_cache_refill_policies,
@@ -287,8 +272,10 @@ impl NotificationServiceImpl {
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
-        let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
-            self.get_worker_slot_mapping_snapshot().await?;
+        let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) = self
+            .metadata_manager
+            .catalog_controller
+            .get_worker_slot_mappings();
 
         let streaming_job_count = self.metadata_manager.count_streaming_job().await?;
         if streaming_job_count > 0 && streaming_worker_slot_mappings.is_empty() {
@@ -300,7 +287,11 @@ impl NotificationServiceImpl {
 
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 
-        let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
+        let (nodes, worker_node_version) = self
+            .metadata_manager
+            .cluster_controller
+            .get_worker_nodes_snapshot()
+            .await?;
 
         let hummock_version = self
             .hummock_manager
@@ -366,7 +357,6 @@ impl NotificationServiceImpl {
             worker_id,
             table_cache_refill_policies,
             &fragment_serving_infos,
-            catalog_version,
         );
 
         Ok(MetaSnapshot {

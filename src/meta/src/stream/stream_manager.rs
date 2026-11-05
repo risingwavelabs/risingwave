@@ -442,7 +442,7 @@ impl GlobalStreamManager {
                     stream_manager
                         .metadata_manager
                         .catalog_controller
-                        .current_notification_version()
+                        .current_catalog_version()
                         .await
                 }
                 CreateType::Foreground => {

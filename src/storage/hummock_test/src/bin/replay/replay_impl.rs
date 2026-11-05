@@ -175,8 +175,7 @@ impl ReplayStateStore for GlobalReplayImpl {
             _ => None,
         };
 
-        self.notifier
-            .notify_hummock_with_version(op, info, Some(version));
+        self.notifier.notify_hummock_with_version(op, info, version);
 
         // wait till version updated
         if let Some(prev_version_id) = prev_version_id {
@@ -331,7 +330,7 @@ impl NotificationClient for ReplayNotificationClient {
         self.notification_manager.notify_hummock_with_version(
             op,
             info.unwrap(),
-            Some(self.first_resp.0.version),
+            self.first_resp.0.version,
         );
 
         Ok(ReplayChannel(rx))

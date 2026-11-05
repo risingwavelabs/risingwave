@@ -1348,7 +1348,6 @@ mod tests {
                         bitmap: Some(old_vnodes.to_protobuf()),
                     }],
                 }),
-                ..Default::default()
             },
         );
         let snapshot = CacheRefiller::table_cache_refill_monitor_snapshot(&metadata);
