@@ -432,6 +432,30 @@ create table t_numeric_array_mismatch (
   amounts integer[]
 ) from s table 'public.t_numeric_array';
 
+# Test 6: array element types are resolved through domains
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_int_array_domain;
+    DROP DOMAIN IF EXISTS int_array_domain;
+    CREATE DOMAIN int_array_domain AS integer[];
+    CREATE TABLE t_int_array_domain (
+        id integer PRIMARY KEY,
+        amounts int_array_domain
+    );
+"
+
+statement ok
+create table t_int_array_domain (
+  id integer primary key,
+  amounts integer[]
+) from s table 'public.t_int_array_domain';
+
+statement error Incompatible data type of column amounts
+create table t_int_array_domain_mismatch (
+  id integer primary key,
+  amounts bigint[]
+) from s table 'public.t_int_array_domain';
+
 # Clean up all resources created during this test
 statement ok
 drop source s cascade;
@@ -444,6 +468,8 @@ psql -c "
     DROP TABLE IF EXISTS t_hstore;
     DROP TABLE IF EXISTS t_bit8;
     DROP TABLE IF EXISTS t_numeric_array;
+    DROP TABLE IF EXISTS t_int_array_domain;
+    DROP DOMAIN IF EXISTS int_array_domain;
     DROP TYPE IF EXISTS mood_enum_2;
     DROP EXTENSION IF EXISTS citext;
     DROP EXTENSION IF EXISTS ltree;
