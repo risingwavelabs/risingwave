@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::mem;
 use std::time::{Duration, Instant};
-use std::{assert_matches, mem};
 
 use anyhow::anyhow;
 use futures::stream::select;
@@ -31,7 +31,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::log_store::{
     FlushCurrentEpochOptions, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
     LogWriter, LogWriterExt, LogWriterMetrics,
@@ -42,21 +42,25 @@ use risingwave_connector::sink::{
 };
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::FragmentId;
-use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio_retry::strategy::jitter;
 
-use crate::common::change_buffer::{OutputKind, output_kind};
-use crate::common::compact_chunk::{
-    InconsistencyBehavior, StreamChunkCompactor, compact_chunk_inline,
-};
 use crate::executor::prelude::*;
+
+mod compaction_plan;
+use compaction_plan::{
+    Compaction, CompactionConfig, CompactionPlan, EpochCompaction, EpochFinish, ReaderCompaction,
+    WriterCompaction,
+};
+
+#[cfg(test)]
+mod compaction_tests;
+
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
-    info: ExecutorInfo,
     input: Executor,
     sink: SinkImpl,
     input_columns: Vec<ColumnCatalog>,
@@ -65,7 +69,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     sink_writer_param: SinkWriterParam,
     chunk_size: usize,
     input_data_types: Vec<DataType>,
-    non_append_only_behavior: Option<NonAppendOnlyBehavior>,
+    compaction: CompactionPlan,
     rate_limit: Option<u32>,
 }
 
@@ -127,17 +131,31 @@ fn drop_deletes_of_reinserted_keys(
         .collect()
 }
 
-/// Orders the inserts of an epoch for `ignore_delete`: the rows gone at the barrier first, then the
-/// rows still there.
-///
-/// When the downstream pk does not contain the stream key, the inserts of a downstream pk come from
-/// several stream keys, in no order, so a row deleted in the epoch may arrive after the row that
-/// replaced it. The deletes are not sent, but they tell which rows are gone: a stream key whose
-/// last change is an insert still has that row at the barrier.
-fn live_rows_last(chunks: Vec<StreamChunk>, stream_key: &[usize]) -> Vec<StreamChunk> {
-    let live = StreamChunkCompactor::new(stream_key.to_vec(), chunks.clone(), StreamKind::Upsert)
-        .into_compacted_chunks_inline::<{ output_kind::UPSERT }>(InconsistencyBehavior::Panic)
-        .into_iter()
+// Rewrite each update whose two rows differ in `key` to a delete and an insert.
+fn split_updates_changing_key(c: StreamChunk, key: &[usize]) -> StreamChunk {
+    let mut c: StreamChunkMut = c.into();
+    let mut update_delete = None;
+    for (row, mut r) in c.to_rows_mut() {
+        match r.op() {
+            Op::UpdateDelete => update_delete = Some((row, r)),
+            Op::UpdateInsert => {
+                if let Some((old_row, mut old)) = update_delete.take()
+                    && !Row::eq(&old_row.project(key), row.project(key))
+                {
+                    old.set_op(Op::Delete);
+                    r.set_op(Op::Insert);
+                }
+            }
+            Op::Insert | Op::Delete => update_delete = None,
+        }
+    }
+    c.into()
+}
+
+// The inserts of an epoch, with those of the rows gone at the barrier first and those of the rows
+// still there last. A key of `live_by` still has a row if its last change is an insert.
+fn live_rows_last(chunks: Vec<StreamChunk>, live_by: &Compaction) -> Vec<StreamChunk> {
+    let live = (live_by.compact_inline(chunks.clone()).into_iter())
         .map(force_append_only)
         .collect_vec();
     let gone = chunks.into_iter().zip_eq(&live).map(|(chunk, live)| {
@@ -147,170 +165,24 @@ fn live_rows_last(chunks: Vec<StreamChunk>, stream_key: &[usize]) -> Vec<StreamC
     });
     let mut ordered = gone.collect_vec();
     ordered.extend(live);
-    ordered.retain(|chunk| chunk.cardinality() > 0);
     ordered
 }
 
-/// The key and the stream kind by which the sink compacts its input.
-///
-/// Compaction assumes that deletes take effect. It merges an insert or update into a later delete
-/// of the same key, and keeps only the last version of a stream key, as each update deletes the row
-/// of the version before. `ignore_delete` drops deletes before compaction, after which every
-/// inserted row stays in the downstream until an insert of the same downstream pk overwrites it,
-/// as in an upsert stream keyed by the downstream pk. That needs the inserts of a downstream pk in
-/// order, see [`live_rows_last`] for when they are not.
-fn compaction_key_and_kind(
-    stream_key: &[usize],
-    input_kind: StreamKind,
-    downstream_pk: Option<&[usize]>,
-    ignore_delete: bool,
-) -> (StreamKey, StreamKind) {
-    if ignore_delete {
-        (
-            downstream_pk.unwrap_or(stream_key).to_vec(),
-            StreamKind::Upsert,
-        )
-    } else {
-        (stream_key.to_vec(), input_kind)
-    }
-}
-
-/// When the sink is non-append-only, i.e. upsert or retract, we need to do some extra work for
-/// correctness and performance.
-#[derive(Clone, Copy, Debug)]
-struct NonAppendOnlyBehavior {
-    /// Whether the user specifies a primary key for the sink, and it matches the stream key that
-    /// the sink compacts by, from [`compaction_key_and_kind`].
-    ///
-    /// By matching, we mean that stream key is a subset of the downstream pk.
-    pk_specified_and_matched: bool,
-    /// Whether the user forces buffering all chunks between two barriers.
-    force_compaction: bool,
-}
-
-impl NonAppendOnlyBehavior {
-    /// NOTE(kwannoel):
-    ///
-    /// After the optimization in <https://github.com/risingwavelabs/risingwave/pull/12250>,
-    /// `DELETE`s will be sequenced before `INSERT`s in JDBC sinks and PG rust sink.
-    /// There's a risk that adjacent chunks with `DELETE`s on the same PK will get
-    /// merged into a single chunk, since the logstore format doesn't preserve chunk
-    /// boundaries. Then we will have double `DELETE`s followed by unspecified sequence
-    /// of `INSERT`s, and lead to inconsistent data downstream.
-    ///
-    /// We only need to do the compaction for non-append-only sinks, when the upstream and
-    /// downstream PKs are matched. When the upstream and downstream PKs are not matched,
-    /// we will buffer the chunks between two barriers, so the compaction is not needed,
-    /// since the barriers will preserve chunk boundaries.
-    ///
-    /// When `force_compaction` is true, we also skip compaction here, since the buffering
-    /// will also make compaction.
-    ///
-    /// When the sink is an append-only sink, it is either `force_append_only` or
-    /// `append_only`, we should only append to downstream, so there should not be any
-    /// overlapping keys.
-    fn should_compact_in_log_reader(self) -> bool {
-        self.pk_specified_and_matched && !self.force_compaction
-    }
-
-    /// When stream key is different from the user defined primary key columns for sinks.
-    /// The operations could be out of order.
-    ///
-    /// For example, we have a stream with derived stream key `a, b` and user-specified sink
-    /// primary key `a`. Assume that we have `(1, 1)` in the table. Then, we perform two `UPDATE`
-    /// operations:
-    ///
-    /// ```text
-    /// UPDATE SET b = 2 WHERE a = 1 ... which issues:
-    ///   - (1, 1)
-    ///   + (1, 2)
-    ///
-    /// UPDATE SET b = 3 WHERE a = 1 ... which issues:
-    ///   - (1, 2)
-    ///   + (1, 3)
-    /// ```
-    ///
-    /// When these changes go into streaming pipeline, they could be shuffled to different parallelism
-    /// (actor), given that they are under different stream keys.
-    ///
-    /// ```text
-    /// Actor 1:
-    /// - (1, 1)
-    ///
-    /// Actor 2:
-    /// + (1, 2)
-    /// - (1, 2)
-    ///
-    /// Actor 3:
-    /// + (1, 3)
-    /// ```
-    ///
-    /// When these records are merged back into sink actor, we may get the records from different
-    /// parallelism in arbitrary order, like:
-    ///
-    /// ```text
-    /// + (1, 2) -- Actor 2, first row
-    /// + (1, 3) -- Actor 3
-    /// - (1, 1) -- Actor 1
-    /// - (1, 2) -- Actor 2, second row
-    /// ```
-    ///
-    /// Note that in terms of stream key (`a, b`), the operations in the order above are completely
-    /// correct, because we are operating on 3 different rows. However, in terms of user defined sink
-    /// primary key `a`, we're violating the unique constraint all the time.
-    ///
-    /// Therefore, in this case, we have to do additional reordering in the sink executor per barrier.
-    /// Specifically, we need to:
-    ///
-    /// First, compact all the changes with the stream key, so we have:
-    /// ```text
-    /// + (1, 3)
-    /// - (1, 1)
-    /// ```
-    ///
-    /// Then, sink all the delete events before sinking all insert events, so we have:
-    /// ```text
-    /// - (1, 1)
-    /// + (1, 3)
-    /// ```
-    /// Since we've compacted the chunk with the stream key, the `DELETE` records survived must be to
-    /// delete an existing row, so we can safely move them to the front. After the deletion is done,
-    /// we can then safely sink the insert events with uniqueness guarantee.
-    ///
-    /// When `force_compaction` is true, we also perform additional reordering to gain the
-    /// benefits of compaction:
-    /// - reduce the number of output messages;
-    /// - emit at most one update per key within a barrier interval, simplifying downstream logic.
-    fn should_reorder_records(self) -> bool {
-        !self.pk_specified_and_matched || self.force_compaction
-    }
-}
-
-/// Get the output kind for chunk compaction based on the given sink type.
-fn compact_output_kind(sink_type: SinkType) -> OutputKind {
-    match sink_type {
-        SinkType::Upsert => output_kind::UPSERT,
-        SinkType::Retract => output_kind::RETRACT,
-        // There won't be any `Update` or `Delete` in the chunk, so it doesn't matter.
-        SinkType::AppendOnly => output_kind::RETRACT,
-    }
-}
-
-/// Dispatch the code block to different output kinds for chunk compaction based on sink type.
-macro_rules! dispatch_output_kind {
-    ($sink_type:expr, $KIND:ident, $body:tt) => {
-        #[allow(unused_braces)]
-        match compact_output_kind($sink_type) {
-            output_kind::UPSERT => {
-                const KIND: OutputKind = output_kind::UPSERT;
-                $body
-            }
-            output_kind::RETRACT => {
-                const KIND: OutputKind = output_kind::RETRACT;
-                $body
-            }
+// Rebuild the visible rows of the chunks into chunks of `chunk_size` rows.
+fn rebuild_chunks(
+    chunks: impl IntoIterator<Item = StreamChunk>,
+    chunk_size: usize,
+    data_types: Vec<DataType>,
+) -> Vec<StreamChunk> {
+    let mut builder = StreamChunkBuilder::new(chunk_size, data_types);
+    let mut rebuilt = vec![];
+    for chunk in chunks {
+        for (op, row) in chunk.rows() {
+            rebuilt.extend(builder.append_row(op, row));
         }
-    };
+    }
+    rebuilt.extend(builder.take());
+    rebuilt
 }
 
 impl<F: LogStoreFactory> SinkExecutor<F> {
@@ -344,40 +216,31 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             assert_eq!(sink_input_schema.data_types(), info.schema.data_types());
         }
 
-        let non_append_only_behavior = if !sink_param.sink_type.is_append_only() {
-            let (stream_key, _) = compaction_key_and_kind(
-                &info.stream_key,
-                input.stream_kind(),
-                sink_param.downstream_pk.as_deref(),
-                sink_param.ignore_delete,
-            );
-            let pk_specified_and_matched = (sink_param.downstream_pk.as_ref())
-                .is_some_and(|downstream_pk| stream_key.iter().all(|i| downstream_pk.contains(i)));
-            let enabled = |key: &str| {
-                (sink_param.properties.get(key)).is_some_and(|v| v.eq_ignore_ascii_case("true"))
-            };
-            // With `ignore_delete`, the changes are compacted by the downstream pk, which
-            // `preserve_row_level_changes` forbids, and there are no deletes to move first.
-            let force_compaction = enabled(SINK_USER_FORCE_COMPACTION)
-                && !(sink_param.ignore_delete && enabled(SINK_USER_PRESERVE_ROW_LEVEL_CHANGES));
-            Some(NonAppendOnlyBehavior {
-                pk_specified_and_matched,
-                force_compaction,
-            })
-        } else {
-            None
+        let enabled = |key: &str| {
+            (sink_param.properties.get(key)).is_some_and(|v| v.eq_ignore_ascii_case("true"))
         };
+        let compaction = CompactionPlan::new(&CompactionConfig {
+            sink_type: sink_param.sink_type,
+            input_kind: input.stream_kind(),
+            stream_key: &info.stream_key,
+            downstream_pk: sink_param.downstream_pk.as_deref(),
+            force_compaction: enabled(SINK_USER_FORCE_COMPACTION),
+            preserve_row_level_changes: enabled(SINK_USER_PRESERVE_ROW_LEVEL_CHANGES),
+            skip_writer_compaction: sink.is_blackhole(),
+            ignore_delete: sink_param.ignore_delete,
+            has_log_store: !sink.is_sink_into_table(),
+            partition_col: sink_writer_param.extra_partition_col_idx,
+        });
 
         tracing::info!(
             sink_id = %sink_param.sink_id,
             actor_id = %actor_context.id,
-            ?non_append_only_behavior,
+            ?compaction,
             "Sink executor info"
         );
 
         Ok(Self {
             actor_context,
-            info,
             input,
             sink,
             input_columns: columns,
@@ -386,7 +249,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             sink_writer_param,
             chunk_size,
             input_data_types,
-            non_append_only_behavior,
+            compaction,
             rate_limit,
         })
     }
@@ -402,13 +265,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             fragment_id,
         );
 
-        let ignore_delete = self.sink_param.ignore_delete;
-        let (stream_key, input_kind) = compaction_key_and_kind(
-            &self.info.stream_key,
-            self.input.stream_kind(),
-            self.sink_param.downstream_pk.as_deref(),
-            ignore_delete,
-        );
         let input = self.input.execute();
 
         let input = input.inspect_ok(move |msg| {
@@ -418,54 +274,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             }
         });
 
-        let preserve_row_level_changes = (self.sink_param.properties)
-            .get(SINK_USER_PRESERVE_ROW_LEVEL_CHANGES)
-            .is_some_and(|v| v.eq_ignore_ascii_case("true"));
-        // The downstream pk whose inserts `ignore_delete` cannot take in the order they arrive.
-        let unordered_downstream_pk = (self.sink_param.downstream_pk.clone()).filter(|pk| {
-            ignore_delete
-                && !self.sink_param.sink_type.is_append_only()
-                && !self.info.stream_key.iter().all(|i| pk.contains(i))
-        });
-
-        let processed_input = if let Some(downstream_pk) = unordered_downstream_pk {
-            Self::process_msg_live_rows_last(
-                input,
-                self.info.stream_key.clone(),
-                downstream_pk,
-                preserve_row_level_changes,
-                self.chunk_size,
-                self.input_data_types,
-                metrics.sink_chunk_buffer_size,
-            )
-            .left_stream()
-        } else {
-            let input = if ignore_delete {
-                // Drop UPDATE/DELETE messages if specified `ignore_delete` (formerly `force_append_only`).
-                input
-                    .map_ok(|msg| match msg {
-                        Message::Chunk(chunk) => Message::Chunk(force_append_only(chunk)),
-                        other => other,
-                    })
-                    .left_stream()
-            } else {
-                input.right_stream()
-            };
-            Self::process_msg(
-                input,
-                self.sink_param.sink_type,
-                stream_key,
-                self.chunk_size,
-                self.input_data_types,
-                input_kind,
-                self.sink_param.downstream_pk.clone(),
-                self.non_append_only_behavior,
-                metrics.sink_chunk_buffer_size,
-                preserve_row_level_changes,
-                self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
-            )
-            .right_stream()
-        };
+        let processed_input = Self::process_msg(
+            input,
+            self.compaction.drop_deletes_first,
+            self.compaction.writer,
+            self.chunk_size,
+            self.input_data_types,
+            metrics.sink_chunk_buffer_size,
+        );
 
         if self.sink.is_sink_into_table() {
             // TODO(hzxa21): support rate limit?
@@ -517,7 +333,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.input_columns,
                             self.sink_param,
                             self.sink_writer_param,
-                            self.non_append_only_behavior,
+                            self.compaction.reader,
                             self.actor_context,
                             rate_limit_rx,
                             rebuild_sink_rx,
@@ -658,238 +474,150 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
-    /// With `ignore_delete` and a downstream pk that does not contain the stream key, buffers each
-    /// epoch to emit its inserts in the order of [`live_rows_last`].
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn process_msg_live_rows_last(
-        input: impl MessageStream,
-        stream_key: StreamKey,
-        downstream_pk: Vec<usize>,
-        preserve_row_level_changes: bool,
-        chunk_size: usize,
-        input_data_types: Vec<DataType>,
-        sink_chunk_buffer_size_metrics: RelabeledAggregatedIntGauge,
-    ) {
-        let mut chunk_buffer = EstimatedVec::new();
-        let mut watermark: Option<super::Watermark> = None;
-        #[for_await]
-        for msg in input {
-            match msg? {
-                Message::Watermark(w) => watermark = Some(w),
-                Message::Chunk(c) => {
-                    chunk_buffer.push(c);
-                    sink_chunk_buffer_size_metrics.set(chunk_buffer.estimated_size() as i64);
-                }
-                Message::Barrier(barrier) => {
-                    let chunks = mem::take(&mut chunk_buffer).into_inner();
-                    let chunks = live_rows_last(chunks, &stream_key);
-                    if preserve_row_level_changes {
-                        // The target table sees every insert.
-                        let mut chunk_builder =
-                            StreamChunkBuilder::new(chunk_size, input_data_types.clone());
-                        for chunk in chunks {
-                            for (op, row) in chunk.rows() {
-                                if let Some(c) = chunk_builder.append_row(op, row) {
-                                    yield Message::Chunk(c);
-                                }
-                            }
-                        }
-                        if let Some(c) = chunk_builder.take() {
-                            yield Message::Chunk(c);
-                        }
-                    } else {
-                        // Keep the last insert of each downstream pk.
-                        let compactor = StreamChunkCompactor::new(
-                            downstream_pk.clone(),
-                            chunks,
-                            StreamKind::Upsert,
-                        );
-                        for c in compactor
-                            .into_compacted_chunks_reconstructed::<{ output_kind::UPSERT }>(
-                                chunk_size,
-                                input_data_types.clone(),
-                                InconsistencyBehavior::Warn,
-                            )
-                        {
-                            yield Message::Chunk(c);
-                        }
-                    }
-                    if let Some(w) = mem::take(&mut watermark) {
-                        yield Message::Watermark(w)
-                    }
-                    yield Message::Barrier(barrier);
-                }
-            }
-        }
-    }
-
-    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn process_msg(
         input: impl MessageStream,
-        sink_type: SinkType,
-        stream_key: StreamKey,
+        drop_deletes_first: bool,
+        compaction: WriterCompaction,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
-        input_kind: StreamKind,
-        downstream_pk: Option<Vec<usize>>,
-        non_append_only_behavior: Option<NonAppendOnlyBehavior>,
         sink_chunk_buffer_size_metrics: RelabeledAggregatedIntGauge,
-        preserve_row_level_changes: bool,
-        skip_compact: bool,
     ) {
-        // To reorder records, we need to buffer chunks of the entire epoch.
-        if let Some(b) = non_append_only_behavior
-            && b.should_reorder_records()
-        {
-            assert_matches!(sink_type, SinkType::Upsert | SinkType::Retract);
-
-            let mut chunk_buffer = EstimatedVec::new();
-            let mut watermark: Option<super::Watermark> = None;
-            #[for_await]
-            for msg in input {
-                match msg? {
-                    Message::Watermark(w) => watermark = Some(w),
-                    Message::Chunk(c) => {
-                        chunk_buffer.push(c);
-                        sink_chunk_buffer_size_metrics.set(chunk_buffer.estimated_size() as i64);
-                    }
-                    Message::Barrier(barrier) => {
-                        let chunks = mem::take(&mut chunk_buffer).into_inner();
-
-                        // 1. Compact the chunk based on the **stream key**, so that we have at most 2 rows for each
-                        //    stream key. Then, move all delete records to the front.
-                        //    With a downstream pk, keep the old row of each update: on this path an update may
-                        //    change the downstream pk, and the old one must still be deleted. Changes on the same
-                        //    downstream pk are folded below. Upsert input is excluded, as its old rows only
-                        //    guarantee the stream key columns, so the old downstream pk is unknown.
-                        let mut delete_chunks = vec![];
-                        let mut insert_chunks = vec![];
-
-                        let compactor =
-                            StreamChunkCompactor::new(stream_key.clone(), chunks, input_kind);
-                        let compacted =
-                            if downstream_pk.is_some() && input_kind != StreamKind::Upsert {
-                                compactor.into_compacted_chunks_inline::<{ output_kind::RETRACT }>(
-                                    InconsistencyBehavior::Panic,
-                                )
-                            } else {
-                                dispatch_output_kind!(sink_type, KIND, {
-                                    compactor.into_compacted_chunks_inline::<KIND>(
-                                        InconsistencyBehavior::Panic,
-                                    )
-                                })
-                            };
-                        for c in compacted {
-                            let chunk = force_delete_only(c.clone());
-                            if chunk.cardinality() > 0 {
-                                delete_chunks.push(chunk);
-                            }
-                            let chunk = force_append_only(c);
-                            if chunk.cardinality() > 0 {
-                                insert_chunks.push(chunk);
-                            }
+        let input = input.map_ok(move |msg| match msg {
+            // Drop UPDATE/DELETE messages if specified `ignore_delete` (formerly `force_append_only`).
+            Message::Chunk(chunk) if drop_deletes_first => Message::Chunk(force_append_only(chunk)),
+            other => other,
+        });
+        match compaction {
+            WriterCompaction::PerEpoch(epoch_compaction) => {
+                let mut chunk_buffer = EstimatedVec::new();
+                let mut watermark: Option<super::Watermark> = None;
+                #[for_await]
+                for msg in input {
+                    match msg? {
+                        Message::Watermark(w) => watermark = Some(w),
+                        Message::Chunk(c) => {
+                            chunk_buffer.push(c);
+                            sink_chunk_buffer_size_metrics
+                                .set(chunk_buffer.estimated_size() as i64);
                         }
-                        // 2. If user specifies a primary key, compact the chunk based on the **downstream pk**
-                        //    to eliminate any unnecessary updates to external systems. This also rewrites the
-                        //    `DELETE` and `INSERT` operations on the same key into `UPDATE` operations, which
-                        //    usually have more efficient implementation.
-                        //    Skip this when the target table has special conflict semantics. In that case, the
-                        //    target table must observe every row-level change instead of a pre-compacted final state.
-                        if let Some(downstream_pk) = &downstream_pk
-                            && !preserve_row_level_changes
-                        {
-                            let chunks = delete_chunks
-                                .into_iter()
-                                .chain(insert_chunks.into_iter())
-                                .collect();
-                            // With a downstream pk, the first stage retains retract updates,
-                            // so this stage has the same input semantics as the original stream.
-                            let chunks = dispatch_output_kind!(sink_type, KIND, {
-                                StreamChunkCompactor::new(downstream_pk.clone(), chunks, input_kind)
-                                    .into_compacted_chunks_reconstructed::<KIND>(
+                        Message::Barrier(barrier) => {
+                            let chunks = mem::take(&mut chunk_buffer).into_inner();
+                            match &epoch_compaction {
+                                EpochCompaction::Once(compaction) => {
+                                    for c in compaction.compact_reconstructed(
+                                        chunks,
                                         chunk_size,
                                         input_data_types.clone(),
-                                        // When compacting based on user provided primary key, we should never panic
-                                        // on inconsistency in case the user provided primary key is not unique.
-                                        InconsistencyBehavior::Warn,
-                                    )
-                            });
-                            for c in chunks {
-                                yield Message::Chunk(c);
-                            }
-                        } else {
-                            if let Some(downstream_pk) = &downstream_pk
-                                && compact_output_kind(sink_type) == output_kind::UPSERT
-                            {
-                                delete_chunks = drop_deletes_of_reinserted_keys(
-                                    delete_chunks,
-                                    &insert_chunks,
-                                    downstream_pk,
-                                );
-                            }
-                            let mut chunk_builder =
-                                StreamChunkBuilder::new(chunk_size, input_data_types.clone());
-                            for chunk in delete_chunks.into_iter().chain(insert_chunks) {
-                                for (op, row) in chunk.rows() {
-                                    if let Some(c) = chunk_builder.append_row(op, row) {
+                                    ) {
+                                        yield Message::Chunk(c);
+                                    }
+                                }
+                                EpochCompaction::Reorder {
+                                    by_stream_key,
+                                    then,
+                                } => {
+                                    let mut delete_chunks = vec![];
+                                    let mut insert_chunks = vec![];
+                                    for c in by_stream_key.compact_inline(chunks) {
+                                        let chunk = force_delete_only(c.clone());
+                                        if chunk.cardinality() > 0 {
+                                            delete_chunks.push(chunk);
+                                        }
+                                        let chunk = force_append_only(c);
+                                        if chunk.cardinality() > 0 {
+                                            insert_chunks.push(chunk);
+                                        }
+                                    }
+                                    if let EpochFinish::ByDownstreamPk(by_downstream_pk) = then {
+                                        let chunks = delete_chunks
+                                            .into_iter()
+                                            .chain(insert_chunks)
+                                            .collect();
+                                        for c in by_downstream_pk.compact_reconstructed(
+                                            chunks,
+                                            chunk_size,
+                                            input_data_types.clone(),
+                                        ) {
+                                            yield Message::Chunk(c);
+                                        }
+                                    } else {
+                                        if let EpochFinish::DropReinsertedDeletes {
+                                            downstream_pk,
+                                        } = then
+                                        {
+                                            delete_chunks = drop_deletes_of_reinserted_keys(
+                                                delete_chunks,
+                                                &insert_chunks,
+                                                downstream_pk,
+                                            );
+                                        }
+                                        for c in rebuild_chunks(
+                                            delete_chunks.into_iter().chain(insert_chunks),
+                                            chunk_size,
+                                            input_data_types.clone(),
+                                        ) {
+                                            yield Message::Chunk(c);
+                                        }
+                                    }
+                                }
+                                EpochCompaction::LiveRowsLast { live_by, then } => {
+                                    let chunks = live_rows_last(chunks, live_by);
+                                    let chunks = match then {
+                                        Some(by_downstream_pk) => by_downstream_pk
+                                            .compact_reconstructed(
+                                                chunks,
+                                                chunk_size,
+                                                input_data_types.clone(),
+                                            ),
+                                        None => rebuild_chunks(
+                                            chunks,
+                                            chunk_size,
+                                            input_data_types.clone(),
+                                        ),
+                                    };
+                                    for c in chunks {
                                         yield Message::Chunk(c);
                                     }
                                 }
                             }
-
-                            if let Some(c) = chunk_builder.take() {
-                                yield Message::Chunk(c);
+                            if let Some(w) = mem::take(&mut watermark) {
+                                yield Message::Watermark(w)
                             }
-                        };
-
-                        // 3. Forward watermark and barrier.
-                        if let Some(w) = mem::take(&mut watermark) {
-                            yield Message::Watermark(w)
+                            yield Message::Barrier(barrier);
                         }
-                        yield Message::Barrier(barrier);
                     }
                 }
             }
-        } else {
-            // In this branch, we don't need to reorder records, either because the stream key matches
-            // the downstream pk, or the sink is append-only.
-            #[for_await]
-            for msg in input {
-                match msg? {
-                    Message::Watermark(w) => yield Message::Watermark(w),
-                    Message::Chunk(mut chunk) => {
-                        // Compact the chunk to eliminate any unnecessary updates to external systems.
-                        // This should be performed against the downstream pk, not the stream key, to
-                        // ensure correct retract/upsert semantics from the downstream's perspective.
-                        if !sink_type.is_append_only()
-                            && let Some(downstream_pk) = &downstream_pk
-                        {
-                            if preserve_row_level_changes {
-                                // Preserve every row-level change so the target table can apply its
-                                // own conflict semantics.
-                            } else if skip_compact {
-                                // We can only skip compaction if the keys are exactly the same, not just
-                                // matching by being a subset.
-                                assert_eq!(&stream_key, downstream_pk);
-                            } else {
-                                chunk = dispatch_output_kind!(sink_type, KIND, {
-                                    compact_chunk_inline::<KIND>(
-                                        chunk,
-                                        downstream_pk,
-                                        input_kind,
-                                        // When compacting based on user provided primary key, we should never panic
-                                        // on inconsistency in case the user provided primary key is not unique.
-                                        InconsistencyBehavior::Warn,
-                                    )
-                                });
-                            }
+            WriterCompaction::PerChunk(compaction) =>
+            {
+                #[for_await]
+                for msg in input {
+                    match msg? {
+                        Message::Chunk(chunk) => {
+                            yield Message::Chunk(compaction.compact_chunk(chunk))
                         }
-                        yield Message::Chunk(chunk);
+                        other => yield other,
                     }
-                    Message::Barrier(barrier) => {
-                        yield Message::Barrier(barrier);
+                }
+            }
+            WriterCompaction::SplitUpdates { key } =>
+            {
+                #[for_await]
+                for msg in input {
+                    match msg? {
+                        Message::Chunk(chunk) => {
+                            yield Message::Chunk(split_updates_changing_key(chunk, &key))
+                        }
+                        other => yield other,
                     }
+                }
+            }
+            WriterCompaction::None =>
+            {
+                #[for_await]
+                for msg in input {
+                    yield msg?;
                 }
             }
         }
@@ -902,7 +630,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         mut sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
-        non_append_only_behavior: Option<NonAppendOnlyBehavior>,
+        compaction: Option<ReaderCompaction>,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
         mut rebuild_sink_rx: UnboundedReceiver<RebuildSinkMessage>,
@@ -949,32 +677,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             log_store_reader_wait_new_future_duration_ns,
         };
 
-        let downstream_pk = sink_param.downstream_pk.clone();
-
         let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
-                let chunk = if let Some(b) = non_append_only_behavior
-                    && b.should_compact_in_log_reader()
-                {
-                    // This guarantees that user has specified a `downstream_pk`.
-                    let downstream_pk = downstream_pk.as_ref().unwrap();
-                    dispatch_output_kind!(sink_param.sink_type, KIND, {
-                        compact_chunk_inline::<KIND>(
-                            chunk,
-                            downstream_pk,
-                            // Writer-side compaction has already converted updates for upsert sinks.
-                            if sink_param.sink_type == SinkType::Upsert {
-                                StreamKind::Upsert
-                            } else {
-                                StreamKind::Retract
-                            },
-                            // When compacting based on user provided primary key, we should never panic
-                            // on inconsistency in case the user provided primary key is not unique.
-                            InconsistencyBehavior::Warn,
-                        )
-                    })
-                } else {
-                    chunk
+                let chunk = match &compaction {
+                    Some(compaction) => compaction.compact_chunk(chunk),
+                    None => chunk,
                 };
                 if needs_projection {
                     // Do projection here because we may have columns that aren't visible to
@@ -1145,6 +852,7 @@ mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::sink::build_sink;
+    use risingwave_connector::sink::catalog::SinkType;
     use risingwave_connector::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
     use risingwave_connector::sink::trivial::BlackHoleSink;
     use tokio::sync::Notify;
@@ -1559,346 +1267,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn stream_key_sink_pk_mismatch_upsert() {
-        stream_key_sink_pk_mismatch(SinkType::Upsert).await;
-    }
-
-    #[tokio::test]
-    async fn stream_key_sink_pk_mismatch_retract() {
-        stream_key_sink_pk_mismatch(SinkType::Retract).await;
-    }
-
-    async fn stream_key_sink_pk_mismatch(sink_type: SinkType) {
-        use risingwave_common::array::StreamChunkTestExt;
-        use risingwave_common::array::stream_chunk::StreamChunk;
-        use risingwave_common::types::DataType;
-
-        use crate::executor::Barrier;
-
-        let properties = maplit::btreemap! {
-            "connector".into() => "blackhole".into(),
-        };
-
-        // We have two visible columns and one hidden column. The hidden column will be pruned out
-        // within the sink executor.
-        let columns = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
-                is_hidden: true,
-            },
-        ];
-        let schema: Schema = columns
-            .iter()
-            .map(|column| Field::from(column.column_desc.clone()))
-            .collect();
-
-        let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                " I I I
-                    + 1 1 10",
-            ))),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                " I I I
-                    + 1 3 30",
-            ))),
-            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                " I I I
-                    + 1 2 20
-                    - 1 2 20",
-            ))),
-            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                " I I I
-                    - 1 1 10
-                    + 1 1 40",
-            ))),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
-        ])
-        .into_executor(schema.clone(), vec![0, 1]);
-
-        let sink_param = SinkParam {
-            sink_id: 0.into(),
-            sink_name: "test".into(),
-            properties,
-
-            columns: columns
-                .iter()
-                .filter(|col| !col.is_hidden)
-                .map(|col| col.column_desc.clone())
-                .collect(),
-            downstream_pk: Some(vec![0]),
-            sink_type,
-            ignore_delete: false,
-            format_desc: None,
-            db_name: "test".into(),
-            sink_from_name: "test".into(),
-        };
-
-        let info = ExecutorInfo::for_test(schema, vec![0, 1], "SinkExecutor".to_owned(), 0);
-
-        let sink = build_sink(sink_param.clone()).unwrap();
-
-        let sink_executor = SinkExecutor::new(
-            ActorContext::for_test(0),
-            info,
-            source,
-            SinkWriterParam::for_test(),
-            sink,
-            sink_param,
-            columns.clone(),
-            BoundedInMemLogStoreFactory::for_test(1),
-            1024,
-            vec![DataType::Int64, DataType::Int64, DataType::Int64],
-            None,
-        )
-        .unwrap();
-
-        let mut executor = sink_executor.boxed().execute();
-
-        // Barrier message.
-        executor.next().await.unwrap().unwrap();
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact_vis(),
-            StreamChunk::from_pretty(
-                " I I I
-                + 1 1 10",
-            )
-        );
-
-        // Barrier message.
-        executor.next().await.unwrap().unwrap();
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        let expected = match sink_type {
-            SinkType::Retract => StreamChunk::from_pretty(
-                " I I I
-                U- 1 1 10
-                U+ 1 1 40",
-            ),
-            SinkType::Upsert => StreamChunk::from_pretty(
-                " I I I
-                + 1 1 40", // For upsert format, there won't be `U- 1 1 10`.
-            ),
-            _ => unreachable!(),
-        };
-        assert_eq!(chunk_msg.into_chunk().unwrap().compact_vis(), expected);
-
-        // The last barrier message.
-        executor.next().await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_sink_into_table_preserves_special_conflict_rows_for_mismatched_pk() {
-        use risingwave_common::array::StreamChunkTestExt;
-        use risingwave_common::array::stream_chunk::StreamChunk;
-        use risingwave_common::types::DataType;
-
-        use crate::executor::Barrier;
-
-        let properties = maplit::btreemap! {
-            "connector".into() => "table".into(),
-            SINK_USER_PRESERVE_ROW_LEVEL_CHANGES.into() => "true".into(),
-        };
-
-        let columns = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
-                is_hidden: false,
-            },
-        ];
-        let schema: Schema = columns
-            .iter()
-            .map(|column| Field::from(column.column_desc.clone()))
-            .collect();
-
-        let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I  I  I
-                  + 1 10  1",
-            )),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I  I  I
-                  + 1 20  2",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-            // Downstream key 1 moves to a new stream key, while downstream key 2 is really deleted.
-            Message::Chunk(StreamChunk::from_pretty(
-                " I  I  I
-                  - 1 10  1
-                  - 1 20  2
-                  + 1 30  3
-                  - 2 50  5",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
-        ])
-        .into_executor(schema.clone(), vec![0, 2]);
-
-        let sink_param = SinkParam {
-            sink_id: 0.into(),
-            sink_name: "test".into(),
-            properties,
-            columns: columns.iter().map(|col| col.column_desc.clone()).collect(),
-            downstream_pk: Some(vec![0]),
-            sink_type: SinkType::Upsert,
-            ignore_delete: false,
-            format_desc: None,
-            db_name: "test".into(),
-            sink_from_name: "test".into(),
-        };
-
-        let info = ExecutorInfo::for_test(schema, vec![0, 2], "SinkExecutor".to_owned(), 0);
-        let sink = build_sink(sink_param.clone()).unwrap();
-
-        let sink_executor = SinkExecutor::new(
-            ActorContext::for_test(0),
-            info,
-            source,
-            SinkWriterParam::for_test(),
-            sink,
-            sink_param,
-            columns,
-            BoundedInMemLogStoreFactory::for_test(1),
-            1024,
-            vec![DataType::Int64, DataType::Int64, DataType::Int64],
-            None,
-        )
-        .unwrap();
-
-        let mut executor = sink_executor.boxed().execute();
-
-        executor.next().await.unwrap().unwrap();
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact_vis(),
-            StreamChunk::from_pretty(
-                " I  I  I
-                  + 1 10  1
-                  + 1 20  2",
-            )
-        );
-
-        executor.next().await.unwrap().unwrap();
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact_vis(),
-            StreamChunk::from_pretty(
-                " I  I  I
-                  - 2 50  5
-                  + 1 30  3",
-            )
-        );
-
-        executor.next().await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_sink_into_table_keeps_default_compaction_without_special_conflict_semantics() {
-        use risingwave_common::array::StreamChunkTestExt;
-        use risingwave_common::array::stream_chunk::StreamChunk;
-        use risingwave_common::types::DataType;
-
-        use crate::executor::Barrier;
-
-        let properties = maplit::btreemap! {
-            "connector".into() => "table".into(),
-        };
-
-        let columns = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
-                is_hidden: false,
-            },
-        ];
-        let schema: Schema = columns
-            .iter()
-            .map(|column| Field::from(column.column_desc.clone()))
-            .collect();
-
-        let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I  I
-                  + 1 10
-                  + 1 20",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-        ])
-        .into_executor(schema.clone(), vec![0]);
-
-        let sink_param = SinkParam {
-            sink_id: 0.into(),
-            sink_name: "test".into(),
-            properties,
-            columns: columns.iter().map(|col| col.column_desc.clone()).collect(),
-            downstream_pk: Some(vec![0]),
-            sink_type: SinkType::Upsert,
-            ignore_delete: false,
-            format_desc: None,
-            db_name: "test".into(),
-            sink_from_name: "test".into(),
-        };
-
-        let info = ExecutorInfo::for_test(schema, vec![0], "SinkExecutor".to_owned(), 0);
-        let sink = build_sink(sink_param.clone()).unwrap();
-
-        let sink_executor = SinkExecutor::new(
-            ActorContext::for_test(0),
-            info,
-            source,
-            SinkWriterParam::for_test(),
-            sink,
-            sink_param,
-            columns,
-            BoundedInMemLogStoreFactory::for_test(1),
-            1024,
-            vec![DataType::Int64, DataType::Int64],
-            None,
-        )
-        .unwrap();
-
-        let mut executor = sink_executor.boxed().execute();
-
-        executor.next().await.unwrap().unwrap();
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact_vis(),
-            StreamChunk::from_pretty(
-                " I  I
-                  + 1 20",
-            )
-        );
-
-        executor.next().await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
     async fn test_empty_barrier_sink() {
         use risingwave_common::types::DataType;
 
@@ -1987,852 +1355,6 @@ mod test {
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3)))
-        );
-    }
-
-    #[tokio::test]
-    async fn test_force_compaction() {
-        use risingwave_common::array::StreamChunkTestExt;
-        use risingwave_common::array::stream_chunk::StreamChunk;
-        use risingwave_common::types::DataType;
-
-        use crate::executor::Barrier;
-
-        let properties = maplit::btreemap! {
-            "connector".into() => "blackhole".into(),
-            "force_compaction".into() => "true".into()
-        };
-
-        // We have two visible columns and one hidden column. The hidden column will be pruned out
-        // within the sink executor.
-        let columns = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
-                is_hidden: true,
-            },
-        ];
-        let schema: Schema = columns
-            .iter()
-            .map(|column| Field::from(column.column_desc.clone()))
-            .collect();
-
-        let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I
-                    + 1 1 10",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I
-                    + 1 3 30",
-            )),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I
-                    + 1 2 20
-                    - 1 2 20
-                    + 1 4 10",
-            )),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I
-                    - 1 1 10
-                    + 1 1 40",
-            )),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I
-                    - 1 4 30",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
-        ])
-        .into_executor(schema.clone(), vec![0, 1]);
-
-        let sink_param = SinkParam {
-            sink_id: 0.into(),
-            sink_name: "test".into(),
-            properties,
-
-            columns: columns
-                .iter()
-                .filter(|col| !col.is_hidden)
-                .map(|col| col.column_desc.clone())
-                .collect(),
-            downstream_pk: Some(vec![0, 1]),
-            sink_type: SinkType::Upsert,
-            ignore_delete: false,
-            format_desc: None,
-            db_name: "test".into(),
-            sink_from_name: "test".into(),
-        };
-
-        let info = ExecutorInfo::for_test(schema, vec![0, 1], "SinkExecutor".to_owned(), 0);
-
-        let sink = build_sink(sink_param.clone()).unwrap();
-
-        let sink_executor = SinkExecutor::new(
-            ActorContext::for_test(0),
-            info,
-            source,
-            SinkWriterParam::for_test(),
-            sink,
-            sink_param,
-            columns.clone(),
-            BoundedInMemLogStoreFactory::for_test(1),
-            1024,
-            vec![DataType::Int64, DataType::Int64, DataType::Int64],
-            None,
-        )
-        .unwrap();
-
-        let mut executor = sink_executor.boxed().execute();
-
-        // Barrier message.
-        executor.next().await.unwrap().unwrap();
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact_vis(),
-            StreamChunk::from_pretty(
-                " I I I
-                + 1 1 10",
-            )
-        );
-
-        // Barrier message.
-        executor.next().await.unwrap().unwrap();
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact_vis(),
-            StreamChunk::from_pretty(
-                " I I I
-                + 1 1 40
-                + 1 3 30",
-            )
-        );
-
-        // The last barrier message.
-        executor.next().await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_upsert_input_retains_delete() {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        for force_compaction in [false, true] {
-            for separate_chunks in [false, true] {
-                let mut input = vec![
-                    Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-                    Message::Chunk(StreamChunk::from_pretty("I I\n+ 1 10")),
-                    Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-                ];
-                if separate_chunks {
-                    input.push(Message::Chunk(StreamChunk::from_pretty("I I\n+ 1 20")));
-                    input.push(Message::Chunk(StreamChunk::from_pretty("I I\n- 1 .")));
-                } else {
-                    input.push(Message::Chunk(StreamChunk::from_pretty(
-                        "I I\n+ 1 20\n- 1 .",
-                    )));
-                }
-                input.push(Message::Barrier(Barrier::new_test_barrier(test_epoch(3))));
-                let ctx = ActorContext::for_test(0);
-                let metrics =
-                    ctx.streaming_metrics
-                        .new_sink_exec_metrics(0.into(), ctx.id, ctx.fragment_id);
-                let output = SinkExecutor::<BoundedInMemLogStoreFactory>::process_msg(
-                    futures::stream::iter(input.into_iter().map(Ok)),
-                    SinkType::Upsert,
-                    vec![0],
-                    1024,
-                    vec![DataType::Int64; 2],
-                    StreamKind::Upsert,
-                    Some(vec![0]),
-                    Some(NonAppendOnlyBehavior {
-                        pk_specified_and_matched: true,
-                        force_compaction,
-                    }),
-                    metrics.sink_chunk_buffer_size,
-                    false,
-                    false,
-                )
-                .try_collect::<Vec<_>>()
-                .await
-                .unwrap();
-                let chunks = output
-                    .into_iter()
-                    .filter_map(|msg| match msg {
-                        Message::Chunk(chunk) if chunk.has_visible_rows() => Some(chunk),
-                        _ => None,
-                    })
-                    .collect_vec();
-                let expected = if separate_chunks && !force_compaction {
-                    StreamChunk::from_pretty("I I\n+ 1 10\n+ 1 20\n- 1 .")
-                } else {
-                    StreamChunk::from_pretty("I I\n+ 1 10\n- 1 .")
-                };
-                assert_eq!(StreamChunk::concat(chunks), expected);
-            }
-        }
-    }
-
-    /// Runs a sink executor over `Int64` columns and returns the output chunks.
-    async fn run_sink_executor(
-        properties: BTreeMap<String, String>,
-        sink_type: SinkType,
-        input_kind: StreamKind,
-        stream_key: Vec<usize>,
-        downstream_pk: Vec<usize>,
-        input: Vec<Message>,
-    ) -> Vec<StreamChunk> {
-        let num_columns = input
-            .iter()
-            .find_map(|msg| msg.as_chunk())
-            .unwrap()
-            .columns()
-            .len();
-        let columns = (0..num_columns)
-            .map(|i| ColumnCatalog {
-                column_desc: ColumnDesc::unnamed(ColumnId::new(i as i32), DataType::Int64),
-                is_hidden: false,
-            })
-            .collect_vec();
-        let schema: Schema = columns
-            .iter()
-            .map(|column| Field::from(column.column_desc.clone()))
-            .collect();
-        let num_barriers = input.iter().filter(|msg| msg.is_barrier()).count();
-
-        let source = Executor::new(
-            ExecutorInfo {
-                stream_kind: input_kind,
-                ..ExecutorInfo::for_test(
-                    schema.clone(),
-                    stream_key.clone(),
-                    "MockSource".to_owned(),
-                    0,
-                )
-            },
-            MockSource::with_messages(input).boxed(),
-        );
-        let ignore_delete = properties
-            .get(risingwave_connector::sink::SINK_USER_IGNORE_DELETE_OPTION)
-            .is_some_and(|v| v.eq_ignore_ascii_case("true"));
-        let sink_param = SinkParam {
-            sink_id: 0.into(),
-            sink_name: "test".into(),
-            properties,
-            columns: columns.iter().map(|col| col.column_desc.clone()).collect(),
-            downstream_pk: Some(downstream_pk),
-            sink_type,
-            ignore_delete,
-            format_desc: None,
-            db_name: "test".into(),
-            sink_from_name: "test".into(),
-        };
-        let info = ExecutorInfo::for_test(schema, stream_key, "SinkExecutor".to_owned(), 0);
-        let sink = build_sink(sink_param.clone()).unwrap();
-        let mut executor = SinkExecutor::new(
-            ActorContext::for_test(0),
-            info,
-            source,
-            SinkWriterParam::for_test(),
-            sink,
-            sink_param,
-            columns,
-            BoundedInMemLogStoreFactory::for_test(1),
-            1024,
-            vec![DataType::Int64; num_columns],
-            None,
-        )
-        .unwrap()
-        .boxed()
-        .execute();
-
-        let mut output = vec![];
-        for _ in 0..num_barriers {
-            loop {
-                match executor.next().await.unwrap().unwrap() {
-                    Message::Chunk(chunk) => output.push(chunk.compact_vis()),
-                    Message::Barrier(_) => break,
-                    Message::Watermark(_) => unreachable!(),
-                }
-            }
-        }
-        output
-    }
-
-    /// The stream key `(0, 1)` does not cover the sink pk `(0, 2)`, so an update of a stream key
-    /// may change its sink pk.
-    fn sink_pk_change_input() -> Vec<Message> {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        vec![
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I I
-                + 1 1 6 10
-                + 2 2 6 10",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-            // The sink pk of `(1, 1)` changes, while that of `(2, 2)` does not.
-            Message::Chunk(StreamChunk::from_pretty(
-                "  I I I I
-                U- 1 1 6 10
-                U+ 1 1 8 10
-                U- 2 2 6 10
-                U+ 2 2 6 20",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
-        ]
-    }
-
-    #[tokio::test]
-    async fn test_sink_pk_change_upsert() {
-        test_sink_pk_change(SinkType::Upsert).await;
-    }
-
-    #[tokio::test]
-    async fn test_sink_pk_change_retract() {
-        test_sink_pk_change(SinkType::Retract).await;
-    }
-
-    async fn test_sink_pk_change(sink_type: SinkType) {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        let output = run_sink_executor(
-            maplit::btreemap! { "connector".into() => "blackhole".into() },
-            sink_type,
-            StreamKind::Retract,
-            vec![0, 1],
-            vec![0, 2],
-            sink_pk_change_input(),
-        )
-        .await;
-
-        let expected = match sink_type {
-            SinkType::Upsert => StreamChunk::from_pretty(
-                " I I I I
-                - 1 1 6 10
-                + 2 2 6 20
-                + 1 1 8 10",
-            ),
-            SinkType::Retract => StreamChunk::from_pretty(
-                "  I I I I
-                -  1 1 6 10
-                U- 2 2 6 10
-                U+ 2 2 6 20
-                +  1 1 8 10",
-            ),
-            _ => unreachable!(),
-        };
-        assert_eq!(
-            output,
-            vec![
-                StreamChunk::from_pretty(
-                    " I I I I
-                    + 1 1 6 10
-                    + 2 2 6 10",
-                ),
-                expected,
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn test_sink_into_table_preserves_special_conflict_rows_for_pk_change() {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        let output = run_sink_executor(
-            maplit::btreemap! {
-                "connector".into() => "table".into(),
-                SINK_USER_PRESERVE_ROW_LEVEL_CHANGES.into() => "true".into()
-            },
-            SinkType::Upsert,
-            StreamKind::Retract,
-            vec![0, 1],
-            vec![0, 2],
-            sink_pk_change_input(),
-        )
-        .await;
-
-        // The delete of the unchanged sink pk `(2, 6)` is dropped, as the key is inserted again.
-        assert_eq!(
-            output,
-            vec![
-                StreamChunk::from_pretty(
-                    " I I I I
-                    + 1 1 6 10
-                    + 2 2 6 10",
-                ),
-                StreamChunk::from_pretty(
-                    " I I I I
-                    - 1 1 6 10
-                    + 1 1 8 10
-                    + 2 2 6 20",
-                ),
-            ]
-        );
-    }
-
-    /// With `force_compaction`, records are reordered even though the stream key `(0)` is covered by
-    /// the sink pk `(0, 1)`, where an update may change the sink pk as well.
-    #[tokio::test]
-    async fn test_force_compaction_sink_pk_change() {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        let input = vec![
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I
-                + 1 6 10",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-            Message::Chunk(StreamChunk::from_pretty(
-                "  I I I
-                U- 1 6 10
-                U+ 1 8 10",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
-        ];
-        let output = run_sink_executor(
-            maplit::btreemap! {
-                "connector".into() => "blackhole".into(),
-                "force_compaction".into() => "true".into()
-            },
-            SinkType::Upsert,
-            StreamKind::Retract,
-            vec![0],
-            vec![0, 1],
-            input,
-        )
-        .await;
-
-        assert_eq!(
-            output,
-            vec![
-                StreamChunk::from_pretty(
-                    " I I I
-                    + 1 6 10",
-                ),
-                StreamChunk::from_pretty(
-                    " I I I
-                    - 1 6 10
-                    + 1 8 10",
-                ),
-            ]
-        );
-    }
-
-    /// The old row of an upsert input only guarantees the stream key columns, so its sink pk is
-    /// unknown and no delete is emitted for it.
-    #[tokio::test]
-    async fn test_upsert_input_sink_pk_change() {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        let input = vec![
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I I
-                + 1 1 6 10",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-            Message::Chunk(StreamChunk::from_pretty(
-                " I I I I
-                - 1 1 . .
-                + 1 1 8 10",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
-        ];
-        let output = run_sink_executor(
-            maplit::btreemap! { "connector".into() => "blackhole".into() },
-            SinkType::Upsert,
-            StreamKind::Upsert,
-            vec![0, 1],
-            vec![0, 2],
-            input,
-        )
-        .await;
-
-        assert_eq!(
-            output,
-            vec![
-                StreamChunk::from_pretty(
-                    " I I I I
-                    + 1 1 6 10",
-                ),
-                StreamChunk::from_pretty(
-                    " I I I I
-                    + 1 1 8 10",
-                ),
-            ]
-        );
-    }
-
-    /// With `ignore_delete`, every inserted or updated row reaches the downstream, however the sink
-    /// compacts the changes.
-    #[tokio::test]
-    async fn test_ignore_delete_keeps_every_inserted_row() {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        type Inputs = Vec<(StreamKind, Vec<Message>)>;
-
-        // The chunks of each epoch.
-        fn epochs(epochs: &[&[&str]]) -> Vec<Message> {
-            let mut messages = vec![Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))];
-            for (i, chunks) in epochs.iter().enumerate() {
-                messages.extend(
-                    (chunks.iter()).map(|chunk| Message::Chunk(StreamChunk::from_pretty(chunk))),
-                );
-                let epoch = test_epoch(i as u64 + 2);
-                messages.push(Message::Barrier(Barrier::new_test_barrier(epoch)));
-            }
-            messages
-        }
-
-        fn properties(extra: &[(&str, &str)]) -> BTreeMap<String, String> {
-            let mut properties = maplit::btreemap! {
-                "connector".to_owned() => "table".to_owned(),
-                "ignore_delete".to_owned() => "true".to_owned(),
-            };
-            properties.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
-            properties
-        }
-
-        // A delete arrives with the insert or update before it, in the same chunk or a later one.
-        fn deletes_after_changes() -> Inputs {
-            vec![
-                (
-                    StreamKind::Retract,
-                    epochs(&[
-                        &[" I I
-                            + 3 30"],
-                        &[
-                            "  I I
-                             + 1 10
-                             - 1 10
-                            U- 3 30
-                            U+ 3 31
-                             - 3 31
-                             + 2 20",
-                            " I I
-                            - 2 20",
-                        ],
-                    ]),
-                ),
-                (
-                    StreamKind::Upsert,
-                    epochs(&[
-                        &[" I I
-                            + 3 30"],
-                        &[
-                            " I I
-                            + 1 10
-                            - 1 .
-                            + 3 31
-                            - 3 .
-                            + 2 20",
-                            " I I
-                            - 2 .",
-                        ],
-                    ]),
-                ),
-            ]
-        }
-
-        // An update moves stream key `1` from downstream pk `6` to `8`.
-        fn row_moved() -> Inputs {
-            vec![
-                (
-                    StreamKind::Retract,
-                    epochs(&[&["  I I
-                                 + 1 6
-                                U- 1 6
-                                U+ 1 8"]]),
-                ),
-                (
-                    StreamKind::Upsert,
-                    epochs(&[&[" I I
-                                + 1 6
-                                + 1 8"]]),
-                ),
-            ]
-        }
-
-        // Two stream keys insert downstream pk `1` in one epoch. There are only inserts, so the
-        // input kind does not matter.
-        fn same_pk_inserted_twice() -> Inputs {
-            vec![(
-                StreamKind::Retract,
-                epochs(&[&[" I I I
-                            + 1 1 10
-                            + 1 2 20"]]),
-            )]
-        }
-
-        // Each scenario runs with each sink configuration listed with it.
-        let scenarios = [
-            (
-                deletes_after_changes as fn() -> Inputs,
-                " I I
-                + 1 10
-                + 2 20
-                + 3 30
-                + 3 31",
-                vec![
-                    // Compacts each chunk.
-                    (properties(&[]), vec![0], vec![0]),
-                    // Buffers and compacts each epoch.
-                    (
-                        properties(&[
-                            ("connector", "blackhole"),
-                            (SINK_USER_FORCE_COMPACTION, "true"),
-                        ]),
-                        vec![0],
-                        vec![0],
-                    ),
-                ],
-            ),
-            (
-                row_moved,
-                " I I
-                + 1 6
-                + 1 8",
-                vec![
-                    // The stream key `0` does not determine the downstream pk `1`.
-                    (properties(&[]), vec![0], vec![1]),
-                    // The downstream pk `0, 1` contains the stream key, but each epoch is compacted.
-                    (
-                        properties(&[(SINK_USER_FORCE_COMPACTION, "true")]),
-                        vec![0],
-                        vec![0, 1],
-                    ),
-                ],
-            ),
-            (
-                same_pk_inserted_twice,
-                " I I I
-                + 1 1 10
-                + 1 2 20",
-                // The target table's conflict handling must see each insert, with or without
-                // `force_compaction`.
-                ["false", "true"]
-                    .map(|force_compaction| {
-                        let properties = properties(&[
-                            (SINK_USER_FORCE_COMPACTION, force_compaction),
-                            (SINK_USER_PRESERVE_ROW_LEVEL_CHANGES, "true"),
-                        ]);
-                        (properties, vec![0, 1], vec![0])
-                    })
-                    .to_vec(),
-            ),
-        ];
-
-        for (inputs, expected, configurations) in scenarios {
-            let expected = StreamChunk::from_pretty(expected).sort_rows();
-            for (properties, stream_key, downstream_pk) in configurations {
-                for (input_kind, input) in inputs() {
-                    let output = run_sink_executor(
-                        properties.clone(),
-                        SinkType::Upsert,
-                        input_kind,
-                        stream_key.clone(),
-                        downstream_pk.clone(),
-                        input,
-                    )
-                    .await;
-                    assert_eq!(
-                        StreamChunk::concat(output).sort_rows(),
-                        expected,
-                        "{properties:?} {input_kind:?} downstream pk {downstream_pk:?}"
-                    );
-                }
-            }
-        }
-    }
-
-    /// With `ignore_delete`, the inserts left after dropping the deletes are compacted by the
-    /// downstream pk: an insert that a later insert of its downstream pk overwrites in the same
-    /// chunk, or epoch with `force_compaction`, is not emitted.
-    #[tokio::test]
-    async fn test_ignore_delete_compacts_by_downstream_pk() {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        let input = |chunk: &str| {
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-                Message::Chunk(StreamChunk::from_pretty(chunk)),
-                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
-            ]
-        };
-        // Row `1` is inserted and updated, which leaves two inserts of it without the delete.
-        let inputs = [
-            (
-                StreamKind::Retract,
-                "  I I
-                 + 1 10
-                U- 1 10
-                U+ 1 20",
-            ),
-            (
-                StreamKind::Upsert,
-                " I I
-                + 1 10
-                + 1 20",
-            ),
-        ];
-        let expected = StreamChunk::from_pretty(
-            " I I
-            + 1 20",
-        );
-
-        for force_compaction in ["false", "true"] {
-            let properties = maplit::btreemap! {
-                "connector".into() => "table".into(),
-                "ignore_delete".into() => "true".into(),
-                SINK_USER_FORCE_COMPACTION.into() => force_compaction.into(),
-            };
-            for (input_kind, chunk) in inputs {
-                let output = run_sink_executor(
-                    properties.clone(),
-                    SinkType::Upsert,
-                    input_kind,
-                    vec![0],
-                    vec![0],
-                    input(chunk),
-                )
-                .await;
-                assert_eq!(
-                    StreamChunk::concat(output),
-                    expected,
-                    "{properties:?} {input_kind:?}"
-                );
-            }
-        }
-    }
-
-    /// With `ignore_delete` and a downstream pk that does not contain the stream key, the inserts of
-    /// a downstream pk arrive in no order. The row that is still there at the barrier is emitted
-    /// last, and a row gone at the barrier is kept only if no later row of its downstream pk is.
-    #[tokio::test]
-    async fn test_ignore_delete_emits_live_row_last() {
-        use risingwave_common::array::StreamChunkTestExt;
-
-        fn input(epochs: &[&[&str]]) -> Vec<Message> {
-            let mut messages = vec![Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))];
-            for (i, chunks) in epochs.iter().enumerate() {
-                messages.extend(
-                    (chunks.iter()).map(|chunk| Message::Chunk(StreamChunk::from_pretty(chunk))),
-                );
-                let epoch = test_epoch(i as u64 + 2);
-                messages.push(Message::Barrier(Barrier::new_test_barrier(epoch)));
-            }
-            messages
-        }
-
-        fn properties(preserve_row_level_changes: &str) -> BTreeMap<String, String> {
-            maplit::btreemap! {
-                "connector".to_owned() => "table".to_owned(),
-                "ignore_delete".to_owned() => "true".to_owned(),
-                SINK_USER_PRESERVE_ROW_LEVEL_CHANGES.to_owned() =>
-                    preserve_row_level_changes.to_owned(),
-            }
-        }
-
-        // The stream key is `(0, 1)` and the downstream pk is `0`. `(1, 2)` is inserted and
-        // deleted, and `(1, 3)` is inserted after it.
-        let live_row_arrives_first: &[&[&str]] = &[&[" I I
-            + 1 3
-            + 1 2
-            - 1 2"]];
-        let live_row_in_an_earlier_chunk: &[&[&str]] = &[&[
-            " I I
-            + 1 3",
-            " I I
-            + 1 2
-            - 1 2",
-        ]];
-        let in_upstream_order: &[&[&str]] = &[&[" I I
-            + 1 2
-            - 1 2
-            + 1 3"]];
-        let no_row_left: &[&[&str]] = &[&[" I I
-            + 1 2
-            - 1 2"]];
-
-        for (epochs, expected) in [
-            (live_row_arrives_first, "+ 1 3"),
-            (live_row_in_an_earlier_chunk, "+ 1 3"),
-            (in_upstream_order, "+ 1 3"),
-            (no_row_left, "+ 1 2"),
-        ] {
-            for input_kind in [StreamKind::Retract, StreamKind::Upsert] {
-                let output = run_sink_executor(
-                    properties("false"),
-                    SinkType::Upsert,
-                    input_kind,
-                    vec![0, 1],
-                    vec![0],
-                    input(epochs),
-                )
-                .await;
-                assert_eq!(
-                    StreamChunk::concat(output),
-                    StreamChunk::from_pretty(&format!(" I I\n{expected}")),
-                    "{epochs:?} {input_kind:?}"
-                );
-            }
-        }
-
-        // A row is updated and then deleted. The update is emitted, as no row is left.
-        let output = run_sink_executor(
-            properties("false"),
-            SinkType::Upsert,
-            StreamKind::Retract,
-            vec![0, 1],
-            vec![0],
-            input(&[
-                &[" I I I
-                    + 1 2 10"],
-                &["  I I I
-                    U- 1 2 10
-                    U+ 1 2 11
-                     - 1 2 11"],
-            ]),
-        )
-        .await;
-        assert_eq!(
-            StreamChunk::concat(output),
-            StreamChunk::from_pretty(
-                " I I I
-                + 1 2 10
-                + 1 2 11",
-            )
-        );
-
-        // A target table that handles conflicts itself gets every insert, in the same order.
-        let output = run_sink_executor(
-            properties("true"),
-            SinkType::Upsert,
-            StreamKind::Retract,
-            vec![0, 1],
-            vec![0],
-            input(live_row_arrives_first),
-        )
-        .await;
-        assert_eq!(
-            StreamChunk::concat(output),
-            StreamChunk::from_pretty(
-                " I I
-                + 1 2
-                + 1 3",
-            )
         );
     }
 }
