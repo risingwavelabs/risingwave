@@ -1941,7 +1941,7 @@ template:
     user-managed: false
 
     # Only effective when NOT user managed
-    image: "cassandra:4.0"
+    image: "cassandra:4.0.21"
     persist-data: false
 
     # Path to the local cqlsh executable when user-managed (defaults to PATH lookup).

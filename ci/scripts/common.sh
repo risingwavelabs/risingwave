@@ -254,19 +254,6 @@ get_latest_kafka_download_url() {
     echo "$download_url"
 }
 
-get_latest_cassandra_version() {
-    local versions=$(curl -s https://downloads.apache.org/cassandra/ | grep -Eo 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | grep -Eo "[0-9]+\.[0-9]+\.[0-9]+")
-    # Sort the version numbers and get the latest one
-    local latest_version=$(echo "$versions" | sort -V | tail -n1)
-    echo "$latest_version"
-}
-
-get_latest_cassandra_download_url() {
-    local latest_version=$(get_latest_cassandra_version)
-    local download_url="https://downloads.apache.org/cassandra/${latest_version}/apache-cassandra-${latest_version}-bin.tar.gz"
-    echo "$download_url"
-}
-
 configure_static_openssl() {
     export OPENSSL_STATIC=1
     export OPENSSL_LIB_DIR="$(dpkg -L libssl-dev | grep libssl.a | xargs dirname)"

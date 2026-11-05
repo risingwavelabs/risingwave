@@ -21,13 +21,15 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+cassandra_version="4.0.21"
+cassandra_archive="apache-cassandra-${cassandra_version}-bin.tar.gz"
+
 sink_test_env_setup "$profile" --need-connector --sleep-duration 40
 
-echo "--- install cassandra"
-wget --no-verbose $(get_latest_cassandra_download_url) -O cassandra_latest.tar.gz
-tar xfvz cassandra_latest.tar.gz
-export LATEST_CASSANDRA_VERSION=$(get_latest_cassandra_version)
-export CASSANDRA_DIR="./apache-cassandra-${LATEST_CASSANDRA_VERSION}"
+echo "--- install Cassandra client"
+wget --no-verbose "https://archive.apache.org/dist/cassandra/${cassandra_version}/${cassandra_archive}" -O "$cassandra_archive"
+tar xfvz "$cassandra_archive"
+export CASSANDRA_DIR="./apache-cassandra-${cassandra_version}"
 
 # Cassandra only support python 3.11
 add-apt-repository ppa:deadsnakes/ppa
