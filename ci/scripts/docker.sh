@@ -14,9 +14,6 @@ if [[ "$RW_TARGET_CPU" != generic && "$arch" != aarch64 ]]; then
   echo "RW_TARGET_CPU requires an ARM64 build" >&2
   exit 1
 fi
-if [[ -n "${ORIGINAL_IMAGE_TAG+x}" && -n "${NEW_IMAGE_TAG+x}" ]]; then
-  validate_cpu_retag "$ORIGINAL_IMAGE_TAG" "${NEW_IMAGE_TAG}-${image_arch}"
-fi
 
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin

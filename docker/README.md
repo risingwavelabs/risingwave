@@ -116,27 +116,20 @@ docker build . -f docker/Dockerfile \
   -t risingwave:local-aarch64-neoverse-v1
 ```
 
-The parameter appends a Rust CPU target to the repository's Cargo flags. It does
-not set global C/C++ compiler flags or change Java and prebuilt libraries. The
-image records the target in the `io.risingwave.target-cpu` label. Build scripts and
-proc macros retain the host CPU target.
+The CPU flag is appended to existing Rust flags; host build scripts and proc macros
+keep their own target. No global C/C++ flags are set; Java and prebuilt libraries
+are unchanged. The image records the selection in its `io.risingwave.target-cpu` label.
 
-For the Docker Buildkite pipeline (`ci/workflows/docker.yml`), set the build
-environment variable `RW_TARGET_CPU=neoverse-v1`. This selects the ARM image path;
-x86 builds, binary releases and image scanning are skipped. CPU-specific staging
-tags and registry build caches get the CPU suffix. Published aliases also get the
-suffix, for example `git-<commit>-neoverse-v1` or `vX.Y.Z-neoverse-v1`, and contain
-only the ARM image. The default workflow keeps its existing tags and architectures.
-The nightly/tag-release workflow is unchanged; use the Docker pipeline for these
-opt-in builds.
+In the Docker Buildkite pipeline (`ci/workflows/docker.yml`), set the environment
+variable `RW_TARGET_CPU=neoverse-v1` to select the ARM-only image path. Staging tags,
+build caches and published aliases get the CPU suffix, for example
+`git-<commit>-neoverse-v1`. Ordinary builds keep their existing tags/architectures;
+manual retags do not validate source-image CPU compatibility. Nightly/tag-release
+workflows do not opt into this setting automatically.
 
-The builder used for the startup smoke test must support the chosen target. The
-existing `linux-arm64` queue does not itself guarantee Graviton3/4 hardware; select
-a compatible agent before running a CPU-specific build. A failed startup prevents
-publication. Deployment must likewise select a matching image and constrain its
-node pool; the standard multi-architecture manifest does not choose CPU models.
-The CPU suffixes are reserved, and the publishing scripts reject retags that add,
-remove or change a CPU requirement.
+Use a compatible builder for the startup smoke test and a matching deployment
+node pool. The existing `linux-arm64` queue and multi-architecture manifests do not
+select CPU models.
 
 ## Generate docker-compose.yml
 

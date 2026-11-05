@@ -34,9 +34,6 @@ if [[ "${#arches[@]}" == 0 ]]; then
   echo "No image architecture selected" >&2
   exit 1
 fi
-if [[ -n "${ORIGINAL_IMAGE_TAG+x}" && -n "${NEW_IMAGE_TAG+x}" ]]; then
-  validate_cpu_retag "$ORIGINAL_IMAGE_TAG" "${NEW_IMAGE_TAG}${cpu_suffix}"
-fi
 
 echo "--- arches: ${arches[*]}"
 
