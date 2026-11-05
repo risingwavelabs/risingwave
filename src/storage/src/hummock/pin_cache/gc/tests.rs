@@ -232,6 +232,7 @@ async fn test_partial_batch_releases_only_deleted_objects() {
     files.push(cache.track_file(failed.into(), 1));
     // The first batch succeeds; the second fails. Only acknowledged paths leave the index.
     let selection = PinCacheGcSelection {
+        failed_uploads: Vec::new(),
         cache: cache.clone(),
         files,
     };
@@ -347,7 +348,7 @@ async fn advance_gc(duration: Duration) {
     tokio::task::yield_now().await;
 }
 
-async fn reject_copy(cache: &PinCache, size: u64) {
+async fn reject_copy(cache: &std::sync::Arc<PinCache>, size: u64) {
     cache.register_objects([1003.into()]);
     assert!(matches!(
         cache
@@ -512,8 +513,7 @@ async fn test_gc_worker_periodic_scan_protects_uploads_and_readers() {
         path: "1002-1.sst".into(),
         size: 8,
     };
-    cache.start_upload(&upload);
-    let upload = scopeguard::guard(upload, |file| cache.finish_upload(&file.path));
+    assert!(cache.admit_upload(&upload).await.unwrap());
     let temporary = "atomic_write_dir/1002-1.sst.12345678";
     store
         .upload(&upload.path, Bytes::from_static(b"complete"))
@@ -558,7 +558,7 @@ async fn test_gc_worker_periodic_scan_protects_uploads_and_readers() {
     );
 
     drop(reader);
-    drop(upload);
+    cache.finish_upload(&upload.path);
     advance_gc(periodic_interval).await;
     let (mut paths, resume) = next_full_scan(&mut scans).await;
     paths.sort();

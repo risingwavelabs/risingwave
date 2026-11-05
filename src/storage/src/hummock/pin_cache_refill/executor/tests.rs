@@ -111,10 +111,7 @@ async fn test_failed_attempt_finishes_and_defensive_resubmission_can_succeed() {
     // Revocation must skip I/O even when the remote file is unavailable.
     let revoked = cache.prepare_refill(object).unwrap();
     cache.revoke_refill(object);
-    assert!(matches!(
-        refill_pin_cache_object(&store, candidate.source_sst.file_size, revoked).await,
-        Ok(Obsolete)
-    ));
+    assert!(wait(executor.submit(&candidate, revoked)).await);
     let token = cache.prepare_refill(object).unwrap();
     let first = executor.submit(&candidate, token);
     let duplicate = executor.submit(&candidate, token);

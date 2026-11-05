@@ -15,6 +15,7 @@
 //! Shared fixtures, compiled only through the `#[cfg(test)]` module declaration.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use parking_lot::Mutex;
 use risingwave_common::config::ObjectStoreConfig;
@@ -31,9 +32,13 @@ use crate::monitor::ObjectStoreMetrics;
 
 type SpaceProbe = Arc<dyn Fn() -> ObjectResult<Option<u64>> + Send + Sync>;
 pub(super) type FullScan = (Vec<String>, oneshot::Sender<()>);
+pub(super) type UploadFinish = (String, oneshot::Sender<()>);
 
 #[derive(Default)]
 pub(super) struct PinCacheTestHooks {
+    pub(super) space_pause: Mutex<Option<mpsc::UnboundedSender<oneshot::Sender<()>>>>,
+    pub(super) upload_finish: Mutex<Option<mpsc::UnboundedSender<UploadFinish>>>,
+    pub(super) panic_before_upload_finish: AtomicBool,
     pub(super) space_probe: Mutex<Option<SpaceProbe>>,
     pub(super) full_scan: Mutex<Option<mpsc::UnboundedSender<FullScan>>>,
 }
@@ -44,6 +49,20 @@ impl PinCache {
         probe: impl Fn() -> ObjectResult<Option<u64>> + Send + Sync + 'static,
     ) {
         *self.test_hooks.space_probe.lock() = Some(Arc::new(probe));
+    }
+
+    pub(in crate::hummock) fn watch_space_probes_for_test(
+        &self,
+    ) -> mpsc::UnboundedReceiver<oneshot::Sender<()>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.test_hooks.space_pause.lock() = Some(tx);
+        rx
+    }
+
+    pub(super) fn watch_upload_finish_for_test(&self) -> mpsc::UnboundedReceiver<UploadFinish> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.test_hooks.upload_finish.lock() = Some(tx);
+        rx
     }
 
     /// Observe the real full selection and pause the worker before deletion until released.
@@ -64,7 +83,7 @@ pub(super) fn object_in_shard(shard: usize, shard_num: usize) -> HummockSstableO
 /// Downloads and publishes an already registered object to prepare a test fixture.
 /// Admission, scheduling and retry behavior must be exercised through the production caller.
 pub(in crate::hummock) async fn download_and_publish_for_test(
-    pin_cache: &PinCache,
+    pin_cache: &Arc<PinCache>,
     remote_store: ObjectStoreRef,
     remote_path: String,
     object_id: HummockSstableObjectId,

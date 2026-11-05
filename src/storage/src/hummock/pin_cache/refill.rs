@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock};
 
 use risingwave_common::log::LogSuppressor;
+use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectResult, ObjectStoreRef,
@@ -34,21 +36,78 @@ pub(crate) enum PinCacheDownloadError {
 }
 
 /// Owns a complete, validated file until the caller publishes or discards it.
-/// Dropping this lease leaves the unreferenced object eligible for full GC.
+/// Dropping this lease hands the unreferenced object to minor GC.
 pub(crate) struct PinCacheDownload {
-    file: Arc<PinCacheFile>,
+    file: Option<Arc<PinCacheFile>>,
+    cache: Arc<PinCache>,
+}
+
+impl Drop for PinCacheDownload {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.take() {
+            self.cache.enqueue_delete(file);
+        }
+    }
+}
+
+pub(crate) struct PinCachePreparedDownload {
+    cache: Arc<PinCache>,
+    file: PinCacheFile,
+    local_io_started: bool,
+}
+
+impl Drop for PinCachePreparedDownload {
+    fn drop(&mut self) {
+        // Before I/O, dropping preparation is a confirmed unused reservation. Once I/O
+        // starts, only the physical owner may transfer it to a file or known cleanup.
+        if !self.local_io_started {
+            self.cache.finish_upload(&self.file.path);
+        }
+    }
+}
+
+impl PinCachePreparedDownload {
+    pub(crate) async fn run(
+        mut self,
+        remote_store: ObjectStoreRef,
+        remote_path: String,
+    ) -> Result<PinCacheDownload, PinCacheDownloadError> {
+        let reader = remote_store
+            .streaming_read(&remote_path, ..)
+            .await
+            .inspect_err(|_| record_io_failure("remote_read_init"))?;
+        self.local_io_started = true;
+        // Owned native FS awaits each position job without a timeout that can detach it.
+        // Catch copy panics at this physical owner boundary after the writer unwinds;
+        // Drop also runs on cancellation and cannot establish physical completion.
+        let result = AssertUnwindSafe(write_file(&self.cache, &self.file, reader))
+            .rw_catch_unwind()
+            .await;
+        if !matches!(&result, Ok(Ok(_))) {
+            let mut state = self.cache.storage.lock();
+            if state.uploads.contains_key(&self.file.path) {
+                // The owned writer has exited, including failure or unwind. Preserve
+                // the full charge until minor confirms all associated paths are absent.
+                state.failed_uploads.insert(self.file.path.clone());
+            }
+        }
+        match result {
+            Ok(result) => Ok(result?),
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
 }
 
 /// Finish accepted writes on a remote error and hand completed failed files to minor GC.
-/// Local I/O failures can leave backend temporary files for full GC.
+/// Local I/O failures retain their reservation until known failure cleanup succeeds.
 async fn write_file(
-    cache: &PinCache,
+    cache: &Arc<PinCache>,
     file: &PinCacheFile,
     mut reader: MonitoredStreamingReader,
 ) -> ObjectResult<PinCacheDownload> {
     let mut writer = cache
         .store
-        .streaming_upload(&file.path)
+        .streaming_upload_owned(&file.path)
         .await
         .inspect_err(|_| record_io_failure("local_upload_init"))?;
     let mut written = 0_u64;
@@ -76,6 +135,23 @@ async fn write_file(
             .inspect_err(|_| record_io_failure("local_upload_write"))?;
         written += chunk_size;
     }
+    #[cfg(test)]
+    {
+        let observer = cache.test_hooks.upload_finish.lock().clone();
+        if let Some(observer) = observer {
+            let (resume, paused) = tokio::sync::oneshot::channel();
+            if observer.send((file.path.clone(), resume)).is_ok() {
+                let _ = paused.await;
+            }
+        }
+        assert!(
+            !cache
+                .test_hooks
+                .panic_before_upload_finish
+                .swap(false, Ordering::Relaxed),
+            "injected pin upload panic before finish"
+        );
+    }
     writer
         .finish()
         .await
@@ -100,7 +176,8 @@ async fn write_file(
         ));
     }
     Ok(PinCacheDownload {
-        file: scopeguard::ScopeGuard::into_inner(completed),
+        file: Some(scopeguard::ScopeGuard::into_inner(completed)),
+        cache: cache.clone(),
     })
 }
 
@@ -128,24 +205,24 @@ impl PinCache {
         self.shard(object_id).state.write().revoke_refill(object_id);
     }
 
-    /// Copies and validates a whole SST without reading or changing the cache index.
-    /// Check free space for the full physical `object_size` (`SstableInfo::file_size`),
-    /// not the logical SST projection size (`SstableInfo::sst_size`).
-    /// The caller checks membership, ownership and cache hits before downloading, and serializes
-    /// attempts per object. Only a successful return can be submitted to `publish`.
-    pub(crate) async fn download(
-        &self,
+    /// Reserves a unique target and full physical SST bytes before starting the copy.
+    /// Uses physical `file_size` rather than the logical SST projection size.
+    /// The caller filters membership, ownership and cache hits and serializes each object.
+    /// Running this preparation produces a validated download for later publication.
+    pub(crate) async fn prepare_download(
+        self: &Arc<Self>,
         object_id: HummockSstableObjectId,
         object_size: u64,
-        remote_store: ObjectStoreRef,
-        remote_path: String,
-    ) -> Result<PinCacheDownload, PinCacheDownloadError> {
-        // This advisory check does not reserve blocks against concurrent disk users.
-        if let Some(available_bytes) = self
-            .available_space()
+    ) -> Result<PinCachePreparedDownload, PinCacheDownloadError> {
+        let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
+        let file = PinCacheFile {
+            path: format!("{}-{path_id}.sst", object_id.as_raw_id()),
+            size: object_size,
+        };
+        if !self
+            .admit_upload(&file)
             .await
             .inspect_err(|_| record_io_failure("local_space"))?
-            && available_bytes < object_size
         {
             static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
                 LazyLock::new(|| LogSuppressor::per_minute(1));
@@ -154,41 +231,52 @@ impl PinCache {
                     suppressed_count,
                     object_id = object_id.as_raw_id(),
                     object_size,
-                    available_bytes,
-                    "skipping pin cache refill because filesystem space is insufficient"
+                    "skipping pin cache refill because its byte budget or filesystem space is insufficient"
                 );
             }
             self.gc_pressure_bytes
                 .fetch_max(object_size, Ordering::Relaxed);
             return Err(PinCacheDownloadError::CapacityRejected);
         }
-        let reader = remote_store
-            .streaming_read(&remote_path, ..)
+        Ok(PinCachePreparedDownload {
+            cache: self.clone(),
+            file,
+            local_io_started: false,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn download(
+        self: &Arc<Self>,
+        object_id: HummockSstableObjectId,
+        object_size: u64,
+        remote_store: ObjectStoreRef,
+        remote_path: String,
+    ) -> Result<PinCacheDownload, PinCacheDownloadError> {
+        let prepared = self.prepare_download(object_id, object_size).await?;
+        tokio::spawn(prepared.run(remote_store, remote_path))
             .await
-            .inspect_err(|_| record_io_failure("remote_read_init"))?;
-        let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
-        let file = PinCacheFile {
-            path: format!("{}-{path_id}.sst", object_id.as_raw_id()),
-            size: object_size,
-        };
-        self.start_upload(&file);
-        let upload = scopeguard::guard(file, |file| self.finish_upload(&file.path));
-        Ok(write_file(self, &upload, reader).await?)
+            .map_err(|error| {
+                ObjectError::internal(format!("owned test download stopped: {error}"))
+            })?
     }
 
     /// Installs a downloaded file only if its original admission is still current.
     /// Returns false if the task was revoked while downloading. The caller must use the token
     /// for this file and serialize downloads per object; an existing publication is a bug.
     /// A rejected download is handed to GC after releasing the lock.
-    pub(crate) fn publish(&self, token: PinCacheRefillToken, download: PinCacheDownload) -> bool {
+    pub(crate) fn publish(
+        &self,
+        token: PinCacheRefillToken,
+        mut download: PinCacheDownload,
+    ) -> bool {
         let mut state = self.shard(token.object_id).state.write();
         let Some(object) = state.object_matching_token(token) else {
             // This download lost permission to publish when its object was unregistered or revoked.
             drop(state);
-            self.enqueue_delete(download.file);
             return false;
         };
-        object.publish(download.file);
+        object.publish(download.file.take().unwrap());
         true
     }
 }
@@ -201,248 +289,4 @@ fn record_io_failure(phase: &'static str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use bytes::Bytes;
-    use futures::{StreamExt, TryStreamExt, stream};
-    use risingwave_hummock_sdk::HummockSstableObjectId;
-    use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
-
-    use super::{PinCache, PinCacheFile, write_file};
-    use crate::hummock::pin_cache::test_utils::{
-        download_and_publish_for_test, in_memory_object_store, local_object_store,
-    };
-    use crate::monitor::ObjectStoreMetrics;
-
-    #[tokio::test]
-    async fn test_revoked_download_cannot_publish_and_replacement_can_retry() {
-        for revoke_by_unregister in [false, true] {
-            let pin_cache = PinCache::new(in_memory_object_store(), 1, [])
-                .await
-                .unwrap();
-            let object_id = HummockSstableObjectId::from(1001);
-            pin_cache.register_objects([object_id]);
-            let token = pin_cache.prepare_refill(object_id).unwrap();
-            let remote = in_memory_object_store();
-            remote
-                .upload("sst", Bytes::from_static(b"replacement"))
-                .await
-                .unwrap();
-            let old = pin_cache
-                .download(object_id, 11, remote.clone(), "sst".into())
-                .await
-                .unwrap();
-
-            if revoke_by_unregister {
-                pin_cache.unregister_objects([object_id]);
-                pin_cache.register_objects([object_id]);
-            } else {
-                pin_cache.revoke_refill(object_id);
-            }
-            let old_path = old.file.path.clone();
-            // The executor waits for the revoked attempt to finish before starting its replacement.
-            assert!(!pin_cache.publish(token, old));
-            assert!(pin_cache.get(object_id).is_none());
-            pin_cache.select_minor().delete().await.unwrap();
-            assert!(
-                pin_cache
-                    .store
-                    .metadata(&old_path)
-                    .await
-                    .unwrap_err()
-                    .is_object_not_found_error()
-            );
-
-            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id, 11)
-                .await
-                .unwrap();
-            assert_ne!(old_path, pin_cache.get(object_id).unwrap().file.path);
-            assert_eq!(
-                pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
-                Bytes::from_static(b"replacement")
-            );
-        }
-    }
-
-    #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
-    #[tokio::test]
-    async fn test_local_finish_error_does_not_block_a_later_download() {
-        let (dir, store) = local_object_store().await;
-        let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
-        cache.register_objects([1001.into()]);
-        cache
-            .next_path_id
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-        // Force the atomic writer's final rename to fail, leaving a real temporary file.
-        std::fs::create_dir(dir.path().join("1001-0.sst")).unwrap();
-        let remote = in_memory_object_store();
-        remote
-            .upload("sst", Bytes::from_static(b"complete"))
-            .await
-            .unwrap();
-        assert!(
-            cache
-                .download(1001.into(), 8, remote.clone(), "sst".into())
-                .await
-                .is_err()
-        );
-        assert!(cache.get(1001.into()).is_none());
-        assert!(cache.storage.lock().uploads.is_empty());
-        let files: Vec<_> = store
-            .list("", None, None)
-            .await
-            .unwrap()
-            .try_collect()
-            .await
-            .unwrap();
-        assert!(
-            files
-                .iter()
-                .any(|file| file.key.starts_with("atomic_write_dir/") && file.total_size == 8)
-        );
-        // No GC or restart is needed for another copy while the disk still has space.
-        download_and_publish_for_test(&cache, remote, "sst".into(), 1001.into(), 8)
-            .await
-            .unwrap();
-        assert_eq!(
-            cache.get(1001.into()).unwrap().read(..).await.unwrap(),
-            Bytes::from_static(b"complete")
-        );
-    }
-
-    #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
-    #[tokio::test]
-    async fn test_live_fs_upload_is_protected_and_failed_copy_does_not_block_refill() {
-        for cancel in [false, true] {
-            let (_dir, local_store) = local_object_store().await;
-            let pin_cache = PinCache::new(local_store.clone(), 1, []).await.unwrap();
-            let object_id = HummockSstableObjectId::from(1001);
-            pin_cache.register_objects([object_id]);
-            let file = PinCacheFile {
-                path: "1001-0.sst".into(),
-                size: 8,
-            };
-            let final_path = file.path.clone();
-            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-            let (fail_tx, fail_rx) = tokio::sync::oneshot::channel();
-            let reader = MonitoredStreamingReader::new(
-                "test",
-                Box::pin(
-                    stream::iter([
-                        Ok(Bytes::from_static(b"half")),
-                        Ok(Bytes::from_static(b"x")),
-                    ])
-                    .chain(stream::once(async move {
-                        started_tx.send(()).unwrap();
-                        let _ = fail_rx.await;
-                        Err(ObjectError::internal("injected remote read failure"))
-                    })),
-                ),
-                Arc::new(ObjectStoreMetrics::unused()),
-                None,
-            );
-            let upload_cache = pin_cache.clone();
-            let task = tokio::spawn(async move {
-                upload_cache.start_upload(&file);
-                let upload = scopeguard::guard(file, |file| upload_cache.finish_upload(&file.path));
-                write_file(&upload_cache, &upload, reader).await
-            });
-            tokio::time::timeout(Duration::from_secs(5), started_rx)
-                .await
-                .unwrap()
-                .unwrap();
-            tokio::time::timeout(Duration::from_secs(5), async {
-                loop {
-                    let files: Vec<_> = local_store
-                        .list("", None, None)
-                        .await
-                        .unwrap()
-                        .try_collect()
-                        .await
-                        .unwrap();
-                    if files.iter().any(|file| file.total_size == 4) {
-                        break;
-                    }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-            pin_cache.select_minor().delete().await.unwrap();
-            pin_cache
-                .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
-                .await
-                .unwrap()
-                .delete()
-                .await
-                .unwrap();
-            let files: Vec<_> = local_store
-                .list("", None, None)
-                .await
-                .unwrap()
-                .try_collect()
-                .await
-                .unwrap();
-            assert!(
-                files.iter().any(|file| file.total_size == 4),
-                "a live upload's temporary file must survive GC"
-            );
-            if cancel {
-                task.abort();
-                assert!(task.await.err().unwrap().is_cancelled());
-                assert!(
-                    local_store
-                        .metadata(&final_path)
-                        .await
-                        .unwrap_err()
-                        .is_object_not_found_error()
-                );
-            } else {
-                fail_tx.send(()).unwrap();
-                assert!(task.await.unwrap().is_err());
-                assert_eq!(
-                    local_store.metadata(&final_path).await.unwrap().total_size,
-                    5
-                );
-            }
-            assert!(pin_cache.get(object_id).is_none());
-            assert!(pin_cache.storage.lock().uploads.is_empty());
-            let remote = in_memory_object_store();
-            remote
-                .upload("sst", Bytes::from_static(b"complete"))
-                .await
-                .unwrap();
-            // Leave the failed copy's bytes on disk while admitting the replacement.
-            download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id, 8)
-                .await
-                .unwrap();
-            let published = pin_cache.get(object_id).unwrap();
-            pin_cache.select_minor().delete().await.unwrap();
-            pin_cache
-                .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
-                .await
-                .unwrap()
-                .delete()
-                .await
-                .unwrap();
-            let files: Vec<_> = local_store
-                .list("", None, None)
-                .await
-                .unwrap()
-                .try_collect()
-                .await
-                .unwrap();
-            assert!(
-                files
-                    .iter()
-                    .all(|file| file.key.ends_with('/') || file.key == published.file.path)
-            );
-            assert_eq!(
-                published.read(..).await.unwrap(),
-                Bytes::from_static(b"complete")
-            );
-        }
-    }
-}
+mod tests;

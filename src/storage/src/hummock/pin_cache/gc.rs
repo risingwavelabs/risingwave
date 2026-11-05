@@ -44,6 +44,7 @@ pub(super) struct PinCacheGcSelection {
     // Keep the storage state and read index alive for the entire selection and deletion.
     cache: Arc<PinCache>,
     files: Vec<Arc<PinCacheFile>>,
+    failed_uploads: Vec<String>,
 }
 
 impl PinCacheGcSelection {
@@ -51,6 +52,7 @@ impl PinCacheGcSelection {
     pub(super) async fn delete(self) -> ObjectResult<()> {
         let mut paths = Vec::with_capacity(DELETE_BATCH_SIZE);
         for batch in self.files.chunks(DELETE_BATCH_SIZE) {
+            let capacity_gate = self.cache.capacity_gate.lock().await;
             paths.extend(batch.iter().map(|file| file.path.clone()));
             self.cache
                 .store
@@ -68,7 +70,36 @@ impl PinCacheGcSelection {
                 }
             }
             paths.clear();
+            drop(capacity_gate);
             tokio::task::yield_now().await;
+        }
+        if !self.failed_uploads.is_empty() {
+            let targets: std::collections::HashSet<_> =
+                self.failed_uploads.iter().map(String::as_str).collect();
+            paths.extend(self.failed_uploads.iter().cloned());
+            let mut listed = self
+                .cache
+                .store
+                .list("atomic_write_dir/", None, None)
+                .await?;
+            while let Some(metadata) = listed.try_next().await? {
+                if upload_target(&metadata.key).is_some_and(|target| targets.contains(target)) {
+                    paths.push(metadata.key);
+                }
+            }
+            let _gate = self.cache.capacity_gate.lock().await;
+            for batch in paths.chunks(DELETE_BATCH_SIZE) {
+                self.cache
+                    .store
+                    .delete_objects(batch)
+                    .await
+                    .inspect_err(|_| GLOBAL_PIN_CACHE_METRICS.gc_failures.inc())?;
+            }
+            let mut state = self.cache.storage.lock();
+            for target in &self.failed_uploads {
+                state.failed_uploads.remove(target);
+                state.uploads.remove(target);
+            }
         }
         Ok(())
     }
@@ -166,9 +197,11 @@ impl PinCache {
                 .cloned()
                 .collect()
         };
+        let failed_uploads = self.storage.lock().failed_uploads.iter().cloned().collect();
         PinCacheGcSelection {
             cache: self.clone(),
             files,
+            failed_uploads,
         }
     }
 
@@ -203,6 +236,7 @@ impl PinCache {
             .as_secs_f64();
         let old_enough = |metadata: &ObjectMetadata| metadata.last_modified < cutoff;
         let mut files = Vec::new();
+        let _capacity_gate = self.capacity_gate.lock().await;
         for file in unreferenced {
             match inventory.remove(&file.path) {
                 Some(metadata) if old_enough(&metadata) => files.push(file),
@@ -218,8 +252,8 @@ impl PinCache {
                 continue;
             }
             let state = self.storage.lock();
-            if state.uploads.contains(&path)
-                || upload_target(&path).is_some_and(|target| state.uploads.contains(target))
+            if state.uploads.contains_key(&path)
+                || upload_target(&path).is_some_and(|target| state.uploads.contains_key(target))
             {
                 continue;
             }
@@ -238,6 +272,7 @@ impl PinCache {
         Ok(PinCacheGcSelection {
             cache: self.clone(),
             files,
+            failed_uploads: Vec::new(),
         })
     }
 }

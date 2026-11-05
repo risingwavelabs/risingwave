@@ -147,6 +147,8 @@ pub(crate) struct PinCache {
     // Leaf lock: never acquire a shard lock or perform I/O while holding it.
     // Upload protection and physical file ownership share this lock.
     storage: Mutex<PinCacheStorageState>,
+    // Serializes capacity probes/admission with confirmed physical deletion.
+    capacity_gate: tokio::sync::Mutex<()>,
     next_path_id: AtomicU64,
     // Largest physical SST rejected since the worker last took the pressure hint.
     gc_pressure_bytes: AtomicU64,
@@ -196,6 +198,7 @@ impl PinCache {
             store,
             storage: Mutex::default(),
             shards: (0..shard_num).map(|_| PinCacheShard::default()).collect(),
+            capacity_gate: tokio::sync::Mutex::new(()),
             next_path_id: AtomicU64::new(rand::random()),
             gc_pressure_bytes: AtomicU64::new(0),
             #[cfg(test)]
@@ -229,7 +232,15 @@ impl PinCache {
         {
             let probe = self.test_hooks.space_probe.lock().clone();
             if let Some(probe) = probe {
-                return probe();
+                let result = probe();
+                let observer = self.test_hooks.space_pause.lock().clone();
+                if let Some(observer) = observer {
+                    let (resume, paused) = tokio::sync::oneshot::channel();
+                    if observer.send(resume).is_ok() {
+                        let _ = paused.await;
+                    }
+                }
+                return result;
             }
         }
         self.store.available_space().await

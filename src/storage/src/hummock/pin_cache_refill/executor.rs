@@ -25,7 +25,7 @@ use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
-use tokio::sync::{Semaphore, mpsc, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use self::PinCacheRefillAttemptOutcome::{CapacityRejected, Obsolete, Published};
 use super::PinCacheRefillObject;
@@ -43,6 +43,8 @@ async fn refill_pin_cache_object(
     store: &SstableStoreRef,
     object_size: u64,
     token: PinCacheRefillToken,
+    permit: OwnedSemaphorePermit,
+    work: Arc<Mutex<HashMap<HummockSstableObjectId, Work>>>,
 ) -> anyhow::Result<PinCacheRefillAttemptOutcome> {
     let cache = store
         .pin_cache()
@@ -51,28 +53,56 @@ async fn refill_pin_cache_object(
     if cache.prepare_refill(token.object_id()) != Some(token) {
         return Ok(Obsolete);
     }
-    let download = match cache
-        .download(
-            token.object_id(),
-            object_size,
-            store.store(),
-            store.get_sst_data_path(token.object_id()),
-        )
-        .await
-    {
-        Ok(download) => download,
-        Err(PinCacheDownloadError::CapacityRejected) => {
-            return Ok(CapacityRejected);
-        }
+    let prepared = match cache.prepare_download(token.object_id(), object_size).await {
+        Ok(prepared) => prepared,
+        Err(PinCacheDownloadError::CapacityRejected) => return Ok(CapacityRejected),
         Err(PinCacheDownloadError::Io(error)) => {
-            return Err(error).context("pin refill object copy");
+            return Err(error).context("pin refill byte admission");
         }
     };
-    Ok(if cache.publish(token, download) {
-        Published
-    } else {
-        Obsolete
-    })
+    let store = store.clone();
+    let task = tokio::spawn(async move {
+        let _permit = permit;
+        let cache = store
+            .pin_cache()
+            .expect("pin refill requires a local backend");
+        let object = token.object_id();
+        {
+            let work = work.lock();
+            if !work
+                .get(&object)
+                .is_some_and(|work| work.completion.is_some())
+                || cache.prepare_refill(object) != Some(token)
+            {
+                return Ok(Obsolete);
+            }
+        }
+        let download = prepared
+            .run(store.store(), store.get_sst_data_path(object))
+            .await
+            .map_err(|error| anyhow::anyhow!(error).context("pin refill object copy"))?;
+        let work = work.lock();
+        // Shutdown/withdrawal and publication linearize under the existing executor lock.
+        // A closed receiver alone retains the baseline detach-on-waiter-drop behavior.
+        if !work
+            .get(&object)
+            .is_some_and(|work| work.completion.is_some())
+        {
+            drop(work);
+            drop(download);
+            return Ok(Obsolete);
+        }
+        Ok(if cache.publish(token, download) {
+            Published
+        } else {
+            Obsolete
+        })
+    });
+    match task.await {
+        Ok(result) => result,
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => Err(error).context("owned pin copy stopped"),
+    }
 }
 
 struct Work {
@@ -87,11 +117,12 @@ struct Work {
 /// Dropping a waiter leaves its copy running; errors finish without background retries.
 pub(crate) struct PinCacheRefillExecutor {
     // Lock order: executor work -> PinCache shard. Never hold work across await.
-    // Indexes dependencies and waiters for queued and running attempts. Cancellation
-    // closes the waiter but keeps the entry until physical exit to prevent overlapping copies.
+    // Object/table cancellation closes the waiter but keeps its entry until physical exit.
+    // Driver shutdown clears entries, forbidding publication while physical copies drain.
     work: Arc<Mutex<HashMap<HummockSstableObjectId, Work>>>,
     // IDs waiting for dispatch; the driver consumes each once and reads its inputs from work.
-    // Dropping the executor's sole sender stops the driver and its unfinished copies.
+    // Driver exit on the drained channel cancels preparation and publication authority.
+    // Submitted physical copies retain their data permits and byte leases until I/O exits.
     jobs: mpsc::UnboundedSender<HummockSstableObjectId>,
     store: SstableStoreRef,
 }
@@ -210,13 +241,14 @@ impl PinCacheRefillExecutor {
                     };
                     let store = store.clone();
                     let concurrency = concurrency.clone();
+                    let work = work.clone();
                     tasks.push(async move {
                         let result = AssertUnwindSafe(async {
-                            let _permit = concurrency
+                            let permit = concurrency
                                 .acquire_owned()
                                 .await
                                 .expect("refill concurrency stays open");
-                            refill_pin_cache_object(&store, object_size, token).await
+                            refill_pin_cache_object(&store, object_size, token, permit, work).await
                         })
                         .rw_catch_unwind()
                         .await;
