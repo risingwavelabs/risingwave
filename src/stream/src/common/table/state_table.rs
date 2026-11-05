@@ -2020,9 +2020,9 @@ where
             .await?;
         pin_mut!(stream);
 
-        if let Some(res) = stream.next().await {
-            let value = res?.into_owned_row();
-            assert!(stream.next().await.is_none());
+        if let Some(row) = stream.try_next().await? {
+            let value = row.into_owned_row();
+            assert!(stream.try_next().await?.is_none());
             Ok(Some(value))
         } else {
             Ok(None)
