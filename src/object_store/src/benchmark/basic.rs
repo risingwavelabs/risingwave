@@ -31,6 +31,7 @@ fn finish(
     name: &str,
     elapsed: Duration,
     count: usize,
+    fixed_count: usize,
     duration: Duration,
     token: &CancellationToken,
 ) -> PhaseReport {
@@ -54,6 +55,8 @@ fn finish(
     });
     report.stop_reason = if token.is_cancelled() {
         "cancelled"
+    } else if duration.is_zero() && count == fixed_count && attempts >= count as u64 {
+        "fixed_work"
     } else if attempts >= count as u64 {
         "operation_limit"
     } else {
@@ -83,7 +86,7 @@ where
     let started_unix_ms = unix_ms();
     let deadline = (!duration.is_zero()).then(|| Instant::now() + duration);
     let (stats, elapsed, peak) = execute_jobs(count, concurrency, token, deadline, execute).await;
-    let mut report = finish(stats, name, elapsed, count, duration, token);
+    let mut report = finish(stats, name, elapsed, count, fixed_count, duration, token);
     report.started_unix_ms = started_unix_ms;
     report.peak_inflight_logical_operations = peak;
     report
@@ -333,7 +336,15 @@ async fn deletes(
         }
         previous_count = (count * batch).min(keys.len());
     }
-    let mut report = finish(stats, "batch_delete", elapsed, limit, duration, token);
+    let mut report = finish(
+        stats,
+        "batch_delete",
+        elapsed,
+        limit,
+        batches,
+        duration,
+        token,
+    );
     report.started_unix_ms = started_unix_ms;
     report.wall_elapsed_ms = wall_started.elapsed().as_secs_f64() * 1000.0;
     report.setup_elapsed_ms = setup_elapsed.as_secs_f64() * 1000.0;
@@ -470,6 +481,36 @@ mod tests {
                 }
                 assert!(owners.iter().all(Option::is_some));
             }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_reasons_distinguish_fixed_work_caps_time_and_cancellation() {
+        use super::*;
+        for (duration, cap, cancelled, expected, succeeded) in [
+            (0, 100, false, "fixed_work", 4),
+            (0, 4, false, "fixed_work", 4),
+            (0, 2, false, "operation_limit", 2),
+            (25, 100, false, "duration", 3),
+            (25, 2, false, "operation_limit", 2),
+            (0, 100, true, "cancelled", 0),
+        ] {
+            let cfg = BenchmarkConfig {
+                basic_duration_ms: duration,
+                basic_max_operations: cap,
+                ..Default::default()
+            };
+            let token = CancellationToken::new();
+            if cancelled {
+                token.cancel();
+            }
+            let phase = measure("range_get", 4, 1, &cfg, &token, |_| async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Outcome::from_result(Ok(Sample::default()))
+            })
+            .await;
+            assert_eq!(phase.stop_reason, expected, "{phase:?}");
+            assert_eq!(phase.succeeded, succeeded);
         }
     }
 

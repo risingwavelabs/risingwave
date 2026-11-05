@@ -681,6 +681,29 @@ async fn real_s3_profiles() {
 }
 
 #[tokio::test]
+async fn fixed_work_reports_natural_completion_and_truncated_uploads_and_deletes() {
+    for (cap, reason) in [(100, "fixed_work"), (2, "operation_limit")] {
+        let mut cfg = config();
+        cfg.profile = Profile::Basic;
+        cfg.basic_max_operations = cap;
+        let report = run(
+            memory(),
+            cfg,
+            format!("risectl-bench/stop-reason-{cap}/"),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(report.succeeded(), "{report:?}");
+        for name in ["multipart_put", "batch_delete"] {
+            let phase = report.phases.iter().find(|p| p.name == name).unwrap();
+            assert_eq!(phase.stop_reason, reason, "{phase:?}");
+            assert_eq!(phase.succeeded, if cap == 100 { 3 } else { 2 });
+        }
+    }
+}
+
+#[tokio::test]
 async fn basic_caps_measurement_reuses_keys_and_replenishes_deletes() {
     let store = memory();
     let mut cfg = config();

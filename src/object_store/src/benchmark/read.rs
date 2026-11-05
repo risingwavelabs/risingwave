@@ -143,7 +143,11 @@ async fn read_response(
     // Initialization may be lazy. First-data timing includes stream creation and the
     // first nonempty read, not just the return of streaming_read().
     let initialized = async {
-        let stream = response.await?;
+        let stream = tokio::select! {
+            biased;
+            _ = token.cancelled() => return Err(Interrupted.into()),
+            result = response => result?,
+        };
         let stream = stream.inspect_ok(move |bytes| {
             max_chunk.fetch_max(bytes.len(), Ordering::Relaxed);
         });
@@ -553,6 +557,80 @@ pub(super) async fn interference_comparison(
 #[cfg(all(test, not(madsim)))]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn pending_stream_open_is_interrupted_by_shutdown_or_window_end() {
+        for cancel_run in [true, false] {
+            let run = CancellationToken::new();
+            let window = run.child_token();
+            let cancel = if cancel_run {
+                run.clone()
+            } else {
+                window.clone()
+            };
+            let (opened, opening) = tokio::sync::oneshot::channel();
+            let response = async {
+                opened.send(()).unwrap();
+                std::future::pending::<Result<ObjectDataStream, ObjectError>>().await
+            };
+            let canceller = tokio::spawn(async move {
+                opening.await.unwrap();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                cancel.cancel();
+            });
+            let request = Request {
+                key: "object".into(),
+                start: 0,
+                length: 10,
+                mode: ReadMode::Intermittent,
+                reader_id: 0,
+                // Cancellation must also release a worker that never reaches readiness.
+                ready: Some((Arc::new(Barrier::new(2)), Arc::new(OnceLock::new()))),
+            };
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(1),
+                read_response(response, &request, &BenchmarkConfig::default(), &window),
+            )
+            .await
+            .expect("a pending stream open must not delay cancellation");
+            canceller.await.unwrap();
+            assert_eq!(run.is_cancelled(), cancel_run);
+            assert!(outcome.interrupted);
+            assert!(outcome.error.is_none());
+            assert_eq!(outcome.sample.bytes, 0);
+            let mut stats = Accumulator::default();
+            stats.add(outcome, Duration::from_millis(10));
+            assert_eq!(stats.interrupted, 1);
+            assert_eq!(stats.failed, 0);
+            assert!(stats.latency.summary().is_none());
+            assert!(stats.failed_latency.summary().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_open_errors_remain_failures_without_cancellation() {
+        let outcome = read_response(
+            async { Err(ObjectError::internal("stream open failed")) },
+            &Request {
+                key: "object".into(),
+                start: 0,
+                length: 10,
+                mode: ReadMode::Continuous,
+                reader_id: 0,
+                ready: None,
+            },
+            &BenchmarkConfig::default(),
+            &CancellationToken::new(),
+        )
+        .await;
+        assert!(!outcome.interrupted);
+        assert!(outcome.error.is_some());
+        let mut stats = Accumulator::default();
+        stats.add(outcome, Duration::from_millis(10));
+        assert_eq!(stats.failed, 1);
+        assert_eq!(stats.interrupted, 0);
+        assert_eq!(stats.failed_latency.summary().unwrap().samples, 1);
+    }
 
     #[test]
     fn rotating_sequences_cover_disjoint_pools_and_reset_reproducibly() {
