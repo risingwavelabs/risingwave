@@ -344,6 +344,7 @@ impl HummockCompactionEventHandler {
             let compact_ret = self
                 .hummock_manager
                 .get_compact_tasks(
+                    compactor.context_id(),
                     existed_groups.clone(),
                     pull_task_count - generated_task_count,
                     &mut **selector,
@@ -795,5 +796,147 @@ impl CompactorStreamEvent for SubscribeIcebergCompactionEventRequest {
 
     fn create_at(&self) -> u64 {
         self.create_at
+    }
+}
+
+#[cfg(test)]
+mod scheduling_tests {
+    use std::time::Duration;
+
+    use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
+    use risingwave_meta_model::compaction_task;
+    use risingwave_rpc_client::HummockMetaClient;
+    use sea_orm::EntityTrait;
+
+    use super::*;
+    use crate::hummock::MockHummockMetaClient;
+    use crate::hummock::compaction::selector::{
+        ManualCompactionOption, default_compaction_selector,
+    };
+    use crate::hummock::manager::tests::{gen_sstable_info, setup_compute_env_with_meta_opts};
+
+    async fn dispatch(manager: Arc<HummockManager>) -> Vec<risingwave_pb::hummock::CompactTask> {
+        let mut receiver = manager.compactor_manager.add_compactor(99.into());
+        let compactor = manager.compactor_manager.get_compactor(99.into()).unwrap();
+        let mut selectors = HashMap::from([(TaskType::Dynamic, default_compaction_selector())]);
+        HummockCompactionEventHandler::new(manager)
+            .try_dispatch_tasks(&compactor, 8, &mut selectors, 1)
+            .await;
+        let mut tasks = vec![];
+        while let Ok(event) = receiver.try_recv() {
+            if let Some(ResponseEvent::CompactTask(task)) = event.unwrap().event {
+                tasks.push(task);
+            }
+        }
+        tasks
+    }
+
+    async fn fixture(deterministic: bool) -> (Arc<HummockManager>, MockHummockMetaClient) {
+        let mut opts = MetaOpts::test(false);
+        opts.compaction_deterministic_test = deterministic;
+        let (_, manager, _, worker_id) = setup_compute_env_with_meta_opts(80, opts).await;
+        manager
+            .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
+            .await
+            .unwrap();
+        let client = MockHummockMetaClient::new(manager.clone(), worker_id as _);
+        commit_ssts(&client, 30, 1).await;
+        (manager, client)
+    }
+
+    async fn commit_ssts(client: &MockHummockMetaClient, epoch: u64, first_sst: u64) {
+        client
+            .commit_epoch(
+                risingwave_common::util::epoch::test_epoch(epoch),
+                SyncResult {
+                    uncommitted_ssts: (first_sst..first_sst + 4)
+                        .map(|id| LocalSstableInfo {
+                            sst_info: gen_sstable_info(
+                                id,
+                                vec![100, 101],
+                                risingwave_common::util::epoch::test_epoch(epoch - 10),
+                            ),
+                            table_stats: Default::default(),
+                            created_at: u64::MAX,
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn assert_task_assignee(
+        manager: &HummockManager,
+        task_id: u64,
+        context_id: HummockContextId,
+    ) {
+        let assignment = manager
+            .compaction_task_from_assignment_for_test(task_id)
+            .await
+            .unwrap();
+        assert_eq!(assignment.context_id, context_id);
+
+        let model = compaction_task::Entity::find_by_id(task_id as i64)
+            .one(&manager.env.meta_store_ref().conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(model.context_id, context_id);
+        let protobuf_assignment: risingwave_pb::hummock::CompactTaskAssignment = model.into();
+        assert_eq!(protobuf_assignment.context_id, context_id);
+
+        let (_, assignments) = manager.list_compaction_status().await;
+        let assignment = assignments
+            .iter()
+            .find(|a| a.compact_task.as_ref().unwrap().task_id == task_id)
+            .unwrap();
+        assert_eq!(assignment.context_id, context_id);
+    }
+
+    #[tokio::test]
+    async fn test_assignment_records_compactor_for_pulled_tasks() {
+        let (manager, _) = fixture(false).await;
+        let tasks = dispatch(manager.clone()).await;
+        assert!(!tasks.is_empty());
+        for task in tasks {
+            assert_task_assignee(&manager, task.task_id, 99.into()).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_assignment_records_compactor_for_manual_tasks() {
+        let (manager, _) = fixture(false).await;
+        let context_id = 77.into();
+        let mut receiver = manager.compactor_manager.add_compactor(context_id);
+        let manual_manager = manager.clone();
+        let trigger = tokio::spawn(async move {
+            manual_manager
+                .trigger_manual_compaction(
+                    2.into(),
+                    ManualCompactionOption {
+                        level: 0,
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+        let response = tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let Some(ResponseEvent::CompactTask(task)) = response.event else {
+            panic!("expected a manual compaction task");
+        };
+        assert_task_assignee(&manager, task.task_id, context_id).await;
+        assert!(
+            manager
+                .cancel_compact_task(task.task_id, TaskStatus::ManualCanceled)
+                .await
+                .unwrap()
+        );
+        trigger.await.unwrap().unwrap();
     }
 }
