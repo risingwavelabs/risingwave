@@ -303,19 +303,32 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub _phantom: PhantomData<T>,
 }
 
+/// Projects the schema sent to upstream CDC validation onto non-INCLUDE columns.
+/// Primary-key indices are remapped to the projection; the RisingWave table keeps its full key.
 pub fn table_schema_exclude_additional_columns(table_schema: &TableSchema) -> TableSchema {
+    let mut old_to_new = vec![None; table_schema.columns.len()];
+    let mut columns = Vec::with_capacity(table_schema.columns.len());
+    for (old_index, col) in table_schema.columns.iter().enumerate() {
+        if col
+            .additional_column
+            .as_ref()
+            .is_some_and(|additional| additional.column_type.is_some())
+        {
+            continue;
+        }
+        old_to_new[old_index] = Some(columns.len() as u32);
+        columns.push(col.clone());
+    }
+
     TableSchema {
-        columns: table_schema
-            .columns
+        columns,
+        // INCLUDE columns form part of RisingWave's key, but upstream validation
+        // only needs the key fields that remain in its projected schema.
+        pk_indices: table_schema
+            .pk_indices
             .iter()
-            .filter(|col| {
-                col.additional_column
-                    .as_ref()
-                    .is_some_and(|val| val.column_type.is_none())
-            })
-            .cloned()
+            .filter_map(|&index| old_to_new[index as usize])
             .collect(),
-        pk_indices: table_schema.pk_indices.clone(),
     }
 }
 
@@ -352,31 +365,32 @@ where
     const SOURCE_NAME: &'static str = T::CDC_CONNECTOR_NAME;
 
     fn init_from_pb_source(&mut self, source: &PbSource) {
+        let columns = source
+            .columns
+            .iter()
+            .flat_map(|col| &col.column_desc)
+            .filter(|col| {
+                !matches!(
+                    col.generated_or_default_column,
+                    Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+                )
+            })
+            .cloned()
+            .collect_vec();
+        // Generated keys belong to the RisingWave table, not the upstream schema.
         let pk_indices = source
             .pk_column_ids
             .iter()
-            .map(|&id| {
-                source
-                    .columns
+            .filter_map(|&id| {
+                columns
                     .iter()
-                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
-                    .unwrap() as u32
+                    .position(|col| col.column_id == id)
+                    .map(|index| index as u32)
             })
             .collect_vec();
 
         let table_schema = PbTableSchema {
-            columns: source
-                .columns
-                .iter()
-                .flat_map(|col| &col.column_desc)
-                .filter(|col| {
-                    !matches!(
-                        col.generated_or_default_column,
-                        Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
-                    )
-                })
-                .cloned()
-                .collect(),
+            columns,
             pk_indices,
         };
         self.table_schema = table_schema;
@@ -386,19 +400,31 @@ where
     }
 
     fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
+        let columns = table_desc
+            .columns
+            .iter()
+            .filter(|col| {
+                !matches!(
+                    col.generated_or_default_column,
+                    Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+                )
+            })
+            .cloned()
+            .collect_vec();
+        let pk_indices = table_desc
+            .stream_key
+            .iter()
+            .filter_map(|&index| {
+                let column_id = table_desc.columns[index as usize].column_id;
+                columns
+                    .iter()
+                    .position(|col| col.column_id == column_id)
+                    .map(|index| index as u32)
+            })
+            .collect_vec();
         let table_schema = TableSchema {
-            columns: table_desc
-                .columns
-                .iter()
-                .filter(|col| {
-                    !matches!(
-                        col.generated_or_default_column,
-                        Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
-                    )
-                })
-                .cloned()
-                .collect(),
-            pk_indices: table_desc.stream_key.clone(),
+            columns,
+            pk_indices,
         };
 
         self.table_schema = table_schema;
@@ -538,7 +564,148 @@ impl CdcScanOptions {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+    use risingwave_pb::plan_common::additional_column::ColumnType;
+    use risingwave_pb::plan_common::{AdditionalCollectionName, AdditionalDatabaseName};
+
     use super::*;
+
+    fn schema_with_generated_primary_key() -> TableSchema {
+        let mut database =
+            ColumnDesc::named("database_name", ColumnId::new(10), DataType::Varchar).to_protobuf();
+        database.additional_column = Some(risingwave_pb::plan_common::AdditionalColumn {
+            column_type: Some(ColumnType::DatabaseName(AdditionalDatabaseName {})),
+        });
+        let tenant =
+            ColumnDesc::named("tenant_id", ColumnId::new(20), DataType::Int32).to_protobuf();
+        let id = ColumnDesc::named("id", ColumnId::new(30), DataType::Int32).to_protobuf();
+        let mut default_column =
+            ColumnDesc::named("version", ColumnId::new(40), DataType::Int32).to_protobuf();
+        default_column.generated_or_default_column =
+            Some(GeneratedOrDefaultColumn::DefaultColumn(Default::default()));
+        let mut generated =
+            ColumnDesc::named("generated_key", ColumnId::new(50), DataType::Int32).to_protobuf();
+        generated.generated_or_default_column =
+            Some(GeneratedOrDefaultColumn::GeneratedColumn(Default::default()));
+        TableSchema {
+            columns: vec![database, tenant, id, default_column, generated],
+            pk_indices: vec![4, 2, 0, 1],
+        }
+    }
+
+    /// Generated keys are omitted before INCLUDE projection, while physical key order is retained.
+    #[test]
+    fn source_schema_excludes_generated_primary_keys() {
+        let schema = schema_with_generated_primary_key();
+        let source = PbSource {
+            columns: schema
+                .columns
+                .iter()
+                .cloned()
+                .map(|column_desc| risingwave_pb::plan_common::ColumnCatalog {
+                    column_desc: Some(column_desc),
+                    ..Default::default()
+                })
+                .collect(),
+            pk_column_ids: vec![50, 30, 10, 20],
+            ..Default::default()
+        };
+        let mut properties = CdcProperties::<Postgres>::default();
+        properties.init_from_pb_source(&source);
+        assert_eq!(properties.table_schema.columns, schema.columns[..4]);
+        assert_eq!(properties.table_schema.pk_indices, vec![2, 0, 1]);
+        let projected = table_schema_exclude_additional_columns(&properties.table_schema);
+        assert_eq!(projected.columns, schema.columns[1..4]);
+        assert_eq!(projected.pk_indices, vec![1, 0]);
+        assert_eq!(source.pk_column_ids, vec![50, 30, 10, 20]);
+    }
+
+    /// Backfill table validation must also exclude generated keys without changing the stream key.
+    #[test]
+    fn cdc_table_schema_excludes_generated_primary_keys() {
+        let schema = schema_with_generated_primary_key();
+        let table_desc = ExternalTableDesc {
+            columns: schema.columns.clone(),
+            stream_key: schema.pk_indices.clone(),
+            ..Default::default()
+        };
+        let mut properties = CdcProperties::<Postgres>::default();
+        properties.init_from_pb_cdc_table_desc(&table_desc);
+        assert_eq!(properties.table_schema.columns, schema.columns[..4]);
+        assert_eq!(properties.table_schema.pk_indices, vec![2, 0, 1]);
+        let projected = table_schema_exclude_additional_columns(&properties.table_schema);
+        assert_eq!(projected.columns, schema.columns[1..4]);
+        assert_eq!(projected.pk_indices, vec![1, 0]);
+        assert_eq!(table_desc.stream_key, vec![4, 2, 0, 1]);
+        assert!(!properties.is_cdc_source_job);
+        assert!(properties.is_backfill_table);
+    }
+
+    /// Checks that removing namespace columns remaps key indices without reordering them.
+    #[test]
+    fn projection_remaps_keys_around_include_columns() {
+        let mut company =
+            ColumnDesc::named("company_name", ColumnId::new(0), DataType::Varchar).to_protobuf();
+        company.additional_column = Some(risingwave_pb::plan_common::AdditionalColumn {
+            column_type: Some(ColumnType::DatabaseName(AdditionalDatabaseName {})),
+        });
+        let id = ColumnDesc::named("_id", ColumnId::new(1), DataType::Jsonb).to_protobuf();
+        let payload = ColumnDesc::named("payload", ColumnId::new(2), DataType::Jsonb).to_protobuf();
+        let mut collection =
+            ColumnDesc::named("collection_name", ColumnId::new(3), DataType::Varchar).to_protobuf();
+        collection.additional_column = Some(risingwave_pb::plan_common::AdditionalColumn {
+            column_type: Some(ColumnType::CollectionName(AdditionalCollectionName {})),
+        });
+
+        let schema = TableSchema {
+            columns: vec![company, id, payload, collection],
+            pk_indices: vec![0, 1, 3],
+        };
+        let projected = table_schema_exclude_additional_columns(&schema);
+        assert_eq!(projected.columns.len(), 2);
+        assert_eq!(projected.columns[0].name, "_id");
+        assert_eq!(projected.columns[1].name, "payload");
+        assert_eq!(projected.pk_indices, vec![0]);
+
+        let schema = TableSchema {
+            pk_indices: vec![2, 1],
+            ..schema
+        };
+        let projected = table_schema_exclude_additional_columns(&schema);
+        assert_eq!(projected.pk_indices, vec![1, 0]);
+    }
+
+    /// Checks that ordinary CDC keys survive projection with or without trailing metadata.
+    #[test]
+    fn projection_preserves_ordinary_cdc_keys() {
+        // Both protobuf representations of a regular column must survive projection.
+        let mut tenant =
+            ColumnDesc::named("tenant_id", ColumnId::new(0), DataType::Int32).to_protobuf();
+        tenant.additional_column = None;
+        let mut id = ColumnDesc::named("id", ColumnId::new(1), DataType::Int32).to_protobuf();
+        id.additional_column = Some(Default::default());
+        let schema = TableSchema {
+            columns: vec![tenant, id],
+            pk_indices: vec![1, 0],
+        };
+        assert_eq!(table_schema_exclude_additional_columns(&schema), schema);
+
+        let mut schema_with_metadata = schema.clone();
+        let mut database =
+            ColumnDesc::named("database_name", ColumnId::new(2), DataType::Varchar).to_protobuf();
+        database.additional_column = Some(risingwave_pb::plan_common::AdditionalColumn {
+            column_type: Some(ColumnType::DatabaseName(AdditionalDatabaseName {})),
+        });
+        schema_with_metadata.columns.push(database);
+        assert_eq!(
+            table_schema_exclude_additional_columns(&schema_with_metadata),
+            schema
+        );
+
+        let empty = TableSchema::default();
+        assert_eq!(table_schema_exclude_additional_columns(&empty), empty);
+    }
 
     #[test]
     fn test_normalize_simple_postgres_quoted_table_name() {
