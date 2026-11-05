@@ -127,6 +127,20 @@ pub async fn handle_create_function(
         }
     };
 
+    let is_scalar = matches!(kind, Kind::Scalar(_));
+    let is_immutable = is_scalar && matches!(&params.behavior, Some(FunctionBehavior::Immutable));
+    let unsafe_skip_materializing_exprs = is_scalar
+        && with_options
+            .unsafe_skip_materializing_exprs
+            .unwrap_or_default();
+    if unsafe_skip_materializing_exprs && !is_immutable {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`IMMUTABLE` must be specified when `unsafe_skip_materializing_exprs` is true"
+                .to_owned(),
+        )
+        .into());
+    }
+
     let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
@@ -167,14 +181,29 @@ pub async fn handle_create_function(
         _ => None,
     };
 
-    let create_fn =
-        risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
-    let output = create_fn(CreateOptions {
-        kind: match kind {
-            Kind::Scalar(_) => UdfKind::Scalar,
-            Kind::Table(_) => UdfKind::Table,
-            Kind::Aggregate(_) => unreachable!(),
-        },
+    let udf_kind = match kind {
+        Kind::Scalar(_) => UdfKind::Scalar,
+        Kind::Table(_) => UdfKind::Table,
+        // Aggregate UDFs are created through `CREATE AGGREGATE` and
+        // `handle_create_aggregate`, not this `CREATE FUNCTION` handler.
+        Kind::Aggregate(_) => unreachable!(),
+    };
+    let udf_impl = risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?;
+    let always_retry_on_network_error = with_options
+        .always_retry_on_network_error
+        .unwrap_or_default();
+    if is_immutable
+        && (udf_impl.supports_always_retry_on_network_error)(udf_kind)
+        && !always_retry_on_network_error
+    {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`always_retry_on_network_error` must be true for an `IMMUTABLE` external scalar UDF"
+                .to_owned(),
+        )
+        .into());
+    }
+    let output = (udf_impl.create_fn)(CreateOptions {
+        kind: udf_kind,
         name: &function_name,
         arg_names: &arg_names,
         arg_types: &arg_types,
@@ -200,9 +229,9 @@ pub async fn handle_create_function(
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
-        always_retry_on_network_error: with_options
-            .always_retry_on_network_error
-            .unwrap_or_default(),
+        always_retry_on_network_error,
+        unsafe_skip_materializing_exprs,
+        is_immutable,
         is_async: with_options.r#async,
         is_batched: with_options.batch,
         created_at_epoch: None,
