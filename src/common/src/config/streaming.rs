@@ -43,7 +43,8 @@ pub struct StreamingConfig {
     pub snapshot_backfill_finish_max_lagged_barriers: usize,
 
     /// The multiplier applied to `in_flight_barrier_nums` when limiting pending barriers in a
-    /// snapshot backfill partial graph. A value of 0 is treated as 1.
+    /// snapshot backfill partial graph. A value of 0 is treated as 1. The resulting limit must
+    /// be at least 2, so that queued catch-up barriers can still drain.
     #[serde(default = "default::streaming::snapshot_backfill_barrier_amplification_factor")]
     pub snapshot_backfill_barrier_amplification_factor: usize,
 
