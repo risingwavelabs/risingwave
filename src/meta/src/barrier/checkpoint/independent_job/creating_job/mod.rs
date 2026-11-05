@@ -34,7 +34,7 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{AddMutation, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::super::state::RenderResult;
 use super::IndependentCheckpointJobControl;
@@ -700,13 +700,31 @@ impl CreatingStreamingJobControl {
             None => (None, vec![]),
         };
         {
-            for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(
+            let barriers_with_mutation = self.status.on_new_upstream_epoch(
                 partial_graph_manager,
                 self.partial_graph_id,
                 self.max_pending_barrier_num,
                 barrier_info,
                 mutation.take(),
-            ) {
+            );
+            if barriers_with_mutation.is_empty() && !notifiers.is_empty() {
+                // No barrier is injected in this round: the job is consuming the log store and
+                // its partial graph has reached the pending-barrier limit, or the job is finishing
+                // or resetting. The only command that reaches a creating job is throttle, which
+                // affects the snapshot executor only while it reads the snapshot, so the mutation
+                // can be dropped and the command completed right away. This matches main, where
+                // the log-store phase never forwards the throttle mutation and the notifier stays
+                // with the database barrier.
+                warn!(
+                    job_id = %self.job_id,
+                    "throttle has no effect on a snapshot backfill job after the snapshot phase, completing the command without injecting a barrier"
+                );
+                for mut notifier in notifiers.drain(..) {
+                    notifier.notify_started();
+                    notifier.notify_collected();
+                }
+            }
+            for (barrier_to_inject, mutation) in barriers_with_mutation {
                 Self::inject_barrier(
                     self.partial_graph_id,
                     partial_graph_manager,
