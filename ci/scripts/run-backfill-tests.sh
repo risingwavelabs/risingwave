@@ -153,7 +153,7 @@ test_backfill_tombstone() {
     done
   ' 1>deletes.log 2>&1 &
 
-  risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+  risedev psql -c "SET streaming_use_snapshot_backfill = false; CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
   wait
