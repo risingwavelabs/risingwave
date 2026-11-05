@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use foyer::Hint;
@@ -29,6 +28,7 @@ use crate::monitor::StoreLocalStatistic;
 
 /// Iterates backwards on a sstable.
 pub struct BackwardSstableIterator {
+    key_buffer: Vec<u8>,
     /// The iterator of the current block.
     block_iter: Option<BlockIterator>,
 
@@ -127,6 +127,7 @@ impl BackwardSstableIterator {
         );
 
         Self {
+            key_buffer: Vec::new(),
             block_iter: None,
             cur_idx: end_idx,
             sst: sstable,
@@ -208,14 +209,11 @@ impl HummockIterator for BackwardSstableIterator {
         let block_idx = self
             .sst
             .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // Compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                ord == Less || ord == Equal
-            })
+            .partition_point(
+                0..self.sst.block_count(),
+                std::ops::Bound::Included(key),
+                &mut self.key_buffer,
+            )
             .saturating_sub(1); // considering the boundary of 0
         let block_idx = block_idx as isize;
 

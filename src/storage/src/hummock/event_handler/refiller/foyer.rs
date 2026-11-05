@@ -95,7 +95,13 @@ impl TableCacheRefillContext {
 
 fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize, usize) {
     let block_meta = &sstable.meta.block_metas[block_index];
-    let block_smallest_key = FullKey::decode(&block_meta.smallest_key);
+    let mut smallest_buffer = Vec::new();
+    let mut next_buffer = Vec::new();
+    let block_smallest_key = FullKey::decode(
+        sstable
+            .meta
+            .block_smallest_key(block_index, &mut smallest_buffer),
+    );
     let table_key_end = match sstable.meta.block_metas.get(block_index + 1) {
         // A table switch always starts a new block. The next table's smallest key has an
         // unrelated vnode, so use the current table's terminal range instead.
@@ -104,10 +110,14 @@ fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize, usize) {
         }
         // Full-key versions of the same table key may span adjacent blocks. After projecting
         // away the epoch, the boundary vnode therefore remains part of the current block.
-        Some(next_block_meta) => Bound::Included(
-            FullKey::decode(&next_block_meta.smallest_key)
-                .user_key
-                .table_key,
+        Some(_) => Bound::Included(
+            FullKey::decode(
+                sstable
+                    .meta
+                    .block_smallest_key(block_index + 1, &mut next_buffer),
+            )
+            .user_key
+            .table_key,
         ),
         // `SstableMeta::largest_key` is the actual last key, unlike the next block's smallest
         // key above. Keep it inclusive, especially for singleton tables whose key contains only
@@ -294,11 +304,17 @@ impl DataCacheRefillTaskGenerator<'_> {
             }
         };
 
+        let mut left_buffer = Vec::new();
+        let mut right_buffer = Vec::new();
+        let mut task_buffer = Vec::new();
         // assert units in asc order
         if cfg!(debug_assertions) {
             originals.iter().tuple_windows().for_each(|(a, b)| {
                 debug_assert_ne!(
-                    KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
+                    KeyComparator::compare_encoded_full_key(
+                        a.largest_key(&mut left_buffer),
+                        b.smallest_key(&mut right_buffer)
+                    ),
                     std::cmp::Ordering::Greater
                 )
             });
@@ -308,23 +324,27 @@ impl DataCacheRefillTaskGenerator<'_> {
         let recent_filter = self.context.sstable_store.recent_filter();
         for psst in parent_ssts {
             for pblk in 0..psst.block_count() {
-                let pleft = &psst.meta.block_metas[pblk].smallest_key;
+                let pleft = psst.meta.block_smallest_key(pblk, &mut left_buffer);
                 let pright = if pblk + 1 == psst.block_count() {
                     // `largest_key` can be included or excluded, both are treated as included here
                     &psst.meta.largest_key
                 } else {
-                    &psst.meta.block_metas[pblk + 1].smallest_key
+                    psst.meta.block_smallest_key(pblk + 1, &mut right_buffer)
                 };
 
                 // partition point: unit.right < pblk.left
                 let uleft = originals.partition_point(|task| {
-                    KeyComparator::compare_encoded_full_key(task.largest_key(), pleft)
-                        == std::cmp::Ordering::Less
+                    KeyComparator::compare_encoded_full_key(
+                        task.largest_key(&mut task_buffer),
+                        pleft,
+                    ) == std::cmp::Ordering::Less
                 });
                 // partition point: unit.left <= pblk.right
                 let uright = originals.partition_point(|task| {
-                    KeyComparator::compare_encoded_full_key(task.smallest_key(), pright)
-                        != std::cmp::Ordering::Greater
+                    KeyComparator::compare_encoded_full_key(
+                        task.smallest_key(&mut task_buffer),
+                        pright,
+                    ) != std::cmp::Ordering::Greater
                 });
 
                 // overlapping: uleft..uright
@@ -370,15 +390,15 @@ impl DataCacheRefillTask {
         }
     }
 
-    fn smallest_key(&self) -> &[u8] {
-        &self.sst.meta.block_metas[self.blks.start].smallest_key
+    fn smallest_key<'a>(&self, buffer: &'a mut Vec<u8>) -> &'a [u8] {
+        self.sst.meta.block_smallest_key(self.blks.start, buffer)
     }
 
-    fn largest_key(&self) -> &[u8] {
+    fn largest_key<'a>(&'a self, buffer: &'a mut Vec<u8>) -> &'a [u8] {
         if self.blks.end == self.sst.block_count() {
             &self.sst.meta.largest_key
         } else {
-            &self.sst.meta.block_metas[self.blks.end].smallest_key
+            self.sst.meta.block_smallest_key(self.blks.end, buffer)
         }
     }
 }

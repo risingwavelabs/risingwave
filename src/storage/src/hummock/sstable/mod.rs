@@ -24,6 +24,10 @@ use std::ops::{BitXor, Bound, Range};
 pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
+mod cached_meta;
+pub use cached_meta::{CachedBlockMeta, CachedSstableMeta};
+#[cfg(test)]
+mod cached_meta_bench;
 mod xor_filter;
 use serde::{Deserialize, Serialize};
 pub use xor_filter::{
@@ -63,6 +67,29 @@ use crate::store::ReadOptions;
 const MAGIC: u32 = 0x5785ab73;
 const OLD_VERSION: u32 = 1;
 const VERSION: u32 = 2;
+
+/// Checks the native footer and body checksum before either decoder allocates metadata.
+fn verified_meta_body(buf: &[u8]) -> HummockResult<(&[u8], u32)> {
+    let mut cursor = buf.len();
+
+    cursor -= 4;
+    let magic = (&buf[cursor..]).get_u32_le();
+    if magic != MAGIC {
+        return Err(HummockError::magic_mismatch(MAGIC, magic));
+    }
+
+    cursor -= 4;
+    let version = (&buf[cursor..cursor + 4]).get_u32_le();
+    if version != VERSION && version != OLD_VERSION {
+        return Err(HummockError::invalid_format_version(version));
+    }
+
+    cursor -= 8;
+    let checksum = (&buf[cursor..cursor + 8]).get_u64_le();
+    let body = &buf[..cursor];
+    xxhash64_verify(body, checksum)?;
+    Ok((body, version))
+}
 
 /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
 /// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
@@ -117,26 +144,19 @@ impl MonotonicDeleteEvent {
     }
 }
 
+#[cfg(test)]
 #[derive(Serialize, Deserialize)]
 struct SerdeSstable {
     id: HummockSstableObjectId,
     meta: SstableMeta,
 }
 
-impl From<SerdeSstable> for Sstable {
-    fn from(SerdeSstable { id, meta }: SerdeSstable) -> Self {
-        // Set skip_bloom_filter_in_serde to false because the behavior
-        // is determined by the serializer
-        Sstable::new(id, meta, false)
-    }
-}
-
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone, Deserialize)]
-#[serde(from = "SerdeSstable")]
+#[serde(from = "cached_meta::DeserializedSstable")]
 pub struct Sstable {
     pub id: HummockSstableObjectId,
-    pub meta: SstableMeta,
+    pub meta: CachedSstableMeta,
     #[serde(skip)]
     pub filter_reader: XorFilterReader,
     /// SST serde happens when an SST meta is written to meta disk cache.
@@ -151,14 +171,12 @@ impl Serialize for Sstable {
     where
         S: serde::Serializer,
     {
-        let mut serde_sstable = SerdeSstable {
-            id: self.id,
-            meta: self.meta.clone(),
+        let filter = if self.skip_bloom_filter_in_serde {
+            vec![]
+        } else {
+            self.filter_reader.encode_to_bytes()
         };
-        if !self.skip_bloom_filter_in_serde {
-            serde_sstable.meta.bloom_filter = self.filter_reader.encode_to_bytes();
-        }
-        serde_sstable.serialize(serializer)
+        self.meta.serialize(self.id, &filter, serializer)
     }
 }
 
@@ -178,28 +196,13 @@ impl Sstable {
         skip_bloom_filter_in_serde: bool,
     ) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
-        let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
+        let filter_reader = XorFilterReader::new(&filter_data, meta.block_metas.len());
         Self {
             id,
-            meta,
+            meta: meta.into(),
             filter_reader,
             skip_bloom_filter_in_serde,
         }
-    }
-
-    /// Restore an SST handle directly from native metadata bytes.
-    pub fn from_meta_bytes(
-        id: HummockSstableObjectId,
-        bytes: &[u8],
-        skip_bloom_filter_in_serde: bool,
-    ) -> HummockResult<Self> {
-        let (meta, filter_reader) = SstableMeta::decode_with_filter(bytes, XorFilterReader::new)?;
-        Ok(Self {
-            id,
-            meta,
-            filter_reader,
-            skip_bloom_filter_in_serde,
-        })
     }
 
     #[inline(always)]
@@ -225,7 +228,7 @@ impl Sstable {
     #[inline(always)]
     pub fn may_match_hash(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
         self.filter_reader
-            .may_match(&self.meta.block_metas, user_key_range, hash)
+            .may_match(&self.meta, user_key_range, hash)
     }
 
     #[inline(always)]
@@ -242,17 +245,15 @@ impl Sstable {
             + self.filter_reader.estimated_heap_size()
     }
 
-    /// Size of the meta disk-cache value, without cloning metadata or encoding its filter.
+    /// Size of the meta disk-cache value, without reconstructing keys or encoding its filter.
     pub(crate) fn serde_encoded_size(&self) -> usize {
-        // Bincode's default format encodes a struct like a tuple and uses a fixed-width
-        // length prefix for byte vectors. Replacing the bloom payload changes only its
-        // byte count. Keep sizing the other fields through serde as the format evolves.
-        let size = bincode::serialized_size(&(self.id, &self.meta)).unwrap() as usize;
-        if self.skip_bloom_filter_in_serde {
-            size
+        let filter_len = if self.skip_bloom_filter_in_serde {
+            0
         } else {
-            size - self.meta.bloom_filter.len() + self.filter_reader.serialized_len()
-        }
+            self.filter_reader.serialized_len()
+        };
+        bincode::serialized_size(&self.id).unwrap() as usize
+            + self.meta.serde_encoded_size(filter_len)
     }
 }
 
@@ -289,7 +290,7 @@ impl BlockMeta {
 
         let total_key_count = buf.get_u32_le();
         let stale_key_count = buf.get_u32_le();
-        let smallest_key = get_length_prefixed_slice(buf);
+        let smallest_key = get_length_prefixed_slice(buf).to_vec();
         Self {
             smallest_key,
             offset,
@@ -306,7 +307,7 @@ impl BlockMeta {
         let uncompressed_size = buf.get_u32_le();
         let total_key_count = 0;
         let stale_key_count = 0;
-        let smallest_key = get_length_prefixed_slice(buf);
+        let smallest_key = get_length_prefixed_slice(buf).to_vec();
         Self {
             smallest_key,
             offset,
@@ -324,10 +325,6 @@ impl BlockMeta {
 
     pub fn table_id(&self) -> TableId {
         FullKey::decode(&self.smallest_key).user_key.table_id
-    }
-
-    fn estimated_heap_size(&self) -> usize {
-        self.smallest_key.capacity()
     }
 }
 
@@ -431,33 +428,8 @@ impl SstableMeta {
     }
 
     pub fn decode(buf: &[u8]) -> HummockResult<Self> {
-        let (mut meta, bloom_filter) = Self::decode_with_filter(buf, |data, _| data.to_vec())?;
-        meta.bloom_filter = bloom_filter;
-        Ok(meta)
-    }
-
-    fn decode_with_filter<F>(
-        buf: &[u8],
-        restore_filter: impl FnOnce(&[u8], &[BlockMeta]) -> F,
-    ) -> HummockResult<(Self, F)> {
-        let mut cursor = buf.len();
-
-        cursor -= 4;
-        let magic = (&buf[cursor..]).get_u32_le();
-        if magic != MAGIC {
-            return Err(HummockError::magic_mismatch(MAGIC, magic));
-        }
-
-        cursor -= 4;
-        let version = (&buf[cursor..cursor + 4]).get_u32_le();
-        if version != VERSION && version != OLD_VERSION {
-            return Err(HummockError::invalid_format_version(version));
-        }
-
-        cursor -= 8;
-        let checksum = (&buf[cursor..cursor + 8]).get_u64_le();
-        let buf = &mut &buf[..cursor];
-        xxhash64_verify(buf, checksum)?;
+        let (mut body, version) = verified_meta_body(buf)?;
+        let buf = &mut body;
 
         let block_meta_count = buf.get_u32_le() as usize;
         let mut block_metas = Vec::with_capacity(block_meta_count);
@@ -471,13 +443,11 @@ impl SstableMeta {
             }
         }
 
-        let filter_len = buf.get_u32_le() as usize;
-        let filter_data = &buf[..filter_len];
-        buf.advance(filter_len);
+        let bloom_filter = get_length_prefixed_slice(buf).to_vec();
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
-        let smallest_key = get_length_prefixed_slice(buf);
-        let largest_key = get_length_prefixed_slice(buf);
+        let smallest_key = get_length_prefixed_slice(buf).to_vec();
+        let largest_key = get_length_prefixed_slice(buf).to_vec();
         let tomb_event_count = buf.get_u32_le() as usize;
         let mut monotonic_tombstone_events = Vec::with_capacity(tomb_event_count);
         for _ in 0..tomb_event_count {
@@ -496,11 +466,10 @@ impl SstableMeta {
                 "read non-empty range tombstones");
         }
 
-        let filter = restore_filter(filter_data, &block_metas);
         #[expect(deprecated)]
-        let meta = Self {
+        Ok(Self {
             block_metas,
-            bloom_filter: Vec::new(),
+            bloom_filter,
             estimated_size,
             key_count,
             smallest_key,
@@ -508,8 +477,7 @@ impl SstableMeta {
             meta_offset,
             monotonic_tombstone_events,
             version,
-        };
-        Ok((meta, filter))
+        })
     }
 
     #[inline]
@@ -533,24 +501,6 @@ impl SstableMeta {
             + 8 // checksum
             + 4 // version
             + 4 // magic
-    }
-
-    #[expect(
-        deprecated,
-        reason = "monotonic_tombstone_events is deprecated but still contributes to decoded meta heap size"
-    )]
-    fn estimated_heap_size(&self) -> usize {
-        self.block_metas.capacity() * std::mem::size_of::<BlockMeta>()
-            + self
-                .block_metas
-                .iter()
-                .map(BlockMeta::estimated_heap_size)
-                .sum::<usize>()
-            + self.bloom_filter.capacity()
-            + self.smallest_key.capacity()
-            + self.largest_key.capacity()
-            + self.monotonic_tombstone_events.capacity()
-                * std::mem::size_of::<MonotonicDeleteEvent>()
     }
 }
 
@@ -670,10 +620,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_sstable_serde() {
-        use foyer::Code;
-
-        use crate::hummock::SstableMetaCacheValue;
-
         let (_, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
             (0..100).clone().map(|x| {
@@ -685,31 +631,140 @@ mod tests {
         )
         .await;
 
-        for skip_filter in [false, true] {
-            let sstable = Sstable::new(42.into(), meta.clone(), skip_filter);
-            let legacy_bytes = bincode::serialize(&sstable).unwrap();
-            let value = SstableMetaCacheValue::from(sstable);
-            let mut bytes = Vec::new();
-            value.encode(&mut bytes).unwrap();
+        // skip sst serde
+        let sstable = Sstable::new(42.into(), meta.clone(), true);
 
-            assert_eq!(bytes, legacy_bytes);
-            assert_eq!(value.estimated_size(), bytes.len());
+        let buffer = bincode::serialize(&sstable).unwrap();
+        assert_eq!(sstable.serde_encoded_size(), buffer.len());
+        assert_eq!(
+            foyer::Code::estimated_size(&crate::hummock::SstableMetaCacheValue::from(
+                sstable.clone()
+            )),
+            buffer.len()
+        );
+        let mut skipped_filter_meta = meta.clone();
+        skipped_filter_meta.bloom_filter.clear();
+        assert_eq!(
+            buffer,
+            bincode::serialize(&SerdeSstable {
+                id: 42.into(),
+                meta: skipped_filter_meta,
+            })
+            .unwrap()
+        );
 
-            let decoded = SstableMetaCacheValue::decode(&mut legacy_bytes.as_slice()).unwrap();
-            assert_eq!(decoded.id, value.id);
-            assert_eq!(decoded.meta, value.meta);
-            assert!(value.has_filter());
-            if skip_filter {
-                assert!(!decoded.has_filter());
-            } else {
-                assert_eq!(
-                    decoded.filter_reader.encode_to_bytes(),
-                    value.filter_reader.encode_to_bytes()
-                );
-            }
-        }
+        let s: Sstable = bincode::deserialize(&buffer).unwrap();
+
+        assert_eq!(s.id, sstable.id);
+        assert_eq!(s.meta, sstable.meta);
+        assert!(!s.skip_bloom_filter_in_serde);
+        assert!(!sstable.filter_reader.is_empty());
+        // The table filter reader is empty because the SST filter is skipped in serde.
+        assert!(s.filter_reader.is_empty());
+
+        // enable sst serde
+        let legacy_bytes = bincode::serialize(&SerdeSstable {
+            id: 42.into(),
+            meta: meta.clone(),
+        })
+        .unwrap();
+        let sstable = Sstable::new(42.into(), meta, false);
+
+        let buffer = bincode::serialize(&sstable).unwrap();
+        assert_eq!(buffer, legacy_bytes);
+        assert_eq!(sstable.serde_encoded_size(), buffer.len());
+        assert_eq!(
+            foyer::Code::estimated_size(&crate::hummock::SstableMetaCacheValue::from(
+                sstable.clone()
+            )),
+            buffer.len()
+        );
+
+        let s: Sstable = bincode::deserialize(&buffer).unwrap();
+
+        assert_eq!(s.id, sstable.id);
+        assert_eq!(s.meta, sstable.meta);
+        assert!(!s.skip_bloom_filter_in_serde);
+        assert_eq!(
+            s.filter_reader.encode_to_bytes(),
+            sstable.filter_reader.encode_to_bytes()
+        );
+
+        use foyer::Code;
+        let mut encoded = Vec::new();
+        Box::new(sstable.clone()).encode(&mut encoded).unwrap();
+        let decoded = Box::<Sstable>::decode(&mut &encoded[..]).unwrap();
+        assert_eq!(decoded.meta, sstable.meta);
+        assert_eq!(
+            decoded.estimated_meta_cache_memory_weight(),
+            sstable.estimated_meta_cache_memory_weight()
+        );
+
+        // A truncated sequence with an extreme length must still fail without trying to
+        // allocate that declared length, as serde's original Vec<BlockMeta> decoder did.
+        let truncated = bincode::serialize(&(HummockSstableObjectId::from(1), u64::MAX)).unwrap();
+        assert!(bincode::deserialize::<SerdeSstable>(&truncated).is_err());
+        assert!(Box::<Sstable>::decode(&mut &truncated[..]).is_err());
     }
 
+    #[test]
+    fn test_cached_sstable_reads_v1_meta() {
+        let key = FullKey::for_test(TableId::new(1), b"\0\0key".to_vec(), 0).encode();
+        // Version 1 predates the per-block key counters. Build its historical byte layout
+        // independently of the current version-2 writer, then consume it through the cache.
+        let mut bytes = Vec::new();
+        bytes.put_u32_le(1);
+        bytes.put_u32_le(0);
+        bytes.put_u32_le(9);
+        bytes.put_u32_le(10);
+        put_length_prefixed_slice(&mut bytes, &key);
+        put_length_prefixed_slice(&mut bytes, &[]);
+        bytes.put_u32_le(100);
+        bytes.put_u32_le(2);
+        put_length_prefixed_slice(&mut bytes, &key);
+        put_length_prefixed_slice(&mut bytes, &key);
+        bytes.put_u32_le(0);
+        bytes.put_u64_le(9);
+        let checksum = xxhash64_checksum(&bytes);
+        bytes.put_u64_le(checksum);
+        bytes.put_u32_le(OLD_VERSION);
+        bytes.put_u32_le(MAGIC);
+        let meta = SstableMeta::decode(&bytes).unwrap();
+        assert_eq!(meta.version, OLD_VERSION);
+        let sstable = Sstable::new(1.into(), meta, false);
+        let direct = Sstable::from_meta_bytes(1.into(), &bytes, false).unwrap();
+        assert_eq!(direct.meta, sstable.meta);
+        assert_eq!(
+            sstable.meta.block_meta(0),
+            BlockMeta {
+                smallest_key: key,
+                len: 9,
+                uncompressed_size: 10,
+                ..Default::default()
+            }
+        );
+
+        // Reject the footer/checksum before parsing a corrupted count or allocating blocks.
+        let mut corrupted = bytes.clone();
+        corrupted[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            Sstable::from_meta_bytes(1.into(), &corrupted, false)
+                .unwrap_err()
+                .to_string(),
+            SstableMeta::decode(&corrupted).unwrap_err().to_string()
+        );
+        let end = bytes.len();
+        for offset in [end - 4, end - 8] {
+            let mut corrupted = bytes.clone();
+            corrupted[offset..offset + 4].copy_from_slice(&3u32.to_le_bytes());
+            assert_eq!(
+                Sstable::from_meta_bytes(1.into(), &corrupted, false)
+                    .unwrap_err()
+                    .to_string(),
+                SstableMeta::decode(&corrupted).unwrap_err().to_string()
+            );
+        }
+    }
     #[tokio::test]
     async fn test_sstable_from_meta_bytes() {
         let (_, meta) = gen_test_sstable_data(

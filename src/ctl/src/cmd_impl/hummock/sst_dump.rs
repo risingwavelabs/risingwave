@@ -259,7 +259,10 @@ pub async fn sst_dump_via_sstable_store(
     );
 
     println!("Estimated Table Size: {}", sstable_meta.estimated_size);
-    println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
+    println!(
+        "Bloom Filter Size: {}",
+        sstable.filter_reader.encode_to_bytes().len()
+    );
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
 
@@ -301,7 +304,7 @@ async fn print_block(
     println!("\tBlock {}", block_idx);
     println!("\t-----------");
 
-    let block_meta = &sst.meta.block_metas[block_idx];
+    let block_meta = sst.meta.block_meta(block_idx);
     let smallest_key = FullKey::decode(&block_meta.smallest_key);
     let data_path = sstable_store.get_sst_data_path(sst.id);
 

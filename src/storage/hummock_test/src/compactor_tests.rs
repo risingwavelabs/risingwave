@@ -1556,7 +1556,9 @@ pub(crate) mod tests {
                         .unwrap();
                     assert_eq!(table.meta.block_metas.len(), block_count);
                     assert_eq!(
-                        FullKey::decode(&table.meta.block_metas.last().unwrap().smallest_key),
+                        FullKey::decode(
+                            &table.meta.block_meta(table.block_count() - 1).smallest_key
+                        ),
                         key(&[3]).to_ref()
                     );
                     inputs[index].push(info);
