@@ -403,6 +403,13 @@ FirestoreConfig:
       Skipped mutations are not delivered; authentication and transient failures still fail the chunk.
     required: false
     default: Default::default
+  - name: firestore.decimal_mode
+    field_type: FirestoreDecimalMode
+    comments: |-
+      DECIMAL encoding: `decimal128` (default, Enterprise only) or `double` (may lose precision).
+      Database metadata is checked for Decimal128; unavailable metadata never selects double.
+    required: false
+    default: Default::default
   - name: firestore.max_batch_size
     field_type: usize
     comments: 'Maximum batch size for batch writes (default: 500)'

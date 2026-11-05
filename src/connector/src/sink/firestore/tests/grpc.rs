@@ -20,6 +20,7 @@ use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
+use gcloud_sdk::google::firestore::admin::v1::Database;
 use gcloud_sdk::google::firestore::v1::{BatchWriteRequest, BatchWriteResponse, WriteResult};
 use risingwave_common::array::StreamChunkTestExt;
 use tokio::sync::{Semaphore, mpsc};
@@ -35,6 +36,9 @@ struct MockService(Arc<MockState>);
 
 struct MockState {
     requests: Mutex<Vec<BatchWriteRequest>>,
+    metadata_requests: Mutex<Vec<GetDatabaseRequest>>,
+    edition: AtomicI32,
+    metadata_error: AtomicI32,
     active: AtomicUsize,
     peak: AtomicUsize,
     started: Semaphore,
@@ -42,6 +46,76 @@ struct MockState {
     fail: bool,
     row_error_code: AtomicI32,
     rpc_error_code: AtomicI32,
+}
+
+#[derive(Clone)]
+struct MockAdminService(Arc<MockState>);
+
+impl tonic::server::NamedService for MockAdminService {
+    const NAME: &'static str = "google.firestore.admin.v1.FirestoreAdmin";
+}
+
+impl tonic::server::UnaryService<GetDatabaseRequest> for MockAdminService {
+    type Future = BoxFuture<'static, std::result::Result<tonic::Response<Database>, tonic::Status>>;
+    type Response = Database;
+
+    fn call(&mut self, request: tonic::Request<GetDatabaseRequest>) -> Self::Future {
+        let state = self.0.clone();
+        assert_eq!(
+            request.metadata().get("authorization").unwrap(),
+            "Bearer owner"
+        );
+        assert_eq!(
+            request
+                .metadata()
+                .get("google-cloud-resource-prefix")
+                .unwrap(),
+            request.get_ref().name.as_str()
+        );
+        state
+            .metadata_requests
+            .lock()
+            .unwrap()
+            .push(request.into_inner());
+        Box::pin(async move {
+            let code = state.metadata_error.load(Ordering::SeqCst);
+            if code != 0 {
+                return Err(tonic::Status::new(
+                    tonic::Code::from_i32(code),
+                    "injected metadata error",
+                ));
+            }
+            Ok(tonic::Response::new(Database {
+                database_edition: state.edition.load(Ordering::SeqCst),
+                ..Default::default()
+            }))
+        })
+    }
+}
+
+impl tonic::codegen::Service<http::Request<tonic::body::Body>> for MockAdminService {
+    type Error = Infallible;
+    type Future = BoxFuture<'static, std::result::Result<Self::Response, Self::Error>>;
+    type Response = http::Response<tonic::body::Body>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut TaskContext<'_>,
+    ) -> Poll<std::result::Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: http::Request<tonic::body::Body>) -> Self::Future {
+        assert_eq!(
+            request.uri().path(),
+            "/google.firestore.admin.v1.FirestoreAdmin/GetDatabase"
+        );
+        let service = self.clone();
+        Box::pin(async move {
+            let mut grpc = tonic::server::Grpc::new(tonic_prost::ProstCodec::default());
+            Ok(grpc.unary(service, request).await)
+        })
+    }
 }
 
 impl tonic::server::NamedService for MockService {
@@ -135,6 +209,9 @@ impl MockServer {
     async fn writer(fail: bool) -> (Self, FirestoreSinkWriter) {
         let state = Arc::new(MockState {
             requests: Mutex::new(vec![]),
+            metadata_requests: Mutex::new(vec![]),
+            edition: AtomicI32::new(DatabaseEdition::Enterprise as i32),
+            metadata_error: AtomicI32::new(0),
             active: AtomicUsize::new(0),
             peak: AtomicUsize::new(0),
             started: Semaphore::new(0),
@@ -153,6 +230,7 @@ impl MockServer {
         let task = tokio::spawn(
             tonic::transport::Server::builder()
                 .add_service(service)
+                .add_service(MockAdminService(state.clone()))
                 .serve_with_incoming(incoming),
         );
         let config = test_config();
@@ -181,6 +259,135 @@ impl MockServer {
         .unwrap()
         .forget();
     }
+}
+
+#[tokio::test]
+async fn decimal_metadata_checks_edition_and_preserves_mode_on_unknown() -> Result<()> {
+    let (server, writer) = MockServer::writer(false).await;
+    let schema = Schema::new(vec![Field::with_name(
+        DataType::list(DataType::Decimal),
+        "amounts",
+    )]);
+    let mut config = writer.config.clone();
+    config.database_id = Some("named-database".to_owned());
+    config.credentials = Some("must not be used for emulator".to_owned());
+    let host = writer
+        .client
+        .get_options()
+        .firebase_api_url
+        .as_ref()
+        .unwrap()
+        .strip_prefix("http://")
+        .unwrap()
+        .to_owned();
+    let client = config.build_client_with_emulator(Some(host)).await?;
+
+    for edition in [
+        DatabaseEdition::Enterprise as i32,
+        DatabaseEdition::Unspecified as i32,
+        99,
+    ] {
+        server.state.edition.store(edition, Ordering::SeqCst);
+        config.validate_decimal_mode(&schema, &client).await?;
+        assert_eq!(config.decimal_mode, FirestoreDecimalMode::Decimal128);
+    }
+    server
+        .state
+        .edition
+        .store(DatabaseEdition::Standard as i32, Ordering::SeqCst);
+    let error = config
+        .validate_decimal_mode(&schema, &client)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SinkError::Config(_)));
+    use thiserror_ext::AsReport;
+    assert!(
+        error
+            .to_report_string()
+            .contains("firestore.decimal_mode='double'")
+    );
+
+    for code in [tonic::Code::PermissionDenied, tonic::Code::Unimplemented] {
+        server
+            .state
+            .metadata_error
+            .store(code as i32, Ordering::SeqCst);
+        config.validate_decimal_mode(&schema, &client).await?;
+        assert_eq!(config.decimal_mode, FirestoreDecimalMode::Decimal128);
+    }
+    for code in [
+        tonic::Code::Unavailable,
+        tonic::Code::Unauthenticated,
+        tonic::Code::NotFound,
+        tonic::Code::DeadlineExceeded,
+    ] {
+        server
+            .state
+            .metadata_error
+            .store(code as i32, Ordering::SeqCst);
+        assert!(
+            config
+                .validate_decimal_mode(&schema, &client)
+                .await
+                .is_err()
+        );
+    }
+    let requests = server.state.metadata_requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 10);
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.name == "projects/demo-rw-firestore/databases/named-database")
+    );
+    config.decimal_mode = FirestoreDecimalMode::Double;
+    config.validate_decimal_mode(&schema, &client).await?;
+    config.decimal_mode = FirestoreDecimalMode::Decimal128;
+    config
+        .validate_decimal_mode(&test_schema(), &client)
+        .await?;
+    assert_eq!(
+        server.state.metadata_requests.lock().unwrap().len(),
+        requests.len()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn decimal128_reaches_batch_write_without_float_rounding() -> Result<()> {
+    use risingwave_common::array::{
+        Array, ArrayBuilder, DecimalArrayBuilder, StreamChunk, Utf8ArrayBuilder,
+    };
+    use risingwave_common::types::Decimal;
+    let (server, mut writer) = MockServer::writer(false).await;
+    writer.schema = Schema::new(vec![
+        Field::with_name(DataType::Varchar, "id"),
+        Field::with_name(DataType::Decimal, "amount"),
+    ]);
+    writer
+        .config
+        .validate_decimal_mode(&writer.schema, &writer.client)
+        .await?;
+    let mut ids = Utf8ArrayBuilder::new(1);
+    ids.append(Some("precise"));
+    let mut amounts = DecimalArrayBuilder::new(1);
+    let amount: Decimal = "9007199254740993".parse().unwrap();
+    amounts.append(Some(amount));
+    let chunk = StreamChunk::new(
+        vec![Op::Insert],
+        vec![ids.finish().into_ref(), amounts.finish().into_ref()],
+    );
+    server.state.gate.add_permits(1);
+    let operations = writer.write_chunk_inner(chunk)?;
+    writer.write_operations(operations).await?;
+    let requests = server.state.requests.lock().unwrap();
+    let Some(write::Operation::Update(document)) = &requests[0].writes[0].operation else {
+        panic!()
+    };
+    assert_eq!(
+        document.fields["amount"],
+        format_datum(Some(ScalarRefImpl::Decimal(amount)), &DataType::Decimal)?
+    );
+    Ok(())
 }
 
 #[tokio::test]
@@ -543,7 +750,11 @@ async fn emulator_crud_replay_and_native_values() -> Result<()> {
         ),
         (
             "decimal".to_owned(),
-            format_datum(Some(ScalarRefImpl::Decimal(decimal)), &DataType::Decimal)?,
+            super::super::format_datum(
+                Some(ScalarRefImpl::Decimal(decimal)),
+                &DataType::Decimal,
+                FirestoreDecimalMode::Double,
+            )?,
         ),
         (
             "nan".to_owned(),

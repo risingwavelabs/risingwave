@@ -79,7 +79,7 @@ enum-as-inner = "0.7"
 firestore = "0.47"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcloud-sdk = "0.28"
+gcloud-sdk = { version = "0.28", features = ["google-firestore-admin-v1"] }
 gcp-bigquery-client = { version = "0.28.0", optional = true }
 glob = "0.3"
 google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.6", features = [

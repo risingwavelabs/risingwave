@@ -31,10 +31,15 @@ fn test_config() -> FirestoreConfig {
         database_id: None,
         credentials: None,
         skip_invalid_rows: false,
+        decimal_mode: FirestoreDecimalMode::default(),
         document_id_column: Some("id".to_owned()),
         max_batch_size: 1,
         max_future_send_nums: 2,
     }
+}
+
+fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Result<Value> {
+    super::format_datum(datum, data_type, FirestoreDecimalMode::default())
 }
 
 fn test_schema() -> Schema {
@@ -263,19 +268,54 @@ fn timestamps_use_native_utc_microseconds_and_validate_range() -> Result<()> {
 }
 
 #[test]
-fn decimals_use_native_numbers_including_special_values() -> Result<()> {
+fn decimal128_preserves_precision_and_special_values() -> Result<()> {
+    use risingwave_common::types::Decimal;
+    for text in [
+        "12.50",
+        "-0.125",
+        "9007199254740993",
+        "79228162514264337593543950335",
+        "0.0000000000000000000000000001",
+        "NaN",
+        "Infinity",
+        "-Infinity",
+    ] {
+        let value: Decimal = text.parse().unwrap();
+        let encoded = format_datum(Some(ScalarRefImpl::Decimal(value)), &DataType::Decimal)?;
+        assert_eq!(
+            encoded.value_type,
+            Some(ValueType::MapValue(MapValue {
+                fields: HashMap::from([(
+                    "__decimal128__".to_owned(),
+                    Value {
+                        value_type: Some(ValueType::StringValue(text.to_owned()))
+                    },
+                )]),
+            })),
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn double_decimals_require_explicit_opt_in() -> Result<()> {
     use risingwave_common::types::Decimal;
     for (text, expected) in [
         ("12.50", 12.5),
         ("-0.125", -0.125),
+        ("9007199254740993", 9007199254740992.0),
         ("79228162514264337593543950335", 7.922816251426434e28),
         ("Infinity", f64::INFINITY),
         ("-Infinity", f64::NEG_INFINITY),
         ("NaN", f64::NAN),
     ] {
         let value: Decimal = text.parse().unwrap();
-        let Some(ValueType::DoubleValue(actual)) =
-            format_datum(Some(ScalarRefImpl::Decimal(value)), &DataType::Decimal)?.value_type
+        let Some(ValueType::DoubleValue(actual)) = super::format_datum(
+            Some(ScalarRefImpl::Decimal(value)),
+            &DataType::Decimal,
+            FirestoreDecimalMode::Double,
+        )?
+        .value_type
         else {
             panic!("decimal changed to a nonnumeric type")
         };
@@ -303,24 +343,65 @@ fn native_types_are_preserved_inside_structs_and_lists() -> Result<()> {
         ("time", DataType::Timestamp),
         ("amounts", DataType::list(DataType::Decimal)),
     ]));
-    let Some(ValueType::MapValue(map)) =
-        format_datum(Some(ScalarRefImpl::Struct(row.as_scalar_ref())), &ty)?.value_type
-    else {
-        panic!()
-    };
-    assert!(matches!(
-        map.fields["time"].value_type,
-        Some(ValueType::TimestampValue(_))
-    ));
-    let Some(ValueType::ArrayValue(array)) = &map.fields["amounts"].value_type else {
-        panic!()
-    };
-    assert_eq!(
-        array.values[0].value_type,
-        Some(ValueType::DoubleValue(12.5))
-    );
-    assert_eq!(array.values[1].value_type, Some(ValueType::NullValue(0)));
+    for mode in [
+        FirestoreDecimalMode::Decimal128,
+        FirestoreDecimalMode::Double,
+    ] {
+        let Some(ValueType::MapValue(map)) =
+            super::format_datum(Some(ScalarRefImpl::Struct(row.as_scalar_ref())), &ty, mode)?
+                .value_type
+        else {
+            panic!()
+        };
+        assert!(matches!(
+            map.fields["time"].value_type,
+            Some(ValueType::TimestampValue(_))
+        ));
+        let Some(ValueType::ArrayValue(array)) = &map.fields["amounts"].value_type else {
+            panic!()
+        };
+        assert_eq!(
+            array.values[0].value_type,
+            super::format_datum(
+                Some(ScalarRefImpl::Decimal(amount)),
+                &DataType::Decimal,
+                mode
+            )?
+            .value_type
+        );
+        assert_eq!(array.values[1].value_type, Some(ValueType::NullValue(0)));
+    }
+    assert!(contains_decimal(&ty));
+    assert!(!contains_decimal(&DataType::list(DataType::Int64)));
     Ok(())
+}
+
+#[test]
+fn decimal_mode_defaults_to_decimal128_and_rejects_unknown_modes() {
+    let mut properties = BTreeMap::from([
+        ("firestore.project_id".to_owned(), "p".to_owned()),
+        ("firestore.collection".to_owned(), "c".to_owned()),
+    ]);
+    assert_eq!(
+        FirestoreConfig::from_btreemap(properties.clone())
+            .unwrap()
+            .decimal_mode,
+        FirestoreDecimalMode::Decimal128
+    );
+    for (mode, expected) in [
+        ("double", FirestoreDecimalMode::Double),
+        ("decimal128", FirestoreDecimalMode::Decimal128),
+    ] {
+        properties.insert("firestore.decimal_mode".to_owned(), mode.to_owned());
+        assert_eq!(
+            FirestoreConfig::from_btreemap(properties.clone())
+                .unwrap()
+                .decimal_mode,
+            expected
+        );
+    }
+    properties.insert("firestore.decimal_mode".to_owned(), "auto".to_owned());
+    assert!(FirestoreConfig::from_btreemap(properties).is_err());
 }
 
 #[test]
