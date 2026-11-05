@@ -11449,7 +11449,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
