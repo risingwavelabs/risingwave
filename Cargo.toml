@@ -460,8 +460,8 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-# Backport borrowed XOR readers and add a byte-backed XOR16 view on xorf 0.13.0.
-xorf = { git = "https://github.com/Li0k/xorf.git", rev = "3620e47af1051c119bcf22d2ebafe18943d84653" }
+# Borrowed XOR readers and portable byte codecs on xorf 0.13.0.
+xorf = { git = "https://github.com/Li0k/xorf.git", rev = "9bd4a6f31b98cff6e2fec7e6c1c9d7de4e9077c6" }
 # Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
 foyer = { git = "https://github.com/Li0k/foyer.git", rev = "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }

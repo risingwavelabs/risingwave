@@ -14,11 +14,13 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::{Bound, Range};
 
 use bytes::{Buf, BufMut};
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
+use xorf::Filter;
 
 use super::BlockMeta;
 
@@ -27,33 +29,32 @@ pub(super) const BLOCKED_FILTER_CHUNK_SIZE: usize = 1024 * 1024;
 pub(super) const BLOCKED_FILTER_ENTRY_LEN_PREFIX: usize = size_of::<u32>();
 pub(super) const BLOCKED_FILTER_FOOTER_LEN: usize = size_of::<u32>() + 1;
 
-/// Algorithm metadata kept separately from the child filter's query bytes.
+/// Interprets encoded child bytes without retaining per-child algorithm metadata.
 ///
-/// The block container owns the bytes. Implementations define their format, legacy decoding and
-/// lookup algorithm. `Self` must contain only inline metadata; the container accounts for its size.
+/// Query readers borrow the bytes owned by the block container and use the dependency's filter
+/// implementation. Encoding owns format-specific legacy normalization.
 pub(super) trait BlockFilter: Clone {
     const BLOCKED_TAG: u8;
 
-    /// Decodes metadata and returns the range of query bytes relative to this encoded child.
-    fn decode(data: &[u8]) -> (Self, Range<usize>);
-    fn contains(&self, data: &[u8], hash: u64) -> bool;
+    fn validate(data: &[u8]);
+    fn reader(data: &[u8]) -> impl Filter<u64> + '_;
     /// The number of bytes appended by `encode`, including any canonicalized legacy header.
-    fn serialized_len(&self, data_len: usize) -> usize;
-    fn encode(&self, data: &[u8], out: &mut Vec<u8>);
+    fn serialized_len(data: &[u8]) -> usize;
+    fn encode(data: &[u8], out: &mut Vec<u8>);
 }
 
 #[derive(Clone)]
-struct FilterBlock<F> {
-    filter: F,
+struct FilterBlock {
     chunk: u32,
     data: Range<u32>,
 }
 
 #[derive(Clone)]
 pub(super) struct BlockBasedFilter<F> {
-    filters: Vec<FilterBlock<F>>,
+    filters: Vec<FilterBlock>,
     chunks: Vec<Vec<u8>>,
     encoded_len: usize,
+    _filter: PhantomData<F>,
 }
 
 impl<F: BlockFilter> BlockBasedFilter<F> {
@@ -81,36 +82,30 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
             let len = reader.get_u32_le() as usize;
             let child = &reader[..len];
             reader.advance(len);
-            let (filter, range) = F::decode(child);
-            let payload = &child[range.clone()];
+            F::validate(child);
             let (chunk, start) = if owned {
-                (0, offset + range.start)
+                (0, offset)
             } else {
                 if chunks
                     .last()
-                    .is_none_or(|chunk| chunk.capacity() - chunk.len() < payload.len())
+                    .is_none_or(|chunk| chunk.capacity() - chunk.len() < child.len())
                 {
-                    let capacity = if payload.is_empty() {
-                        0
-                    } else {
-                        payload
-                            .len()
-                            .max(BLOCKED_FILTER_CHUNK_SIZE.min(payload.len() + reader.len()))
-                    };
+                    let capacity = child
+                        .len()
+                        .max(BLOCKED_FILTER_CHUNK_SIZE.min(child.len() + reader.len()));
                     chunks.push(Vec::with_capacity(capacity));
                 }
                 let index = u32::try_from(chunks.len() - 1).unwrap();
                 let chunk = chunks.last_mut().unwrap();
                 let start = chunk.len();
-                chunk.extend_from_slice(payload);
+                chunk.extend_from_slice(child);
                 (index, start)
             };
-            let end = u32::try_from(start + payload.len())
-                .expect("blocked filter data offset exceeds u32");
+            let end =
+                u32::try_from(start + child.len()).expect("blocked filter data offset exceeds u32");
             let start = u32::try_from(start).expect("blocked filter data offset exceeds u32");
-            encoded_len += BLOCKED_FILTER_ENTRY_LEN_PREFIX + filter.serialized_len(payload.len());
+            encoded_len += BLOCKED_FILTER_ENTRY_LEN_PREFIX + F::serialized_len(child);
             filters.push(FilterBlock {
-                filter,
                 chunk,
                 data: start..end,
             });
@@ -123,19 +118,20 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
             filters,
             chunks,
             encoded_len,
+            _filter: PhantomData,
         }
     }
 
     #[inline]
-    fn block_data(&self, block: &FilterBlock<F>) -> &[u8] {
+    fn block_data(&self, block: &FilterBlock) -> &[u8] {
         &self.chunks[block.chunk as usize][block.data.start as usize..block.data.end as usize]
     }
 
     pub(super) fn encode_block(&self, index: usize) -> Vec<u8> {
         let block = &self.filters[index];
         let data = self.block_data(block);
-        let mut out = Vec::with_capacity(block.filter.serialized_len(data.len()));
-        block.filter.encode(data, &mut out);
+        let mut out = Vec::with_capacity(F::serialized_len(data));
+        F::encode(data, &mut out);
         out
     }
 
@@ -143,8 +139,8 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
         let mut out = Vec::with_capacity(self.serialized_len());
         for block in &self.filters {
             let data = self.block_data(block);
-            out.put_u32_le(block.filter.serialized_len(data.len()) as u32);
-            block.filter.encode(data, &mut out);
+            out.put_u32_le(F::serialized_len(data) as u32);
+            F::encode(data, &mut out);
         }
         out.put_u32_le(self.filters.len() as u32);
         out.put_u8(F::BLOCKED_TAG);
@@ -156,7 +152,7 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
     }
 
     pub(super) fn estimated_heap_size(&self) -> usize {
-        self.filters.capacity() * size_of::<FilterBlock<F>>()
+        self.filters.capacity() * size_of::<FilterBlock>()
             + self.chunks.capacity() * size_of::<Vec<u8>>()
             + self.chunks.iter().map(Vec::capacity).sum::<usize>()
     }
@@ -210,7 +206,7 @@ impl<F: BlockFilter> BlockBasedFilter<F> {
                 break;
             }
             let block = &self.filters[block_idx];
-            if block.filter.contains(self.block_data(block), hash) {
+            if F::reader(self.block_data(block)).contains(&hash) {
                 return true;
             }
             block_idx += 1;

@@ -14,10 +14,11 @@
 
 use std::borrow::Cow;
 use std::mem::size_of;
-use std::ops::Range;
 use std::sync::Arc;
 
-use bytes::{Buf, BufMut};
+#[cfg(test)]
+use bytes::Buf;
+use bytes::BufMut;
 use risingwave_hummock_sdk::key::UserKeyRangeRef;
 use risingwave_pb::hummock::PbSstableFilterType;
 use xorf::{Filter, Xor8, Xor8Ref, Xor16, Xor16BytesRef};
@@ -60,12 +61,9 @@ impl Xor8FilterBuilder {
     }
 
     fn build_from_xor8(xor_filter: &Xor8) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
-        buf.put_u64_le(xor_filter.seed);
-        buf.put_u32_le(xor_filter.block_length as u32);
-        buf.put_slice(xor_filter.fingerprints.as_ref());
-        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
-        buf.put_u8(FOOTER_XOR8);
+        let mut buf = Vec::with_capacity(xor_filter.encoded_le_len() + 1);
+        xor_filter.encode_le_into(&mut buf);
+        buf.push(FOOTER_XOR8);
         buf
     }
 }
@@ -82,15 +80,9 @@ impl Xor16FilterBuilder {
     }
 
     fn build_from_xor16(xor_filter: &Xor16) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() * 2 + 1);
-        buf.put_u64_le(xor_filter.seed);
-        buf.put_u32_le(xor_filter.block_length as u32);
-        xor_filter
-            .fingerprints
-            .iter()
-            .for_each(|x| buf.put_u16_le(*x));
-        // Add an extra byte so readers can distinguish tagged xor filter formats.
-        buf.put_u8(FOOTER_XOR16);
+        let mut buf = Vec::with_capacity(xor_filter.encoded_le_len() + 1);
+        xor_filter.encode_le_into(&mut buf);
+        buf.push(FOOTER_XOR16);
         buf
     }
 }
@@ -126,11 +118,11 @@ fn approximate_plain_xor_filter_serialized_len(key_count: usize, fingerprint_siz
 }
 
 fn xor8_filter_serialized_len(filter: &Xor8) -> usize {
-    PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len()
+    filter.encoded_le_len() + 1
 }
 
 fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
-    PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
+    filter.encoded_le_len() + 1
 }
 
 /// Computes the serialized byte length of a blocked Xor filter.
@@ -434,105 +426,73 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     }
 }
 
-// These descriptors contain no fingerprint allocation; BlockBasedFilter owns the query bytes.
+// RW owns child framing and legacy compatibility; xorf owns the algorithm encoding.
 #[derive(Clone)]
-struct Xor8Block {
-    seed: u64,
-    block_length: u32,
-    footer: u8,
-}
+struct Xor8Block;
 
 impl BlockFilter for Xor8Block {
     const BLOCKED_TAG: u8 = FOOTER_BLOCKED_XOR8;
 
-    fn decode(mut data: &[u8]) -> (Self, Range<usize>) {
+    fn validate(data: &[u8]) {
         assert!(data.len() >= PLAIN_XOR_FILTER_FIXED_LEN);
-        let end = data.len() - 1;
-        let footer = data[end];
-        let seed = data.get_u64_le();
-        let block_length = data.get_u32_le();
-        (
-            Self {
-                seed,
-                block_length,
-                footer,
-            },
-            PLAIN_XOR_FILTER_FIXED_LEN - 1..end,
-        )
     }
 
     #[inline]
-    fn contains(&self, data: &[u8], hash: u64) -> bool {
-        Xor8Ref {
-            seed: self.seed,
-            block_length: self.block_length as usize,
-            fingerprints: data,
-        }
-        .contains(&hash)
+    fn reader(data: &[u8]) -> impl Filter<u64> + '_ {
+        Xor8Ref::from_encoded_le(&data[..data.len() - 1]).expect("invalid xor8 child")
     }
 
-    fn serialized_len(&self, data_len: usize) -> usize {
-        PLAIN_XOR_FILTER_FIXED_LEN + data_len
+    fn serialized_len(data: &[u8]) -> usize {
+        data.len()
     }
 
-    fn encode(&self, data: &[u8], out: &mut Vec<u8>) {
-        out.put_u64_le(self.seed);
-        out.put_u32_le(self.block_length);
+    fn encode(data: &[u8], out: &mut Vec<u8>) {
         out.extend_from_slice(data);
-        out.put_u8(self.footer);
     }
 }
 
 #[derive(Clone)]
-struct Xor16Block {
-    seed: u64,
-    block_length: u32,
-}
+struct Xor16Block;
 
 impl BlockFilter for Xor16Block {
     const BLOCKED_TAG: u8 = FOOTER_BLOCKED_XOR16;
 
-    fn decode(mut data: &[u8]) -> (Self, Range<usize>) {
+    fn validate(data: &[u8]) {
         assert_eq!(data.last(), Some(&FOOTER_XOR16));
-        if data.len() == 1 {
-            // Legacy empty children have no header. Encoding emits the canonical full header.
-            return (
-                Self {
-                    seed: 0,
-                    block_length: 0,
-                },
-                0..0,
-            );
-        }
-        assert!(data.len() >= PLAIN_XOR_FILTER_FIXED_LEN);
-        let end = data.len() - 1;
-        let seed = data.get_u64_le();
-        let block_length = data.get_u32_le();
-        (
-            Self { seed, block_length },
-            PLAIN_XOR_FILTER_FIXED_LEN - 1..end,
-        )
+        assert!(data.len() == 1 || data.len() >= PLAIN_XOR_FILTER_FIXED_LEN);
     }
 
     #[inline]
-    fn contains(&self, data: &[u8], hash: u64) -> bool {
-        Xor16BytesRef {
-            seed: self.seed,
-            block_length: self.block_length as usize,
-            fingerprints: data.as_chunks::<2>().0,
+    fn reader(data: &[u8]) -> impl Filter<u64> + '_ {
+        if data.len() == 1 {
+            return Xor16BytesRef {
+                seed: 0,
+                block_length: 0,
+                fingerprints: &[],
+            };
         }
-        .contains(&hash)
+        // Old blocked readers ignore an incomplete fingerprint before the footer.
+        let body = &data[..(data.len() - 1) & !1];
+        Xor16BytesRef::from_encoded_le(body).expect("invalid xor16 child")
     }
 
-    fn serialized_len(&self, data_len: usize) -> usize {
-        PLAIN_XOR_FILTER_FIXED_LEN + data_len
+    fn serialized_len(data: &[u8]) -> usize {
+        data.len().max(PLAIN_XOR_FILTER_FIXED_LEN)
     }
 
-    fn encode(&self, data: &[u8], out: &mut Vec<u8>) {
-        out.put_u64_le(self.seed);
-        out.put_u32_le(self.block_length);
-        out.extend_from_slice(data);
-        out.put_u8(FOOTER_XOR16);
+    fn encode(data: &[u8], out: &mut Vec<u8>) {
+        if data.len() == 1 {
+            // Legacy empty children encode with the canonical full header.
+            Xor16 {
+                seed: 0,
+                block_length: 0,
+                fingerprints: Box::default(),
+            }
+            .encode_le_into(out);
+            out.push(FOOTER_XOR16);
+        } else {
+            out.extend_from_slice(data);
+        }
     }
 }
 
@@ -596,23 +556,14 @@ impl XorFilterReader {
         Self { filter }
     }
 
-    fn to_xor8(mut data: &[u8]) -> Xor8 {
-        let mbuf = &mut data;
-        let xor_filter_seed = mbuf.get_u64_le();
-        let xor_filter_block_length = mbuf.get_u32_le();
-        // is correct even when there is an extra 0xff byte in the end of buf
-        let end_pos = mbuf.len() - 1;
-        let xor_filter_fingerprints = mbuf[..end_pos].to_vec().into_boxed_slice();
-        Xor8 {
-            seed: xor_filter_seed,
-            block_length: xor_filter_block_length as usize,
-            fingerprints: xor_filter_fingerprints,
-        }
+    fn to_xor8(data: &[u8]) -> Xor8 {
+        Xor8Ref::from_encoded_le(&data[..data.len() - 1])
+            .expect("invalid xor8 filter")
+            .into()
     }
 
-    fn to_xor16(mut data: &[u8]) -> Xor16 {
-        let kind = *data.last().unwrap();
-        assert_eq!(kind, FOOTER_XOR16);
+    fn to_xor16(data: &[u8]) -> Xor16 {
+        assert_eq!(data.last(), Some(&FOOTER_XOR16));
         if data.len() <= 1 {
             return Xor16 {
                 seed: 0,
@@ -620,22 +571,10 @@ impl XorFilterReader {
                 fingerprints: vec![].into_boxed_slice(),
             };
         }
-        let buf = &mut data;
-        let xor_filter_seed = buf.get_u64_le();
-        let xor_filter_block_length = buf.get_u32_le();
-        // Decode complete fingerprints in bulk, leaving the one-byte footer out.
-        let (fingerprints, _) = buf.as_chunks::<2>();
-        let xor_filter_fingerprints = fingerprints
-            .iter()
-            .copied()
-            .map(u16::from_le_bytes)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        Xor16 {
-            seed: xor_filter_seed,
-            block_length: xor_filter_block_length as usize,
-            fingerprints: xor_filter_fingerprints,
-        }
+        // Preserve the old plain reader's complete-word decoding, including malformed tails.
+        Xor16BytesRef::from_encoded_le(&data[..data.len() & !1])
+            .expect("invalid xor16 filter")
+            .into()
     }
 
     /// Returns the serialized byte length of the decoded filter reader.
@@ -803,7 +742,7 @@ mod tests {
             );
         }
 
-        // Reconstructing headers must preserve bytes that the existing readers tolerate.
+        // Child export must preserve bytes tolerated by the existing readers.
         let mut xor8 = Xor8FilterBuilder::build_from_xor8(&Xor8::from(&vec![42]));
         *xor8.last_mut().unwrap() = 17;
         let mut xor16 = next;
