@@ -17,7 +17,7 @@ use std::mem::take;
 
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::id::{ActorId, DatabaseId, JobId, SourceId};
+use risingwave_common::id::{ActorId, DatabaseId, FragmentId, JobId, SourceId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::ingest_mode::IngestMode;
 use risingwave_meta_model::bounded_job::BoundedJobStatus;
@@ -84,8 +84,8 @@ pub(super) struct BoundedLoadTracker {
     list_finished: HashSet<ActorId>,
     read_finished: HashSet<ActorId>,
     phase: Phase,
-    /// Whether `Load { Start }` has been sent to the job's actors.
-    pub start_sent: bool,
+    /// The actors of each fragment taking part in the load when it started.
+    fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
     /// Actions of the collected barriers, applied once their checkpoint commits.
     actions: Vec<BoundedLoadAction>,
 }
@@ -99,9 +99,11 @@ impl BoundedLoadTracker {
     ) -> Self {
         let mut listers = HashSet::new();
         let mut readers = HashSet::new();
+        let mut fragment_actors = HashMap::new();
 
         for (fragment, role) in bounded_roles(fragments, source_id) {
             let actors = fragment.actors.keys().copied();
+            fragment_actors.insert(fragment.fragment_id, actors.clone().collect());
 
             match role {
                 BoundedRole::Lister => listers.extend(actors),
@@ -129,20 +131,26 @@ impl BoundedLoadTracker {
             list_finished: HashSet::new(),
             read_finished: HashSet::new(),
             phase,
-            start_sent: false,
+            fragment_actors,
             actions: vec![],
         }
     }
 
-    /// Returns the source to send `Load { Start }` for, if it has not been sent yet.
-    pub fn take_pending_start(&mut self) -> Option<SourceId> {
-        if self.start_sent {
-            return None;
-        }
+    fn is_finished(&self) -> bool {
+        matches!(self.phase, Phase::Completed | Phase::Failed)
+    }
 
-        self.start_sent = true;
-
-        Some(self.source_id)
+    /// Whether the load still runs on the actors it started on, given the job's fragments now.
+    fn runs_on(&self, fragments: &HashMap<FragmentId, InflightFragmentInfo>) -> bool {
+        self.fragment_actors.iter().all(|(fragment_id, actors)| {
+            fragments.get(fragment_id).is_some_and(|fragment| {
+                fragment.actors.len() == actors.len()
+                    && fragment
+                        .actors
+                        .keys()
+                        .all(|actor_id| actors.contains(actor_id))
+            })
+        })
     }
 
     pub fn apply_progress(&mut self, report: &LoadReport) {
@@ -202,6 +210,115 @@ impl BoundedLoadTracker {
     /// Takes the queued actions, once their checkpoint commits.
     pub fn take_actions(&mut self) -> Vec<BoundedLoadAction> {
         take(&mut self.actions)
+    }
+}
+
+/// The bounded loads of a database.
+///
+/// A load is registered when its job is created, whatever the creation path, and from its
+/// `LOADING` row on recovery. It starts once its job's actors are in the database graph, and
+/// restarts, resuming, whenever those actors change. So no path that adds or changes a job's
+/// actors (creation, snapshot backfill merge, recovery, reschedule, replace) handles loads itself.
+#[derive(Debug, Default)]
+pub(super) struct BoundedLoads {
+    /// `None` until `Load { Start }` is sent to the actors that run the load.
+    loads: HashMap<(JobId, SourceId), Option<BoundedLoadTracker>>,
+}
+
+impl BoundedLoads {
+    pub fn register(&mut self, job_id: JobId, source_ids: impl IntoIterator<Item = SourceId>) {
+        for source_id in source_ids {
+            self.loads.entry((job_id, source_id)).or_default();
+        }
+    }
+
+    pub fn is_bounded_source(&self, source_id: SourceId) -> bool {
+        self.loads.keys().any(|(_, id)| *id == source_id)
+    }
+
+    /// Drops the loads of jobs that no longer exist.
+    pub fn retain_jobs(&mut self, exists: impl Fn(JobId) -> bool) {
+        self.loads.retain(|(job_id, _), _| exists(*job_id));
+    }
+
+    /// Whether a load needs `Load { Start }`. `fragments` returns the fragments of a job in the
+    /// database graph, and `None` while the job is not in it.
+    pub fn has_pending_start<'a>(
+        &self,
+        fragments: impl Fn(JobId) -> Option<&'a HashMap<FragmentId, InflightFragmentInfo>>,
+    ) -> bool {
+        self.loads
+            .iter()
+            .any(|((job_id, _), tracker)| match fragments(*job_id) {
+                None => false,
+                Some(fragments) => needs_start(tracker.as_ref(), fragments),
+            })
+    }
+
+    /// Starts one load that needs `Load { Start }` on the actors that run it now, returning it.
+    pub fn take_pending_start<'a>(
+        &mut self,
+        database_id: DatabaseId,
+        fragments: impl Fn(JobId) -> Option<&'a HashMap<FragmentId, InflightFragmentInfo>>,
+    ) -> Option<(JobId, SourceId)> {
+        self.loads
+            .iter_mut()
+            .find_map(|(&(job_id, source_id), tracker)| {
+                let fragments = fragments(job_id)?;
+
+                needs_start(tracker.as_ref(), fragments).then(|| {
+                    *tracker = Some(BoundedLoadTracker::new(
+                        database_id,
+                        job_id,
+                        source_id,
+                        fragments.values(),
+                    ));
+
+                    (job_id, source_id)
+                })
+            })
+    }
+
+    /// Applies `report` to the load it belongs to. Several jobs can read the same source, so the
+    /// reporting actor picks the job. Reports of actors a load no longer runs on are dropped.
+    pub fn apply_progress(&mut self, report: &LoadReport) {
+        let tracker = self
+            .loads
+            .iter_mut()
+            .filter(|((_, source_id), _)| *source_id == report.source_id)
+            .find_map(|(_, tracker)| {
+                tracker
+                    .as_mut()
+                    .filter(|tracker| tracker.has_actor(report.actor_id))
+            });
+
+        match tracker {
+            Some(tracker) => tracker.apply_progress(report),
+            None => tracing::warn!(
+                ?report,
+                "ignore progress of an actor no bounded load runs on"
+            ),
+        }
+    }
+
+    /// Takes the queued actions, once their checkpoint commits.
+    pub fn take_actions(&mut self) -> Vec<BoundedLoadAction> {
+        self.loads
+            .values_mut()
+            .flatten()
+            .flat_map(|tracker| tracker.take_actions())
+            .collect()
+    }
+}
+
+/// Finished loads stay registered so that late reports are still recognized as bounded.
+fn needs_start(
+    tracker: Option<&BoundedLoadTracker>,
+    fragments: &HashMap<FragmentId, InflightFragmentInfo>,
+) -> bool {
+    match tracker {
+        None => true,
+        Some(tracker) => !tracker.is_finished() && !tracker.runs_on(fragments),
     }
 }
 
@@ -385,9 +502,9 @@ pub(crate) async fn mark_bounded_job_failed(
 
 /// Fails if any of `job_ids` has an unfinished bounded load.
 ///
-/// A [`BoundedLoadTracker`] counts progress against the actors captured when the load starts,
-/// so operations that change a job's actors (reschedule, replace) would leave the load unable to
-/// complete. Call this inside the same transaction as such operations.
+/// [`BoundedLoads`] restarts a load on a job's new actors, but resuming on rescheduled or replaced
+/// actors is untested, so such operations are rejected while the job loads. Call this inside the
+/// same transaction as such operations.
 pub(crate) async fn ensure_not_loading_bounded(
     conn: &impl ConnectionTrait,
     job_ids: impl IntoIterator<Item = JobId>,
@@ -417,7 +534,7 @@ mod tests {
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_pb::plan_common::PbSourceIngestMode;
     use risingwave_pb::stream_plan::{
-        PbStreamNode, SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
+        NoOpNode, PbStreamNode, SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
     };
 
     use super::*;
@@ -425,7 +542,9 @@ mod tests {
 
     const DATABASE_ID: DatabaseId = DatabaseId::new(1);
     const JOB_ID: JobId = JobId::new(2);
+    const OTHER_JOB_ID: JobId = JobId::new(3);
     const SOURCE_ID: SourceId = SourceId::new(10);
+    const OTHER_SOURCE_ID: SourceId = SourceId::new(11);
 
     /// A source fragment with a fetch fragment yields listers and readers, starting in `Listing`.
     #[test]
@@ -524,6 +643,177 @@ mod tests {
         assert!(bounded_load_sources([&streaming]).unwrap().is_empty());
     }
 
+    /// A load starts once its job is in the database graph, and only once on the same actors.
+    #[test]
+    fn test_loads_start_in_graph() {
+        let mut loads = BoundedLoads::default();
+        loads.register(JOB_ID, [SOURCE_ID]);
+        assert!(loads.is_bounded_source(SOURCE_ID));
+        assert!(!loads.has_pending_start(|_| None));
+        assert_eq!(loads.take_pending_start(DATABASE_ID, |_| None), None);
+
+        let graph = job_fragments(two_phase());
+        assert!(loads.has_pending_start(|_| Some(&graph)));
+        assert_eq!(
+            loads.take_pending_start(DATABASE_ID, |_| Some(&graph)),
+            Some((JOB_ID, SOURCE_ID))
+        );
+        assert!(!loads.has_pending_start(|_| Some(&graph)));
+        assert_eq!(
+            loads.take_pending_start(DATABASE_ID, |_| Some(&graph)),
+            None
+        );
+    }
+
+    /// A load restarts when the actors of its own fragments change, and then drops reports of
+    /// its old actors.
+    #[test]
+    fn test_loads_restart_on_new_actors() {
+        let graph = |fetch_actors: &[u32], other_actors: &[u32]| {
+            job_fragments(vec![
+                fragment(1, &[1, 2], source_node(SOURCE_ID)),
+                fragment(2, fetch_actors, fetch_node(SOURCE_ID)),
+                fragment(3, other_actors, other_node()),
+            ])
+        };
+        let mut loads = BoundedLoads::default();
+        loads.register(JOB_ID, [SOURCE_ID]);
+        let started = graph(&[3, 4], &[6]);
+        loads.take_pending_start(DATABASE_ID, |_| Some(&started));
+        loads.apply_progress(&list_finished(1));
+        loads.apply_progress(&list_finished(2));
+        assert_eq!(loads.take_actions(), vec![list_finish()]);
+
+        let other_scaled_out = graph(&[3, 4], &[6, 7]);
+        assert!(!loads.has_pending_start(|_| Some(&other_scaled_out)));
+        let scaled_out = graph(&[3, 4, 5], &[6]);
+        assert!(loads.has_pending_start(|_| Some(&scaled_out)));
+
+        let moved = graph(&[3, 5], &[6]);
+        assert_eq!(
+            loads.take_pending_start(DATABASE_ID, |_| Some(&moved)),
+            Some((JOB_ID, SOURCE_ID))
+        );
+        assert!(!loads.has_pending_start(|_| Some(&moved)));
+
+        loads.apply_progress(&list_finished(1));
+        loads.apply_progress(&list_finished(2));
+        assert_eq!(loads.take_actions(), vec![list_finish()]);
+        loads.apply_progress(&reader_done(3));
+        loads.apply_progress(&reader_done(4));
+        assert!(loads.take_actions().is_empty());
+        loads.apply_progress(&reader_done(5));
+        assert_eq!(loads.take_actions(), vec![complete()]);
+    }
+
+    /// Completed and failed loads are not restarted when their actors change.
+    #[test]
+    fn test_finished_loads_not_restarted() {
+        for (progress, action) in [
+            (LoadProgress::ReaderDone, complete()),
+            (LoadProgress::Failed, fail()),
+        ] {
+            let mut loads = BoundedLoads::default();
+            loads.register(JOB_ID, [SOURCE_ID]);
+            let graph = job_fragments(one_phase());
+            loads.take_pending_start(DATABASE_ID, |_| Some(&graph));
+            loads.apply_progress(&report(1, progress));
+            loads.apply_progress(&report(2, progress));
+            assert_eq!(loads.take_actions(), vec![action]);
+
+            let moved = job_fragments(vec![fragment(1, &[1, 3], source_node(SOURCE_ID))]);
+            assert!(!loads.has_pending_start(|_| Some(&moved)));
+            assert_eq!(
+                loads.take_pending_start(DATABASE_ID, |_| Some(&moved)),
+                None
+            );
+            assert!(loads.is_bounded_source(SOURCE_ID));
+        }
+    }
+
+    /// Reports go to the started load running on the reporting actor, and others are dropped.
+    #[test]
+    fn test_loads_route_reports() {
+        let mut loads = BoundedLoads::default();
+        loads.register(JOB_ID, [SOURCE_ID]);
+        loads.register(OTHER_JOB_ID, [SOURCE_ID]);
+        loads.apply_progress(&reader_done(1));
+        loads.apply_progress(&reader_done(2));
+
+        let graph = job_fragments(one_phase());
+        let other_graph = job_fragments(vec![fragment(5, &[7, 8], source_node(SOURCE_ID))]);
+        let fragments = |job_id: JobId| {
+            Some(if job_id == JOB_ID {
+                &graph
+            } else {
+                &other_graph
+            })
+        };
+        let first = loads.take_pending_start(DATABASE_ID, fragments);
+        let second = loads.take_pending_start(DATABASE_ID, fragments);
+        assert_eq!(
+            HashSet::from([first, second]),
+            HashSet::from([Some((JOB_ID, SOURCE_ID)), Some((OTHER_JOB_ID, SOURCE_ID))])
+        );
+        assert_eq!(loads.take_pending_start(DATABASE_ID, fragments), None);
+
+        loads.apply_progress(&reader_done(7));
+        loads.apply_progress(&reader_done(9));
+        loads.apply_progress(&LoadReport {
+            actor_id: 8.into(),
+            source_id: OTHER_SOURCE_ID,
+            progress: LoadProgress::ReaderDone,
+        });
+        assert!(loads.take_actions().is_empty());
+        loads.apply_progress(&reader_done(8));
+        assert_eq!(
+            loads.take_actions(),
+            vec![BoundedLoadAction::Complete {
+                job_id: OTHER_JOB_ID,
+                source_id: SOURCE_ID,
+            }]
+        );
+        loads.apply_progress(&reader_done(1));
+        loads.apply_progress(&reader_done(2));
+        assert_eq!(loads.take_actions(), vec![complete()]);
+    }
+
+    /// A job reading two bounded sources starts one load for each.
+    #[test]
+    fn test_loads_two_sources() {
+        let mut loads = BoundedLoads::default();
+        loads.register(JOB_ID, [SOURCE_ID, OTHER_SOURCE_ID]);
+        let graph = job_fragments(vec![
+            fragment(1, &[1, 2], source_node(SOURCE_ID)),
+            fragment(5, &[7, 8], source_node(OTHER_SOURCE_ID)),
+        ]);
+        let first = loads.take_pending_start(DATABASE_ID, |_| Some(&graph));
+        let second = loads.take_pending_start(DATABASE_ID, |_| Some(&graph));
+        assert_eq!(
+            HashSet::from([first, second]),
+            HashSet::from([Some((JOB_ID, SOURCE_ID)), Some((JOB_ID, OTHER_SOURCE_ID))])
+        );
+        assert!(!loads.has_pending_start(|_| Some(&graph)));
+
+        loads.apply_progress(&reader_done(1));
+        loads.apply_progress(&reader_done(2));
+        assert_eq!(loads.take_actions(), vec![complete()]);
+    }
+
+    /// Loads of jobs that no longer exist are dropped.
+    #[test]
+    fn test_loads_retain_jobs() {
+        let mut loads = BoundedLoads::default();
+        loads.register(JOB_ID, [SOURCE_ID]);
+        loads.register(OTHER_JOB_ID, [OTHER_SOURCE_ID]);
+
+        loads.retain_jobs(|job_id| job_id == OTHER_JOB_ID);
+        assert!(!loads.is_bounded_source(SOURCE_ID));
+        assert!(loads.is_bounded_source(OTHER_SOURCE_ID));
+        let graph = job_fragments(one_phase());
+        assert!(!loads.has_pending_start(|job_id| (job_id == JOB_ID).then_some(&graph)));
+    }
+
     fn list_finish() -> BoundedLoadAction {
         BoundedLoadAction::ListFinish {
             database_id: DATABASE_ID,
@@ -577,6 +867,23 @@ mod tests {
             }))),
             ..Default::default()
         }
+    }
+
+    /// A node that reads no source.
+    fn other_node() -> PbStreamNode {
+        PbStreamNode {
+            node_body: Some(NodeBody::NoOp(NoOpNode {})),
+            ..Default::default()
+        }
+    }
+
+    fn job_fragments(
+        fragments: Vec<InflightFragmentInfo>,
+    ) -> HashMap<FragmentId, InflightFragmentInfo> {
+        fragments
+            .into_iter()
+            .map(|fragment| (fragment.fragment_id, fragment))
+            .collect()
     }
 
     fn fragment(fragment_id: u32, actor_ids: &[u32], nodes: PbStreamNode) -> InflightFragmentInfo {

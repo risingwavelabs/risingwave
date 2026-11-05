@@ -63,7 +63,6 @@ use uuid::Uuid;
 use super::{BarrierKind, TracedEpoch};
 use crate::barrier::BackfillOrderState;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
-use crate::barrier::bounded_progress::BoundedLoadTracker;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::{
     IcebergV3JobCheckpointControl, IcebergV3RenderResult, IndependentJobControl, IndependentJobInfo,
@@ -965,21 +964,6 @@ impl PartialGraphRecoverer<'_> {
                         } else {
                             None
                         };
-                    let bounded_load_trackers = active_bounded_loads
-                        .remove(&job_id)
-                        .into_iter()
-                        .flatten()
-                        .map(|source_id| {
-                            let tracker = BoundedLoadTracker::new(
-                                database_id,
-                                job_id,
-                                source_id,
-                                fragment_infos.values(),
-                            );
-                            (source_id, tracker)
-                        })
-                        .collect();
-
                     Ok((
                         job_id,
                         InflightStreamingJobInfo {
@@ -990,7 +974,6 @@ impl PartialGraphRecoverer<'_> {
                                 .unwrap_or_default(),
                             status,
                             cdc_table_backfill_tracker,
-                            bounded_load_trackers,
                         },
                     ))
                 })
@@ -1112,10 +1095,6 @@ impl PartialGraphRecoverer<'_> {
             assert!(
                 !cdc_table_snapshot_splits.contains_key(&job_id),
                 "snapshot backfill job {job_id} should not have cdc backfill"
-            );
-            assert!(
-                !active_bounded_loads.contains_key(&job_id),
-                "snapshot backfill job {job_id} should not have a bounded load"
             );
 
             if is_paused {
@@ -1359,7 +1338,13 @@ impl PartialGraphRecoverer<'_> {
 
         let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
-        let database_info = InflightDatabaseInfo::recover(
+        // The loads of jobs still backfilling start once those jobs merge into the database graph.
+        let database_bounded_loads = database_jobs
+            .keys()
+            .chain(independent_checkpoint_job_controls.keys())
+            .filter_map(|job_id| Some((*job_id, active_bounded_loads.remove(job_id)?)))
+            .collect_vec();
+        let mut database_info = InflightDatabaseInfo::recover(
             database_id,
             database_jobs.into_values(),
             self.control_stream_manager()
@@ -1367,6 +1352,9 @@ impl PartialGraphRecoverer<'_> {
                 .shared_actor_infos()
                 .clone(),
         );
+        for (job_id, source_ids) in database_bounded_loads {
+            database_info.register_bounded_loads(job_id, source_ids);
+        }
         let database_state = BarrierWorkerState::recovery(new_epoch, is_paused);
         Ok(DatabaseCheckpointControl::recovery(
             database_id,
