@@ -98,6 +98,7 @@ pub struct CompactTask {
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTaskAssignment {
     pub compact_task: CompactTask,
+    /// Worker selected to execute the task. Legacy assignments may contain zero.
     pub context_id: HummockContextId,
 }
 
