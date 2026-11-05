@@ -84,23 +84,59 @@ It will run RisingWave with corresponding (object) storage products.
 
 ## Build the images
 
-The docker images for x86_64 are built with AVX2 SIMD extensions, while the images for aarch64 are built with NEON SIMD extensions. These must be available on your machine. If your machine does not support these extensions, you must build the docker image with the build-arg `simd_disabled=true`.
+The default images use AVX2 on x86_64 and NEON on aarch64.
 
 To build the images, simply run:
 
 ```
-docker build . -f docker/Dockerfile
+docker build . -f docker/Dockerfile --build-arg CARGO_PROFILE=production
 ```
 
 from the project root.
 
-To build the images without SIMD vector extensions, run
+### ARM CPU targets
 
-```
-docker build . -f docker/Dockerfile --build-arg simd_disabled=true
+Set `RW_TARGET_CPU` explicitly for the deployment hardware. The default `generic`
+keeps the existing ARM build flags. Different instance sizes using the same CPU
+can share an image.
+
+| `RW_TARGET_CPU` | Deployment hardware | CI image tag suffix |
+| --- | --- | --- |
+| `generic` (default) | Existing supported ARM64 machines | `-aarch64` |
+| `neoverse-n1` | Graviton2 and newer | `-aarch64-neoverse-n1` |
+| `neoverse-v1` | Graviton3 | `-aarch64-neoverse-v1` |
+| `neoverse-v2` | Graviton4 | `-aarch64-neoverse-v2` |
+
+For example, build a Graviton3 image on an ARM64 builder:
+
+```bash
+docker build . -f docker/Dockerfile \
+  --build-arg CARGO_PROFILE=production \
+  --build-arg RW_TARGET_CPU=neoverse-v1 \
+  -t risingwave:local-aarch64-neoverse-v1
 ```
 
-from the project root and run any subsequent docker commands on the resultant image.
+The parameter appends a Rust CPU target to the repository's Cargo flags. It does
+not set global C/C++ compiler flags or change Java and prebuilt libraries. The
+image records the target in the `io.risingwave.target-cpu` label. Build scripts and
+proc macros retain the host CPU target.
+
+For the Docker Buildkite pipeline (`ci/workflows/docker.yml`), set the build
+environment variable `RW_TARGET_CPU=neoverse-v1`. This selects the ARM image path;
+x86 builds, binary releases and image scanning are skipped. CPU-specific staging
+tags and registry build caches get the CPU suffix. Published aliases also get the
+suffix, for example `git-<commit>-neoverse-v1` or `vX.Y.Z-neoverse-v1`, and contain
+only the ARM image. The default workflow keeps its existing tags and architectures.
+The nightly/tag-release workflow is unchanged; use the Docker pipeline for these
+opt-in builds.
+
+The builder used for the startup smoke test must support the chosen target. The
+existing `linux-arm64` queue does not itself guarantee Graviton3/4 hardware; select
+a compatible agent before running a CPU-specific build. A failed startup prevents
+publication. Deployment must likewise select a matching image and constrain its
+node pool; the standard multi-architecture manifest does not choose CPU models.
+The CPU suffixes are reserved, and the publishing scripts reject retags that add,
+remove or change a CPU requirement.
 
 ## Generate docker-compose.yml
 

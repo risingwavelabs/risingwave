@@ -69,6 +69,7 @@ ENV GIT_SHA=$GIT_SHA
 
 ARG CARGO_PROFILE
 ENV CARGO_PROFILE=$CARGO_PROFILE
+ARG RW_TARGET_CPU=generic
 
 COPY ./ /risingwave
 WORKDIR /risingwave
@@ -76,12 +77,23 @@ WORKDIR /risingwave
 ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
-RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion && \
+RUN source docker/cpu-target.sh && \
+  cargo_args=() && \
+  output_dir="/risingwave/target/${CARGO_PROFILE}" && \
+  if [[ "$RW_TARGET_CPU" != generic ]]; then \
+    [[ "$(uname -m)" == aarch64 ]] || { echo "RW_TARGET_CPU requires an ARM64 build" >&2; exit 1; }; \
+    [[ -z "${RUSTFLAGS+x}${CARGO_ENCODED_RUSTFLAGS+x}" ]] || { echo "RW_TARGET_CPU cannot be combined with RUSTFLAGS overrides" >&2; exit 1; }; \
+    # Append to the repository flags; keep build scripts and proc macros on the host CPU target. \
+    cargo_args+=(--config "target.aarch64-unknown-linux-gnu.rustflags=[\"-Ctarget-cpu=${RW_TARGET_CPU}\"]" --target aarch64-unknown-linux-gnu); \
+    output_dir="/risingwave/target/aarch64-unknown-linux-gnu/${CARGO_PROFILE}"; \
+  fi && \
+  echo "Building Rust code with RW_TARGET_CPU=${RW_TARGET_CPU}" && \
+  cargo fetch && \
+  cargo build "${cargo_args[@]}" -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf --features datafusion && \
   mkdir -p /risingwave/bin && \
-  mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
-  mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
-  cp ./target/${CARGO_PROFILE}/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
+  mv "${output_dir}/risingwave" /risingwave/bin/ && \
+  mv "${output_dir}/risingwave.dwp" /risingwave/bin/ && \
+  cp "${output_dir}"/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib/adbc && \
   # Download ADBC Snowflake driver shared library for runtime (avoid invoking risedev/cargo-make here).
@@ -126,6 +138,8 @@ RUN ./build-debezium.sh && \
 FROM base AS risingwave
 
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
+ARG RW_TARGET_CPU=generic
+LABEL io.risingwave.target-cpu=$RW_TARGET_CPU
 
 RUN apt-get update && apt-get -y install linux-tools-generic \
   && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf

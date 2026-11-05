@@ -5,6 +5,8 @@ set -euo pipefail
 
 : "${SOURCE_IMAGE_TAG:?Set SOURCE_IMAGE_TAG to the existing image tag}"
 : "${TARGET_IMAGE_TAG:?Set TARGET_IMAGE_TAG to the new image tag}"
+source docker/cpu-target.sh
+validate_cpu_retag "$SOURCE_IMAGE_TAG" "$TARGET_IMAGE_TAG"
 
 DUPLICATE_ON_GHCR="${DUPLICATE_ON_GHCR:-false}"
 DUPLICATE_ON_DOCKERHUB="${DUPLICATE_ON_DOCKERHUB:-false}"
