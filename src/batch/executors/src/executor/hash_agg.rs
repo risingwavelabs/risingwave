@@ -15,39 +15,35 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
 use prometheus::core::Atomic;
 use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::bitmap::{Bitmap, FilterByBitmap};
+use risingwave_common::bitmap::{BitmapBuilder, FilterByBitmap};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
-use risingwave_pb::Message;
 use risingwave_pb::batch_plan::HashAggNode;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::data::DataChunk as PbDataChunk;
 
 use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    WrapStreamExecutor,
 };
 use crate::monitor::BatchSpillMetrics;
+use crate::spill::MIN_WORKING_SET_BYTES;
+use crate::spill::partition::{PENDING_BYTES, PartitionWriter, read_coalesced};
+use crate::spill::spill_file::{SpillDir, SpillFile};
+use crate::spill::spill_op::SpillBackend;
 use crate::spill::spill_op::SpillBackend::Disk;
-use crate::spill::spill_op::{
-    DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY, SpillBackend, SpillBuildHasher, SpillOp,
-};
 use crate::task::{ShutdownToken, TaskId};
 
 type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<AggregateState>, PrecomputedBuildHasher, A>;
@@ -195,15 +191,11 @@ pub struct HashAggExecutor<K> {
     /// Output schema
     schema: Schema,
     child: BoxedExecutor,
-    /// Used to initialize the state of the aggregation from the spilled files.
-    init_agg_state_executor: Option<BoxedExecutor>,
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
     spill_backend: Option<SpillBackend>,
     spill_metrics: Arc<BatchSpillMetrics>,
-    /// The upper bound of memory usage for this executor.
-    memory_upper_bound: Option<u64>,
     shutdown_rx: ShutdownToken,
     _phantom: PhantomData<K>,
 }
@@ -223,52 +215,17 @@ impl<K> HashAggExecutor<K> {
         spill_metrics: Arc<BatchSpillMetrics>,
         shutdown_rx: ShutdownToken,
     ) -> Self {
-        Self::new_inner(
-            aggs,
-            group_key_columns,
-            group_key_types,
-            schema,
-            child,
-            None,
-            identity,
-            chunk_size,
-            mem_context,
-            spill_backend,
-            spill_metrics,
-            None,
-            shutdown_rx,
-        )
-    }
-
-    #[expect(clippy::too_many_arguments)]
-    fn new_inner(
-        aggs: Arc<Vec<BoxedAggregateFunction>>,
-        group_key_columns: Vec<usize>,
-        group_key_types: Vec<DataType>,
-        schema: Schema,
-        child: BoxedExecutor,
-        init_agg_state_executor: Option<BoxedExecutor>,
-        identity: String,
-        chunk_size: usize,
-        mem_context: MemoryContext,
-        spill_backend: Option<SpillBackend>,
-        spill_metrics: Arc<BatchSpillMetrics>,
-        memory_upper_bound: Option<u64>,
-        shutdown_rx: ShutdownToken,
-    ) -> Self {
         HashAggExecutor {
             aggs,
             group_key_columns,
             group_key_types,
             schema,
             child,
-            init_agg_state_executor,
             identity,
             chunk_size,
             mem_context,
             spill_backend,
             spill_metrics,
-            memory_upper_bound,
             shutdown_rx,
             _phantom: PhantomData,
         }
@@ -289,448 +246,262 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
     }
 }
 
-/// `AggSpillManager` is used to manage how to write spill data file and read them back.
-/// The spill data first need to be partitioned. Each partition contains 2 files: `agg_state_file` and `input_chunks_file`.
-/// The spill file consume a data chunk and serialize the chunk into a protobuf bytes.
-/// Finally, spill file content will look like the below.
-/// The file write pattern is append-only and the read pattern is sequential scan.
-/// This can maximize the disk IO performance.
-///
-/// ```text
-/// [proto_len]
-/// [proto_bytes]
-/// ...
-/// [proto_len]
-/// [proto_bytes]
-/// ```
-pub struct AggSpillManager {
-    op: SpillOp,
-    partition_num: usize,
-    agg_state_writers: Vec<opendal::Writer>,
-    agg_state_chunk_builder: Vec<DataChunkBuilder>,
-    input_writers: Vec<opendal::Writer>,
-    input_chunk_builders: Vec<DataChunkBuilder>,
-    spill_build_hasher: SpillBuildHasher,
-    group_key_types: Vec<DataType>,
-    child_data_types: Vec<DataType>,
-    agg_data_types: Vec<DataType>,
-    spill_chunk_size: usize,
-    spill_metrics: Arc<BatchSpillMetrics>,
-}
+/// The inputs of a spilled partition: input rows, and states that a pass wrote out with their group
+/// keys.
+const ROWS: usize = 0;
+const STATES: usize = 1;
 
-impl AggSpillManager {
-    fn new(
-        spill_backend: SpillBackend,
-        agg_identity: &String,
-        partition_num: usize,
-        group_key_types: Vec<DataType>,
-        agg_data_types: Vec<DataType>,
-        child_data_types: Vec<DataType>,
-        spill_chunk_size: usize,
-        spill_metrics: Arc<BatchSpillMetrics>,
-    ) -> Result<Self> {
-        let suffix_uuid = uuid::Uuid::new_v4();
-        let dir = format!("{}-{}/", agg_identity, suffix_uuid);
-        let op = SpillOp::create(dir, spill_backend)?;
-        let agg_state_writers = Vec::with_capacity(partition_num);
-        let agg_state_chunk_builder = Vec::with_capacity(partition_num);
-        let input_writers = Vec::with_capacity(partition_num);
-        let input_chunk_builders = Vec::with_capacity(partition_num);
-        // Use uuid to generate an unique hasher so that when recursive spilling happens they would use a different hasher to avoid data skew.
-        let spill_build_hasher = SpillBuildHasher(suffix_uuid.as_u64_pair().1);
-        Ok(Self {
-            op,
-            partition_num,
-            agg_state_writers,
-            agg_state_chunk_builder,
-            input_writers,
-            input_chunk_builders,
-            spill_build_hasher,
-            group_key_types,
-            child_data_types,
-            agg_data_types,
-            spill_chunk_size,
-            spill_metrics,
-        })
-    }
-
-    async fn init_writers(&mut self) -> Result<()> {
-        for i in 0..self.partition_num {
-            let agg_state_partition_file_name = format!("agg-state-p{}", i);
-            let w = self.op.writer_with(&agg_state_partition_file_name).await?;
-            self.agg_state_writers.push(w);
-
-            let partition_file_name = format!("input-chunks-p{}", i);
-            let w = self.op.writer_with(&partition_file_name).await?;
-            self.input_writers.push(w);
-            self.input_chunk_builders.push(DataChunkBuilder::new(
-                self.child_data_types.clone(),
-                self.spill_chunk_size,
-            ));
-            self.agg_state_chunk_builder.push(DataChunkBuilder::new(
-                self.group_key_types
-                    .iter()
-                    .cloned()
-                    .chain(self.agg_data_types.iter().cloned())
-                    .collect(),
-                self.spill_chunk_size,
-            ));
-        }
-        Ok(())
-    }
-
-    async fn write_agg_state_row(&mut self, row: impl Row, hash_code: u64) -> Result<()> {
-        let partition = hash_code as usize % self.partition_num;
-        if let Some(output_chunk) = self.agg_state_chunk_builder[partition].append_one_row(row) {
-            let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-            let buf = Message::encode_to_vec(&chunk_pb);
-            let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-            self.spill_metrics
-                .batch_spill_write_bytes
-                .inc_by((buf.len() + len_bytes.len()) as u64);
-            self.agg_state_writers[partition].write(len_bytes).await?;
-            self.agg_state_writers[partition].write(buf).await?;
-        }
-        Ok(())
-    }
-
-    async fn write_input_chunk(&mut self, chunk: DataChunk, hash_codes: Vec<u64>) -> Result<()> {
-        let (columns, vis) = chunk.into_parts_v2();
-        for partition in 0..self.partition_num {
-            let new_vis = vis.clone()
-                & Bitmap::from_iter(
-                    hash_codes
-                        .iter()
-                        .map(|hash_code| (*hash_code as usize % self.partition_num) == partition),
-                );
-            let new_chunk = DataChunk::from_parts(columns.clone(), new_vis);
-            for output_chunk in self.input_chunk_builders[partition].append_chunk(new_chunk) {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.input_writers[partition].write(len_bytes).await?;
-                self.input_writers[partition].write(buf).await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn close_writers(&mut self) -> Result<()> {
-        for partition in 0..self.partition_num {
-            if let Some(output_chunk) = self.agg_state_chunk_builder[partition].consume_all() {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.agg_state_writers[partition].write(len_bytes).await?;
-                self.agg_state_writers[partition].write(buf).await?;
-            }
-
-            if let Some(output_chunk) = self.input_chunk_builders[partition].consume_all() {
-                let chunk_pb: PbDataChunk = output_chunk.to_protobuf();
-                let buf = Message::encode_to_vec(&chunk_pb);
-                let len_bytes = Bytes::copy_from_slice(&(buf.len() as u32).to_le_bytes());
-                self.spill_metrics
-                    .batch_spill_write_bytes
-                    .inc_by((buf.len() + len_bytes.len()) as u64);
-                self.input_writers[partition].write(len_bytes).await?;
-                self.input_writers[partition].write(buf).await?;
-            }
-        }
-
-        for mut w in self.agg_state_writers.drain(..) {
-            w.close().await?;
-        }
-        for mut w in self.input_writers.drain(..) {
-            w.close().await?;
-        }
-        Ok(())
-    }
-
-    async fn read_agg_state_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
-        let agg_state_partition_file_name = format!("agg-state-p{}", partition);
-        let r = self.op.reader_with(&agg_state_partition_file_name).await?;
-        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
-    }
-
-    async fn read_input_partition(&mut self, partition: usize) -> Result<BoxedDataChunkStream> {
-        let input_partition_file_name = format!("input-chunks-p{}", partition);
-        let r = self.op.reader_with(&input_partition_file_name).await?;
-        Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
-    }
-
-    async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
-        let agg_state_partition_file_name = format!("agg-state-p{}", partition);
-        let agg_state_size = self
-            .op
-            .stat(&agg_state_partition_file_name)
-            .await?
-            .content_length();
-        let input_partition_file_name = format!("input-chunks-p{}", partition);
-        let input_size = self
-            .op
-            .stat(&input_partition_file_name)
-            .await?
-            .content_length();
-        Ok(agg_state_size + input_size)
-    }
-
-    async fn clear_partition(&mut self, partition: usize) -> Result<()> {
-        let agg_state_partition_file_name = format!("agg-state-p{}", partition);
-        self.op.delete(&agg_state_partition_file_name).await?;
-        let input_partition_file_name = format!("input-chunks-p{}", partition);
-        self.op.delete(&input_partition_file_name).await?;
-        Ok(())
-    }
-}
+/// Level from which a pass whose states keep growing beyond the memory limit fails instead of
+/// writing them out again, so that splitting terminates even if groups keep sharing partitions.
+const MAX_LEVELS: u32 = 32;
 
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
+    /// Aggregates the input in passes. A pass creates groups until the memory limit is exceeded,
+    /// then admits no more: rows of its groups keep updating them, and rows of other groups are
+    /// written to partitions by their group key. When its input ends, the pass outputs its groups,
+    /// and each partition becomes the input of another pass.
+    ///
+    /// The states of admitted groups may keep growing, as those of `string_agg` or DISTINCT do. When
+    /// they grow while the memory limit is exceeded, the pass writes them to the partitions of their
+    /// groups and sends all its later rows there too, and the next passes resume them. That needs
+    /// states that can be encoded and more than one group: otherwise the pass fails with
+    /// `OutOfMemory`.
+    ///
+    /// Up to [`MIN_WORKING_SET_BYTES`] of the executor's memory, or of the states for their growth,
+    /// is used regardless of the limit, so that spilling makes progress when other queries hold
+    /// the whole budget.
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        // Keep this partition's charges separate from the shared parent. Its private context
-        // releases remaining state charges on completion, errors, or cancellation.
-        let mem_context = MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0));
-        let child_schema = self.child.schema().clone();
-        let mut need_to_spill = false;
-        // If the memory upper bound is less than 1MB, we don't need to check memory usage.
-        let check_memory = match self.memory_upper_bound {
-            Some(upper_bound) => upper_bound > SPILL_AT_LEAST_MEMORY,
-            None => true,
+        let Self {
+            aggs,
+            group_key_columns,
+            group_key_types,
+            child,
+            identity,
+            chunk_size,
+            mem_context,
+            spill_backend,
+            spill_metrics,
+            shutdown_rx,
+            ..
+        } = *self;
+        // A private context releases the remaining charges on completion, errors and cancellation.
+        let mem_context = MemoryContext::new(Some(mem_context), TrAdderAtomic::new(0));
+        let input_data_types = child.schema().data_types();
+        // An encodable state is a datum of its aggregate's return type.
+        let states_encodable = aggs
+            .iter()
+            .all(|agg| matches!(agg.create_state(), Ok(AggregateState::Datum(_))));
+        let state_key_columns = (0..group_key_types.len()).collect_vec();
+        let state_data_types = group_key_types
+            .iter()
+            .cloned()
+            .chain(aggs.iter().map(|agg| agg.return_type()))
+            .collect_vec();
+        let start_spilling = |spill_dir: &mut Option<SpillDir>, level: u32| {
+            let Some(spill_backend) = &spill_backend else {
+                return Err(BatchError::OutOfMemory(mem_context.mem_limit()));
+            };
+            if spill_dir.is_none() {
+                info!(identity, "batch hash agg executor starts to spill");
+                *spill_dir = Some(SpillDir::create(
+                    spill_backend.clone(),
+                    spill_metrics.clone(),
+                )?);
+            }
+            PartitionWriter::new(
+                spill_dir.as_ref().unwrap(),
+                level,
+                [group_key_columns.clone(), state_key_columns.clone()],
+                [input_data_types.clone(), state_data_types.clone()],
+                chunk_size,
+                &mem_context,
+            )
         };
+        let mut spill_dir = None;
+        // Spilled partitions left to aggregate, with the spills that produced each.
+        let mut partitions: Vec<([SpillFile; 2], u32)> = vec![];
+        let mut states_input: Option<BoxedDataChunkStream> = None;
+        let mut input = child.execute();
+        let mut level = 0;
+        let over_limit = || {
+            mem_context.get_bytes_used() as u64 > MIN_WORKING_SET_BYTES
+                && !mem_context.check_memory_usage()
+        };
+        loop {
+            let mut states_heap_size = 0;
+            let mut groups = AggHashMap::<K, _>::with_hasher_in(
+                PrecomputedBuildHasher,
+                mem_context.global_allocator(),
+            );
+            // Set once the pass stops admitting groups.
+            let mut writer: Option<PartitionWriter<2>> = None;
 
-        // Track only this executor's manual charges; spill partitions share the parent counter.
-        let mut states_heap_size = 0;
-        // hash map for each agg groups
-        let mut groups = AggHashMap::<K, _>::with_hasher_in(
-            PrecomputedBuildHasher,
-            mem_context.global_allocator(),
-        );
-
-        if let Some(init_agg_state_executor) = self.init_agg_state_executor {
-            // `init_agg_state_executor` exists which means this is a sub `HashAggExecutor` used to consume spilling data.
-            // The spilled agg states by its parent executor need to be recovered first.
-            let mut init_agg_state_stream = init_agg_state_executor.execute();
-            #[for_await]
-            for chunk in &mut init_agg_state_stream {
-                let chunk = chunk?;
-                let group_key_indices = (0..self.group_key_columns.len()).collect_vec();
-                let keys = K::build_many(&group_key_indices, &chunk);
-                let mut memory_usage_diff = 0;
-                for (row_id, key) in keys.into_iter().enumerate() {
-                    let mut agg_states = vec![];
-                    for i in 0..self.aggs.len() {
-                        let agg = &self.aggs[i];
-                        let datum = chunk
-                            .row_at(row_id)
-                            .0
-                            .datum_at(self.group_key_columns.len() + i)
-                            .to_owned_datum();
-                        let agg_state = agg.decode_state(datum)?;
-                        memory_usage_diff += agg_state.estimated_size() as i64;
-                        agg_states.push(agg_state);
+            if let Some(states) = states_input.take() {
+                #[for_await]
+                for chunk in states {
+                    let chunk = chunk?;
+                    let keys = K::build_many(&state_key_columns, &chunk);
+                    let mut rejected = writer
+                        .is_some()
+                        .then(|| BitmapBuilder::zeroed(chunk.capacity()));
+                    let mut memory_usage_diff = 0;
+                    for (row_id, key) in keys
+                        .into_iter()
+                        .enumerate()
+                        .filter_by_bitmap(chunk.visibility())
+                    {
+                        if let Some(rejected) = &mut rejected {
+                            rejected.set(row_id, true);
+                            continue;
+                        }
+                        let row = chunk.row_at_unchecked_vis(row_id);
+                        let states: Vec<_> = (aggs.iter().enumerate())
+                            .map(|(i, agg)| {
+                                agg.decode_state(
+                                    row.datum_at(state_key_columns.len() + i).to_owned_datum(),
+                                )
+                            })
+                            .try_collect()?;
+                        memory_usage_diff += states
+                            .iter()
+                            .map(|state| state.estimated_size() as i64)
+                            .sum::<i64>();
+                        // A pass writes out each group's states at most once.
+                        groups.try_insert(key, states).unwrap();
                     }
-                    groups.try_insert(key, agg_states).unwrap();
-                }
+                    states_heap_size += memory_usage_diff;
+                    mem_context.add_unchecked(memory_usage_diff);
 
-                // Restored states are retained even when loading the partition exceeds the limit.
+                    if let Some(writer) = &mut writer {
+                        let rejected = chunk.with_visibility(rejected.unwrap().finish());
+                        writer.write(STATES, &rejected).await?;
+                    } else if over_limit() {
+                        writer = Some(start_spilling(&mut spill_dir, level)?);
+                    }
+                }
+            }
+
+            #[for_await]
+            for chunk in &mut input {
+                let chunk = StreamChunk::from(chunk?);
+                let keys = K::build_many(group_key_columns.as_slice(), &chunk);
+                let mut rejected = writer
+                    .is_some()
+                    .then(|| BitmapBuilder::zeroed(chunk.capacity()));
+                let mut memory_usage_diff = 0;
+                for (row_id, key) in keys
+                    .into_iter()
+                    .enumerate()
+                    .filter_by_bitmap(chunk.visibility())
+                {
+                    let (states, new_group) = match &mut rejected {
+                        Some(rejected) => match groups.get_mut(&key) {
+                            Some(states) => (states, false),
+                            None => {
+                                rejected.set(row_id, true);
+                                continue;
+                            }
+                        },
+                        None => match groups.entry(key) {
+                            Entry::Occupied(entry) => (entry.into_mut(), false),
+                            Entry::Vacant(entry) => {
+                                let states =
+                                    aggs.iter().map(|agg| agg.create_state()).try_collect()?;
+                                (entry.insert(states), true)
+                            }
+                        },
+                    };
+
+                    // TODO: currently not a vectorized implementation
+                    for (agg, state) in aggs.iter().zip_eq_fast(states) {
+                        if !new_group {
+                            memory_usage_diff -= state.estimated_size() as i64;
+                        }
+                        agg.update_range(state, &chunk, row_id..row_id + 1).await?;
+                        memory_usage_diff += state.estimated_size() as i64;
+                    }
+                }
+                // States have already been updated and must remain charged until they are released.
                 states_heap_size += memory_usage_diff;
                 mem_context.add_unchecked(memory_usage_diff);
-                if check_memory && !mem_context.check_memory_usage() {
-                    warn!(
-                        "not enough memory to load one partition agg state after spill which is not a normal case, so keep going"
-                    );
-                }
-            }
-        }
 
-        let mut input_stream = self.child.execute();
-        // consume all chunks to compute the agg result
-        #[for_await]
-        for chunk in &mut input_stream {
-            let chunk = StreamChunk::from(chunk?);
-            let keys = K::build_many(self.group_key_columns.as_slice(), &chunk);
-            let mut memory_usage_diff = 0;
-            for (row_id, key) in keys
-                .into_iter()
-                .enumerate()
-                .filter_by_bitmap(chunk.visibility())
-            {
-                let mut new_group = false;
-                let states = match groups.entry(key) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => {
-                        new_group = true;
-                        let states = self
-                            .aggs
-                            .iter()
-                            .map(|agg| agg.create_state())
-                            .try_collect()?;
-                        entry.insert(states)
+                if let Some(writer) = &mut writer {
+                    let rejected = chunk
+                        .data_chunk()
+                        .with_visibility(rejected.unwrap().finish());
+                    writer.write(ROWS, &rejected).await?;
+                    if memory_usage_diff > 0
+                        && states_heap_size as u64 > MIN_WORKING_SET_BYTES
+                        && !mem_context.check_memory_usage()
+                    {
+                        if !states_encodable || groups.len() <= 1 || level >= MAX_LEVELS {
+                            return Err(BatchError::OutOfMemory(mem_context.mem_limit()));
+                        }
+                        // With no groups left, the pass rejects all its later rows.
+                        let mut builders = vec![];
+                        let (mut rows, mut bytes) = (0, 0);
+                        for (key, states) in &groups {
+                            if rows == 0 {
+                                builders = (state_data_types.iter())
+                                    .map(|data_type| data_type.create_array_builder(chunk_size))
+                                    .collect_vec();
+                            }
+                            let (key_builders, state_builders) =
+                                builders.split_at_mut(state_key_columns.len());
+                            key.deserialize_to_builders(key_builders, &group_key_types)?;
+                            for ((agg, state), builder) in
+                                aggs.iter().zip_eq_fast(states).zip_eq_fast(state_builders)
+                            {
+                                bytes += state.estimated_size();
+                                builder.append(agg.encode_state(state)?);
+                            }
+                            rows += 1;
+                            if rows == chunk_size || bytes >= PENDING_BYTES {
+                                let columns = builders.drain(..).map(|b| b.finish().into());
+                                let states_chunk = DataChunk::new(columns.collect(), rows);
+                                writer.write(STATES, &states_chunk).await?;
+                                (rows, bytes) = (0, 0);
+                            }
+                        }
+                        if rows > 0 {
+                            let columns = builders.drain(..).map(|b| b.finish().into());
+                            let states_chunk = DataChunk::new(columns.collect(), rows);
+                            writer.write(STATES, &states_chunk).await?;
+                        }
+                        groups = AggHashMap::<K, _>::with_hasher_in(
+                            PrecomputedBuildHasher,
+                            mem_context.global_allocator(),
+                        );
+                        mem_context.add_unchecked(-states_heap_size);
+                        states_heap_size = 0;
                     }
-                };
-
-                // TODO: currently not a vectorized implementation
-                for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
-                    if !new_group {
-                        memory_usage_diff -= state.estimated_size() as i64;
-                    }
-                    agg.update_range(state, &chunk, row_id..row_id + 1).await?;
-                    memory_usage_diff += state.estimated_size() as i64;
+                } else if over_limit() {
+                    writer = Some(start_spilling(&mut spill_dir, level)?);
                 }
             }
-            // States have already been updated and must remain charged until they are released.
-            states_heap_size += memory_usage_diff;
-            mem_context.add_unchecked(memory_usage_diff);
-            if check_memory && !mem_context.check_memory_usage() {
-                if self.spill_backend.is_some() {
-                    need_to_spill = true;
-                    break;
-                } else {
-                    Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
-                }
-            }
-        }
 
-        if need_to_spill {
-            // A spilling version of aggregation based on the RFC: Spill Hash Aggregation https://github.com/risingwavelabs/rfcs/pull/89
-            // When HashAggExecutor told memory is insufficient, AggSpillManager will start to partition the hash table and spill to disk.
-            // After spilling the hash table, AggSpillManager will consume all chunks from the input executor,
-            // partition and spill to disk with the same hash function as the hash table spilling.
-            // Finally, we would get e.g. 20 partitions. Each partition should contain a portion of the original hash table and input data.
-            // A sub HashAggExecutor would be used to consume each partition one by one.
-            // If memory is still not enough in the sub HashAggExecutor, it will spill its hash table and input recursively.
-            info!(
-                "batch hash agg executor {} starts to spill out",
-                &self.identity
-            );
-            let mut agg_spill_manager = AggSpillManager::new(
-                self.spill_backend.clone().unwrap(),
-                &self.identity,
-                DEFAULT_SPILL_PARTITION_NUM,
-                self.group_key_types.clone(),
-                self.aggs.iter().map(|agg| agg.return_type()).collect(),
-                child_schema.data_types(),
-                self.chunk_size,
-                self.spill_metrics.clone(),
-            )?;
-            agg_spill_manager.init_writers().await?;
-
-            let mut memory_usage_diff = 0;
-            // Spill agg states.
-            for (key, states) in groups {
-                let key_row = key.deserialize(&self.group_key_types)?;
-                let mut agg_datums = vec![];
-                for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
-                    let encode_state = agg.encode_state(&state)?;
-                    memory_usage_diff -= state.estimated_size() as i64;
-                    agg_datums.push(encode_state);
-                }
-                let agg_state_row = OwnedRow::from_iter(agg_datums.into_iter());
-                // Must match the partition of the group's remaining input rows, which are hashed
-                // by their key columns below.
-                let hash_code = key_row.hash(agg_spill_manager.spill_build_hasher).value();
-                agg_spill_manager
-                    .write_agg_state_row(key_row.chain(agg_state_row), hash_code)
-                    .await?;
-            }
-
-            // Release memory occupied by agg hash map.
-            debug_assert_eq!(memory_usage_diff, -states_heap_size);
-            mem_context.add_unchecked(memory_usage_diff);
-
-            // Spill input chunks.
-            #[for_await]
-            for chunk in input_stream {
-                let chunk: DataChunk = chunk?;
-                let hash_codes = chunk.get_hash_values(
-                    self.group_key_columns.as_slice(),
-                    agg_spill_manager.spill_build_hasher,
-                );
-                agg_spill_manager
-                    .write_input_chunk(
-                        chunk,
-                        hash_codes
-                            .into_iter()
-                            .map(|hash_code| hash_code.value())
-                            .collect(),
-                    )
-                    .await?;
-            }
-
-            agg_spill_manager.close_writers().await?;
-
-            // Process each partition one by one.
-            for i in 0..agg_spill_manager.partition_num {
-                let partition_size = agg_spill_manager.estimate_partition_size(i).await?;
-
-                let agg_state_stream = agg_spill_manager.read_agg_state_partition(i).await?;
-                let input_stream = agg_spill_manager.read_input_partition(i).await?;
-
-                let sub_hash_agg_executor: HashAggExecutor<K> = HashAggExecutor::new_inner(
-                    self.aggs.clone(),
-                    self.group_key_columns.clone(),
-                    self.group_key_types.clone(),
-                    self.schema.clone(),
-                    Box::new(WrapStreamExecutor::new(child_schema.clone(), input_stream)),
-                    Some(Box::new(WrapStreamExecutor::new(
-                        self.schema.clone(),
-                        agg_state_stream,
-                    ))),
-                    format!("{}-sub{}", self.identity.clone(), i),
-                    self.chunk_size,
-                    self.mem_context.clone(),
-                    self.spill_backend.clone(),
-                    self.spill_metrics.clone(),
-                    Some(partition_size),
-                    self.shutdown_rx.clone(),
-                );
-
-                debug!(
-                    "create sub_hash_agg {} for hash_agg {} to spill",
-                    sub_hash_agg_executor.identity, self.identity
-                );
-
-                let sub_hash_agg_stream = Box::new(sub_hash_agg_executor).execute();
-
-                #[for_await]
-                for chunk in sub_hash_agg_stream {
-                    let chunk = chunk?;
-                    yield chunk;
-                }
-
-                // Clear files of the current partition.
-                agg_spill_manager.clear_partition(i).await?;
-            }
-        } else {
             // Don't use `into_iter` here, it may cause memory leak.
             let mut result = groups.iter_mut();
-            let cardinality = self.chunk_size;
             loop {
-                let mut group_builders: Vec<_> = self
-                    .group_key_types
+                let mut group_builders: Vec<_> = group_key_types
                     .iter()
-                    .map(|datatype| datatype.create_array_builder(cardinality))
+                    .map(|datatype| datatype.create_array_builder(chunk_size))
                     .collect();
 
-                let mut agg_builders: Vec<_> = self
-                    .aggs
+                let mut agg_builders: Vec<_> = aggs
                     .iter()
-                    .map(|agg| agg.return_type().create_array_builder(cardinality))
+                    .map(|agg| agg.return_type().create_array_builder(chunk_size))
                     .collect();
 
                 let mut has_next = false;
                 let mut array_len = 0;
-                for (key, states) in result.by_ref().take(cardinality) {
-                    self.shutdown_rx.check()?;
+                for (key, states) in result.by_ref().take(chunk_size) {
+                    shutdown_rx.check()?;
                     has_next = true;
                     array_len += 1;
-                    key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
-                    for ((agg, state), builder) in (self.aggs.iter())
+                    key.deserialize_to_builders(&mut group_builders[..], &group_key_types)?;
+                    for ((agg, state), builder) in (aggs.iter())
                         .zip_eq_fast(states)
                         .zip_eq_fast(&mut agg_builders)
                     {
@@ -751,6 +522,34 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 let output = DataChunk::new(columns, array_len);
                 yield output;
             }
+            drop(groups);
+            mem_context.add_unchecked(-states_heap_size);
+
+            if let Some(writer) = writer {
+                for files in writer.finish().await? {
+                    if files.iter().any(|file| file.rows() > 0) {
+                        partitions.push((files, level + 1));
+                    }
+                }
+            }
+            let Some(([rows, states], partition_level)) = partitions.pop() else {
+                break;
+            };
+            states_input = (states.rows() > 0).then(|| {
+                read_coalesced(
+                    states,
+                    state_data_types.clone(),
+                    chunk_size,
+                    mem_context.clone(),
+                )
+            });
+            input = read_coalesced(
+                rows,
+                input_data_types.clone(),
+                chunk_size,
+                mem_context.clone(),
+            );
+            level = partition_level;
         }
     }
 }
@@ -762,8 +561,11 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use allocator_api2::alloc::{AllocError as AllocErrorApi2, Allocator as AllocatorApi2};
+    use futures::StreamExt;
     use futures_async_stream::for_await;
+    use risingwave_common::array::{Array, I32Array, I64Array, Utf8Array};
     use risingwave_common::metrics::LabelGuardedIntGauge;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_pb::data::PbDataType;
@@ -773,7 +575,7 @@ mod tests {
 
     use super::*;
     use crate::executor::SortExecutor;
-    use crate::executor::test_utils::{MockExecutor, diff_executor_output};
+    use crate::executor::test_utils::{MockExecutor, PeakCounter, diff_executor_output};
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -1095,8 +897,7 @@ mod tests {
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Int32),
         ]));
-        // The executor spills its states after the first chunk, and the second chunk updates the
-        // same groups, so each group's state and its remaining rows must share a partition.
+        // Less than the minimum working set is aggregated in memory even with no memory budget.
         src_exec.add(DataChunk::from_pretty(
             "i i i
              0 1 1
@@ -1173,5 +974,194 @@ mod tests {
 
         let expect_exec = create_order_by_executor(expect_exec);
         diff_executor_output(actual_exec, expect_exec).await;
+    }
+
+    /// Output rows of `calls` over `input` grouped by its first column, sorted. Without
+    /// `mem_context` the aggregation cannot spill.
+    async fn spill_test_agg(
+        calls: &[&str],
+        input: &[DataChunk],
+        mem_context: Option<MemoryContext>,
+    ) -> Result<Vec<String>> {
+        let aggs: Vec<_> = calls
+            .iter()
+            .map(|call| build_agg(&risingwave_expr::aggregate::AggCall::from_pretty(call)).unwrap())
+            .collect();
+        let fields = std::iter::once(Field::unnamed(DataType::Int32))
+            .chain(aggs.iter().map(|agg| Field::unnamed(agg.return_type())))
+            .collect();
+        let mut child = MockExecutor::new(Schema::new(
+            input[0]
+                .columns()
+                .iter()
+                .map(|column| Field::unnamed(column.data_type()))
+                .collect(),
+        ));
+        for chunk in input {
+            child.add(chunk.clone());
+        }
+        let executor = Box::new(HashAggExecutor::<risingwave_common::hash::Key32>::new(
+            Arc::new(aggs),
+            vec![0],
+            vec![DataType::Int32],
+            Schema { fields },
+            Box::new(child),
+            "HashAggExecutor".to_owned(),
+            CHUNK_SIZE,
+            mem_context.clone().unwrap_or_else(MemoryContext::none),
+            mem_context.is_some().then_some(SpillBackend::Memory),
+            BatchSpillMetrics::for_test(),
+            ShutdownToken::empty(),
+        ));
+        let mut rows = vec![];
+        let mut stream = executor.execute();
+        while let Some(chunk) = stream.next().await {
+            rows.extend(chunk?.rows().map(|row| format!("{:?}", row.to_owned_row())));
+        }
+        rows.sort();
+        Ok(rows)
+    }
+
+    /// Aggregates `input` in memory and with a memory limit of 0, and checks that both give the
+    /// same groups. With no memory, a pass stops admitting groups once the executor holds the
+    /// minimum working set.
+    async fn check_spilled_agg(calls: &[&str], input: &[DataChunk]) {
+        let expected = spill_test_agg(calls, input, None).await.unwrap();
+        let actual = spill_test_agg(calls, input, Some(MemoryContext::for_spill_test()))
+            .await
+            .unwrap();
+        assert_eq!(actual, expected, "{calls:?}");
+    }
+
+    /// Aggregates whose states cannot be encoded spill too, as long as the groups that a pass
+    /// admitted stop growing once it admits no more. Here each input chunk holds whole groups.
+    #[tokio::test]
+    async fn test_spill_hash_agg_any_aggregate() {
+        let input = (0..200)
+            .map(|chunk| {
+                let rows = 0..256i64;
+                let row = |r: i64| chunk * 256 + r;
+                DataChunk::new(
+                    vec![
+                        I32Array::from_iter(rows.clone().map(|r| {
+                            (chunk != 3 || r < 224).then_some((chunk * 8 + r / 32) as i32)
+                        }))
+                        .into_ref(),
+                        I32Array::from_iter(
+                            rows.clone()
+                                .map(|r| (row(r) % 5 != 0).then_some((row(r) % 17) as i32)),
+                        )
+                        .into_ref(),
+                        I64Array::from_iter(rows.map(|r| Some(row(r)))).into_ref(),
+                    ],
+                    256,
+                )
+            })
+            .collect_vec();
+        for call in [
+            "(count:int8 $1:int4)",
+            "(sum:int8 $1:int4)",
+            "(count:int8 $1:int4 distinct)",
+            "(sum:int8 $1:int4 distinct)",
+            "(array_agg:int4[] $1:int4 orderby $2:asc)",
+            "(array_agg:int8[] $2:int8 orderby $2:desc)",
+            "(first_value:int8 $2:int8 orderby $2:asc)",
+            "(max:int4 $1:int4)",
+        ] {
+            check_spilled_agg(&[call], &input).await;
+        }
+    }
+
+    /// Input of `chunks` chunks: a group key of `groups` values interleaved row by row, a string of
+    /// `width` bytes, and a comma.
+    fn growing_states_input(chunks: i32, groups: i32, width: usize) -> Vec<DataChunk> {
+        let value = "v".repeat(width);
+        (0..chunks)
+            .map(|chunk| {
+                let rows = (0..1024).map(|row| chunk * 1024 + row);
+                DataChunk::new(
+                    vec![
+                        I32Array::from_iter(rows.map(|row| Some(row % groups))).into_ref(),
+                        Utf8Array::from_iter((0..1024).map(|_| Some(value.as_str()))).into_ref(),
+                        Utf8Array::from_iter((0..1024).map(|_| Some(","))).into_ref(),
+                    ],
+                    1024,
+                )
+            })
+            .collect_vec()
+    }
+
+    /// States that keep growing after a pass stops admitting groups are written out with their
+    /// groups when they can be encoded, so the aggregation stays within the memory limit.
+    #[tokio::test]
+    async fn test_spill_hash_agg_growing_states() {
+        let input = growing_states_input(400, 1000, 100);
+        let calls = [
+            "(string_agg:varchar $1:varchar $2:varchar)",
+            "(count:int8 $1:varchar)",
+        ];
+        let expected = spill_test_agg(&calls, &input, None).await.unwrap();
+        // The states end up about 40 MB.
+        let limit = 8 << 20;
+        let counter = PeakCounter::default();
+        let actual = spill_test_agg(
+            &calls,
+            &input,
+            Some(MemoryContext::root(counter.clone(), limit)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(actual, expected);
+        let peak = counter.peak();
+        assert!(peak < 3 * limit as i64, "peak {peak} bytes");
+    }
+
+    /// Growing states fail with `OutOfMemory` rather than exceed the memory limit when they cannot
+    /// be encoded, or when they belong to a single group.
+    #[tokio::test]
+    async fn test_spill_hash_agg_growing_states_out_of_memory() {
+        for (calls, groups) in [
+            (["(array_agg:varchar[] $1:varchar)"], 4),
+            (["(string_agg:varchar $1:varchar $2:varchar)"], 1),
+        ] {
+            let result = spill_test_agg(
+                &calls,
+                &growing_states_input(100, groups, 100),
+                Some(MemoryContext::root(TrAdderAtomic::new(0), 1 << 20)),
+            )
+            .await;
+            assert!(
+                matches!(result, Err(BatchError::OutOfMemory(_))),
+                "{calls:?}: {result:?}"
+            );
+        }
+    }
+
+    /// A partition larger than the minimum working set is aggregated in passes that spill again, at
+    /// the next level.
+    #[tokio::test]
+    async fn test_spill_hash_agg_levels() {
+        let padding = "x".repeat(250);
+        let input = (0..100)
+            .map(|chunk| {
+                let rows = (0..1024).map(|row| chunk * 1024 + row);
+                let payloads = rows
+                    .clone()
+                    .map(|row| format!("{}{padding}", row % 97))
+                    .collect_vec();
+                DataChunk::new(
+                    vec![
+                        I32Array::from_iter(rows.map(|row| Some(row * 7919 % 10_000))).into_ref(),
+                        Utf8Array::from_iter(payloads.iter().map(|p| Some(p.as_str()))).into_ref(),
+                    ],
+                    1024,
+                )
+            })
+            .collect_vec();
+        check_spilled_agg(
+            &["(count:int8 $1:varchar)", "(max:varchar $1:varchar)"],
+            &input,
+        )
+        .await;
     }
 }
