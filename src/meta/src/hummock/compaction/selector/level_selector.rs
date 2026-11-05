@@ -295,8 +295,10 @@ impl DynamicLevelSelectorCore {
             let non_overlapping_score =
                 std::cmp::max(non_overlapping_size_score, non_overlapping_level_score);
 
-            // Reduce the level num of l0 non-overlapping sub_level
-            if non_overlapping_size_score > SCORE_BASE {
+            // Always try L0-to-base before falling back to intra-L0 compaction. The base picker
+            // checks every candidate interval, so a depth-triggered L0 may still find a runnable
+            // range even when its total size is below the base-level size threshold.
+            if non_overlapping_score > SCORE_BASE {
                 ctx.score_levels.push(PickerInfo {
                     score: non_overlapping_score + 1,
                     select_level: 0,
@@ -769,6 +771,72 @@ pub mod tests {
             ),
         );
         assert!(compaction.is_none());
+    }
+
+    fn depth_triggered_l0_levels() -> (CompactionGroup, Levels) {
+        let config = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(1000)
+            .max_level(1)
+            .max_compaction_bytes(10000)
+            .sub_level_max_compaction_bytes(1000)
+            .level0_sub_level_compact_level_count(3)
+            .compaction_mode(CompactionMode::Range as i32)
+            .build();
+        let levels = Levels {
+            levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 99, 1)])],
+            l0: generate_l0_nonoverlapping_sublevels(
+                (0..4)
+                    .map(|id| generate_table(id, 1, 0, 99, id + 2))
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        (CompactionGroup::new(1, config), levels)
+    }
+
+    #[test]
+    fn depth_trigger_tries_to_base_before_intra_l0() {
+        let (group, levels) = depth_triggered_l0_levels();
+        let mut selector = DynamicLevelSelector::default();
+        let mut handlers = (0..=1).map(LevelHandler::new).collect_vec();
+        let mut stats = LocalSelectorStatistic::default();
+
+        let compaction = pick_compaction_with_in_progress(
+            &mut selector,
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &mut stats,
+            &InProgressCompactionView::default(),
+        )
+        .unwrap();
+
+        assert_eq!(compaction.input.target_level, 1);
+    }
+
+    #[test]
+    fn depth_trigger_falls_back_to_intra_l0_after_base_candidates_fail() {
+        let (group, levels) = depth_triggered_l0_levels();
+        let mut selector = DynamicLevelSelector::default();
+        let mut handlers = (0..=1).map(LevelHandler::new).collect_vec();
+        handlers[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
+        let mut stats = LocalSelectorStatistic::default();
+
+        let compaction = pick_compaction_with_in_progress(
+            &mut selector,
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &mut stats,
+            &InProgressCompactionView::default(),
+        )
+        .unwrap();
+
+        assert_eq!(compaction.input.target_level, 0);
+        assert_eq!(stats.skip_picker.len(), 1);
+        assert!(stats.skip_picker[0].2.skip_by_pending_files > 0);
     }
 
     #[test]
