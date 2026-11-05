@@ -112,7 +112,50 @@ impl<T> Deref for VectorMetaFileHolder<T> {
     }
 }
 
-pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
+/// Meta-cache value with the existing bincode format and allocation-free filter sizing.
+///
+/// A separate type lets this cache override `Code::estimated_size` without changing
+/// `Sstable`'s serde implementation or conflicting with Foyer's serde blanket impl.
+#[derive(Debug)]
+pub struct SstableMetaCacheValue(Box<Sstable>);
+
+impl From<Sstable> for SstableMetaCacheValue {
+    fn from(sstable: Sstable) -> Self {
+        Self(Box::new(sstable))
+    }
+}
+
+impl Deref for SstableMetaCacheValue {
+    type Target = Sstable;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<Sstable> for SstableMetaCacheValue {
+    fn as_ref(&self) -> &Sstable {
+        &self.0
+    }
+}
+
+impl foyer::Code for SstableMetaCacheValue {
+    fn encode(&self, writer: &mut impl std::io::Write) -> foyer::Result<()> {
+        bincode::serialize_into(writer, &self.0).map_err(foyer::Error::bincode_error)
+    }
+
+    fn decode(reader: &mut impl std::io::Read) -> foyer::Result<Self> {
+        bincode::deserialize_from(reader)
+            .map(Self)
+            .map_err(foyer::Error::bincode_error)
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.0.serde_encoded_size()
+    }
+}
+
+pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, SstableMetaCacheValue>;
 
 pub type VectorBlockHolder = CacheEntry<(HummockVectorFileId, usize), Box<VectorBlock>>;
 
@@ -198,7 +241,7 @@ pub struct SstableStoreConfig {
     pub use_new_object_prefix_strategy: bool,
     pub skip_bloom_filter_in_serde: bool,
 
-    pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    pub meta_cache: HybridCache<HummockSstableObjectId, SstableMetaCacheValue>,
     pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
 
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
@@ -209,7 +252,7 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
 
-    meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    meta_cache: HybridCache<HummockSstableObjectId, SstableMetaCacheValue>,
     block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
@@ -273,9 +316,11 @@ impl SstableStore {
         let meta_cache = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
             .with_shards(1)
-            .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                u64::BITS as usize / 8 + value.estimate_size()
-            })
+            .with_weighter(
+                |_: &HummockSstableObjectId, value: &SstableMetaCacheValue| {
+                    u64::BITS as usize / 8 + value.estimate_size()
+                },
+            )
             .storage()
             .build()
             .await
@@ -703,7 +748,7 @@ impl SstableStore {
     pub async fn sstable_cached(
         &self,
         sst_obj_id: HummockSstableObjectId,
-    ) -> HummockResult<Option<HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>>> {
+    ) -> HummockResult<Option<TableHolder>> {
         self.meta_cache
             .get(&sst_obj_id)
             .await
@@ -732,7 +777,7 @@ impl SstableStore {
             let sst = Sstable::from_meta_bytes(object_id, &buf, skip_bloom_filter_in_serde)?;
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-            Ok::<_, anyhow::Error>(Box::new(sst))
+            Ok::<_, anyhow::Error>(SstableMetaCacheValue::from(sst))
         });
 
         stats.cache_meta_block_total += 1;
@@ -773,7 +818,8 @@ impl SstableStore {
 
     pub fn insert_meta_cache(&self, object_id: HummockSstableObjectId, meta: SstableMeta) {
         let sst = Sstable::new(object_id, meta, self.skip_bloom_filter_in_serde);
-        self.meta_cache.insert(object_id, Box::new(sst));
+        self.meta_cache
+            .insert(object_id, SstableMetaCacheValue::from(sst));
     }
 
     pub fn insert_block_cache(
@@ -823,7 +869,7 @@ impl SstableStore {
         Ok(BlockDataStream::new(reader, metas.to_vec()))
     }
 
-    pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, Box<Sstable>> {
+    pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, SstableMetaCacheValue> {
         &self.meta_cache
     }
 

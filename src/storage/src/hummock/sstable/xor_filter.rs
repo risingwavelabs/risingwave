@@ -368,6 +368,28 @@ impl XorFilterReader {
         BlockBasedXor16Filter { filters }
     }
 
+    /// Returns the exact encoded length, including filter headers and footers.
+    pub(super) fn serialized_len(&self) -> usize {
+        const PLAIN_FILTER_FIXED_LEN: usize = 8 + 4 + 1;
+        match &self.filter {
+            XorFilter::Xor8(filter) => PLAIN_FILTER_FIXED_LEN + filter.fingerprints.len(),
+            XorFilter::Xor16(filter) => {
+                PLAIN_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
+            }
+            XorFilter::BlockXor16(reader) => {
+                4 + 1
+                    + reader
+                        .filters
+                        .iter()
+                        .map(|(_, filter)| {
+                            4 + PLAIN_FILTER_FIXED_LEN
+                                + filter.fingerprints.len() * std::mem::size_of::<u16>()
+                        })
+                        .sum::<usize>()
+            }
+        }
+    }
+
     pub fn estimate_size(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => filter.fingerprints.len(),
@@ -576,6 +598,7 @@ mod tests {
         let xor8_bytes = xor8_builder.finish(None);
         let xor8_reader = XorFilterReader::new(&xor8_bytes, &[]);
         let xor8_encoded = xor8_reader.encode_to_bytes();
+        assert_eq!(xor8_reader.serialized_len(), xor8_encoded.len());
         assert_eq!(
             xor8_bytes, xor8_encoded,
             "Xor8 builder and reader should produce identical bytes"
@@ -589,6 +612,7 @@ mod tests {
         let xor16_bytes = xor16_builder.finish(None);
         let xor16_reader = XorFilterReader::new(&xor16_bytes, &[]);
         let xor16_encoded = xor16_reader.encode_to_bytes();
+        assert_eq!(xor16_reader.serialized_len(), xor16_encoded.len());
         assert_eq!(
             xor16_bytes, xor16_encoded,
             "Xor16 builder and reader should produce identical bytes"
@@ -626,6 +650,7 @@ mod tests {
         let blocked_bytes = blocked_builder.finish(None);
         let blocked_reader = XorFilterReader::new(&blocked_bytes, &block_metas);
         let blocked_encoded = blocked_reader.encode_to_bytes();
+        assert_eq!(blocked_reader.serialized_len(), blocked_encoded.len());
         assert_eq!(
             blocked_bytes, blocked_encoded,
             "BlockedXor16 builder and reader should produce identical bytes"

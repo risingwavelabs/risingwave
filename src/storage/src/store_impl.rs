@@ -42,8 +42,8 @@ use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::sharded::ShardedRecentFilter;
 use crate::hummock::simple::SimpleRecentFilter;
 use crate::hummock::{
-    Block, BlockCacheEventListener, HummockError, HummockStorage, Sstable, SstableBlockIndex,
-    SstableStore, SstableStoreConfig,
+    Block, BlockCacheEventListener, HummockError, HummockStorage, SstableBlockIndex,
+    SstableMetaCacheValue, SstableStore, SstableStoreConfig,
 };
 use crate::memory::MemoryStateStore;
 use crate::memory::sled::SledStateStore;
@@ -704,9 +704,11 @@ impl StateStoreImpl {
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
-                .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                    u64::BITS as usize / 8 + value.estimate_size()
-                })
+                .with_weighter(
+                    |_: &HummockSstableObjectId, value: &SstableMetaCacheValue| {
+                        u64::BITS as usize / 8 + value.estimate_size()
+                    },
+                )
                 .storage();
 
             if !opts.meta_file_cache_dir.is_empty() {
