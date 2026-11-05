@@ -460,9 +460,11 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-# Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
-# Also backport https://github.com/foyer-rs/foyer/pull/1349 to reuse entry size estimates.
-# Backport https://github.com/foyer-rs/foyer/pull/1359 and #1362 to preserve keeper registrations.
+# Foyer v0.22.6 with the following upstream backports.
+# - Reduce recovery indexing overhead (https://github.com/foyer-rs/foyer/pull/1296).
+# - Reuse the entry size estimate in enqueue (https://github.com/foyer-rs/foyer/pull/1349).
+# - Preserve newer keeper registrations when older references drop (https://github.com/foyer-rs/foyer/pull/1359).
+# - Cover keeper registration lifetimes (https://github.com/foyer-rs/foyer/pull/1362).
 foyer = { git = "https://github.com/Li0k/foyer.git", rev = "64296306ca8c0d68e126fed7eb7dab797050864a" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Keep transitive madsim-family resolution aligned to the same upstream rev.
