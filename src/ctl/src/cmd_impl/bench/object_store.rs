@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -108,7 +109,7 @@ pub struct ObjectStoreArgs {
     /// Cooperative deadline; an in-flight write is allowed to finish or hit SDK timeout.
     #[arg(long, default_value_t = 1800)]
     pub max_runtime_secs: u64,
-    /// Also save the final JSON report here. Progress is written to stderr.
+    /// Also save JSON atomically here; the parent directory must exist.
     #[arg(long)]
     pub output: Option<PathBuf>,
 }
@@ -251,6 +252,28 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
             .is_some(),
         "max-runtime-secs exceeds the platform clock range"
     );
+    // Probe the destination before S3 I/O, without truncating an existing report.
+    // A sibling temporary file also makes the final replacement atomic.
+    let output = args
+        .output
+        .as_ref()
+        .map(|path| {
+            ensure!(
+                !path.is_dir(),
+                "report output is a directory: {}",
+                path.display()
+            );
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let file = tempfile::Builder::new()
+                .prefix(".object-store-report-")
+                .tempfile_in(parent)
+                .context("prepare benchmark report output")?;
+            Ok::<_, anyhow::Error>((file, path))
+        })
+        .transpose()?;
 
     let mut object_config: ObjectStoreConfig = if let Some(path) = &args.config_path {
         let text = tokio::fs::read_to_string(path)
@@ -360,12 +383,21 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
     }
     redact_errors(&mut json, &secrets);
     let text = serde_json::to_string_pretty(&json)?;
-    if let Some(path) = args.output {
-        tokio::fs::write(path, &text)
-            .await
-            .context("write benchmark report")?;
-    }
-    println!("{text}");
+    let saved = output
+        .map(|(mut file, path)| {
+            file.write_all(text.as_bytes())?;
+            file.flush()?;
+            file.persist(path)
+                .map_err(|error| error.error)
+                .context("persist benchmark report")?;
+            Ok::<_, anyhow::Error>(())
+        })
+        .transpose();
+    // Attempt both outputs before propagating either error. In particular, a
+    // late file error must not suppress the complete JSON document on stdout.
+    let printed = writeln!(std::io::stdout().lock(), "{text}").context("write report to stdout");
+    saved.context("save benchmark report; full JSON was also attempted on stdout")?;
+    printed?;
     if !succeeded {
         bail!(
             "benchmark did not complete successfully; inspect the JSON phase and cleanup results"

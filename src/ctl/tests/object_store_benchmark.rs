@@ -78,3 +78,45 @@ async fn invalid_parameters_fail_before_client_initialization() {
     let error = run(args, Default::default()).await.unwrap_err();
     assert!(error.to_string().contains("S3/MinIO"));
 }
+
+#[tokio::test]
+async fn invalid_report_path_fails_before_client_initialization() {
+    let directory = tempfile::tempdir().unwrap();
+    for path in [
+        directory.path().join("missing/result.json"),
+        directory.path().to_path_buf(),
+    ] {
+        let args = Standalone::try_parse_from([
+            "test",
+            "--store",
+            "s3://bucket",
+            "--output",
+            path.to_str().unwrap(),
+        ])
+        .unwrap()
+        .args;
+        let error = run(args, Default::default()).await.unwrap_err();
+        assert!(error.to_string().contains("report"), "{error:#}");
+    }
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn output_preparation_preserves_existing_report_on_setup_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("result.json");
+    std::fs::write(&path, "previous report").unwrap();
+    let args = Standalone::try_parse_from([
+        "test",
+        "--store",
+        "memory",
+        "--output",
+        path.to_str().unwrap(),
+    ])
+    .unwrap()
+    .args;
+    let error = run(args, Default::default()).await.unwrap_err();
+    assert!(error.to_string().contains("S3/MinIO"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "previous report");
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+}
