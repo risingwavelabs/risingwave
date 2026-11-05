@@ -551,12 +551,11 @@ pub(crate) fn filter_block_metas(
         return 0..0;
     }
     let block_metas = &meta.block_metas;
-    let mut key_buffer = Vec::new();
     let mut start_index = if key_range.left.is_empty() {
         range.start
     } else {
         let left = FullKey::decode(&key_range.left);
-        meta.partition_point(range.clone(), Bound::Included(left), &mut key_buffer)
+        meta.partition_point(range.clone(), Bound::Included(left))
             .saturating_sub(1)
             .max(range.start)
     };
@@ -564,7 +563,7 @@ pub(crate) fn filter_block_metas(
         range.end
     } else {
         let right = FullKey::decode(&key_range.right);
-        meta.partition_point(range.clone(), Bound::Included(right), &mut key_buffer)
+        meta.partition_point(range.clone(), Bound::Included(right))
     };
     if end_exclusive <= range.start {
         return 0..0;

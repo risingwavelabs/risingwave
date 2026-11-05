@@ -26,8 +26,6 @@ mod block_iterator;
 pub use block_iterator::*;
 mod cached_meta;
 pub use cached_meta::{CachedBlockMeta, CachedSstableMeta};
-#[cfg(test)]
-mod cached_meta_bench;
 mod xor_filter;
 use serde::{Deserialize, Serialize};
 pub use xor_filter::{
@@ -284,38 +282,11 @@ impl BlockMeta {
     }
 
     pub fn decode(buf: &mut &[u8]) -> Self {
-        let offset = buf.get_u32_le();
-        let len = buf.get_u32_le();
-        let uncompressed_size = buf.get_u32_le();
-
-        let total_key_count = buf.get_u32_le();
-        let stale_key_count = buf.get_u32_le();
-        let smallest_key = get_length_prefixed_slice(buf).to_vec();
-        Self {
-            smallest_key,
-            offset,
-            len,
-            uncompressed_size,
-            total_key_count,
-            stale_key_count,
-        }
+        BlockMetaRef::decode(buf, VERSION).into()
     }
 
     pub fn decode_from_v1(buf: &mut &[u8]) -> Self {
-        let offset = buf.get_u32_le();
-        let len = buf.get_u32_le();
-        let uncompressed_size = buf.get_u32_le();
-        let total_key_count = 0;
-        let stale_key_count = 0;
-        let smallest_key = get_length_prefixed_slice(buf).to_vec();
-        Self {
-            smallest_key,
-            offset,
-            len,
-            uncompressed_size,
-            total_key_count,
-            stale_key_count,
-        }
+        BlockMetaRef::decode(buf, OLD_VERSION).into()
     }
 
     #[inline]
@@ -325,6 +296,96 @@ impl BlockMeta {
 
     pub fn table_id(&self) -> TableId {
         FullKey::decode(&self.smallest_key).user_key.table_id
+    }
+}
+
+/// Borrowed native block metadata for the raw and cache-resident decoders.
+struct BlockMetaRef<'a> {
+    smallest_key: &'a [u8],
+    offset: u32,
+    len: u32,
+    uncompressed_size: u32,
+    total_key_count: u32,
+    stale_key_count: u32,
+}
+
+impl<'a> BlockMetaRef<'a> {
+    fn decode(buf: &mut &'a [u8], version: u32) -> Self {
+        let offset = buf.get_u32_le();
+        let len = buf.get_u32_le();
+        let uncompressed_size = buf.get_u32_le();
+        let (total_key_count, stale_key_count) = if version == OLD_VERSION {
+            (0, 0)
+        } else {
+            (buf.get_u32_le(), buf.get_u32_le())
+        };
+        Self {
+            smallest_key: get_length_prefixed_slice(buf),
+            offset,
+            len,
+            uncompressed_size,
+            total_key_count,
+            stale_key_count,
+        }
+    }
+}
+
+impl From<BlockMetaRef<'_>> for BlockMeta {
+    fn from(block: BlockMetaRef<'_>) -> Self {
+        Self {
+            smallest_key: block.smallest_key.to_vec(),
+            offset: block.offset,
+            len: block.len,
+            uncompressed_size: block.uncompressed_size,
+            total_key_count: block.total_key_count,
+            stale_key_count: block.stale_key_count,
+        }
+    }
+}
+
+/// Construction-only fields following the native block sequence. Both decoders need owned
+/// boundary keys/tombstones, while the filter remains borrowed until its destination is chosen.
+struct NativeMetaTail<'a> {
+    bloom_filter: &'a [u8],
+    estimated_size: u32,
+    key_count: u32,
+    smallest_key: Vec<u8>,
+    largest_key: Vec<u8>,
+    monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
+    meta_offset: u64,
+}
+
+impl<'a> NativeMetaTail<'a> {
+    fn decode(buf: &mut &'a [u8]) -> Self {
+        let bloom_filter = get_length_prefixed_slice(buf);
+        let estimated_size = buf.get_u32_le();
+        let key_count = buf.get_u32_le();
+        let smallest_key = get_length_prefixed_slice(buf).to_vec();
+        let largest_key = get_length_prefixed_slice(buf).to_vec();
+        let tomb_event_count = buf.get_u32_le() as usize;
+        let mut monotonic_tombstone_events = Vec::with_capacity(tomb_event_count);
+        for _ in 0..tomb_event_count {
+            monotonic_tombstone_events.push(MonotonicDeleteEvent::decode(buf));
+        }
+        let meta_offset = buf.get_u64_le();
+        if !monotonic_tombstone_events.is_empty() {
+            warn!(
+                count = monotonic_tombstone_events.len(),
+                tables = ?monotonic_tombstone_events.iter()
+                    .map(|event| event.event_key.left_user_key.table_id)
+                    .collect::<HashSet<_>>(),
+                "read non-empty range tombstones"
+            );
+        }
+        Self {
+            bloom_filter,
+            estimated_size,
+            key_count,
+            smallest_key,
+            largest_key,
+            monotonic_tombstone_events,
+            meta_offset,
+        }
     }
 }
 
@@ -433,49 +494,20 @@ impl SstableMeta {
 
         let block_meta_count = buf.get_u32_le() as usize;
         let mut block_metas = Vec::with_capacity(block_meta_count);
-        if version == OLD_VERSION {
-            for _ in 0..block_meta_count {
-                block_metas.push(BlockMeta::decode_from_v1(buf));
-            }
-        } else {
-            for _ in 0..block_meta_count {
-                block_metas.push(BlockMeta::decode(buf));
-            }
+        for _ in 0..block_meta_count {
+            block_metas.push(BlockMetaRef::decode(buf, version).into());
         }
-
-        let bloom_filter = get_length_prefixed_slice(buf).to_vec();
-        let estimated_size = buf.get_u32_le();
-        let key_count = buf.get_u32_le();
-        let smallest_key = get_length_prefixed_slice(buf).to_vec();
-        let largest_key = get_length_prefixed_slice(buf).to_vec();
-        let tomb_event_count = buf.get_u32_le() as usize;
-        let mut monotonic_tombstone_events = Vec::with_capacity(tomb_event_count);
-        for _ in 0..tomb_event_count {
-            let monotonic_tombstone_event = MonotonicDeleteEvent::decode(buf);
-            monotonic_tombstone_events.push(monotonic_tombstone_event);
-        }
-        let meta_offset = buf.get_u64_le();
-
-        if !monotonic_tombstone_events.is_empty() {
-            warn!(
-                count = monotonic_tombstone_events.len(),
-                tables = ?monotonic_tombstone_events
-                    .iter()
-                    .map(|event| event.event_key.left_user_key.table_id)
-                    .collect::<HashSet<_>>(),
-                "read non-empty range tombstones");
-        }
-
+        let tail = NativeMetaTail::decode(buf);
         #[expect(deprecated)]
         Ok(Self {
             block_metas,
-            bloom_filter,
-            estimated_size,
-            key_count,
-            smallest_key,
-            largest_key,
-            meta_offset,
-            monotonic_tombstone_events,
+            bloom_filter: tail.bloom_filter.to_vec(),
+            estimated_size: tail.estimated_size,
+            key_count: tail.key_count,
+            smallest_key: tail.smallest_key,
+            largest_key: tail.largest_key,
+            meta_offset: tail.meta_offset,
+            monotonic_tombstone_events: tail.monotonic_tombstone_events,
             version,
         })
     }
@@ -532,12 +564,14 @@ impl SstableIteratorReadOptions {
 
 #[cfg(test)]
 mod tests {
+    use foyer::Code;
+
     use super::*;
-    use crate::hummock::HummockValue;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of,
     };
     use crate::hummock::test_utils::gen_test_sstable_data;
+    use crate::hummock::{HummockValue, SstableMetaCacheValue};
     use crate::store::PrefetchOptions;
 
     #[test]
@@ -631,80 +665,47 @@ mod tests {
         )
         .await;
 
-        // skip sst serde
-        let sstable = Sstable::new(42.into(), meta.clone(), true);
-
-        let buffer = bincode::serialize(&sstable).unwrap();
-        assert_eq!(sstable.serde_encoded_size(), buffer.len());
-        assert_eq!(
-            foyer::Code::estimated_size(&crate::hummock::SstableMetaCacheValue::from(
-                sstable.clone()
-            )),
-            buffer.len()
-        );
-        let mut skipped_filter_meta = meta.clone();
-        skipped_filter_meta.bloom_filter.clear();
-        assert_eq!(
-            buffer,
-            bincode::serialize(&SerdeSstable {
+        for skip_filter in [false, true] {
+            let mut legacy_meta = meta.clone();
+            if skip_filter {
+                legacy_meta.bloom_filter.clear();
+            }
+            let legacy_bytes = bincode::serialize(&SerdeSstable {
                 id: 42.into(),
-                meta: skipped_filter_meta,
+                meta: legacy_meta,
             })
-            .unwrap()
-        );
+            .unwrap();
+            let value =
+                SstableMetaCacheValue::from(Sstable::new(42.into(), meta.clone(), skip_filter));
+            let mut bytes = Vec::new();
+            value.encode(&mut bytes).unwrap();
+            assert_eq!(bytes, legacy_bytes);
+            assert_eq!(value.estimated_size(), bytes.len());
 
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert!(!s.skip_bloom_filter_in_serde);
-        assert!(!sstable.filter_reader.is_empty());
-        // The table filter reader is empty because the SST filter is skipped in serde.
-        assert!(s.filter_reader.is_empty());
-
-        // enable sst serde
-        let legacy_bytes = bincode::serialize(&SerdeSstable {
-            id: 42.into(),
-            meta: meta.clone(),
-        })
-        .unwrap();
-        let sstable = Sstable::new(42.into(), meta, false);
-
-        let buffer = bincode::serialize(&sstable).unwrap();
-        assert_eq!(buffer, legacy_bytes);
-        assert_eq!(sstable.serde_encoded_size(), buffer.len());
-        assert_eq!(
-            foyer::Code::estimated_size(&crate::hummock::SstableMetaCacheValue::from(
-                sstable.clone()
-            )),
-            buffer.len()
-        );
-
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert!(!s.skip_bloom_filter_in_serde);
-        assert_eq!(
-            s.filter_reader.encode_to_bytes(),
-            sstable.filter_reader.encode_to_bytes()
-        );
-
-        use foyer::Code;
-        let mut encoded = Vec::new();
-        Box::new(sstable.clone()).encode(&mut encoded).unwrap();
-        let decoded = Box::<Sstable>::decode(&mut &encoded[..]).unwrap();
-        assert_eq!(decoded.meta, sstable.meta);
-        assert_eq!(
-            decoded.estimated_meta_cache_memory_weight(),
-            sstable.estimated_meta_cache_memory_weight()
-        );
+            let decoded = SstableMetaCacheValue::decode(&mut &bytes[..]).unwrap();
+            assert_eq!(decoded.id, value.id);
+            assert_eq!(decoded.meta, value.meta);
+            assert!(!decoded.skip_bloom_filter_in_serde);
+            assert!(value.has_filter());
+            if skip_filter {
+                assert!(!decoded.has_filter());
+            } else {
+                assert_eq!(
+                    decoded.filter_reader.encode_to_bytes(),
+                    value.filter_reader.encode_to_bytes()
+                );
+                assert_eq!(
+                    decoded.estimated_meta_cache_memory_weight(),
+                    value.estimated_meta_cache_memory_weight()
+                );
+            }
+        }
 
         // A truncated sequence with an extreme length must still fail without trying to
         // allocate that declared length, as serde's original Vec<BlockMeta> decoder did.
         let truncated = bincode::serialize(&(HummockSstableObjectId::from(1), u64::MAX)).unwrap();
         assert!(bincode::deserialize::<SerdeSstable>(&truncated).is_err());
-        assert!(Box::<Sstable>::decode(&mut &truncated[..]).is_err());
+        assert!(SstableMetaCacheValue::decode(&mut &truncated[..]).is_err());
     }
 
     #[test]
@@ -765,6 +766,7 @@ mod tests {
             );
         }
     }
+
     #[tokio::test]
     async fn test_sstable_from_meta_bytes() {
         let (_, meta) = gen_test_sstable_data(

@@ -460,7 +460,6 @@ where
         h: u64,
     ) -> bool {
         debug_assert_eq!(self.filters.len(), meta.block_metas.len());
-        let mut key_buffer = Vec::new();
         let mut block_idx = match user_key_range.0 {
             Bound::Unbounded => 0,
             Bound::Included(left) | Bound::Excluded(left) => meta
@@ -470,24 +469,33 @@ where
                         user_key: left,
                         epoch_with_gap: EpochWithGap::new_min_epoch(),
                     }),
-                    &mut key_buffer,
                 )
                 .saturating_sub(1),
         };
 
+        // FullKey sorts epochs in descending order. MIN includes every version of the
+        // right user key; MAX excludes every version when the right bound is exclusive.
         while block_idx < self.filters.len() {
             let read_bound = match user_key_range.1 {
                 Bound::Unbounded => false,
                 Bound::Included(right) => {
-                    let ord = FullKey::decode(meta.block_smallest_key(block_idx, &mut key_buffer))
-                        .user_key
-                        .cmp(&right);
+                    let ord = meta.compare_block_key(
+                        block_idx,
+                        FullKey {
+                            user_key: right,
+                            epoch_with_gap: EpochWithGap::new_min_epoch(),
+                        },
+                    );
                     ord == Ordering::Greater
                 }
                 Bound::Excluded(right) => {
-                    let ord = FullKey::decode(meta.block_smallest_key(block_idx, &mut key_buffer))
-                        .user_key
-                        .cmp(&right);
+                    let ord = meta.compare_block_key(
+                        block_idx,
+                        FullKey {
+                            user_key: right,
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
+                        },
+                    );
                     ord != Ordering::Less
                 }
             };
@@ -626,7 +634,7 @@ impl XorFilterReader {
     ///
     /// This intentionally follows RisingWave's filter encoding size, not the exact Rust heap
     /// footprint of the decoded reader.
-    pub(super) fn serialized_len(&self) -> usize {
+    pub fn serialized_len(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
             XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),
@@ -1096,7 +1104,8 @@ mod tests {
                 ..Default::default()
             };
             let expected = Sstable::new(1.into(), meta.clone(), false);
-            let native = Sstable::from_meta_bytes(1.into(), &meta.encode_to_bytes(), false).unwrap();
+            let native =
+                Sstable::from_meta_bytes(1.into(), &meta.encode_to_bytes(), false).unwrap();
             assert_eq!(native.meta, expected.meta);
             assert_eq!(
                 native.filter_reader.encode_to_bytes(),

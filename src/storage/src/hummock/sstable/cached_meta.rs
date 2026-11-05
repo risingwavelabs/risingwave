@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::cmp::Ordering;
 use std::fmt::Formatter;
 use std::ops::{Bound, Range};
 
 use bytes::Buf;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_hummock_sdk::key::{FullKey, TABLE_PREFIX_LEN};
+use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, TABLE_PREFIX_LEN, TableKey, UserKey};
+use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::utils::get_length_prefixed_slice;
 use super::{
-    BlockMeta, MonotonicDeleteEvent, OLD_VERSION, Sstable, SstableMeta, XorFilterReader,
-    verified_meta_body,
+    BlockMeta, BlockMetaRef, MonotonicDeleteEvent, NativeMetaTail, Sstable, SstableMeta,
+    XorFilterReader, verified_meta_body,
 };
 use crate::hummock::HummockResult;
 
@@ -116,24 +115,27 @@ impl CachedBlocksBuilder {
     fn new(block_count: usize) -> Self {
         Self {
             block_metas: Vec::with_capacity(block_count),
-            data: Vec::new(),
+            // Two u32 headers and an uncompressed epoch are present in every entry.
+            data: Vec::with_capacity(block_count * (8 + EPOCH_LEN)),
             restarts: Vec::with_capacity(block_count.div_ceil(KEY_RESTART_INTERVAL)),
         }
     }
 
-    // Callers own the previous key so native decoding can borrow it from the input buffer.
+    // Callers own the previous full key so native decoding can borrow it from the input.
     fn push(&mut self, block: CachedBlockMeta, key: &[u8], previous: &[u8]) {
+        let table_key = FullKey::decode(key).user_key.table_key.0;
         let shared = if self.block_metas.len().is_multiple_of(KEY_RESTART_INTERVAL) {
             self.restarts.push(self.data.len());
             0
         } else {
-            common_prefix(previous, key)
+            common_prefix(FullKey::decode(previous).user_key.table_key.0, table_key)
         };
-        let suffix = &key[shared..];
+        let suffix = &table_key[shared..];
         self.data.extend_from_slice(&(shared as u32).to_le_bytes());
         self.data
             .extend_from_slice(&(suffix.len() as u32).to_le_bytes());
         self.data.extend_from_slice(suffix);
+        self.data.extend_from_slice(&key[key.len() - EPOCH_LEN..]);
         self.block_metas.push(block);
     }
 
@@ -249,62 +251,35 @@ impl Sstable {
         let mut blocks = CachedBlocksBuilder::new(count);
         let mut previous: &[u8] = &[];
         for _ in 0..count {
-            let offset = buf.get_u32_le();
-            let len = buf.get_u32_le();
-            let uncompressed_size = buf.get_u32_le();
-            let (total_key_count, stale_key_count) = if version == OLD_VERSION {
-                (0, 0)
-            } else {
-                (buf.get_u32_le(), buf.get_u32_le())
-            };
-            let key = get_length_prefixed_slice(&mut buf);
+            let block = BlockMetaRef::decode(&mut buf, version);
             blocks.push(
                 CachedBlockMeta {
-                    offset,
-                    len,
-                    uncompressed_size,
-                    total_key_count,
-                    stale_key_count,
-                    table_id: FullKey::decode(key).user_key.table_id,
+                    offset: block.offset,
+                    len: block.len,
+                    uncompressed_size: block.uncompressed_size,
+                    total_key_count: block.total_key_count,
+                    stale_key_count: block.stale_key_count,
+                    table_id: FullKey::decode(block.smallest_key).user_key.table_id,
                 },
-                key,
+                block.smallest_key,
                 previous,
             );
-            previous = key;
+            previous = block.smallest_key;
         }
-        let filter_data = get_length_prefixed_slice(&mut buf);
-        let filter_reader = XorFilterReader::new(filter_data, count);
-        let estimated_size = buf.get_u32_le();
-        let key_count = buf.get_u32_le();
-        let smallest_key = get_length_prefixed_slice(&mut buf).to_vec();
-        let largest_key = get_length_prefixed_slice(&mut buf).to_vec();
-        let tomb_event_count = buf.get_u32_le() as usize;
-        let mut monotonic_tombstone_events = Vec::with_capacity(tomb_event_count);
-        for _ in 0..tomb_event_count {
-            monotonic_tombstone_events.push(MonotonicDeleteEvent::decode(&mut buf));
-        }
-        let meta_offset = buf.get_u64_le();
-        if !monotonic_tombstone_events.is_empty() {
-            tracing::warn!(
-                count = monotonic_tombstone_events.len(),
-                tables = ?monotonic_tombstone_events.iter()
-                    .map(|event| event.event_key.left_user_key.table_id)
-                    .collect::<HashSet<_>>(),
-                "read non-empty range tombstones"
-            );
-        }
+        let tail = NativeMetaTail::decode(&mut buf);
+        let filter_reader = XorFilterReader::new(tail.bloom_filter, count);
         let CachedBlocks { block_metas, keys } = blocks.finish();
         Ok(Self {
             id,
             meta: CachedSstableMeta {
                 block_metas,
                 keys,
-                estimated_size,
-                key_count,
-                smallest_key,
-                largest_key,
-                meta_offset,
-                monotonic_tombstone_events,
+                estimated_size: tail.estimated_size,
+                key_count: tail.key_count,
+                smallest_key: tail.smallest_key,
+                largest_key: tail.largest_key,
+                meta_offset: tail.meta_offset,
+                monotonic_tombstone_events: tail.monotonic_tombstone_events,
                 version,
             },
             filter_reader,
@@ -325,6 +300,8 @@ fn common_prefix(a: &[u8], b: &[u8]) -> usize {
     len
 }
 
+/// Cache-only K16 encoding: shared TableKey length, suffix length, suffix, and an
+/// uncompressed epoch. Table IDs live in CachedBlockMeta; neither can enter a shared prefix.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PrefixKeys {
     data: Box<[u8]>,
@@ -332,19 +309,84 @@ struct PrefixKeys {
 }
 
 impl PrefixKeys {
-    fn entry(&self, offset: usize) -> (usize, &[u8], usize) {
-        let shared = u32::from_le_bytes(self.data[offset..offset + 4].try_into().unwrap()) as usize;
-        let len =
-            u32::from_le_bytes(self.data[offset + 4..offset + 8].try_into().unwrap()) as usize;
-        let end = offset + 8 + len;
-        (shared, &self.data[offset + 8..end], end)
+    fn entries(&self, offset: usize) -> impl Iterator<Item = KeyEntry<'_>> {
+        let mut data = &self.data[offset..];
+        std::iter::from_fn(move || (!data.is_empty()).then(|| KeyEntry::decode(&mut data)))
     }
 
-    fn decode_next(&self, offset: usize, key: &mut Vec<u8>) -> usize {
-        let (shared, suffix, end) = self.entry(offset);
-        key.truncate(shared);
-        key.extend_from_slice(suffix);
-        end
+    fn restart(&self, group: usize) -> KeyEntry<'_> {
+        self.entries(self.restarts[group]).next().unwrap()
+    }
+}
+
+/// One borrowed entry of the in-memory prefix encoding.
+struct KeyEntry<'a> {
+    shared: usize,
+    suffix: &'a [u8],
+    epoch: &'a [u8; EPOCH_LEN],
+}
+
+impl<'a> KeyEntry<'a> {
+    fn decode(data: &mut &'a [u8]) -> Self {
+        let shared = data.get_u32_le() as usize;
+        let len = data.get_u32_le() as usize;
+        let (suffix, rest) = data.split_at(len);
+        let (epoch, rest) = rest.split_at(EPOCH_LEN);
+        *data = rest;
+        Self {
+            shared,
+            suffix,
+            epoch: epoch.try_into().unwrap(),
+        }
+    }
+
+    fn epoch(&self) -> EpochWithGap {
+        EpochWithGap::from_u64(u64::from_be_bytes(*self.epoch))
+    }
+
+    /// Apply a TableKey delta to a full-key buffer. This also replaces its table ID and epoch.
+    fn restore(&self, table_id: TableId, key: &mut Vec<u8>) {
+        key.resize(TABLE_PREFIX_LEN + self.shared, 0);
+        key[..TABLE_PREFIX_LEN].copy_from_slice(&table_id.as_raw_id().to_be_bytes());
+        key.extend_from_slice(self.suffix);
+        key.extend_from_slice(self.epoch);
+    }
+
+    fn restart_key(&self, table_id: TableId) -> FullKey<&'a [u8]> {
+        debug_assert_eq!(self.shared, 0);
+        FullKey {
+            user_key: UserKey::new(table_id, TableKey(self.suffix)),
+            epoch_with_gap: self.epoch(),
+        }
+    }
+}
+
+/// Compares successive TableKey deltas against one fixed target, without restoring keys.
+struct TableKeyComparator<'a> {
+    target: &'a [u8],
+    matched: usize,
+    order: Ordering,
+}
+
+impl<'a> TableKeyComparator<'a> {
+    fn new(target: &'a [u8]) -> Self {
+        Self {
+            target,
+            matched: 0,
+            order: Ordering::Equal,
+        }
+    }
+
+    fn compare(&mut self, entry: &KeyEntry<'_>) -> Ordering {
+        if entry.shared <= self.matched {
+            let target = &self.target[entry.shared..];
+            let matched = common_prefix(entry.suffix, target);
+            self.matched = entry.shared + matched;
+            self.order = entry.suffix.get(matched).cmp(&target.get(matched));
+        }
+        // Otherwise the shared prefix retains the previous first difference, including
+        // a target that ended there. A previous key that ended there cannot share more bytes.
+        self.order
     }
 }
 
@@ -352,22 +394,44 @@ impl CachedSstableMeta {
     /// Restores one key into reader-owned scratch, without retaining decoded keys in the cache.
     pub fn block_smallest_key<'a>(&self, index: usize, key: &'a mut Vec<u8>) -> &'a [u8] {
         assert!(index < self.block_metas.len());
-        let first = index / KEY_RESTART_INTERVAL * KEY_RESTART_INTERVAL;
-        let mut offset = self.keys.restarts[index / KEY_RESTART_INTERVAL];
-        key.clear();
-        for _ in first..=index {
-            offset = self.keys.decode_next(offset, key);
+        let group = index / KEY_RESTART_INTERVAL;
+        let first = group * KEY_RESTART_INTERVAL;
+        for entry in self
+            .keys
+            .entries(self.keys.restarts[group])
+            .take(index - first + 1)
+        {
+            entry.restore(self.block_metas[index].table_id, key);
         }
         key
     }
 
+    /// Compares a block boundary without allocating or restoring its full key.
+    pub(super) fn compare_block_key(&self, index: usize, target: FullKey<&[u8]>) -> Ordering {
+        let table_order = self.block_metas[index]
+            .table_id
+            .cmp(&target.user_key.table_id);
+        if !table_order.is_eq() {
+            return table_order;
+        }
+        let group = index / KEY_RESTART_INTERVAL;
+        let first = group * KEY_RESTART_INTERVAL;
+        let mut comparator = TableKeyComparator::new(target.user_key.table_key.0);
+        let mut order = Ordering::Equal;
+        for entry in self
+            .keys
+            .entries(self.keys.restarts[group])
+            .take(index - first + 1)
+        {
+            order = comparator
+                .compare(&entry)
+                .then_with(|| target.epoch_with_gap.cmp(&entry.epoch()));
+        }
+        order
+    }
+
     /// Returns the absolute index after the keys within `bound` in the requested range.
-    pub fn partition_point(
-        &self,
-        range: Range<usize>,
-        bound: Bound<FullKey<&[u8]>>,
-        key: &mut Vec<u8>,
-    ) -> usize {
+    pub fn partition_point(&self, range: Range<usize>, bound: Bound<FullKey<&[u8]>>) -> usize {
         assert!(range.start <= range.end && range.end <= self.block_metas.len());
         if range.is_empty() {
             return range.start;
@@ -377,64 +441,48 @@ impl CachedSstableMeta {
             Bound::Excluded(target) => (target, false),
             Bound::Unbounded => return range.end,
         };
-        let before_bound = |key: FullKey<&[u8]>| {
-            let order = key.cmp(&target);
-            order.is_lt() || (inclusive && order.is_eq())
-        };
+        let before_bound = |order: Ordering| order.is_lt() || (inclusive && order.is_eq());
         let first_group = range.start / KEY_RESTART_INTERVAL;
         let end_group = (range.end - 1) / KEY_RESTART_INTERVAL + 1;
-        let first_key = if range.start.is_multiple_of(KEY_RESTART_INTERVAL) {
-            self.keys.entry(self.keys.restarts[first_group]).1
-        } else {
-            self.block_smallest_key(range.start, key)
-        };
-        if !before_bound(FullKey::decode(first_key)) {
+        if !before_bound(self.compare_block_key(range.start, target)) {
             return range.start;
         }
-        let found = self.keys.restarts[first_group + 1..end_group].partition_point(|&offset| {
-            let (_, complete, _) = self.keys.entry(offset);
-            before_bound(FullKey::decode(complete))
-        });
-        let group = first_group + found;
+        let mut left = first_group + 1;
+        let mut right = end_group;
+        while left < right {
+            let group = left + (right - left) / 2;
+            let first = group * KEY_RESTART_INTERVAL;
+            let restart = self
+                .keys
+                .restart(group)
+                .restart_key(self.block_metas[first].table_id);
+            if before_bound(restart.cmp(&target)) {
+                left = group + 1;
+            } else {
+                right = group;
+            }
+        }
+        let group = left - 1;
         let first = group * KEY_RESTART_INTERVAL;
         let end = range.end.min(first + KEY_RESTART_INTERVAL);
-        // The range start or selected restart was already accepted above. Decode through it
-        // to initialize prefix reuse, without accepting keys before the requested range.
         let known_true = first.max(range.start);
         if known_true + 1 == end {
             return end;
         }
-        let mut offset = self.keys.restarts[group];
-        let target_table_key = target.user_key.table_key.0;
-        let mut matched = 0;
-        key.clear();
-        for index in first..end {
-            let (shared, suffix, next) = self.keys.entry(offset);
-            key.truncate(shared);
-            key.extend_from_slice(suffix);
-            offset = next;
-            if index < known_true {
+        let mut comparator = TableKeyComparator::new(target.user_key.table_key.0);
+        for (index, entry) in (first..end).zip(self.keys.entries(self.keys.restarts[group])) {
+            // Always advance TableKey comparison, including entries before range.start and
+            // entries from another table. Prefixes contain only TableKey bytes.
+            let user_order = comparator.compare(&entry);
+            if index <= known_true {
                 continue;
             }
-            let current = FullKey::decode(key);
-            let order = current.user_key.table_id.cmp(&target.user_key.table_id);
-            let order = if order.is_eq() {
-                let table_key = current.user_key.table_key.0;
-                // Reuse only user-key bytes: an encoded shared prefix may extend into the
-                // previous key's epoch when the next user key is longer.
-                let reused = matched
-                    .min(shared.saturating_sub(TABLE_PREFIX_LEN))
-                    .min(table_key.len());
-                matched = reused + common_prefix(&table_key[reused..], &target_table_key[reused..]);
-                table_key
-                    .get(matched)
-                    .cmp(&target_table_key.get(matched))
-                    .then_with(|| target.epoch_with_gap.cmp(&current.epoch_with_gap))
-            } else {
-                matched = 0;
-                order
-            };
-            if index > known_true && (order.is_gt() || (!inclusive && order.is_eq())) {
+            let order = self.block_metas[index]
+                .table_id
+                .cmp(&target.user_key.table_id)
+                .then(user_order)
+                .then_with(|| target.epoch_with_gap.cmp(&entry.epoch()));
+            if !before_bound(order) {
                 return index;
             }
         }
@@ -468,13 +516,13 @@ impl CachedSstableMeta {
 
     /// Legacy bincode size, without reconstructing full keys or encoding the SST filter.
     pub(super) fn serde_encoded_size(&self, filter_len: usize) -> usize {
-        let mut blocks_size = 8; // Vec length.
-        let mut offset = 0;
-        for _ in &self.block_metas {
-            let (shared, suffix, next) = self.keys.entry(offset);
-            blocks_size += 8 + shared + suffix.len() + 5 * 4;
-            offset = next;
-        }
+        let blocks_size = 8 + self
+            .keys
+            .entries(0)
+            .map(|entry| {
+                8 + TABLE_PREFIX_LEN + entry.shared + entry.suffix.len() + EPOCH_LEN + 5 * 4
+            })
+            .sum::<usize>();
         // Match the remaining MetaRef fields in their established bincode order. Byte slices
         // only contribute their length here, and tombstones keep their existing serde layout.
         let tail_size = bincode::serialized_size(&(
@@ -538,28 +586,16 @@ struct BlockMetasRef<'a>(&'a CachedSstableMeta);
 
 impl Serialize for BlockMetasRef<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        #[derive(Serialize)]
-        struct BlockRef<'a> {
-            smallest_key: &'a serde_bytes::Bytes,
-            offset: u32,
-            len: u32,
-            uncompressed_size: u32,
-            total_key_count: u32,
-            stale_key_count: u32,
-        }
         let mut seq = serializer.serialize_seq(Some(self.0.block_metas.len()))?;
-        let mut key = Vec::new();
-        let mut offset = 0;
-        for block in &self.0.block_metas {
-            offset = self.0.keys.decode_next(offset, &mut key);
-            seq.serialize_element(&BlockRef {
-                smallest_key: serde_bytes::Bytes::new(&key),
-                offset: block.offset,
-                len: block.len,
-                uncompressed_size: block.uncompressed_size,
-                total_key_count: block.total_key_count,
-                stale_key_count: block.stale_key_count,
-            })?;
+        let mut raw = BlockMeta::default();
+        for (block, entry) in self.0.block_metas.iter().zip(self.0.keys.entries(0)) {
+            entry.restore(block.table_id, &mut raw.smallest_key);
+            raw.offset = block.offset;
+            raw.len = block.len;
+            raw.uncompressed_size = block.uncompressed_size;
+            raw.total_key_count = block.total_key_count;
+            raw.stale_key_count = block.stale_key_count;
+            seq.serialize_element(&raw)?;
         }
         seq.end()
     }
@@ -644,7 +680,6 @@ mod tests {
         );
         let meta = decoded.meta;
         assert!(meta.estimated_heap_size() < old_key_bytes / 8);
-        let mut buffer = Vec::new();
         for (index, original) in blocks.iter().enumerate() {
             assert_eq!(meta.block_meta(index), *original);
             let target = FullKey::decode(&original.smallest_key);
@@ -653,7 +688,7 @@ mod tests {
                     + blocks[range.clone()]
                         .partition_point(|block| FullKey::decode(&block.smallest_key) <= target);
                 assert_eq!(
-                    meta.partition_point(range.clone(), Bound::Included(target), &mut buffer),
+                    meta.partition_point(range.clone(), Bound::Included(target)),
                     expected
                 );
                 for inclusive in [true, false] {
@@ -679,7 +714,6 @@ mod tests {
                                     epoch_with_gap: EpochWithGap::new_max_epoch(),
                                 })
                             },
-                            &mut buffer,
                         ),
                         expected
                     );
@@ -691,7 +725,6 @@ mod tests {
             meta.partition_point(
                 40..79,
                 Bound::Included(FullKey::decode(&blocks[39].smallest_key)),
-                &mut buffer
             ),
             40
         );
@@ -719,12 +752,42 @@ mod tests {
                 }
             }
         }
+        // Growing prefix keys force a fresh suffix comparison after an equal/shorter key,
+        // across complete restart groups. Epoch bytes must never enter the shared prefix.
+        for len in 1..=33 {
+            blocks.push(BlockMeta {
+                smallest_key: FullKey::new_with_gap_epoch(
+                    TableId::new(4),
+                    TableKey(vec![b'a'; len]),
+                    EpochWithGap::from_u64(0x6161_6161_6161_6161),
+                )
+                .encode(),
+                ..Default::default()
+            });
+        }
         let meta = CachedSstableMeta::from(SstableMeta {
             block_metas: blocks.clone(),
             ..Default::default()
         });
-        let mut scratch = Vec::new();
         let count = blocks.len();
+        for (index, block) in blocks.iter().enumerate() {
+            let target = FullKey::decode(&block.smallest_key);
+            for (other_index, other) in blocks.iter().enumerate() {
+                assert_eq!(
+                    meta.compare_block_key(other_index, target),
+                    FullKey::decode(&other.smallest_key).cmp(&target),
+                    "boundary {other_index}, target {index}"
+                );
+            }
+            assert_eq!(
+                meta.partition_point(0..count, Bound::Included(target)),
+                index + 1
+            );
+            assert_eq!(
+                meta.partition_point(0..count, Bound::Excluded(target)),
+                index
+            );
+        }
         let ranges = [
             0..count,
             1..count - 1,
@@ -738,7 +801,7 @@ mod tests {
         ];
         for range in &ranges {
             assert_eq!(
-                meta.partition_point(range.clone(), Bound::Unbounded, &mut scratch),
+                meta.partition_point(range.clone(), Bound::Unbounded),
                 range.end
             );
             for table in 0..=4 {
@@ -767,7 +830,6 @@ mod tests {
                                     } else {
                                         Bound::Excluded(target)
                                     },
-                                    &mut scratch,
                                 ),
                                 expected,
                                 "full bound: {range:?}, {target:?}, inclusive={inclusive}"
@@ -800,7 +862,6 @@ mod tests {
                                         ..target
                                     })
                                 },
-                                &mut scratch,
                             ),
                             expected,
                             "user bound: {range:?}, {target:?}, inclusive={inclusive}"

@@ -60,7 +60,6 @@ pub struct SstableIterator {
     // precisely inside the boundary block.
     block_start_idx_inclusive: usize,
     block_end_idx_exclusive: usize,
-    key_buffer: Vec<u8>,
 }
 
 impl SstableIterator {
@@ -155,7 +154,6 @@ impl SstableIterator {
             block_meta_count
         );
 
-        let mut key_buffer = Vec::new();
         if let Some(end_bound) = options.scan_end_user_key.as_ref() {
             let range = block_start_idx_inclusive..block_end_idx_exclusive;
             block_end_idx_exclusive = match end_bound {
@@ -166,7 +164,6 @@ impl SstableIterator {
                         user_key: end_key.as_ref(),
                         epoch_with_gap: EpochWithGap::new_min_epoch(),
                     }),
-                    &mut key_buffer,
                 ),
                 Excluded(end_key) => sstable.meta.partition_point(
                     range,
@@ -174,7 +171,6 @@ impl SstableIterator {
                         user_key: end_key.as_ref(),
                         epoch_with_gap: EpochWithGap::new_max_epoch(),
                     }),
-                    &mut key_buffer,
                 ),
             };
         }
@@ -190,7 +186,6 @@ impl SstableIterator {
             preload_end_block_idx: 0,
             block_start_idx_inclusive,
             block_end_idx_exclusive,
-            key_buffer,
         }
     }
 
@@ -298,13 +293,12 @@ impl SstableIterator {
         Ok(())
     }
 
-    fn calculate_block_idx_by_key(&mut self, key: FullKey<&[u8]>) -> usize {
+    fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {
         self.sst
             .meta
             .partition_point(
                 self.block_start_idx_inclusive..self.block_end_idx_exclusive,
                 Included(key),
-                &mut self.key_buffer,
             )
             .saturating_sub(1)
             .max(self.block_start_idx_inclusive)

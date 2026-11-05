@@ -261,7 +261,7 @@ pub async fn sst_dump_via_sstable_store(
     println!("Estimated Table Size: {}", sstable_meta.estimated_size);
     println!(
         "Bloom Filter Size: {}",
-        sstable.filter_reader.encode_to_bytes().len()
+        sstable.filter_reader.serialized_len()
     );
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
