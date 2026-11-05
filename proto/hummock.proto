@@ -651,8 +651,8 @@ message CompactionGroupInfo {
 
 message CompactTaskAssignment {
   CompactTask compact_task = 1;
-  reserved 2;
-  reserved "context_id";
+  // Worker selected to execute the task. Legacy assignments may contain zero.
+  uint32 context_id = 2;
 }
 
 message HummockPinnedVersion {

@@ -30,7 +30,7 @@ use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
-use crate::{CompactionGroupId, HummockSstableObjectId};
+use crate::{CompactionGroupId, HummockContextId, HummockSstableObjectId};
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
@@ -98,6 +98,8 @@ pub struct CompactTask {
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTaskAssignment {
     pub compact_task: CompactTask,
+    /// Worker selected to execute the task. Legacy assignments may contain zero.
+    pub context_id: HummockContextId,
 }
 
 impl CompactTask {
@@ -534,6 +536,7 @@ impl From<PbCompactTaskAssignment> for CompactTaskAssignment {
     fn from(assignment: PbCompactTaskAssignment) -> Self {
         Self {
             compact_task: CompactTask::from(assignment.compact_task.unwrap()),
+            context_id: assignment.context_id,
         }
     }
 }
@@ -542,6 +545,7 @@ impl From<&PbCompactTaskAssignment> for CompactTaskAssignment {
     fn from(assignment: &PbCompactTaskAssignment) -> Self {
         Self {
             compact_task: CompactTask::from(assignment.compact_task.as_ref().unwrap()),
+            context_id: assignment.context_id,
         }
     }
 }
@@ -550,6 +554,7 @@ impl From<CompactTaskAssignment> for PbCompactTaskAssignment {
     fn from(assignment: CompactTaskAssignment) -> Self {
         Self {
             compact_task: Some(assignment.compact_task.into()),
+            context_id: assignment.context_id,
         }
     }
 }
@@ -558,6 +563,7 @@ impl From<&CompactTaskAssignment> for PbCompactTaskAssignment {
     fn from(assignment: &CompactTaskAssignment) -> Self {
         Self {
             compact_task: Some((&assignment.compact_task).into()),
+            context_id: assignment.context_id,
         }
     }
 }

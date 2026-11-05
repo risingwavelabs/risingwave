@@ -37,7 +37,6 @@ use sea_orm::sea_query::OnConflict;
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::model::CompactionGroup;
-use crate::manager::META_NODE_ID;
 use crate::model::{MetadataModelError, MetadataModelResult, Transactional};
 
 pub type Transaction = sea_orm::DatabaseTransaction;
@@ -47,6 +46,7 @@ pub(crate) fn compaction_task_model_to_assignment(
 ) -> CompactTaskAssignment {
     CompactTaskAssignment {
         compact_task: CompactTask::from(model.task.to_protobuf()),
+        context_id: model.context_id,
     }
 }
 
@@ -123,8 +123,7 @@ impl Transactional<Transaction> for CompactTaskAssignment {
         let task: risingwave_pb::hummock::CompactTask = (&self.compact_task).into();
         let m = compaction_task::ActiveModel {
             id: Set(self.compact_task.task_id.try_into().unwrap()),
-            // The legacy column is NOT NULL; keep writing the existing placeholder.
-            context_id: Set(META_NODE_ID),
+            context_id: Set(self.context_id),
             task: Set(CompactionTask::from(&task)),
         };
         compaction_task::Entity::insert(m)

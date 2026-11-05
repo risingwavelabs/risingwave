@@ -236,7 +236,10 @@ mod tests {
     }
 
     fn assignment(task: CompactTask) -> CompactTaskAssignment {
-        CompactTaskAssignment { compact_task: task }
+        CompactTaskAssignment {
+            compact_task: task,
+            context_id: 1.into(),
+        }
     }
 
     fn view_for_group(
