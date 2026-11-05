@@ -48,7 +48,6 @@ use crate::enforce_secret::EnforceSecret;
 pub const FIRESTORE_SINK: &str = "firestore";
 
 const DEFAULT_MAX_BATCH_SIZE: usize = 500; // Firestore batch limit
-const DEFAULT_MAX_FUTURE_SEND_NUMS: usize = 256;
 const MAX_DOCUMENT_SIZE: usize = 1_048_576;
 // Leave room for the database name and protobuf framing below the 10 MiB RPC limit.
 const MAX_BATCH_WRITE_BYTES: usize = 9 * 1024 * 1024;
@@ -104,7 +103,7 @@ pub struct FirestoreConfig {
     /// Maximum batch size for batch writes (default: 500)
     #[serde(
         rename = "firestore.max_batch_size",
-        default = "default_max_batch_size"
+        default = "default_firestore_max_batch_size"
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_size: usize,
@@ -113,18 +112,18 @@ pub struct FirestoreConfig {
     /// Chunks are written sequentially to preserve per-document mutation order.
     #[serde(
         rename = "firestore.max_future_send_nums",
-        default = "default_max_future_send_nums"
+        default = "default_firestore_max_future_send_nums"
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub max_future_send_nums: usize,
 }
 
-fn default_max_batch_size() -> usize {
-    DEFAULT_MAX_BATCH_SIZE
+fn default_firestore_max_batch_size() -> usize {
+    500
 }
 
-fn default_max_future_send_nums() -> usize {
-    DEFAULT_MAX_FUTURE_SEND_NUMS
+fn default_firestore_max_future_send_nums() -> usize {
+    256
 }
 
 impl EnforceSecret for FirestoreConfig {
@@ -275,6 +274,9 @@ impl FirestoreConfig {
             return Err(SinkError::Config(anyhow!(
                 "firestore.max_future_send_nums must be greater than 0"
             )));
+        }
+        for field in schema.fields() {
+            validate_column_type(&field.data_type, &field.name)?;
         }
         if let Some(name) = &self.document_id_column {
             return schema
@@ -759,6 +761,31 @@ fn format_datum(
     decimal_mode: FirestoreDecimalMode,
 ) -> Result<Value> {
     format_datum_at_depth(datum, data_type, decimal_mode, 0)
+}
+
+/// Reject types the row encoder cannot serialize before connecting to Firestore.
+fn validate_column_type(data_type: &DataType, column_path: &str) -> Result<()> {
+    match data_type {
+        DataType::Map(_) | DataType::Vector(_) | DataType::Variant => {
+            Err(SinkError::Config(anyhow!(
+                "Firestore sink column '{}' has unsupported type {}",
+                column_path,
+                data_type
+            )))
+        }
+        DataType::List(inner) if matches!(inner.elem(), DataType::List(_)) => {
+            Err(SinkError::Config(anyhow!(
+                "Firestore sink column '{}' has unsupported type {}: arrays cannot directly contain arrays",
+                column_path,
+                data_type
+            )))
+        }
+        DataType::List(inner) => validate_column_type(inner.elem(), &format!("{column_path}[]")),
+        DataType::Struct(st) => st.iter().try_for_each(|(name, data_type)| {
+            validate_column_type(data_type, &format!("{column_path}.{name}"))
+        }),
+        _ => Ok(()),
+    }
 }
 
 fn contains_decimal(data_type: &DataType) -> bool {
