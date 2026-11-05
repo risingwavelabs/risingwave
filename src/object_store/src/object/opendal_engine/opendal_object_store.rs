@@ -188,7 +188,7 @@ impl ObjectStore for OpendalObjectStore {
         // `TimeoutLayer` must be specified before `RetryLayer`.
         // Otherwise, it will lead to bad state inside OpenDAL and panic.
         // See https://docs.rs/opendal/latest/opendal/layers/struct.RetryLayer.html#panics
-        let reader = self
+        let op = self
             .op
             .clone()
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
@@ -205,10 +205,16 @@ impl ObjectStore for OpendalObjectStore {
                     .with_max_times(self.config.retry.streaming_read_retry_attempts)
                     .with_factor(self.config.retry.req_backoff_factor as f32)
                     .with_jitter(),
-            )
-            .reader_with(path)
-            .await?;
-        let stream = reader.into_bytes_stream(range).await?.map(|item| {
+            );
+        let mut reader = op.reader_with(path);
+        if self.config.opendal_streaming_read_chunk_size > 0 {
+            // OpenDAL fully buffers each range before yielding, with a separate limit on the
+            // number of range requests in flight.
+            reader = reader
+                .chunk(self.config.opendal_streaming_read_chunk_size)
+                .concurrent(self.config.opendal_streaming_read_chunk_concurrency);
+        }
+        let stream = reader.await?.into_bytes_stream(range).await?.map(|item| {
             item.map(|b| Bytes::copy_from_slice(b.as_ref()))
                 .map_err(|e| {
                     ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
@@ -517,9 +523,202 @@ impl StreamingUploader for OpendalStreamingUploader {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use futures::TryStreamExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::Notify;
+    use tokio::task::{JoinHandle, JoinSet};
 
     use super::*;
+    use crate::object::{InMemObjectStore, ObjectDataStreamReader, ObjectStoreImpl};
+
+    #[derive(Clone, Copy)]
+    enum FirstRequest {
+        Respond,
+        Stall,
+        WaitForConcurrent,
+    }
+
+    /// Serve a fixed object over the S3 range-GET protocol, recording physical HTTP requests.
+    /// Control the first response to exercise the read deadline and concurrent requests.
+    async fn mock_s3_streaming_reader(
+        chunk_size: usize,
+        chunk_concurrency: usize,
+        first_request: FirstRequest,
+    ) -> (ObjectStoreImpl, Arc<Mutex<Vec<String>>>, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded = requests.clone();
+        let server = tokio::spawn(async move {
+            let mut connections = JoinSet::new();
+            let next_request = Arc::new(Notify::new());
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let recorded = recorded.clone();
+                let next_request = next_request.clone();
+                connections.spawn(async move {
+                    let mut request = Vec::new();
+                    while !request.ends_with(b"\r\n\r\n") {
+                        let mut buf = [0; 1024];
+                        let n = socket.read(&mut buf).await.unwrap();
+                        assert_ne!(n, 0);
+                        request.extend_from_slice(&buf[..n]);
+                    }
+                    let request = String::from_utf8(request).unwrap();
+                    let range = request
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("range").then_some(value.trim())
+                        })
+                        .unwrap();
+                    let first = {
+                        let mut requests = recorded.lock().unwrap();
+                        requests.push(range.to_owned());
+                        requests.len() == 1
+                    };
+                    if first {
+                        match first_request {
+                            FirstRequest::Respond => {}
+                            FirstRequest::Stall => std::future::pending::<()>().await,
+                            FirstRequest::WaitForConcurrent => next_request.notified().await,
+                        }
+                    } else {
+                        next_request.notify_one();
+                    }
+                    let (start, end) = range.strip_prefix("bytes=").unwrap().split_once('-').unwrap();
+                    let start: usize = start.parse().unwrap();
+                    let end: usize = end.parse().unwrap();
+                    let body = &b"0123456789abcdef"[start..=end];
+                    let response = format!(
+                        "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/16\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                    socket.write_all(body).await.unwrap();
+                });
+                while connections.try_join_next().is_some() {}
+            }
+        });
+        let mut config = ObjectStoreConfig {
+            opendal_streaming_read_chunk_size: chunk_size,
+            opendal_streaming_read_chunk_concurrency: chunk_concurrency,
+            ..Default::default()
+        };
+        config.retry.streaming_read_attempt_timeout_ms = match first_request {
+            FirstRequest::Respond => 10_000,
+            _ => 1000,
+        };
+        config.retry.streaming_read_retry_attempts = 1;
+        config.retry.req_backoff_interval_ms = 1;
+        config.retry.req_backoff_max_delay_ms = 1;
+        let config = Arc::new(config);
+        let metrics = Arc::new(ObjectStoreMetrics::unused());
+        let store = OpendalObjectStore::new_minio_engine(
+            &format!("minio://key:secret@{addr}/bucket"),
+            config.clone(),
+            metrics.clone(),
+        )
+        .unwrap();
+        (
+            ObjectStoreImpl::Opendal(store.monitored(metrics, config)),
+            requests,
+            server,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_opendal_chunked_streaming_read_requests() {
+        for (chunk_size, chunk_concurrency) in [(0, 1), (4, 0), (4, 1)] {
+            let (store, requests, server) =
+                mock_s3_streaming_reader(chunk_size, chunk_concurrency, FirstRequest::Respond)
+                    .await;
+            let reader = store.streaming_read("data", 2..13).await.unwrap();
+            assert_eq!(reader.streaming_read_timeout, Some(Duration::from_secs(10)));
+            assert!(requests.lock().unwrap().is_empty());
+            let mut reader = ObjectDataStreamReader::new(reader.into_stream());
+            let mut buf = [0; 4];
+            reader.read_exact(&mut buf).await.unwrap();
+            assert_eq!(&buf, b"2345");
+            assert_eq!(requests.lock().unwrap().len(), 1);
+            reader.read_exact(&mut buf).await.unwrap();
+            assert_eq!(&buf, b"6789");
+            let mut tail = Vec::new();
+            reader.read_to_end(&mut tail).await.unwrap();
+            assert_eq!(tail, b"abc");
+            let expected = if chunk_size > 0 {
+                vec!["bytes=2-5", "bytes=6-9", "bytes=10-12"]
+            } else {
+                vec!["bytes=2-12"]
+            };
+            assert_eq!(*requests.lock().unwrap(), expected);
+            server.abort();
+            let _ = server.await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_opendal_chunked_streaming_read_timeout() {
+        let (store, requests, server) = mock_s3_streaming_reader(4, 1, FirstRequest::Stall).await;
+        let ObjectStoreImpl::Opendal(store) = store else {
+            unreachable!()
+        };
+        // Construct the monitored reader directly, without the enum dispatch wrapper.
+        let mut reader = store.streaming_read("data", 2..6).await.unwrap();
+        assert_eq!(reader.streaming_read_timeout, Some(Duration::from_secs(1)));
+        // Reuse the existing deadline for the entire wait, including backend attempts/backoff.
+        let err = reader.read_bytes().await.unwrap().unwrap_err();
+        assert!(matches!(
+            err.inner(),
+            crate::object::ObjectErrorInner::Timeout(_)
+        ));
+        assert_eq!(*requests.lock().unwrap(), ["bytes=2-5"]);
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn test_opendal_chunked_streaming_read_concurrency() {
+        let (store, requests, server) =
+            mock_s3_streaming_reader(4, 2, FirstRequest::WaitForConcurrent).await;
+        let reader = store.streaming_read("data", 2..10).await.unwrap();
+        let mut reader = ObjectDataStreamReader::new(reader.into_stream());
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await.unwrap();
+        assert_eq!(bytes, b"23456789");
+        {
+            let requests = requests.lock().unwrap();
+            assert_eq!(requests.len(), 2);
+            // The first response cannot complete until the other range starts. Sequential
+            // reads would hit the read deadline instead of reaching this assertion.
+            assert_ne!(requests[0], requests[1]);
+        }
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn test_opendal_chunk_config_does_not_change_other_backends() {
+        let config = Arc::new(ObjectStoreConfig {
+            opendal_streaming_read_chunk_size: 4,
+            ..Default::default()
+        });
+        let timeout = Duration::from_millis(config.retry.streaming_read_attempt_timeout_ms);
+        let store = ObjectStoreImpl::InMem(
+            InMemObjectStore::default().monitored(Arc::new(ObjectStoreMetrics::unused()), config),
+        );
+        store
+            .upload("data", Bytes::from_static(b"0123456789"))
+            .await
+            .unwrap();
+        let mut reader = store.streaming_read("data", 2..9).await.unwrap();
+        assert_eq!(reader.streaming_read_timeout, Some(timeout));
+        assert_eq!(reader.read_bytes().await.unwrap().unwrap(), "2345678");
+        assert!(reader.read_bytes().await.is_none());
+    }
 
     async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
         store
