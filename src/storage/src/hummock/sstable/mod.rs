@@ -16,6 +16,7 @@
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
+mod block_filter;
 
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
