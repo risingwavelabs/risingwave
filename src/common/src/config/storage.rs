@@ -931,7 +931,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .meta_file_cache
         .flush_buffer_threshold_mb
-        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+        .unwrap_or(default::storage::meta_file_cache_flush_buffer_threshold_mb());
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
@@ -1164,7 +1164,7 @@ pub mod default {
         }
 
         pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize {
-            64
+            256
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
