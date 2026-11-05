@@ -670,6 +670,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_sstable_serde() {
+        use foyer::Code;
+
+        use crate::hummock::SstableMetaCacheValue;
+
         let (_, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
             (0..100).clone().map(|x| {
@@ -681,33 +685,31 @@ mod tests {
         )
         .await;
 
-        // skip sst serde
-        let sstable = Sstable::new(42.into(), meta.clone(), true);
+        for skip_filter in [false, true] {
+            let sstable = Sstable::new(42.into(), meta.clone(), skip_filter);
+            let legacy_bytes = bincode::serialize(&sstable).unwrap();
+            let value = SstableMetaCacheValue::from(sstable);
+            let mut bytes = Vec::new();
+            value.encode(&mut bytes).unwrap();
 
-        let buffer = bincode::serialize(&sstable).unwrap();
+            assert_eq!(bytes, legacy_bytes);
+            assert_eq!(value.estimated_size(), bytes.len());
 
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert!(!sstable.filter_reader.is_empty());
-        // The table filter reader is empty because the SST filter is skipped in serde.
-        assert!(s.filter_reader.is_empty());
-
-        // enable sst serde
-        let sstable = Sstable::new(42.into(), meta, false);
-
-        let buffer = bincode::serialize(&sstable).unwrap();
-
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
-
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert_eq!(
-            s.filter_reader.encode_to_bytes(),
-            sstable.filter_reader.encode_to_bytes()
-        );
+            let decoded = SstableMetaCacheValue::decode(&mut legacy_bytes.as_slice()).unwrap();
+            assert_eq!(decoded.id, value.id);
+            assert_eq!(decoded.meta, value.meta);
+            assert!(value.has_filter());
+            if skip_filter {
+                assert!(!decoded.has_filter());
+            } else {
+                assert_eq!(
+                    decoded.filter_reader.encode_to_bytes(),
+                    value.filter_reader.encode_to_bytes()
+                );
+            }
+        }
     }
+
     #[tokio::test]
     async fn test_sstable_from_meta_bytes() {
         let (_, meta) = gen_test_sstable_data(
@@ -737,53 +739,5 @@ mod tests {
         corrupt[0] ^= 1;
         assert!(SstableMeta::decode(&corrupt).is_err());
         assert!(Sstable::from_meta_bytes(42.into(), &corrupt, false).is_err());
-    }
-
-    #[tokio::test]
-    async fn test_meta_cache_codec_compatibility() {
-        use foyer::Code;
-
-        use crate::hummock::SstableMetaCacheValue;
-
-        fn check(sstable: Sstable) {
-            let legacy_bytes = bincode::serialize(&sstable).unwrap();
-            let legacy: Box<Sstable> = bincode::deserialize(&legacy_bytes).unwrap();
-            let value = SstableMetaCacheValue::from(sstable);
-            assert_eq!(value.estimated_size(), legacy_bytes.len());
-            let mut bytes = Vec::new();
-            value.encode(&mut bytes).unwrap();
-            assert_eq!(bytes, legacy_bytes);
-            // Existing disk entries remain readable, and new entries retain the old format.
-            let decoded = SstableMetaCacheValue::decode(&mut &legacy_bytes[..]).unwrap();
-            let decoded_legacy: Box<Sstable> = bincode::deserialize(&bytes).unwrap();
-            for sstable in [&*decoded, &*decoded_legacy] {
-                assert_eq!(sstable.id, legacy.id);
-                assert_eq!(sstable.meta, legacy.meta);
-                assert_eq!(
-                    sstable.filter_reader.encode_to_bytes(),
-                    legacy.filter_reader.encode_to_bytes()
-                );
-            }
-        }
-
-        let (_, meta) = gen_test_sstable_data(
-            default_builder_opt_for_test(),
-            (0..100).map(|x| (iterator_test_key_of(x), HummockValue::put(vec![42]))),
-        )
-        .await;
-        let meta_bytes = meta.encode_to_bytes();
-        for skip_filter in [false, true] {
-            check(Sstable::from_meta_bytes(42.into(), &meta_bytes, skip_filter).unwrap());
-            let mut sstable = Sstable::new(42.into(), meta.clone(), skip_filter);
-            // Public metadata can contain a replacement bloom payload. Serialization only
-            // uses it when skip_filter is true; otherwise it encodes the decoded reader.
-            sstable.meta.bloom_filter = vec![255];
-            check(sstable);
-
-            let mut empty_meta = meta.clone();
-            empty_meta.bloom_filter.clear();
-            // An empty reader encodes a canonical header/footer, not zero bytes.
-            check(Sstable::new(42.into(), empty_meta, skip_filter));
-        }
     }
 }

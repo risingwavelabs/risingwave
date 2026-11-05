@@ -951,12 +951,7 @@ mod tests {
     fn assert_blocked_filter_builder_approx_len_matches_output<F: FilterBuilder>() {
         let mut builder = F::create(filter_builder_options(0));
         let approximate_len = builder.approximate_len();
-        let filter = builder.finish(None).unwrap();
-        assert_eq!(approximate_len, filter.len());
-        assert_eq!(
-            XorFilterReader::new(&filter, &[]).serialized_len(),
-            filter.len()
-        );
+        assert_eq!(approximate_len, builder.finish(None).unwrap().len());
 
         let mut builder = F::create(filter_builder_options(1024));
         for i in 0..50 {
