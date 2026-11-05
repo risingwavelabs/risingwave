@@ -120,6 +120,8 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                     chunk_size: params.config.developer.chunk_size,
                     max_dirty_groups_heap_size: (params.config.developer)
                         .hash_agg_max_dirty_groups_heap_size,
+                    group_cache_max_entries: (params.config.developer)
+                        .hash_agg_group_cache_max_entries,
                     emit_on_window_close: node.get_emit_on_window_close(),
                 },
             },
