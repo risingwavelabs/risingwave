@@ -21,7 +21,6 @@
 - [CPU Profiling](./benchmark-and-profile/cpu-profiling.md)
 - [Memory (Heap) Profiling](./benchmark-and-profile/memory-profiling.md)
 - [Microbench](./benchmark-and-profile/microbenchmarks.md)
-- [Object Store Benchmark](./benchmark-and-profile/object-store-benchmark.md)
 
 ---
 
