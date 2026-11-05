@@ -462,7 +462,8 @@ opt-level = 2
 [patch.crates-io]
 # Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
 # Also backport https://github.com/foyer-rs/foyer/pull/1349 to reuse entry size estimates.
-foyer = { git = "https://github.com/Li0k/foyer.git", rev = "4beeb01f6689dde8b94744499f4be578eba8202b" }
+# Backport https://github.com/foyer-rs/foyer/pull/1359 and #1362 to preserve keeper registrations.
+foyer = { git = "https://github.com/Li0k/foyer.git", rev = "64296306ca8c0d68e126fed7eb7dab797050864a" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Keep transitive madsim-family resolution aligned to the same upstream rev.
 madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "e46e4ef5c7a2ae9ceca511202b305d10111aff5d" }
