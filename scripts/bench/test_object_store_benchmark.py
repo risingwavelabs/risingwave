@@ -18,6 +18,8 @@
 import io
 import threading
 import unittest
+import sys
+from unittest import mock
 from types import SimpleNamespace
 
 import object_store_benchmark as bench
@@ -112,6 +114,68 @@ class BenchmarkTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "incorrect content"):
             b.preflight(0, bench.Sample(), Stop(client))
         self.assertEqual(client.objects, {"production/key": b"keep"})
+
+    def test_preflight_preserves_primary_error_when_cleanup_also_fails(self):
+        class FailingCleanup(Client):
+            def delete_objects(self, **kwargs):
+                raise RuntimeError("cleanup unavailable")
+        client = FailingCleanup(data=b"wrong data" * 500)
+        with self.assertRaises(RuntimeError) as raised:
+            benchmark(client).preflight(0, bench.Sample(), Stop(client))
+        self.assertIn("incorrect content", str(raised.exception))
+        self.assertIn("cleanup unavailable", str(raised.exception))
+
+    def test_multipart_preserves_upload_and_abort_errors(self):
+        class FailingMultipart(Client):
+            def create_multipart_upload(self, **kwargs):
+                return {"UploadId": "test-upload"}
+
+            def upload_part(self, **kwargs):
+                raise ValueError("primary upload failure")
+
+            def abort_multipart_upload(self, **kwargs):
+                raise RuntimeError("abort unavailable")
+        b = benchmark(FailingMultipart())
+        b.args.part_size = 5
+        with self.assertRaises(RuntimeError) as raised:
+            b.put("object", b"payload", bench.Sample(), multipart=True)
+        self.assertIn("primary upload failure", str(raised.exception))
+        self.assertIn("abort unavailable", str(raised.exception))
+
+    def test_partial_report_does_not_refresh_credentials_after_io(self):
+        state = {"started": False}
+        secret = 'secret"quote'
+        class Credentials:
+            def get_frozen_credentials(self):
+                if state["started"]:
+                    raise RuntimeError("credential refresh unavailable")
+                return SimpleNamespace(access_key="test-key", secret_key=secret, token=None)
+        class Session:
+            def client(self, *args, **kwargs):
+                return SimpleNamespace(close=lambda: None)
+
+            def get_credentials(self):
+                return Credentials()
+        def fail_run(_):
+            state["started"] = True
+            raise RuntimeError(f"primary read failed: {secret}")
+        args = benchmark(Client()).args
+        for name, value in dict(endpoint=None, region="us-east-1", addressing_style="path", ca_cert=None,
+                                concurrency=2, fast_readers=1, timeout_secs=1, max_runtime_secs=60,
+                                output=None, keep_data=False, delete_batch_size=5).items():
+            setattr(args, name, value)
+        modules = {"boto3": SimpleNamespace(Session=Session, __version__="test"),
+                   "botocore": SimpleNamespace(__version__="test"),
+                   "botocore.config": SimpleNamespace(Config=lambda **kwargs: None)}
+        output = io.StringIO()
+        with mock.patch.dict(sys.modules, modules), mock.patch.object(bench, "arguments", return_value=args), \
+                mock.patch.object(bench.Benchmark, "run", fail_run), mock.patch.object(bench, "summary"), \
+                mock.patch.object(bench.signal, "signal"), mock.patch.object(sys, "stdout", output):
+            self.assertEqual(bench.main(), 1)
+        import json
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["benchmark"]["fatal_errors"], ["primary read failed: [redacted]"])
+        self.assertEqual(report["benchmark"]["cleanup_status"], "completed")
 
     def test_histograms_pool_samples_and_separate_failures(self):
         a, b = bench.Stats(), bench.Stats()

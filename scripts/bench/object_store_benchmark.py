@@ -248,8 +248,11 @@ class Benchmark:
                     parts.append(dict(PartNumber=len(parts) + 1, ETag=result["ETag"]))
                 self.client.complete_multipart_upload(Bucket=self.args.bucket, Key=key, UploadId=upload,
                                                      MultipartUpload=dict(Parts=parts))
-            except Exception:
-                self.client.abort_multipart_upload(Bucket=self.args.bucket, Key=key, UploadId=upload)
+            except Exception as error:
+                try:
+                    self.client.abort_multipart_upload(Bucket=self.args.bucket, Key=key, UploadId=upload)
+                except Exception as abort_error:
+                    raise RuntimeError(f"multipart upload failed: {error}; abort failed: {abort_error}") from error
                 raise
         sample.bytes += len(data)
         sample.items += 1
@@ -267,6 +270,7 @@ class Benchmark:
 
     def preflight(self, _, sample, stop):
         key, data = f"{self.prefix}check/probe", bytes(range(251)) * 16
+        failure = None
         try:
             self.put(key, data, Sample())
             if self.client.head_object(Bucket=self.args.bucket, Key=key)["ContentLength"] != len(data):
@@ -283,8 +287,17 @@ class Benchmark:
             if self.listed(f"{self.prefix}check/"):
                 raise ValueError("object is still listed after DELETE")
             sample.items = 1
+        except Exception as error:
+            failure = error
+            raise
         finally:
-            self.delete([key])  # The probe is never retained, even with --keep-data.
+            # Cleanup must not hide the operation that originally failed.
+            try:
+                self.delete([key])  # The probe is never retained, even with --keep-data.
+            except Exception as cleanup_error:
+                if failure is not None:
+                    raise RuntimeError(f"preflight failed: {failure}; probe cleanup failed: {cleanup_error}") from failure
+                raise
 
     def read(self, key, length, mode, sample, stop, reader_id=0, ready=None):
         started = time.monotonic()
@@ -646,6 +659,13 @@ def main():
     session = boto3.Session()
     client = session.client("s3", endpoint_url=args.endpoint, region_name=args.region, config=config,
                           verify=args.ca_cert or True)
+    # Snapshot resolved credentials before I/O. Report writing must not trigger
+    # a provider refresh, which can itself fail after a partial run.
+    credentials = session.get_credentials()
+    secrets = [os.environ.get(k, "") for k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")]
+    if credentials:
+        frozen = credentials.get_frozen_credentials()
+        secrets += [frozen.access_key, frozen.secret_key, frozen.token]
     shutdown = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: shutdown.set())
     signal.signal(signal.SIGTERM, lambda *_: shutdown.set())
@@ -675,13 +695,6 @@ def main():
                "Fixed compactor modes read the same objects/bytes. Deliberate pauses and resume waits are separate.",
                "No background body consumer; OS/socket/TLS/HTTP buffers remain. Server backpressure is unverified.",
                "Interrupted body reads are closed after the current blocking read returns or times out; drain is separate."])
-    # SDK errors can contain signed URLs or identifiers. Redact resolved credentials,
-    # including credentials supplied by profiles/roles rather than environment only.
-    credentials = session.get_credentials()
-    secrets = [os.environ.get(k, "") for k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")]
-    if credentials:
-        frozen = credentials.get_frozen_credentials()
-        secrets += [frozen.access_key, frozen.secret_key, frozen.token]
     def redact(value):
         if isinstance(value, str):
             for secret in secrets:
