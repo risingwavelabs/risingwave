@@ -118,6 +118,11 @@ impl BuildingFragment {
         table_id_gen: GlobalTableIdGen,
     ) {
         let fragment_id = fragment.fragment_id;
+        stream_graph_visitor::visit_iceberg_completion_tables(fragment, |table| {
+            table.table_id = table_id_gen
+                .to_global_id(table.table_id.as_raw_id())
+                .as_global_id();
+        });
         stream_graph_visitor::visit_internal_tables(fragment, |table, table_type_name| {
             table.id = table_id_gen
                 .to_global_id(table.id.as_raw_id())
@@ -975,6 +980,7 @@ impl StreamFragmentGraph {
                 .sum::<u32>(),
             proto.table_ids_cnt
         );
+        Self::check_iceberg_completion_tables(&fragments)?;
 
         // Create edges.
         let mut downstreams = HashMap::new();
@@ -1033,6 +1039,47 @@ impl StreamFragmentGraph {
         })
     }
 
+    /// Internal table ID remapping looks up completion table references by ID, so reject
+    /// references that do not point to a Fetch state table of this graph before any remapping.
+    fn check_iceberg_completion_tables(
+        fragments: &HashMap<GlobalFragmentId, BuildingFragment>,
+    ) -> MetaResult<()> {
+        let mut fetch_table_ids = HashSet::new();
+        let mut references = Vec::new();
+        for fragment in fragments.values() {
+            stream_graph_visitor::visit_fragment(&fragment.inner, |body| match body {
+                NodeBody::StreamFsFetch(node) => {
+                    if let Some(table) = node
+                        .node_inner
+                        .as_ref()
+                        .and_then(|fetch| fetch.state_table.as_ref())
+                    {
+                        fetch_table_ids.insert(table.id);
+                    }
+                }
+                NodeBody::Source(node) => {
+                    if let Some(desc) = node
+                        .source_inner
+                        .as_ref()
+                        .and_then(|source| source.iceberg_fetch_state_table.as_ref())
+                    {
+                        references.push(desc.table_id);
+                    }
+                }
+                _ => {}
+            });
+        }
+        if let Some(id) = references
+            .into_iter()
+            .find(|id| !fetch_table_ids.contains(id))
+        {
+            bail!(
+                "Iceberg completion table {id} must reference a Fetch state table in this ingestion graph"
+            );
+        }
+        Ok(())
+    }
+
     /// Retrieve the **incomplete** internal tables map of the whole graph.
     ///
     /// Note that some fields in the table catalogs are not filled during the current phase, e.g.,
@@ -1055,6 +1102,9 @@ impl StreamFragmentGraph {
     /// `create_internal_table_catalog`.
     pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<TableId, TableId>) {
         for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_iceberg_completion_tables(&mut fragment.inner, |table| {
+                table.table_id = table_id_map[&table.table_id];
+            });
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
@@ -1096,6 +1146,9 @@ impl StreamFragmentGraph {
         // TODO(alter-mv): unify this with `fit_internal_table_ids_with_mapping` after we
         // confirm the behavior is the same.
         for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_iceberg_completion_tables(&mut fragment.inner, |table| {
+                table.table_id = internal_table_id_map[&table.table_id].id;
+            });
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
@@ -1136,6 +1189,9 @@ impl StreamFragmentGraph {
         let mut old_internal_tables: HashMap<_, _> =
             old_internal_tables.into_iter().map(|t| (t.id, t)).collect();
         for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_iceberg_completion_tables(&mut fragment.inner, |table| {
+                table.table_id = matches[&table.table_id];
+            });
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
@@ -1152,6 +1208,11 @@ impl StreamFragmentGraph {
 
     /// Fit the internal tables' `table_id`s according to the given mapping.
     pub fn fit_internal_table_ids_with_mapping(&mut self, mut matches: HashMap<TableId, Table>) {
+        for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_iceberg_completion_tables(&mut fragment.inner, |table| {
+                table.table_id = matches[&table.table_id].id;
+            });
+        }
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,

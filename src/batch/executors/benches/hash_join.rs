@@ -28,6 +28,7 @@ use risingwave_expr::expr::build_from_pretty;
 use utils::bench_join;
 
 enable_jemalloc!();
+risingwave_expr_impl::enable!();
 
 fn create_hash_join_executor(
     join_type: JoinType,
@@ -62,7 +63,8 @@ fn create_hash_join_executor(
         _ => vec![0, 1],
     };
 
-    let cond = with_cond.then(|| build_from_pretty("(greater_than:int8 $0:int8 100:int8)").into());
+    let cond =
+        with_cond.then(|| build_from_pretty("(greater_than:boolean $0:int8 100:int8)").into());
 
     Box::new(HashJoinExecutor::<hash::Key64>::new(
         join_type,

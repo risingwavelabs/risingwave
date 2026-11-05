@@ -25,6 +25,13 @@ use risingwave_storage::hummock::value::HummockValue;
 // Build and native-decode an SST before any timed iterations. Shared-prefix keys keep
 // the fixture bounded while exercising actual block metadata and filter builders.
 pub async fn sstable_meta<F: FilterBuilder>(key_count: usize, key_len: usize) -> SstableMeta {
+    sstable_fixture::<F>(key_count, key_len).await.1
+}
+
+pub async fn sstable_fixture<F: FilterBuilder>(
+    key_count: usize,
+    key_len: usize,
+) -> (bytes::Bytes, SstableMeta) {
     let options = SstableBuilderOptions {
         capacity: 128 << 20,
         block_capacity: 64 << 10,
@@ -50,5 +57,6 @@ pub async fn sstable_meta<F: FilterBuilder>(key_count: usize, key_len: usize) ->
             .unwrap();
     }
     let (bytes, meta) = builder.finish().await.unwrap().writer_output;
-    SstableMeta::decode(&bytes[meta.meta_offset as usize..]).unwrap()
+    let meta = SstableMeta::decode(&bytes[meta.meta_offset as usize..]).unwrap();
+    (bytes, meta)
 }

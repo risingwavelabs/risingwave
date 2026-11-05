@@ -20,4 +20,11 @@ fn main() {
         // Leave the environment variable unset if error occurs.
         println!("cargo:warning={}", e.as_report())
     }
+
+    // The macOS linker exports every global symbol of an executable by default, so the dyld export
+    // trie repeats the whole symbol string table (hundreds of MB for a dev build since the v0
+    // mangling scheme). Exported symbols are not used and already empty for Linux build.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg-bins=-Wl,-no_exported_symbols");
+    }
 }

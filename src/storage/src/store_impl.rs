@@ -482,6 +482,10 @@ pub mod verify {
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
 
+        fn read_epoch(&self) -> Option<u64> {
+            self.actual.read_epoch()
+        }
+
         // TODO: may avoid manual async fn when the bug of rust compiler is fixed. Currently it will
         // fail to compile.
         #[expect(clippy::manual_async_fn)]
@@ -1107,6 +1111,8 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     pub trait DynStateStoreRead: DynStateStoreGet + StaticSendSync {
+        fn read_epoch(&self) -> Option<u64>;
+
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1151,6 +1157,10 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreRead> DynStateStoreRead for S {
+        fn read_epoch(&self) -> Option<u64> {
+            StateStoreRead::read_epoch(self)
+        }
+
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1567,6 +1577,10 @@ mod dyn_state_store {
     {
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
+
+        fn read_epoch(&self) -> Option<u64> {
+            self.as_ref().read_epoch()
+        }
 
         fn iter(
             &self,

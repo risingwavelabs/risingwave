@@ -121,6 +121,11 @@ harness = false
 required-features = ["test"]
 
 [[bench]]
+name = "bench_sstable_meta"
+harness = false
+required-features = ["test"]
+
+[[bench]]
 name = "bench_sstable_meta_size"
 harness = false
 required-features = ["test"]
@@ -136,6 +141,16 @@ harness = false
 [[bench]]
 name = "bench_table_watermarks"
 harness = false
+
+[[bench]]
+name = "bench_sstable_filter_restore"
+harness = false
+required-features = ["test"]
+
+[[bench]]
+name = "bench_sstable_decode"
+harness = false
+required-features = ["test"]
 
 [lints]
 workspace = true
