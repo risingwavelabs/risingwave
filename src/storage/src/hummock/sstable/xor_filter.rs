@@ -433,11 +433,13 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     }
 }
 
-// Runtime-only index into the shared fingerprint array. Offsets are not persisted.
+// Runtime-only index into the shared fingerprint array; not part of the encoded format.
 #[derive(Clone)]
 struct XorFilterBlock {
     seed: u64,
+    // Number of fingerprints in each of the child filter's three XOR segments.
     block_length: u32,
+    // Offset in fingerprint elements, not bytes.
     offset: u32,
 }
 
@@ -472,7 +474,7 @@ impl<T> BlockBasedXorFilter<T> {
             let mut child = &reader[..len];
             reader.advance(len);
             let offset = u32::try_from(fingerprints.len())
-                .expect("blocked filter offset exceeds its u32-encoded byte length");
+                .expect("blocked filter fingerprint offset exceeds u32");
             let (seed, block_length) = if size_of::<T>() == 2 && len == 1 {
                 assert_eq!(child[0], FOOTER_XOR16);
                 (0, 0)
@@ -554,8 +556,7 @@ impl<T> BlockBasedXorFilter<T> {
         &self,
         block_metas: &[BlockMeta],
         user_key_range: &UserKeyRangeRef<'_>,
-        h: u64,
-        contains: impl Fn(&XorFilterBlock, &[T], u64) -> bool,
+        contains: impl Fn(&XorFilterBlock, &[T]) -> bool,
     ) -> bool {
         debug_assert_eq!(self.filters.len(), block_metas.len());
         let mut block_idx = match user_key_range.0 {
@@ -589,11 +590,7 @@ impl<T> BlockBasedXorFilter<T> {
             if read_bound {
                 break;
             }
-            if contains(
-                &self.filters[block_idx],
-                self.block_fingerprints(block_idx),
-                h,
-            ) {
+            if contains(&self.filters[block_idx], self.block_fingerprints(block_idx)) {
                 return true;
             }
             block_idx += 1;
@@ -756,7 +753,7 @@ impl XorFilterReader {
                 XorFilter::Xor8(filter) => filter.contains(&h),
                 XorFilter::Xor16(filter) => filter.contains(&h),
                 XorFilter::BlockXor8(reader) => {
-                    reader.may_exist(block_metas, user_key_range, h, |block, fingerprints, h| {
+                    reader.may_exist(block_metas, user_key_range, |block, fingerprints| {
                         Xor8Ref {
                             seed: block.seed,
                             block_length: block.block_length as usize,
@@ -766,7 +763,7 @@ impl XorFilterReader {
                     })
                 }
                 XorFilter::BlockXor16(reader) => {
-                    reader.may_exist(block_metas, user_key_range, h, |block, fingerprints, h| {
+                    reader.may_exist(block_metas, user_key_range, |block, fingerprints| {
                         Xor16Ref {
                             seed: block.seed,
                             block_length: block.block_length as usize,

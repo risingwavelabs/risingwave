@@ -39,7 +39,7 @@ fn bench_sstable_filter_restore(c: &mut Criterion) {
         .build()
         .unwrap();
     let mut group = c.benchmark_group("sstable_filter_restore");
-    let mut measure = |name: &str, meta: SstableMeta, probe: bool| {
+    let mut measure = |name: &str, meta: SstableMeta| {
         let restored = XorFilterReader::new(&meta.bloom_filter, &meta.block_metas);
         assert!(!restored.is_empty());
         assert_eq!(restored.encode_to_bytes(), meta.bloom_filter);
@@ -64,39 +64,41 @@ fn bench_sstable_filter_restore(c: &mut Criterion) {
                 BatchSize::PerIteration,
             );
         });
-        if probe {
+        group.bench_function(BenchmarkId::new("restore_and_drop", name), |b| {
+            b.iter(|| {
+                drop(black_box(XorFilterReader::new(
+                    black_box(&meta.bloom_filter),
+                    black_box(&meta.block_metas),
+                )));
+            });
+        });
+        if restored.is_block_based_filter() {
             measure_blocked_probes(&mut group, name, &meta, &restored);
         }
     };
     measure(
         "xor8",
         runtime.block_on(sstable_meta::<Xor8FilterBuilder>(1_100_000, 64)),
-        false,
     );
     measure(
         "xor16",
         runtime.block_on(sstable_meta::<Xor16FilterBuilder>(1_100_000, 64)),
-        false,
     );
     measure(
         "blocked_xor8",
         runtime.block_on(sstable_meta::<BlockedXor8FilterBuilder>(1_100_000, 64)),
-        false,
     );
     measure(
         "blocked_xor16",
         runtime.block_on(sstable_meta::<BlockedXor16FilterBuilder>(1_100_000, 64)),
-        false,
     );
     measure(
         "blocked_xor8_large",
         runtime.block_on(sstable_meta::<BlockedXor8FilterBuilder>(4_400_000, 64)),
-        true,
     );
     measure(
         "blocked_xor16_large",
         runtime.block_on(sstable_meta::<BlockedXor16FilterBuilder>(4_400_000, 64)),
-        true,
     );
     group.finish();
 }
@@ -109,19 +111,6 @@ fn measure_blocked_probes(
 ) {
     let metas = &meta.block_metas;
     group.throughput(Throughput::Elements(1));
-    #[cfg(unix)]
-    group.bench_function(BenchmarkId::new("restore_and_drop_cpu", name), |b| {
-        b.iter_custom(|iterations| {
-            let start = thread_cpu_time();
-            for _ in 0..iterations {
-                drop(black_box(XorFilterReader::new(
-                    black_box(&meta.bloom_filter),
-                    black_box(metas),
-                )));
-            }
-            thread_cpu_time() - start
-        });
-    });
     let queries: Vec<_> = (0..256_u64)
         .map(|i| {
             let index = (i as usize * 7919) % metas.len();
@@ -174,20 +163,6 @@ fn measure_blocked_probes(
             });
         });
     }
-}
-
-#[cfg(unix)]
-fn thread_cpu_time() -> Duration {
-    let mut time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: time is a valid writable timespec.
-    assert_eq!(
-        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) },
-        0
-    );
-    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
 }
 
 criterion_group! {

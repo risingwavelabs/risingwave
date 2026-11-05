@@ -461,7 +461,7 @@ opt-level = 2
 
 [patch.crates-io]
 # Backport borrowed XOR readers from https://github.com/ayazhafiz/xorf/pull/112 onto 0.13.0.
-xorf = { git = "https://github.com/Li0k/xorf.git", rev = "3f76ab1cd9f382f23709dd4239a6cea5570ff0ea" }
+xorf = { git = "https://github.com/Li0k/xorf.git", rev = "55ff2c303137be7c599b7b85598c072166adf966" }
 # Backport https://github.com/foyer-rs/foyer/pull/1296 onto v0.22.6 for faster recovery.
 foyer = { git = "https://github.com/Li0k/foyer.git", rev = "02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
