@@ -232,19 +232,32 @@ async fn test_close_error_preserves_original_error_with_successful_or_failed_abo
                 std::fs::write(dir.path().join(path).join("blocked"), b"owned fault").unwrap();
             }
         }
+        // The same failed rename can report EEXIST or ENOTEMPTY on different platforms.
+        let close_error =
+            std::fs::rename(dir.path().join(&actual), dir.path().join(&target)).unwrap_err();
+        if abort_fails {
+            let abort_error = std::fs::remove_file(dir.path().join(&actual)).unwrap_err();
+            assert_ne!(close_error.kind(), abort_error.kind());
+        }
         resume.send(()).unwrap();
         drop(finish);
         let error = match task.await.unwrap() {
             Err(error) => error,
             Ok(_) => panic!("close must fail"),
         };
+        let io_error =
+            std::iter::successors(Some(&error as &dyn std::error::Error), |e| e.source())
+                .find_map(|e| e.downcast_ref::<std::io::Error>())
+                .expect("close must preserve its underlying I/O error");
+        assert_eq!(io_error.kind(), close_error.kind(), "{error}");
+        assert_eq!(
+            io_error.raw_os_error(),
+            close_error.raw_os_error(),
+            "{error}"
+        );
         assert!(cache.get(1001.into()).is_none());
         assert_eq!(cache.storage.lock().uploads.values().sum::<u64>(), 8);
         if abort_fails {
-            assert!(
-                error.to_string().to_lowercase().contains("not empty"),
-                "original close error was masked: {error}"
-            );
             assert!(cache.select_minor().delete().await.is_err());
             assert!(cache.storage.lock().failed_uploads.contains(&target));
             assert!(matches!(
