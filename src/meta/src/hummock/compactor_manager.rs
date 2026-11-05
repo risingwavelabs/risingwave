@@ -611,6 +611,7 @@ mod tests {
             let _receiver = compactor_manager.add_compactor(context_id);
             hummock_manager
                 .get_compact_task(
+                    context_id,
                     StaticCompactionGroupId::StateDefault,
                     &mut default_compaction_selector(),
                 )

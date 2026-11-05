@@ -187,6 +187,7 @@ pub async fn compact_once(
     // 2. get compact task
     let mut compact_task = hummock_manager_ref
         .manual_get_compact_task(
+            1.into(),
             StaticCompactionGroupId::StateDefault,
             manual_compcation_option,
         )

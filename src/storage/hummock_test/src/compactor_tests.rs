@@ -274,7 +274,11 @@ pub(crate) mod tests {
         let compaction_group_id =
             get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), table_id).await;
         while let Some(compact_task) = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+            .get_compact_task(
+                1.into(),
+                compaction_group_id,
+                &mut default_compaction_selector(),
+            )
             .await
             .unwrap()
         {
@@ -441,7 +445,7 @@ pub(crate) mod tests {
         };
         // 2. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+            .manual_get_compact_task(1.into(), compaction_group_id, manual_compcation_option)
             .await
             .unwrap();
 
@@ -576,7 +580,7 @@ pub(crate) mod tests {
                 .await;
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+            .manual_get_compact_task(worker_id, compaction_group_id, manual_compcation_option)
             .await
             .unwrap()
             .unwrap();
@@ -640,7 +644,11 @@ pub(crate) mod tests {
 
         // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+            .get_compact_task(
+                worker_id,
+                compaction_group_id,
+                &mut default_compaction_selector(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -771,7 +779,7 @@ pub(crate) mod tests {
                 .await;
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+            .manual_get_compact_task(1.into(), compaction_group_id, manual_compcation_option)
             .await
             .unwrap()
             .unwrap();
@@ -842,7 +850,11 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+            .get_compact_task(
+                1.into(),
+                compaction_group_id,
+                &mut default_compaction_selector(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -984,7 +996,7 @@ pub(crate) mod tests {
                 .await;
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+            .manual_get_compact_task(1.into(), compaction_group_id, manual_compcation_option)
             .await
             .unwrap()
             .unwrap();
@@ -1048,7 +1060,11 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+            .get_compact_task(
+                1.into(),
+                compaction_group_id,
+                &mut default_compaction_selector(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -1158,7 +1174,7 @@ pub(crate) mod tests {
             get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), existing_table_id)
                 .await;
         let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
+            .manual_get_compact_task(worker_id, compaction_group_id, manual_compcation_option)
             .await
             .unwrap()
             .unwrap();
@@ -2073,7 +2089,7 @@ pub(crate) mod tests {
             };
             // 2. get compact task
             let compact_task = hummock_manager_ref
-                .manual_get_compact_task(group_id, manual_compcation_option)
+                .manual_get_compact_task(1.into(), group_id, manual_compcation_option)
                 .await
                 .unwrap();
 
@@ -2313,7 +2329,7 @@ pub(crate) mod tests {
                     ..Default::default()
                 };
                 let compact_task = hummock_manager_ref
-                    .manual_get_compact_task(group_id, manual_compcation_option)
+                    .manual_get_compact_task(1.into(), group_id, manual_compcation_option)
                     .await
                     .unwrap();
 
