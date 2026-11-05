@@ -156,7 +156,11 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
 deltalake = { version = "0.29", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
-foyer = { version = "0.21.2", features = ["serde", "tracing", "nightly"] }
+foyer = { version = "0.22.6", default-features = false, features = [
+    "runtime-madsim-tokio",
+    "serde",
+    "tracing",
+] }
 futures-async-stream = "0.2.13"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.16", features = [
@@ -164,9 +168,7 @@ hashbrown = { version = "0.16", features = [
     "inline-more",
     "nightly",
 ] }
-hashbrown0_14 = { package = "hashbrown", version = "0.14", features = [
-    "nightly",
-] }
+hashbrown0_14 = { package = "hashbrown", version = "0.14" }
 hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
     "nightly",
 ] }
@@ -194,10 +196,12 @@ mysql_async = { version = "0.36", features = [
     "rust_decimal",
 ] }
 opendal = "0.53"
-opentelemetry = "0.29"
-opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
-opentelemetry-semantic-conventions = "0.16"
-opentelemetry_sdk = { version = "0.29", default-features = false }
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+opentelemetry-semantic-conventions = "0.31"
+opentelemetry_sdk = { version = "0.31", default-features = false, features = [
+    "trace",
+] }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
 parking_lot = { version = "0.12", features = [
     "arc_lock",
@@ -301,7 +305,7 @@ toml = "0.9"
 # v0.5.2 adds gzip/zstd encoding features and updates the codegen API accordingly.
 tonic = { package = "madsim-tonic", version = "0.5.2", features = ["zstd"] }
 tonic-build = { package = "madsim-tonic-build", version = "0.5.2" }
-tracing-opentelemetry = "0.30"
+tracing-opentelemetry = "=0.32.0"
 
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`
@@ -415,6 +419,12 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
+# Foyer v0.22.6 with the following upstream backports.
+# - Reduce recovery indexing overhead (https://github.com/foyer-rs/foyer/pull/1296).
+# - Reuse the entry size estimate in enqueue (https://github.com/foyer-rs/foyer/pull/1349).
+# - Preserve newer keeper registrations when older references drop (https://github.com/foyer-rs/foyer/pull/1359).
+# - Cover keeper registration lifetimes (https://github.com/foyer-rs/foyer/pull/1362).
+foyer = { git = "https://github.com/Li0k/foyer.git", rev = "64296306ca8c0d68e126fed7eb7dab797050864a" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Override madsim-tonic and madsim-tonic-build with v0.5.2 (rev 66e049a) to add zstd compression support.
 # v0.5.2+0.12.0 adds gzip/zstd encoding features while remaining compatible with workspace version ^0.5.1.
