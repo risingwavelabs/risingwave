@@ -389,9 +389,6 @@ for_all_wrapped_id_fields! (
             table_watermarks: TableId,
             table_schemas: TableId,
         }
-        CompactTaskAssignment {
-            context_id: WorkerId,
-        }
         CompactTaskProgress {
             compaction_group_id: CompactionGroupId,
         }

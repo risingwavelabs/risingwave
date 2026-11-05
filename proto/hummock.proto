@@ -651,7 +651,8 @@ message CompactionGroupInfo {
 
 message CompactTaskAssignment {
   CompactTask compact_task = 1;
-  uint32 context_id = 2;
+  reserved 2;
+  reserved "context_id";
 }
 
 message HummockPinnedVersion {

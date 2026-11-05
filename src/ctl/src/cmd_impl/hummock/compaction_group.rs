@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use comfy_table::{Row, Table};
 use itertools::Itertools;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
@@ -235,31 +235,19 @@ pub async fn list_compaction_status(context: &CtlContext, verbose: bool) -> anyh
         let mut table = Table::new();
         table.set_header({
             let mut row = Row::new();
-            row.add_cell("Hummock Context".into());
             row.add_cell("Task Count".into());
             row.add_cell("Tasks".into());
             row
         });
-        let mut assignment_lite: HashMap<HummockContextId, Vec<u64>> = HashMap::new();
-        for a in assignment {
-            assignment_lite
-                .entry(a.context_id)
-                .or_default()
-                .push(a.compact_task.unwrap().task_id);
-        }
-        for (k, v) in assignment_lite {
-            let mut row = Row::new();
-            row.add_cell(k.into());
-            row.add_cell(v.len().into());
-            row.add_cell(
-                v.into_iter()
-                    .sorted()
-                    .map(|t| t.to_string())
-                    .join(",")
-                    .into(),
-            );
-            table.add_row(row);
-        }
+        let task_ids = assignment
+            .into_iter()
+            .map(|a| a.compact_task.unwrap().task_id)
+            .sorted()
+            .collect_vec();
+        let mut row = Row::new();
+        row.add_cell(task_ids.len().into());
+        row.add_cell(task_ids.into_iter().map(|t| t.to_string()).join(",").into());
+        table.add_row(row);
         println!("{table}");
 
         let mut table = Table::new();

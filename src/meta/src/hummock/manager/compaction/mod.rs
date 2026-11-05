@@ -84,7 +84,6 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::{HummockManager, commit_multi_var};
-use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -562,7 +561,6 @@ impl HummockManager {
                             compact_task.task_id,
                             CompactTaskAssignment {
                                 compact_task: compact_task.clone(),
-                                context_id: META_NODE_ID, // deprecated
                             },
                         );
 
@@ -833,13 +831,9 @@ impl HummockManager {
             .await
     }
 
-    /// Finishes or cancels a compaction task, according to `task_status`.
+    /// Finishes or cancels compaction tasks according to each report's `task_status`.
     ///
-    /// If `context_id` is not None, its validity will be checked when writing meta store.
-    /// Its ownership of the task is checked as well.
-    ///
-    /// Return Ok(false) indicates either the task is not found,
-    /// or the task is not owned by `context_id` when `context_id` is not None.
+    /// Returns one boolean per report, with `false` indicating that the task was not found.
     pub async fn report_compact_tasks_impl(
         &self,
         report_tasks: Vec<ReportTask>,
@@ -1428,13 +1422,9 @@ impl HummockManager {
                 .compaction
                 .write_with_process_name("report_compact_task_for_test")
                 .await;
-            guard.compact_task_assignment.insert(
-                task_id,
-                CompactTaskAssignment {
-                    compact_task: task,
-                    context_id: 0.into(),
-                },
-            );
+            guard
+                .compact_task_assignment
+                .insert(task_id, CompactTaskAssignment { compact_task: task });
         }
 
         // In the test, the contents of the compact task may have been modified directly, while the contents of compact_task_assignment were not modified.
