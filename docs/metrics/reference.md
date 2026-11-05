@@ -77,6 +77,11 @@ Metric names are stable across releases unless explicitly called out. Histograms
 follow Prometheus conventions — a histogram `foo_bar_duration_seconds` produces
 `foo_bar_duration_seconds_bucket{le="..."}`, `_sum`, and `_count` series.
 
+`aws_sdk_retry_counts` is no longer emitted. Its collector depended on the
+obsolete `aws_smithy_client::retry` log target and did not track retries from the
+current AWS SDK. `object_store_request_retry_count` covers RisingWave wrapper
+retries only; it does not provide SDK-internal retry counts.
+
 Every metric defined in the code is captured in `inventory.tsv` with:
 
 | Column        | Meaning                                                   |
