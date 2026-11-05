@@ -86,15 +86,20 @@ pub enum LocalNotification {
 }
 
 #[derive(Debug)]
-struct Target {
-    subscribe_type: SubscribeType,
-    // `None` indicates sending to all subscribers of `subscribe_type`.
-    worker_key: Option<WorkerKey>,
+enum Target {
+    Subscribers {
+        subscribe_type: SubscribeType,
+        // `None` indicates sending to all subscribers of `subscribe_type`.
+        worker_key: Option<WorkerKey>,
+    },
+    /// The sender of one subscribe call. By the time the task is delivered, the worker may have
+    /// subscribed again and replaced its entry in the sender map.
+    Sender(UnboundedSender<Notification>),
 }
 
 impl From<SubscribeType> for Target {
     fn from(value: SubscribeType) -> Self {
-        Self {
+        Self::Subscribers {
             subscribe_type: value,
             worker_key: None,
         }
@@ -227,20 +232,18 @@ impl NotificationManager {
         self.notify(target, operation, info, None);
     }
 
+    /// Queue the snapshot behind every notification published before it was read. The observer
+    /// manager filters out such notifications only if they arrive before the snapshot.
     pub fn notify_snapshot(
         &self,
         sender: UnboundedSender<Notification>,
         meta_snapshot: MetaSnapshot,
     ) {
-        let response = SubscribeResponse {
-            status: None,
-            operation: Operation::Snapshot as i32,
-            info: Some(Info::Snapshot(meta_snapshot)),
-            version: Default::default(),
-        };
-        let _ = sender.send(Ok(response)).inspect_err(|err| {
-            tracing::warn!("Failed to notify direct subscriber: {}", err.as_report());
-        });
+        self.notify_without_version(
+            Target::Sender(sender),
+            Operation::Snapshot,
+            Info::Snapshot(meta_snapshot),
+        );
     }
 
     pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
@@ -281,7 +284,7 @@ impl NotificationManager {
 
     pub(crate) fn notify_hummock_targeted_update(&self, worker_key: WorkerKey, info: Info) {
         self.notify_without_version(
-            Target {
+            Target::Subscribers {
                 subscribe_type: SubscribeType::Hummock,
                 worker_key: Some(worker_key),
             },
@@ -419,13 +422,25 @@ impl NotificationManagerCore {
             };
         }
 
-        let senders = self.senders_of(target.subscribe_type);
+        let (subscribe_type, worker_key) = match target {
+            Target::Subscribers {
+                subscribe_type,
+                worker_key,
+            } => (subscribe_type, worker_key),
+            Target::Sender(sender) => {
+                let _ = sender.send(Ok(response)).inspect_err(|err| {
+                    tracing::warn!("Failed to send snapshot: {}", err.as_report());
+                });
+                return;
+            }
+        };
+        let senders = self.senders_of(subscribe_type);
 
-        if let Some(worker_key) = target.worker_key {
+        if let Some(worker_key) = worker_key {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
                     let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
+                        warn_send_failure!(subscribe_type, &worker_key, err.as_report());
                         entry.remove_entry();
                     });
                 }
@@ -438,7 +453,7 @@ impl NotificationManagerCore {
                 sender
                     .send(Ok(response.clone()))
                     .inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
+                        warn_send_failure!(subscribe_type, &worker_key, err.as_report());
                     })
                     .is_ok()
             });
@@ -583,6 +598,30 @@ mod tests {
         let notification = rx2.recv().await.unwrap().unwrap();
         assert_eq!(notification.version, version);
         assert_eq!(mgr.current_version().await, version);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_arrives_after_notification_it_covers() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let worker_key = WorkerKey(HostAddress {
+            host: "a".to_owned(),
+            port: 1,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Frontend, worker_key, tx.clone());
+
+        // The test runtime has one thread and `notify_frontend` does not yield after queueing, so
+        // the notification is still in the queue when the snapshot is sent.
+        let version = mgr
+            .notify_frontend(Operation::Add, Info::Database(Default::default()))
+            .await;
+        mgr.notify_snapshot(tx, MetaSnapshot::default());
+
+        let first = rx.recv().await.unwrap().unwrap();
+        assert!(matches!(first.info, Some(Info::Database(_))));
+        assert_eq!(first.version, version);
+        let second = rx.recv().await.unwrap().unwrap();
+        assert!(matches!(second.info, Some(Info::Snapshot(_))));
     }
 
     #[tokio::test]
