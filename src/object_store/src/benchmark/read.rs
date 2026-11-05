@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -26,8 +29,10 @@ use tokio::sync::Barrier;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
-use super::{Accumulator, BenchmarkConfig, Outcome, PhaseReport, ReadMode, Sample};
-use crate::object::{ObjectDataStreamReader, ObjectError, ObjectStoreImpl};
+use super::{
+    Accumulator, BenchmarkConfig, InterferenceCohort, Outcome, PhaseReport, ReadMode, Sample,
+};
+use crate::object::{ObjectDataStream, ObjectDataStreamReader, ObjectError, ObjectStoreImpl};
 
 // Stable deterministic mixing for offsets/jitter; not a cryptographic generator.
 pub(super) fn offset(seed: u64, index: usize, maximum: usize) -> usize {
@@ -45,6 +50,7 @@ struct Interrupted;
 
 struct Request {
     key: String,
+    start: usize,
     length: usize,
     mode: ReadMode,
     reader_id: usize,
@@ -52,9 +58,15 @@ struct Request {
 }
 
 #[try_stream(ok = Bytes, error = ObjectError)]
-async fn short_gets(store: Arc<ObjectStoreImpl>, key: String, length: usize, chunk: usize) {
-    for start in (0..length).step_by(chunk) {
-        let end = start.saturating_add(chunk).min(length);
+async fn short_gets(
+    store: Arc<ObjectStoreImpl>,
+    key: String,
+    base: usize,
+    length: usize,
+    chunk: usize,
+) {
+    for start in (base..base + length).step_by(chunk) {
+        let end = start.saturating_add(chunk).min(base + length);
         let data = store.read(&key, start..end).await?;
         if data.len() != end - start {
             Err(ObjectError::internal(
@@ -79,6 +91,7 @@ pub(super) async fn read_object(
         store,
         Request {
             key,
+            start: 0,
             length,
             mode,
             reader_id,
@@ -96,6 +109,31 @@ async fn read_request(
     config: Arc<BenchmarkConfig>,
     token: CancellationToken,
 ) -> Outcome {
+    let response = async {
+        match request.mode {
+            ReadMode::Chunked => Ok(short_gets(
+                store,
+                request.key.clone(),
+                request.start,
+                request.length,
+                config.short_get_size,
+            )
+            .boxed()),
+            _ => Ok(store
+                .streaming_read(&request.key, request.start..request.start + request.length)
+                .await?
+                .into_stream()),
+        }
+    };
+    read_response(response, &request, &config, &token).await
+}
+
+async fn read_response(
+    response: impl Future<Output = Result<ObjectDataStream, ObjectError>>,
+    request: &Request,
+    config: &BenchmarkConfig,
+    token: &CancellationToken,
+) -> Outcome {
     let mut sample = Sample::default();
     let chunk_size = Arc::new(AtomicUsize::new(0));
     let max_chunk = chunk_size.clone();
@@ -104,15 +142,7 @@ async fn read_request(
     // Initialization may be lazy. First-data timing includes stream creation and the
     // first nonempty read, not just the return of streaming_read().
     let initialized = async {
-        let stream = match request.mode {
-            ReadMode::Chunked => {
-                short_gets(store, request.key, request.length, config.short_get_size).boxed()
-            }
-            _ => store
-                .streaming_read(&request.key, 0..request.length)
-                .await?
-                .into_stream(),
-        };
+        let stream = response.await?;
         let stream = stream.inspect_ok(move |bytes| {
             max_chunk.fetch_max(bytes.len(), Ordering::Relaxed);
         });
@@ -131,7 +161,7 @@ async fn read_request(
         sample.bytes = 1;
         sample.first_data.record(first_started.elapsed());
     }
-    if let Some((barrier, start)) = request.ready {
+    if let Some((barrier, start)) = &request.ready {
         // Even an initialization error joins readiness, so peers cannot deadlock.
         tokio::select! {
             _ = token.cancelled() => {},
@@ -244,6 +274,52 @@ async fn read_request(
     }
 }
 
+fn cohort_pool(config: &BenchmarkConfig, is_fast: bool) -> Range<usize> {
+    // Validation guarantees at least one distinct object per concurrent worker.
+    let fast_objects = (config.objects as u128 * config.fast_readers as u128
+        / (config.fast_readers + config.concurrency) as u128) as usize;
+    if is_fast {
+        0..fast_objects
+    } else {
+        fast_objects..config.objects
+    }
+}
+
+/// Each worker cycles its own strided partition. The sequence restarts per comparison.
+fn interference_request(
+    config: &BenchmarkConfig,
+    worker: usize,
+    iteration: usize,
+) -> (usize, Range<usize>) {
+    let is_fast = worker < config.fast_readers;
+    let pool = cohort_pool(config, is_fast);
+    let (local_worker, workers, length) = if is_fast {
+        (worker, config.fast_readers, config.range_size)
+    } else {
+        (
+            worker - config.fast_readers,
+            config.concurrency,
+            config.object_size,
+        )
+    };
+    let owned = (pool.len() - 1 - local_worker) / workers + 1;
+    let object = pool.start + local_worker + (iteration % owned) * workers;
+    let start = offset(
+        config.seed ^ worker as u64,
+        iteration,
+        config.object_size - length,
+    );
+    (object, start..start + length)
+}
+
+#[derive(Default)]
+struct Cohort {
+    stats: Accumulator,
+    objects: HashSet<usize>,
+    active: Duration,
+    failed_workers: usize,
+}
+
 /// The fast cohort is identical in all three experiments. Competitors either
 /// consume continuously or intermittently. Both cohorts run through the window.
 pub(super) async fn interference(
@@ -277,6 +353,7 @@ pub(super) async fn interference(
         let barrier = Arc::new(Barrier::new(config.fast_readers + competitors + 1));
         let clock = Arc::new(OnceLock::new());
         let mut tasks = JoinSet::new();
+        let mut worker_cohorts = HashMap::new();
         let fast_inflight = super::Inflight::default();
         let competitor_inflight = super::Inflight::default();
         for id in 0..config.fast_readers + competitors {
@@ -289,11 +366,13 @@ pub(super) async fn interference(
             let s = store.clone();
             let cfg = config.clone();
             let token = end_window.clone();
-            let key = keys[id % keys.len()].clone();
+            let keys = keys.clone();
             let ready = barrier.clone();
             let clock = clock.clone();
-            tasks.spawn(async move {
+            let task = tasks.spawn(async move {
                 let mut stats = Accumulator::default();
+                let mut objects = HashSet::new();
+                let mut iteration = 0usize;
                 if is_fast {
                     tokio::select! { _ = ready.wait() => {}, _ = token.cancelled() => {} }
                     while clock.get().is_none() && !token.is_cancelled() {
@@ -302,13 +381,13 @@ pub(super) async fn interference(
                 }
                 let mut initial = !is_fast;
                 while !token.is_cancelled() {
+                    let (object, range) = interference_request(&cfg, id, iteration);
+                    objects.insert(object);
+                    iteration = iteration.wrapping_add(1);
                     let request = Request {
-                        key: key.clone(),
-                        length: if is_fast {
-                            cfg.range_size
-                        } else {
-                            cfg.object_size
-                        },
+                        key: keys[object].clone(),
+                        start: range.start,
+                        length: range.len(),
                         mode: if is_fast { ReadMode::Continuous } else { mode },
                         reader_id: id,
                         ready: initial.then(|| (ready.clone(), clock.clone())),
@@ -326,8 +405,9 @@ pub(super) async fn interference(
                     }
                     tokio::task::yield_now().await;
                 }
-                (is_fast, stats)
+                (stats, objects, Instant::now())
             });
+            worker_cohorts.insert(task.id(), is_fast);
         }
         tokio::select! {
             _ = barrier.wait() => {},
@@ -342,55 +422,232 @@ pub(super) async fn interference(
         }
         let elapsed = started.elapsed();
         end_window.cancel();
-        let mut fast = Accumulator::default();
-        let mut slow = Accumulator::default();
-        while let Some(result) = tasks.join_next().await {
+        let mut fast = Cohort::default();
+        let mut slow = Cohort::default();
+        while let Some(result) = tasks.join_next_with_id().await {
+            let id = match &result {
+                Ok((id, _)) => *id,
+                Err(error) => error.id(),
+            };
+            let cohort = if worker_cohorts[&id] {
+                &mut fast
+            } else {
+                &mut slow
+            };
             match result {
-                Ok((true, worker)) => fast.merge(worker),
-                Ok((false, worker)) => slow.merge(worker),
+                Ok((_, (worker, objects, finished))) => {
+                    cohort.failed_workers += usize::from(worker.failed > 0);
+                    cohort.active += finished.saturating_duration_since(started).min(elapsed);
+                    cohort.objects.extend(objects);
+                    cohort.stats.merge(worker);
+                }
                 Err(error) => {
-                    fast.failed += 1;
-                    fast.errors.push(format!("worker failed: {error}"));
+                    cohort.failed_workers += 1;
+                    cohort
+                        .stats
+                        .errors
+                        .push(format!("worker failed; lifetime unavailable: {error}"));
                 }
             }
         }
         let drain_ms = started.elapsed().saturating_sub(elapsed).as_secs_f64() * 1000.0;
-        let mut fast_report = fast.report(
-            format!("interference_{name}/fast"),
-            elapsed,
-            None,
-            shutdown.is_cancelled(),
-        );
-        fast_report.drain_ms = drain_ms;
-        fast_report.wall_elapsed_ms += drain_ms;
-        fast_report.stop_reason = if shutdown.is_cancelled() {
-            "cancelled"
-        } else {
-            "observation_window"
+        let mut invalid_reasons = vec![];
+        if shutdown.is_cancelled() {
+            invalid_reasons.push("observation window cancelled".into());
         }
-        .into();
-        fast_report.started_unix_ms = started_unix_ms;
-        fast_report.peak_inflight_logical_operations = fast_inflight.peak();
-        reports.push(fast_report);
-        if competitors > 0 {
-            let mut slow_report = slow.report(
-                format!("interference_{name}/competitors"),
+        for (name, cohort) in [("fast", &fast), ("competitors", &slow)] {
+            if cohort.failed_workers > 0 {
+                invalid_reasons.push(format!("{name}: {} workers failed", cohort.failed_workers));
+            }
+        }
+        if fast.stats.succeeded == 0 {
+            invalid_reasons.push("fast cohort completed no reads".into());
+        }
+        for (is_fast, cohort) in [(true, fast), (false, slow)] {
+            if !is_fast && competitors == 0 {
+                continue;
+            }
+            let pool = cohort_pool(&config, is_fast);
+            let no_fast_reads = is_fast && cohort.stats.succeeded == 0;
+            let mut report = cohort.stats.report(
+                format!(
+                    "interference_{name}/{}",
+                    if is_fast { "fast" } else { "competitors" }
+                ),
                 elapsed,
                 None,
                 shutdown.is_cancelled(),
             );
-            slow_report.drain_ms = drain_ms;
-            slow_report.wall_elapsed_ms += drain_ms;
-            slow_report.stop_reason = if shutdown.is_cancelled() {
+            if !shutdown.is_cancelled() && (cohort.failed_workers > 0 || no_fast_reads) {
+                report.status = "failed".into();
+                if no_fast_reads {
+                    report.errors.push("fast cohort completed no reads".into());
+                }
+            }
+            report.interference = Some(InterferenceCohort {
+                comparison_valid: invalid_reasons.is_empty(),
+                invalid_reasons: invalid_reasons.clone(),
+                expected_workers: if is_fast {
+                    config.fast_readers
+                } else {
+                    competitors
+                },
+                failed_workers: cohort.failed_workers,
+                active_worker_seconds: cohort.active.as_secs_f64(),
+                object_pool_start: pool.start,
+                object_pool_objects: pool.len(),
+                object_pool_bytes: (pool.len() * config.object_size) as u64,
+                requested_objects: cohort.objects.len(),
+                range_bytes: if is_fast {
+                    config.range_size
+                } else {
+                    config.object_size
+                },
+            });
+            report.drain_ms = drain_ms;
+            report.wall_elapsed_ms += drain_ms;
+            report.stop_reason = if shutdown.is_cancelled() {
                 "cancelled"
             } else {
                 "observation_window"
             }
             .into();
-            slow_report.started_unix_ms = started_unix_ms;
-            slow_report.peak_inflight_logical_operations = competitor_inflight.peak();
-            reports.push(slow_report);
+            report.started_unix_ms = started_unix_ms;
+            report.peak_inflight_logical_operations = if is_fast {
+                fast_inflight.peak()
+            } else {
+                competitor_inflight.peak()
+            };
+            reports.push(report);
         }
     }
     reports
+}
+
+#[cfg(all(test, not(madsim)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotating_sequences_cover_disjoint_pools_and_reset_reproducibly() {
+        let mut config = BenchmarkConfig {
+            fast_readers: 2,
+            concurrency: 2,
+            ..Default::default()
+        };
+        for objects in [4, 5, 20, 21] {
+            config.objects = objects;
+            let sequence = |worker| {
+                (0..objects * 2)
+                    .map(|i| interference_request(&config, worker, i))
+                    .collect::<Vec<_>>()
+            };
+            let mut fast = HashSet::new();
+            let mut competitors = HashSet::new();
+            let mut owners = HashMap::new();
+            for worker in 0..4 {
+                let requests = sequence(worker);
+                // Each comparison starts at request zero, independently of timing/mode.
+                assert_eq!(requests, sequence(worker));
+                let own: HashSet<_> = requests.iter().map(|(object, _)| *object).collect();
+                for object in &own {
+                    assert!(owners.insert(*object, worker).is_none());
+                }
+                let pool = if worker < 2 {
+                    &mut fast
+                } else {
+                    &mut competitors
+                };
+                pool.extend(own);
+                let length = if worker < 2 {
+                    config.range_size
+                } else {
+                    config.object_size
+                };
+                assert!(
+                    requests
+                        .iter()
+                        .all(|(_, range)| range.len() == length && range.end <= config.object_size)
+                );
+                if worker < 2 {
+                    assert!(requests.iter().any(|(_, range)| range.start > 0));
+                    assert!(requests.windows(2).any(|pair| pair[0].1 != pair[1].1));
+                }
+            }
+            assert!(fast.is_disjoint(&competitors));
+            assert_eq!(fast.len(), objects / 2);
+            assert_eq!(competitors.len(), objects - objects / 2);
+            assert_eq!(owners.len(), objects);
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_resume_byte_does_not_hide_a_delayed_consumption_unit() {
+        let config = BenchmarkConfig {
+            object_size: 10,
+            consume_size: 3,
+            pause_ms: 10,
+            ..Default::default()
+        };
+        // The first chunk covers the first unit AND the next unit's first byte.
+        // Only polling for the rest of the second unit starts the body delay.
+        let stream = futures::stream::once(async { Ok(Bytes::from_static(b"0123")) })
+            .chain(futures::stream::once(async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                Ok(Bytes::from_static(b"456789"))
+            }))
+            .boxed();
+        let outcome = read_response(
+            async { Ok(stream) },
+            &Request {
+                key: "object".into(),
+                start: 0,
+                length: 10,
+                mode: ReadMode::Intermittent,
+                reader_id: 0,
+                ready: None,
+            },
+            &config,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert!(outcome.error.is_none());
+        assert_eq!(outcome.sample.bytes, 10);
+        let first = outcome.sample.first_data.summary().unwrap();
+        let resume = outcome.sample.resume.summary().unwrap();
+        let consume = outcome.sample.consume.summary().unwrap();
+        assert!(consume.max_ms >= 100.0);
+        assert!(first.max_ms < consume.max_ms);
+        assert!(resume.max_ms < consume.max_ms);
+        assert_eq!(consume.samples, 4);
+        let pause_ms = outcome.sample.pause.as_secs_f64() * 1000.0;
+        assert!(pause_ms >= 30.0);
+
+        let mut stats = Accumulator::default();
+        stats.add(outcome, Duration::from_millis(130));
+        let report = super::super::BenchmarkReport {
+            schema_version: 3,
+            profile_version: 3,
+            prefix: "test/".into(),
+            config,
+            planned_dataset_bytes: 10,
+            phases: vec![stats.report(
+                "compactor_intermittent".into(),
+                Duration::from_millis(130),
+                None,
+                false,
+            )],
+            cleanup_status: "completed".into(),
+            cleanup_errors: vec![],
+            cancelled: false,
+            backpressure_verified: false,
+            notes: vec![],
+        };
+        let summary = super::super::terminal_summary(&report);
+        assert!(summary.contains("first_data: n=1; p95="));
+        assert!(summary.contains("resume_first_data: n=3; p95="));
+        assert!(summary.contains("consume: n=4; p95="));
+        assert!(summary.contains(&format!("max={:.2} ms", consume.max_ms)));
+        assert!(summary.contains(&format!("active pause across readers={pause_ms:.1} ms")));
+    }
 }

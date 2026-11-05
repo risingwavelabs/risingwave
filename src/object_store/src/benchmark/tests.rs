@@ -147,6 +147,15 @@ async fn all_profiles_clean_only_owned_objects() {
     ] {
         let phase = report.phases.iter().find(|p| p.name == name).unwrap();
         assert!(phase.succeeded > 0, "{phase:?}");
+        if let Some(cohort) = &phase.interference {
+            assert!(cohort.comparison_valid, "{cohort:?}");
+            assert_eq!(cohort.failed_workers, 0);
+            assert!(cohort.active_worker_seconds > 0.0);
+            assert!(
+                cohort.active_worker_seconds
+                    <= cohort.expected_workers as f64 * phase.elapsed_ms / 1000.0 + 1e-9
+            );
+        }
     }
     for name in [
         "compactor_continuous",
@@ -186,6 +195,77 @@ async fn interference_initialization_errors_do_not_deadlock() {
     .await
     .unwrap();
     assert!(phases.iter().all(|p| p.status == "failed"));
+}
+
+#[tokio::test]
+async fn competitor_failures_invalidate_the_paired_fast_comparison() {
+    let store = memory();
+    // The fast pool contains object zero. Both competitor objects are missing.
+    store
+        .upload("fast", Bytes::from_static(b"0123456789"))
+        .await
+        .unwrap();
+    let mut cfg = config();
+    cfg.interference_ms = 30;
+    let phases = read::interference(
+        store,
+        Arc::new(vec!["fast".into(), "missing1".into(), "missing2".into()]),
+        Arc::new(cfg),
+        &CancellationToken::new(),
+    )
+    .await;
+    let baseline = &phases[0];
+    assert_eq!(baseline.status, "completed");
+    assert!(baseline.interference.as_ref().unwrap().comparison_valid);
+    for pair in phases[1..].chunks_exact(2) {
+        let fast = &pair[0];
+        let competitor = &pair[1];
+        assert_eq!(fast.status, "completed"); // Preserve the actual fast I/O outcome.
+        assert!(fast.succeeded > 0);
+        assert_eq!(competitor.status, "failed");
+        for phase in pair {
+            let context = phase.interference.as_ref().unwrap();
+            assert!(!context.comparison_valid);
+            assert!(
+                context
+                    .invalid_reasons
+                    .iter()
+                    .any(|reason| reason.contains("competitors: 1 workers failed"))
+            );
+        }
+        let fast_context = fast.interference.as_ref().unwrap();
+        let competitor_context = competitor.interference.as_ref().unwrap();
+        assert_eq!(fast_context.failed_workers, 0);
+        assert_eq!(competitor_context.failed_workers, 1);
+        assert_eq!(fast_context.object_pool_objects, 1);
+        assert_eq!(competitor_context.object_pool_objects, 2);
+        assert_eq!(fast_context.object_pool_bytes, 10);
+        assert_eq!(competitor_context.object_pool_bytes, 20);
+        assert_eq!(fast_context.requested_objects, 1);
+        assert_eq!(competitor_context.requested_objects, 1);
+        assert!(competitor_context.active_worker_seconds < fast_context.active_worker_seconds);
+    }
+    let report = BenchmarkReport {
+        schema_version: 3,
+        profile_version: 3,
+        prefix: "test/".into(),
+        config: config(),
+        planned_dataset_bytes: 30,
+        // Even a consumer looking only at successful fast phases must see invalidity.
+        phases: phases
+            .into_iter()
+            .filter(|p| p.name.ends_with("/fast"))
+            .collect(),
+        cleanup_status: "completed".into(),
+        cleanup_errors: vec![],
+        cancelled: false,
+        backpressure_verified: false,
+        notes: vec![],
+    };
+    assert!(!report.succeeded());
+    let summary = terminal_summary(&report);
+    assert!(summary.contains("comparison=invalid"));
+    assert!(summary.contains("invalid comparison: competitors: 1 workers failed"));
 }
 
 #[tokio::test]
@@ -393,6 +473,34 @@ async fn actual_http_ranges_stay_large_during_pauses_and_split_only_in_chunked_m
         assert_eq!(*ranges.lock().unwrap(), expected);
         assert_eq!(outcome.sample.bytes, 10);
     }
+    server.abort();
+}
+
+#[tokio::test]
+async fn interference_sends_nonzero_range_offsets_over_http() {
+    let (store, ranges, server) = protocol_store(false).await;
+    let mut cfg = config();
+    cfg.interference_ms = 100;
+    let phases = read::interference(
+        store,
+        Arc::new(vec!["a".into(), "b".into(), "c".into()]),
+        Arc::new(cfg),
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(
+        phases
+            .iter()
+            .all(|p| p.interference.as_ref().unwrap().comparison_valid),
+        "{phases:?}"
+    );
+    assert!(
+        ranges
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|range| range != "bytes=0-4" && range != "bytes=0-9")
+    );
     server.abort();
 }
 

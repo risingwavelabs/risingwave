@@ -449,6 +449,7 @@ impl Accumulator {
             consume: self.consume.summary(),
             resume_first_data: self.resume.summary(),
             max_stream_chunk_bytes: self.max_stream_chunk,
+            interference: None,
             errors: self.errors,
         }
     }
@@ -473,6 +474,24 @@ pub struct MeasurementBudget {
     pub duration_ms: u64,
     pub duration_basis: String,
     pub max_operations: usize,
+}
+
+/// Per-cohort context for a timed interference comparison, not a performance verdict.
+#[derive(Debug, Serialize)]
+pub struct InterferenceCohort {
+    pub comparison_valid: bool,
+    pub invalid_reasons: Vec<String>,
+    pub expected_workers: usize,
+    pub failed_workers: usize,
+    /// Sum of worker lifetimes within the observation window, excluding readiness/drain.
+    pub active_worker_seconds: f64,
+    pub object_pool_start: usize,
+    pub object_pool_objects: usize,
+    /// Eligible object capacity, not unique bytes actually read during the window.
+    pub object_pool_bytes: u64,
+    /// Distinct objects targeted by attempts, including initial readiness requests.
+    pub requested_objects: usize,
+    pub range_bytes: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -514,6 +533,7 @@ pub struct PhaseReport {
     pub consume: Option<Distribution>,
     pub resume_first_data: Option<Distribution>,
     pub max_stream_chunk_bytes: usize,
+    pub interference: Option<InterferenceCohort>,
     pub errors: Vec<String>,
 }
 
@@ -535,7 +555,10 @@ pub struct BenchmarkReport {
 impl BenchmarkReport {
     pub fn succeeded(&self) -> bool {
         !self.cancelled
-            && self.phases.iter().all(|p| p.status == "completed")
+            && self.phases.iter().all(|p| {
+                p.status == "completed"
+                    && p.interference.as_ref().is_none_or(|c| c.comparison_valid)
+            })
             && matches!(self.cleanup_status.as_str(), "completed" | "kept")
     }
 }
@@ -594,13 +617,38 @@ pub fn terminal_summary(report: &BenchmarkReport) -> String {
             )
             .unwrap();
         }
-        if let Some(resume) = &phase.resume_first_data {
+        if phase.first_data.is_some() || phase.consume.is_some() || phase.active_pause_ms > 0.0 {
             writeln!(
                 text,
-                "  active pause across readers={:.1} ms; resume-first-data p99={:.2} ms (n={})",
-                phase.active_pause_ms, resume.p99_ms, resume.samples
+                "  active pause across readers={:.1} ms",
+                phase.active_pause_ms
             )
             .unwrap();
+            for (name, timing) in [
+                ("first_data", &phase.first_data),
+                ("consume", &phase.consume),
+                ("resume_first_data", &phase.resume_first_data),
+            ] {
+                if let Some(d) = timing {
+                    writeln!(
+                        text,
+                        "  {name}: n={}; p95={:.2} ms; p99={:.2} ms; max={:.2} ms",
+                        d.samples, d.p95_ms, d.p99_ms, d.max_ms
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(text, "  {name}: n=0; p95=-; p99=-; max=-").unwrap();
+                }
+            }
+        }
+        if let Some(c) = &phase.interference {
+            writeln!(text, "  comparison={}; workers={}; failed_workers={}; active_worker_seconds={:.3}; pool={} objects / {} bytes; requested_objects={}; range={} bytes",
+                if c.comparison_valid { "valid" } else { "invalid" }, c.expected_workers,
+                c.failed_workers, c.active_worker_seconds, c.object_pool_objects,
+                c.object_pool_bytes, c.requested_objects, c.range_bytes).unwrap();
+            for reason in &c.invalid_reasons {
+                writeln!(text, "  invalid comparison: {reason}").unwrap();
+            }
         }
     }
     writeln!(
@@ -1004,8 +1052,8 @@ pub async fn run(
         }
     }
     Ok(BenchmarkReport {
-        schema_version: 2,
-        profile_version: 2,
+        schema_version: 3,
+        profile_version: 3,
         prefix,
         planned_dataset_bytes: (config.objects * config.object_size) as u64 + metadata_keys.len() as u64 * 4096,
         config: (*config).clone(),
@@ -1022,6 +1070,7 @@ pub async fn run(
             "LIST measures complete RW enumeration and may include metadata HEAD requests; it is not HTTP LIST requests/sec.".into(),
             "Cleanup deletes known keys; failed/cancelled multipart uploads may require server lifecycle cleanup.".into(),
             "Cache state is uncontrolled. Read order is recorded; intentional pauses are included in end-to-end latency.".into(),
+            "Interference cohorts rotate disjoint object pools and reset deterministic request sequences for each comparison. Pool bytes are eligible capacity, not unique bytes read; requested object counts include readiness. Worker-seconds measure lifetimes within the observation window, not time spent in I/O. A worker failure invalidates both sides of a comparison.".into(),
             "No automatic performance pass/fail or server-side backpressure claim is made.".into(),
         ],
     })
