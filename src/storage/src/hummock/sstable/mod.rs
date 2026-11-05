@@ -178,7 +178,7 @@ impl Sstable {
         skip_bloom_filter_in_serde: bool,
     ) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
-        let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
+        let filter_reader = XorFilterReader::from_owned(filter_data, &meta.block_metas);
         Self {
             id,
             meta,

@@ -21079,7 +21079,7 @@ checksum = "4d25c75bf9ea12c4040a97f829154768bbbce366287e2dc044af160cd79a13fd"
 [[package]]
 name = "xorf"
 version = "0.13.0"
-source = "git+https://github.com/Li0k/xorf.git?rev=55ff2c303137be7c599b7b85598c072166adf966#55ff2c303137be7c599b7b85598c072166adf966"
+source = "git+https://github.com/Li0k/xorf.git?rev=3620e47af1051c119bcf22d2ebafe18943d84653#3620e47af1051c119bcf22d2ebafe18943d84653"
 dependencies = [
  "libm",
  "rand 0.8.5",

@@ -43,6 +43,8 @@ fn bench_sstable_filter_restore(c: &mut Criterion) {
         let restored = XorFilterReader::new(&meta.bloom_filter, &meta.block_metas);
         assert!(!restored.is_empty());
         assert_eq!(restored.encode_to_bytes(), meta.bloom_filter);
+        let blocked = restored.is_block_based_filter();
+        drop(restored);
         eprintln!(
             "fixture={name} blocks={} filter_bytes={} xxh64={:016x}",
             meta.block_metas.len(),
@@ -72,7 +74,8 @@ fn bench_sstable_filter_restore(c: &mut Criterion) {
                 )));
             });
         });
-        if restored.is_block_based_filter() {
+        if blocked {
+            let restored = XorFilterReader::new(&meta.bloom_filter, &meta.block_metas);
             measure_blocked_probes(&mut group, name, &meta, &restored);
         }
     };
