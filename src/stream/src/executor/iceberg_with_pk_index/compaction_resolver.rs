@@ -328,9 +328,10 @@ impl CompactionResolverExecutor {
         }
 
         for (path, task) in split_paths.iter().zip_eq_fast(tasks.0.iter_mut()) {
-            let split_conflicts = task.await.map_err(|e| {
-                SinkError::Iceberg(anyhow!("output scan task for {path} failed: {e}"))
-            })?;
+            let split_conflicts = task
+                .await
+                .with_context(|| format!("output scan task for {path} failed"))
+                .map_err(SinkError::Iceberg)?;
             if let Some(delete_vector) = split_conflicts {
                 *conflicts.entry(path.to_string()).or_default() |= delete_vector;
             }
