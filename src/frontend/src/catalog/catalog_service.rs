@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
-use parking_lot::{RawRwLock, RwLock};
+use parking_lot::{RawRwLockRecursive, RecursiveRwLock};
 use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
@@ -48,20 +48,20 @@ use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
-pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
+pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLockRecursive, Catalog>;
 
 /// [`CatalogReader`] can read catalog from local catalog and force the holder can not modify it.
 #[derive(Clone)]
-pub struct CatalogReader(Arc<RwLock<Catalog>>);
+pub struct CatalogReader(Arc<RecursiveRwLock<Catalog>>);
 
 impl CatalogReader {
-    pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
+    pub fn new(inner: Arc<RecursiveRwLock<Catalog>>) -> Self {
         CatalogReader(inner)
     }
 
     pub fn read_guard(&self) -> CatalogReadGuard {
-        // Make this recursive so that one can get this guard in the same thread without fear.
-        self.0.read_arc_recursive()
+        // RecursiveRwLock allows nested read guards even while a writer is waiting.
+        self.0.read_arc()
     }
 }
 
