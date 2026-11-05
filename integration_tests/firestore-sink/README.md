@@ -78,9 +78,42 @@ as UTC, independent of the session or process time zone. Submicrosecond precisio
 is truncated; years outside 0001–9999 are invalid rows. NULL remains native NULL,
 including in lists and structs.
 
-`DECIMAL` is written as a native double, including NaN and infinities. This uses
-64-bit floating point and can round high-precision decimal values. If exact text
-is required, explicitly cast the column to `VARCHAR` in the sink query.
+`DECIMAL` defaults to native Decimal128, including NaN and infinities. It preserves
+all significant digits of a RisingWave decimal without an intermediate double,
+also inside lists and structs. Firestore Enterprise edition supports Decimal128;
+Standard edition does not. Use `firestore.decimal_mode` to select the encoding:
+
+| Value | Behavior |
+| --- | --- |
+| `decimal128` (default) | Preserve decimal precision; requires Enterprise edition. |
+| `double` | Opt into 64-bit floating point, which can round decimal values. Works with Standard edition and the pinned emulator. |
+
+For example, Standard edition users can set
+`firestore.decimal_mode = 'double'` in the sink's WITH options. The value
+`9007199254740993` remains exact with Decimal128 but becomes `9007199254740992`
+with double. Cast the column to `VARCHAR` in the sink query if exact text storage
+is preferred on Standard edition.
+
+When the sink schema contains decimals and the mode is `decimal128`, sink
+validation and writer startup query the target database's `databaseEdition` using
+Firestore Admin `GetDatabase`. A known Standard database is rejected with an
+actionable configuration error, before writing rows, even with
+`firestore.skip_invalid_rows=true`. The sink never automatically switches to
+double. Metadata requires `datastore.databases.getMetadata`; Datastore User
+includes it, but a custom write-only role might not. Permission-denied or
+unimplemented metadata requests (including emulators without the Admin API), and
+unspecified or unknown edition values, produce a warning and keep Decimal128.
+Other failures, including authentication, missing database, transport errors and
+the 10-second metadata timeout, fail startup. Explicit `double` and schemas
+without decimals do not need the metadata request.
+
+The Decimal128 wire encoding follows the official
+[Firestore BSON type mapping](https://cloud.google.com/firestore/mongodb-compatibility/docs/supported-data-types-drivers):
+a reserved `__decimal128__` map containing the exact decimal text. This denotes a
+native scalar, rather than an ordinary string field. Unit and gRPC tests cover
+this representation and edition detection; the pinned Standard-style emulator
+tests exercise the explicit double mode. A live Enterprise smoke test is still
+needed to verify native Decimal128 query behavior against the service.
 
 Parent document segments in `firestore.collection` may reference sink columns:
 

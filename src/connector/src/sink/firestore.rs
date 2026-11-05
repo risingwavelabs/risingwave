@@ -13,12 +13,16 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use firestore::{FirestoreDb, FirestoreDbOptions};
 use futures::StreamExt;
+use gcloud_sdk::google::firestore::admin::v1::GetDatabaseRequest;
+use gcloud_sdk::google::firestore::admin::v1::database::DatabaseEdition;
+use gcloud_sdk::google::firestore::admin::v1::firestore_admin_client::FirestoreAdminClient;
 use gcloud_sdk::google::firestore::v1::value::ValueType;
 use gcloud_sdk::google::firestore::v1::{
     ArrayValue, BatchWriteRequest, Document, MapValue, Value, Write, write,
@@ -48,6 +52,17 @@ const DEFAULT_MAX_FUTURE_SEND_NUMS: usize = 256;
 const MAX_DOCUMENT_SIZE: usize = 1_048_576;
 // Leave room for the database name and protobuf framing below the 10 MiB RPC limit.
 const MAX_BATCH_WRITE_BYTES: usize = 9 * 1024 * 1024;
+const DATABASE_METADATA_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FirestoreDecimalMode {
+    #[default]
+    Decimal128,
+    Double,
+}
+
+impl crate::with_options::WithOptions for FirestoreDecimalMode {}
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -80,6 +95,11 @@ pub struct FirestoreConfig {
     #[serde(rename = "firestore.skip_invalid_rows", default)]
     #[serde_as(as = "DisplayFromStr")]
     pub skip_invalid_rows: bool,
+
+    /// DECIMAL encoding: `decimal128` (default, Enterprise only) or `double` (may lose precision).
+    /// Database metadata is checked for Decimal128; unavailable metadata never selects double.
+    #[serde(rename = "firestore.decimal_mode", default)]
+    pub decimal_mode: FirestoreDecimalMode,
 
     /// Maximum batch size for batch writes (default: 500)
     #[serde(
@@ -129,11 +149,22 @@ impl FirestoreConfig {
             FirestoreDbOptions::new(self.project_id.clone())
         };
 
-        let db = if let Some(host) = emulator_host {
-            // The SDK already supports the emulator endpoint, but still attempts ADC by default.
-            // Use the emulator's owner token without fetching or forwarding cloud credentials.
-            use gcloud_sdk::{ExternalJwtFunctionSource, Token, TokenSourceType};
+        if let Some(ref host) = emulator_host {
             options.firebase_api_url = Some(format!("http://{host}"));
+        }
+        let (scopes, token_source) = self.token_source(emulator_host.is_some());
+        FirestoreDb::with_options_token_source(options, scopes, token_source)
+            .await
+            .map_err(|e| {
+                SinkError::Firestore(anyhow!(e).context("failed to create Firestore client"))
+            })
+    }
+
+    fn token_source(&self, emulator: bool) -> (Vec<String>, gcloud_sdk::TokenSourceType) {
+        use gcloud_sdk::{ExternalJwtFunctionSource, GCP_DEFAULT_SCOPES, Token, TokenSourceType};
+        if emulator {
+            // Neither the data client nor the metadata client should fetch ADC or
+            // forward configured cloud credentials to an emulator.
             let source = ExternalJwtFunctionSource::new(|| async {
                 Ok(Token::new(
                     "Bearer".to_owned(),
@@ -141,31 +172,84 @@ impl FirestoreConfig {
                     chrono::Utc::now() + chrono::Duration::hours(1),
                 ))
             });
-            FirestoreDb::with_options_token_source(
-                options,
-                vec![],
-                TokenSourceType::ExternalSource(Box::new(source)),
-            )
-            .await
+            (vec![], TokenSourceType::ExternalSource(Box::new(source)))
         } else if let Some(ref cred) = self.credentials {
-            // Use JSON credentials string with gcloud-sdk's TokenSourceType
-            // firestore internally uses gcloud-sdk, so we use TokenSourceType::Json
-            use gcloud_sdk::{GCP_DEFAULT_SCOPES, TokenSourceType};
-
-            FirestoreDb::with_options_token_source(
-                options,
+            (
                 GCP_DEFAULT_SCOPES.clone(),
                 TokenSourceType::Json(cred.clone()),
             )
-            .await
         } else {
-            // Use default credentials (from environment, metadata server, etc.)
-            FirestoreDb::with_options(options).await
-        };
+            (GCP_DEFAULT_SCOPES.clone(), TokenSourceType::Default)
+        }
+    }
 
-        db.map_err(|e| {
-            SinkError::Firestore(anyhow!(e).context("failed to create Firestore client"))
-        })
+    async fn validate_decimal_mode(&self, schema: &Schema, client: &FirestoreDb) -> Result<()> {
+        if self.decimal_mode == FirestoreDecimalMode::Double
+            || !schema
+                .fields()
+                .iter()
+                .any(|field| contains_decimal(&field.data_type))
+        {
+            return Ok(());
+        }
+        let edition =
+            tokio::time::timeout(DATABASE_METADATA_TIMEOUT, self.database_edition(client))
+                .await
+                .map_err(|_| {
+                    SinkError::Firestore(anyhow!("Firestore database metadata request timed out"))
+                })??;
+        match edition.and_then(|edition| DatabaseEdition::try_from(edition).ok()) {
+            Some(DatabaseEdition::Standard) => Err(SinkError::Config(anyhow!(
+                "firestore.decimal_mode='decimal128' requires Firestore Enterprise edition; \
+                 this database is Standard. Set firestore.decimal_mode='double' to opt into \
+                 floating-point conversion (which may lose precision), or cast DECIMAL to VARCHAR"
+            ))),
+            Some(DatabaseEdition::Enterprise) => Ok(()),
+            _ => {
+                tracing::warn!(database = %client.get_database_path(), "Firestore database edition is unknown; keeping firestore.decimal_mode='decimal128', without falling back to double");
+                Ok(())
+            }
+        }
+    }
+
+    async fn database_edition(&self, client: &FirestoreDb) -> Result<Option<i32>> {
+        let options = client.get_options();
+        let (scopes, token_source) = self.token_source(options.firebase_api_url.is_some());
+        let admin = gcloud_sdk::GoogleApi::from_function_with_token_source(
+            FirestoreAdminClient::new,
+            options
+                .firebase_api_url
+                .as_deref()
+                .unwrap_or("https://firestore.googleapis.com"),
+            Some(client.get_database_path().to_owned()),
+            scopes,
+            token_source,
+        )
+        .await
+        .map_err(|error| {
+            SinkError::Firestore(
+                anyhow!(error).context("failed to create Firestore metadata client"),
+            )
+        })?;
+        let mut request = tonic::Request::new(GetDatabaseRequest {
+            name: client.get_database_path().to_owned(),
+        });
+        request.set_timeout(DATABASE_METADATA_TIMEOUT);
+        match admin.get().get_database(request).await {
+            Ok(response) => Ok(Some(response.into_inner().database_edition)),
+            Err(error)
+                if matches!(
+                    error.code(),
+                    tonic::Code::PermissionDenied | tonic::Code::Unimplemented
+                ) =>
+            {
+                tracing::warn!(database = %client.get_database_path(), code = ?error.code(), "Cannot read Firestore database edition; metadata requires datastore.databases.getMetadata and may be unsupported by the emulator");
+                Ok(None)
+            }
+            Err(error) => Err(SinkError::Firestore(
+                anyhow!(error).context("failed to read Firestore database edition"),
+            )),
+        }
     }
 
     fn validate_schema(&self, schema: &Schema, pk_indices: &[usize]) -> Result<Option<usize>> {
@@ -242,7 +326,10 @@ impl Sink for FirestoreSink {
     async fn validate(&self) -> Result<()> {
         self.config
             .validate_schema(&self.schema, &self.pk_indices)?;
-        self.config.build_client().await?;
+        let client = self.config.build_client().await?;
+        self.config
+            .validate_decimal_mode(&self.schema, &client)
+            .await?;
 
         Ok(())
     }
@@ -293,6 +380,7 @@ impl FirestoreSinkWriter {
         let doc_id_col_idx = config.validate_schema(&schema, &pk_indices)?;
         let collection_path = parse_collection_path(&config.collection, &schema)?;
         let client = config.build_client().await?;
+        config.validate_decimal_mode(&schema, &client).await?;
 
         Ok(Self {
             client,
@@ -338,7 +426,7 @@ impl FirestoreSinkWriter {
     fn format_row(&self, row: RowRef<'_>) -> Result<HashMap<String, Value>> {
         let mut map = HashMap::new();
         for (datum, field) in row.iter().zip_eq_debug(self.schema.fields()) {
-            let value = format_datum(datum, &field.data_type)?;
+            let value = format_datum(datum, &field.data_type, self.config.decimal_mode)?;
             map.insert(field.name.clone(), value);
         }
         Ok(map)
@@ -665,8 +753,21 @@ impl FirestoreOperation {
 
 // Encode Firestore values directly: JSON cannot represent non-finite floats, and the
 // SDK's serde serializer casts u64 to i64 without checking its range.
-fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Result<Value> {
-    format_datum_at_depth(datum, data_type, 0)
+fn format_datum(
+    datum: Option<ScalarRefImpl<'_>>,
+    data_type: &DataType,
+    decimal_mode: FirestoreDecimalMode,
+) -> Result<Value> {
+    format_datum_at_depth(datum, data_type, decimal_mode, 0)
+}
+
+fn contains_decimal(data_type: &DataType) -> bool {
+    match data_type {
+        DataType::Decimal => true,
+        DataType::List(list) => contains_decimal(list.elem()),
+        DataType::Struct(struct_type) => struct_type.types().any(contains_decimal),
+        _ => false,
+    }
 }
 
 fn check_container_depth(depth: usize) -> Result<()> {
@@ -693,6 +794,7 @@ fn array_value(values: Vec<Value>) -> Result<ValueType> {
 fn format_datum_at_depth(
     datum: Option<ScalarRefImpl<'_>>,
     data_type: &DataType,
+    decimal_mode: FirestoreDecimalMode,
     depth: usize,
 ) -> Result<Value> {
     let Some(scalar) = datum else {
@@ -707,10 +809,24 @@ fn format_datum_at_depth(
         DataType::Int64 => ValueType::IntegerValue(scalar.into_int64()),
         DataType::Float32 => ValueType::DoubleValue(scalar.into_float32().0.into()),
         DataType::Float64 => ValueType::DoubleValue(scalar.into_float64().0),
-        DataType::Decimal => ValueType::DoubleValue(
-            f64::try_from(scalar.into_decimal())
-                .map_err(|error| SinkError::Firestore(anyhow!(error)))?,
-        ),
+        DataType::Decimal => match decimal_mode {
+            // Firestore's wire representation for Decimal128 is a reserved map,
+            // not a string field. RisingWave decimals have at most 29 significant
+            // digits, within Decimal128's 34, so no intermediate f64 is needed.
+            // https://cloud.google.com/firestore/mongodb-compatibility/docs/supported-data-types-drivers
+            FirestoreDecimalMode::Decimal128 => ValueType::MapValue(MapValue {
+                fields: HashMap::from([(
+                    "__decimal128__".to_owned(),
+                    Value {
+                        value_type: Some(ValueType::StringValue(scalar.into_decimal().to_string())),
+                    },
+                )]),
+            }),
+            FirestoreDecimalMode::Double => ValueType::DoubleValue(
+                f64::try_from(scalar.into_decimal())
+                    .map_err(|error| SinkError::Firestore(anyhow!(error)))?,
+            ),
+        },
         DataType::Timestamp => {
             // A timestamp without a time zone is interpreted as UTC, independently of
             // the session/process time zone. Firestore stores microsecond precision.
@@ -734,7 +850,7 @@ fn format_datum_at_depth(
             let values = scalar
                 .into_list()
                 .iter()
-                .map(|item| format_datum_at_depth(item, inner.elem(), depth + 1))
+                .map(|item| format_datum_at_depth(item, inner.elem(), decimal_mode, depth + 1))
                 .collect::<Result<Vec<_>>>()?;
             array_value(values)?
         }
@@ -748,7 +864,7 @@ fn format_datum_at_depth(
             {
                 fields.insert(
                     name.to_owned(),
-                    format_datum_at_depth(datum, dt, depth + 1)?,
+                    format_datum_at_depth(datum, dt, decimal_mode, depth + 1)?,
                 );
             }
             ValueType::MapValue(MapValue { fields })
