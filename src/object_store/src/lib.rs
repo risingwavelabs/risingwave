@@ -17,3 +17,6 @@
 #![feature(coroutines)]
 
 pub mod object;
+
+/// Standalone diagnostics using the same clients as RisingWave.
+pub mod benchmark;

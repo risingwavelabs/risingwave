@@ -1,0 +1,481 @@
+// Copyright 2026 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use super::*;
+use crate::object::{InMemObjectStore, ObjectStore, ObjectStoreConfig, build_remote_object_store};
+
+fn config() -> BenchmarkConfig {
+    BenchmarkConfig {
+        objects: 3,
+        object_size: 10,
+        concurrency: 1,
+        range_size: 5,
+        block_size: 3,
+        consume_size: 3,
+        pause_ms: 1,
+        short_get_size: 4,
+        metadata_objects: 5,
+        delete_batch_size: 2,
+        fast_readers: 1,
+        interference_ms: 10,
+        ..Default::default()
+    }
+}
+
+fn memory() -> Arc<ObjectStoreImpl> {
+    Arc::new(ObjectStoreImpl::InMem(
+        InMemObjectStore::for_test().monitored(
+            Arc::new(ObjectStoreMetrics::unused()),
+            Arc::new(ObjectStoreConfig::default()),
+        ),
+    ))
+}
+
+#[tokio::test]
+async fn consumption_units_and_short_get_tail() {
+    let store = memory();
+    store
+        .upload("object", Bytes::from_static(b"0123456789"))
+        .await
+        .unwrap();
+    for mode in [
+        ReadMode::Continuous,
+        ReadMode::Intermittent,
+        ReadMode::Chunked,
+    ] {
+        let outcome = read::read_object(
+            store.clone(),
+            "object".into(),
+            Arc::new(config()),
+            mode,
+            0,
+            CancellationToken::new(),
+        )
+        .await;
+        assert!(outcome.error.is_none());
+        assert_eq!(outcome.sample.bytes, 10);
+        assert_eq!(outcome.sample.items, 1);
+        assert_eq!(outcome.sample.consume.0.len(), 4);
+        assert_eq!(outcome.sample.first_data.0.len(), 1);
+        if mode == ReadMode::Continuous {
+            assert_eq!(outcome.sample.pause, Duration::ZERO);
+            assert_eq!(outcome.sample.resume.0.len(), 0);
+        } else {
+            // Three pauses, and no fourth sleep after the final partial unit.
+            assert!(outcome.sample.pause >= Duration::from_millis(3));
+            assert_eq!(outcome.sample.resume.0.len(), 3);
+        }
+    }
+}
+
+#[tokio::test]
+async fn one_byte_units_and_cancellation_preserve_progress() {
+    let store = memory();
+    store
+        .upload("object", Bytes::from_static(b"0123456789"))
+        .await
+        .unwrap();
+    let mut cfg = config();
+    cfg.consume_size = 1;
+    cfg.pause_ms = 60_000;
+    let token = CancellationToken::new();
+    let cancel = token.clone();
+    let task = tokio::spawn(read::read_object(
+        store,
+        "object".into(),
+        Arc::new(cfg),
+        ReadMode::Intermittent,
+        0,
+        token,
+    ));
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    cancel.cancel();
+    let outcome = tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(outcome.interrupted);
+    assert!(outcome.error.is_none());
+    assert_eq!(outcome.sample.bytes, 1);
+    let mut stats = Accumulator::default();
+    stats.add(outcome, Duration::from_millis(10));
+    assert_eq!(stats.failed, 0);
+    assert_eq!(stats.interrupted, 1);
+    assert_eq!(stats.latency.0.len(), 0); // No fabricated completed-request latency.
+}
+
+#[tokio::test]
+async fn all_profiles_clean_only_owned_objects() {
+    let store = memory();
+    store
+        .upload("production/object", Bytes::from_static(b"untouched"))
+        .await
+        .unwrap();
+    let report = run(
+        store.clone(),
+        config(),
+        "risectl-bench/test/".into(),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert!(report.succeeded(), "{report:?}");
+    for name in [
+        "multipart_put",
+        "range_get",
+        "block_get",
+        "list",
+        "batch_delete",
+        "compactor_continuous",
+        "compactor_intermittent",
+        "compactor_chunked",
+        "interference_fast_only/fast",
+        "interference_continuous_competitors/fast",
+        "interference_slow_competitors/fast",
+    ] {
+        let phase = report.phases.iter().find(|p| p.name == name).unwrap();
+        assert!(phase.succeeded > 0, "{phase:?}");
+    }
+    for name in [
+        "compactor_continuous",
+        "compactor_intermittent",
+        "compactor_chunked",
+    ] {
+        assert_eq!(
+            report.phases.iter().find(|p| p.name == name).unwrap().bytes,
+            30
+        );
+    }
+    let remaining: Vec<_> = store
+        .list("", None, None)
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].key, "production/object");
+    assert!(!report.backpressure_verified);
+}
+
+#[tokio::test]
+async fn interference_initialization_errors_do_not_deadlock() {
+    let store = memory();
+    let cfg = Arc::new(config());
+    let keys = Arc::new(vec![
+        "missing1".into(),
+        "missing2".into(),
+        "missing3".into(),
+    ]);
+    let phases = tokio::time::timeout(
+        Duration::from_secs(2),
+        read::interference(store, keys, cfg, &CancellationToken::new()),
+    )
+    .await
+    .unwrap();
+    assert!(phases.iter().all(|p| p.status == "failed"));
+}
+
+#[tokio::test]
+async fn kept_data_and_pre_cancelled_run() {
+    let store = memory();
+    let mut cfg = config();
+    cfg.profile = Profile::Compactor;
+    cfg.keep_data = true;
+    let report = run(
+        store.clone(),
+        cfg,
+        "risectl-bench/kept/".into(),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert!(report.succeeded());
+    assert_eq!(
+        store
+            .list("risectl-bench/kept/", None, None)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+    let mut reuse = config();
+    reuse.profile = Profile::Compactor;
+    reuse.keep_data = true;
+    reuse.reuse_data = true;
+    reuse.read_order.reverse();
+    let reused = run(
+        store.clone(),
+        reuse,
+        "risectl-bench/kept/".into(),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert!(reused.succeeded());
+    assert_eq!(reused.phases[0].name, "validate_retained_data");
+    assert_eq!(reused.phases[1].name, "compactor_chunked");
+    let token = CancellationToken::new();
+    token.cancel();
+    let report = run(
+        store.clone(),
+        config(),
+        "risectl-bench/cancelled/".into(),
+        token,
+    )
+    .await
+    .unwrap();
+    assert!(!report.succeeded());
+    assert_eq!(report.cleanup_status, "completed");
+    assert!(
+        store
+            .list("risectl-bench/cancelled/", None, None)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn rejects_invalid_experiments_and_merges_percentiles() {
+    let mut cfg = config();
+    cfg.read_order[2] = ReadMode::Continuous;
+    assert!(cfg.validate().is_err());
+    cfg = config();
+    cfg.objects = 1;
+    assert!(cfg.validate().is_err());
+    cfg = config();
+    cfg.consume_size = 0;
+    assert!(cfg.validate().is_err());
+    let mut a = Timings::default();
+    let mut b = Timings::default();
+    for _ in 0..99 {
+        a.record(Duration::from_millis(1));
+    }
+    b.record(Duration::from_millis(100));
+    a.merge(&b);
+    let summary = a.summary().unwrap();
+    assert_eq!(summary.samples, 100);
+    assert!(summary.p99_ms < 2.0); // Pooled samples, not the worst per-worker p99.
+    assert!(summary.max_ms >= 100.0);
+}
+
+/// Minimal S3 protocol fixture: records actual Range headers and can truncate
+/// a body while keeping the advertised length, unlike an in-memory store.
+async fn protocol_store(
+    truncate: bool,
+) -> (
+    Arc<ObjectStoreImpl>,
+    Arc<std::sync::Mutex<Vec<String>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let ranges = Arc::new(std::sync::Mutex::new(vec![]));
+    let recorded = ranges.clone();
+    let task = tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let ranges = recorded.clone();
+            tokio::spawn(async move {
+                let mut header = vec![];
+                loop {
+                    let mut byte = [0];
+                    if socket.read_exact(&mut byte).await.is_err() {
+                        return;
+                    }
+                    header.push(byte[0]);
+                    if header.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                    if header.len() > 32_768 {
+                        return;
+                    }
+                }
+                let header = String::from_utf8(header).unwrap();
+                if header.starts_with("HEAD ") {
+                    socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n",
+                        )
+                        .await
+                        .unwrap();
+                    return;
+                }
+                let range = header
+                    .lines()
+                    .find_map(|line| {
+                        let (key, value) = line.split_once(':')?;
+                        key.eq_ignore_ascii_case("range")
+                            .then(|| value.trim().to_owned())
+                    })
+                    .expect("range header");
+                ranges.lock().unwrap().push(range.clone());
+                let (start, end) = range
+                    .strip_prefix("bytes=")
+                    .unwrap()
+                    .split_once('-')
+                    .unwrap();
+                let start: usize = start.parse().unwrap();
+                let end: usize = end.parse().unwrap();
+                let response = format!(
+                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/10\r\nConnection: close\r\n\r\n",
+                    end - start + 1
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+                let data = b"0123456789";
+                let body = if truncate {
+                    &data[start..(start + 5).min(end + 1)]
+                } else {
+                    &data[start..=end]
+                };
+                socket.write_all(body).await.unwrap();
+            });
+        }
+    });
+    let mut cfg = ObjectStoreConfig::default();
+    cfg.retry.streaming_read_retry_attempts = 0;
+    cfg.retry.read_retry_attempts = 0;
+    let cfg = Arc::new(cfg);
+    let metrics = Arc::new(ObjectStoreMetrics::unused());
+    let store = crate::object::OpendalObjectStore::new_minio_engine(
+        &format!("minio://test-key:test-secret@http://{endpoint}/bucket"),
+        cfg.clone(),
+        metrics.clone(),
+    )
+    .unwrap()
+    .monitored(metrics, cfg);
+    (Arc::new(ObjectStoreImpl::Opendal(store)), ranges, task)
+}
+
+#[tokio::test]
+async fn actual_http_ranges_stay_large_during_pauses_and_split_only_in_chunked_mode() {
+    let (store, ranges, server) = protocol_store(false).await;
+    for mode in [
+        ReadMode::Continuous,
+        ReadMode::Intermittent,
+        ReadMode::Chunked,
+    ] {
+        ranges.lock().unwrap().clear();
+        let outcome = read::read_object(
+            store.clone(),
+            "object".into(),
+            Arc::new(config()),
+            mode,
+            0,
+            CancellationToken::new(),
+        )
+        .await;
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        let expected = if mode == ReadMode::Chunked {
+            vec!["bytes=0-3", "bytes=4-7", "bytes=8-9"]
+        } else {
+            vec!["bytes=0-9"]
+        };
+        assert_eq!(*ranges.lock().unwrap(), expected);
+        assert_eq!(outcome.sample.bytes, 10);
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn truncated_http_body_is_a_failure_with_partial_progress() {
+    let (store, ranges, server) = protocol_store(true).await;
+    let outcome = read::read_object(
+        store,
+        "object".into(),
+        Arc::new(config()),
+        ReadMode::Continuous,
+        0,
+        CancellationToken::new(),
+    )
+    .await;
+    assert!(outcome.error.is_some());
+    assert!(!outcome.interrupted);
+    assert_eq!(outcome.sample.bytes, 5);
+    assert_eq!(ranges.lock().unwrap().len(), 1);
+    server.abort();
+}
+
+/// Run explicitly against disposable local MinIO, never a customer's bucket.
+#[tokio::test]
+#[ignore = "requires RW_BENCH_TEST_STORE and disposable S3-compatible storage"]
+async fn real_s3_profiles() {
+    let url = std::env::var("RW_BENCH_TEST_STORE").expect("RW_BENCH_TEST_STORE");
+    let mut object_config = ObjectStoreConfig {
+        upload_part_size: 5 << 20,
+        opendal_writer_abort_on_err: true,
+        ..Default::default()
+    };
+    object_config.s3.developer.use_opendal =
+        std::env::var("RW_BENCH_TEST_BACKEND").as_deref() != Ok("aws");
+    let metrics = Arc::new(ObjectStoreMetrics::unused());
+    let store = Arc::new(
+        build_remote_object_store(&url, metrics, "benchmark-test", Arc::new(object_config)).await,
+    );
+    let cfg = BenchmarkConfig {
+        objects: 3,
+        object_size: 12 << 20,
+        concurrency: 2,
+        fast_readers: 1,
+        consume_size: 1 << 20,
+        short_get_size: 4 << 20,
+        pause_ms: 1,
+        metadata_objects: 1013,
+        delete_batch_size: 5,
+        interference_ms: 200,
+        ..Default::default()
+    };
+    let prefix = format!(
+        "risectl-bench/integration-{}-{}/",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let report = run(store.clone(), cfg, prefix.clone(), CancellationToken::new())
+        .await
+        .unwrap();
+    if let Ok(path) = std::env::var("RW_BENCH_TEST_REPORT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
+    assert!(report.succeeded(), "{report:#?}");
+    assert!(
+        store
+            .list(&prefix, None, None)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    for name in [
+        "compactor_continuous",
+        "compactor_intermittent",
+        "compactor_chunked",
+    ] {
+        assert_eq!(
+            report.phases.iter().find(|p| p.name == name).unwrap().bytes,
+            36 << 20
+        );
+    }
+}

@@ -650,6 +650,38 @@ impl ObjectStore for S3ObjectStore {
 }
 
 impl S3ObjectStore {
+    /// Override only this client's trust roots for standalone diagnostics.
+    #[cfg(not(madsim))]
+    pub(crate) fn set_diagnostic_ca(&mut self, pem: Vec<u8>) -> ObjectResult<()> {
+        let context = tls::TlsContext::builder()
+            .with_trust_store(tls::TrustStore::default().with_pem_certificate(pem))
+            .build()
+            .map_err(|e| ObjectError::internal(format!("invalid CA configuration: {e}")))?;
+        let nodelay = self.config.s3.nodelay;
+        let keepalive = self.config.s3.keepalive_ms;
+        let http = SmithyHttpClientBuilder::new().build_with_connector_fn(move |settings, _| {
+            let mut connector = SmithyConnector::builder();
+            if let Some(settings) = settings {
+                connector = connector.connector_settings(settings.clone());
+            }
+            if let Some(nodelay) = nodelay {
+                connector = connector.enable_tcp_nodelay(nodelay);
+            }
+            if let Some(keepalive) = keepalive {
+                connector = connector.pool_idle_timeout(Duration::from_millis(keepalive));
+            }
+            connector
+                .tls_provider(tls::Provider::Rustls(
+                    tls::rustls_provider::CryptoMode::AwsLc,
+                ))
+                .tls_context(context.clone())
+                .build()
+        });
+        self.client =
+            Client::from_conf(self.client.config().to_builder().http_client(http).build());
+        Ok(())
+    }
+
     pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient + use<> {
         let nodelay = config.s3.nodelay;
         let pool_idle_timeout = config.s3.keepalive_ms.map(Duration::from_millis);
