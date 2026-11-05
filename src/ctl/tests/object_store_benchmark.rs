@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(not(madsim))]
+
 use clap::Parser;
 use risingwave_ctl::CliOpts;
 use risingwave_ctl::cmd_impl::bench::object_store::{ObjectStoreArgs, run};

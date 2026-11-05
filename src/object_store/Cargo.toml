@@ -45,8 +45,8 @@ opendal = { workspace = true, features = [
 opendal-http-transport-reqwest = { workspace = true }
 pin-project-lite = { workspace = true }
 prometheus = { version = "0.14", features = ["process"] }
-reqwest = "0.13.4" # required by opendal-http-transport-reqwest
 rand = { workspace = true }
+reqwest = "0.13.4" # required by opendal-http-transport-reqwest
 risingwave_common = { workspace = true }
 serde = { workspace = true }
 spin = "0.12"
@@ -59,6 +59,7 @@ tracing = "0.1"
 [dev-dependencies]
 serde_json = "1"
 tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

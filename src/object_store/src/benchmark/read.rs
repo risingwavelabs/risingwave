@@ -24,6 +24,7 @@ use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use thiserror_ext::AsReport;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Barrier;
 use tokio::task::JoinSet;
@@ -345,181 +346,206 @@ pub(super) async fn interference(
         if shutdown.is_cancelled() {
             break;
         }
-        eprintln!(
-            "benchmark: interference/{name} ({} fast + {competitors} competitors)",
-            config.fast_readers
+        reports.extend(
+            interference_comparison(
+                store.clone(),
+                keys.clone(),
+                config.clone(),
+                shutdown,
+                name,
+                competitors,
+                mode,
+            )
+            .await,
         );
-        let end_window = shutdown.child_token();
-        let barrier = Arc::new(Barrier::new(config.fast_readers + competitors + 1));
-        let clock = Arc::new(OnceLock::new());
-        let mut tasks = JoinSet::new();
-        let mut worker_cohorts = HashMap::new();
-        let fast_inflight = super::Inflight::default();
-        let competitor_inflight = super::Inflight::default();
-        for id in 0..config.fast_readers + competitors {
-            let is_fast = id < config.fast_readers;
-            let inflight = if is_fast {
-                fast_inflight.clone()
-            } else {
-                competitor_inflight.clone()
-            };
-            let s = store.clone();
-            let cfg = config.clone();
-            let token = end_window.clone();
-            let keys = keys.clone();
-            let ready = barrier.clone();
-            let clock = clock.clone();
-            let task = tasks.spawn(async move {
-                let mut stats = Accumulator::default();
-                let mut objects = HashSet::new();
-                let mut iteration = 0usize;
-                if is_fast {
-                    tokio::select! { _ = ready.wait() => {}, _ = token.cancelled() => {} }
-                    while clock.get().is_none() && !token.is_cancelled() {
-                        tokio::task::yield_now().await;
-                    }
-                }
-                let mut initial = !is_fast;
-                while !token.is_cancelled() {
-                    let (object, range) = interference_request(&cfg, id, iteration);
-                    objects.insert(object);
-                    iteration = iteration.wrapping_add(1);
-                    let request = Request {
-                        key: keys[object].clone(),
-                        start: range.start,
-                        length: range.len(),
-                        mode: if is_fast { ReadMode::Continuous } else { mode },
-                        reader_id: id,
-                        ready: initial.then(|| (ready.clone(), clock.clone())),
-                    };
-                    initial = false;
-                    let started = Instant::now();
-                    let guard = inflight.enter();
-                    let outcome =
-                        read_request(s.clone(), request, cfg.clone(), token.clone()).await;
-                    drop(guard);
-                    let failed = outcome.error.is_some();
-                    stats.add(outcome, started.elapsed());
-                    if failed {
-                        break;
-                    }
+    }
+    reports
+}
+
+/// Run one complete comparison; request cursors and readiness are local to this window.
+pub(super) async fn interference_comparison(
+    store: Arc<ObjectStoreImpl>,
+    keys: Arc<Vec<String>>,
+    config: Arc<BenchmarkConfig>,
+    shutdown: &CancellationToken,
+    name: &str,
+    competitors: usize,
+    mode: ReadMode,
+) -> Vec<PhaseReport> {
+    let mut reports = vec![];
+    eprintln!(
+        "benchmark: interference/{name} ({} fast + {competitors} competitors)",
+        config.fast_readers
+    );
+    let end_window = shutdown.child_token();
+    let barrier = Arc::new(Barrier::new(config.fast_readers + competitors + 1));
+    let clock = Arc::new(OnceLock::new());
+    let mut tasks = JoinSet::new();
+    let mut worker_cohorts = HashMap::new();
+    let fast_inflight = super::Inflight::default();
+    let competitor_inflight = super::Inflight::default();
+    for id in 0..config.fast_readers + competitors {
+        let is_fast = id < config.fast_readers;
+        let inflight = if is_fast {
+            fast_inflight.clone()
+        } else {
+            competitor_inflight.clone()
+        };
+        let s = store.clone();
+        let cfg = config.clone();
+        let token = end_window.clone();
+        let keys = keys.clone();
+        let ready = barrier.clone();
+        let clock = clock.clone();
+        let task = tasks.spawn(async move {
+            let mut stats = Accumulator::default();
+            let mut objects = HashSet::new();
+            let mut iteration = 0usize;
+            if is_fast {
+                tokio::select! { _ = ready.wait() => {}, _ = token.cancelled() => {} }
+                while clock.get().is_none() && !token.is_cancelled() {
                     tokio::task::yield_now().await;
                 }
-                (stats, objects, Instant::now())
-            });
-            worker_cohorts.insert(task.id(), is_fast);
-        }
-        tokio::select! {
-            _ = barrier.wait() => {},
-            _ = shutdown.cancelled() => {},
-        }
-        let started = Instant::now();
-        let started_unix_ms = super::unix_ms();
-        let _ = clock.set(started);
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(config.interference_ms)) => {},
-            _ = shutdown.cancelled() => {},
-        }
-        let elapsed = started.elapsed();
-        end_window.cancel();
-        let mut fast = Cohort::default();
-        let mut slow = Cohort::default();
-        while let Some(result) = tasks.join_next_with_id().await {
-            let id = match &result {
-                Ok((id, _)) => *id,
-                Err(error) => error.id(),
-            };
-            let cohort = if worker_cohorts[&id] {
-                &mut fast
-            } else {
-                &mut slow
-            };
-            match result {
-                Ok((_, (worker, objects, finished))) => {
-                    cohort.failed_workers += usize::from(worker.failed > 0);
-                    cohort.active += finished.saturating_duration_since(started).min(elapsed);
-                    cohort.objects.extend(objects);
-                    cohort.stats.merge(worker);
+            }
+            let mut initial = !is_fast;
+            while !token.is_cancelled() {
+                let (object, range) = interference_request(&cfg, id, iteration);
+                objects.insert(object);
+                iteration = iteration.wrapping_add(1);
+                let request = Request {
+                    key: keys[object].clone(),
+                    start: range.start,
+                    length: range.len(),
+                    mode: if is_fast { ReadMode::Continuous } else { mode },
+                    reader_id: id,
+                    ready: initial.then(|| (ready.clone(), clock.clone())),
+                };
+                initial = false;
+                let started = Instant::now();
+                let guard = inflight.enter();
+                let outcome = read_request(s.clone(), request, cfg.clone(), token.clone()).await;
+                drop(guard);
+                let failed = outcome.error.is_some();
+                stats.add(outcome, started.elapsed());
+                if failed {
+                    break;
                 }
-                Err(error) => {
-                    cohort.failed_workers += 1;
-                    cohort
-                        .stats
-                        .errors
-                        .push(format!("worker failed; lifetime unavailable: {error}"));
-                }
+                tokio::task::yield_now().await;
+            }
+            (stats, objects, Instant::now())
+        });
+        worker_cohorts.insert(task.id(), is_fast);
+    }
+    tokio::select! {
+        _ = barrier.wait() => {},
+        _ = shutdown.cancelled() => {},
+    }
+    let started = Instant::now();
+    let started_unix_ms = super::unix_ms();
+    let _ = clock.set(started);
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_millis(config.interference_ms)) => {},
+        _ = shutdown.cancelled() => {},
+    }
+    let elapsed = started.elapsed();
+    end_window.cancel();
+    let mut fast = Cohort::default();
+    let mut slow = Cohort::default();
+    while let Some(result) = tasks.join_next_with_id().await {
+        let id = match &result {
+            Ok((id, _)) => *id,
+            Err(error) => error.id(),
+        };
+        let cohort = if worker_cohorts[&id] {
+            &mut fast
+        } else {
+            &mut slow
+        };
+        match result {
+            Ok((_, (worker, objects, finished))) => {
+                cohort.failed_workers += usize::from(worker.failed > 0);
+                cohort.active += finished.saturating_duration_since(started).min(elapsed);
+                cohort.objects.extend(objects);
+                cohort.stats.merge(worker);
+            }
+            Err(error) => {
+                cohort.failed_workers += 1;
+                cohort.stats.errors.push(format!(
+                    "worker failed; lifetime unavailable: {}",
+                    error.as_report()
+                ));
             }
         }
-        let drain_ms = started.elapsed().saturating_sub(elapsed).as_secs_f64() * 1000.0;
-        let mut invalid_reasons = vec![];
-        if shutdown.is_cancelled() {
-            invalid_reasons.push("observation window cancelled".into());
+    }
+    let drain_ms = started.elapsed().saturating_sub(elapsed).as_secs_f64() * 1000.0;
+    let mut invalid_reasons = vec![];
+    if shutdown.is_cancelled() {
+        invalid_reasons.push("observation window cancelled".into());
+    }
+    for (name, cohort) in [("fast", &fast), ("competitors", &slow)] {
+        if cohort.failed_workers > 0 {
+            invalid_reasons.push(format!("{name}: {} workers failed", cohort.failed_workers));
         }
-        for (name, cohort) in [("fast", &fast), ("competitors", &slow)] {
-            if cohort.failed_workers > 0 {
-                invalid_reasons.push(format!("{name}: {} workers failed", cohort.failed_workers));
+    }
+    if fast.stats.succeeded == 0 {
+        invalid_reasons.push("fast cohort completed no reads".into());
+    }
+    for (is_fast, cohort) in [(true, fast), (false, slow)] {
+        if !is_fast && competitors == 0 {
+            continue;
+        }
+        let pool = cohort_pool(&config, is_fast);
+        let no_fast_reads = is_fast && cohort.stats.succeeded == 0;
+        let mut report = cohort.stats.report(
+            format!(
+                "interference_{name}/{}",
+                if is_fast { "fast" } else { "competitors" }
+            ),
+            elapsed,
+            None,
+            shutdown.is_cancelled(),
+        );
+        if !shutdown.is_cancelled() && (cohort.failed_workers > 0 || no_fast_reads) {
+            report.status = "failed".into();
+            if no_fast_reads {
+                report.errors.push("fast cohort completed no reads".into());
             }
         }
-        if fast.stats.succeeded == 0 {
-            invalid_reasons.push("fast cohort completed no reads".into());
-        }
-        for (is_fast, cohort) in [(true, fast), (false, slow)] {
-            if !is_fast && competitors == 0 {
-                continue;
-            }
-            let pool = cohort_pool(&config, is_fast);
-            let no_fast_reads = is_fast && cohort.stats.succeeded == 0;
-            let mut report = cohort.stats.report(
-                format!(
-                    "interference_{name}/{}",
-                    if is_fast { "fast" } else { "competitors" }
-                ),
-                elapsed,
-                None,
-                shutdown.is_cancelled(),
-            );
-            if !shutdown.is_cancelled() && (cohort.failed_workers > 0 || no_fast_reads) {
-                report.status = "failed".into();
-                if no_fast_reads {
-                    report.errors.push("fast cohort completed no reads".into());
-                }
-            }
-            report.interference = Some(InterferenceCohort {
-                comparison_valid: invalid_reasons.is_empty(),
-                invalid_reasons: invalid_reasons.clone(),
-                expected_workers: if is_fast {
-                    config.fast_readers
-                } else {
-                    competitors
-                },
-                failed_workers: cohort.failed_workers,
-                active_worker_seconds: cohort.active.as_secs_f64(),
-                object_pool_start: pool.start,
-                object_pool_objects: pool.len(),
-                object_pool_bytes: (pool.len() * config.object_size) as u64,
-                requested_objects: cohort.objects.len(),
-                range_bytes: if is_fast {
-                    config.range_size
-                } else {
-                    config.object_size
-                },
-            });
-            report.drain_ms = drain_ms;
-            report.wall_elapsed_ms += drain_ms;
-            report.stop_reason = if shutdown.is_cancelled() {
-                "cancelled"
+        report.interference = Some(InterferenceCohort {
+            comparison_valid: invalid_reasons.is_empty(),
+            invalid_reasons: invalid_reasons.clone(),
+            expected_workers: if is_fast {
+                config.fast_readers
             } else {
-                "observation_window"
-            }
-            .into();
-            report.started_unix_ms = started_unix_ms;
-            report.peak_inflight_logical_operations = if is_fast {
-                fast_inflight.peak()
+                competitors
+            },
+            failed_workers: cohort.failed_workers,
+            active_worker_seconds: cohort.active.as_secs_f64(),
+            object_pool_start: pool.start,
+            object_pool_objects: pool.len(),
+            object_pool_bytes: (pool.len() * config.object_size) as u64,
+            requested_objects: cohort.objects.len(),
+            range_bytes: if is_fast {
+                config.range_size
             } else {
-                competitor_inflight.peak()
-            };
-            reports.push(report);
+                config.object_size
+            },
+        });
+        report.drain_ms = drain_ms;
+        report.wall_elapsed_ms += drain_ms;
+        report.stop_reason = if shutdown.is_cancelled() {
+            "cancelled"
+        } else {
+            "observation_window"
         }
+        .into();
+        report.started_unix_ms = started_unix_ms;
+        report.peak_inflight_logical_operations = if is_fast {
+            fast_inflight.peak()
+        } else {
+            competitor_inflight.peak()
+        };
+        reports.push(report);
     }
     reports
 }

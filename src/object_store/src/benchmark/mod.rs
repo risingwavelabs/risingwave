@@ -33,6 +33,7 @@ use hdrhistogram::Histogram;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
@@ -356,7 +357,7 @@ impl Accumulator {
         } else if let Some(error) = outcome.error {
             self.failed += 1;
             if self.errors.len() < 8 {
-                self.errors.push(format!("{error:#}"));
+                self.errors.push(format!("{}", error.as_report()));
             }
         } else {
             self.succeeded += 1;
@@ -754,7 +755,9 @@ where
             Ok(worker) => stats.merge(worker),
             Err(error) => {
                 stats.failed += 1;
-                stats.errors.push(format!("worker failed: {error}"));
+                stats
+                    .errors
+                    .push(format!("worker failed: {}", error.as_report()));
             }
         }
     }
@@ -1047,7 +1050,7 @@ pub async fn run(
                 .await
                 .context("cleanup test objects")
             {
-                cleanup_errors.push(format!("{error:#}"));
+                cleanup_errors.push(format!("{}", error.as_report()));
             }
         }
     }

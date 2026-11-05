@@ -100,7 +100,7 @@ pub struct ObjectStoreArgs {
     /// Retain test data for inspection. Batch DELETE still deletes its own dataset.
     #[arg(long)]
     pub keep_data: bool,
-    /// Reuse the data/<index> objects from a retained prefix (compactor profile only).
+    /// Reuse the `data/<index>` objects from a retained prefix (compactor profile only).
     #[arg(long)]
     pub reuse_prefix: Option<String>,
     /// Override the configured S3 backend, recording the effective value in the report.

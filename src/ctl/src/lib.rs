@@ -648,6 +648,7 @@ pub enum ProfileCommands {
 pub async fn start(opts: CliOpts, shutdown: CancellationToken) {
     // Object-store benchmarks own cooperative shutdown, so they can write a
     // partial report and clean up after Ctrl-C instead of being dropped here.
+    #[cfg(not(madsim))]
     if matches!(
         &opts.command,
         Commands::Bench(BenchCommands::ObjectStore(_))

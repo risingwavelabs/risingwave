@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use thiserror_ext::AsReport;
+
 use super::*;
 
 fn limits(config: &BenchmarkConfig, fixed_count: usize) -> (usize, Duration) {
@@ -442,7 +444,9 @@ pub(super) async fn preflight(
                 (Ok(sample), Ok(())) => Ok(sample),
                 (Err(error), Ok(())) => Err(error),
                 (Ok(_), Err(error)) => Err(error),
-                (Err(error), Err(cleanup)) => Err(error.context(format!("{cleanup:#}"))),
+                (Err(error), Err(cleanup)) => {
+                    Err(error.context(format!("{}", cleanup.as_report())))
+                }
             })
         }
     })
@@ -469,7 +473,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn duration_stops_scheduling_but_finishes_inflight_work() {
         use super::*;
         let cfg = BenchmarkConfig {

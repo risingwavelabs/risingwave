@@ -358,13 +358,21 @@ fn rejects_invalid_experiments_and_merges_percentiles() {
     assert!(summary.max_ms >= 100.0);
 }
 
-/// Minimal S3 protocol fixture: records actual Range headers and can truncate
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HttpGet {
+    key: String,
+    range: std::ops::Range<usize>,
+}
+
+type RequestLog = Arc<std::sync::Mutex<Vec<HttpGet>>>;
+
+/// Minimal S3 protocol fixture: records actual keys and Range headers and can truncate
 /// a body while keeping the advertised length, unlike an in-memory store.
 async fn protocol_store(
     truncate: bool,
 ) -> (
     Arc<ObjectStoreImpl>,
-    Arc<std::sync::Mutex<Vec<String>>>,
+    RequestLog,
     tokio::task::JoinHandle<()>,
 ) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -408,7 +416,6 @@ async fn protocol_store(
                             .then(|| value.trim().to_owned())
                     })
                     .expect("range header");
-                ranges.lock().unwrap().push(range.clone());
                 let (start, end) = range
                     .strip_prefix("bytes=")
                     .unwrap()
@@ -416,18 +423,33 @@ async fn protocol_store(
                     .unwrap();
                 let start: usize = start.parse().unwrap();
                 let end: usize = end.parse().unwrap();
+                let key = header
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap()
+                    .rsplit('/')
+                    .next()
+                    .unwrap()
+                    .to_owned();
+                ranges.lock().unwrap().push(HttpGet {
+                    key,
+                    range: start..end + 1,
+                });
                 let response = format!(
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/10\r\nConnection: close\r\n\r\n",
                     end - start + 1
                 );
-                socket.write_all(response.as_bytes()).await.unwrap();
+                if socket.write_all(response.as_bytes()).await.is_err() {
+                    return;
+                }
                 let data = b"0123456789";
                 let body = if truncate {
                     &data[start..(start + 5).min(end + 1)]
                 } else {
                     &data[start..=end]
                 };
-                socket.write_all(body).await.unwrap();
+                // Observation-window cancellation may close a request after its header.
+                let _ = socket.write_all(body).await;
             });
         }
     });
@@ -466,42 +488,109 @@ async fn actual_http_ranges_stay_large_during_pauses_and_split_only_in_chunked_m
         .await;
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
         let expected = if mode == ReadMode::Chunked {
-            vec!["bytes=0-3", "bytes=4-7", "bytes=8-9"]
+            vec![0..4, 4..8, 8..10]
         } else {
-            vec!["bytes=0-9"]
+            std::iter::once(0..10).collect()
         };
-        assert_eq!(*ranges.lock().unwrap(), expected);
+        assert_eq!(
+            ranges
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|r| r.range.clone())
+                .collect::<Vec<_>>(),
+            expected
+        );
         assert_eq!(outcome.sample.bytes, 10);
     }
     server.abort();
 }
 
-#[tokio::test]
-async fn interference_sends_nonzero_range_offsets_over_http() {
+async fn capture_comparison_requests(
+    objects: usize,
+    competitors: usize,
+    mode: ReadMode,
+) -> Vec<Vec<HttpGet>> {
     let (store, ranges, server) = protocol_store(false).await;
-    let mut cfg = config();
-    cfg.interference_ms = 100;
-    let phases = read::interference(
-        store,
-        Arc::new(vec!["a".into(), "b".into(), "c".into()]),
-        Arc::new(cfg),
-        &CancellationToken::new(),
-    )
+    let cfg = Arc::new(BenchmarkConfig {
+        objects,
+        fast_readers: 2,
+        concurrency: 2,
+        interference_ms: 60_000,
+        ..config()
+    });
+    let shutdown = CancellationToken::new();
+    let cancel = shutdown.clone();
+    let task = tokio::spawn(async move {
+        read::interference_comparison(
+            store,
+            Arc::new((0..objects).map(|i| i.to_string()).collect()),
+            cfg,
+            &cancel,
+            "wire_sequence",
+            competitors,
+            mode,
+        )
+        .await
+    });
+    // Stop by observed request count, not by an assumption about CI scheduling speed.
+    let observed = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let mut workers = vec![vec![]; 2 + competitors];
+            for request in ranges.lock().unwrap().iter() {
+                let object: usize = request.key.parse().unwrap();
+                assert!(object < objects);
+                let worker = if object < objects / 2 {
+                    object % 2
+                } else {
+                    2 + (object - objects / 2) % 2
+                };
+                workers[worker].push(request.clone());
+            }
+            if workers.iter().all(|requests| requests.len() >= 8) {
+                for requests in &mut workers {
+                    requests.truncate(8);
+                }
+                return workers;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
     .await;
-    assert!(
-        phases
-            .iter()
-            .all(|p| p.interference.as_ref().unwrap().comparison_valid),
-        "{phases:?}"
-    );
-    assert!(
-        ranges
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|range| range != "bytes=0-4" && range != "bytes=0-9")
-    );
+    shutdown.cancel();
+    task.await.unwrap();
     server.abort();
+    observed.expect("each worker must issue the required HTTP requests")
+}
+
+#[tokio::test]
+async fn actual_interference_sequences_reset_and_expand_with_the_dataset() {
+    let mut working_sets = vec![];
+    for objects in [4, 12] {
+        let baseline = capture_comparison_requests(objects, 0, ReadMode::Continuous).await;
+        let continuous = capture_comparison_requests(objects, 2, ReadMode::Continuous).await;
+        let slow = capture_comparison_requests(objects, 2, ReadMode::Intermittent).await;
+        assert_eq!(baseline, continuous[..2]);
+        assert_eq!(baseline, slow[..2]);
+        assert_eq!(continuous[2..], slow[2..]);
+        let keys = |workers: &[Vec<HttpGet>]| {
+            workers
+                .iter()
+                .flatten()
+                .map(|r| r.key.clone())
+                .collect::<std::collections::HashSet<_>>()
+        };
+        let fast_keys = keys(&baseline);
+        let competitor_keys = keys(&slow[2..]);
+        assert!(fast_keys.is_disjoint(&competitor_keys));
+        assert_eq!(fast_keys.len(), objects / 2);
+        assert_eq!(competitor_keys.len(), objects / 2);
+        assert!(baseline.iter().flatten().all(|r| r.range.len() == 5));
+        assert!(baseline.iter().flatten().any(|r| r.range.start != 0));
+        assert!(slow[2..].iter().flatten().all(|r| r.range == (0..10)));
+        working_sets.push(fast_keys.len() + competitor_keys.len());
+    }
+    assert!(working_sets[1] > working_sets[0]);
 }
 
 #[tokio::test]

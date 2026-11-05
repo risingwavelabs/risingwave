@@ -19,4 +19,5 @@
 pub mod object;
 
 /// Standalone diagnostics using the same clients as RisingWave.
+#[cfg(not(madsim))]
 pub mod benchmark;
