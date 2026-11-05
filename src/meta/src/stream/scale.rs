@@ -26,7 +26,6 @@ use risingwave_connector::source::{SplitId, SplitMetaData};
 use risingwave_meta_model::{
     StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
 };
-use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher};
 use sea_orm::{ConnectionTrait, JoinType, QuerySelect, RelationTrait};
 use thiserror_ext::AsReport;
@@ -41,7 +40,10 @@ use crate::controller::scale::{
     find_fragment_no_shuffle_dags_detailed, load_fragment_context, load_fragment_context_for_jobs,
 };
 use crate::error::bail_invalid_parameter;
-use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv, MetadataManager};
+use crate::manager::{
+    ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
+    MetadataManager,
+};
 use crate::model::{ActorId, FragmentId, StreamActor, StreamActorWithDispatchers};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -1364,25 +1366,16 @@ impl GlobalStreamManager {
             return Ok(has_blocked_jobs);
         }
 
-        let active_workers =
-            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
-
-        tracing::info!(
-            "trigger parallelism control for jobs: {:#?}, workers {:#?}",
-            job_ids,
-            active_workers.current()
-        );
-
         let batch_size = match self.env.opts.parallelism_control_batch_size {
             0 => job_ids.len(),
             n => n,
         };
 
         tracing::info!(
-            "total {} streaming jobs, batch size {}, schedulable worker ids: {:?}",
+            jobs = ?job_ids,
+            "total {} streaming jobs, batch size {}",
             job_ids.len(),
             batch_size,
-            active_workers.current()
         );
 
         let batches: Vec<_> = job_ids
@@ -1425,25 +1418,25 @@ impl GlobalStreamManager {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
 
+        // ActiveStreamingWorkerNodes consumes and ignores non-worker notifications, so keep
+        // a separate subscription for StreamingJobBackfillFinished.
         self.env
             .notification_manager()
             .insert_local_sender(local_notification_tx);
+        let mut active_workers =
+            ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
+                .await
+                .expect("subscribe active streaming compute nodes");
 
-        // waiting for the first tick
+        // Preserve the startup wait before processing notifications and control rounds.
         ticker.tick().await;
 
-        let worker_nodes = self
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await
-            .expect("list active streaming compute nodes");
-
-        let mut worker_cache: BTreeMap<_, _> = worker_nodes
-            .into_iter()
-            .map(|worker| (worker.id, worker))
-            .collect();
-
-        let mut should_trigger = false;
+        // Recovery may have placed actors using an older worker snapshot. Reconcile the initial
+        // snapshot even if no worker changes arrive after the subscription was established.
+        // This requests one pass per monitor startup, plus retries for errors or blocked jobs.
+        // Even an unchanged layout costs catalog reads and rendering under the reschedule lock,
+        // but the barrier worker skips actor-id allocation and reschedule-barrier injection.
+        let mut should_trigger = true;
 
         loop {
             tokio::select! {
@@ -1455,14 +1448,13 @@ impl GlobalStreamManager {
                 }
 
                 _ = ticker.tick(), if should_trigger => {
-                    let include_workers = worker_cache.keys().copied().collect_vec();
-
-                    if include_workers.is_empty() {
+                    if active_workers.current().is_empty() {
                         tracing::debug!("no available worker nodes");
                         should_trigger = false;
                         continue;
                     }
 
+                    tracing::info!(worker_count = active_workers.current().len(), "trigger parallelism control for active workers");
                     match self.trigger_parallelism_control().await {
                         Ok(cont) => {
                             should_trigger = cont;
@@ -1474,63 +1466,42 @@ impl GlobalStreamManager {
                     }
                 }
 
+                changed_worker = active_workers.changed() => {
+                    match changed_worker {
+                        ActiveStreamingWorkerChange::Add(worker) => {
+                            tracing::info!(
+                                worker = %worker.id,
+                                parallelism = worker.compute_node_parallelism(),
+                                resource_group = worker.resource_group(),
+                                "new worker joined",
+                            );
+                            should_trigger = true;
+                        }
+                        ActiveStreamingWorkerChange::Update(worker) => {
+                            // The helper compares the entire WorkerNode, including resource metadata.
+                            tracing::info!(
+                                worker = %worker.id,
+                                parallelism = worker.compute_node_parallelism(),
+                                resource_group = worker.resource_group(),
+                                "worker properties changed",
+                            );
+                            should_trigger = true;
+                        }
+                        // Passive scale-in is handled by the barrier manager. The helper has
+                        // already removed the worker from its current snapshot.
+                        ActiveStreamingWorkerChange::Remove(worker) => {
+                            tracing::info!(worker = %worker.id, "worker removed from parallelism control monitor");
+                        }
+                    }
+                }
+
                 notification = local_notification_rx.recv() => {
                     let notification = notification.expect("local notification channel closed in loop of stream manager");
-
-                    // Only maintain the cache for streaming compute nodes.
-                    let worker_is_streaming_compute = |worker: &WorkerNode| {
-                        worker.get_type() == Ok(WorkerType::ComputeNode)
-                            && worker.property.as_ref().unwrap().is_streaming
-                    };
-
                     match notification {
                         // TODO(#25478): add a local notification path for relevant session
                         // parameter updates and trigger a control round here when the cluster
                         // defaults for stream/backfill parallelism change.
                         LocalNotification::SystemParamsChange(_) => {}
-                        LocalNotification::WorkerNodeActivated(worker) => {
-                            if !worker_is_streaming_compute(&worker) {
-                                continue;
-                            }
-
-                            tracing::info!(worker = %worker.id, "worker activated notification received");
-
-                            let prev_worker = worker_cache.insert(worker.id, worker.clone());
-
-                            match prev_worker {
-                                Some(prev_worker) if prev_worker.compute_node_parallelism() != worker.compute_node_parallelism()  => {
-                                    tracing::info!(worker = %worker.id, "worker parallelism changed");
-                                    should_trigger = true;
-                                }
-                                Some(prev_worker) if prev_worker.resource_group() != worker.resource_group()  => {
-                                    tracing::info!(worker = %worker.id, "worker label changed");
-                                    should_trigger = true;
-                                }
-                                None => {
-                                    tracing::info!(worker = %worker.id, "new worker joined");
-                                    should_trigger = true;
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        // Since our logic for handling passive scale-in is within the barrier manager,
-                        // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
-                        LocalNotification::WorkerNodeDeleted(worker) => {
-                            if !worker_is_streaming_compute(&worker) {
-                                continue;
-                            }
-
-                            match worker_cache.remove(&worker.id) {
-                                Some(prev_worker) => {
-                                    tracing::info!(worker = %prev_worker.id, "worker removed from stream manager cache");
-                                }
-                                None => {
-                                    tracing::warn!(worker = %worker.id, "worker not found in stream manager cache, but it was removed");
-                                }
-                            }
-                        }
-
                         LocalNotification::StreamingJobBackfillFinished(job_id) => {
                             tracing::debug!(job_id = %job_id, "received backfill finished notification");
                             if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
