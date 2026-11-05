@@ -12,25 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Cache-resident SST metadata and its existing read interface.
+//! The private key index owns prefix encoding and lookup; format adapts existing Native/Foyer bytes.
+
 use std::cmp::Ordering;
-use std::fmt::Formatter;
 use std::ops::{Bound, Range};
 
-use bytes::Buf;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, TABLE_PREFIX_LEN, TableKey, UserKey};
-use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
-use serde::de::{SeqAccess, Visitor};
-use serde::ser::SerializeSeq;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use risingwave_hummock_sdk::key::FullKey;
 
-use super::{
-    BlockMeta, BlockMetaRef, MonotonicDeleteEvent, NativeMetaTail, Sstable, SstableMeta,
-    XorFilterReader, verified_meta_body,
-};
-use crate::hummock::HummockResult;
+use super::{BlockMeta, MonotonicDeleteEvent};
+#[cfg(test)]
+use super::{Sstable, SstableMeta};
 
-const KEY_RESTART_INTERVAL: usize = 16;
+mod format;
+mod key_index;
+
+pub(super) use format::DeserializedSstable;
+use key_index::PrefixKeys;
 
 /// The address and counters of a cached block. Keys belong to `CachedSstableMeta`'s prefix index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,6 +49,7 @@ impl CachedBlockMeta {
 }
 
 impl From<&BlockMeta> for CachedBlockMeta {
+    #[inline]
     fn from(block: &BlockMeta) -> Self {
         Self {
             offset: block.offset,
@@ -76,417 +76,22 @@ pub struct CachedSstableMeta {
     pub version: u32,
 }
 
-impl From<SstableMeta> for CachedSstableMeta {
-    #[expect(deprecated)]
-    fn from(meta: SstableMeta) -> Self {
-        let mut blocks = CachedBlocksBuilder::new(meta.block_metas.len());
-        let mut previous = Vec::new();
-        for block in meta.block_metas {
-            blocks.push(
-                CachedBlockMeta::from(&block),
-                &block.smallest_key,
-                &previous,
-            );
-            previous = block.smallest_key;
-        }
-        let CachedBlocks { block_metas, keys } = blocks.finish();
-        Self {
-            block_metas,
-            keys,
-            estimated_size: meta.estimated_size,
-            key_count: meta.key_count,
-            smallest_key: meta.smallest_key,
-            largest_key: meta.largest_key,
-            meta_offset: meta.meta_offset,
-            monotonic_tombstone_events: meta.monotonic_tombstone_events,
-            version: meta.version,
-        }
-    }
-}
-
-/// Construction-only accumulator shared by native, Foyer and writer metadata paths.
-struct CachedBlocksBuilder {
-    block_metas: Vec<CachedBlockMeta>,
-    data: Vec<u8>,
-    restarts: Vec<usize>,
-}
-
-impl CachedBlocksBuilder {
-    fn new(block_count: usize) -> Self {
-        Self {
-            block_metas: Vec::with_capacity(block_count),
-            // Two u32 headers and an uncompressed epoch are present in every entry.
-            data: Vec::with_capacity(block_count * (8 + EPOCH_LEN)),
-            restarts: Vec::with_capacity(block_count.div_ceil(KEY_RESTART_INTERVAL)),
-        }
-    }
-
-    // Callers own the previous full key so native decoding can borrow it from the input.
-    fn push(&mut self, block: CachedBlockMeta, key: &[u8], previous: &[u8]) {
-        let table_key = FullKey::decode(key).user_key.table_key.0;
-        let shared = if self.block_metas.len().is_multiple_of(KEY_RESTART_INTERVAL) {
-            self.restarts.push(self.data.len());
-            0
-        } else {
-            common_prefix(FullKey::decode(previous).user_key.table_key.0, table_key)
-        };
-        let suffix = &table_key[shared..];
-        self.data.extend_from_slice(&(shared as u32).to_le_bytes());
-        self.data
-            .extend_from_slice(&(suffix.len() as u32).to_le_bytes());
-        self.data.extend_from_slice(suffix);
-        self.data.extend_from_slice(&key[key.len() - EPOCH_LEN..]);
-        self.block_metas.push(block);
-    }
-
-    fn finish(self) -> CachedBlocks {
-        CachedBlocks {
-            block_metas: self.block_metas,
-            keys: PrefixKeys {
-                data: self.data.into_boxed_slice(),
-                restarts: self.restarts.into_boxed_slice(),
-            },
-        }
-    }
-}
-
-struct CachedBlocks {
-    block_metas: Vec<CachedBlockMeta>,
-    keys: PrefixKeys,
-}
-
-impl<'de> Deserialize<'de> for CachedBlocks {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct BlocksVisitor;
-
-        impl<'de> Visitor<'de> for BlocksVisitor {
-            type Value = CachedBlocks;
-
-            fn expecting(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("a sequence of SST block metadata")
-            }
-
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                // Match serde's cautious Vec preallocation for untrusted sequence lengths.
-                let initial = seq
-                    .size_hint()
-                    .unwrap_or(0)
-                    .min(1024 * 1024 / std::mem::size_of::<CachedBlockMeta>());
-                let mut blocks = CachedBlocksBuilder::new(initial);
-                let mut previous = Vec::new();
-                while let Some(block) = seq.next_element::<BlockMeta>()? {
-                    blocks.push(
-                        CachedBlockMeta::from(&block),
-                        &block.smallest_key,
-                        &previous,
-                    );
-                    previous = block.smallest_key;
-                }
-                Ok(blocks.finish())
-            }
-        }
-
-        deserializer.deserialize_seq(BlocksVisitor)
-    }
-}
-
-// Keep the original field names/order and serde_bytes layout. Only block_metas uses a
-// custom visitor, so deserialization retains at most the current and previous full key.
-#[derive(Deserialize)]
-pub(super) struct DeserializedSstable {
-    id: HummockSstableObjectId,
-    meta: DeserializedMeta,
-}
-
-#[derive(Deserialize)]
-struct DeserializedMeta {
-    block_metas: CachedBlocks,
-    #[serde(with = "serde_bytes")]
-    bloom_filter: Vec<u8>,
-    estimated_size: u32,
-    key_count: u32,
-    #[serde(with = "serde_bytes")]
-    smallest_key: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    largest_key: Vec<u8>,
-    meta_offset: u64,
-    monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
-    version: u32,
-}
-
-impl From<DeserializedSstable> for Sstable {
-    fn from(DeserializedSstable { id, meta }: DeserializedSstable) -> Self {
-        let CachedBlocks { block_metas, keys } = meta.block_metas;
-        let filter_reader = XorFilterReader::new(&meta.bloom_filter, block_metas.len());
-        Self {
-            id,
-            meta: CachedSstableMeta {
-                block_metas,
-                keys,
-                estimated_size: meta.estimated_size,
-                key_count: meta.key_count,
-                smallest_key: meta.smallest_key,
-                largest_key: meta.largest_key,
-                meta_offset: meta.meta_offset,
-                monotonic_tombstone_events: meta.monotonic_tombstone_events,
-                version: meta.version,
-            },
-            filter_reader,
-            // The bytes determine whether a filter was serialized, as in the legacy decoder.
-            skip_bloom_filter_in_serde: false,
-        }
-    }
-}
-
-impl Sstable {
-    /// Decodes the existing native SST format directly into its cache representation.
-    pub fn from_meta_bytes(
-        id: HummockSstableObjectId,
-        buf: &[u8],
-        skip_bloom_filter_in_serde: bool,
-    ) -> HummockResult<Self> {
-        let (mut buf, version) = verified_meta_body(buf)?;
-
-        let count = buf.get_u32_le() as usize;
-        let mut blocks = CachedBlocksBuilder::new(count);
-        let mut previous: &[u8] = &[];
-        for _ in 0..count {
-            let block = BlockMetaRef::decode(&mut buf, version);
-            blocks.push(
-                CachedBlockMeta {
-                    offset: block.offset,
-                    len: block.len,
-                    uncompressed_size: block.uncompressed_size,
-                    total_key_count: block.total_key_count,
-                    stale_key_count: block.stale_key_count,
-                    table_id: FullKey::decode(block.smallest_key).user_key.table_id,
-                },
-                block.smallest_key,
-                previous,
-            );
-            previous = block.smallest_key;
-        }
-        let tail = NativeMetaTail::decode(&mut buf);
-        let filter_reader = XorFilterReader::new(tail.bloom_filter, count);
-        let CachedBlocks { block_metas, keys } = blocks.finish();
-        Ok(Self {
-            id,
-            meta: CachedSstableMeta {
-                block_metas,
-                keys,
-                estimated_size: tail.estimated_size,
-                key_count: tail.key_count,
-                smallest_key: tail.smallest_key,
-                largest_key: tail.largest_key,
-                meta_offset: tail.meta_offset,
-                monotonic_tombstone_events: tail.monotonic_tombstone_events,
-                version,
-            },
-            filter_reader,
-            skip_bloom_filter_in_serde,
-        })
-    }
-}
-
-fn common_prefix(a: &[u8], b: &[u8]) -> usize {
-    let end = a.len().min(b.len());
-    let mut len = 0;
-    while len + 32 <= end && a[len..len + 32] == b[len..len + 32] {
-        len += 32;
-    }
-    while len < end && a[len] == b[len] {
-        len += 1;
-    }
-    len
-}
-
-/// Cache-only K16 encoding: shared TableKey length, suffix length, suffix, and an
-/// uncompressed epoch. Table IDs live in CachedBlockMeta; neither can enter a shared prefix.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct PrefixKeys {
-    data: Box<[u8]>,
-    restarts: Box<[usize]>,
-}
-
-impl PrefixKeys {
-    fn entries(&self, offset: usize) -> impl Iterator<Item = KeyEntry<'_>> {
-        let mut data = &self.data[offset..];
-        std::iter::from_fn(move || (!data.is_empty()).then(|| KeyEntry::decode(&mut data)))
-    }
-
-    fn restart(&self, group: usize) -> KeyEntry<'_> {
-        self.entries(self.restarts[group]).next().unwrap()
-    }
-}
-
-/// One borrowed entry of the in-memory prefix encoding.
-struct KeyEntry<'a> {
-    shared: usize,
-    suffix: &'a [u8],
-    epoch: &'a [u8; EPOCH_LEN],
-}
-
-impl<'a> KeyEntry<'a> {
-    fn decode(data: &mut &'a [u8]) -> Self {
-        let shared = data.get_u32_le() as usize;
-        let len = data.get_u32_le() as usize;
-        let (suffix, rest) = data.split_at(len);
-        let (epoch, rest) = rest.split_at(EPOCH_LEN);
-        *data = rest;
-        Self {
-            shared,
-            suffix,
-            epoch: epoch.try_into().unwrap(),
-        }
-    }
-
-    fn epoch(&self) -> EpochWithGap {
-        EpochWithGap::from_u64(u64::from_be_bytes(*self.epoch))
-    }
-
-    /// Apply a TableKey delta to a full-key buffer. This also replaces its table ID and epoch.
-    fn restore(&self, table_id: TableId, key: &mut Vec<u8>) {
-        key.resize(TABLE_PREFIX_LEN + self.shared, 0);
-        key[..TABLE_PREFIX_LEN].copy_from_slice(&table_id.as_raw_id().to_be_bytes());
-        key.extend_from_slice(self.suffix);
-        key.extend_from_slice(self.epoch);
-    }
-
-    fn restart_key(&self, table_id: TableId) -> FullKey<&'a [u8]> {
-        debug_assert_eq!(self.shared, 0);
-        FullKey {
-            user_key: UserKey::new(table_id, TableKey(self.suffix)),
-            epoch_with_gap: self.epoch(),
-        }
-    }
-}
-
-/// Compares successive TableKey deltas against one fixed target, without restoring keys.
-struct TableKeyComparator<'a> {
-    target: &'a [u8],
-    matched: usize,
-    order: Ordering,
-}
-
-impl<'a> TableKeyComparator<'a> {
-    fn new(target: &'a [u8]) -> Self {
-        Self {
-            target,
-            matched: 0,
-            order: Ordering::Equal,
-        }
-    }
-
-    fn compare(&mut self, entry: &KeyEntry<'_>) -> Ordering {
-        if entry.shared <= self.matched {
-            let target = &self.target[entry.shared..];
-            let matched = common_prefix(entry.suffix, target);
-            self.matched = entry.shared + matched;
-            self.order = entry.suffix.get(matched).cmp(&target.get(matched));
-        }
-        // Otherwise the shared prefix retains the previous first difference, including
-        // a target that ended there. A previous key that ended there cannot share more bytes.
-        self.order
-    }
-}
-
 impl CachedSstableMeta {
     /// Restores one key into reader-owned scratch, without retaining decoded keys in the cache.
     pub fn block_smallest_key<'a>(&self, index: usize, key: &'a mut Vec<u8>) -> &'a [u8] {
-        assert!(index < self.block_metas.len());
-        let group = index / KEY_RESTART_INTERVAL;
-        let first = group * KEY_RESTART_INTERVAL;
-        for entry in self
-            .keys
-            .entries(self.keys.restarts[group])
-            .take(index - first + 1)
-        {
-            entry.restore(self.block_metas[index].table_id, key);
-        }
-        key
+        let block = &self.block_metas[index];
+        self.keys.restore_key(index, block.table_id, key)
     }
 
     /// Compares a block boundary without allocating or restoring its full key.
     pub(super) fn compare_block_key(&self, index: usize, target: FullKey<&[u8]>) -> Ordering {
-        let table_order = self.block_metas[index]
-            .table_id
-            .cmp(&target.user_key.table_id);
-        if !table_order.is_eq() {
-            return table_order;
-        }
-        let group = index / KEY_RESTART_INTERVAL;
-        let first = group * KEY_RESTART_INTERVAL;
-        let mut comparator = TableKeyComparator::new(target.user_key.table_key.0);
-        let mut order = Ordering::Equal;
-        for entry in self
-            .keys
-            .entries(self.keys.restarts[group])
-            .take(index - first + 1)
-        {
-            order = comparator
-                .compare(&entry)
-                .then_with(|| target.epoch_with_gap.cmp(&entry.epoch()));
-        }
-        order
+        self.keys
+            .compare_key(index, self.block_metas[index].table_id, target)
     }
 
     /// Returns the absolute index after the keys within `bound` in the requested range.
     pub fn partition_point(&self, range: Range<usize>, bound: Bound<FullKey<&[u8]>>) -> usize {
-        assert!(range.start <= range.end && range.end <= self.block_metas.len());
-        if range.is_empty() {
-            return range.start;
-        }
-        let (target, inclusive) = match bound {
-            Bound::Included(target) => (target, true),
-            Bound::Excluded(target) => (target, false),
-            Bound::Unbounded => return range.end,
-        };
-        let before_bound = |order: Ordering| order.is_lt() || (inclusive && order.is_eq());
-        let first_group = range.start / KEY_RESTART_INTERVAL;
-        let end_group = (range.end - 1) / KEY_RESTART_INTERVAL + 1;
-        if !before_bound(self.compare_block_key(range.start, target)) {
-            return range.start;
-        }
-        let mut left = first_group + 1;
-        let mut right = end_group;
-        while left < right {
-            let group = left + (right - left) / 2;
-            let first = group * KEY_RESTART_INTERVAL;
-            let restart = self
-                .keys
-                .restart(group)
-                .restart_key(self.block_metas[first].table_id);
-            if before_bound(restart.cmp(&target)) {
-                left = group + 1;
-            } else {
-                right = group;
-            }
-        }
-        let group = left - 1;
-        let first = group * KEY_RESTART_INTERVAL;
-        let end = range.end.min(first + KEY_RESTART_INTERVAL);
-        let known_true = first.max(range.start);
-        if known_true + 1 == end {
-            return end;
-        }
-        let mut comparator = TableKeyComparator::new(target.user_key.table_key.0);
-        for (index, entry) in (first..end).zip(self.keys.entries(self.keys.restarts[group])) {
-            // Always advance TableKey comparison, including entries before range.start and
-            // entries from another table. Prefixes contain only TableKey bytes.
-            let user_order = comparator.compare(&entry);
-            if index <= known_true {
-                continue;
-            }
-            let order = self.block_metas[index]
-                .table_id
-                .cmp(&target.user_key.table_id)
-                .then(user_order)
-                .then_with(|| target.epoch_with_gap.cmp(&entry.epoch()));
-            if !before_bound(order) {
-                return index;
-            }
-        }
-        end
+        self.keys.partition_point(&self.block_metas, range, bound)
     }
 
     /// Reconstructs an owned `BlockMeta`, allocating its key, for raw copying or inspection.
@@ -506,98 +111,11 @@ impl CachedSstableMeta {
 
     pub(super) fn estimated_heap_size(&self) -> usize {
         self.block_metas.capacity() * std::mem::size_of::<CachedBlockMeta>()
-            + self.keys.data.len()
-            + std::mem::size_of_val(&*self.keys.restarts)
+            + self.keys.estimated_heap_size()
             + self.smallest_key.capacity()
             + self.largest_key.capacity()
             + self.monotonic_tombstone_events.capacity()
                 * std::mem::size_of::<MonotonicDeleteEvent>()
-    }
-
-    /// Legacy bincode size, without reconstructing full keys or encoding the SST filter.
-    pub(super) fn serde_encoded_size(&self, filter_len: usize) -> usize {
-        let blocks_size = 8 + self
-            .keys
-            .entries(0)
-            .map(|entry| {
-                8 + TABLE_PREFIX_LEN + entry.shared + entry.suffix.len() + EPOCH_LEN + 5 * 4
-            })
-            .sum::<usize>();
-        // Match the remaining MetaRef fields in their established bincode order. Byte slices
-        // only contribute their length here, and tombstones keep their existing serde layout.
-        let tail_size = bincode::serialized_size(&(
-            serde_bytes::Bytes::new(&[]),
-            self.estimated_size,
-            self.key_count,
-            serde_bytes::Bytes::new(&self.smallest_key),
-            serde_bytes::Bytes::new(&self.largest_key),
-            self.meta_offset,
-            &self.monotonic_tombstone_events,
-            self.version,
-        ))
-        .unwrap() as usize;
-        blocks_size + tail_size + filter_len
-    }
-
-    pub(super) fn serialize<S: Serializer>(
-        &self,
-        id: HummockSstableObjectId,
-        filter: &[u8],
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        // Preserve the existing Foyer/bincode field order and full-key sequence. Only one key
-        // is reconstructed at a time, including bincode's serialized_size traversal.
-        #[derive(Serialize)]
-        struct MetaRef<'a> {
-            block_metas: BlockMetasRef<'a>,
-            bloom_filter: &'a serde_bytes::Bytes,
-            estimated_size: u32,
-            key_count: u32,
-            smallest_key: &'a serde_bytes::Bytes,
-            largest_key: &'a serde_bytes::Bytes,
-            meta_offset: u64,
-            monotonic_tombstone_events: &'a [MonotonicDeleteEvent],
-            version: u32,
-        }
-        #[derive(Serialize)]
-        struct SstableRef<'a> {
-            id: HummockSstableObjectId,
-            meta: MetaRef<'a>,
-        }
-        SstableRef {
-            id,
-            meta: MetaRef {
-                block_metas: BlockMetasRef(self),
-                bloom_filter: serde_bytes::Bytes::new(filter),
-                estimated_size: self.estimated_size,
-                key_count: self.key_count,
-                smallest_key: serde_bytes::Bytes::new(&self.smallest_key),
-                largest_key: serde_bytes::Bytes::new(&self.largest_key),
-                meta_offset: self.meta_offset,
-                monotonic_tombstone_events: &self.monotonic_tombstone_events,
-                version: self.version,
-            },
-        }
-        .serialize(serializer)
-    }
-}
-
-struct BlockMetasRef<'a>(&'a CachedSstableMeta);
-
-impl Serialize for BlockMetasRef<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut seq = serializer.serialize_seq(Some(self.0.block_metas.len()))?;
-        let mut raw = BlockMeta::default();
-        for (block, entry) in self.0.block_metas.iter().zip(self.0.keys.entries(0)) {
-            entry.restore(block.table_id, &mut raw.smallest_key);
-            raw.offset = block.offset;
-            raw.len = block.len;
-            raw.uncompressed_size = block.uncompressed_size;
-            raw.total_key_count = block.total_key_count;
-            raw.stale_key_count = block.stale_key_count;
-            seq.serialize_element(&raw)?;
-        }
-        seq.end()
     }
 }
 
