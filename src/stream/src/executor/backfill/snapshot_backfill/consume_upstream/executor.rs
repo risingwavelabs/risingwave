@@ -118,6 +118,8 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
         let first_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
         let first_barrier_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier);
+        let progress_table_id = self.progress_state_table.table_id();
+        let mut progress_vnode_bitmap = self.progress_state_table.vnodes().clone();
         let mut progress_state = BackfillState::new(
             self.progress_state_table,
             first_barrier_epoch,
@@ -227,6 +229,15 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                 }
 
                 let post_commit = progress_state.commit(barrier.epoch).await?;
+                if barrier.is_checkpoint() {
+                    self.progress.report_table_change_log_progress(
+                        barrier.epoch,
+                        self.upstream_table_id,
+                        progress_table_id,
+                        progress_vnode_bitmap.clone(),
+                        last_consumed_min_epoch,
+                    );
+                }
                 let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
                 if let Some(new_rate_limit) = barrier.mutation.as_ref().and_then(|mutation| {
                     if let Mutation::Throttle(config) = &**mutation
@@ -256,6 +267,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                     post_commit.post_yield_barrier(update_vnode_bitmap).await?
                 {
                     drop(stream);
+                    progress_vnode_bitmap = new_vnode_bitmap.clone();
                     upstream_table.update_vnode_bitmap(new_vnode_bitmap);
                     // recreate the stream on update vnode bitmap
                     stream = ConsumeUpstreamStream::new(

@@ -248,7 +248,7 @@ message Subscription {
   uint32 id = 1;
   string name = 2;
   string definition = 3;
-  uint64 retention_seconds = 6;
+  optional uint64 retention_seconds = 6;
   uint32 database_id = 8;
   uint32 schema_id = 9;
   uint32 dependent_table_id = 10;
@@ -259,6 +259,10 @@ message Subscription {
   optional string created_at_cluster_version = 16;
 
   SubscriptionState subscription_state = 19;
+
+  // Set only for the internal subscription that keeps an upstream cross-database
+  // materialized view's change log alive for a downstream streaming job.
+  optional uint32 cross_db_downstream_job_id = 20;
 }
 
 message ConnectionParams {

@@ -29,18 +29,6 @@ from t_order
 order by k, ts desc, id desc;
 
 statement ok
-set database to d2;
-
-statement ok
-set database to d1;
-
-statement ok
-create subscription sub from t1 with(retention = '1D');
-
-statement ok
-create subscription sub_order from mv_order_src with(retention = '1D');
-
-statement ok
 insert into t_order values (2, 1, 20, '2026-01-02 00:00:00');
 
 statement ok
@@ -105,9 +93,6 @@ statement ok
 create table t_rate_limit(v1 int);
 
 statement ok
-create subscription sub_rate_limit from t_rate_limit with(retention = '1D');
-
-statement ok
 set database to d2;
 
 statement ok
@@ -163,15 +148,6 @@ drop materialized view mv_order_dst;
 
 statement ok
 set database to d1;
-
-statement ok
-drop subscription sub_order;
-
-statement ok
-drop subscription sub_rate_limit;
-
-statement ok
-drop subscription sub;
 
 statement ok
 drop materialized view mv_order_src;

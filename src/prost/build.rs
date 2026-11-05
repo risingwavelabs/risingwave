@@ -144,6 +144,7 @@ for_all_wrapped_id_fields! (
         Subscription {
             id: SubscriptionId,
             dependent_table_id: TableId,
+            cross_db_downstream_job_id: JobId,
             schema_id: SchemaId,
             database_id: DatabaseId,
             owner: UserId,

@@ -22,8 +22,8 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::subscription_catalog::{
     SubscriptionCatalog, SubscriptionId, SubscriptionState,
 };
-use crate::error::Result;
-use crate::handler::util::reject_internal_table_dependency;
+use crate::error::{ErrorCode, Result};
+use crate::handler::util::{convert_interval_to_u64_seconds, reject_internal_table_dependency};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::{Binder, OptimizerContext, OptimizerContextRef};
@@ -50,12 +50,17 @@ pub fn create_subscription_catalog(
     )?;
     reject_internal_table_dependency(dependent_table.as_ref(), "CREATE SUBSCRIPTION")?;
     let dependent_table_id = dependent_table.id;
+    let retention = context.with_options().get("retention").ok_or_else(|| {
+        ErrorCode::InternalError("Subscription retention time not set.".to_owned())
+    })?;
+    let retention_seconds = convert_interval_to_u64_seconds(retention)?;
 
-    let mut subscription_catalog = SubscriptionCatalog {
+    let subscription_catalog = SubscriptionCatalog {
         id: SubscriptionId::placeholder(),
         name: subscription_name,
         definition,
-        retention_seconds: 0,
+        retention_seconds: Some(retention_seconds),
+        cross_db_downstream_job_id: None,
         database_id: subscription_database_id,
         schema_id: subscription_schema_id,
         dependent_table_id,
@@ -66,8 +71,6 @@ pub fn create_subscription_catalog(
         initialized_at_cluster_version: None,
         subscription_state: SubscriptionState::Init,
     };
-
-    subscription_catalog.set_retention_seconds(context.with_options())?;
 
     Ok(subscription_catalog)
 }

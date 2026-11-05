@@ -66,22 +66,41 @@ pub async fn handle_declare_subscription_cursor(
             Binder::resolve_schema_qualified_name(db_name, &sub_name)?;
         session.get_subscription_by_name(sub_schema_name, &sub_name)?
     };
+    let retention_seconds = match (
+        subscription.cross_db_downstream_job_id,
+        subscription.retention_seconds,
+    ) {
+        (Some(_), _) => {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "internal cross-database subscriptions cannot be used by cursors".to_owned(),
+            )
+            .into());
+        }
+        (None, Some(retention_seconds)) => retention_seconds,
+        (None, None) => {
+            return Err(ErrorCode::InternalError(
+                "user subscription has no retention time".to_owned(),
+            )
+            .into());
+        }
+    };
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
         risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp) => {
-            check_cursor_unix_millis(start_rw_timestamp, subscription.retention_seconds)?;
+            check_cursor_unix_millis(start_rw_timestamp, retention_seconds)?;
             Some(convert_unix_millis_to_logstore_u64(start_rw_timestamp))
         }
         risingwave_sqlparser::ast::Since::ProcessTime => Some(Epoch::now().0),
         risingwave_sqlparser::ast::Since::Begin => {
-            let min_unix_millis =
-                Epoch::now().as_unix_millis() - subscription.retention_seconds * 1000;
+            let min_unix_millis = Epoch::now().as_unix_millis() - retention_seconds * 1000;
             let subscription_build_millis = subscription.created_at_epoch.unwrap().as_unix_millis();
             let min_unix_millis = std::cmp::max(min_unix_millis, subscription_build_millis);
             Some(convert_unix_millis_to_logstore_u64(min_unix_millis))
         }
         risingwave_sqlparser::ast::Since::Full => None,
     };
+    let subscription_schema_id = subscription.schema_id;
+    let subscription_name = subscription.name.clone();
     // Create cursor based on the response
     if let Err(e) = session
         .get_cursor_manager()
@@ -89,7 +108,9 @@ pub async fn handle_declare_subscription_cursor(
             cursor_name.real_value(),
             start_rw_timestamp,
             subscription.dependent_table_id,
-            subscription,
+            retention_seconds,
+            subscription_schema_id,
+            subscription_name,
             &handler_args,
         )
         .await
