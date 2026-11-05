@@ -33,9 +33,6 @@ pub struct ObjectStoreArgs {
     /// Existing risingwave.toml. Read settings from `storage.object_store`.
     #[arg(long)]
     pub config_path: Option<PathBuf>,
-    /// PEM CA bundle; otherwise use `SSL_CERT_FILE` or `AWS_CA_BUNDLE` when present.
-    #[arg(long)]
-    pub ca_cert: Option<PathBuf>,
     /// JSON `BenchmarkConfig`. CLI tuning options override this file.
     #[arg(long)]
     pub parameters: Option<PathBuf>,
@@ -297,24 +294,15 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
     );
     let object_config = Arc::new(object_config);
     let metrics = Arc::new(ObjectStoreMetrics::unused());
-    let mut store = build_remote_object_store(
+    // Use the standard RW backend initialization, including its credential and
+    // TLS configuration. Benchmarks do not construct a separate HTTP client.
+    let store = build_remote_object_store(
         store_url,
         metrics.clone(),
         "risectl-bench",
         object_config.clone(),
     )
     .await;
-    let ca_path = args
-        .ca_cert
-        .or_else(|| std::env::var_os("SSL_CERT_FILE").map(PathBuf::from))
-        .or_else(|| std::env::var_os("AWS_CA_BUNDLE").map(PathBuf::from));
-    if let Some(path) = &ca_path {
-        benchmark::configure_ca(
-            &mut store,
-            &tokio::fs::read(path).await.context("read CA bundle")?,
-            &object_config,
-        )?;
-    }
     let store = Arc::new(store);
     let prefix = args
         .reuse_prefix
@@ -352,7 +340,6 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
             "abort_on_error_override": true,
             "execution_host": std::env::var("HOSTNAME").ok(),
             "proxy_configured": (["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "ALL_PROXY", "all_proxy"].iter().any(|name| std::env::var_os(name).is_some())),
-            "ca_file": ca_path,
         },
         "stop_reason": if report.cancelled { if shutdown.is_cancelled() { "shutdown" } else { "deadline" } } else { "finished" },
         "observed_outer_retry_events": benchmark::observed_retries(&metrics),

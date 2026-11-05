@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use bytes::Bytes;
 use futures::TryStreamExt;
 use hdrhistogram::Histogram;
@@ -735,40 +735,6 @@ pub fn observed_retries(metrics: &ObjectStoreMetrics) -> u64 {
                 .map_or(0, |counter| counter.value() as u64)
         })
         .sum()
-}
-
-/// Add private CA roots to this diagnostic client without changing global config.
-pub fn configure_ca(
-    store: &mut ObjectStoreImpl,
-    pem: &[u8],
-    config: &crate::object::ObjectStoreConfig,
-) -> Result<()> {
-    let certificates = reqwest::Certificate::from_pem_bundle(pem).context("parse CA bundle")?;
-    ensure!(
-        !certificates.is_empty(),
-        "CA bundle contains no certificates"
-    );
-    match store {
-        ObjectStoreImpl::Opendal(store) => {
-            let mut builder = reqwest::Client::builder().tls_certs_merge(certificates);
-            if let Some(ms) = config.s3.keepalive_ms {
-                builder = builder.tcp_keepalive(Duration::from_millis(ms));
-            }
-            if let Some(nodelay) = config.s3.nodelay {
-                builder = builder.tcp_nodelay(nodelay);
-            }
-            let transport = opendal::HttpTransporter::new(
-                opendal_http_transport_reqwest::ReqwestTransport::new(builder.build()?),
-            );
-            let store = store.mut_inner();
-            let context = store.op.base_context().with_http_transport(transport);
-            store.op = store.op.clone().with_context(context);
-        }
-        #[cfg(not(madsim))]
-        ObjectStoreImpl::S3(store) => store.mut_inner().set_diagnostic_ca(pem.to_vec())?,
-        _ => bail!("custom CA is supported only for the S3/OpenDAL diagnostic backends"),
-    }
-    Ok(())
 }
 
 /// Only objects whose keys are constructed here are ever deleted.
