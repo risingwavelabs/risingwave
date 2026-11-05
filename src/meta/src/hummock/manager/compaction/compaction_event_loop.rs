@@ -206,8 +206,9 @@ impl HummockCompactionEventHandler {
     ) -> bool {
         let mut compactor_alive = true;
         let compactor_manager = self.hummock_manager.compactor_manager.clone();
-        let cancel_tasks = compactor_manager
-            .update_task_heartbeats(&progress)
+        let (expired_tasks, mut untracked_tasks) =
+            compactor_manager.update_task_heartbeats(&progress);
+        let mut cancel_tasks = expired_tasks
             .into_iter()
             .map(|task| task.task_id)
             .collect::<Vec<_>>();
@@ -230,6 +231,10 @@ impl HummockCompactionEventHandler {
                 );
             }
         }
+
+        // Untracked tasks have already been removed from meta. They only need a cancellation
+        // event on the reporting compactor, without another attempt to remove their meta state.
+        cancel_tasks.append(&mut untracked_tasks);
 
         match compactor_manager.get_compactor(context_id) {
             Some(compactor) => {
@@ -959,6 +964,94 @@ mod scheduling_tests {
                 .unwrap()
         );
         trigger.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_manual_cancellation_stops_untracked_task_on_heartbeat() {
+        let (manager, _) = fixture(false).await;
+        let task = manager
+            .get_compact_task(2.into(), &mut *default_compaction_selector())
+            .await
+            .unwrap()
+            .unwrap();
+        let context_id = 99.into();
+        let mut receiver = manager.compactor_manager.add_compactor(context_id);
+        let handler = HummockCompactionEventHandler::new(manager.clone());
+        let progress = CompactTaskProgress {
+            task_id: task.task_id,
+            num_progress_key: 1,
+            ..Default::default()
+        };
+
+        assert!(handler.handle_heartbeat(context_id, vec![progress]).await);
+        assert!(receiver.try_recv().is_err());
+
+        // This is the same cancellation path used by risectl. Meta no longer lists the task.
+        assert!(
+            manager
+                .cancel_compact_task(task.task_id, TaskStatus::ManualCanceled)
+                .await
+                .unwrap()
+        );
+        assert!(manager.compactor_manager.get_progress().is_empty());
+        assert!(
+            manager
+                .compaction_task_from_assignment_for_test(task.task_id)
+                .await
+                .is_none()
+        );
+        let next_task = manager
+            .get_compact_task(2.into(), &mut *default_compaction_selector())
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Retry cancellation while the old task still runs, including after reconnecting.
+        // A newly assigned task in the same heartbeat must remain active.
+        for num_progress_key in 1..=3 {
+            if num_progress_key == 3 {
+                receiver = manager.compactor_manager.add_compactor(context_id);
+            }
+            assert!(
+                handler
+                    .handle_heartbeat(
+                        context_id,
+                        vec![
+                            progress,
+                            CompactTaskProgress {
+                                task_id: next_task.task_id,
+                                num_progress_key,
+                                ..Default::default()
+                            },
+                        ],
+                    )
+                    .await
+            );
+            let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
+            let ResponseEvent::CancelCompactTask(cancel) = event else {
+                panic!("expected compactor cancellation, got {event:?}");
+            };
+            assert_eq!(cancel.task_id, task.task_id);
+            assert_eq!(cancel.context_id, context_id);
+            assert!(receiver.try_recv().is_err());
+            let tracked = manager.compactor_manager.get_progress();
+            assert_eq!(tracked.len(), 1);
+            assert_eq!(tracked[0].task_id, next_task.task_id);
+        }
+
+        // A late result cannot revive the canceled task or apply its output.
+        assert!(
+            !manager
+                .report_compact_task(
+                    task.task_id,
+                    TaskStatus::Success,
+                    vec![],
+                    None,
+                    HashMap::default(),
+                )
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

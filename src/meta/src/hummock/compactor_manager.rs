@@ -351,15 +351,17 @@ impl CompactorManagerInner {
         self.task_heartbeats.remove(&task_id).unwrap();
     }
 
+    /// Returns expired tasks and untracked task IDs that should be stopped on the compactor.
     pub fn update_task_heartbeats(
         &mut self,
         progress_list: &Vec<CompactTaskProgress>,
-    ) -> Vec<CompactTask> {
+    ) -> (Vec<CompactTask>, Vec<HummockCompactionTaskId>) {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_secs();
         let mut cancel_tasks = vec![];
+        let mut untracked_tasks = vec![];
         for progress in progress_list {
             if let Some(task_ref) = self.task_heartbeats.get_mut(&progress.task_id) {
                 task_ref.update_at = now;
@@ -382,10 +384,14 @@ impl CompactorManagerInner {
                     // cancel
                     cancel_tasks.push(task_ref.task.clone())
                 }
+            } else {
+                // Meta may have already canceled the task, for example through risectl.
+                // Keep sending cancellation while the compactor still reports it.
+                untracked_tasks.push(progress.task_id);
             }
         }
 
-        cancel_tasks
+        (cancel_tasks, untracked_tasks)
     }
 
     pub fn compactor_num(&self) -> usize {
@@ -474,7 +480,7 @@ impl CompactorManager {
     pub fn update_task_heartbeats(
         &self,
         progress_list: &Vec<CompactTaskProgress>,
-    ) -> Vec<CompactTask> {
+    ) -> (Vec<CompactTask>, Vec<HummockCompactionTaskId>) {
         self.inner.write().update_task_heartbeats(progress_list)
     }
 
