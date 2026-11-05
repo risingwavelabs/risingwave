@@ -32,6 +32,10 @@ fn parses_sizes_profiles_and_root_command() {
         "256MiB",
         "--consume-size",
         "64KiB",
+        "--basic-duration-ms",
+        "0",
+        "--basic-max-operations",
+        "500",
         "--profile",
         "compactor",
         "--reuse-prefix",
@@ -41,6 +45,8 @@ fn parses_sizes_profiles_and_root_command() {
     .args;
     assert_eq!(args.object_size, Some(256 << 20));
     assert_eq!(args.consume_size, Some(64 << 10));
+    assert_eq!(args.basic_duration_ms, Some(0));
+    assert_eq!(args.basic_max_operations, Some(500));
     assert!(
         CliOpts::try_parse_from([
             "risectl",

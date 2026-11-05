@@ -362,6 +362,13 @@ pub(super) async fn interference(
             shutdown.is_cancelled(),
         );
         fast_report.drain_ms = drain_ms;
+        fast_report.wall_elapsed_ms += drain_ms;
+        fast_report.stop_reason = if shutdown.is_cancelled() {
+            "cancelled"
+        } else {
+            "observation_window"
+        }
+        .into();
         fast_report.started_unix_ms = started_unix_ms;
         fast_report.peak_inflight_logical_operations = fast_inflight.peak();
         reports.push(fast_report);
@@ -373,6 +380,13 @@ pub(super) async fn interference(
                 shutdown.is_cancelled(),
             );
             slow_report.drain_ms = drain_ms;
+            slow_report.wall_elapsed_ms += drain_ms;
+            slow_report.stop_reason = if shutdown.is_cancelled() {
+                "cancelled"
+            } else {
+                "observation_window"
+            }
+            .into();
             slow_report.started_unix_ms = started_unix_ms;
             slow_report.peak_inflight_logical_operations = competitor_inflight.peak();
             reports.push(slow_report);

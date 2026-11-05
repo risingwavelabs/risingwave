@@ -54,9 +54,15 @@ pub struct ObjectStoreArgs {
     /// Basic ranged GET and fast-reader size (default: 1MiB).
     #[arg(long, value_parser = parse_size)]
     pub range_size: Option<usize>,
-    /// Basic range/block operations per object (default: 16).
+    /// Range/block operations per object in fixed-work basic mode (default: 16).
     #[arg(long)]
     pub read_iterations: Option<usize>,
+    /// Wall-time budget per basic phase; 0 uses fixed counts (default: 30000 ms).
+    #[arg(long)]
+    pub basic_duration_ms: Option<u64>,
+    /// Maximum logical attempts per basic phase, including failures (default: 10000).
+    #[arg(long)]
+    pub basic_max_operations: Option<usize>,
     /// Basic random block GET size (default: 64KiB).
     #[arg(long, value_parser = parse_size)]
     pub block_size: Option<usize>,
@@ -213,6 +219,8 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
         concurrency,
         range_size,
         read_iterations,
+        basic_duration_ms,
+        basic_max_operations,
         block_size,
         consume_size,
         pause_ms,
@@ -327,6 +335,7 @@ pub async fn run(args: ObjectStoreArgs, shutdown: CancellationToken) -> Result<(
     deadline.abort();
     let report = result?;
     let succeeded = report.succeeded();
+    eprint!("{}", benchmark::terminal_summary(&report));
     let mut json = json!({
         "build": { "version": risingwave_common::RW_VERSION, "git_sha": risingwave_common::GIT_SHA },
         "target": {

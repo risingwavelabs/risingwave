@@ -15,6 +15,7 @@
 //! Fixed-work object-store benchmarks and a timed fast-reader interference experiment.
 //! No Meta connection, Kubernetes resources, or production SST discovery is involved.
 
+mod basic;
 mod read;
 // These tests measure real-time/network behavior, not simulated performance.
 #[cfg(all(test, not(madsim)))]
@@ -48,6 +49,10 @@ pub struct BenchmarkConfig {
     pub concurrency: usize,
     pub range_size: usize,
     pub read_iterations: usize,
+    /// Per-basic-phase wall-time budget; zero selects the original fixed-work counts.
+    pub basic_duration_ms: u64,
+    /// Per-basic-phase cap, including failed attempts. Data preparation is separate.
+    pub basic_max_operations: usize,
     pub block_size: usize,
     pub consume_size: usize,
     pub pause_ms: u64,
@@ -76,6 +81,8 @@ impl Default for BenchmarkConfig {
             concurrency: 8,
             range_size: 1 << 20,
             read_iterations: 16,
+            basic_duration_ms: 30_000,
+            basic_max_operations: 10_000,
             block_size: 64 << 10,
             consume_size: 256 << 10,
             pause_ms: 10,
@@ -127,6 +134,16 @@ impl ReadMode {
 
 impl BenchmarkConfig {
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.basic_max_operations > 0,
+            "basic_max_operations must be positive"
+        );
+        ensure!(
+            Instant::now()
+                .checked_add(Duration::from_millis(self.basic_duration_ms))
+                .is_some(),
+            "basic duration exceeds the platform clock range"
+        );
         ensure!(
             self.objects > 0 && self.concurrency > 0,
             "objects and concurrency must be positive"
@@ -308,6 +325,7 @@ pub(super) struct Accumulator {
     items: u64,
     pause: Duration,
     latency: Timings,
+    failed_latency: Timings,
     first_data: Timings,
     consume: Timings,
     resume: Timings,
@@ -319,8 +337,12 @@ impl Accumulator {
     fn add(&mut self, outcome: Outcome, elapsed: Duration) {
         self.attempted += 1;
         if !outcome.interrupted {
-            self.latency
-                .record(outcome.measured_elapsed.unwrap_or(elapsed));
+            let timings = if outcome.error.is_some() {
+                &mut self.failed_latency
+            } else {
+                &mut self.latency
+            };
+            timings.record(outcome.measured_elapsed.unwrap_or(elapsed));
         }
         self.bytes += outcome.sample.bytes;
         self.items += outcome.sample.items;
@@ -350,6 +372,7 @@ impl Accumulator {
         self.items += other.items;
         self.pause += other.pause;
         self.latency.merge(&other.latency);
+        self.failed_latency.merge(&other.failed_latency);
         self.first_data.merge(&other.first_data);
         self.consume.merge(&other.consume);
         self.resume.merge(&other.resume);
@@ -368,6 +391,16 @@ impl Accumulator {
         let incomplete = expected.is_some_and(|n| n as u64 != self.attempted);
         let seconds = elapsed.as_secs_f64();
         PhaseReport {
+            item_unit: match name.as_str() {
+                "preflight" => "functional_checks",
+                "list" => "enumerated_objects",
+                "batch_delete" => "deleted_objects",
+                "multipart_put" | "prepare_data" | "prepare_metadata" => "uploaded_objects",
+                "validate_retained_data" => "validated_objects",
+                _ => "completed_object_reads",
+            }
+            .into(),
+            operation_unit: operation_unit(&name).into(),
             name,
             status: if cancelled {
                 "cancelled"
@@ -378,6 +411,11 @@ impl Accumulator {
             }
             .into(),
             elapsed_ms: seconds * 1000.0,
+            wall_elapsed_ms: seconds * 1000.0,
+            setup_elapsed_ms: 0.0,
+            setup_operations: 0,
+            budget: None,
+            stop_reason: if cancelled { "cancelled" } else { "fixed_work" }.into(),
             started_unix_ms: 0,
             drain_ms: 0.0,
             peak_inflight_logical_operations: 0,
@@ -385,8 +423,8 @@ impl Accumulator {
             succeeded: self.succeeded,
             failed: self.failed,
             interrupted: self.interrupted,
-            final_error_rate: (self.attempted > 0)
-                .then(|| self.failed as f64 / self.attempted as f64),
+            final_error_rate: (self.succeeded + self.failed > 0)
+                .then(|| self.failed as f64 / (self.succeeded + self.failed) as f64),
             bytes: self.bytes,
             items: self.items,
             mib_per_sec: if seconds > 0.0 {
@@ -399,13 +437,14 @@ impl Accumulator {
             } else {
                 0.0
             },
-            objects_per_sec: if seconds > 0.0 {
+            items_per_sec: if seconds > 0.0 {
                 self.items as f64 / seconds
             } else {
                 0.0
             },
             active_pause_ms: self.pause.as_secs_f64() * 1000.0,
             latency: self.latency.summary(),
+            failed_latency: self.failed_latency.summary(),
             first_data: self.first_data.summary(),
             consume: self.consume.summary(),
             resume_first_data: self.resume.summary(),
@@ -415,11 +454,42 @@ impl Accumulator {
     }
 }
 
+fn operation_unit(name: &str) -> &'static str {
+    match name {
+        "multipart_put" | "prepare_data" => "complete_object_upload",
+        "range_get" => "ranged_get",
+        "block_get" => "block_get",
+        "list" => "complete_prefix_scan",
+        "batch_delete" => "delete_batch",
+        "preflight" => "functional_check",
+        "prepare_metadata" => "small_object_upload",
+        "validate_retained_data" => "object_metadata_check",
+        _ => "object_read",
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct MeasurementBudget {
+    pub duration_ms: u64,
+    pub duration_basis: String,
+    pub max_operations: usize,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PhaseReport {
     pub name: String,
+    pub operation_unit: String,
+    pub item_unit: String,
     pub status: String,
+    /// Rate denominator: measured wall time. Basic phases finish in-flight I/O;
+    /// interference phases exclude their separately reported drain.
+    /// DELETE replenishment between rounds is excluded.
     pub elapsed_ms: f64,
+    pub wall_elapsed_ms: f64,
+    pub setup_elapsed_ms: f64,
+    pub setup_operations: u64,
+    pub budget: Option<MeasurementBudget>,
+    pub stop_reason: String,
     pub started_unix_ms: u128,
     /// Cleanup/drain after the timed interference window, excluded from its rates.
     pub drain_ms: f64,
@@ -435,10 +505,11 @@ pub struct PhaseReport {
     pub items: u64,
     pub mib_per_sec: f64,
     pub logical_ops_per_sec: f64,
-    pub objects_per_sec: f64,
+    pub items_per_sec: f64,
     pub active_pause_ms: f64,
-    /// Includes errors and intentional pauses. Not pure server latency.
+    /// Successful logical operations only; includes intentional pauses.
     pub latency: Option<Distribution>,
+    pub failed_latency: Option<Distribution>,
     pub first_data: Option<Distribution>,
     pub consume: Option<Distribution>,
     pub resume_first_data: Option<Distribution>,
@@ -467,6 +538,84 @@ impl BenchmarkReport {
             && self.phases.iter().all(|p| p.status == "completed")
             && matches!(self.cleanup_status.as_str(), "completed" | "kept")
     }
+}
+
+/// Human-readable diagnostics on stderr; stdout remains a single JSON document.
+pub fn terminal_summary(report: &BenchmarkReport) -> String {
+    use std::fmt::Write;
+    let mut text = String::new();
+    writeln!(
+        text,
+        "\nObject-store benchmark (schema {}, profile {})",
+        report.schema_version, report.profile_version
+    )
+    .unwrap();
+    writeln!(
+        text,
+        "{:<46} {:<10} {:>9} {:>10} {:>10} {:>10} {:>10} {:>7}",
+        "Phase / logical operation",
+        "Status",
+        "Samples",
+        "MiB/s",
+        "Ops/s",
+        "p50 ms",
+        "p99 ms",
+        "Errors"
+    )
+    .unwrap();
+    for phase in &report.phases {
+        let percentile = |f: fn(&Distribution) -> f64| {
+            phase
+                .latency
+                .as_ref()
+                .map_or_else(|| "-".into(), |d| format!("{:.2}", f(d)))
+        };
+        writeln!(
+            text,
+            "{:<46} {:<10} {:>9} {:>10.2} {:>10.2} {:>10} {:>10} {:>7}",
+            phase.name,
+            phase.status,
+            phase.latency.as_ref().map_or(0, |d| d.samples),
+            phase.mib_per_sec,
+            phase.logical_ops_per_sec,
+            percentile(|d| d.p50_ms),
+            percentile(|d| d.p99_ms),
+            phase.failed
+        )
+        .unwrap();
+        writeln!(text, "  unit={}; measured={:.1} ms; wall={:.1} ms; stop={}; items={} {} ({:.2}/s); interrupted={}",
+            phase.operation_unit, phase.elapsed_ms, phase.wall_elapsed_ms, phase.stop_reason,
+            phase.items, phase.item_unit, phase.items_per_sec, phase.interrupted).unwrap();
+        if phase.setup_operations > 0 {
+            writeln!(
+                text,
+                "  excluded setup: {} uploads, {:.1} ms",
+                phase.setup_operations, phase.setup_elapsed_ms
+            )
+            .unwrap();
+        }
+        if let Some(resume) = &phase.resume_first_data {
+            writeln!(
+                text,
+                "  active pause across readers={:.1} ms; resume-first-data p99={:.2} ms (n={})",
+                phase.active_pause_ms, resume.p99_ms, resume.samples
+            )
+            .unwrap();
+        }
+    }
+    writeln!(
+        text,
+        "Cleanup: {}; prefix: {}",
+        report.cleanup_status, report.prefix
+    )
+    .unwrap();
+    writeln!(text, "Latency samples are successful logical operations, not HTTP requests or PUTPARTs. Small samples do not establish a stable p99.").unwrap();
+    writeln!(
+        text,
+        "Cache state and server-side backpressure are unverified. Full details are in JSON.\n"
+    )
+    .unwrap();
+    text
 }
 
 #[derive(Clone, Default)]
@@ -507,8 +656,27 @@ where
     Fut: Future<Output = Outcome> + Send + 'static,
 {
     eprintln!("benchmark: {name} ({count} logical operations, {concurrency} workers)");
-    let started = Instant::now();
     let started_unix_ms = unix_ms();
+    let (stats, elapsed, peak) = execute_jobs(count, concurrency, token, None, execute).await;
+    let mut report = stats.report(name.into(), elapsed, Some(count), token.is_cancelled());
+    report.started_unix_ms = started_unix_ms;
+    report.peak_inflight_logical_operations = peak;
+    report
+}
+
+/// Stop scheduling at the deadline; finish in-flight operations before returning.
+async fn execute_jobs<F, Fut>(
+    count: usize,
+    concurrency: usize,
+    token: &CancellationToken,
+    deadline: Option<Instant>,
+    execute: F,
+) -> (Accumulator, Duration, usize)
+where
+    F: Fn(usize) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Outcome> + Send + 'static,
+{
+    let started = Instant::now();
     let execute = Arc::new(execute);
     let inflight = Inflight::default();
     let mut tasks = JoinSet::new();
@@ -519,12 +687,11 @@ where
         tasks.spawn(async move {
             let mut stats = Accumulator::default();
             for index in (worker..count).step_by(concurrency) {
-                if token.is_cancelled() {
+                if token.is_cancelled() || deadline.is_some_and(|d| Instant::now() >= d) {
                     break;
                 }
                 let started = Instant::now();
                 let guard = inflight.enter();
-                // Writes finish (or hit their configured SDK timeout) before cleanup.
                 let outcome = execute(index).await;
                 drop(guard);
                 stats.add(outcome, started.elapsed());
@@ -543,15 +710,7 @@ where
             }
         }
     }
-    let mut report = stats.report(
-        name.into(),
-        started.elapsed(),
-        Some(count),
-        token.is_cancelled(),
-    );
-    report.started_unix_ms = started_unix_ms;
-    report.peak_inflight_logical_operations = inflight.peak();
-    report
+    (stats, started.elapsed(), inflight.peak())
 }
 
 pub(super) fn unix_ms() -> u128 {
@@ -643,6 +802,12 @@ pub async fn run(
     });
     let mut phases = vec![];
 
+    let ready = if config.reuse_data {
+        true
+    } else {
+        phases.push(basic::preflight(store.clone(), &prefix, &token).await);
+        phases.last().is_some_and(|p| p.status == "completed")
+    };
     if config.reuse_data {
         let s = store.clone();
         let keys = large_keys.clone();
@@ -677,20 +842,17 @@ pub async fn run(
             )
             .await,
         );
-    } else {
+    } else if ready && !token.is_cancelled() {
         // Prepare payload before measuring PUT; share immutable bytes between workers.
         let mut payload = vec![0; config.object_size];
         rand::rngs::StdRng::seed_from_u64(config.seed).fill_bytes(&mut payload);
         let payload = Bytes::from(payload);
         let s = store.clone();
         let keys = large_keys.clone();
+        let upload_payload = payload.clone();
         phases.push(
             jobs(
-                if basic {
-                    "multipart_put"
-                } else {
-                    "prepare_data"
-                },
+                "prepare_data",
                 keys.len(),
                 config.concurrency,
                 &token,
@@ -719,50 +881,27 @@ pub async fn run(
             )
             .await,
         );
-    }
-    let data_ready = phases.last().is_some_and(|p| p.status == "completed");
-    if basic && data_ready && !token.is_cancelled() {
-        for (name, size) in [
-            ("range_get", config.range_size),
-            ("block_get", config.block_size),
-        ] {
-            let s = store.clone();
-            let keys = large_keys.clone();
-            let cfg = config.clone();
+        if basic && phases.last().is_some_and(|p| p.status == "completed") && !token.is_cancelled()
+        {
             phases.push(
-                jobs(
-                    name,
-                    config.objects * config.read_iterations,
-                    config.concurrency,
+                basic::uploads(
+                    store.clone(),
+                    large_keys.clone(),
+                    upload_payload,
+                    config.clone(),
                     &token,
-                    move |i| {
-                        let s = s.clone();
-                        let key = keys[i % keys.len()].clone();
-                        let cfg = cfg.clone();
-                        async move {
-                            Outcome::from_result(
-                                async {
-                                    let offset = read::offset(cfg.seed, i, cfg.object_size - size);
-                                    let data = s.read(&key, offset..offset + size).await?;
-                                    ensure!(
-                                        data.len() == size,
-                                        "unexpected GET length: {} != {size}",
-                                        data.len()
-                                    );
-                                    Ok(Sample {
-                                        bytes: data.len() as u64,
-                                        items: 1,
-                                        ..Default::default()
-                                    })
-                                }
-                                .await,
-                            )
-                        }
-                    },
                 )
                 .await,
             );
         }
+    }
+    let data_ready = phases
+        .iter()
+        .find(|p| p.name == "prepare_data" || p.name == "validate_retained_data")
+        .is_some_and(|p| p.status == "completed");
+    if basic && data_ready && !token.is_cancelled() {
+        phases
+            .extend(basic::reads(store.clone(), large_keys.clone(), config.clone(), &token).await);
     }
     if compactor && data_ready && !token.is_cancelled() {
         for mode in &config.read_order {
@@ -832,74 +971,17 @@ pub async fn run(
             .await,
         );
         if phases.last().is_some_and(|p| p.status == "completed") {
-            let s = store.clone();
-            let list_prefix = format!("{prefix}metadata/");
-            let expected = metadata_keys.len();
-            phases.push(
-                jobs(
-                    "list",
-                    config.concurrency,
-                    config.concurrency,
-                    &token,
-                    move |_| {
-                        let s = s.clone();
-                        let prefix = list_prefix.clone();
-                        async move {
-                            Outcome::from_result(
-                                async {
-                                    let mut stream = s.list(&prefix, None, None).await?;
-                                    let mut count = 0;
-                                    while stream.try_next().await?.is_some() {
-                                        count += 1;
-                                    }
-                                    ensure!(
-                                        count == expected,
-                                        "LIST returned {count} objects, expected {expected}"
-                                    );
-                                    Ok(Sample {
-                                        items: count as u64,
-                                        ..Default::default()
-                                    })
-                                }
-                                .await,
-                            )
-                        }
-                    },
-                )
-                .await,
-            );
-            let s = store.clone();
-            let keys = metadata_keys.clone();
-            let batch = config.delete_batch_size;
-            phases.push(
-                jobs(
-                    "batch_delete",
-                    keys.len().div_ceil(batch),
-                    config.concurrency,
-                    &token,
-                    move |i| {
-                        let s = s.clone();
-                        let keys = keys[i * batch..((i + 1) * batch).min(keys.len())].to_vec();
-                        async move {
-                            Outcome::from_result(
-                                async {
-                                    s.delete_objects(&keys).await?;
-                                    Ok(Sample {
-                                        items: keys.len() as u64,
-                                        ..Default::default()
-                                    })
-                                }
-                                .await,
-                            )
-                        }
-                    },
-                )
-                .await,
+            phases.extend(
+                basic::metadata(store.clone(), metadata_keys.clone(), config.clone(), &token).await,
             );
         }
     }
 
-    let mut expected = vec![];
+    let mut expected = vec![if config.reuse_data {
+        "validate_retained_data"
+    } else {
+        "prepare_data"
+    }];
     if basic {
         expected.extend([
             "multipart_put",
@@ -956,8 +1038,8 @@ pub async fn run(
         }
     }
     Ok(BenchmarkReport {
-        schema_version: 1,
-        profile_version: 1,
+        schema_version: 2,
+        profile_version: 2,
         prefix,
         planned_dataset_bytes: (config.objects * config.object_size) as u64 + metadata_keys.len() as u64 * 4096,
         config: (*config).clone(),
@@ -968,6 +1050,9 @@ pub async fn run(
         backpressure_verified: false,
         notes: vec![
             "Logical operations use the RW client; SDK/internal retries and HTTP request counts are not fully observed.".into(),
+            "Basic phases stop scheduling at their wall-time or operation limit, then finish in-flight I/O. DELETE replenishment consumes the wall-time budget but is excluded from measured rates; setup and measured time are separate.".into(),
+            "Upload latency is a complete streaming upload, not PUTPART latency. Successful and failed logical-operation latency are separate; interrupted operations have no completed latency.".into(),
+            "Quantiles include sample counts and are descriptive, not evidence of a stable tail with a small sample.".into(),
             "LIST measures complete RW enumeration and may include metadata HEAD requests; it is not HTTP LIST requests/sec.".into(),
             "Cleanup deletes known keys; failed/cancelled multipart uploads may require server lifecycle cleanup.".into(),
             "Cache state is uncontrolled. Read order is recorded; intentional pauses are included in end-to-end latency.".into(),

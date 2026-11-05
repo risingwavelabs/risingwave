@@ -25,6 +25,7 @@ fn config() -> BenchmarkConfig {
         consume_size: 3,
         pause_ms: 1,
         short_get_size: 4,
+        basic_duration_ms: 0,
         metadata_objects: 5,
         delete_batch_size: 2,
         fast_readers: 1,
@@ -438,6 +439,8 @@ async fn real_s3_profiles() {
         consume_size: 1 << 20,
         short_get_size: 4 << 20,
         pause_ms: 1,
+        basic_duration_ms: 25,
+        basic_max_operations: 100,
         metadata_objects: 1013,
         delete_batch_size: 5,
         interference_ms: 200,
@@ -478,4 +481,200 @@ async fn real_s3_profiles() {
             36 << 20
         );
     }
+}
+
+#[tokio::test]
+async fn basic_caps_measurement_reuses_keys_and_replenishes_deletes() {
+    let store = memory();
+    let mut cfg = config();
+    cfg.profile = Profile::Basic;
+    cfg.basic_duration_ms = 10_000;
+    cfg.basic_max_operations = 7;
+    cfg.keep_data = true;
+    let report = run(
+        store.clone(),
+        cfg,
+        "risectl-bench/budget/".into(),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert!(report.succeeded(), "{report:#?}");
+    for name in [
+        "multipart_put",
+        "range_get",
+        "block_get",
+        "list",
+        "batch_delete",
+    ] {
+        let phase = report.phases.iter().find(|p| p.name == name).unwrap();
+        assert_eq!(phase.attempted, 7);
+        assert_eq!(phase.latency.as_ref().unwrap().samples, 7);
+        assert_eq!(phase.stop_reason, "operation_limit");
+    }
+    let deleted = report
+        .phases
+        .iter()
+        .find(|p| p.name == "batch_delete")
+        .unwrap();
+    assert_eq!(deleted.operation_unit, "delete_batch");
+    assert_eq!(deleted.setup_operations, 10); // Two complete five-object replenishments.
+    assert_eq!(deleted.items, 12); // Two five-object rounds and one two-object batch.
+    assert!(deleted.wall_elapsed_ms >= deleted.elapsed_ms + deleted.setup_elapsed_ms);
+    let remaining = store
+        .list("risectl-bench/budget/", None, None)
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    assert_eq!(
+        remaining
+            .iter()
+            .filter(|o| o.key.contains("/data/"))
+            .count(),
+        3
+    );
+    assert!(!remaining.iter().any(|o| o.key.contains("/check/")));
+    let summary = terminal_summary(&report);
+    assert!(summary.contains("delete_batch"));
+    assert!(summary.contains("complete_object_upload"));
+    assert!(summary.contains("Samples"));
+    assert!(summary.contains("excluded setup"));
+}
+
+#[test]
+fn successful_failed_and_interrupted_latency_have_separate_denominators() {
+    let mut stats = Accumulator::default();
+    stats.add(
+        Outcome::from_result(Ok(Sample::default())),
+        Duration::from_millis(1),
+    );
+    stats.add(
+        Outcome::from_result(Err(anyhow::anyhow!("I/O failure"))),
+        Duration::from_millis(100),
+    );
+    stats.add(
+        Outcome {
+            sample: Sample::default(),
+            error: None,
+            interrupted: true,
+            measured_elapsed: None,
+        },
+        Duration::from_secs(1),
+    );
+    let report = stats.report("list".into(), Duration::from_secs(1), None, false);
+    assert_eq!(report.latency.as_ref().unwrap().samples, 1);
+    assert_eq!(report.failed_latency.as_ref().unwrap().samples, 1);
+    assert_eq!(report.final_error_rate, Some(0.5));
+    assert_eq!(report.interrupted, 1);
+    assert_eq!(report.operation_unit, "complete_prefix_scan");
+}
+
+#[tokio::test]
+async fn corrupt_range_is_rejected_before_large_data_preparation() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let puts = Arc::new(AtomicUsize::new(0));
+    let count = puts.clone();
+    let server = tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let puts = count.clone();
+            tokio::spawn(async move {
+                let mut header = vec![];
+                while !header.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    if socket.read_exact(&mut byte).await.is_err() {
+                        return;
+                    }
+                    header.push(byte[0]);
+                    if header.len() > 32_768 {
+                        return;
+                    }
+                }
+                let header = String::from_utf8(header).unwrap();
+                let field = |key: &str| {
+                    header.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case(key)
+                            .then(|| value.trim().to_owned())
+                    })
+                };
+                let length = field("content-length")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let mut body = vec![0; length];
+                if socket.read_exact(&mut body).await.is_err() {
+                    return;
+                }
+                let (status, length, response) = if header.starts_with("PUT ") {
+                    puts.fetch_add(1, Ordering::SeqCst);
+                    ("200 OK", 0, vec![])
+                } else if header.starts_with("HEAD ") {
+                    ("200 OK", 4096, vec![])
+                } else if header.starts_with("GET ") {
+                    let range = field("range").unwrap();
+                    let (start, end) = range
+                        .strip_prefix("bytes=")
+                        .unwrap()
+                        .split_once('-')
+                        .unwrap();
+                    let start: usize = start.parse().unwrap();
+                    let end: usize = end.parse().unwrap();
+                    let mut data = (start..=end).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+                    if start == 17 {
+                        data[0] ^= 1;
+                    } // Correct length, wrong range content.
+                    ("206 Partial Content", data.len(), data)
+                } else if header.starts_with("POST ") {
+                    let data = b"<DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"/>"
+                        .to_vec();
+                    ("200 OK", data.len(), data)
+                } else {
+                    ("204 No Content", 0, vec![])
+                };
+                let response_header = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+                );
+                if socket.write_all(response_header.as_bytes()).await.is_ok() {
+                    let _ = socket.write_all(&response).await;
+                }
+            });
+        }
+    });
+    let mut cfg = ObjectStoreConfig::default();
+    cfg.retry.read_retry_attempts = 0;
+    let cfg = Arc::new(cfg);
+    let metrics = Arc::new(ObjectStoreMetrics::unused());
+    let store = crate::object::OpendalObjectStore::new_minio_engine(
+        &format!("minio://test-key:test-secret@http://{endpoint}/bucket"),
+        cfg.clone(),
+        metrics.clone(),
+    )
+    .unwrap()
+    .monitored(metrics, cfg);
+    let report = run(
+        Arc::new(ObjectStoreImpl::Opendal(store)),
+        config(),
+        "risectl-bench/corrupt/".into(),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    server.abort();
+    let check = &report.phases[0];
+    assert_eq!(check.name, "preflight");
+    assert_eq!(check.status, "failed");
+    assert!(check.errors[0].contains("incorrect content"), "{check:?}");
+    assert_eq!(puts.load(Ordering::SeqCst), 1); // Only the 4 KiB probe was uploaded.
+    assert_eq!(
+        report
+            .phases
+            .iter()
+            .find(|p| p.name == "prepare_data")
+            .unwrap()
+            .status,
+        "skipped"
+    );
 }
