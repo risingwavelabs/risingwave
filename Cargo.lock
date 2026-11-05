@@ -6572,7 +6572,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=4beeb01f6689dde8b94744499f4be578eba8202b#4beeb01f6689dde8b94744499f4be578eba8202b"
 dependencies = [
  "anyhow",
  "asyncband",
@@ -6592,7 +6592,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=4beeb01f6689dde8b94744499f4be578eba8202b#4beeb01f6689dde8b94744499f4be578eba8202b"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -6619,7 +6619,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=4beeb01f6689dde8b94744499f4be578eba8202b#4beeb01f6689dde8b94744499f4be578eba8202b"
 dependencies = [
  "anyhow",
  "asyncband",
@@ -6644,7 +6644,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=4beeb01f6689dde8b94744499f4be578eba8202b#4beeb01f6689dde8b94744499f4be578eba8202b"
 dependencies = [
  "allocator-api2",
  "anyhow",
@@ -6677,7 +6677,7 @@ dependencies = [
 [[package]]
 name = "foyer-tokio"
 version = "0.22.6"
-source = "git+https://github.com/Li0k/foyer.git?rev=02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5#02d6b5ebc7516121ab0ad84ad8780623cfa1c8c5"
+source = "git+https://github.com/Li0k/foyer.git?rev=4beeb01f6689dde8b94744499f4be578eba8202b#4beeb01f6689dde8b94744499f4be578eba8202b"
 dependencies = [
  "madsim-tokio",
  "tokio",
