@@ -379,6 +379,36 @@
         └─StreamProject { exprs: [t.a, t.b, t.c, 2:Int32] }
           └─StreamFilter { predicate: (t.a = 5:Int32) }
             └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(5)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill IS NULL in an OR predicate produces an IS NULL branch
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a is null or a = 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c, $src(hidden)], stream_key: [a, b, $src], pk_columns: [a, b, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t.a, t.b, 0:Int32) }
+      │ └─StreamProject { exprs: [t.a, t.b, t.c, 0:Int32] }
+      │   └─StreamFilter { predicate: IsNull(t.a) }
+      │     └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = None, stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+      └─StreamExchange { dist: HashShard(t.a, t.b, 1:Int32) }
+        └─StreamProject { exprs: [t.a, t.b, t.c, 1:Int32] }
+          └─StreamFilter { predicate: (t.a = 1:Int32) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill merged eq ranges produce an IS NULL branch
+  sql: |
+    create table t(a int, b int, c int, d int, primary key(a, b, c));
+    select * from t where a is null or a = 1 or (a is null and b = 2 and c > 3);
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c, d, $src(hidden)], stream_key: [a, b, c, $src], pk_columns: [a, b, c, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t.a, t.b, t.c, 0:Int32) }
+      │ └─StreamProject { exprs: [t.a, t.b, t.c, t.d, 0:Int32] }
+      │   └─StreamFilter { predicate: (t.a = 1:Int32) AND ((IsNull(t.a) OR (t.a = 1:Int32)) OR ((IsNull(t.a) AND (t.b = 2:Int32)) AND (t.c > 3:Int32))) }
+      │     └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t.d], pk_scan_range: a = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b, t.c], pk: [a, b, c], dist: UpstreamHashShard(t.a, t.b, t.c) }
+      └─StreamExchange { dist: HashShard(t.a, t.b, t.c, 1:Int32) }
+        └─StreamProject { exprs: [t.a, t.b, t.c, t.d, 1:Int32] }
+          └─StreamFilter { predicate: IsNull(t.a) AND ((IsNull(t.a) OR (t.a = 1:Int32)) OR ((IsNull(t.a) AND (t.b = 2:Int32)) AND (t.c > 3:Int32))) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t.d], pk_scan_range: a = None, stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b, t.c], pk: [a, b, c], dist: UpstreamHashShard(t.a, t.b, t.c) }
 - name: snapshot backfill covering index selection
   sql: |
     create table t(a int, b int, c int, primary key(a));

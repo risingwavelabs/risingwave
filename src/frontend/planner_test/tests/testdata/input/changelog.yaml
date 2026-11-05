@@ -41,3 +41,55 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+
+- name: keyed changelog with a distribution subset
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (tenant)
+    select payload from c;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_stream
+  - stream_plan
+  - stream_dist_plan
+
+- name: keyed changelog with reordered equal distribution keys
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (id, TENANT)
+    select payload from c;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+
+- name: keyed changelog with a quoted distribution column
+  sql: |
+    create table t (id int primary key, "Tenant" int, payload varchar);
+    with c as changelog from t key (id, "Tenant") distributed by ("Tenant")
+    select payload from c;
+  expected_outputs:
+  - stream_plan
+
+- name: keyed changelog rejects distribution outside declared key
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant, id) distributed by (payload)
+    select * from c;
+  expected_outputs:
+  - binder_error
+
+- name: keyed changelog rejects a distribution superset
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar);
+    with c as changelog from t key (tenant) distributed by (tenant, id)
+    select * from c;
+  expected_outputs:
+  - binder_error
+
+- name: keyed changelog reports all invalid distribution columns
+  sql: |
+    create table t (id int primary key, tenant int, payload varchar, "Region" int);
+    with c as changelog from t key (tenant, id) distributed by (tenant, payload, "Region")
+    select * from c;
+  expected_outputs:
+  - binder_error

@@ -43,6 +43,7 @@ pub mod event_handler;
 pub mod local_version;
 pub mod observer_manager;
 pub mod store;
+pub(crate) mod table_cache_metadata;
 pub use store::*;
 mod validator;
 pub mod value;

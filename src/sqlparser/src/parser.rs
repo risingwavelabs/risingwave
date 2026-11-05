@@ -5022,8 +5022,18 @@ impl Parser<'_> {
                     .parse_keyword(Keyword::KEY)
                     .then(|| self.parse_parenthesized_column_list(Mandatory))
                     .transpose()?;
+                let distributed_by = if self.parse_keyword(Keyword::DISTRIBUTED) {
+                    self.expect_keyword(Keyword::BY)?;
+                    Some(self.parse_parenthesized_column_list(Mandatory)?)
+                } else {
+                    None
+                };
 
-                Ok(CteInner::ChangeLog { from, key })
+                Ok(CteInner::ChangeLog {
+                    from,
+                    key,
+                    distributed_by,
+                })
             }
         }
     }

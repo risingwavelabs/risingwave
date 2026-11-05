@@ -868,7 +868,7 @@ struct ChangeSequenceClock {
 impl ChangeSequenceClock {
     const fn new() -> Self {
         Self {
-            next: parking_lot::const_mutex((0, 0)),
+            next: Mutex::new((0, 0)),
         }
     }
 
@@ -1086,7 +1086,9 @@ fn build_protobuf_field(
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Variant => {
-            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Variant")));
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Don't support Variant"
+            )));
         }
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
         DataType::Float32 | DataType::Int256 => {
