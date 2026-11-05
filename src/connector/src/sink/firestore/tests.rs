@@ -157,6 +157,70 @@ fn invalid_config_is_rejected_before_connecting() {
 }
 
 #[test]
+fn unsupported_column_types_are_rejected_in_nested_schemas() {
+    use risingwave_common::types::{MapType, StructType};
+    use thiserror_ext::AsReport;
+
+    let mut config = test_config();
+    for unsupported in [
+        DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
+        DataType::Vector(3),
+        DataType::Variant,
+        DataType::list(DataType::list(DataType::Int32)),
+    ] {
+        for (data_type, path) in [
+            (unsupported.clone(), "payload"),
+            (
+                DataType::Struct(StructType::new([("nested", unsupported.clone())])),
+                "payload.nested",
+            ),
+            (
+                DataType::list(DataType::Struct(StructType::new([(
+                    "nested",
+                    unsupported.clone(),
+                )]))),
+                "payload[].nested",
+            ),
+        ] {
+            let schema = Schema::new(vec![
+                Field::with_name(DataType::Varchar, "id"),
+                Field::with_name(data_type, "payload"),
+            ]);
+            for skip_invalid_rows in [false, true] {
+                config.skip_invalid_rows = skip_invalid_rows;
+                let error = config.validate_schema(&schema, &[0]).unwrap_err();
+                assert!(matches!(error, SinkError::Config(_)));
+                let message = error.to_report_string();
+                assert!(message.contains(&format!("column '{path}'")), "{message}");
+                assert!(message.contains(&unsupported.to_string()), "{message}");
+            }
+        }
+    }
+}
+
+#[test]
+fn supported_nested_column_types_remain_valid() -> Result<()> {
+    use risingwave_common::types::StructType;
+
+    let schema = Schema::new(vec![
+        Field::with_name(DataType::Varchar, "id"),
+        Field::with_name(
+            DataType::list(DataType::Struct(StructType::new([
+                ("values", DataType::list(DataType::Int64)),
+                ("amount", DataType::Decimal),
+                ("json", DataType::Jsonb),
+            ]))),
+            "payload",
+        ),
+    ]);
+    let mut config = test_config();
+    assert_eq!(config.validate_schema(&schema, &[])?, Some(0));
+    config.document_id_column = None;
+    assert_eq!(config.validate_schema(&schema, &[0])?, None);
+    Ok(())
+}
+
+#[test]
 fn partial_or_incomplete_batch_ack_is_an_error() {
     let ok = Status::default();
     let failed = Status {

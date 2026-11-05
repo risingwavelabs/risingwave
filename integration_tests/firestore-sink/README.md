@@ -141,6 +141,10 @@ path in upsert mode. Append-only mode retains the old document.
 
 ## Invalid row policy
 
+The sink rejects `MAP`, `VECTOR`, `VARIANT`, and directly nested SQL array column
+types at creation, including inside structs and lists. Errors identify the field
+path. `JSONB` contents are validated per row.
+
 `firestore.skip_invalid_rows` defaults to `false`, preserving failure/replay.
 Opting in permanently skips invalid mutations and logs a warning. It covers
 invalid/empty/NULL document or parent IDs, unsupported row values, excessive
@@ -161,5 +165,5 @@ The emulator suite additionally reads back native timestamps and decimal numbers
 writes the same child ID under two parents, moves a child, mixes healthy rows with
 NULL/empty/invalid IDs and a document over 1 MiB, and checks continued delivery.
 It also sends a deliberately oversized write directly to exercise server rejection
-and isolation alongside a healthy write. These tests do not replace the user's
-full 48-check SQL/crash-recovery comparison against the Python connector.
+and isolation alongside a healthy write. End-to-end SQL and crash-recovery testing
+against a real RisingWave deployment is still needed.
