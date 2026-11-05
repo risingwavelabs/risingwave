@@ -29,6 +29,7 @@ parquet = { workspace = true }
 prometheus = { version = "0.14", features = ["process"] }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
