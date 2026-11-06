@@ -2687,8 +2687,7 @@ dependencies = [
 [[package]]
 name = "chrono-tz"
 version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
+source = "git+https://github.com/risingwavelabs/chrono-tz.git?tag=v0.10.4-2026f#66a4f5d729afdec9dd3f0f0d0dec448c7b72c777"
 dependencies = [
  "chrono",
  "chrono-tz-build",
@@ -2699,8 +2698,7 @@ dependencies = [
 [[package]]
 name = "chrono-tz-build"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7d8d1efd5109b9c1cd3b7966bd071cdfb53bb6eb0b22a473a68c2f70a11a1eb"
+source = "git+https://github.com/risingwavelabs/chrono-tz.git?tag=v0.10.4-2026f#66a4f5d729afdec9dd3f0f0d0dec448c7b72c777"
 dependencies = [
  "parse-zoneinfo",
  "phf_codegen 0.12.1",
@@ -11999,8 +11997,7 @@ dependencies = [
 [[package]]
 name = "parse-zoneinfo"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3c406c9e2aa74554e662d2c2ee11cd3e73756988800be7e6f5eddb16fed4699"
+source = "git+https://github.com/risingwavelabs/chrono-tz.git?tag=v0.10.4-2026f#66a4f5d729afdec9dd3f0f0d0dec448c7b72c777"
 
 [[package]]
 name = "paste"
