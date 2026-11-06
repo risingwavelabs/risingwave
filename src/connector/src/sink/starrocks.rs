@@ -134,6 +134,16 @@ pub struct StarrocksConfig {
     #[with_option(allow_alter_on_fly)]
     pub max_batch_size_bytes: Option<u64>,
 
+    /// The maximum cumulative serialized payload bytes per writer/transaction.
+    /// Defaults to unlimited. Before the next row would exceed this limit, commit
+    /// the current transaction, even before `commit_checkpoint_interval` elapses.
+    /// A single oversized row is rejected. Early commits can increase data versions;
+    /// recovery can replay committed data under the sink's at-least-once contract.
+    #[serde(rename = "starrocks.max_transaction_size_bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub max_transaction_size_bytes: Option<u64>,
+
     /// Skip the `StarRocks` JSON size check. Defaults to false. This may increase
     /// backend memory usage and does not disable `starrocks.max_batch_size_bytes`.
     #[serde(rename = "starrocks.ignore_json_size", default)]
@@ -197,6 +207,11 @@ impl StarrocksConfig {
                 "`starrocks.max_batch_size_bytes` must be greater than 0"
             )));
         }
+        if let Some(0) = config.max_transaction_size_bytes {
+            return Err(SinkError::Config(anyhow!(
+                "`starrocks.max_transaction_size_bytes` must be greater than 0"
+            )));
+        }
         if config
             .load_mem_limit
             .is_some_and(|limit| limit > i64::MAX as u64)
@@ -220,39 +235,40 @@ impl StarrocksConfig {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct LoadRequestSizeDecision {
-    finish_current_load: bool,
-    next_batch_size_bytes: u64,
+struct PayloadSizeDecision {
+    finish_current_payload: bool,
+    next_payload_size_bytes: u64,
 }
 
-fn decide_load_request_size(
-    current_batch_size_bytes: u64,
+fn decide_payload_size(
+    current_size_bytes: u64,
     row_size: u64,
-    max_batch_size_bytes: u64,
-) -> Result<LoadRequestSizeDecision> {
-    if row_size > max_batch_size_bytes {
+    max_size_bytes: u64,
+    option_name: &str,
+) -> Result<PayloadSizeDecision> {
+    if row_size > max_size_bytes {
         return Err(SinkError::Starrocks(format!(
-            "single row payload size {} bytes exceeds `starrocks.max_batch_size_bytes` limit {} bytes",
-            row_size, max_batch_size_bytes
+            "single row payload size {} bytes exceeds `{}` limit {} bytes",
+            row_size, option_name, max_size_bytes
         )));
     }
 
-    if current_batch_size_bytes > 0
-        && current_batch_size_bytes
+    if current_size_bytes > 0
+        && current_size_bytes
             .checked_add(row_size)
-            .is_none_or(|next_batch_size_bytes| next_batch_size_bytes > max_batch_size_bytes)
+            .is_none_or(|next_payload_size_bytes| next_payload_size_bytes > max_size_bytes)
     {
-        return Ok(LoadRequestSizeDecision {
-            finish_current_load: true,
-            next_batch_size_bytes: row_size,
+        return Ok(PayloadSizeDecision {
+            finish_current_payload: true,
+            next_payload_size_bytes: row_size,
         });
     }
 
-    Ok(LoadRequestSizeDecision {
-        finish_current_load: false,
-        next_batch_size_bytes: current_batch_size_bytes
+    Ok(PayloadSizeDecision {
+        finish_current_payload: false,
+        next_payload_size_bytes: current_size_bytes
             .checked_add(row_size)
-            .expect("sum is checked against max_batch_size_bytes above"),
+            .expect("sum is checked against max_size_bytes above"),
     })
 }
 
@@ -488,9 +504,12 @@ pub struct StarrocksSinkWriter {
     client: Option<StarrocksClient>,
     txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
+    // Retain the cleanup label across RPC awaits. Failed or cancelled writers are discarded.
     curr_txn_label: Option<String>,
     max_batch_size_bytes: Option<u64>,
     current_batch_size_bytes: u64,
+    max_transaction_size_bytes: Option<u64>,
+    current_transaction_size_bytes: u64,
 }
 
 impl TryFrom<SinkParam> for StarrocksSink {
@@ -556,6 +575,8 @@ impl StarrocksSinkWriter {
             curr_txn_label: None,
             max_batch_size_bytes: config.max_batch_size_bytes,
             current_batch_size_bytes: 0,
+            max_transaction_size_bytes: config.max_transaction_size_bytes,
+            current_transaction_size_bytes: 0,
         })
     }
 
@@ -580,19 +601,53 @@ impl StarrocksSinkWriter {
 
     async fn write_row_json(&mut self, row_json_string: String) -> Result<()> {
         let row_size = row_json_string.len() as u64;
+        // Validate both single-row limits before committing any pending data.
+        for (limit, option) in [
+            (self.max_batch_size_bytes, "starrocks.max_batch_size_bytes"),
+            (
+                self.max_transaction_size_bytes,
+                "starrocks.max_transaction_size_bytes",
+            ),
+        ] {
+            if let Some(limit) = limit {
+                decide_payload_size(0, row_size, limit, option)?;
+            }
+        }
+        let transaction_decision = self
+            .max_transaction_size_bytes
+            .map(|limit| {
+                decide_payload_size(
+                    self.current_transaction_size_bytes,
+                    row_size,
+                    limit,
+                    "starrocks.max_transaction_size_bytes",
+                )
+            })
+            .transpose()?;
+        if transaction_decision
+            .as_ref()
+            .is_some_and(|decision| decision.finish_current_payload)
+        {
+            // Serial commits preserve ordering. The log sinker still truncates only
+            // at its normal checkpoint boundary, so recovery may replay this data.
+            self.commit_current_transaction().await?;
+        }
+        self.ensure_transaction().await?;
+        // Recompute after transaction rollover, which also finishes the previous load.
         let size_decision = self
             .max_batch_size_bytes
-            .map(|max_batch_size_bytes| {
-                decide_load_request_size(
+            .map(|limit| {
+                decide_payload_size(
                     self.current_batch_size_bytes,
                     row_size,
-                    max_batch_size_bytes,
+                    limit,
+                    "starrocks.max_batch_size_bytes",
                 )
             })
             .transpose()?;
         if size_decision
             .as_ref()
-            .is_some_and(|decision| decision.finish_current_load)
+            .is_some_and(|decision| decision.finish_current_payload)
         {
             self.finish_load_request().await?;
         }
@@ -602,8 +657,11 @@ impl StarrocksSinkWriter {
             .ok_or_else(|| SinkError::Starrocks("Can't find starrocks sink insert".to_owned()))?
             .write(row_json_string.into())
             .await?;
-        if let Some(size_decision) = size_decision {
-            self.current_batch_size_bytes = size_decision.next_batch_size_bytes;
+        if let Some(decision) = size_decision {
+            self.current_batch_size_bytes = decision.next_payload_size_bytes;
+        }
+        if let Some(decision) = transaction_decision {
+            self.current_transaction_size_bytes = decision.next_payload_size_bytes;
         }
         Ok(())
     }
@@ -671,6 +729,67 @@ impl StarrocksSinkWriter {
         )
     }
 
+    async fn ensure_transaction(&mut self) -> Result<()> {
+        if self.curr_txn_label.is_some() {
+            return Ok(());
+        }
+        let txn_label = self.new_txn_label();
+        tracing::debug!(?txn_label, "begin transaction");
+        // Retain the label if begin is cancelled or its response is lost.
+        self.curr_txn_label = Some(txn_label.clone());
+        let result = async {
+            let txn_label_res = self.txn_client.begin(txn_label.clone()).await?;
+            if txn_label != txn_label_res {
+                return Err(SinkError::Starrocks(format!(
+                    "label {} returned from StarRocks {} differs from generated one",
+                    txn_label, txn_label_res
+                )));
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(err) = result {
+            self.rollback_after_failure().await;
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    async fn commit_current_transaction(&mut self) -> Result<()> {
+        let result = async {
+            self.finish_load_request().await?;
+            if let Some(txn_label) = self.curr_txn_label.clone() {
+                // Keep the label across awaits for cancellation cleanup through Drop.
+                self.prepare_and_commit(txn_label).await?;
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(err) = result {
+            self.rollback_after_failure().await;
+            return Err(err);
+        }
+        self.curr_txn_label = None;
+        self.current_transaction_size_bytes = 0;
+        Ok(())
+    }
+
+    /// Best-effort cleanup before discarding the writer; callers retain the original error.
+    async fn rollback_after_failure(&mut self) {
+        let Some(txn_label) = self.curr_txn_label.clone() else {
+            return;
+        };
+        tracing::debug!(?txn_label, "rollback transaction");
+        let rollback_result = self.txn_client.rollback(txn_label.clone()).await;
+        // This failed writer is discarded. Cleanup has already been attempted;
+        // avoid a second abort replacing the original operation error. Keep
+        // the label until the await completes so cancellation can still clean up.
+        self.curr_txn_label = None;
+        if let Err(rollback_err) = rollback_result {
+            tracing::warn!(?txn_label, error = ?rollback_err.as_report(), "Couldn't roll back transaction after failure");
+        }
+    }
+
     async fn prepare_and_commit(&self, txn_label: String) -> Result<()> {
         tracing::debug!(?txn_label, "prepare transaction");
         let txn_label_res = self.txn_client.prepare(txn_label.clone()).await?;
@@ -716,21 +835,6 @@ impl SinkWriter for StarrocksSinkWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        // We check whether start a new transaction in `write_batch`. Therefore, if no data has been written
-        // within the `commit_checkpoint_interval` period, no meta requests will be made. Otherwise if we request
-        // `prepare` against an empty transaction, the `StarRocks` will report a `hasn't send any data yet` error.
-        if self.curr_txn_label.is_none() {
-            let txn_label = self.new_txn_label();
-            tracing::debug!(?txn_label, "begin transaction");
-            let txn_label_res = self.txn_client.begin(txn_label.clone()).await?;
-            if txn_label != txn_label_res {
-                return Err(SinkError::Starrocks(format!(
-                    "label {} returned from StarRocks {} differs from generated one",
-                    txn_label, txn_label_res
-                )));
-            }
-            self.curr_txn_label = Some(txn_label);
-        }
         if self.is_append_only {
             self.append_only(chunk).await
         } else {
@@ -739,37 +843,18 @@ impl SinkWriter for StarrocksSinkWriter {
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        // Here we finish the `/api/transaction/load` request when a barrier is received. Therefore,
-        // one or more load requests should be made within one commit_checkpoint_interval period.
-        // StarRocks will take care of merging those splits into a larger one during prepare transaction.
-        // Thus, only one version will be produced when the transaction is committed. See Stream Load
-        // transaction interface for more information.
-        self.finish_load_request().await?;
-
-        if is_checkpoint
-            && let Some(txn_label) = self.curr_txn_label.take()
-            && let Err(err) = self.prepare_and_commit(txn_label.clone()).await
-        {
-            match self.txn_client.rollback(txn_label.clone()).await {
-                Ok(_) => tracing::warn!(
-                    ?txn_label,
-                    "transaction is successfully rolled back due to commit failure"
-                ),
-                Err(err) => {
-                    tracing::warn!(?txn_label, error = ?err.as_report(), "Couldn't roll back transaction after commit failed")
-                }
-            }
-
-            return Err(err);
+        if is_checkpoint {
+            self.commit_current_transaction().await?;
+        } else {
+            // A barrier finishes only the HTTP request, not the transaction.
+            self.finish_load_request().await?;
         }
         Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
-        if let Some(txn_label) = self.curr_txn_label.take() {
-            tracing::debug!(?txn_label, "rollback transaction");
-            self.txn_client.rollback(txn_label).await?;
-        }
+        // Cleanup failure must not replace the write error held by the log sinker.
+        self.rollback_after_failure().await;
         Ok(())
     }
 }
@@ -1037,7 +1122,7 @@ mod tests {
         }
     }
 
-    fn base_properties() -> BTreeMap<String, String> {
+    pub(super) fn base_properties() -> BTreeMap<String, String> {
         BTreeMap::from([
             ("starrocks.host".to_owned(), "127.0.0.1".to_owned()),
             ("starrocks.mysqlport".to_owned(), "9030".to_owned()),
@@ -1155,6 +1240,7 @@ mod tests {
         let config = StarrocksConfig::from_btreemap(base_properties()).unwrap();
 
         assert_eq!(config.max_batch_size_bytes, None);
+        assert_eq!(config.max_transaction_size_bytes, None);
     }
 
     #[test]
@@ -1183,10 +1269,10 @@ mod tests {
     #[test]
     fn starrocks_batch_size_allows_exact_limit() {
         assert_eq!(
-            decide_load_request_size(3, 2, 5).unwrap(),
-            LoadRequestSizeDecision {
-                finish_current_load: false,
-                next_batch_size_bytes: 5,
+            decide_payload_size(3, 2, 5, "starrocks.max_batch_size_bytes").unwrap(),
+            PayloadSizeDecision {
+                finish_current_payload: false,
+                next_payload_size_bytes: 5,
             }
         );
     }
@@ -1194,17 +1280,17 @@ mod tests {
     #[test]
     fn starrocks_batch_size_rolls_over_before_exceeding_limit() {
         assert_eq!(
-            decide_load_request_size(4, 2, 5).unwrap(),
-            LoadRequestSizeDecision {
-                finish_current_load: true,
-                next_batch_size_bytes: 2,
+            decide_payload_size(4, 2, 5, "starrocks.max_batch_size_bytes").unwrap(),
+            PayloadSizeDecision {
+                finish_current_payload: true,
+                next_payload_size_bytes: 2,
             }
         );
     }
 
     #[test]
     fn starrocks_batch_size_rejects_single_oversized_row() {
-        let err = decide_load_request_size(0, 6, 5).unwrap_err();
+        let err = decide_payload_size(0, 6, 5, "starrocks.max_batch_size_bytes").unwrap_err();
 
         assert!(err.to_string().contains(
             "single row payload size 6 bytes exceeds `starrocks.max_batch_size_bytes` limit 5 bytes"
@@ -1214,11 +1300,14 @@ mod tests {
     #[test]
     fn starrocks_batch_size_rolls_over_on_u64_overflow() {
         assert_eq!(
-            decide_load_request_size(u64::MAX, 1, u64::MAX).unwrap(),
-            LoadRequestSizeDecision {
-                finish_current_load: true,
-                next_batch_size_bytes: 1,
+            decide_payload_size(u64::MAX, 1, u64::MAX, "starrocks.max_batch_size_bytes").unwrap(),
+            PayloadSizeDecision {
+                finish_current_payload: true,
+                next_payload_size_bytes: 1,
             }
         );
     }
 }
+
+#[cfg(all(test, not(madsim)))]
+mod transaction_tests;

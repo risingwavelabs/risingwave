@@ -4,6 +4,12 @@ system ok
 test "${STARROCKS_DATABASE_IS_DISPOSABLE}" = "true"
 
 statement ok
+DROP SINK IF EXISTS sink_transaction_cap;
+
+statement ok
+DROP TABLE IF EXISTS transaction_cap;
+
+statement ok
 DROP SINK IF EXISTS s6;
 
 statement ok
@@ -359,6 +365,71 @@ DROP SINK sink_timestamptz_table;
 
 statement ok
 DROP TABLE timestamptz_table;
+
+# A row fits in the transaction cap, but multiple rows require early commits.
+# The transaction cap is smaller than the HTTP batch cap, with JSON checks skipped.
+system ok
+starrocks -e "CREATE TABLE ${STARROCKS_DATABASE}.demo_transaction_cap(id int, v string) ENGINE=OLAP PRIMARY KEY(id) DISTRIBUTED BY HASH(id) properties(\"replication_num\" = \"1\");"
+
+statement ok
+SET sink_decouple = true;
+
+statement ok
+CREATE TABLE transaction_cap(id int primary key, v varchar);
+
+statement ok
+CREATE SINK sink_transaction_cap FROM transaction_cap WITH (
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
+    type = 'upsert',
+    primary_key = 'id',
+    starrocks.table = 'demo_transaction_cap',
+    starrocks.ignore_json_size = 'true',
+    starrocks.max_batch_size_bytes = '4096',
+    starrocks.max_transaction_size_bytes = '1024',
+    commit_checkpoint_interval = '2'
+);
+
+statement ok
+INSERT INTO transaction_cap SELECT i, repeat('x', 512) FROM generate_series(1, 6) AS t(i);
+
+system ok retry 30 backoff 1s
+starrocks -N -B -e "SELECT COUNT(*) FROM ${STARROCKS_DATABASE}.demo_transaction_cap WHERE length(v) = 512;"
+----
+6
+
+
+statement error starrocks.max_transaction_size_bytes.*greater than 0
+ALTER SINK sink_transaction_cap CONNECTOR WITH (starrocks.max_transaction_size_bytes = '0');
+
+statement ok
+ALTER SINK sink_transaction_cap CONNECTOR WITH (starrocks.max_transaction_size_bytes = '2048');
+
+query T
+SELECT connector_props -> 'starrocks.max_transaction_size_bytes' ->> 'value'
+FROM rw_catalog.rw_sinks WHERE name = 'sink_transaction_cap';
+----
+2048
+
+statement ok
+UPDATE transaction_cap SET v = repeat('y', 512) WHERE id <= 3;
+
+statement ok
+DELETE FROM transaction_cap WHERE id = 6;
+
+system ok retry 30 backoff 1s
+starrocks -N -B -e "SELECT count(*), sum(v = repeat('y', 512)), sum(v = repeat('x', 512)) FROM ${STARROCKS_DATABASE}.demo_transaction_cap;"
+----
+5	3	2
+
+
+statement ok
+DROP SINK sink_transaction_cap;
+
+statement ok
+DROP TABLE transaction_cap;
+
+system ok
+starrocks -e "DROP TABLE ${STARROCKS_DATABASE}.demo_transaction_cap;"
 
 system ok
 starrocks -e "
