@@ -11,6 +11,7 @@ repository = { workspace = true }
 ignored = ["aws-credential-types"]
 
 [dependencies]
+arc-swap = { workspace = true }
 async-trait = "0.1"
 await-tree = { workspace = true }
 aws-config = { workspace = true }
@@ -26,6 +27,7 @@ crc32fast = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+http = "1"
 itertools = { workspace = true }
 madsim = { workspace = true }
 opendal = { workspace = true, features = [
@@ -53,7 +55,11 @@ tokio-retry = "0.3"
 tracing = "0.1"
 
 [dev-dependencies]
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 tempfile = "3"
+tokio = { workspace = true, features = ["io-util", "net", "test-util"] }
 
 [lints]
 workspace = true

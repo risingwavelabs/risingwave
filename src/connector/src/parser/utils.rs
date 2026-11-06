@@ -39,11 +39,6 @@ macro_rules! log_error {
     };
 }
 pub(crate) use log_error;
-use risingwave_pb::plan_common::additional_column;
-use risingwave_pb::plan_common::additional_column::ColumnType;
-
-use crate::parser::{AccessError, AccessResult};
-use crate::source::cdc::DebeziumCdcMeta;
 
 fn get_topic<'a>(
     props: &'a BTreeMap<String, String>,
@@ -129,23 +124,6 @@ pub fn extract_timestamp_from_meta(meta: &SourceMeta) -> DatumRef<'_> {
         SourceMeta::DebeziumCdc(cdc_meta) => cdc_meta.extract_timestamp(),
         SourceMeta::Kinesis(kinesis_meta) => kinesis_meta.extract_timestamp(),
         _ => None,
-    }
-}
-
-pub fn extract_cdc_meta_column<'a>(
-    cdc_meta: &'a DebeziumCdcMeta,
-    column_type: &additional_column::ColumnType,
-    column_name: &str,
-) -> AccessResult<DatumRef<'a>> {
-    match column_type {
-        ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
-        ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
-        // `table_name` in additional columns should be the object name only, not the routing key
-        // (which can be `schema.table` or `db.table` depending on the connector).
-        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name_only()),
-        _ => Err(AccessError::UnsupportedAdditionalColumn {
-            name: column_name.to_owned(),
-        }),
     }
 }
 

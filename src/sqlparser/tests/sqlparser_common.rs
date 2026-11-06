@@ -3011,6 +3011,7 @@ fn parse_changelog_cte_key() {
         CteInner::ChangeLog {
             from: ObjectName(vec![Ident::new_unchecked("mv1")]),
             key: None,
+            distributed_by: None,
         }
     );
 
@@ -3019,6 +3020,7 @@ fn parse_changelog_cte_key() {
         CteInner::ChangeLog {
             from: ObjectName(vec![Ident::new_unchecked("mv2")]),
             key: Some(vec![Ident::new_unchecked("id")]),
+            distributed_by: None,
         }
     );
 
@@ -3030,6 +3032,7 @@ fn parse_changelog_cte_key() {
                 Ident::new_unchecked("id"),
                 Ident::with_quote_unchecked('"', "Quoted"),
             ]),
+            distributed_by: None,
         }
     );
 
@@ -3039,6 +3042,70 @@ fn parse_changelog_cte_key() {
         "WITH c AS changelog from mv KEY (id,) SELECT * FROM c",
         "WITH c AS changelog from mv KEY (schema.id) SELECT * FROM c",
         "WITH c AS changelog from mv PRIMARY KEY (id) SELECT * FROM c",
+    ] {
+        assert!(
+            parse_sql_statements(sql).is_err(),
+            "expected error for {sql}"
+        );
+    }
+}
+
+#[test]
+fn parse_changelog_cte_distributed_by() {
+    let query = verified_query(
+        "WITH a AS changelog from public.mv DISTRIBUTED BY (id), \
+              b (x, y) AS changelog from mv DISTRIBUTED BY (tenant, \"Quoted\") \
+         SELECT * FROM a, b",
+    );
+    let ctes = &query.with.as_ref().unwrap().cte_tables;
+    assert_eq!(ctes.len(), 2);
+    assert!(matches!(
+        &ctes[0].cte_inner,
+        CteInner::ChangeLog { distributed_by: Some(columns), .. }
+            if columns == &vec![Ident::new_unchecked("id")]
+    ));
+    assert!(matches!(
+        &ctes[1].cte_inner,
+        CteInner::ChangeLog { distributed_by: Some(columns), .. }
+            if columns == &vec![Ident::new_unchecked("tenant"), Ident::with_quote_unchecked('"', "Quoted")]
+    ));
+
+    for sql in [
+        "WITH c AS changelog from mv DISTRIBUTED BY () SELECT * FROM c",
+        "WITH c AS changelog from mv DISTRIBUTED BY id SELECT * FROM c",
+        "WITH c AS changelog from mv DISTRIBUTED (id) SELECT * FROM c",
+        "WITH c AS changelog from mv DISTRIBUTED BY (id,) SELECT * FROM c",
+        "WITH c AS changelog from mv DISTRIBUTED BY (mv.id) SELECT * FROM c",
+        "WITH c AS changelog from mv DISTRIBUTED BY (id + 1) SELECT * FROM c",
+    ] {
+        assert!(
+            parse_sql_statements(sql).is_err(),
+            "expected error for {sql}"
+        );
+    }
+}
+
+#[test]
+fn parse_changelog_cte_key_and_distributed_by() {
+    let sql =
+        "WITH c AS changelog from mv KEY (tenant, id) DISTRIBUTED BY (tenant) SELECT * FROM c";
+    let query = verified_query(sql);
+    assert_matches!(
+        &query.with.as_ref().unwrap().cte_tables[0].cte_inner,
+        CteInner::ChangeLog { key: Some(key), distributed_by: Some(distribution), .. }
+            if key == &vec![Ident::new_unchecked("tenant"), Ident::new_unchecked("id")]
+                && distribution == &vec![Ident::new_unchecked("tenant")]
+    );
+}
+
+#[test]
+fn parse_changelog_cte_rejects_out_of_order_or_repeated_clauses() {
+    for sql in [
+        "WITH c AS changelog from mv DISTRIBUTED BY (tenant) KEY (tenant, id) SELECT * FROM c",
+        "WITH c AS changelog from mv KEY (id) KEY (id) SELECT * FROM c",
+        "WITH c AS changelog from mv DISTRIBUTED BY (id) DISTRIBUTED BY (id) SELECT * FROM c",
+        "WITH c AS changelog from mv KEY (id) DISTRIBUTED BY (id) KEY (id) SELECT * FROM c",
+        "WITH c AS changelog from mv DISTRIBUTED BY (id) KEY (id) DISTRIBUTED BY (id) SELECT * FROM c",
     ] {
         assert!(
             parse_sql_statements(sql).is_err(),

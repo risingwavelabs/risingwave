@@ -923,16 +923,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                                         mongo_split.inner.start_offset = None;
                                                     }
                                                 }
-                                                SplitImpl::CitusCdc(debezium_split) => {
-                                                    if let Some(citus_split) = debezium_split.citus_split.as_mut() {
-                                                        tracing::info!(
-                                                            split_id = ?citus_split.inner.split_id,
-                                                            old_offset = ?citus_split.inner.start_offset,
-                                                            "Clearing Citus CDC offset"
-                                                        );
-                                                        citus_split.inner.start_offset = None;
-                                                    }
-                                                }
                                                 SplitImpl::SqlServerCdc(debezium_split) => {
                                                     if let Some(sqlserver_split) = debezium_split.sql_server_split.as_mut() {
                                                         tracing::info!(
@@ -1430,8 +1420,7 @@ mod tests {
             wait_checkpoint_tx,
             building_task: WaitCheckpointTask::CommitCdcOffset(None),
         };
-        let split =
-            SplitImpl::PostgresCdc(DebeziumCdcSplit::new(1, Some("offset".to_owned()), None));
+        let split = SplitImpl::PostgresCdc(DebeziumCdcSplit::new(1, Some("offset".to_owned())));
 
         let non_checkpoint = Barrier {
             kind: BarrierKind::Barrier,
@@ -1467,10 +1456,8 @@ mod tests {
         let persisted_split = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
             1001,
             Some(offset.to_owned()),
-            None,
         ));
-        let uninitialized_split =
-            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+        let uninitialized_split = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None));
         let epoch_1 = EpochPair::new_test_epoch(test_epoch(1));
         let epoch_2 = EpochPair::new_test_epoch(test_epoch(2));
         let epoch_3 = EpochPair::new_test_epoch(test_epoch(3));
@@ -1528,10 +1515,8 @@ mod tests {
         let split_with_offset = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
             1001,
             Some(r#"{"sourceOffset":{"file":"binlog.000123","pos":45678}}"#.to_owned()),
-            None,
         ));
-        let split_without_offset =
-            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+        let split_without_offset = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None));
 
         update_mysql_cdc_state_file_seq_metric(
             &mut metric_guard,
