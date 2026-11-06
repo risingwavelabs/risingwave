@@ -15563,6 +15563,7 @@ dependencies = [
  "bytes",
  "crc32fast",
  "fail",
+ "fs4",
  "futures",
  "futures-async-stream",
  "http 1.5.0",

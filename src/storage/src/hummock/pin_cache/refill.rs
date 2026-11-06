@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, LazyLock};
 
+use risingwave_common::log::LogSuppressor;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectResult, ObjectStoreRef,
@@ -23,44 +24,71 @@ use risingwave_object_store::object::{
 use super::{PinCache, PinCacheFile, PinCacheRefillToken};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
+/// Download failures distinguish capacity pressure from object-store I/O errors.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum PinCacheDownloadError {
+    #[error("pin cache local capacity is exhausted")]
+    CapacityRejected,
+    #[error(transparent)]
+    Io(#[from] ObjectError),
+}
+
 /// Owns a complete, validated file until the caller publishes or discards it.
-/// Dropping it never changes the index. Physical reclamation is added separately.
+/// Dropping this lease leaves the unreferenced object eligible for full GC.
 pub(crate) struct PinCacheDownload {
     file: Arc<PinCacheFile>,
 }
 
-/// Copy and validate one file without reading or changing the cache index.
+/// Finish accepted writes on a remote error and hand completed failed files to minor GC.
+/// Local I/O failures can leave backend temporary files for full GC.
 async fn write_file(
-    store: &ObjectStoreRef,
+    cache: &PinCache,
     file: &PinCacheFile,
     mut reader: MonitoredStreamingReader,
-) -> ObjectResult<()> {
-    // TODO: Preallocate file.size bytes in the FS writer's temporary file once
-    // OpenDAL supports physical space reservation.
-    let mut writer = store
+) -> ObjectResult<PinCacheDownload> {
+    let mut writer = cache
+        .store
         .streaming_upload(&file.path)
         .await
         .inspect_err(|_| record_io_failure("local_upload_init"))?;
     let mut written = 0_u64;
+    let mut read_error = None;
     while let Some(chunk) = reader.read_bytes().await {
-        let chunk = chunk.inspect_err(|_| record_io_failure("remote_read"))?;
-        written = written.saturating_add(chunk.len() as u64);
-        if written > file.size {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                record_io_failure("remote_read");
+                read_error = Some(error);
+                break;
+            }
+        };
+        let chunk_size = chunk.len() as u64;
+        if chunk_size > file.size.saturating_sub(written) {
             record_io_failure("size_validation");
-            return Err(ObjectError::internal(
+            read_error = Some(ObjectError::internal(
                 "pinned SST is larger than its version metadata",
             ));
+            break;
         }
         writer
             .write_bytes(chunk)
             .await
             .inspect_err(|_| record_io_failure("local_upload_write"))?;
+        written += chunk_size;
     }
     writer
         .finish()
         .await
         .inspect_err(|_| record_io_failure("local_upload_finish"))?;
-    let local_size = store
+    // Register before metadata I/O so validation failure or cancellation retains cleanup intent.
+    let completed = scopeguard::guard(cache.track_file(file.path.clone(), written), |file| {
+        cache.enqueue_delete(file)
+    });
+    if let Some(error) = read_error {
+        return Err(error);
+    }
+    let local_size = cache
+        .store
         .metadata(&file.path)
         .await
         .inspect_err(|_| record_io_failure("local_metadata"))?
@@ -71,7 +99,9 @@ async fn write_file(
             "pinned SST size does not match its version metadata",
         ));
     }
-    Ok(())
+    Ok(PinCacheDownload {
+        file: scopeguard::ScopeGuard::into_inner(completed),
+    })
 }
 
 impl PinCache {
@@ -99,8 +129,8 @@ impl PinCache {
     }
 
     /// Copies and validates a whole SST without reading or changing the cache index.
-    /// `object_size` is the full physical size (`SstableInfo::file_size`), not the logical
-    /// SST projection size (`SstableInfo::sst_size`).
+    /// Check free space for the full physical `object_size` (`SstableInfo::file_size`),
+    /// not the logical SST projection size (`SstableInfo::sst_size`).
     /// The caller checks membership, ownership and cache hits before downloading, and serializes
     /// attempts per object. Only a successful return can be submitted to `publish`.
     pub(crate) async fn download(
@@ -109,31 +139,52 @@ impl PinCache {
         object_size: u64,
         remote_store: ObjectStoreRef,
         remote_path: String,
-    ) -> ObjectResult<PinCacheDownload> {
-        let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
-        let path = format!("{}-{path_id}.sst", object_id.as_raw_id());
-        let file = PinCacheFile {
-            path,
-            size: object_size,
-        };
+    ) -> Result<PinCacheDownload, PinCacheDownloadError> {
+        // This advisory check does not reserve blocks against concurrent disk users.
+        if let Some(available_bytes) = self
+            .store
+            .available_space()
+            .await
+            .inspect_err(|_| record_io_failure("local_space"))?
+            && available_bytes < object_size
+        {
+            static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                LazyLock::new(|| LogSuppressor::per_minute(1));
+            if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                tracing::warn!(
+                    suppressed_count,
+                    object_id = object_id.as_raw_id(),
+                    object_size,
+                    available_bytes,
+                    "skipping pin cache refill because filesystem space is insufficient"
+                );
+            }
+            return Err(PinCacheDownloadError::CapacityRejected);
+        }
         let reader = remote_store
             .streaming_read(&remote_path, ..)
             .await
             .inspect_err(|_| record_io_failure("remote_read_init"))?;
-        write_file(&self.store, &file, reader).await?;
-        Ok(PinCacheDownload {
-            file: Arc::new(file),
-        })
+        let path_id = self.next_path_id.fetch_add(1, Ordering::Relaxed);
+        let file = PinCacheFile {
+            path: format!("{}-{path_id}.sst", object_id.as_raw_id()),
+            size: object_size,
+        };
+        self.start_upload(&file);
+        let upload = scopeguard::guard(file, |file| self.finish_upload(&file.path));
+        Ok(write_file(self, &upload, reader).await?)
     }
 
     /// Installs a downloaded file only if its original admission is still current.
     /// Returns false if the task was revoked while downloading. The caller must use the token
     /// for this file and serialize downloads per object; an existing publication is a bug.
-    /// A rejected download is dropped after the lock, so cleanup never runs while it is held.
+    /// A rejected download is handed to GC after releasing the lock.
     pub(crate) fn publish(&self, token: PinCacheRefillToken, download: PinCacheDownload) -> bool {
         let mut state = self.shard(token.object_id).write();
         let Some(object) = state.object_matching_token(token) else {
             // This download lost permission to publish when its object was unregistered or revoked.
+            drop(state);
+            self.enqueue_delete(download.file);
             return false;
         };
         object.publish(download.file);
@@ -193,6 +244,15 @@ mod tests {
             // The executor waits for the revoked attempt to finish before starting its replacement.
             assert!(!pin_cache.publish(token, old));
             assert!(pin_cache.get(object_id).is_none());
+            pin_cache.select_minor().delete().await.unwrap();
+            assert!(
+                pin_cache
+                    .store
+                    .metadata(&old_path)
+                    .await
+                    .unwrap_err()
+                    .is_object_not_found_error()
+            );
 
             download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id, 11)
                 .await
@@ -207,13 +267,58 @@ mod tests {
 
     #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
     #[tokio::test]
-    async fn test_interrupted_fs_upload_cannot_publish() {
+    async fn test_local_finish_error_does_not_block_a_later_download() {
+        let (dir, store) = local_object_store().await;
+        let cache = PinCache::new(store.clone(), 1, []).await.unwrap();
+        cache.register_objects([1001.into()]);
+        cache
+            .next_path_id
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        // Force the atomic writer's final rename to fail, leaving a real temporary file.
+        std::fs::create_dir(dir.path().join("1001-0.sst")).unwrap();
+        let remote = in_memory_object_store();
+        remote
+            .upload("sst", Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+        assert!(
+            cache
+                .download(1001.into(), 8, remote.clone(), "sst".into())
+                .await
+                .is_err()
+        );
+        assert!(cache.get(1001.into()).is_none());
+        assert!(cache.storage.lock().uploads.is_empty());
+        let files: Vec<_> = store
+            .list("", None, None)
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        assert!(
+            files
+                .iter()
+                .any(|file| file.key.starts_with("atomic_write_dir/") && file.total_size == 8)
+        );
+        // No GC or restart is needed for another copy while the disk still has space.
+        download_and_publish_for_test(&cache, remote, "sst".into(), 1001.into(), 8)
+            .await
+            .unwrap();
+        assert_eq!(
+            cache.get(1001.into()).unwrap().read(..).await.unwrap(),
+            Bytes::from_static(b"complete")
+        );
+    }
+
+    #[cfg_attr(madsim, ignore = "OpenDAL FS requires a native Tokio runtime")]
+    #[tokio::test]
+    async fn test_live_fs_upload_is_protected_and_failed_copy_does_not_block_refill() {
         for cancel in [false, true] {
             let (_dir, local_store) = local_object_store().await;
             let pin_cache = PinCache::new(local_store.clone(), 1, []).await.unwrap();
             let object_id = HummockSstableObjectId::from(1001);
             pin_cache.register_objects([object_id]);
-
             let file = PinCacheFile {
                 path: "1001-0.sst".into(),
                 size: 8,
@@ -229,7 +334,6 @@ mod tests {
                         Ok(Bytes::from_static(b"x")),
                     ])
                     .chain(stream::once(async move {
-                        // Two writes flush the FS position writer's one-chunk buffer.
                         started_tx.send(()).unwrap();
                         let _ = fail_rx.await;
                         Err(ObjectError::internal("injected remote read failure"))
@@ -238,13 +342,16 @@ mod tests {
                 Arc::new(ObjectStoreMetrics::unused()),
                 None,
             );
-            let upload_store = local_store.clone();
-            let task = tokio::spawn(async move { write_file(&upload_store, &file, reader).await });
+            let upload_cache = pin_cache.clone();
+            let task = tokio::spawn(async move {
+                upload_cache.start_upload(&file);
+                let upload = scopeguard::guard(file, |file| upload_cache.finish_upload(&file.path));
+                write_file(&upload_cache, &upload, reader).await
+            });
             tokio::time::timeout(Duration::from_secs(5), started_rx)
                 .await
                 .unwrap()
                 .unwrap();
-            // Wait for Tokio's buffered file write to reach the filesystem before cancellation.
             tokio::time::timeout(Duration::from_secs(5), async {
                 loop {
                     let files: Vec<_> = local_store
@@ -262,31 +369,79 @@ mod tests {
             })
             .await
             .unwrap();
-            assert!(pin_cache.get(object_id).is_none());
+            pin_cache.select_minor().delete().await.unwrap();
+            pin_cache
+                .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+                .await
+                .unwrap()
+                .delete()
+                .await
+                .unwrap();
+            let files: Vec<_> = local_store
+                .list("", None, None)
+                .await
+                .unwrap()
+                .try_collect()
+                .await
+                .unwrap();
+            assert!(
+                files.iter().any(|file| file.total_size == 4),
+                "a live upload's temporary file must survive GC"
+            );
             if cancel {
                 task.abort();
-                assert!(task.await.unwrap_err().is_cancelled());
+                assert!(task.await.err().unwrap().is_cancelled());
+                assert!(
+                    local_store
+                        .metadata(&final_path)
+                        .await
+                        .unwrap_err()
+                        .is_object_not_found_error()
+                );
             } else {
                 fail_tx.send(()).unwrap();
                 assert!(task.await.unwrap().is_err());
+                assert_eq!(
+                    local_store.metadata(&final_path).await.unwrap().total_size,
+                    5
+                );
             }
-
             assert!(pin_cache.get(object_id).is_none());
-            assert!(
-                local_store
-                    .metadata(&final_path)
-                    .await
-                    .unwrap_err()
-                    .is_object_not_found_error()
-            );
+            assert!(pin_cache.storage.lock().uploads.is_empty());
             let remote = in_memory_object_store();
             remote
                 .upload("sst", Bytes::from_static(b"complete"))
                 .await
                 .unwrap();
+            // Leave the failed copy's bytes on disk while admitting the replacement.
             download_and_publish_for_test(&pin_cache, remote, "sst".into(), object_id, 8)
                 .await
                 .unwrap();
+            let published = pin_cache.get(object_id).unwrap();
+            pin_cache.select_minor().delete().await.unwrap();
+            pin_cache
+                .select_full(std::time::SystemTime::now() + Duration::from_secs(1))
+                .await
+                .unwrap()
+                .delete()
+                .await
+                .unwrap();
+            let files: Vec<_> = local_store
+                .list("", None, None)
+                .await
+                .unwrap()
+                .try_collect()
+                .await
+                .unwrap();
+            assert!(
+                files
+                    .iter()
+                    .all(|file| file.key.ends_with('/') || file.key == published.file.path)
+            );
+            assert_eq!(
+                published.read(..).await.unwrap(),
+                Bytes::from_static(b"complete")
+            );
         }
     }
 }

@@ -110,6 +110,12 @@ pub trait ObjectStore: Send + Sync {
     /// Obtains the object metadata.
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
 
+    /// Available bytes on the underlying filesystem, or None for non-local stores.
+    /// This is an advisory space check, not a reservation or a per-store quota.
+    async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        Ok(None)
+    }
+
     /// Deletes blob permanently.
     async fn delete(&self, path: &str) -> ObjectResult<()>;
 
@@ -308,6 +314,10 @@ impl ObjectStoreImpl {
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         object_store_impl_method_body!(self, metadata(path).await)
+    }
+
+    pub async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        object_store_impl_method_body!(self, available_space().await)
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -560,6 +570,10 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - start `operation_latency` timer
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
+    pub async fn available_space(&self) -> ObjectResult<Option<u64>> {
+        self.inner.available_space().await
+    }
+
     pub fn new(
         store: OS,
         object_store_metrics: Arc<ObjectStoreMetrics>,
